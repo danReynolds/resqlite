@@ -174,16 +174,22 @@ void readerEntrypoint(List<Object> args) {
       }
 
       // Reply: (result, sacrificed, errorMessage).
+      // For sacrifice, we send via SendPort.send (which copies) and then
+      // close the receivePort to exit the isolate. We do NOT use
+      // Isolate.exit for sending because the VM makes no ordering guarantee
+      // between the Isolate.exit reply and the exitPort notification —
+      // the pool's exitPort handler can fire before the reply arrives,
+      // causing a false crash detection. Sending first guarantees the reply
+      // is queued before the isolate starts shutting down.
+      //
+      // The SendPort copy cost is acceptable: the sacrifice threshold is set
+      // high enough that respawn overhead already dominates, and the raw
+      // primitive data (List<Object?>, List<String>, int) copies linearly.
+      request.replyPort.send((result, sacrifice, null));
       if (sacrifice) {
-        final runtimeType = result.runtimeType;
-        stderr.writeln(
-          '[resqlite] Worker $readerId sacrificing: '
-          'type=${request.runtimeType}, resultType=$runtimeType',
-        );
         receivePort.close();
-        Isolate.exit(request.replyPort, (result, true, null));
+        // Isolate exits naturally when no ports remain open.
       }
-      request.replyPort.send((result, false, null));
     } catch (e, st) {
       stderr.writeln('[resqlite] Worker $readerId query error: $e\n$st');
       request.replyPort.send((null, false, e.toString()));
