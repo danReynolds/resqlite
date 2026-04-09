@@ -5,6 +5,7 @@
 /// when all workers are busy). The actual query execution logic lives in
 /// read_worker.dart.
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -122,36 +123,20 @@ final class ReaderPool {
     return (rows, hash);
   }
 
-  /// Maximum retries when a worker crashes during query execution.
-  /// Crashes during sacrifice (Isolate.exit) are recoverable — the pool
-  /// respawns the worker and retries on the next available one.
-  static const int _maxRetries = 3;
-
   /// Returns (result, sacrificed) — callers reconstruct typed results.
   Future<(Object?, bool)> _dispatch(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) async {
     final count = _workers.length;
-    var retries = 0;
 
     // Retry loop: find an available (alive + not busy) worker.
     // If none are available, wait for a notification and try again.
-    // If a worker crashes mid-query (sacrifice/respawn), retry on the next.
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
-          try {
-            return await slot.request(buildRequest);
-          } on StateError catch (e) {
-            // Worker crashed during query (sacrifice Isolate.exit failure,
-            // native segfault, or OOM). The slot is already respawning.
-            // Retry on the next available worker.
-            if (++retries > _maxRetries) rethrow;
-            if (e.message.contains('crashed')) break; // back to wait loop
-            rethrow; // non-crash errors propagate immediately
-          }
+          return slot.request(buildRequest);
         }
       }
 
@@ -192,6 +177,7 @@ class _WorkerSlot {
   bool _alive = false;
   bool _busy = false;
   bool _closed = false;
+  int _generation = 0; // incremented on each spawn for diagnostics
 
   /// The in-flight request's completer and replyPort, if any.
   /// Used by the exitPort handler to fail the request if the worker
@@ -199,12 +185,19 @@ class _WorkerSlot {
   Completer<Object?>? _pendingCompleter;
   RawReceivePort? _pendingReplyPort;
 
+  /// Whether the last completed request was a sacrifice.
+  /// Used by the exitPort handler to distinguish expected exits
+  /// (sacrifice) from unexpected crashes.
+  bool _lastRequestSacrificed = false;
+
   /// A worker is available if it's alive, has a SendPort, and isn't busy.
   bool get isAvailable => _alive && _sendPort != null && !_busy;
 
   Future<void> spawn(int dbHandleAddr) async {
     if (_closed) return;
     _alive = false;
+    _generation++;
+    final gen = _generation;
 
     final readyPort = RawReceivePort();
     final completer = Completer<SendPort>.sync();
@@ -213,9 +206,21 @@ class _WorkerSlot {
       completer.complete(msg as SendPort);
     };
 
+    // Error listener — catches uncaught exceptions in the worker isolate
+    // that would otherwise silently kill it.
+    final errorPort = RawReceivePort();
+    errorPort.handler = (Object? msg) {
+      final errors = msg as List;
+      stderr.writeln(
+        '[resqlite] Worker $_readerId gen$gen UNCAUGHT ERROR: '
+        '${errors[0]}\n${errors[1]}',
+      );
+    };
+
     final exitPort = RawReceivePort();
     exitPort.handler = (_) {
       exitPort.close();
+      errorPort.close();
       _alive = false;
       _sendPort = null;
 
@@ -227,22 +232,38 @@ class _WorkerSlot {
         _pendingReplyPort = null;
         _pendingCompleter = null;
         _busy = false;
+        stderr.writeln(
+          '[resqlite] Worker $_readerId gen$gen CRASHED with pending request '
+          '(lastSacrificed=$_lastRequestSacrificed, busy=$_busy)',
+        );
         pending.completeError(StateError(
-          'Worker isolate crashed during query execution',
+          'Worker isolate crashed during query execution '
+          '(reader=$_readerId, gen=$gen)',
         ));
         _notifyPool();
+      } else {
+        // Expected exit: either sacrifice (replyPort already delivered)
+        // or graceful close.
+        if (_lastRequestSacrificed) {
+          stderr.writeln(
+            '[resqlite] Worker $_readerId gen$gen exited after sacrifice (expected)',
+          );
+        }
       }
+
+      _lastRequestSacrificed = false;
 
       if (!_closed) {
         unawaited(spawn(dbHandleAddr));
       }
     };
 
-    await Isolate.spawn(readerEntrypoint, [
-      readyPort.sendPort,
-      dbHandleAddr,
-      _readerId,
-    ], onExit: exitPort.sendPort);
+    await Isolate.spawn(
+      readerEntrypoint,
+      [readyPort.sendPort, dbHandleAddr, _readerId],
+      onExit: exitPort.sendPort,
+      onError: errorPort.sendPort,
+    );
 
     _sendPort = await completer.future;
     _alive = true;
@@ -256,6 +277,7 @@ class _WorkerSlot {
     if (port == null) throw StateError('Worker not alive');
 
     _busy = true;
+    _lastRequestSacrificed = false;
     final replyPort = RawReceivePort();
     final completer = Completer<(Object?, bool)>.sync();
 
@@ -278,6 +300,10 @@ class _WorkerSlot {
         completer.completeError(StateError(error));
         return;
       }
+
+      // Track sacrifice state so the exitPort handler can distinguish
+      // expected exits from crashes.
+      _lastRequestSacrificed = sacrificed;
 
       // If sacrificed, the worker is dying — don't mark as available.
       // The exitPort handler will trigger respawn + _notifyPool.

@@ -11,6 +11,7 @@ library;
 
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -174,11 +175,17 @@ void readerEntrypoint(List<Object> args) {
 
       // Reply: (result, sacrificed, errorMessage).
       if (sacrifice) {
+        final runtimeType = result.runtimeType;
+        stderr.writeln(
+          '[resqlite] Worker $readerId sacrificing: '
+          'type=${request.runtimeType}, resultType=$runtimeType',
+        );
         receivePort.close();
         Isolate.exit(request.replyPort, (result, true, null));
       }
       request.replyPort.send((result, false, null));
-    } catch (e) {
+    } catch (e, st) {
+      stderr.writeln('[resqlite] Worker $readerId query error: $e\n$st');
       request.replyPort.send((null, false, e.toString()));
     }
   };
