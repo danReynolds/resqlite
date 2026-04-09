@@ -73,7 +73,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     utf8.encode(jsonEncode(
       stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
     ));
-    stmt.dispose();
+    stmt.close();
   }
   for (var i = 0; i < defaultIterations; i++) {
     final sw = Stopwatch()..start();
@@ -81,7 +81,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     utf8.encode(jsonEncode(
       stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
     ));
-    stmt.dispose();
+    stmt.close();
     sw.stop();
     tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
   }
@@ -110,7 +110,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   }
 
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return [tResqlite, tSqlite3, tAsync];

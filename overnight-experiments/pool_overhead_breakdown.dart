@@ -86,7 +86,7 @@ Future<void> main() async {
         params: [42],
         replyPort: replyPort.sendPort,
       ));
-      final result = await replyPort.first;
+      final _ = await replyPort.first;
       sw.stop();
       if (i >= _warmup) timings.add(sw.elapsedMicroseconds);
     }
@@ -226,10 +226,10 @@ void _workerMain(SendPort mainPort) {
 
   port.listen((msg) {
     switch (msg) {
-      case _PoolStyleRequest(:final sql, :final params, :final replyPort):
+      case _PoolStyleRequest(:final replyPort):
         final result = _doWork();
         replyPort.send(_QueryResult(result));
-      case _ListStyleRequest(:final sql, :final params, :final replyPort):
+      case _ListStyleRequest(:final replyPort):
         final columns = ['id', 'name', 'description', 'value', 'category', 'created_at'];
         final rows = [[42, 'Item 42', 'Description for item 42 with padding text', 63.0, 'category_2', '2026-04-07T12:00:00Z']];
         replyPort.send((columns, rows));

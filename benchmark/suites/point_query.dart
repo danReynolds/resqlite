@@ -5,7 +5,6 @@ import 'package:resqlite/resqlite.dart' as resqlite;
 
 import '../shared/config.dart';
 import '../shared/seeder.dart';
-import '../shared/stats.dart';
 
 /// Point query throughput: SELECT WHERE id = ? in a hot loop.
 /// Reports queries per second — the latency floor for the pool dispatch path.

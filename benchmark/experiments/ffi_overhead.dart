@@ -67,7 +67,7 @@ Future<void> main() async {
       for (var i = 0; i < _iterations; i++) {
         final sw = Stopwatch()..start();
         final h = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
-        final result = queryBytes(h, sql, const []);
+        final result = queryBytes(h, 0, sql, const []);
         result.length; // force a read so the call is not optimized away
         resqliteFree(result.ptr.cast());
         sw.stop();

@@ -140,13 +140,13 @@ Future<_ScaleResult> _benchmarkMaps(String dir, int rowCount) async {
   for (var i = 0; i < defaultWarmup; i++) {
     final stmt = sqlite3Db.prepare(sql);
     _consume(stmt.select());
-    stmt.dispose();
+    stmt.close();
   }
   for (var i = 0; i < defaultIterations; i++) {
     final sw = Stopwatch()..start();
     final stmt = sqlite3Db.prepare(sql);
     _consume(stmt.select());
-    stmt.dispose();
+    stmt.close();
     sw.stop();
     tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
   }
@@ -169,7 +169,7 @@ Future<_ScaleResult> _benchmarkMaps(String dir, int rowCount) async {
   }
 
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return _ScaleResult(tResqlite, tSqlite3, tAsync);
@@ -205,7 +205,7 @@ Future<_ScaleResult> _benchmarkBytes(String dir, int rowCount) async {
     utf8.encode(jsonEncode(
       stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
     ));
-    stmt.dispose();
+    stmt.close();
   }
   for (var i = 0; i < defaultIterations; i++) {
     final sw = Stopwatch()..start();
@@ -213,7 +213,7 @@ Future<_ScaleResult> _benchmarkBytes(String dir, int rowCount) async {
     utf8.encode(jsonEncode(
       stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
     ));
-    stmt.dispose();
+    stmt.close();
     sw.stop();
     tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
   }
@@ -236,7 +236,7 @@ Future<_ScaleResult> _benchmarkBytes(String dir, int rowCount) async {
   }
 
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return _ScaleResult(tResqlite, tSqlite3, tAsync);

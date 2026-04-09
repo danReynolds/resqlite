@@ -301,7 +301,7 @@ void _workerMain(SendPort mainPort) {
         replyPort.send(_buildOneMap());
       case _BuildTenMaps(:final replyPort):
         replyPort.send(_buildTenMaps());
-      case _InstrumentedRequest(:final replyPort, :final sendTimestamp):
+      case _InstrumentedRequest(:final replyPort):
         final receiveTime = _microsNow();
         final map = _buildOneMap();
         final workDone = _microsNow();

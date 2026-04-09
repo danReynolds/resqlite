@@ -100,7 +100,7 @@ Future<List<BenchmarkTiming>> _benchmark(String dir) async {
     for (var c = 0; c < 10; c++) {
       final stmt = sqlite3Db.prepare(sql);
       stmt.select(['cat_$c']);
-      stmt.dispose();
+      stmt.close();
     }
   }
   for (var i = 0; i < defaultIterations; i++) {
@@ -108,7 +108,7 @@ Future<List<BenchmarkTiming>> _benchmark(String dir) async {
     for (var c = 0; c < _queryIterations; c++) {
       final stmt = sqlite3Db.prepare(sql);
       stmt.select(['cat_${c % 10}']);
-      stmt.dispose();
+      stmt.close();
     }
     sw.stop();
     tSqlite3NoCach.recordWallOnly(sw.elapsedMicroseconds);
@@ -130,7 +130,7 @@ Future<List<BenchmarkTiming>> _benchmark(String dir) async {
     sw.stop();
     tSqlite3Cached.recordWallOnly(sw.elapsedMicroseconds);
   }
-  cachedStmt.dispose();
+  cachedStmt.close();
 
   // --- sqlite_async ---
   final tAsync = BenchmarkTiming('sqlite_async getAll()');
@@ -149,7 +149,7 @@ Future<List<BenchmarkTiming>> _benchmark(String dir) async {
   }
 
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return [tResqlite, tSqlite3NoCach, tSqlite3Cached, tAsync];

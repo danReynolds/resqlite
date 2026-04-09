@@ -62,7 +62,7 @@ void seedSqlite3(
   for (var i = 0; i < rowCount; i++) {
     stmt.execute(builder(i));
   }
-  stmt.dispose();
+  stmt.close();
 }
 
 Future<void> seedSqliteAsync(

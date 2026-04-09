@@ -2,7 +2,6 @@
 /// Real SQLite benchmark: ReaderPool.query() vs Database.select()
 /// Both paths do actual FFI/SQLite work on the same database.
 /// This tests the actual production code path to confirm/deny the 22% gap.
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';

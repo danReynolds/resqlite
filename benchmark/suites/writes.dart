@@ -89,7 +89,7 @@ Future<String> runWritesBenchmark() async {
       ));
 
       await resqliteDb.close();
-      sqlite3Db.dispose();
+      sqlite3Db.close();
       await asyncDb.close();
     }
 
@@ -122,7 +122,7 @@ Future<String> runWritesBenchmark() async {
         for (final ps in paramSets) {
           stmtW.execute(ps);
         }
-        stmtW.dispose();
+        stmtW.close();
         sqlite3Db.execute('COMMIT');
         await asyncDb.executeBatch(insertSql, paramSets);
       }
@@ -147,7 +147,7 @@ Future<String> runWritesBenchmark() async {
         for (final ps in paramSets) {
           stmt.execute(ps);
         }
-        stmt.dispose();
+        stmt.close();
         sqlite3Db.execute('COMMIT');
         sw.stop();
         tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
@@ -173,7 +173,7 @@ Future<String> runWritesBenchmark() async {
       ));
 
       await resqliteDb.close();
-      sqlite3Db.dispose();
+      sqlite3Db.close();
       await asyncDb.close();
     }
 

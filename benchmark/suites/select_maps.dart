@@ -73,13 +73,13 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   for (var i = 0; i < defaultWarmup; i++) {
     final stmt = sqlite3Db.prepare(sql);
     _consumeSqlite3Rows(stmt.select());
-    stmt.dispose();
+    stmt.close();
   }
   for (var i = 0; i < defaultIterations; i++) {
     final sw = Stopwatch()..start();
     final stmt = sqlite3Db.prepare(sql);
     _consumeSqlite3Rows(stmt.select());
-    stmt.dispose();
+    stmt.close();
     sw.stop();
     tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
   }
@@ -105,7 +105,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
 
   // --- Cleanup ---
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return [tResqlite, tSqlite3, tAsync];

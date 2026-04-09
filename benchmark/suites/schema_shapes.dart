@@ -196,13 +196,13 @@ Future<List<BenchmarkTiming>> _benchmarkShape(String dir, _Shape shape) async {
   for (var i = 0; i < defaultWarmup; i++) {
     final stmt = sqlite3Db.prepare(sql);
     _consume(stmt.select());
-    stmt.dispose();
+    stmt.close();
   }
   for (var i = 0; i < defaultIterations; i++) {
     final sw = Stopwatch()..start();
     final stmt = sqlite3Db.prepare(sql);
     _consume(stmt.select());
-    stmt.dispose();
+    stmt.close();
     sw.stop();
     tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
   }
@@ -226,7 +226,7 @@ Future<List<BenchmarkTiming>> _benchmarkShape(String dir, _Shape shape) async {
   }
 
   await resqliteDb.close();
-  sqlite3Db.dispose();
+  sqlite3Db.close();
   await asyncDb.close();
 
   return [tResqlite, tSqlite3, tAsync];

@@ -113,7 +113,6 @@ void _printHardwareSummary(
 
   final select1k = _find('1000 rows / resqlite select');
   final bytes1k = _find('1000 rows / resqlite selectBytes');
-  final pointQps = _find('Point Query Throughput / resqlite qps');
   final batch1k = _find('Batch Insert (1000 rows)');
   final invalidation = _find('Invalidation Latency');
 
