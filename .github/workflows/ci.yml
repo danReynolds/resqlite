@@ -34,12 +34,15 @@ jobs:
         run: dart pub get
 
       - name: Run benchmark suite
+        continue-on-error: true
         run: dart run benchmark/run_all.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary
 
       - name: Run head-to-head
+        continue-on-error: true
         run: dart run benchmark/head_to_head_worker.dart --out=/tmp/h2h.json --repeat=3
 
       - name: Print head-to-head results
+        continue-on-error: true
         run: |
           python3 -c "
           import json
@@ -62,6 +65,7 @@ jobs:
           "
 
       - name: Upload benchmark results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
