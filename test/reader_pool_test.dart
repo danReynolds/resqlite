@@ -83,9 +83,8 @@ void main() {
     });
 
     // -----------------------------------------------------------------
-    // Large results — sacrifice threshold = 50000 cells.
-    // At 6 cols, that's ~8334 rows. Tests below 50000 cells use SendPort;
-    // tests above exercise the Isolate.exit sacrifice + respawn path.
+    // Large results — triggers Isolate.exit sacrifice path
+    // (sacrifice threshold = 6000 cells; 6 cols × 1000+ rows)
     // -----------------------------------------------------------------
 
     test('select handles large results (sacrifice path)', () async {
@@ -105,20 +104,18 @@ void main() {
       expect((decoded.last as Map)['name'], 'item_4999');
     });
 
-    test('repeated large selects work (SendPort path)', () async {
+    test('repeated large selects work (workers respawn)', () async {
       await _seed(db, 2000);
-      // 2000 × 6 = 12000 cells — below sacrifice threshold (50000),
-      // so these use SendPort. Tests pool reuse under large payloads.
+      // Each call exceeds sacrifice threshold (2000 × 6 = 12000 > 6000),
+      // killing the worker. The pool must respawn for the next call.
       for (var i = 0; i < 10; i++) {
         final rows = await db.select('SELECT * FROM items');
         expect(rows, hasLength(2000), reason: 'iteration $i');
       }
     });
 
-    test('repeated large selectBytes work (always SendPort)', () async {
+    test('repeated large selectBytes work (workers respawn)', () async {
       await _seed(db, 2000);
-      // selectBytes never sacrifices — Uint8List is a flat buffer where
-      // SendPort memcpy is always cheaper than isolate respawn.
       for (var i = 0; i < 10; i++) {
         final bytes = await db.selectBytes('SELECT * FROM items');
         final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
@@ -296,11 +293,19 @@ void main() {
       expect(rows[0]['name'], 'item_0');
     });
 
-    test('result at various sizes uses SendPort (below sacrifice threshold)', () async {
-      await _seed(db, 5000);
-      // 5000 × 6 = 30000 cells — below sacrifice threshold (50000).
+    test('result at threshold boundary (exactly 1000 rows × 6 cols = 6000 cells)', () async {
+      await _seed(db, 1000);
+      // Exactly at threshold — should use SendPort (threshold is >6000, not >=).
       final rows = await db.select('SELECT * FROM items');
-      expect(rows, hasLength(5000));
+      expect(rows, hasLength(1000));
+
+      // 1001 rows (6006 cells) — should trigger sacrifice.
+      await db.execute(
+        'INSERT INTO items(name, category, price, quantity, description) '
+        "VALUES ('extra', 'cat_0', 0.0, 0, 'extra')",
+      );
+      final rows2 = await db.select('SELECT * FROM items');
+      expect(rows2, hasLength(1001));
     });
 
     test('rapid sequential queries (pool reuse)', () async {

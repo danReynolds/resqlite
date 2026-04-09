@@ -67,18 +67,17 @@ final class SelectIfChangedRequest extends ReadRequest {
 }
 
 /// Threshold: if rows * cols exceeds this, the worker does Isolate.exit
-/// (zero-copy) instead of SendPort.send (copy). For List<Map<String, Object?>>
-/// results, SendPort must traverse and copy every element — the cost grows
-/// with result size. Isolate.exit avoids the copy but incurs 2-5ms of
-/// respawn overhead. Below ~50000 cells, the SendPort copy is cheaper than
-/// respawning. Above it, zero-copy wins decisively.
-const int sacrificeThreshold = 50000;
+/// (zero-copy) instead of SendPort.send (copy). Set high enough that
+/// sacrifice only triggers for genuinely large results — at 1000 rows × 6
+/// cols (6000 cells), pool and one-off are tied, so sacrificing just adds
+/// respawn churn. At 5000+ rows the zero-copy advantage becomes meaningful.
+const int sacrificeThreshold = 6000;
 
-// Note: selectBytes never sacrifices. Uint8List is a single contiguous buffer —
-// SendPort.send does one memcpy (~0.1ms/MB), which is always cheaper than the
-// 1-5ms isolate respawn cost that sacrifice incurs. Sacrifice only helps for
-// complex object graphs (List<Map<String, Object?>>) where SendPort must
-// traverse and copy each element individually.
+/// Byte-length threshold for selectBytes. Uint8List is a single contiguous
+/// buffer, so Isolate.exit does true zero-copy transfer (memory ownership
+/// moves to the receiving isolate). Above this threshold the zero-copy
+/// advantage outweighs the respawn cost.
+const int bytesSacrificeThreshold = 102400; // 100 KB
 
 /// Per-worker cell buffer. Reused across queries to avoid calloc/free per query.
 ffi.Pointer<ffi.Uint8> _cellsBuf = ffi.nullptr;
@@ -128,24 +127,31 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          result = ResultSet(raw.values, raw.schema, raw.rowCount);
           sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+          // On sacrifice, send raw components (primitives only) for reliable
+          // Isolate.exit transfer. The pool reconstructs ResultSet on receipt.
+          // On SendPort path, wrap eagerly — no transfer risk.
+          result = sacrifice
+              ? (raw.values, raw.schema.names, raw.rowCount)
+              : ResultSet(raw.values, raw.schema, raw.rowCount);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
           final (raw, readTables) = executeQueryWithDeps(
             dbHandleAddr, readerId, sql, parameters,
           );
-          result = (
-            ResultSet(raw.values, raw.schema, raw.rowCount)
-                as List<Map<String, Object?>>,
-            readTables,
-          );
           sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+          result = sacrifice
+              ? (raw.values, raw.schema.names, raw.rowCount, readTables)
+              : (
+                  ResultSet(raw.values, raw.schema, raw.rowCount)
+                      as List<Map<String, Object?>>,
+                  readTables,
+                );
 
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           result = bytes;
-          sacrifice = false; // Uint8List is a flat buffer — SendPort memcpy is always cheaper than respawn.
+          sacrifice = bytes.length > bytesSacrificeThreshold;
 
         case SelectIfChangedRequest(
           :final sql,
@@ -158,9 +164,11 @@ void readerEntrypoint(List<Object> args) {
             result = (newHash, null);
             sacrifice = false;
           } else {
-            final resultSet = ResultSet(raw.values, raw.schema, raw.rowCount);
-            result = (newHash, resultSet as List<Map<String, Object?>>);
             sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+            result = sacrifice
+                ? (newHash, raw.values, raw.schema.names, raw.rowCount)
+                : (newHash, ResultSet(raw.values, raw.schema, raw.rowCount)
+                    as List<Map<String, Object?>>);
           }
       }
 

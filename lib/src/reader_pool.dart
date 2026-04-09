@@ -9,6 +9,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'read_worker.dart';
+import 'row.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
 ///
@@ -52,10 +53,17 @@ final class ReaderPool {
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
-  ]) {
-    return _dispatch<List<Map<String, Object?>>>(
+  ]) async {
+    final (result, sacrificed) = await _dispatch(
       (replyPort) => SelectRequest(replyPort, sql, parameters),
     );
+    if (sacrificed) {
+      // Sacrifice path sends raw components for reliable Isolate.exit.
+      final (values, columns, rowCount) =
+          result as (List<Object?>, List<String>, int);
+      return ResultSet(values, RowSchema(columns), rowCount);
+    }
+    return result as List<Map<String, Object?>>;
   }
 
   /// Execute a query and capture read dependencies (table names).
@@ -63,20 +71,30 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch<(List<Map<String, Object?>>, List<String>)>(
+    final (result, sacrificed) = await _dispatch(
       (replyPort) => SelectWithDepsRequest(replyPort, sql, parameters),
     );
-    return result;
+    if (sacrificed) {
+      final (values, columns, rowCount, readTables) =
+          result as (List<Object?>, List<String>, int, List<String>);
+      return (
+        ResultSet(values, RowSchema(columns), rowCount)
+            as List<Map<String, Object?>>,
+        readTables,
+      );
+    }
+    return result as (List<Map<String, Object?>>, List<String>);
   }
 
   /// Execute a query returning JSON-encoded bytes.
   Future<Uint8List> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
-  ]) {
-    return _dispatch<Uint8List>(
+  ]) async {
+    final (result, _) = await _dispatch(
       (replyPort) => SelectBytesRequest(replyPort, sql, parameters),
     );
+    return result as Uint8List;
   }
 
   /// Execute a re-query with worker-side hash comparison.
@@ -86,15 +104,26 @@ final class ReaderPool {
     List<Object?> parameters,
     int lastResultHash,
   ) async {
-    final result = await _dispatch<(int, List<Map<String, Object?>>?)>(
+    final (result, sacrificed) = await _dispatch(
       (replyPort) => SelectIfChangedRequest(
         replyPort, sql, parameters, lastResultHash,
       ),
     );
-    return (result.$2, result.$1);
+    if (sacrificed) {
+      final (hash, values, columns, rowCount) =
+          result as (int, List<Object?>, List<String>, int);
+      return (
+        ResultSet(values, RowSchema(columns), rowCount)
+            as List<Map<String, Object?>>?,
+        hash,
+      );
+    }
+    final (hash, rows) = result as (int, List<Map<String, Object?>>?);
+    return (rows, hash);
   }
 
-  Future<T> _dispatch<T>(
+  /// Returns (result, sacrificed) — callers reconstruct typed results.
+  Future<(Object?, bool)> _dispatch(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) async {
     final count = _workers.length;
@@ -106,7 +135,7 @@ final class ReaderPool {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
-          return slot.request<T>(buildRequest);
+          return slot.request(buildRequest);
         }
       }
 
@@ -204,7 +233,7 @@ class _WorkerSlot {
     _notifyPool(); // Wake up callers waiting for a worker.
   }
 
-  Future<T> request<T>(
+  Future<(Object?, bool)> request(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) {
     final port = _sendPort;
@@ -212,7 +241,7 @@ class _WorkerSlot {
 
     _busy = true;
     final replyPort = RawReceivePort();
-    final completer = Completer<T>.sync();
+    final completer = Completer<(Object?, bool)>.sync();
 
     // Track the pending request so the exitPort handler can fail it
     // if the worker crashes before replying.
@@ -240,7 +269,7 @@ class _WorkerSlot {
       if (!sacrificed) {
         _notifyPool();
       }
-      completer.complete(result as T);
+      completer.complete((result, sacrificed));
     };
 
     port.send(buildRequest(replyPort.sendPort));
