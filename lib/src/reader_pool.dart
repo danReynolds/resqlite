@@ -226,10 +226,10 @@ class _WorkerSlot {
 
       // Isolate.exit sends the reply and terminates in one shot, but the
       // Dart event loop may deliver the exitPort message before the
-      // replyPort message. Deferring with scheduleMicrotask lets any
+      // replyPort message. Deferring to the next event-loop turn lets any
       // already-queued replyPort message process first, so we only fail
       // the pending completer if the reply truly never arrived (real crash).
-      scheduleMicrotask(() {
+      Future<void>.delayed(Duration.zero, () {
         final pending = _pendingCompleter;
         if (pending != null && !pending.isCompleted) {
           _pendingReplyPort?.close();
