@@ -11,7 +11,6 @@ library;
 
 import 'dart:convert';
 import 'dart:ffi' as ffi;
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -174,24 +173,17 @@ void readerEntrypoint(List<Object> args) {
       }
 
       // Reply: (result, sacrificed, errorMessage).
-      // For sacrifice, we send via SendPort.send (which copies) and then
-      // close the receivePort to exit the isolate. We do NOT use
-      // Isolate.exit for sending because the VM makes no ordering guarantee
-      // between the Isolate.exit reply and the exitPort notification —
-      // the pool's exitPort handler can fire before the reply arrives,
-      // causing a false crash detection. Sending first guarantees the reply
-      // is queued before the isolate starts shutting down.
-      //
-      // The SendPort copy cost is acceptable: the sacrifice threshold is set
-      // high enough that respawn overhead already dominates, and the raw
-      // primitive data (List<Object?>, List<String>, int) copies linearly.
+      // Send reply via SendPort (not Isolate.exit) to avoid a message
+      // ordering race: the Dart VM makes no guarantee that an Isolate.exit
+      // reply arrives before the exitPort notification. Sending first
+      // guarantees the replyPort handler resolves the completer before
+      // the exitPort fires.
       request.replyPort.send((result, sacrifice, null));
       if (sacrifice) {
         receivePort.close();
         // Isolate exits naturally when no ports remain open.
       }
-    } catch (e, st) {
-      stderr.writeln('[resqlite] Worker $readerId query error: $e\n$st');
+    } catch (e) {
       request.replyPort.send((null, false, e.toString()));
     }
   };

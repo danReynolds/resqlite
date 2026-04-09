@@ -5,7 +5,6 @@
 /// when all workers are busy). The actual query execution logic lives in
 /// read_worker.dart.
 import 'dart:async';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -16,8 +15,9 @@ import 'row.dart';
 ///
 /// Each worker handles one query at a time. Small results return via SendPort
 /// (fast round-trip). Large results trigger sacrifice — the worker sends the
-/// reply, then exits. The pool detects the sacrifice via the reply flag and
-/// initiates respawn immediately, without waiting for the exitPort.
+/// reply via SendPort, then exits by closing its receive port. The pool
+/// detects the sacrifice via the reply flag and initiates respawn immediately,
+/// without waiting for the exitPort.
 ///
 /// Dispatch never sends two queries to the same worker. If all workers are
 /// busy, callers wait until one becomes available (finishes its query or
@@ -60,6 +60,8 @@ final class ReaderPool {
       (replyPort) => SelectRequest(replyPort, sql, parameters),
     );
     if (sacrificed) {
+      // Sacrifice path sends raw components (primitives only) to avoid
+      // Isolate.exit serialization issues. Reconstruct ResultSet here.
       final (values, columns, rowCount) =
           result as (List<Object?>, List<String>, int);
       return ResultSet(values, RowSchema(columns), rowCount);
@@ -170,19 +172,20 @@ class _WorkerSlot {
   bool _alive = false;
   bool _busy = false;
   bool _closed = false;
-  int _generation = 0;
 
   /// The in-flight request's completer and replyPort, if any.
+  /// Used by the exitPort handler to fail the request if the worker
+  /// dies without sending a reply (genuine native crash).
   Completer<Object?>? _pendingCompleter;
   RawReceivePort? _pendingReplyPort;
 
+  /// A worker is available if it's alive, has a SendPort, and isn't busy.
   bool get isAvailable => _alive && _sendPort != null && !_busy;
 
   Future<void> spawn(int dbHandleAddr) async {
     if (_closed) return;
     _alive = false;
     _dbHandleAddr = dbHandleAddr;
-    _generation++;
 
     final readyPort = RawReceivePort();
     final completer = Completer<SendPort>.sync();
@@ -191,19 +194,9 @@ class _WorkerSlot {
       completer.complete(msg as SendPort);
     };
 
-    final errorPort = RawReceivePort();
-    errorPort.handler = (Object? msg) {
-      final errors = msg as List;
-      stderr.writeln(
-        '[resqlite] Worker $_readerId gen$_generation UNCAUGHT: '
-        '${errors[0]}\n${errors[1]}',
-      );
-    };
-
     final exitPort = RawReceivePort();
     exitPort.handler = (_) {
       exitPort.close();
-      errorPort.close();
 
       // Safety net: if the worker died with a pending request that was
       // never replied to (genuine native crash), fail the completer.
@@ -217,27 +210,18 @@ class _WorkerSlot {
         _alive = false;
         _sendPort = null;
         _busy = false;
-        stderr.writeln(
-          '[resqlite] Worker $_readerId gen$_generation CRASHED '
-          'with pending request',
-        );
         pending.completeError(StateError(
-          'Worker isolate crashed during query execution '
-          '(reader=$_readerId, gen=$_generation)',
+          'Worker isolate crashed during query execution',
         ));
-        // Respawn after crash.
         if (!_closed) unawaited(spawn(dbHandleAddr));
         _notifyPool();
       }
-      // If no pending completer, this is a post-sacrifice exit — no-op.
-      // Respawn was already triggered by the replyPort handler.
     };
 
     await Isolate.spawn(
       readerEntrypoint,
       [readyPort.sendPort, dbHandleAddr, _readerId],
       onExit: exitPort.sendPort,
-      onError: errorPort.sendPort,
     );
 
     _sendPort = await completer.future;
@@ -263,6 +247,7 @@ class _WorkerSlot {
       _pendingCompleter = null;
       _pendingReplyPort = null;
 
+      // Worker replies with (result, sacrificed, errorMessage) record.
       final (result, sacrificed, error) = msg as (Object?, bool, String?);
 
       if (error != null) {
