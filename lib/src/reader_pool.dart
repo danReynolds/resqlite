@@ -122,20 +122,36 @@ final class ReaderPool {
     return (rows, hash);
   }
 
+  /// Maximum retries when a worker crashes during query execution.
+  /// Crashes during sacrifice (Isolate.exit) are recoverable — the pool
+  /// respawns the worker and retries on the next available one.
+  static const int _maxRetries = 3;
+
   /// Returns (result, sacrificed) — callers reconstruct typed results.
   Future<(Object?, bool)> _dispatch(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) async {
     final count = _workers.length;
+    var retries = 0;
 
     // Retry loop: find an available (alive + not busy) worker.
     // If none are available, wait for a notification and try again.
+    // If a worker crashes mid-query (sacrifice/respawn), retry on the next.
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
-          return slot.request(buildRequest);
+          try {
+            return await slot.request(buildRequest);
+          } on StateError catch (e) {
+            // Worker crashed during query (sacrifice Isolate.exit failure,
+            // native segfault, or OOM). The slot is already respawning.
+            // Retry on the next available worker.
+            if (++retries > _maxRetries) rethrow;
+            if (e.message.contains('crashed')) break; // back to wait loop
+            rethrow; // non-crash errors propagate immediately
+          }
         }
       }
 
