@@ -224,32 +224,29 @@ class _WorkerSlot {
       _alive = false;
       _sendPort = null;
 
-      // If the worker died with an in-flight request (native crash),
-      // fail the pending completer so the caller doesn't hang forever.
-      final pending = _pendingCompleter;
-      if (pending != null && !pending.isCompleted) {
-        _pendingReplyPort?.close();
-        _pendingReplyPort = null;
-        _pendingCompleter = null;
-        _busy = false;
-        stderr.writeln(
-          '[resqlite] Worker $_readerId gen$gen CRASHED with pending request '
-          '(lastSacrificed=$_lastRequestSacrificed, busy=$_busy)',
-        );
-        pending.completeError(StateError(
-          'Worker isolate crashed during query execution '
-          '(reader=$_readerId, gen=$gen)',
-        ));
-        _notifyPool();
-      } else {
-        // Expected exit: either sacrifice (replyPort already delivered)
-        // or graceful close.
-        if (_lastRequestSacrificed) {
+      // Isolate.exit sends the reply and terminates in one shot, but the
+      // Dart event loop may deliver the exitPort message before the
+      // replyPort message. Deferring with scheduleMicrotask lets any
+      // already-queued replyPort message process first, so we only fail
+      // the pending completer if the reply truly never arrived (real crash).
+      scheduleMicrotask(() {
+        final pending = _pendingCompleter;
+        if (pending != null && !pending.isCompleted) {
+          _pendingReplyPort?.close();
+          _pendingReplyPort = null;
+          _pendingCompleter = null;
+          _busy = false;
           stderr.writeln(
-            '[resqlite] Worker $_readerId gen$gen exited after sacrifice (expected)',
+            '[resqlite] Worker $_readerId gen$gen CRASHED with pending request '
+            '(lastSacrificed=$_lastRequestSacrificed, busy=$_busy)',
           );
+          pending.completeError(StateError(
+            'Worker isolate crashed during query execution '
+            '(reader=$_readerId, gen=$gen)',
+          ));
+          _notifyPool();
         }
-      }
+      });
 
       _lastRequestSacrificed = false;
 
