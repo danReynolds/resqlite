@@ -1,0 +1,27 @@
+name: resqlite
+description: >-
+  High-performance, reactive SQLite for Dart and Flutter.
+  Reads, writes, and reactive re-queries run on persistent worker isolates
+  with zero main-isolate jank.
+version: 0.1.0
+repository: https://github.com/purelydan/resqlite
+topics:
+  - sqlite
+  - database
+  - reactive
+  - flutter
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  ffi: ^2.1.4
+  hooks: ^1.0.0
+  code_assets: ^1.0.0
+  native_toolchain_c: ^0.17.5
+  path: ^1.9.0
+
+dev_dependencies:
+  test: ^1.26.3
+  sqlite3: ^3.2.0
+  sqlite_async: ^0.14.0-wip.0

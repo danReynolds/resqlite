@@ -1,0 +1,1185 @@
+#include "resqlite.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+// Forward declarations.
+static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
+                       int param_count);
+
+// ---------------------------------------------------------------------------
+// Growable buffer
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    unsigned char* data;
+    int len;
+    int cap;
+} resqlite_buf;
+
+static void buf_init(resqlite_buf* b, int initial_cap) {
+    b->data = (unsigned char*)malloc(initial_cap);
+    b->len = 0;
+    b->cap = initial_cap;
+}
+
+__attribute__((hot)) static void buf_ensure(resqlite_buf* b, int extra) {
+    if (__builtin_expect(b->len + extra <= b->cap, 1)) return;
+    int new_cap = b->cap;
+    while (new_cap < b->len + extra) new_cap *= 2;
+    b->data = (unsigned char*)realloc(b->data, new_cap);
+    b->cap = new_cap;
+}
+
+__attribute__((hot)) static void buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
+    buf_ensure(b, n);
+    memcpy(b->data + b->len, src, n);
+    b->len += n;
+}
+
+static void buf_write_byte(resqlite_buf* b, unsigned char v) {
+    buf_ensure(b, 1);
+    b->data[b->len++] = v;
+}
+
+static void buf_write_i32(resqlite_buf* b, int v) {
+    unsigned char tmp[4];
+    tmp[0] = (unsigned char)(v & 0xff);
+    tmp[1] = (unsigned char)((v >> 8) & 0xff);
+    tmp[2] = (unsigned char)((v >> 16) & 0xff);
+    tmp[3] = (unsigned char)((v >> 24) & 0xff);
+    buf_write(b, tmp, 4);
+}
+
+static void buf_write_i64(resqlite_buf* b, long long v) {
+    unsigned char tmp[8];
+    for (int i = 0; i < 8; i++) {
+        tmp[i] = (unsigned char)((v >> (i * 8)) & 0xff);
+    }
+    buf_write(b, tmp, 8);
+}
+
+static void buf_write_f64(resqlite_buf* b, double v) {
+    unsigned char tmp[8];
+    memcpy(tmp, &v, 8);
+    buf_write(b, tmp, 8);
+}
+
+static void buf_write_char(resqlite_buf* b, char c) {
+    buf_write_byte(b, (unsigned char)c);
+}
+
+static void buf_write_str(resqlite_buf* b, const char* s, int len) {
+    buf_write(b, s, len);
+}
+
+// ---------------------------------------------------------------------------
+// Statement cache (per connection)
+// ---------------------------------------------------------------------------
+
+#define STMT_CACHE_MAX 32
+
+typedef struct {
+    char* sql;
+    int sql_len;
+    sqlite3_stmt* stmt;
+    char* read_tables[RESQLITE_MAX_READ_TABLES];
+    int read_table_count;
+} resqlite_cached_stmt;
+
+typedef struct {
+    resqlite_cached_stmt entries[STMT_CACHE_MAX];
+    int count;
+} resqlite_stmt_cache;
+
+static void stmt_cache_init(resqlite_stmt_cache* c) {
+    c->count = 0;
+    memset(c->entries, 0, sizeof(c->entries));
+}
+
+static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
+                                                    const char* sql,
+                                                    int sql_len) {
+    for (int i = 0; i < c->count; i++) {
+        if (c->entries[i].sql_len == sql_len &&
+            memcmp(c->entries[i].sql, sql, sql_len) == 0) {
+            if (i != c->count - 1) {
+                resqlite_cached_stmt tmp = c->entries[i];
+                c->entries[i] = c->entries[c->count - 1];
+                c->entries[c->count - 1] = tmp;
+            }
+            return &c->entries[c->count - 1];
+        }
+    }
+    return NULL;
+}
+
+static sqlite3_stmt* stmt_cache_lookup(resqlite_stmt_cache* c,
+                                        const char* sql, int sql_len) {
+    resqlite_cached_stmt* entry = stmt_cache_lookup_entry(c, sql, sql_len);
+    return entry ? entry->stmt : NULL;
+}
+
+static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
+                                              const char* sql,
+                                              int sql_len,
+                                              sqlite3_stmt* stmt) {
+    if (c->count >= STMT_CACHE_MAX) {
+        sqlite3_finalize(c->entries[0].stmt);
+        free(c->entries[0].sql);
+        for (int i = 0; i < c->entries[0].read_table_count; i++) {
+            free(c->entries[0].read_tables[i]);
+        }
+        memmove(&c->entries[0], &c->entries[1],
+                (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
+        c->count = STMT_CACHE_MAX - 1;
+    }
+    char* sql_copy = (char*)malloc(sql_len + 1);
+    memcpy(sql_copy, sql, sql_len);
+    sql_copy[sql_len] = '\0';
+
+    c->entries[c->count].sql = sql_copy;
+    c->entries[c->count].sql_len = sql_len;
+    c->entries[c->count].stmt = stmt;
+    c->entries[c->count].read_table_count = 0;
+    memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
+    c->count++;
+    return &c->entries[c->count - 1];
+}
+
+static void stmt_cache_clear(resqlite_stmt_cache* c) {
+    for (int i = 0; i < c->count; i++) {
+        sqlite3_finalize(c->entries[i].stmt);
+        free(c->entries[i].sql);
+        for (int j = 0; j < c->entries[i].read_table_count; j++) {
+            free(c->entries[i].read_tables[j]);
+        }
+    }
+    c->count = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Reader connection
+// ---------------------------------------------------------------------------
+
+// Read table tracking (per-reader, for stream dependency capture).
+typedef struct {
+    char* names[RESQLITE_MAX_READ_TABLES];
+    int count;      // number of active entries
+    int allocated;  // number of slots with strdup'd strings (>= count)
+} resqlite_read_set;
+
+static void read_set_init(resqlite_read_set* s) {
+    s->count = 0;
+    s->allocated = 0;
+}
+
+static void read_set_add(resqlite_read_set* s, const char* table_name) {
+    if (!table_name) return;
+    // Deduplicate.
+    for (int i = 0; i < s->count; i++) {
+        if (strcmp(s->names[i], table_name) == 0) return;
+    }
+    if (s->count >= RESQLITE_MAX_READ_TABLES) return;
+    // Free old string in this slot if one exists from a previous cycle.
+    if (s->count < s->allocated) {
+        free(s->names[s->count]);
+    }
+    s->names[s->count] = strdup(table_name);
+    s->count++;
+    if (s->count > s->allocated) s->allocated = s->count;
+}
+
+static void read_set_reset(resqlite_read_set* s) {
+    // Reset active count. Strings stay valid (Dart reads them after
+    // resqlite_get_read_tables returns pointers). They'll be freed
+    // on the next read_set_add when their slots are reused.
+    s->count = 0;
+}
+
+static void read_set_free(resqlite_read_set* s) {
+    for (int i = 0; i < s->allocated; i++) {
+        free(s->names[i]);
+    }
+    s->count = 0;
+    s->allocated = 0;
+}
+
+static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
+                                             const resqlite_read_set* read_tables) {
+    for (int i = 0; i < entry->read_table_count; i++) {
+        free(entry->read_tables[i]);
+        entry->read_tables[i] = NULL;
+    }
+    entry->read_table_count = 0;
+
+    for (int i = 0; i < read_tables->count && i < RESQLITE_MAX_READ_TABLES; i++) {
+        entry->read_tables[i] = strdup(read_tables->names[i]);
+        entry->read_table_count++;
+    }
+}
+
+static void read_set_load_from_cache_entry(resqlite_read_set* read_set,
+                                           const resqlite_cached_stmt* entry) {
+    read_set_reset(read_set);
+    for (int i = 0; i < entry->read_table_count; i++) {
+        read_set_add(read_set, entry->read_tables[i]);
+    }
+}
+
+typedef struct {
+    sqlite3* db;
+    resqlite_stmt_cache cache;
+    resqlite_read_set read_tables;
+    resqlite_buf json_buf;  // persistent buffer for resqlite_query_bytes
+    int in_use;
+} resqlite_reader;
+
+// ---------------------------------------------------------------------------
+// Connection pool
+// ---------------------------------------------------------------------------
+
+#define MAX_READERS 16
+
+// ---------------------------------------------------------------------------
+// Dirty table tracking
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    char* names[RESQLITE_MAX_DIRTY_TABLES];
+    int count;
+    int allocated;
+} resqlite_dirty_set;
+
+static void dirty_set_init(resqlite_dirty_set* s) {
+    s->count = 0;
+    s->allocated = 0;
+}
+
+static void dirty_set_add(resqlite_dirty_set* s, const char* table_name) {
+    if (!table_name) return;
+
+    // Check for duplicate.
+    for (int i = 0; i < s->count; i++) {
+        if (strcmp(s->names[i], table_name) == 0) return;
+    }
+
+    if (s->count >= RESQLITE_MAX_DIRTY_TABLES) return;  // overflow protection
+    // Free old string in this slot if one exists from a previous cycle.
+    if (s->count < s->allocated) {
+        free(s->names[s->count]);
+    }
+    s->names[s->count] = strdup(table_name);
+    s->count++;
+    if (s->count > s->allocated) s->allocated = s->count;
+}
+
+static void dirty_set_reset(resqlite_dirty_set* s) {
+    // Reset active count. Strings stay valid (Dart reads them after
+    // resqlite_get_dirty_tables returns pointers). Freed on next add or close.
+    s->count = 0;
+}
+
+static void dirty_set_free(resqlite_dirty_set* s) {
+    for (int i = 0; i < s->allocated; i++) {
+        free(s->names[i]);
+    }
+    s->count = 0;
+    s->allocated = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Connection pool + dirty tracking
+// ---------------------------------------------------------------------------
+
+struct resqlite_db {
+    // Write connection (used for exec, DDL, DML).
+    sqlite3* writer;
+    resqlite_stmt_cache writer_cache;
+    sqlite3_mutex* writer_mutex;
+
+    // Dirty tables accumulated by the preupdate hook.
+    resqlite_dirty_set dirty_tables;
+    int writer_checkpoint_running;
+
+    // Reader pool.
+    resqlite_reader readers[MAX_READERS];
+    int reader_count;
+    sqlite3_mutex* pool_mutex;
+    // No condition variable — Dart retries if no reader available.
+
+    char* path;
+};
+
+#define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 500
+
+// ---------------------------------------------------------------------------
+// Authorizer callback — records read tables (for stream dependencies)
+// ---------------------------------------------------------------------------
+
+#define SQLITE_READ 20  // SQLite authorizer action code for column read
+
+static int authorizer_callback(
+    void* user_data,
+    int action_code,
+    const char* arg1,   // table name for SQLITE_READ
+    const char* arg2,   // column name
+    const char* arg3,   // database name
+    const char* arg4    // trigger/view name
+) {
+    (void)arg2; (void)arg3; (void)arg4;
+    if (action_code == SQLITE_READ && arg1 != NULL) {
+        resqlite_read_set* rs = (resqlite_read_set*)user_data;
+        read_set_add(rs, arg1);
+    }
+    return SQLITE_OK;  // allow all operations
+}
+
+// ---------------------------------------------------------------------------
+// Preupdate hook callback — records dirty tables
+// ---------------------------------------------------------------------------
+
+static void preupdate_hook(
+    void* user_data,
+    sqlite3* db,
+    int op,
+    const char* db_name,
+    const char* table_name,
+    sqlite3_int64 old_rowid,
+    sqlite3_int64 new_rowid
+) {
+    (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
+    resqlite_db* sdb = (resqlite_db*)user_data;
+    dirty_set_add(&sdb->dirty_tables, table_name);
+}
+
+static int writer_wal_hook(
+    void* user_data,
+    sqlite3* db,
+    const char* db_name,
+    int pages_in_wal
+) {
+    resqlite_db* sdb = (resqlite_db*)user_data;
+    if (pages_in_wal < RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES ||
+        sdb->writer_checkpoint_running) {
+        return SQLITE_OK;
+    }
+
+    sdb->writer_checkpoint_running = 1;
+    int rc = sqlite3_wal_checkpoint_v2(
+        db,
+        db_name,
+        SQLITE_CHECKPOINT_PASSIVE,
+        NULL,
+        NULL
+    );
+    sdb->writer_checkpoint_running = 0;
+
+    // PASSIVE checkpoints can legitimately report BUSY if readers pin the WAL.
+    // Treat that as "try again later" instead of surfacing an error from commit.
+    if (rc == SQLITE_BUSY) return SQLITE_OK;
+    return rc;
+}
+
+// Open a connection with optional encryption.
+// encryption_key_hex: hex string like "aabb01..." or NULL for no encryption.
+static sqlite3* open_connection(const char* path, int read_only,
+                                 const char* encryption_key_hex) {
+    sqlite3* db = NULL;
+    int flags = read_only
+        ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
+        : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX);
+
+    int rc = sqlite3_open_v2(path, &db, flags, NULL);
+    if (rc != SQLITE_OK) {
+        if (db) sqlite3_close_v2(db);
+        return NULL;
+    }
+
+    // Set encryption key before any other operations. The key must be set
+    // immediately after opening — before any reads or PRAGMAs.
+    if (encryption_key_hex != NULL && encryption_key_hex[0] != '\0') {
+        // Validate hex-only to prevent PRAGMA injection.
+        for (const char* p = encryption_key_hex; *p; p++) {
+            char c = *p;
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                  (c >= 'A' && c <= 'F'))) {
+                sqlite3_close_v2(db);
+                return NULL;
+            }
+        }
+        char pragma[256];
+        snprintf(pragma, sizeof(pragma), "PRAGMA key = \"x'%s'\"", encryption_key_hex);
+        rc = sqlite3_exec(db, pragma, NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_close_v2(db);
+            return NULL;
+        }
+
+        // Probe to force page decryption and verify the key is correct.
+        rc = sqlite3_exec(db, "SELECT count(*) FROM sqlite_master", NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_close_v2(db);
+            return NULL;
+        }
+    }
+
+    sqlite3_exec(db, "PRAGMA journal_mode = WAL", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA busy_timeout = 5000", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA mmap_size = 268435456", NULL, NULL, NULL);  // 256 MB
+    sqlite3_exec(db, "PRAGMA cache_size = -8192", NULL, NULL, NULL);    // 8 MB
+    sqlite3_exec(db, "PRAGMA temp_store = MEMORY", NULL, NULL, NULL);
+    if (read_only) {
+        // Readers should never trigger auto-checkpoints.
+        sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 0", NULL, NULL, NULL);
+    } else {
+        // Writer: resqlite installs its own passive checkpoint scheduler via
+        // sqlite3_wal_hook() in resqlite_open(), so disable SQLite's built-in
+        // autocheckpoint to avoid two independent schedulers fighting.
+        sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 0", NULL, NULL, NULL);
+        sqlite3_exec(db, "PRAGMA journal_size_limit = 67108864", NULL, NULL, NULL);  // 64 MB
+    }
+    // synchronous=NORMAL is set automatically by SQLITE_DEFAULT_WAL_SYNCHRONOUS=1
+    // for all connections in WAL mode — no PRAGMA needed.
+
+    return db;
+}
+
+resqlite_db* resqlite_open(const char* path, int max_readers,
+                          const char* encryption_key_hex) {
+    // Required when compiled with SQLITE_OMIT_AUTOINIT — call once before
+    // any other SQLite API. Subsequent calls are harmless no-ops.
+    sqlite3_initialize();
+
+    if (max_readers <= 0) max_readers = 8;
+    if (max_readers > MAX_READERS) max_readers = MAX_READERS;
+
+    // Open write connection.
+    sqlite3* writer = open_connection(path, 0, encryption_key_hex);
+    if (!writer) return NULL;
+
+    resqlite_db* db = (resqlite_db*)calloc(1, sizeof(resqlite_db));
+    db->writer = writer;
+    db->path = strdup(path);
+    stmt_cache_init(&db->writer_cache);
+    dirty_set_init(&db->dirty_tables);
+    db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
+    db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
+
+    // Install preupdate hook on writer for dirty table tracking.
+    sqlite3_preupdate_hook(writer, preupdate_hook, db);
+    sqlite3_wal_hook(writer, writer_wal_hook, db);
+
+    // Open reader connections with authorizer hooks for dependency tracking.
+    db->reader_count = 0;
+    for (int i = 0; i < max_readers; i++) {
+        sqlite3* rdb = open_connection(path, 1, encryption_key_hex);
+        if (!rdb) continue;
+        db->readers[i].db = rdb;
+        stmt_cache_init(&db->readers[i].cache);
+        read_set_init(&db->readers[i].read_tables);
+        buf_init(&db->readers[i].json_buf, 16384);
+        db->readers[i].in_use = 0;
+
+        // Install authorizer to capture read dependencies.
+        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[i].read_tables);
+
+        db->reader_count++;
+    }
+
+    return db;
+}
+
+void resqlite_close(resqlite_db* db) {
+    if (!db) return;
+
+    // Close all readers.
+    for (int i = 0; i < db->reader_count; i++) {
+        stmt_cache_clear(&db->readers[i].cache);
+        read_set_free(&db->readers[i].read_tables);
+        if (db->readers[i].json_buf.data) free(db->readers[i].json_buf.data);
+        sqlite3_close_v2(db->readers[i].db);
+    }
+
+    // Close writer.
+    sqlite3_mutex_enter(db->writer_mutex);
+    stmt_cache_clear(&db->writer_cache);
+    dirty_set_free(&db->dirty_tables);
+    sqlite3_close_v2(db->writer);
+    sqlite3_mutex_leave(db->writer_mutex);
+
+    sqlite3_mutex_free(db->writer_mutex);
+    sqlite3_mutex_free(db->pool_mutex);
+    free(db->path);
+    free(db);
+}
+
+const char* resqlite_errmsg(resqlite_db* db) {
+    if (!db || !db->writer) return "database not open";
+    return sqlite3_errmsg(db->writer);
+}
+
+sqlite3* resqlite_writer_handle(resqlite_db* db) {
+    return db ? db->writer : NULL;
+}
+
+int resqlite_exec(resqlite_db* db, const char* sql) {
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
+                                            int sql_len, int* out_rc) {
+    sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, sql_len);
+    if (stmt) {
+        sqlite3_reset(stmt);
+        *out_rc = SQLITE_OK;
+        return stmt;
+    }
+
+    int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        *out_rc = rc;
+        return NULL;
+    }
+
+    stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt);
+    *out_rc = SQLITE_OK;
+    return stmt;
+}
+
+int resqlite_execute(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count,
+    resqlite_write_result* out_result
+) {
+    sqlite3_mutex_enter(db->writer_mutex);
+
+    int rc;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    if (!stmt) {
+        sqlite3_mutex_leave(db->writer_mutex);
+        return rc;
+    }
+
+    rc = bind_params(stmt, params, param_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_reset(stmt);
+        sqlite3_mutex_leave(db->writer_mutex);
+        return rc;
+    }
+
+    rc = sqlite3_step(stmt);
+    if (out_result) {
+        out_result->affected_rows = sqlite3_changes(db->writer);
+        out_result->last_insert_id = sqlite3_last_insert_rowid(db->writer);
+    }
+    sqlite3_reset(stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+
+    if (rc == SQLITE_DONE || rc == SQLITE_ROW) return SQLITE_OK;
+    return rc;
+}
+
+int resqlite_run_batch(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+) {
+    sqlite3_mutex_enter(db->writer_mutex);
+
+    // Begin transaction — IMMEDIATE acquires the write lock upfront,
+    // avoiding the lock-upgrade path since we know we're writing.
+    int rc = sqlite3_exec(db->writer, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+        sqlite3_mutex_leave(db->writer_mutex);
+        return rc;
+    }
+
+    // Prepare statement once.
+    sqlite3_stmt* stmt = NULL;
+    rc = SQLITE_OK;
+    stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
+    if (stmt) {
+        sqlite3_reset(stmt);
+    } else {
+        rc = sqlite3_prepare_v3(db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
+            sqlite3_mutex_leave(db->writer_mutex);
+            return rc;
+        }
+        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+    }
+
+    // Execute for each param set.
+    for (int i = 0; i < set_count; i++) {
+        sqlite3_reset(stmt);
+
+        rc = bind_params(stmt, &param_sets[i * param_count], param_count);
+        if (rc != SQLITE_OK) {
+            sqlite3_reset(stmt);
+            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
+            sqlite3_mutex_leave(db->writer_mutex);
+            return rc;
+        }
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+            sqlite3_reset(stmt);
+            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
+            sqlite3_mutex_leave(db->writer_mutex);
+            return rc;
+        }
+    }
+
+    sqlite3_reset(stmt);
+
+    // Commit.
+    rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+int resqlite_get_dirty_tables(
+    resqlite_db* db,
+    const char** out_tables,
+    int max_tables
+) {
+    int count = db->dirty_tables.count;
+    if (count > max_tables) count = max_tables;
+
+    // Copy pointers — caller must read strings before the next call.
+    for (int i = 0; i < count; i++) {
+        out_tables[i] = db->dirty_tables.names[i];
+    }
+
+    // Reset active count. Strings stay valid — out_tables still points to them.
+    // They'll be freed on the next dirty_set_add when slots are reused.
+    dirty_set_reset(&db->dirty_tables);
+
+    return count;
+}
+
+int resqlite_get_read_tables(
+    resqlite_db* db,
+    int reader_id,
+    const char** out_tables,
+    int max_tables
+) {
+    if (reader_id < 0 || reader_id >= db->reader_count) return 0;
+
+    resqlite_read_set* rs = &db->readers[reader_id].read_tables;
+    int count = rs->count;
+    if (count > max_tables) count = max_tables;
+
+    for (int i = 0; i < count; i++) {
+        out_tables[i] = rs->names[i];
+    }
+
+    // Reset active count. Strings stay valid until next query on this reader.
+    read_set_reset(rs);
+
+    return count;
+}
+
+int resqlite_db_status_total(
+    resqlite_db* db,
+    int op,
+    int reset,
+    int* out_current,
+    int* out_highwater
+) {
+    if (!db || !out_current || !out_highwater) return SQLITE_MISUSE;
+
+    int total_current = 0;
+    int total_highwater = 0;
+    int rc = SQLITE_OK;
+
+    sqlite3_mutex_enter(db->writer_mutex);
+    int current = 0;
+    int highwater = 0;
+    int writer_rc = sqlite3_db_status(db->writer, op, &current, &highwater, reset);
+    sqlite3_mutex_leave(db->writer_mutex);
+    if (writer_rc != SQLITE_OK) {
+        rc = writer_rc;
+    } else {
+        total_current += current;
+        total_highwater += highwater;
+    }
+
+    sqlite3_mutex_enter(db->pool_mutex);
+    for (int i = 0; i < db->reader_count; i++) {
+        if (db->readers[i].in_use) {
+            if (rc == SQLITE_OK) rc = SQLITE_BUSY;
+            continue;
+        }
+
+        current = 0;
+        highwater = 0;
+        int reader_rc = sqlite3_db_status(
+            db->readers[i].db, op, &current, &highwater, reset);
+        if (reader_rc != SQLITE_OK) {
+            if (rc == SQLITE_OK) rc = reader_rc;
+            continue;
+        }
+        total_current += current;
+        total_highwater += highwater;
+    }
+    sqlite3_mutex_leave(db->pool_mutex);
+
+    *out_current = total_current;
+    *out_highwater = total_highwater;
+    return rc;
+}
+
+// ---------------------------------------------------------------------------
+// Reader pool: acquire / release
+// ---------------------------------------------------------------------------
+
+// Find an idle reader. Returns reader index, or -1 if none available.
+static int find_idle_reader(resqlite_db* db) {
+    for (int i = 0; i < db->reader_count; i++) {
+        if (!db->readers[i].in_use) return i;
+    }
+    return -1;
+}
+
+// Acquire an idle reader, spinning briefly if all are busy.
+// Uses sqlite3_sleep (cross-platform) instead of pthread_cond_wait.
+static int acquire_reader(resqlite_db* db) {
+    for (int attempt = 0; attempt < 1000; attempt++) {
+        sqlite3_mutex_enter(db->pool_mutex);
+        int idx = find_idle_reader(db);
+        if (idx >= 0) {
+            db->readers[idx].in_use = 1;
+            sqlite3_mutex_leave(db->pool_mutex);
+            return idx;
+        }
+        sqlite3_mutex_leave(db->pool_mutex);
+        // Brief sleep — sqlite3_sleep is cross-platform (ms).
+        sqlite3_sleep(1);
+    }
+    return -1;  // Timed out after ~1 second.
+}
+
+// Release a reader back to the pool.
+static void release_reader(resqlite_db* db, int idx) {
+    sqlite3_mutex_enter(db->pool_mutex);
+    db->readers[idx].in_use = 0;
+    sqlite3_mutex_leave(db->pool_mutex);
+}
+
+// ---------------------------------------------------------------------------
+// Internal: get or prepare on a specific reader
+// ---------------------------------------------------------------------------
+
+static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
+                                            const char* sql, int sql_len,
+                                            int* out_rc) {
+    resqlite_cached_stmt* entry =
+        stmt_cache_lookup_entry(&reader->cache, sql, sql_len);
+    if (entry) {
+        sqlite3_reset(entry->stmt);
+        read_set_load_from_cache_entry(&reader->read_tables, entry);
+        *out_rc = SQLITE_OK;
+        return entry->stmt;
+    }
+
+    // The authorizer populates per-reader read tables during prepare.
+    // Reset before preparing so this statement captures only its own deps.
+    read_set_reset(&reader->read_tables);
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = sqlite3_prepare_v3(reader->db, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        *out_rc = rc;
+        return NULL;
+    }
+
+    entry = stmt_cache_insert(&reader->cache, sql, sql_len, stmt);
+    stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
+    *out_rc = SQLITE_OK;
+    return stmt;
+}
+
+// ---------------------------------------------------------------------------
+// Internal: bind parameters
+// ---------------------------------------------------------------------------
+
+static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
+                       int param_count) {
+    for (int i = 0; i < param_count; i++) {
+        int idx = i + 1;
+        int rc;
+        switch (params[i].type) {
+            case RESQLITE_TYPE_NULL:
+                rc = sqlite3_bind_null(stmt, idx);
+                break;
+            case RESQLITE_TYPE_INT64:
+                rc = sqlite3_bind_int64(stmt, idx, params[i].int_val);
+                break;
+            case RESQLITE_TYPE_FLOAT64:
+                rc = sqlite3_bind_double(stmt, idx, params[i].float_val);
+                break;
+            case RESQLITE_TYPE_TEXT:
+                rc = sqlite3_bind_text(stmt, idx,
+                                       params[i].text.data,
+                                       params[i].text.len,
+                                       SQLITE_STATIC);
+                break;
+            case RESQLITE_TYPE_BLOB:
+                rc = sqlite3_bind_blob64(stmt, idx,
+                                          params[i].blob.data,
+                                          params[i].blob.len,
+                                          SQLITE_STATIC);
+                break;
+            default:
+                rc = sqlite3_bind_null(stmt, idx);
+                break;
+        }
+        if (rc != SQLITE_OK) return rc;
+    }
+    return SQLITE_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Public: stmt acquire/release (for Dart per-cell stepping)
+// ---------------------------------------------------------------------------
+
+sqlite3_stmt* resqlite_stmt_acquire(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count,
+    int* out_reader
+) {
+    int reader_idx = acquire_reader(db);
+    if (reader_idx < 0) {
+        *out_reader = -1;
+        return NULL;
+    }
+    resqlite_reader* reader = &db->readers[reader_idx];
+
+    int rc;
+    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!stmt) {
+        release_reader(db, reader_idx);
+        *out_reader = -1;
+        return NULL;
+    }
+
+    rc = bind_params(stmt, params, param_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_reset(stmt);
+        release_reader(db, reader_idx);
+        *out_reader = -1;
+        return NULL;
+    }
+
+    *out_reader = reader_idx;
+    return stmt;
+}
+
+void resqlite_stmt_release(resqlite_db* db, int reader_id) {
+    if (reader_id >= 0 && reader_id < db->reader_count) {
+        release_reader(db, reader_id);
+    }
+}
+
+// Acquire a statement on a specific reader without pool mutex.
+// The caller guarantees exclusive access to this reader (dedicated worker).
+sqlite3_stmt* resqlite_stmt_acquire_on(
+    resqlite_db* db,
+    int reader_id,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count
+) {
+    if (reader_id < 0 || reader_id >= db->reader_count) return NULL;
+    resqlite_reader* reader = &db->readers[reader_id];
+
+    int rc;
+    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!stmt) return NULL;
+
+    rc = bind_params(stmt, params, param_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_reset(stmt);
+        return NULL;
+    }
+
+    return stmt;
+}
+
+// ---------------------------------------------------------------------------
+// Fast int64-to-string (avoids snprintf format parsing overhead)
+// ---------------------------------------------------------------------------
+
+__attribute__((hot)) static int fast_i64_to_str(long long val, char* buf) {
+    if (val == 0) { buf[0] = '0'; return 1; }
+
+    char tmp[21]; // max int64 is 20 digits + sign
+    int pos = 0;
+    int negative = 0;
+    unsigned long long uval;
+
+    if (val < 0) {
+        negative = 1;
+        uval = (unsigned long long)(-(val + 1)) + 1; // avoid UB on LLONG_MIN
+    } else {
+        uval = (unsigned long long)val;
+    }
+
+    while (uval > 0) {
+        tmp[pos++] = '0' + (char)(uval % 10);
+        uval /= 10;
+    }
+
+    int len = 0;
+    if (negative) buf[len++] = '-';
+    for (int i = pos - 1; i >= 0; i--) {
+        buf[len++] = tmp[i];
+    }
+    return len;
+}
+
+// ---------------------------------------------------------------------------
+// JSON output
+// ---------------------------------------------------------------------------
+
+__attribute__((hot)) static void json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
+    buf_write_char(b, '"');
+
+    // Scan-then-flush: write spans of safe characters in one memcpy,
+    // only stopping for characters that need escaping.
+    int start = 0;
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        const char* esc = NULL;
+        int esc_len = 0;
+        char esc_buf[7];
+
+        if (c == '"')       { esc = "\\\""; esc_len = 2; }
+        else if (c == '\\') { esc = "\\\\"; esc_len = 2; }
+        else if (c == '\b') { esc = "\\b";  esc_len = 2; }
+        else if (c == '\f') { esc = "\\f";  esc_len = 2; }
+        else if (c == '\n') { esc = "\\n";  esc_len = 2; }
+        else if (c == '\r') { esc = "\\r";  esc_len = 2; }
+        else if (c == '\t') { esc = "\\t";  esc_len = 2; }
+        else if (c < 0x20)  {
+            snprintf(esc_buf, sizeof(esc_buf), "\\u%04x", c);
+            esc = esc_buf;
+            esc_len = 6;
+        }
+
+        if (esc) {
+            // Flush unescaped span.
+            if (i > start) buf_write(b, s + start, i - start);
+            buf_write(b, esc, esc_len);
+            start = i + 1;
+        }
+    }
+    // Flush remaining unescaped span.
+    if (start < len) buf_write(b, s + start, len - start);
+
+    buf_write_char(b, '"');
+}
+
+__attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
+    int col_count = sqlite3_column_count(stmt);
+
+    // Stack-allocate for typical column counts (<=64), heap for larger.
+    const char* _col_names_stack[64];
+    int _col_name_lens_stack[64];
+    const char** col_names = (col_count <= 64) ? _col_names_stack : NULL;
+    int* col_name_lens = (col_count <= 64) ? _col_name_lens_stack : NULL;
+    int col_names_init = 0;
+
+    buf_write_char(b, '[');
+
+    int row_index = 0;
+    int rc;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        if (!col_names_init) {
+            if (col_count > 64) {
+                col_names = (const char**)malloc(col_count * sizeof(const char*));
+                col_name_lens = (int*)malloc(col_count * sizeof(int));
+            }
+            col_names_init = 1;
+            for (int i = 0; i < col_count; i++) {
+                col_names[i] = sqlite3_column_name(stmt, i);
+                col_name_lens[i] = (int)strlen(col_names[i]);
+            }
+        }
+
+        if (row_index > 0) buf_write_char(b, ',');
+        buf_write_char(b, '{');
+
+        for (int i = 0; i < col_count; i++) {
+            if (i > 0) buf_write_char(b, ',');
+
+            json_write_string(b, col_names[i], col_name_lens[i]);
+            buf_write_char(b, ':');
+
+            int type = sqlite3_column_type(stmt, i);
+            switch (type) {
+                case SQLITE_NULL:
+                    buf_write_str(b, "null", 4);
+                    break;
+                case SQLITE_INTEGER: {
+                    char num[24];
+                    int num_len = fast_i64_to_str(
+                        sqlite3_column_int64(stmt, i), num);
+                    buf_write_str(b, num, num_len);
+                    break;
+                }
+                case SQLITE_FLOAT: {
+                    char num[32];
+                    int num_len = snprintf(num, sizeof(num), "%.17g",
+                                           sqlite3_column_double(stmt, i));
+                    buf_write_str(b, num, num_len);
+                    break;
+                }
+                case SQLITE_TEXT: {
+                    // column_text MUST be called before column_bytes — calling
+                    // bytes first can trigger an implicit type conversion that
+                    // invalidates the text pointer.
+                    const char* text = (const char*)sqlite3_column_text(stmt, i);
+                    int text_len = sqlite3_column_bytes(stmt, i);
+                    json_write_string(b, text, text_len);
+                    break;
+                }
+                case SQLITE_BLOB: {
+                    int blob_len = sqlite3_column_bytes(stmt, i);
+                    const unsigned char* blob =
+                        (const unsigned char*)sqlite3_column_blob(stmt, i);
+                    buf_write_char(b, '"');
+                    static const char hex[] = "0123456789abcdef";
+                    for (int j = 0; j < blob_len; j++) {
+                        buf_write_byte(b, hex[blob[j] >> 4]);
+                        buf_write_byte(b, hex[blob[j] & 0x0f]);
+                    }
+                    buf_write_char(b, '"');
+                    break;
+                }
+                default:
+                    buf_write_str(b, "null", 4);
+                    break;
+            }
+        }
+
+        buf_write_char(b, '}');
+        row_index++;
+    }
+
+    buf_write_char(b, ']');
+
+    sqlite3_reset(stmt);
+    if (col_count > 64) {
+        free(col_names);
+        free(col_name_lens);
+    }
+
+    if (rc != SQLITE_DONE) return rc;
+
+    return SQLITE_OK;
+}
+
+int resqlite_query_bytes(
+    resqlite_db* db,
+    int reader_id,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count,
+    unsigned char** out_buf,
+    int* out_len
+) {
+    if (reader_id < 0 || reader_id >= db->reader_count) {
+        *out_buf = NULL;
+        *out_len = 0;
+        return SQLITE_BUSY;
+    }
+    resqlite_reader* reader = &db->readers[reader_id];
+
+    int rc;
+    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!stmt) {
+        *out_buf = NULL;
+        *out_len = 0;
+        return rc;
+    }
+
+    rc = bind_params(stmt, params, param_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_reset(stmt);
+        *out_buf = NULL;
+        *out_len = 0;
+        return rc;
+    }
+
+    // Use persistent reader buffer — reset, no malloc/free per query.
+    reader->json_buf.len = 0;
+
+    rc = write_json_to_buf(stmt, &reader->json_buf);
+
+    if (rc != SQLITE_OK) {
+        *out_buf = NULL;
+        *out_len = 0;
+        return rc;
+    }
+
+    // Caller copies before next query. Dedicated reader guarantees this.
+    *out_buf = reader->json_buf.data;
+    *out_len = reader->json_buf.len;
+    return SQLITE_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Batch row reader
+// ---------------------------------------------------------------------------
+
+__attribute__((hot)) int resqlite_step_row(
+    sqlite3_stmt* stmt,
+    int col_count,
+    resqlite_cell* cells
+) {
+    int rc = sqlite3_step(stmt);
+    if (__builtin_expect(rc != SQLITE_ROW, 0)) return rc;
+
+    for (int i = 0; i < col_count; i++) {
+        int type = sqlite3_column_type(stmt, i);
+        cells[i].type = type;
+        switch (type) {
+            case SQLITE_INTEGER:
+                cells[i].i = sqlite3_column_int64(stmt, i);
+                break;
+            case SQLITE_FLOAT:
+                cells[i].d = sqlite3_column_double(stmt, i);
+                break;
+            case SQLITE_TEXT:
+                cells[i].p = sqlite3_column_text(stmt, i);
+                cells[i].len = sqlite3_column_bytes(stmt, i);
+                break;
+            case SQLITE_BLOB:
+                cells[i].p = sqlite3_column_blob(stmt, i);
+                cells[i].len = sqlite3_column_bytes(stmt, i);
+                break;
+            default:
+                // SQLITE_NULL or unknown
+                break;
+        }
+    }
+
+    return SQLITE_ROW;
+}
+
+void resqlite_free(void* ptr) {
+    free(ptr);
+}

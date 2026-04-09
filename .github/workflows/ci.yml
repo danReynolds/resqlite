@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+      - name: Analyze
+        run: dart analyze --fatal-infos
+      - name: Run tests
+        run: dart test --timeout 60s
+
+  benchmark:
+    name: Benchmarks
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Run benchmark suite
+        run: dart run benchmark/run_all.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary
+
+      - name: Run head-to-head
+        run: dart run benchmark/head_to_head_worker.dart --out=/tmp/h2h.json --repeat=3
+
+      - name: Print head-to-head results
+        run: |
+          python3 -c "
+          import json
+          with open('/tmp/h2h.json') as f:
+              d = json.load(f)['cases']
+          metrics = [
+              ('repeated_point_query', 'qps', 'Point query'),
+              ('large_result_read', 'mean_ms', 'Large read 5k'),
+              ('stream_invalidation_latency', 'mean_ms', 'Stream invalidation'),
+              ('single_row_crud', 'ops_per_sec', 'Single CRUD'),
+              ('batch_write_transaction', 'rows_per_sec', 'Batch write'),
+          ]
+          for case_id, metric, label in metrics:
+              v = d.get(case_id, {}).get(metric)
+              if v:
+                  if metric in ('qps', 'ops_per_sec', 'rows_per_sec'):
+                      print(f'{label}: {int(v):,}')
+                  else:
+                      print(f'{label}: {v:.3f}ms')
+          "
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark/results/*.md
+            /tmp/h2h.json
+          retention-days: 90
