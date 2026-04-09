@@ -67,17 +67,18 @@ final class SelectIfChangedRequest extends ReadRequest {
 }
 
 /// Threshold: if rows * cols exceeds this, the worker does Isolate.exit
-/// (zero-copy) instead of SendPort.send (copy). Set high enough that
-/// sacrifice only triggers for genuinely large results — at 1000 rows × 6
-/// cols (6000 cells), pool and one-off are tied, so sacrificing just adds
-/// respawn churn. At 5000+ rows the zero-copy advantage becomes meaningful.
-const int sacrificeThreshold = 6000;
+/// (zero-copy) instead of SendPort.send (copy). For List<Map<String, Object?>>
+/// results, SendPort must traverse and copy every element — the cost grows
+/// with result size. Isolate.exit avoids the copy but incurs 2-5ms of
+/// respawn overhead. Below ~50000 cells, the SendPort copy is cheaper than
+/// respawning. Above it, zero-copy wins decisively.
+const int sacrificeThreshold = 50000;
 
-/// Byte-length threshold for selectBytes. Uint8List is a single object so
-/// Isolate.exit validation is O(1) regardless of size, but SendPort copies
-/// the bytes. Below this threshold the copy is negligible; above it
-/// Isolate.exit avoids moving megabytes through the SendPort copy path.
-const int bytesSacrificeThreshold = 102400; // 100 KB
+// Note: selectBytes never sacrifices. Uint8List is a single contiguous buffer —
+// SendPort.send does one memcpy (~0.1ms/MB), which is always cheaper than the
+// 1-5ms isolate respawn cost that sacrifice incurs. Sacrifice only helps for
+// complex object graphs (List<Map<String, Object?>>) where SendPort must
+// traverse and copy each element individually.
 
 /// Per-worker cell buffer. Reused across queries to avoid calloc/free per query.
 ffi.Pointer<ffi.Uint8> _cellsBuf = ffi.nullptr;
@@ -144,7 +145,7 @@ void readerEntrypoint(List<Object> args) {
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           result = bytes;
-          sacrifice = bytes.length > bytesSacrificeThreshold;
+          sacrifice = false; // Uint8List is a flat buffer — SendPort memcpy is always cheaper than respawn.
 
         case SelectIfChangedRequest(
           :final sql,
