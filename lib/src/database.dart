@@ -52,7 +52,7 @@ final class Database {
   /// Zone key storing the active [Transaction] when inside a transaction body.
   /// Database methods check this to transparently route through the transaction
   /// instead of deadlocking on the write lock.
-  static final _activeTransactionZone = Object();
+  static const _activeTransactionZone = #_activeTransaction;
 
   /// Acquires exclusive write access, runs [body], then releases the lock.
   Future<T> _withWriteLock<T>(Future<T> Function() body) async {
