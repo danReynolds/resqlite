@@ -8,6 +8,7 @@ import 'package:ffi/ffi.dart';
 
 import 'exceptions.dart';
 import 'native/resqlite_bindings.dart';
+import 'query_cache.dart';
 import 'reader_pool.dart';
 import 'stream_engine.dart';
 import 'write_worker.dart';
@@ -48,8 +49,13 @@ final class Database {
   ReaderPool? _readerPool;
   Future<ReaderPool>? _readerPoolReady;
 
-  // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
-  late final StreamEngine _streamEngine = StreamEngine(() => _readers);
+  // Shared query cache — used by both select() and stream().
+  final QueryCache _cache = QueryCache();
+
+  // Reactive query engine — manages stream subscriptions, delegates caching
+  // to the shared QueryCache.
+  late final StreamEngine _streamEngine =
+      StreamEngine(() => _readers, _cache);
 
   /// The raw native database handle.
   ///
@@ -325,8 +331,30 @@ final class Database {
     List<Object?> parameters = const [],
   ]) async {
     _ensureOpen();
+    final key = queryKey(sql, parameters);
+
+    // Check the shared cache — returns immediately on hit.
+    final cached = _cache.get(key);
+    if (cached != null) return cached.result;
+
+    // Cache miss — query the reader pool with dependency tracking
+    // so the result can be cached and invalidated correctly.
     final pool = await _readers;
-    return pool.select(sql, parameters);
+    final (rows, readTables) = await pool.selectWithDeps(sql, parameters);
+
+    // Only cache small results to avoid excessive memory use.
+    if (rows.length <= maxCacheableRows) {
+      _cache.put(
+        key: key,
+        sql: sql,
+        params: parameters,
+        result: rows,
+        resultHash: hashResult(rows),
+        readTables: Set<String>.unmodifiable(readTables.toSet()),
+      );
+    }
+
+    return rows;
   }
 
   /// Executes a query and returns the result as JSON-encoded bytes.
@@ -409,6 +437,7 @@ final class Database {
     if (_closed) return;
     _closed = true;
     _streamEngine.closeAll();
+    _cache.clear();
     _readerPool?.close();
     if (_writerPort != null) {
       await _writerRequest<bool>((replyPort) => CloseRequest(replyPort));
