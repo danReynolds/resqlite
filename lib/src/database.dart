@@ -49,21 +49,14 @@ final class Database {
   // the lock holder has exclusive write access until released.
   Completer<void>? _writeLock;
 
-  /// Zone key used to detect calls to [execute]/[executeBatch]/[transaction]
-  /// from inside a transaction body. Without this guard, such calls would
-  /// deadlock waiting for the write lock that the outer transaction holds.
-  static final _inTransactionZone = Object();
+  /// Zone key storing the active [Transaction] when inside a transaction body.
+  /// Database methods check this to transparently route through the transaction
+  /// instead of deadlocking on the write lock.
+  static final _activeTransactionZone = Object();
 
   /// Acquires exclusive write access, runs [body], then releases the lock.
   Future<T> _withWriteLock<T>(Future<T> Function() body) async {
     _ensureOpen();
-    if (Zone.current[_inTransactionZone] == true) {
-      throw StateError(
-        'Cannot call db.execute/executeBatch/transaction from inside a '
-        'transaction body. Use the Transaction instance passed to the '
-        'callback instead (e.g. tx.execute, tx.select, tx.transaction).',
-      );
-    }
     while (true) {
       final lock = _writeLock;
       if (lock == null) break;
@@ -247,13 +240,17 @@ final class Database {
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
-  ]) => _withWriteLock(() async {
-    final response = await _writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
-    return response.result;
-  });
+  ]) {
+    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    if (tx != null) return tx.execute(sql, parameters);
+    return _withWriteLock(() async {
+      final response = await _writerRequest<ExecuteResponse>(
+        (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      );
+      _streamEngine.handleDirtyTables(response.dirtyTables);
+      return response.result;
+    });
+  }
 
   /// Executes one SQL statement across many parameter sets in a single
   /// transaction.
@@ -304,8 +301,11 @@ final class Database {
   /// Rolled-back transactions do not trigger stream re-queries.
   ///
   /// Returns the value returned by [body].
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) =>
-    _withWriteLock(() => _runTransaction(body));
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
+    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    if (tx != null) return tx.transaction(body);
+    return _withWriteLock(() => _runTransaction(body));
+  }
 
   /// Runs a transaction without acquiring the write lock. Used by both
   /// [transaction] (which acquires the lock first) and [Transaction.transaction]
@@ -316,7 +316,7 @@ final class Database {
       final tx = Transaction._(this);
       final result = await runZoned(
         () => body(tx),
-        zoneValues: {_inTransactionZone: true},
+        zoneValues: {_activeTransactionZone: tx},
       );
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => CommitRequest(replyPort),
@@ -362,6 +362,15 @@ final class Database {
   /// - [selectBytes], for JSON-encoded results without Dart object allocation
   /// - [stream], for reactive queries that re-emit on writes
   Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> parameters = const [],
+  ]) {
+    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    if (tx != null) return tx.select(sql, parameters);
+    return _selectFromPool(sql, parameters);
+  }
+
+  Future<List<Map<String, Object?>>> _selectFromPool(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
