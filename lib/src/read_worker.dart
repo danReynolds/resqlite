@@ -100,14 +100,19 @@ final Map<String, RowSchema> _schemaCache = {};
 // Read worker isolate entrypoint
 // ---------------------------------------------------------------------------
 
-/// Worker entrypoint args: [SendPort mainPort, int dbHandleAddr, int readerId]
+/// Worker entrypoint args:
+///   [SendPort mainPort, int dbHandleAddr, int readerId, SendPort controlPort]
 ///
-/// Receives [ReadRequest] messages via RawReceivePort. Replies with
-/// `(result, sacrificed, errorMessage)` record.
+/// Receives [ReadRequest] messages via RawReceivePort. Small results are
+/// sent back via the per-request replyPort (SendPort.send). Large results
+/// are sent via Isolate.exit to [controlPort] for zero-copy transfer —
+/// the pool routes onExit to the same control port, so the data message
+/// is guaranteed to arrive before the exit notification (same-port FIFO).
 void readerEntrypoint(List<Object> args) {
   final mainPort = args[0] as SendPort;
   final dbHandleAddr = args[1] as int;
   final readerId = args[2] as int;
+  final controlPort = args[3] as SendPort;
 
   final receivePort = RawReceivePort();
   mainPort.send(receivePort.sendPort);
@@ -172,17 +177,15 @@ void readerEntrypoint(List<Object> args) {
           }
       }
 
-      // Reply: (result, sacrificed, errorMessage).
-      // Send reply via SendPort (not Isolate.exit) to avoid a message
-      // ordering race: the Dart VM makes no guarantee that an Isolate.exit
-      // reply arrives before the exitPort notification. Sending first
-      // guarantees the replyPort handler resolves the completer before
-      // the exitPort fires.
-      request.replyPort.send((result, sacrifice, null));
       if (sacrifice) {
+        // Zero-copy transfer via Isolate.exit to the control port.
+        // The pool's onExit is routed to the same port, so the VM's
+        // same-port FIFO ordering guarantees this data arrives before
+        // the onExit null notification.
         receivePort.close();
-        // Isolate exits naturally when no ports remain open.
+        Isolate.exit(controlPort, (result, true, null));
       }
+      request.replyPort.send((result, false, null));
     } catch (e) {
       request.replyPort.send((null, false, e.toString()));
     }
