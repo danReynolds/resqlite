@@ -49,19 +49,22 @@ final class Database {
   // the lock holder has exclusive write access until released.
   Completer<void>? _writeLock;
 
-  Future<void> _acquireWriteLock() async {
+  /// Acquires exclusive write access, runs [body], then releases the lock.
+  Future<T> _withWriteLock<T>(Future<T> Function() body) async {
+    _ensureOpen();
     while (true) {
       final lock = _writeLock;
       if (lock == null) break;
       await lock.future;
     }
     _writeLock = Completer<void>();
-  }
-
-  void _releaseWriteLock() {
-    final lock = _writeLock;
-    _writeLock = null;
-    lock?.complete();
+    try {
+      return await body();
+    } finally {
+      final lock = _writeLock;
+      _writeLock = null;
+      lock?.complete();
+    }
   }
 
   // Persistent reader pool.
@@ -232,19 +235,13 @@ final class Database {
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
-  ]) async {
-    _ensureOpen();
-    await _acquireWriteLock();
-    try {
-      final response = await _writerRequest<ExecuteResponse>(
-        (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-      );
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-      return response.result;
-    } finally {
-      _releaseWriteLock();
-    }
-  }
+  ]) => _withWriteLock(() async {
+    final response = await _writerRequest<ExecuteResponse>(
+      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+    );
+    _streamEngine.handleDirtyTables(response.dirtyTables);
+    return response.result;
+  });
 
   /// Executes one SQL statement across many parameter sets in a single
   /// transaction.
@@ -265,18 +262,13 @@ final class Database {
   /// Streams watching the affected table fire once on commit, not per row.
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
-    _ensureOpen();
-    await _acquireWriteLock();
-    try {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) =>
+    _withWriteLock(() async {
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => BatchRequest(sql, paramSets, replyPort),
       );
       _streamEngine.handleDirtyTables(response.dirtyTables);
-    } finally {
-      _releaseWriteLock();
-    }
-  }
+    });
 
   /// Runs [body] inside a database transaction.
   ///
@@ -300,15 +292,8 @@ final class Database {
   /// Rolled-back transactions do not trigger stream re-queries.
   ///
   /// Returns the value returned by [body].
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
-    _ensureOpen();
-    await _acquireWriteLock();
-    try {
-      return await _runTransaction(body);
-    } finally {
-      _releaseWriteLock();
-    }
-  }
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) =>
+    _withWriteLock(() => _runTransaction(body));
 
   /// Runs a transaction without acquiring the write lock. Used by both
   /// [transaction] (which acquires the lock first) and [Transaction.transaction]
