@@ -5,3 +5,4 @@ build/
 *.dylib
 *.so
 *.dll
+.claude/worktrees/
