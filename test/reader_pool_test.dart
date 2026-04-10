@@ -5,7 +5,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
 /// Seed a wide table (6 columns) with [count] rows.
-/// With 6 columns, the sacrifice threshold (6000 cells) is hit at ~1000 rows.
+/// Each row is ~107 bytes. Sacrifice threshold is 256 KB (~2450 rows).
 Future<void> _seed(Database db, int count) async {
   await db.execute('''
     CREATE TABLE items(
@@ -84,7 +84,7 @@ void main() {
 
     // -----------------------------------------------------------------
     // Large results — triggers Isolate.exit sacrifice path
-    // (sacrifice threshold = 6000 cells; 6 cols × 1000+ rows)
+    // (sacrifice threshold = 256 KB; ~2450+ rows with this schema)
     // -----------------------------------------------------------------
 
     test('select handles large results (sacrifice path)', () async {
@@ -105,21 +105,21 @@ void main() {
     });
 
     test('repeated large selects work (workers respawn)', () async {
-      await _seed(db, 2000);
-      // Each call exceeds sacrifice threshold (2000 × 6 = 12000 > 6000),
-      // killing the worker. The pool must respawn for the next call.
+      await _seed(db, 3000);
+      // Each call is ~321 KB (3000 × ~107 bytes), exceeding the 256 KB
+      // sacrifice threshold. The pool must respawn for the next call.
       for (var i = 0; i < 10; i++) {
         final rows = await db.select('SELECT * FROM items');
-        expect(rows, hasLength(2000), reason: 'iteration $i');
+        expect(rows, hasLength(3000), reason: 'iteration $i');
       }
     });
 
     test('repeated large selectBytes work (workers respawn)', () async {
-      await _seed(db, 2000);
+      await _seed(db, 3000);
       for (var i = 0; i < 10; i++) {
         final bytes = await db.selectBytes('SELECT * FROM items');
         final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
-        expect(decoded, hasLength(2000), reason: 'iteration $i');
+        expect(decoded, hasLength(3000), reason: 'iteration $i');
       }
     });
 
@@ -160,16 +160,16 @@ void main() {
     });
 
     test('concurrent large selects (all sacrifice, all respawn)', () async {
-      await _seed(db, 2000);
-      // 8 concurrent queries, each returning 2000 rows × 6 cols = 12000 cells.
-      // Every one triggers sacrifice. Pool must respawn workers between queries.
+      await _seed(db, 3000);
+      // 8 concurrent queries, each ~321 KB — all trigger sacrifice.
+      // Pool must respawn workers between queries.
       final futures = List.generate(
         8,
         (_) => db.select('SELECT * FROM items'),
       );
       final results = await Future.wait(futures);
       for (final rows in results) {
-        expect(rows, hasLength(2000));
+        expect(rows, hasLength(3000));
       }
     });
 
@@ -293,19 +293,22 @@ void main() {
       expect(rows[0]['name'], 'item_0');
     });
 
-    test('result at threshold boundary (exactly 1000 rows × 6 cols = 6000 cells)', () async {
-      await _seed(db, 1000);
-      // Exactly at threshold — should use SendPort (threshold is >6000, not >=).
-      final rows = await db.select('SELECT * FROM items');
-      expect(rows, hasLength(1000));
+    test('result near threshold boundary works both paths', () async {
+      // 2000 rows ≈ 214 KB — under 256 KB threshold, uses SendPort.
+      await _seed(db, 2000);
+      final small = await db.select('SELECT * FROM items');
+      expect(small, hasLength(2000));
 
-      // 1001 rows (6006 cells) — should trigger sacrifice.
-      await db.execute(
+      // 3000 rows ≈ 321 KB — over 256 KB threshold, triggers sacrifice.
+      await db.executeBatch(
         'INSERT INTO items(name, category, price, quantity, description) '
-        "VALUES ('extra', 'cat_0', 0.0, 0, 'extra')",
+        'VALUES (?, ?, ?, ?, ?)',
+        List.generate(1000, (i) => [
+          'extra_$i', 'cat_0', 0.0, 0, 'extra row',
+        ]),
       );
-      final rows2 = await db.select('SELECT * FROM items');
-      expect(rows2, hasLength(1001));
+      final large = await db.select('SELECT * FROM items');
+      expect(large, hasLength(3000));
     });
 
     test('rapid sequential queries (pool reuse)', () async {
@@ -343,7 +346,7 @@ void main() {
     // -----------------------------------------------------------------
 
     test('stress: 50 concurrent mixed queries', () async {
-      await _seed(db, 2000);
+      await _seed(db, 3000);
 
       final futures = <Future>[];
       for (var i = 0; i < 50; i++) {
@@ -356,14 +359,14 @@ void main() {
               }),
             );
           case 1:
-            // Large select (sacrifice path)
+            // Large select (sacrifice path, ~321 KB > 256 KB threshold)
             futures.add(
               db.select('SELECT * FROM items').then((rows) {
-                expect(rows, hasLength(2000));
+                expect(rows, hasLength(3000));
               }),
             );
           case 2:
-            // selectBytes
+            // selectBytes (small, SendPort path)
             futures.add(
               db.selectBytes('SELECT * FROM items LIMIT 100').then((bytes) {
                 final decoded =

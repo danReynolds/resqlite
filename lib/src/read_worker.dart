@@ -66,18 +66,14 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastResultHash;
 }
 
-/// Threshold: if rows * cols exceeds this, the worker does Isolate.exit
-/// (zero-copy) instead of SendPort.send (copy). Set high enough that
-/// sacrifice only triggers for genuinely large results — at 1000 rows × 6
-/// cols (6000 cells), pool and one-off are tied, so sacrificing just adds
-/// respawn churn. At 5000+ rows the zero-copy advantage becomes meaningful.
-const int sacrificeThreshold = 6000;
-
-/// Byte-length threshold for selectBytes. Uint8List is a single contiguous
-/// buffer, so Isolate.exit does true zero-copy transfer (memory ownership
-/// moves to the receiving isolate). Above this threshold the zero-copy
-/// advantage outweighs the respawn cost.
-const int bytesSacrificeThreshold = 102400; // 100 KB
+/// Byte-size threshold for sacrifice. If the estimated transfer size of
+/// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
+/// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
+/// above it the zero-copy transfer outweighs the ~2-5ms respawn cost.
+///
+/// Applies to both row results (estimated during the cell loop) and
+/// selectBytes results (exact byte length of the JSON buffer).
+const int sacrificeByteThreshold = 256 * 1024; // 256 KB
 
 /// Per-worker cell buffer. Reused across queries to avoid calloc/free per query.
 ffi.Pointer<ffi.Uint8> _cellsBuf = ffi.nullptr;
@@ -132,7 +128,7 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           // On sacrifice, send raw components (primitives only) for reliable
           // Isolate.exit transfer. The pool reconstructs ResultSet on receipt.
           // On SendPort path, wrap eagerly — no transfer risk.
@@ -144,7 +140,7 @@ void readerEntrypoint(List<Object> args) {
           final (raw, readTables) = executeQueryWithDeps(
             dbHandleAddr, readerId, sql, parameters,
           );
-          sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           result = sacrifice
               ? (raw.values, raw.schema.names, raw.rowCount, readTables)
               : (
@@ -156,7 +152,7 @@ void readerEntrypoint(List<Object> args) {
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           result = bytes;
-          sacrifice = bytes.length > bytesSacrificeThreshold;
+          sacrifice = bytes.length > sacrificeByteThreshold;
 
         case SelectIfChangedRequest(
           :final sql,
@@ -169,7 +165,7 @@ void readerEntrypoint(List<Object> args) {
             result = (newHash, null);
             sacrifice = false;
           } else {
-            sacrifice = raw.rowCount * raw.colCount > sacrificeThreshold;
+            sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
             result = sacrifice
                 ? (newHash, raw.values, raw.schema.names, raw.rowCount)
                 : (newHash, ResultSet(raw.values, raw.schema, raw.rowCount)
@@ -300,11 +296,19 @@ String _fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount, this.colCount);
+  RawQueryResult(
+    this.values, this.schema, this.rowCount, this.colCount,
+    this.estimatedBytes,
+  );
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
   final int colCount;
+
+  /// Estimated byte size of the result data for sacrifice decisions.
+  /// Accumulated during the cell loop: 8 bytes per int/double, byte length
+  /// per string/blob, 0 per null. Cheap to compute — no second pass needed.
+  final int estimatedBytes;
 }
 
 /// Execute a SELECT query on a dedicated reader (no pool mutex).
@@ -411,6 +415,7 @@ Uint8List executeQueryBytes(
     final values = List<Object?>.filled(colCount * 256, null, growable: true);
     var writeIdx = 0;
     var rowCount = 0;
+    var byteEstimate = 0;
 
     try {
       while (_resqliteStepRow(stmt, colCount, cellsBuf) == _sqliteRow) {
@@ -426,11 +431,14 @@ Uint8List executeQueryBytes(
           switch (type) {
             case _sqliteInteger:
               values[writeIdx++] = cellsI64[i64Base + _valI64];
+              byteEstimate += 8;
             case _sqliteFloat:
               values[writeIdx++] = cellsF64[i64Base + _valI64];
+              byteEstimate += 8;
             case _sqliteText:
               final textAddr = cellsI64[i64Base + _valI64];
               final textLen = cellsI32[i32Base + _lenI32];
+              byteEstimate += textLen;
               if (textLen == 0) {
                 values[writeIdx++] = '';
               } else {
@@ -442,6 +450,7 @@ Uint8List executeQueryBytes(
             case _sqliteBlob:
               final blobAddr = cellsI64[i64Base + _valI64];
               final blobLen = cellsI32[i32Base + _lenI32];
+              byteEstimate += blobLen;
               if (blobLen == 0) {
                 values[writeIdx++] = Uint8List(0);
               } else {
@@ -461,7 +470,7 @@ Uint8List executeQueryBytes(
     }
 
     values.length = writeIdx;
-    final raw = RawQueryResult(values, schema, rowCount, colCount);
+    final raw = RawQueryResult(values, schema, rowCount, colCount, byteEstimate);
 
     // Capture read dependencies before releasing the reader (if requested).
     final readTables = captureReadTables
