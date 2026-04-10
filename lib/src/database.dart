@@ -372,16 +372,9 @@ final class Database {
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
-  ]) {
+  ]) async {
     final tx = Zone.current[_activeTransactionZone] as Transaction?;
     if (tx != null) return tx.select(sql, parameters);
-    return _selectFromPool(sql, parameters);
-  }
-
-  Future<List<Map<String, Object?>>> _selectFromPool(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
     _ensureOpen();
     final pool = await _readers;
     return pool.select(sql, parameters);
