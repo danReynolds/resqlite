@@ -5,6 +5,8 @@ import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
 /// Deterministic stream probe — avoids timing-sensitive Future.delayed waits.
+/// Collects emissions and lets tests await the Nth event by count, or assert
+/// that no further events arrive within a timeout window.
 final class _StreamProbe<T> {
   _StreamProbe(Stream<T> stream) {
     _subscription = stream.listen((event) {
@@ -24,6 +26,8 @@ final class _StreamProbe<T> {
   final _waiters = <_EventWaiter<T>>[];
   late final StreamSubscription<T> _subscription;
 
+  /// Waits for the [count]-th emission (1-indexed). Returns immediately if
+  /// that emission already arrived.
   Future<T> event(
     int count, {
     Duration timeout = const Duration(seconds: 2),
@@ -36,6 +40,7 @@ final class _StreamProbe<T> {
     });
   }
 
+  /// Asserts that no additional stream event arrives within [duration].
   Future<void> expectNoAdditionalEvents(Duration duration) async {
     try {
       final event = await this.event(_events.length + 1, timeout: duration);
@@ -78,13 +83,14 @@ void main() {
       }
     });
 
-    // -----------------------------------------------------------------
+    // =================================================================
     // Write lock — concurrent writes are serialized
-    // -----------------------------------------------------------------
+    // =================================================================
 
-    test('concurrent executes do not interleave', () async {
-      // Fire many concurrent inserts — they should all succeed without
-      // interfering with each other.
+    test('concurrent executes are serialized and do not interleave', () async {
+      // Launch 20 inserts concurrently via Future.wait. The write lock
+      // ensures they execute one at a time — none should fail or produce
+      // duplicate IDs.
       final futures = List.generate(
         20,
         (i) => db.execute('INSERT INTO items(name) VALUES (?)', ['item_$i']),
@@ -95,17 +101,17 @@ void main() {
       expect(rows[0]['c'], 20);
     });
 
-    test('concurrent execute does not run inside a transaction', () async {
-      // Start a transaction with a delay. A concurrent execute should
-      // wait for the transaction to finish, not slip inside it.
+    test('execute waits for an in-flight transaction to finish', () async {
+      // A transaction holds the write lock for its entire duration.
+      // A concurrent db.execute() must wait — it should not slip
+      // inside the transaction or execute before it commits.
       final txFuture = db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['inside_tx']);
-        // Yield to let the concurrent execute attempt to run.
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero); // yield to scheduler
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['inside_tx_2']);
       });
 
-      // This execute should wait for the transaction to finish.
+      // Launched after txFuture but before it completes.
       final executeFuture = db.execute(
         'INSERT INTO items(name) VALUES (?)',
         ['outside_tx'],
@@ -115,13 +121,15 @@ void main() {
 
       final rows = await db.select('SELECT name FROM items ORDER BY id');
       expect(rows, hasLength(3));
-      // Transaction items should be first (transaction held the lock).
+      // Transaction rows come first because it held the lock.
       expect(rows[0]['name'], 'inside_tx');
       expect(rows[1]['name'], 'inside_tx_2');
       expect(rows[2]['name'], 'outside_tx');
     });
 
-    test('concurrent transactions are serialized', () async {
+    test('concurrent transactions run one at a time', () async {
+      // Two transactions launched concurrently. The write lock ensures
+      // tx2 does not start until tx1 has committed.
       final order = <String>[];
 
       final tx1 = db.transaction((tx) async {
@@ -139,18 +147,95 @@ void main() {
 
       await Future.wait([tx1, tx2]);
 
-      // tx2 should not start until tx1 finishes.
       expect(order.indexOf('tx1_end'), lessThan(order.indexOf('tx2_start')));
 
       final rows = await db.select('SELECT name FROM items ORDER BY id');
       expect(rows, hasLength(2));
     });
 
-    // -----------------------------------------------------------------
-    // Nested transactions — explicit nesting with savepoints
-    // -----------------------------------------------------------------
+    // =================================================================
+    // Zone-based transparent routing — db.* calls inside a transaction
+    // body are automatically routed through the active Transaction.
+    // =================================================================
 
-    test('nested transaction commits with outer', () async {
+    test('db.execute() inside a transaction routes through tx', () async {
+      // Calling db.execute() (not tx.execute()) inside a transaction body
+      // should transparently route through the transaction via the Zone,
+      // rather than deadlocking on the write lock.
+      await db.transaction((tx) async {
+        await db.execute('INSERT INTO items(name) VALUES (?)', ['via_db']);
+        // The insert should be visible within the same transaction.
+        final rows = await tx.select('SELECT name FROM items');
+        expect(rows, hasLength(1));
+        expect(rows[0]['name'], 'via_db');
+      });
+
+      // Committed — visible outside the transaction.
+      final rows = await db.select('SELECT name FROM items');
+      expect(rows, hasLength(1));
+    });
+
+    test('db.select() inside a transaction sees uncommitted writes', () async {
+      // Calling db.select() inside a transaction body should route through
+      // the writer connection (tx.select), so it sees uncommitted writes
+      // from earlier in the same transaction.
+      await db.transaction((tx) async {
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['uncommitted']);
+
+        // db.select() would normally go to the reader pool and NOT see
+        // uncommitted writes. Inside a transaction Zone it routes through
+        // tx.select() instead.
+        final rows = await db.select('SELECT name FROM items');
+        expect(rows, hasLength(1));
+        expect(rows[0]['name'], 'uncommitted');
+      });
+    });
+
+    test('db.transaction() inside a transaction nests via savepoint', () async {
+      // Calling db.transaction() (not tx.transaction()) inside a transaction
+      // body should nest as a SAVEPOINT via the Zone routing, rather than
+      // deadlocking on the write lock.
+      await db.transaction((tx) async {
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
+
+        await db.transaction((inner) async {
+          await inner.execute('INSERT INTO items(name) VALUES (?)', ['inner']);
+        });
+      });
+
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(2));
+      expect(rows[0]['name'], 'outer');
+      expect(rows[1]['name'], 'inner');
+    });
+
+    test('db.executeBatch() inside a transaction throws a clear error',
+        () async {
+      // executeBatch wraps in its own BEGIN/COMMIT in C, which conflicts
+      // with an outer transaction. Rather than silently corrupting state,
+      // it throws with guidance to use tx.execute() in a loop instead.
+      await expectLater(
+        db.transaction((tx) async {
+          await db.executeBatch(
+            'INSERT INTO items(name) VALUES (?)',
+            [['a'], ['b']],
+          );
+        }),
+        throwsA(isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('executeBatch'),
+        )),
+      );
+    });
+
+    // =================================================================
+    // Nested transactions — explicit nesting with SAVEPOINTs
+    // =================================================================
+
+    test('inner transaction commits when outer commits', () async {
+      // Both levels insert a row. When the outer transaction commits,
+      // both rows are persisted.
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
         await tx.transaction((inner) async {
@@ -164,7 +249,9 @@ void main() {
       expect(rows[1]['name'], 'inner');
     });
 
-    test('nested transaction rollback only undoes inner changes', () async {
+    test('inner rollback only undoes inner changes', () async {
+      // The inner transaction throws, rolling back its SAVEPOINT.
+      // The outer transaction's insert survives and commits.
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
 
@@ -180,24 +267,25 @@ void main() {
           // expected
         }
 
-        // Outer transaction should still see its own insert.
+        // Outer should still see its own insert, but not the rolled-back one.
         final rows = await tx.select('SELECT name FROM items ORDER BY id');
         expect(rows, hasLength(1));
         expect(rows[0]['name'], 'outer');
       });
 
-      // After outer commits, only 'outer' is persisted.
       final rows = await db.select('SELECT name FROM items ORDER BY id');
       expect(rows, hasLength(1));
       expect(rows[0]['name'], 'outer');
     });
 
     test('outer rollback undoes everything including committed inner', () async {
+      // The inner transaction commits (RELEASE SAVEPOINT), but then the
+      // outer transaction throws — ROLLBACK undoes all changes including
+      // the inner's.
       try {
         await db.transaction((tx) async {
           await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
 
-          // Inner commits successfully.
           await tx.transaction((inner) async {
             await inner.execute(
               'INSERT INTO items(name) VALUES (?)',
@@ -205,7 +293,6 @@ void main() {
             );
           });
 
-          // But outer throws — everything rolls back.
           throw StateError('rollback outer');
         });
       } on StateError {
@@ -216,7 +303,25 @@ void main() {
       expect(rows, isEmpty);
     });
 
-    test('double nesting works', () async {
+    test('transaction body exception rolls back and rethrows', () async {
+      // A non-StateError exception should still trigger rollback and
+      // propagate to the caller.
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.execute('INSERT INTO items(name) VALUES (?)', ['doomed']);
+          throw FormatException('bad data');
+        }),
+        throwsA(isA<FormatException>()),
+      );
+
+      // Rolled back — nothing persisted.
+      final rows = await db.select('SELECT name FROM items');
+      expect(rows, isEmpty);
+    });
+
+    test('three levels of nesting commit correctly', () async {
+      // Verifies SAVEPOINT depth tracking works beyond two levels:
+      // level 0 = BEGIN IMMEDIATE, level 1 = SAVEPOINT s1, level 2 = SAVEPOINT s2.
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['level_0']);
 
@@ -242,7 +347,10 @@ void main() {
       expect(rows[2]['name'], 'level_2');
     });
 
-    test('double nesting rollback at middle level', () async {
+    test('middle-level rollback undoes it and its children', () async {
+      // Three levels: outer commits, middle throws after inner commits.
+      // ROLLBACK TO s1 undoes both level_1 and level_2, but level_0
+      // survives.
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['level_0']);
 
@@ -260,7 +368,6 @@ void main() {
               );
             });
 
-            // Rollback inner1 — undoes both level_1 and level_2.
             throw StateError('rollback inner1');
           });
         } on StateError {
@@ -273,17 +380,20 @@ void main() {
       expect(rows[0]['name'], 'level_0');
     });
 
-    // -----------------------------------------------------------------
-    // Stream invalidation with nested transactions
-    // -----------------------------------------------------------------
+    // =================================================================
+    // Stream invalidation — streams should fire once on commit, not
+    // per statement, and should not fire on rollback.
+    // =================================================================
 
-    test('stream fires after nested transaction commits', () async {
+    test('stream fires once after nested transaction commits', () async {
+      // A transaction with a nested inner transaction inserts two rows.
+      // The stream should emit exactly one update (on outer commit),
+      // not one per statement or per nesting level.
       final probe = _StreamProbe(
         db.stream('SELECT name FROM items ORDER BY id'),
       );
 
-      // Wait for initial emission (empty table).
-      await probe.event(1);
+      await probe.event(1); // initial emission (empty table)
 
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
@@ -299,14 +409,16 @@ void main() {
     });
 
     test('stream does not fire after rolled-back transaction', () async {
+      // Seed one row, wait for the stream to emit it, then roll back
+      // a transaction that inserts another row. The stream should not
+      // fire again — rolled-back writes produce no dirty tables.
       await db.execute('INSERT INTO items(name) VALUES (?)', ['seed']);
 
       final probe = _StreamProbe(
         db.stream('SELECT name FROM items ORDER BY id'),
       );
 
-      // Wait for initial emission (seed row).
-      await probe.event(1);
+      await probe.event(1); // initial emission (seed row)
 
       try {
         await db.transaction((tx) async {
@@ -317,8 +429,6 @@ void main() {
         // expected
       }
 
-      // No additional emission should fire — rolled-back writes don't
-      // trigger stream invalidation.
       await probe.expectNoAdditionalEvents(const Duration(milliseconds: 150));
 
       await probe.cancel();

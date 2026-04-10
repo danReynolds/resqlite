@@ -271,13 +271,21 @@ final class Database {
   /// Streams watching the affected table fire once on commit, not per row.
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) =>
-    _withWriteLock(() async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) {
+    if (Zone.current[_activeTransactionZone] != null) {
+      throw StateError(
+        'Cannot call db.executeBatch() inside a transaction. '
+        'Use tx.execute() in a loop instead — the enclosing transaction '
+        'already provides atomicity.',
+      );
+    }
+    return _withWriteLock(() async {
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => BatchRequest(sql, paramSets, replyPort),
       );
       _streamEngine.handleDirtyTables(response.dirtyTables);
     });
+  }
 
   /// Runs [body] inside a database transaction.
   ///
