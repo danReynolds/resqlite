@@ -50,8 +50,10 @@ final class Database {
   Completer<void>? _writeLock;
 
   Future<void> _acquireWriteLock() async {
-    while (_writeLock != null) {
-      await _writeLock!.future;
+    while (true) {
+      final lock = _writeLock;
+      if (lock == null) break;
+      await lock.future;
     }
     _writeLock = Completer<void>();
   }
