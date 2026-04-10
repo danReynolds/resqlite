@@ -252,6 +252,86 @@ Future<String> runWritesBenchmark() async {
       await resqliteDb.close();
       await asyncDb.close();
     }
+
+    // -----------------------------------------------------------------
+    // Transaction reads (tx.select with larger result sets)
+    // -----------------------------------------------------------------
+    for (final rowCount in [500, 1000]) {
+      final resqliteDb = await resqlite.Database.open(
+        '${tempDir.path}/resqlite_txread_$rowCount.db',
+      );
+      final asyncDb = sqlite_async.SqliteDatabase(
+        path: '${tempDir.path}/async_txread_$rowCount.db',
+      );
+      await asyncDb.initialize();
+
+      const createSql = '''
+        CREATE TABLE items(
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          value REAL NOT NULL,
+          category TEXT NOT NULL
+        )
+      ''';
+      const insertSql =
+          'INSERT INTO items(name, value, category) VALUES (?, ?, ?)';
+
+      await resqliteDb.execute(createSql);
+      await asyncDb.execute(createSql);
+      final paramSets = [
+        for (var i = 0; i < rowCount; i++)
+          ['item_$i', i * 1.5, 'cat_${i % 10}'],
+      ];
+      await resqliteDb.executeBatch(insertSql, paramSets);
+      await asyncDb.executeBatch(insertSql, paramSets);
+
+      const selectSql = 'SELECT * FROM items ORDER BY id';
+
+      // Warmup.
+      for (var i = 0; i < defaultWarmup; i++) {
+        await resqliteDb.transaction((tx) async {
+          await tx.select(selectSql);
+        });
+        await asyncDb.writeTransaction((tx) async {
+          await tx.getAll(selectSql);
+        });
+      }
+
+      final tResqlite = BenchmarkTiming('resqlite tx.select()');
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          final rows = await tx.select(selectSql);
+          // Touch data to prevent dead-code elimination.
+          if (rows.length != rowCount) throw StateError('bad');
+        });
+        sw.stop();
+        tResqlite.recordWallOnly(sw.elapsedMicroseconds);
+      }
+
+      final tAsync = BenchmarkTiming('sqlite_async tx.getAll()');
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await asyncDb.writeTransaction((tx) async {
+          final rows = await tx.getAll(selectSql);
+          if (rows.length != rowCount) throw StateError('bad');
+        });
+        sw.stop();
+        tAsync.recordWallOnly(sw.elapsedMicroseconds);
+      }
+
+      printComparisonTable(
+        '=== Transaction Read ($rowCount rows) ===',
+        [tResqlite, tAsync],
+      );
+      markdown.write(markdownTable(
+        'Transaction Read ($rowCount rows)',
+        [tResqlite, tAsync],
+      ));
+
+      await resqliteDb.close();
+      await asyncDb.close();
+    }
   } finally {
     await tempDir.delete(recursive: true);
   }
