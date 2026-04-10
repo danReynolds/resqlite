@@ -120,9 +120,14 @@ void writerEntrypoint(List<Object> args) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr);
   final writerConn = _resqliteWriterHandle(dbHandle);
   final receivePort = RawReceivePort();
-  var inTransaction = false;
 
-  // Pre-allocate native strings for transaction SQL (avoids repeated toNativeUtf8).
+  /// Transaction nesting depth.
+  /// 0 = no active transaction.
+  /// 1 = top-level transaction (BEGIN IMMEDIATE / COMMIT / ROLLBACK).
+  /// 2+ = nested savepoints (SAVEPOINT s1 / RELEASE s1 / ROLLBACK TO s1).
+  var txDepth = 0;
+
+  // Pre-allocate native strings for top-level transaction SQL.
   final beginSql = 'BEGIN IMMEDIATE'.toNativeUtf8();
   final commitSql = 'COMMIT'.toNativeUtf8();
   final rollbackSql = 'ROLLBACK'.toNativeUtf8();
@@ -151,7 +156,7 @@ void writerEntrypoint(List<Object> args) {
           }
           // Only send dirty tables if not in a transaction —
           // during transactions, dirty tables accumulate until commit.
-          final dirty = inTransaction
+          final dirty = txDepth > 0
               ? const <String>[]
               : getDirtyTables(dbHandle);
           replyPort.send(ExecuteResponse(result, dirty));
@@ -165,27 +170,53 @@ void writerEntrypoint(List<Object> args) {
           replyPort.send(BatchResponse(dirty));
 
         case BeginRequest(:final replyPort):
-          resqliteExec(dbHandle, beginSql);
-          inTransaction = true;
+          if (txDepth == 0) {
+            resqliteExec(dbHandle, beginSql);
+          } else {
+            final sp = 'SAVEPOINT s$txDepth'.toNativeUtf8();
+            resqliteExec(dbHandle, sp);
+            calloc.free(sp);
+          }
+          txDepth++;
           replyPort.send(true);
 
         case CommitRequest(:final replyPort):
-          resqliteExec(dbHandle, commitSql);
-          inTransaction = false;
-          // Now collect all dirty tables accumulated during the transaction.
-          final dirty = getDirtyTables(dbHandle);
-          replyPort.send(BatchResponse(dirty));
+          txDepth--;
+          if (txDepth == 0) {
+            resqliteExec(dbHandle, commitSql);
+            final dirty = getDirtyTables(dbHandle);
+            replyPort.send(BatchResponse(dirty));
+          } else {
+            final sp = 'RELEASE s$txDepth'.toNativeUtf8();
+            resqliteExec(dbHandle, sp);
+            calloc.free(sp);
+            // Dirty tables stay accumulated — only the outermost commit
+            // collects them.
+            replyPort.send(const BatchResponse(<String>[]));
+          }
 
         case RollbackRequest(:final replyPort):
-          resqliteExec(dbHandle, rollbackSql);
-          inTransaction = false;
-          // Clear dirty tables — rolled back changes don't count.
-          getDirtyTables(dbHandle);
+          txDepth--;
+          if (txDepth == 0) {
+            resqliteExec(dbHandle, rollbackSql);
+            // Clear dirty tables — rolled back changes don't count.
+            getDirtyTables(dbHandle);
+          } else {
+            // ROLLBACK TO undoes changes since the savepoint.
+            // RELEASE removes the savepoint from SQLite's stack.
+            final rollbackSp = 'ROLLBACK TO s$txDepth'.toNativeUtf8();
+            final releaseSp = 'RELEASE s$txDepth'.toNativeUtf8();
+            resqliteExec(dbHandle, rollbackSp);
+            resqliteExec(dbHandle, releaseSp);
+            calloc.free(rollbackSp);
+            calloc.free(releaseSp);
+          }
           replyPort.send(true);
 
         case CloseRequest(:final replyPort):
           receivePort.close();
           replyPort.send(true);
+      }
       }
     } catch (e) {
       // Extract SQL context from the request for better error messages.

@@ -44,6 +44,24 @@ final class Database {
   SendPort? _writerPort;
   Future<SendPort>? _writerReady;
 
+  // Write lock — ensures concurrent db.execute() / db.transaction() calls
+  // don't interleave on the writer isolate. Callers wait for the lock;
+  // the lock holder has exclusive write access until released.
+  Completer<void>? _writeLock;
+
+  Future<void> _acquireWriteLock() async {
+    while (_writeLock != null) {
+      await _writeLock!.future;
+    }
+    _writeLock = Completer<void>();
+  }
+
+  void _releaseWriteLock() {
+    final lock = _writeLock;
+    _writeLock = null;
+    lock?.complete();
+  }
+
   // Persistent reader pool.
   ReaderPool? _readerPool;
   Future<ReaderPool>? _readerPoolReady;
@@ -214,11 +232,16 @@ final class Database {
     List<Object?> parameters = const [],
   ]) async {
     _ensureOpen();
-    final response = await _writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
-    return response.result;
+    await _acquireWriteLock();
+    try {
+      final response = await _writerRequest<ExecuteResponse>(
+        (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      );
+      _streamEngine.handleDirtyTables(response.dirtyTables);
+      return response.result;
+    } finally {
+      _releaseWriteLock();
+    }
   }
 
   /// Executes one SQL statement across many parameter sets in a single
@@ -242,10 +265,15 @@ final class Database {
   /// Throws a [ResqliteQueryException] if any statement fails.
   Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     _ensureOpen();
-    final response = await _writerRequest<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
+    await _acquireWriteLock();
+    try {
+      final response = await _writerRequest<BatchResponse>(
+        (replyPort) => BatchRequest(sql, paramSets, replyPort),
+      );
+      _streamEngine.handleDirtyTables(response.dirtyTables);
+    } finally {
+      _releaseWriteLock();
+    }
   }
 
   /// Runs [body] inside a database transaction.
@@ -272,8 +300,19 @@ final class Database {
   /// Returns the value returned by [body].
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
     _ensureOpen();
-    await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
+    await _acquireWriteLock();
+    try {
+      return await _runTransaction(body);
+    } finally {
+      _releaseWriteLock();
+    }
+  }
 
+  /// Runs a transaction without acquiring the write lock. Used by both
+  /// [transaction] (which acquires the lock first) and [Transaction.transaction]
+  /// (which already holds the lock from the outer transaction).
+  Future<T> _runTransaction<T>(Future<T> Function(Transaction tx) body) async {
+    await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
     try {
       final tx = Transaction._(this);
       final result = await body(tx);
@@ -427,11 +466,21 @@ final class Database {
 /// connection, so reads see uncommitted writes from earlier statements
 /// in the same transaction.
 ///
+/// Supports nested transactions via [transaction], which uses SQLite
+/// SAVEPOINTs under the hood:
+///
 /// ```dart
 /// await db.transaction((tx) async {
 ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+///
+///   // Nested transaction — uses SAVEPOINT internally.
+///   await tx.transaction((inner) async {
+///     await inner.execute('INSERT INTO users(name) VALUES (?)', ['Bob']);
+///     // Throw here to roll back only Bob's insert.
+///   });
+///
 ///   final rows = await tx.select('SELECT COUNT(*) as c FROM users');
-///   print(rows.first['c']); // includes the just-inserted row
+///   print(rows.first['c']); // includes Ada (and Bob if inner didn't throw)
 /// });
 /// ```
 ///
@@ -468,5 +517,32 @@ final class Transaction {
       (replyPort) => QueryRequest(sql, parameters, replyPort),
     );
     return response.rows;
+  }
+
+  /// Runs [body] inside a nested transaction (SAVEPOINT).
+  ///
+  /// If [body] completes normally, the savepoint is released (changes
+  /// become part of the enclosing transaction). If [body] throws, the
+  /// savepoint is rolled back (only this nested transaction's changes
+  /// are undone) and the exception is rethrown.
+  ///
+  /// ```dart
+  /// await db.transaction((tx) async {
+  ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+  ///   try {
+  ///     await tx.transaction((inner) async {
+  ///       await inner.execute('INSERT INTO users(name) VALUES (?)', ['Bob']);
+  ///       throw StateError('oops');
+  ///     });
+  ///   } on StateError {
+  ///     // Bob's insert is rolled back; Ada's remains.
+  ///   }
+  /// });
+  /// ```
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
+    // Already holds the write lock from the outer transaction.
+    // _runTransaction sends Begin (→ SAVEPOINT) / Commit (→ RELEASE)
+    // / Rollback (→ ROLLBACK TO) to the writer isolate.
+    return _db._runTransaction(body);
   }
 }
