@@ -54,6 +54,11 @@ final class Database {
   /// instead of deadlocking on the write lock.
   static const _activeTransactionZone = #_activeTransaction;
 
+  /// Returns the active [Transaction] if called from within a transaction
+  /// body's Zone, or `null` otherwise.
+  static Transaction? get _activeTx =>
+      Zone.current[_activeTransactionZone] as Transaction?;
+
   /// Acquires exclusive write access, runs [body], then releases the lock.
   Future<T> _withWriteLock<T>(Future<T> Function() body) async {
     _ensureOpen();
@@ -241,7 +246,7 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) {
-    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    final tx = _activeTx;
     if (tx != null) return tx.execute(sql, parameters);
     return _withWriteLock(() async {
       final response = await _writerRequest<ExecuteResponse>(
@@ -272,13 +277,8 @@ final class Database {
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
   Future<void> executeBatch(String sql, List<List<Object?>> paramSets) {
-    if (Zone.current[_activeTransactionZone] != null) {
-      throw StateError(
-        'Cannot call db.executeBatch() inside a transaction. '
-        'Use tx.execute() in a loop instead — the enclosing transaction '
-        'already provides atomicity.',
-      );
-    }
+    final tx = _activeTx;
+    if (tx != null) return tx.executeBatch(sql, paramSets);
     return _withWriteLock(() async {
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => BatchRequest(sql, paramSets, replyPort),
@@ -310,7 +310,7 @@ final class Database {
   ///
   /// Returns the value returned by [body].
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
-    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    final tx = _activeTx;
     if (tx != null) return tx.transaction(body);
     return _withWriteLock(() => _runTransaction(body));
   }
@@ -373,7 +373,7 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    final tx = _activeTx;
     if (tx != null) return tx.select(sql, parameters);
     _ensureOpen();
     final pool = await _readers;
@@ -529,6 +529,31 @@ final class Transaction {
       (replyPort) => QueryRequest(sql, parameters, replyPort),
     );
     return response.rows;
+  }
+
+  /// Executes one SQL statement across many parameter sets within this
+  /// transaction.
+  ///
+  /// ```dart
+  /// await db.transaction((tx) async {
+  ///   await tx.executeBatch(
+  ///     'INSERT INTO users(name) VALUES (?)',
+  ///     [['Ada'], ['Grace'], ['Sonja']],
+  ///   );
+  /// });
+  /// ```
+  ///
+  /// Each parameter set is executed individually on the writer connection.
+  /// The enclosing transaction provides atomicity — no separate
+  /// BEGIN/COMMIT is needed. The SQLite statement cache prevents
+  /// re-preparation across calls with the same SQL.
+  Future<void> executeBatch(
+    String sql,
+    List<List<Object?>> paramSets,
+  ) async {
+    for (final params in paramSets) {
+      await execute(sql, params);
+    }
   }
 
   /// Runs [body] inside a nested transaction (SAVEPOINT).

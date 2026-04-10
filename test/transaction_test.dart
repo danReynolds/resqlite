@@ -209,24 +209,76 @@ void main() {
       expect(rows[1]['name'], 'inner');
     });
 
-    test('db.executeBatch() inside a transaction throws a clear error',
-        () async {
-      // executeBatch wraps in its own BEGIN/COMMIT in C, which conflicts
-      // with an outer transaction. Rather than silently corrupting state,
-      // it throws with guidance to use tx.execute() in a loop instead.
-      await expectLater(
-        db.transaction((tx) async {
-          await db.executeBatch(
-            'INSERT INTO items(name) VALUES (?)',
-            [['a'], ['b']],
-          );
-        }),
-        throwsA(isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          contains('executeBatch'),
-        )),
-      );
+    test('db.executeBatch() inside a transaction routes through tx', () async {
+      // Calling db.executeBatch() inside a transaction body should route
+      // through tx.executeBatch(), which loops individual executes on the
+      // writer connection. The enclosing transaction provides atomicity.
+      await db.transaction((tx) async {
+        await db.executeBatch(
+          'INSERT INTO items(name) VALUES (?)',
+          [['a'], ['b'], ['c']],
+        );
+        // All three should be visible within the transaction.
+        final rows = await tx.select('SELECT name FROM items ORDER BY id');
+        expect(rows, hasLength(3));
+      });
+
+      // Committed — all visible outside.
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(3));
+      expect(rows[0]['name'], 'a');
+      expect(rows[1]['name'], 'b');
+      expect(rows[2]['name'], 'c');
+    });
+
+    test('tx.executeBatch() works directly', () async {
+      // Calling executeBatch on the Transaction instance itself.
+      await db.transaction((tx) async {
+        await tx.executeBatch(
+          'INSERT INTO items(name) VALUES (?)',
+          [['x'], ['y']],
+        );
+      });
+
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(2));
+      expect(rows[0]['name'], 'x');
+      expect(rows[1]['name'], 'y');
+    });
+
+    test('executeBatch inside nested transaction rolls back on throw', () async {
+      // A batch insert inside a nested transaction that throws should
+      // roll back only the nested portion.
+      await db.transaction((tx) async {
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
+
+        try {
+          await tx.transaction((inner) async {
+            await inner.executeBatch(
+              'INSERT INTO items(name) VALUES (?)',
+              [['inner_a'], ['inner_b']],
+            );
+            throw StateError('rollback inner');
+          });
+        } on StateError {
+          // expected
+        }
+      });
+
+      // Only the outer row survives.
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(1));
+      expect(rows[0]['name'], 'outer');
+    });
+
+    test('executeBatch with empty paramSets is a no-op', () async {
+      // Empty batch should not throw or insert anything.
+      await db.transaction((tx) async {
+        await tx.executeBatch('INSERT INTO items(name) VALUES (?)', []);
+      });
+
+      final rows = await db.select('SELECT name FROM items');
+      expect(rows, isEmpty);
     });
 
     // =================================================================
