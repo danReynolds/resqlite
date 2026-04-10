@@ -49,9 +49,21 @@ final class Database {
   // the lock holder has exclusive write access until released.
   Completer<void>? _writeLock;
 
+  /// Zone key used to detect calls to [execute]/[executeBatch]/[transaction]
+  /// from inside a transaction body. Without this guard, such calls would
+  /// deadlock waiting for the write lock that the outer transaction holds.
+  static final _inTransactionZone = Object();
+
   /// Acquires exclusive write access, runs [body], then releases the lock.
   Future<T> _withWriteLock<T>(Future<T> Function() body) async {
     _ensureOpen();
+    if (Zone.current[_inTransactionZone] == true) {
+      throw StateError(
+        'Cannot call db.execute/executeBatch/transaction from inside a '
+        'transaction body. Use the Transaction instance passed to the '
+        'callback instead (e.g. tx.execute, tx.select, tx.transaction).',
+      );
+    }
     while (true) {
       final lock = _writeLock;
       if (lock == null) break;
@@ -302,7 +314,10 @@ final class Database {
     await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
     try {
       final tx = Transaction._(this);
-      final result = await body(tx);
+      final result = await runZoned(
+        () => body(tx),
+        zoneValues: {_inTransactionZone: true},
+      );
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => CommitRequest(replyPort),
       );

@@ -918,6 +918,27 @@ sqlite3_stmt* resqlite_stmt_acquire_on(
     return stmt;
 }
 
+// Acquire a statement on the writer connection without mutex.
+// The caller (writer isolate) guarantees exclusive access.
+sqlite3_stmt* resqlite_stmt_acquire_writer(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count
+) {
+    int rc;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    if (!stmt) return NULL;
+
+    rc = bind_params(stmt, params, param_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_reset(stmt);
+        return NULL;
+    }
+
+    return stmt;
+}
+
 // ---------------------------------------------------------------------------
 // Fast int64-to-string (avoids snprintf format parsing overhead)
 // ---------------------------------------------------------------------------

@@ -4,6 +4,56 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
+/// Deterministic stream probe — avoids timing-sensitive Future.delayed waits.
+final class _StreamProbe<T> {
+  _StreamProbe(Stream<T> stream) {
+    _subscription = stream.listen((event) {
+      _events.add(event);
+      final ready =
+          _waiters.where((w) => w.count <= _events.length).toList();
+      for (final w in ready) {
+        _waiters.remove(w);
+        if (!w.completer.isCompleted) {
+          w.completer.complete(_events[w.count - 1]);
+        }
+      }
+    });
+  }
+
+  final _events = <T>[];
+  final _waiters = <_EventWaiter<T>>[];
+  late final StreamSubscription<T> _subscription;
+
+  Future<T> event(
+    int count, {
+    Duration timeout = const Duration(seconds: 2),
+  }) {
+    if (_events.length >= count) return Future.value(_events[count - 1]);
+    final completer = Completer<T>();
+    _waiters.add(_EventWaiter(count, completer));
+    return completer.future.timeout(timeout, onTimeout: () {
+      throw TimeoutException('Timed out waiting for event $count');
+    });
+  }
+
+  Future<void> expectNoAdditionalEvents(Duration duration) async {
+    try {
+      final event = await this.event(_events.length + 1, timeout: duration);
+      fail('Unexpected additional stream event: $event');
+    } on TimeoutException {
+      // Expected: no event arrived within the window.
+    }
+  }
+
+  Future<void> cancel() => _subscription.cancel();
+}
+
+final class _EventWaiter<T> {
+  _EventWaiter(this.count, this.completer);
+  final int count;
+  final Completer<T> completer;
+}
+
 void main() {
   group('Write lock and nested transactions', () {
     late Directory tempDir;
@@ -48,14 +98,11 @@ void main() {
     test('concurrent execute does not run inside a transaction', () async {
       // Start a transaction with a delay. A concurrent execute should
       // wait for the transaction to finish, not slip inside it.
-      final txDone = Completer<void>();
-
       final txFuture = db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['inside_tx']);
         // Yield to let the concurrent execute attempt to run.
         await Future<void>.delayed(Duration.zero);
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['inside_tx_2']);
-        txDone.complete();
       });
 
       // This execute should wait for the transaction to finish.
@@ -231,21 +278,12 @@ void main() {
     // -----------------------------------------------------------------
 
     test('stream fires after nested transaction commits', () async {
-      final probe = Completer<List<Map<String, Object?>>>();
-      var emissions = 0;
+      final probe = _StreamProbe(
+        db.stream('SELECT name FROM items ORDER BY id'),
+      );
 
-      final sub = db
-          .stream('SELECT name FROM items ORDER BY id')
-          .listen((rows) {
-        emissions++;
-        // Wait for the second emission (after the write).
-        if (emissions == 2 && !probe.isCompleted) {
-          probe.complete(rows);
-        }
-      });
-
-      // Wait for initial emission.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // Wait for initial emission (empty table).
+      await probe.event(1);
 
       await db.transaction((tx) async {
         await tx.execute('INSERT INTO items(name) VALUES (?)', ['outer']);
@@ -254,23 +292,21 @@ void main() {
         });
       });
 
-      final rows = await probe.future.timeout(const Duration(seconds: 2));
+      final rows = await probe.event(2);
       expect(rows, hasLength(2));
 
-      await sub.cancel();
+      await probe.cancel();
     });
 
     test('stream does not fire after rolled-back transaction', () async {
       await db.execute('INSERT INTO items(name) VALUES (?)', ['seed']);
 
-      var emissions = 0;
-      final sub = db
-          .stream('SELECT name FROM items ORDER BY id')
-          .listen((_) => emissions++);
+      final probe = _StreamProbe(
+        db.stream('SELECT name FROM items ORDER BY id'),
+      );
 
-      // Wait for initial emission.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      final emissionsAfterInit = emissions;
+      // Wait for initial emission (seed row).
+      await probe.event(1);
 
       try {
         await db.transaction((tx) async {
@@ -281,11 +317,11 @@ void main() {
         // expected
       }
 
-      // Give streams time to process (they shouldn't fire).
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(emissions, emissionsAfterInit);
+      // No additional emission should fire — rolled-back writes don't
+      // trigger stream invalidation.
+      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 150));
 
-      await sub.cancel();
+      await probe.cancel();
     });
   });
 }
