@@ -234,7 +234,7 @@ void _handleQuery(
   }
 
   try {
-    final raw = decodeSteppedQuery(stmt, sql);
+    final raw = decodeQuery(stmt, sql);
     // No dirty table collection — _handleQuery only runs during transactions,
     // and dirty tables must accumulate until commit.
     replyPort.send(QueryResponse(

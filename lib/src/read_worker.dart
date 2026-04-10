@@ -238,7 +238,7 @@ Uint8List executeQueryBytes(
   }
 
   try {
-    final raw = decodeSteppedQuery(stmt, sql);
+    final raw = decodeQuery(stmt, sql);
 
     final readTables = captureReadTables
         ? getReadTables(dbHandle, readerId)

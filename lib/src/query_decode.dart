@@ -144,7 +144,7 @@ final class RawQueryResult {
 /// The statement must already be acquired and bound (via
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
-RawQueryResult decodeSteppedQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
+RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final colCount = sqlite3ColumnCount(stmt);
   final schema = schemaCache[sql] ?? () {
     final s = RowSchema(List<String>.generate(colCount, (i) {
