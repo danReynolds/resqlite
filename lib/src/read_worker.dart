@@ -305,9 +305,8 @@ final class RawQueryResult {
   final int rowCount;
   final int colCount;
 
-  /// Estimated byte size of the result data for sacrifice decisions.
-  /// Accumulated during the cell loop: 8 bytes per int/double, byte length
-  /// per string/blob, 0 per null. Cheap to compute — no second pass needed.
+  /// Estimated byte size of the result data, accumulated during the cell loop.
+  /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
   final int estimatedBytes;
 }
 
