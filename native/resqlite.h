@@ -138,6 +138,14 @@ sqlite3_stmt* resqlite_stmt_acquire_on(
     int param_count
 );
 
+// Writer variant — no mutex. Caller (writer isolate) guarantees exclusive access.
+sqlite3_stmt* resqlite_stmt_acquire_writer(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count
+);
+
 int resqlite_query_bytes(
     resqlite_db* db,
     int reader_id,
