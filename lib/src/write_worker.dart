@@ -217,7 +217,6 @@ void writerEntrypoint(List<Object> args) {
           receivePort.close();
           replyPort.send(true);
       }
-      }
     } catch (e) {
       // Extract SQL context from the request for better error messages.
       String? sql;
