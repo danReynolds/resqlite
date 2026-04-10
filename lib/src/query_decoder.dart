@@ -34,8 +34,8 @@ external ffi.Pointer<Utf8> sqlite3ColumnName(
 );
 
 @ffi.Native<
-  ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int, ffi.Pointer<ffi.Uint8>)
->(symbol: 'resqlite_step_row', isLeaf: true)
+    ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int,
+        ffi.Pointer<ffi.Uint8>)>(symbol: 'resqlite_step_row', isLeaf: true)
 external int resqliteStepRow(
   ffi.Pointer<ffi.Void> stmt,
   int colCount,
@@ -136,7 +136,7 @@ final class RawQueryResult {
 }
 
 // ---------------------------------------------------------------------------
-// Stepped query decode
+// Query decoder
 // ---------------------------------------------------------------------------
 
 /// Decode a bound statement into a [RawQueryResult] using resqlite_step_row.
@@ -146,15 +146,16 @@ final class RawQueryResult {
 /// The caller must NOT finalize the statement — it's owned by the C cache.
 RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final colCount = sqlite3ColumnCount(stmt);
-  final schema = schemaCache[sql] ?? () {
-    final s = RowSchema(List<String>.generate(colCount, (i) {
-      final namePtr = sqlite3ColumnName(stmt, i);
-      final nameLen = cStrlen(namePtr.cast());
-      return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
-    }, growable: false));
-    schemaCache[sql] = s;
-    return s;
-  }();
+  final schema = schemaCache[sql] ??
+      () {
+        final s = RowSchema(List<String>.generate(colCount, (i) {
+          final namePtr = sqlite3ColumnName(stmt, i);
+          final nameLen = cStrlen(namePtr.cast());
+          return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
+        }, growable: false));
+        schemaCache[sql] = s;
+        return s;
+      }();
 
   final buf = ensureCellBuffer(colCount);
   final cellsTyped = buf.asTypedList(cellSize * colCount);

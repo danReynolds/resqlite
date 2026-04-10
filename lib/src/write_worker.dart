@@ -13,7 +13,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'native/resqlite_bindings.dart';
-import 'query_decode.dart';
+import 'query_decoder.dart';
 import 'row.dart';
 
 // ---------------------------------------------------------------------------
@@ -105,13 +105,12 @@ final class ErrorResponse {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Pointer<ffi.Void> Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
+    ffi.Pointer<ffi.Void> Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+    )>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Void> sql,
@@ -157,9 +156,8 @@ void writerEntrypoint(List<Object> args) {
           } else {
             result = executeWrite(dbHandle, sql, params);
           }
-          final dirty = inTransaction
-              ? const <String>[]
-              : getDirtyTables(dbHandle);
+          final dirty =
+              inTransaction ? const <String>[] : getDirtyTables(dbHandle);
           replyPort.send(ExecuteResponse(result, dirty));
 
         case QueryRequest(:final sql, :final params, :final replyPort):
@@ -228,7 +226,8 @@ void _handleQuery(
       paramsNative,
       params.length,
     );
-    if (stmt == ffi.nullptr) throw StateError('Failed to acquire writer statement');
+    if (stmt == ffi.nullptr)
+      throw StateError('Failed to acquire writer statement');
   } finally {
     calloc.free(sqlNative);
   }

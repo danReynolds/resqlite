@@ -13,7 +13,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'native/resqlite_bindings.dart';
-import 'query_decode.dart';
+import 'query_decoder.dart';
 import 'result_hash.dart';
 import 'row.dart';
 
@@ -48,7 +48,10 @@ final class SelectBytesRequest extends ReadRequest {
 /// Stream re-query with worker-side hash comparison.
 final class SelectIfChangedRequest extends ReadRequest {
   SelectIfChangedRequest(
-    super.replyPort, super.sql, super.parameters, this.lastResultHash,
+    super.replyPort,
+    super.sql,
+    super.parameters,
+    this.lastResultHash,
   );
   final int lastResultHash;
 }
@@ -99,7 +102,10 @@ void readerEntrypoint(List<Object> args) {
 
         case SelectWithDepsRequest(:final sql, :final parameters):
           final (raw, readTables) = executeQueryWithDeps(
-            dbHandleAddr, readerId, sql, parameters,
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
           );
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           result = sacrifice
@@ -111,15 +117,16 @@ void readerEntrypoint(List<Object> args) {
                 );
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
+          final bytes =
+              executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           result = bytes;
           sacrifice = bytes.length > sacrificeByteThreshold;
 
         case SelectIfChangedRequest(
-          :final sql,
-          :final parameters,
-          :final lastResultHash,
-        ):
+            :final sql,
+            :final parameters,
+            :final lastResultHash,
+          ):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
           final newHash = hashRawResult(raw);
           if (newHash == lastResultHash) {
@@ -129,8 +136,11 @@ void readerEntrypoint(List<Object> args) {
             sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
             result = sacrifice
                 ? (newHash, raw.values, raw.schema.names, raw.rowCount)
-                : (newHash, ResultSet(raw.values, raw.schema, raw.rowCount)
-                    as List<Map<String, Object?>>);
+                : (
+                    newHash,
+                    ResultSet(raw.values, raw.schema, raw.rowCount)
+                        as List<Map<String, Object?>>
+                  );
           }
       }
 
@@ -151,14 +161,13 @@ void readerEntrypoint(List<Object> args) {
 
 // Dedicated reader variant — no pool mutex.
 @ffi.Native<
-  ffi.Pointer<ffi.Void> Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
+    ffi.Pointer<ffi.Void> Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+    )>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -182,8 +191,7 @@ RawQueryResult executeQuery(
 }
 
 /// Hash a raw query result using the shared FNV-1a implementation.
-int hashRawResult(RawQueryResult raw) =>
-    hashValues(raw.rowCount, raw.values);
+int hashRawResult(RawQueryResult raw) => hashValues(raw.rowCount, raw.values);
 
 /// Execute a query returning JSON-encoded bytes on a dedicated reader.
 Uint8List executeQueryBytes(
@@ -206,7 +214,10 @@ Uint8List executeQueryBytes(
   List<Object?> parameters,
 ) {
   final (raw, tables) = _executeQueryImpl(
-    handleAddr, readerId, sql, parameters,
+    handleAddr,
+    readerId,
+    sql,
+    parameters,
     captureReadTables: true,
   );
   return (raw, tables!);
@@ -240,9 +251,8 @@ Uint8List executeQueryBytes(
   try {
     final raw = decodeQuery(stmt, sql);
 
-    final readTables = captureReadTables
-        ? getReadTables(dbHandle, readerId)
-        : null;
+    final readTables =
+        captureReadTables ? getReadTables(dbHandle, readerId) : null;
 
     return (raw, readTables);
   } finally {

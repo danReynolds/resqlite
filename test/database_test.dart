@@ -583,6 +583,80 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    // ----- Transaction reads (exercises writer-side decode path) -----
+
+    test('transaction select returns many rows with correct types', () async {
+      await db.execute('''
+        CREATE TABLE items(
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          price REAL NOT NULL,
+          data BLOB
+        )
+      ''');
+      await db.executeBatch(
+        'INSERT INTO items(name, price, data) VALUES (?, ?, ?)',
+        [for (var i = 0; i < 500; i++) [
+          'item_$i', i * 1.5, null,
+        ]],
+      );
+
+      final rows = await db.transaction((tx) async {
+        return await tx.select('SELECT * FROM items ORDER BY id');
+      });
+
+      expect(rows, hasLength(500));
+      expect(rows.first['name'], 'item_0');
+      expect(rows.first['price'], 0.0);
+      expect(rows.last['name'], 'item_499');
+      expect(rows.last['price'], 499 * 1.5);
+    });
+
+    test('transaction select sees uncommitted batch writes', () async {
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT NOT NULL)',
+      );
+
+      final result = await db.transaction((tx) async {
+        // Write 200 rows, then read them back inside the same transaction.
+        for (var i = 0; i < 200; i++) {
+          await tx.execute('INSERT INTO t(val) VALUES (?)', ['row_$i']);
+        }
+        return await tx.select('SELECT * FROM t ORDER BY id');
+      });
+
+      expect(result, hasLength(200));
+      expect(result.first['val'], 'row_0');
+      expect(result.last['val'], 'row_199');
+    });
+
+    test('transaction select with unicode and blob types', () async {
+      await db.execute('''
+        CREATE TABLE mixed(
+          id INTEGER PRIMARY KEY,
+          label TEXT NOT NULL,
+          payload BLOB
+        )
+      ''');
+
+      final rows = await db.transaction((tx) async {
+        await tx.execute(
+          'INSERT INTO mixed(label, payload) VALUES (?, ?)',
+          ['日本語テスト', Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF])],
+        );
+        await tx.execute(
+          'INSERT INTO mixed(label, payload) VALUES (?, ?)',
+          ['émojis 🎉🚀', Uint8List.fromList([1, 2, 3])],
+        );
+        return await tx.select('SELECT * FROM mixed ORDER BY id');
+      });
+
+      expect(rows, hasLength(2));
+      expect(rows[0]['label'], '日本語テスト');
+      expect(rows[0]['payload'], [0xDE, 0xAD, 0xBE, 0xEF]);
+      expect(rows[1]['label'], 'émojis 🎉🚀');
+    });
+
     // ----- Concurrent reads + writes -----
 
     test('reads work during sequential writes', () async {
