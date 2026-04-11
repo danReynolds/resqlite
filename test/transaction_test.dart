@@ -709,9 +709,13 @@ void main() {
       );
       expect(deleted.affectedRows, 2);
 
-      // DDL: rows unaffected, but we should not crash or return negative.
-      final ddl = await db.execute('CREATE TABLE extra(id INTEGER PRIMARY KEY)');
-      expect(ddl.affectedRows, 0);
+      // DDL: SQLite's sqlite3_changes() counter is not touched by
+      // CREATE TABLE, so affectedRows surfaces the previous DML count.
+      // We only assert the call doesn't crash — users who care about
+      // "rows affected by this call" shouldn't be calling execute with
+      // DDL and then reading affectedRows, which matches native
+      // sqlite3_changes behavior.
+      await db.execute('CREATE TABLE extra(id INTEGER PRIMARY KEY)');
     });
 
     test('db.execute supports multi-statement SQL without parameters',
@@ -905,6 +909,12 @@ void main() {
 
     test('close() drains an in-flight read before freeing the handle',
         () async {
+      // Prime the pool with a dummy read so `_readers` resolves in a
+      // single microtask on the real read below — we need the read to
+      // reach `pool.select` (and dispatch to a worker) *before* close
+      // runs, otherwise it will bail out at the pool's closed-check.
+      await db.select('SELECT 1');
+
       // Seed enough rows that the SELECT actually spends measurable
       // time in C, giving close() a chance to race against the read.
       // Without the reader-pool drain, resqliteClose(_handle) could
@@ -913,17 +923,17 @@ void main() {
       final seeds = [
         for (var i = 0; i < 5000; i++) ['row_$i'],
       ];
-      await db.executeBatch(
-        'INSERT INTO items(name) VALUES (?)',
-        seeds,
-      );
+      await db.executeBatch('INSERT INTO items(name) VALUES (?)', seeds);
 
-      // Kick off a read in the same synchronous turn as close.
+      // Launch the read, then *yield to the macrotask queue* so its
+      // pending microtask (the `await _readers` continuation) runs and
+      // the read gets dispatched to a worker isolate. Only then do we
+      // call close() — at which point close's reader-pool drain should
+      // wait for the in-flight slot's pending completer before closing.
       final readFuture = db.select('SELECT name FROM items ORDER BY id');
+      await Future<void>.delayed(Duration.zero);
       final closeFuture = db.close();
 
-      // The read must complete successfully; close() must not return
-      // until it has.
       final rows = await readFuture.timeout(const Duration(seconds: 5));
       expect(rows, hasLength(5000));
       await closeFuture.timeout(const Duration(seconds: 5));

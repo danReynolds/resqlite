@@ -226,11 +226,17 @@ WriteResult executeWrite(
 /// shape matrix (`setCount × paramCount`), so non-uniform rows either
 /// silently truncate or read past the allocated buffer depending on
 /// which direction the shape drifts.
-void _assertUniformParamSets(
+///
+/// Callers should invoke this on the *main* isolate before sending the
+/// paramSets to the writer — we want [ArgumentError] to surface
+/// directly to the user rather than crossing the isolate boundary as
+/// a generic "internal writer error".
+void assertUniformParamSets(
   String sql,
   List<List<Object?>> paramSets,
-  int paramCount,
 ) {
+  if (paramSets.isEmpty) return;
+  final paramCount = paramSets.first.length;
   for (var i = 0; i < paramSets.length; i++) {
     if (paramSets[i].length != paramCount) {
       throw ArgumentError.value(
@@ -253,7 +259,6 @@ void executeBatchWrite(
 ) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
-  _assertUniformParamSets(sql, paramSets, paramCount);
 
   final sqlNative = sql.toNativeUtf8();
   try {
@@ -292,7 +297,6 @@ void executeBatchWriteNested(
 ) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
-  _assertUniformParamSets(sql, paramSets, paramCount);
 
   final sqlNative = sql.toNativeUtf8();
   try {

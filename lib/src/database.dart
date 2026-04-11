@@ -319,6 +319,10 @@ final class Database {
       _ensureOpen();
       return Future.value();
     }
+    // Validate on the main isolate so ArgumentError reaches the caller
+    // directly instead of round-tripping through the writer as a generic
+    // "internal error" response.
+    assertUniformParamSets(sql, paramSets);
     final tx = _activeTx;
     if (tx != null) return tx.executeBatch(sql, paramSets);
     return _withWriteLock(() async {
@@ -453,10 +457,12 @@ final class Database {
     if (tx != null) return tx.select(sql, parameters);
     _ensureOpen();
     final pool = await _readers;
-    // Re-check after awaiting the pool future — close() may have run
-    // while we were parked, and dispatching into a closed pool would
-    // hit a torn-down handle.
-    _ensureOpen();
+    // No post-await _ensureOpen re-check: if close() has run while we
+    // were parked, the pool itself now rejects dispatch with
+    // ResqliteConnectionException (see ReaderPool._dispatch). That lets
+    // *in-flight* reads that had already dispatched to a worker finish
+    // via the pool's drain semantics, while reads still parked on the
+    // pool future bail out cleanly.
     return pool.select(sql, parameters);
   }
 
@@ -485,7 +491,6 @@ final class Database {
   ]) async {
     _ensureOpen();
     final pool = await _readers;
-    _ensureOpen();
     return pool.selectBytes(sql, parameters);
   }
 
@@ -730,6 +735,7 @@ final class Transaction {
   ) async {
     _ensureActive();
     if (paramSets.isEmpty) return;
+    assertUniformParamSets(sql, paramSets);
     await _db._writerRequest<BatchResponse>(
       (replyPort) => BatchRequest(sql, paramSets, replyPort),
     );
