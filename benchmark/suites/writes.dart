@@ -254,6 +254,110 @@ Future<String> runWritesBenchmark() async {
     }
 
     // -----------------------------------------------------------------
+    // Batched writes INSIDE an interactive transaction.
+    //
+    // Regression guard for the "tx.executeBatch is a loop of individual
+    // tx.execute calls" pattern. The new path routes through the writer
+    // isolate's BatchRequest handler via a dedicated nested C entry
+    // point (resqlite_run_batch_nested), collapsing N isolate
+    // round-trips to 1 and reusing the prepared statement cache.
+    //
+    // Compares three strategies inside the same transaction:
+    //   - tx.executeBatch (the fast path we care about)
+    //   - a hand-written for-loop of tx.execute calls (the old path)
+    //   - sqlite_async's equivalent batched insert inside a txn
+    // -----------------------------------------------------------------
+    for (final batchSize in [100, 1000]) {
+      final resqliteDb = await resqlite.Database.open(
+        '${tempDir.path}/resqlite_txbatch_$batchSize.db',
+      );
+      final asyncDb = sqlite_async.SqliteDatabase(
+        path: '${tempDir.path}/async_txbatch_$batchSize.db',
+      );
+      await asyncDb.initialize();
+
+      const createSql =
+          'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
+      const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
+
+      await resqliteDb.execute(createSql);
+      await asyncDb.execute(createSql);
+
+      final paramSets = [
+        for (var i = 0; i < batchSize; i++) ['item_$i', i * 1.5],
+      ];
+
+      // Warmup.
+      for (var i = 0; i < defaultWarmup; i++) {
+        await resqliteDb.transaction((tx) async {
+          await tx.executeBatch(insertSql, paramSets);
+        });
+        await asyncDb.writeTransaction((tx) async {
+          for (final ps in paramSets) {
+            await tx.execute(insertSql, ps);
+          }
+        });
+      }
+      await resqliteDb.execute('DELETE FROM t');
+      await asyncDb.execute('DELETE FROM t');
+
+      final tResqliteBatch = BenchmarkTiming(
+        'resqlite tx.executeBatch()',
+      );
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          await tx.executeBatch(insertSql, paramSets);
+        });
+        sw.stop();
+        tResqliteBatch.recordWallOnly(sw.elapsedMicroseconds);
+        await resqliteDb.execute('DELETE FROM t');
+      }
+
+      final tResqliteLoop = BenchmarkTiming(
+        'resqlite tx.execute() loop',
+      );
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          for (final ps in paramSets) {
+            await tx.execute(insertSql, ps);
+          }
+        });
+        sw.stop();
+        tResqliteLoop.recordWallOnly(sw.elapsedMicroseconds);
+        await resqliteDb.execute('DELETE FROM t');
+      }
+
+      final tAsyncLoop = BenchmarkTiming(
+        'sqlite_async tx.execute() loop',
+      );
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await asyncDb.writeTransaction((tx) async {
+          for (final ps in paramSets) {
+            await tx.execute(insertSql, ps);
+          }
+        });
+        sw.stop();
+        tAsyncLoop.recordWallOnly(sw.elapsedMicroseconds);
+        await asyncDb.execute('DELETE FROM t');
+      }
+
+      printComparisonTable(
+        '=== Batched Write Inside Transaction ($batchSize rows) ===',
+        [tResqliteBatch, tResqliteLoop, tAsyncLoop],
+      );
+      markdown.write(markdownTable(
+        'Batched Write Inside Transaction ($batchSize rows)',
+        [tResqliteBatch, tResqliteLoop, tAsyncLoop],
+      ));
+
+      await resqliteDb.close();
+      await asyncDb.close();
+    }
+
+    // -----------------------------------------------------------------
     // Transaction reads (tx.select with larger result sets)
     // -----------------------------------------------------------------
     for (final rowCount in [500, 1000]) {

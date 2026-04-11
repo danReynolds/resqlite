@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'exceptions.dart';
 import 'read_worker.dart';
 import 'row.dart';
 
@@ -32,6 +33,7 @@ final class ReaderPool {
 
   final List<_WorkerSlot> _workers;
   int _next = 0;
+  bool _closed = false;
 
   /// Completed whenever any worker becomes available (finishes a query
   /// or finishes respawning). Callers waiting in _dispatch are woken up.
@@ -134,6 +136,14 @@ final class ReaderPool {
   Future<(Object?, bool)> _dispatch(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) async {
+    // Fail fast on a closed pool so a caller who slipped past the
+    // Database-level open check (e.g. a subscription whose reQuery
+    // fires during close) doesn't park forever on `_workerAvailable`
+    // waiting for a worker that will never come back.
+    if (_closed) {
+      throw ResqliteConnectionException('Reader pool is closed.');
+    }
+
     final count = _workers.length;
 
     while (true) {
@@ -148,13 +158,34 @@ final class ReaderPool {
       // All workers busy or dead. Wait for any to become available.
       _workerAvailable ??= Completer<void>.sync();
       await _workerAvailable!.future;
+
+      // Re-check after waking: close() may have run while we were
+      // parked and we must not loop forever over dead slots.
+      if (_closed) {
+        throw ResqliteConnectionException('Reader pool is closed.');
+      }
     }
   }
 
-  void close() {
-    for (final slot in _workers) {
-      slot.close();
+  /// Drains any in-flight read and then shuts every worker down.
+  ///
+  /// Returns a Future that completes when all worker isolates have
+  /// finished their current request and released their SQLite
+  /// connections. This matches the writer-side drain in
+  /// `Database.close()` so `resqliteClose(handle)` never runs while a
+  /// reader worker is still stepping over the handle.
+  ///
+  /// Any caller that had parked on `_workerAvailable` waiting for a
+  /// free worker is woken up so `_dispatch` can observe `_closed` and
+  /// bail out with StateError rather than looping over dead slots.
+  Future<void> close() async {
+    _closed = true;
+    // Wake any parked dispatch waiters so they can re-check _closed.
+    if (_workerAvailable case Completer<void> c) {
+      _workerAvailable = null;
+      c.complete();
     }
+    await Future.wait(_workers.map((slot) => slot.close()));
   }
 }
 
@@ -301,8 +332,20 @@ class _WorkerSlot {
     return completer.future;
   }
 
-  void close() {
+  /// Drain-then-shutdown. If a query is in flight, we wait for it to
+  /// complete before signalling the worker to exit — otherwise the
+  /// worker could still be stepping over the shared SQLite handle when
+  /// `Database.close()` frees it a few lines later.
+  Future<void> close() async {
     _closed = true;
+    final pending = _pendingCompleter;
+    if (pending != null) {
+      try {
+        await pending.future;
+      } catch (_) {
+        // We only need the completion signal; the caller handles errors.
+      }
+    }
     _sendPort?.send(null);
     _alive = false;
     _sendPort = null;

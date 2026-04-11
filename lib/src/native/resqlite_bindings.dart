@@ -42,6 +42,19 @@ external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
     ffi.Pointer<ffi.Void>,
     ffi.Pointer<Utf8>,
     ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'resqlite_exec_with_result', isLeaf: true)
+external int resqliteExecWithResult(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> outResult,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
     ffi.Int,
     ffi.Pointer<ffi.Uint8>,  // resqlite_write_result* (affected_rows + last_insert_id)
   )
@@ -74,6 +87,23 @@ external int resqliteRunBatch(
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_run_batch_nested', isLeaf: true)
+external int resqliteRunBatchNested(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
     ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Int,
   )
@@ -96,73 +126,200 @@ final class WriteResult {
   final int lastInsertId;
 }
 
-/// Execute a parameterized write statement. Returns affected rows + last insert ID.
-WriteResult executeWrite(ffi.Pointer<ffi.Void> dbHandle, String sql, List<Object?> params) {
+/// Execute a statement with no parameters via the direct `sqlite3_exec`
+/// path, capturing affected row count and last insert rowid.
+///
+/// Unlike [executeWrite] this supports multi-statement SQL such as
+/// `"CREATE TABLE a; CREATE INDEX ..."` which cannot be prepared in one
+/// step. The trade-off is that prepared-statement caching is bypassed —
+/// use the parameterized path for hot write statements.
+WriteResult execNoParams(ffi.Pointer<ffi.Void> dbHandle, String sql) {
   final sqlNative = sql.toNativeUtf8();
-  final paramsNative = allocateParams(params);
-  final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
   try {
-    final rc = resqliteExecute(
-      dbHandle, sqlNative, paramsNative, params.length, resultBuf,
-    );
-    if (rc != 0) {
-      // Read error message carefully — it may be invalid if the connection is in a bad state.
-      String errMsg;
-      try {
-        errMsg = resqliteErrmsg(dbHandle).toDartString();
-      } catch (_) {
-        errMsg = 'unknown error';
+    final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
+    try {
+      final rc = resqliteExecWithResult(dbHandle, sqlNative, resultBuf);
+      if (rc != 0) {
+        // Read the error message carefully — if the connection is in a
+        // bad state the pointer may be invalid.
+        String errMsg;
+        try {
+          errMsg = resqliteErrmsg(dbHandle).toDartString();
+        } catch (_) {
+          errMsg = 'unknown error';
+        }
+        throw ResqliteQueryException(
+          errMsg,
+          sql: sql,
+          sqliteCode: rc,
+        );
       }
-      throw ResqliteQueryException(
-        'execute failed: $errMsg (code $rc)',
-        sql: sql,
-        parameters: params,
-        sqliteCode: rc,
+      final view =
+          ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
+      return WriteResult(
+        view.getInt32(_writeResultOffAffected, Endian.little),
+        view.getInt64(_writeResultOffLastId, Endian.little),
       );
+    } finally {
+      calloc.free(resultBuf);
     }
-    final view = ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
-    return WriteResult(
-      view.getInt32(_writeResultOffAffected, Endian.little),
-      view.getInt64(_writeResultOffLastId, Endian.little),
-    );
   } finally {
-    freeParams(paramsNative, params);
     calloc.free(sqlNative);
-    calloc.free(resultBuf);
   }
 }
 
-/// Execute a batch: one SQL, many param sets, in a transaction.
+/// Execute a parameterized write statement. Returns affected rows + last insert ID.
+///
+/// Uses nested try/finally so each allocation is protected by the time
+/// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
+/// the earlier resources are still released. Flat sequential allocation
+/// would leak on allocator failure, which is rare but real.
+WriteResult executeWrite(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<Object?> params,
+) {
+  final sqlNative = sql.toNativeUtf8();
+  try {
+    final paramsNative = allocateParams(params);
+    try {
+      final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
+      try {
+        final rc = resqliteExecute(
+          dbHandle, sqlNative, paramsNative, params.length, resultBuf,
+        );
+        if (rc != 0) {
+          // Read the error message carefully — if the connection is in a
+          // bad state the pointer may be invalid.
+          String errMsg;
+          try {
+            errMsg = resqliteErrmsg(dbHandle).toDartString();
+          } catch (_) {
+            errMsg = 'unknown error';
+          }
+          throw ResqliteQueryException(
+            errMsg,
+            sql: sql,
+            parameters: params,
+            sqliteCode: rc,
+          );
+        }
+        final view =
+            ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
+        return WriteResult(
+          view.getInt32(_writeResultOffAffected, Endian.little),
+          view.getInt64(_writeResultOffLastId, Endian.little),
+        );
+      } finally {
+        calloc.free(resultBuf);
+      }
+    } finally {
+      freeParams(paramsNative, params);
+    }
+  } finally {
+    calloc.free(sqlNative);
+  }
+}
+
+/// Validates that every row in [paramSets] has the same length. The
+/// C-level batch runner treats the flattened param array as a fixed-
+/// shape matrix (`setCount × paramCount`), so non-uniform rows either
+/// silently truncate or read past the allocated buffer depending on
+/// which direction the shape drifts.
+///
+/// Callers should invoke this on the *main* isolate before sending the
+/// paramSets to the writer — we want [ArgumentError] to surface
+/// directly to the user rather than crossing the isolate boundary as
+/// a generic "internal writer error".
+void assertUniformParamSets(
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  if (paramSets.isEmpty) return;
+  final paramCount = paramSets.first.length;
+  for (var i = 0; i < paramSets.length; i++) {
+    if (paramSets[i].length != paramCount) {
+      throw ArgumentError.value(
+        paramSets,
+        'paramSets',
+        'every row must have the same number of parameters. '
+            'Row 0 has $paramCount, row $i has ${paramSets[i].length}. '
+            'SQL: $sql',
+      );
+    }
+  }
+}
+
+/// Execute a batch: one SQL, many param sets, wrapped in a fresh
+/// BEGIN IMMEDIATE / COMMIT transaction.
 void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-
   final paramCount = paramSets.first.length;
+
   final sqlNative = sql.toNativeUtf8();
-
-  // Flatten all param sets into one contiguous native array.
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
-
   try {
-    final rc = resqliteRunBatch(
-      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
-    );
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
-        sql: sql,
-        sqliteCode: rc,
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatch(
+        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
       );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
     }
   } finally {
-    freeParams(paramsNative, allParams);
+    calloc.free(sqlNative);
+  }
+}
+
+/// Execute a batch inside an already-open transaction (top-level or savepoint).
+/// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
+/// without issuing any rollback, so the caller can roll back at the correct
+/// scope (full ROLLBACK vs ROLLBACK TO savepoint).
+void executeBatchWriteNested(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  if (paramSets.isEmpty) return;
+  final paramCount = paramSets.first.length;
+
+  final sqlNative = sql.toNativeUtf8();
+  try {
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatchNested(
+        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
+      );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
+    }
+  } finally {
     calloc.free(sqlNative);
   }
 }
