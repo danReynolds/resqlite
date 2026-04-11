@@ -184,22 +184,47 @@ void writerEntrypoint(List<Object> args) {
           }
 
         case BeginRequest(:final replyPort):
+          // BEGIN at depth 0, SAVEPOINT at depth > 0.
+          // On failure, `txDepth` stays at its current value and the error
+          // propagates — the caller's `_runTransaction` never entered its
+          // body so there is nothing to roll back.
           if (txDepth == 0) {
-            resqliteExec(dbHandle, beginSql);
+            final rc = resqliteExec(dbHandle, beginSql);
+            if (rc != 0) {
+              final errMsg = resqliteErrmsg(dbHandle).toDartString();
+              throw StateError('begin failed: $errMsg (code $rc)');
+            }
           } else {
             final sp = 'SAVEPOINT s$txDepth'.toNativeUtf8();
-            resqliteExec(dbHandle, sp);
+            final rc = resqliteExec(dbHandle, sp);
             calloc.free(sp);
+            if (rc != 0) {
+              final errMsg = resqliteErrmsg(dbHandle).toDartString();
+              throw StateError('savepoint failed: $errMsg (code $rc)');
+            }
           }
           txDepth++;
           replyPort.send(true);
 
         case CommitRequest(:final replyPort):
+          // Contract: after handling this request (success or failure),
+          // `txDepth` is reduced by one and the corresponding SQLite
+          // transaction scope is no longer active. This lets the writer
+          // stay consistent even if commit or release fails — the next
+          // request sees a predictable state.
           final newDepth = txDepth - 1;
           if (newDepth == 0) {
             final rc = resqliteExec(dbHandle, commitSql);
             if (rc != 0) {
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
+              // On commit failure SQLite typically auto-rolls the txn back,
+              // but behavior depends on the error (deferred FK, etc.). Run
+              // a best-effort ROLLBACK; ignore its return code since it
+              // may legitimately fail with "no transaction active".
+              resqliteExec(dbHandle, rollbackSql);
+              // Drop any tables dirtied by the aborted transaction.
+              getDirtyTables(dbHandle);
+              txDepth = newDepth;
               throw StateError('commit failed: $errMsg (code $rc)');
             }
             txDepth = newDepth;
@@ -211,6 +236,17 @@ void writerEntrypoint(List<Object> args) {
             calloc.free(sp);
             if (rc != 0) {
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
+              // RELEASE failed — the savepoint is still live in SQLite.
+              // Force-clean it with ROLLBACK TO + RELEASE so depth tracking
+              // and SQLite's savepoint stack stay in sync. Swallow errors
+              // from the cleanup path — we're already returning an error.
+              final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
+              final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
+              resqliteExec(dbHandle, rollbackSp);
+              resqliteExec(dbHandle, releaseSp);
+              calloc.free(rollbackSp);
+              calloc.free(releaseSp);
+              txDepth = newDepth;
               throw StateError(
                 'release savepoint failed: $errMsg (code $rc)',
               );
@@ -222,39 +258,42 @@ void writerEntrypoint(List<Object> args) {
           }
 
         case RollbackRequest(:final replyPort):
+          // Contract: same as CommitRequest — `txDepth` is always reduced
+          // by one after this returns, regardless of whether the underlying
+          // ROLLBACK succeeds. That keeps the writer usable for the next
+          // caller even if SQLite reports a rollback failure.
           final newDepth = txDepth - 1;
           if (newDepth == 0) {
             final rc = resqliteExec(dbHandle, rollbackSql);
+            // Clear dirty tables regardless — rolled-back changes don't count.
+            getDirtyTables(dbHandle);
+            txDepth = newDepth;
             if (rc != 0) {
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
               throw StateError('rollback failed: $errMsg (code $rc)');
             }
-            txDepth = newDepth;
-            // Clear dirty tables — rolled back changes don't count.
-            getDirtyTables(dbHandle);
           } else {
             // ROLLBACK TO undoes changes since the savepoint.
             // RELEASE removes the savepoint from SQLite's stack.
             final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
             final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
             final rc1 = resqliteExec(dbHandle, rollbackSp);
+            final rc2 = resqliteExec(dbHandle, releaseSp);
             calloc.free(rollbackSp);
+            calloc.free(releaseSp);
+            txDepth = newDepth;
             if (rc1 != 0) {
-              calloc.free(releaseSp);
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
               throw StateError(
                 'rollback to savepoint failed: $errMsg (code $rc1)',
               );
             }
-            final rc2 = resqliteExec(dbHandle, releaseSp);
-            calloc.free(releaseSp);
             if (rc2 != 0) {
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
               throw StateError(
                 'release savepoint failed: $errMsg (code $rc2)',
               );
             }
-            txDepth = newDepth;
           }
           replyPort.send(true);
 

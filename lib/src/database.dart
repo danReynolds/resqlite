@@ -61,9 +61,18 @@ final class Database {
   static const _activeTransactionZone = #_activeTransaction;
 
   /// Returns the active [Transaction] if called from within a transaction
-  /// body's Zone, or `null` otherwise.
-  static Transaction? get _activeTx =>
-      Zone.current[_activeTransactionZone] as Transaction?;
+  /// body for *this* database, or `null` otherwise.
+  ///
+  /// The Zone key is process-global, so a transaction on a different
+  /// [Database] instance can leak into our Zone if the caller nests
+  /// `dbB.execute(...)` inside `dbA.transaction(...)`. We filter on
+  /// `identical(tx._db, this)` so those cross-database calls run against
+  /// their own database normally, instead of silently routing through
+  /// the wrong connection.
+  Transaction? get _activeTx {
+    final tx = Zone.current[_activeTransactionZone] as Transaction?;
+    return (tx != null && identical(tx._db, this)) ? tx : null;
+  }
 
   /// Acquires exclusive write access, runs [body], then releases the lock.
   Future<T> _withWriteLock<T>(Future<T> Function() body) async {
@@ -327,23 +336,48 @@ final class Database {
   /// Runs a transaction without acquiring the write lock. Used by both
   /// [transaction] (which acquires the lock first) and [Transaction.transaction]
   /// (which already holds the lock from the outer transaction).
+  ///
+  /// Error handling is structured so that:
+  ///
+  /// 1. If [body] throws, we issue a rollback and rethrow the *body* error,
+  ///    even if the rollback itself also fails (rollback errors are
+  ///    suppressed — the user's error is more informative).
+  /// 2. If commit throws, we do *not* issue a second rollback. The writer
+  ///    isolate already cleaned up its own transaction state when commit
+  ///    failed (best-effort rollback + `txDepth` reset), so re-sending
+  ///    `RollbackRequest` would either no-op against a non-existent
+  ///    transaction or, worse, roll back some *other* enclosing scope.
   Future<T> _runTransaction<T>(Future<T> Function(Transaction tx) body) async {
     await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
+
+    late final T result;
     try {
       final tx = Transaction._(this);
-      final result = await runZoned(
+      result = await runZoned(
         () => body(tx),
         zoneValues: {_activeTransactionZone: tx},
       );
-      final response = await _writerRequest<BatchResponse>(
-        (replyPort) => CommitRequest(replyPort),
-      );
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-      return result;
-    } catch (e) {
-      await _writerRequest<bool>((replyPort) => RollbackRequest(replyPort));
+    } catch (_) {
+      try {
+        await _writerRequest<bool>((replyPort) => RollbackRequest(replyPort));
+      } catch (_) {
+        // Swallow rollback errors — propagating them would mask the
+        // original body error, which is what the caller actually needs
+        // to see. The writer isolate always leaves `txDepth` consistent
+        // after a rollback attempt, so state is already reset for the
+        // next caller.
+      }
       rethrow;
     }
+
+    // Commit is deliberately outside the try/catch: on commit failure the
+    // writer isolate has already rolled back and reset `txDepth`, so we
+    // must not issue a second rollback. The error propagates directly.
+    final response = await _writerRequest<BatchResponse>(
+      (replyPort) => CommitRequest(replyPort),
+    );
+    _streamEngine.handleDirtyTables(response.dirtyTables);
+    return result;
   }
 
   // -------------------------------------------------------------------------

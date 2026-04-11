@@ -487,5 +487,155 @@ void main() {
 
       await probe.cancel();
     });
+
+    // =================================================================
+    // Multi-database Zone isolation — a transaction on dbA must not
+    // leak its active Transaction into calls on dbB via the shared
+    // Zone key.
+    // =================================================================
+
+    test('db.execute on a different Database is not routed through the '
+        'first Database\'s transaction', () async {
+      // Open a second database in the same temp directory. The Zone key
+      // `#_activeTransaction` is process-global, so without proper instance
+      // filtering `dbB.execute()` inside `db.transaction(...)` would
+      // silently route through `db`'s Transaction and run against the
+      // wrong connection.
+      final dbB = await Database.open('${tempDir.path}/other.db');
+      await dbB.execute(
+        'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      );
+
+      try {
+        await db.transaction((tx) async {
+          // This dbB call must go to dbB (its own writer/write-lock).
+          await dbB.execute(
+            'INSERT INTO items(name) VALUES (?)',
+            ['from_dbA_tx'],
+          );
+          // Inside-tx reads on dbB should see the row (dbB has its own
+          // writer connection and no active transaction, so db.select
+          // goes through dbB's reader pool).
+          final rowsB = await dbB.select('SELECT name FROM items');
+          expect(rowsB, hasLength(1));
+          expect(rowsB[0]['name'], 'from_dbA_tx');
+
+          // And this write goes to db (the original one).
+          await tx.execute(
+            'INSERT INTO items(name) VALUES (?)',
+            ['from_db_tx'],
+          );
+        });
+
+        final rowsA = await db.select('SELECT name FROM items');
+        expect(rowsA, hasLength(1));
+        expect(rowsA[0]['name'], 'from_db_tx');
+
+        final rowsB = await dbB.select('SELECT name FROM items');
+        expect(rowsB, hasLength(1));
+        expect(rowsB[0]['name'], 'from_dbA_tx');
+      } finally {
+        await dbB.close();
+      }
+    });
+
+    // =================================================================
+    // State consistency after commit / rollback failures — `txDepth`
+    // on the writer isolate must always match SQLite's real depth
+    // even when COMMIT or RELEASE fails, otherwise the next caller
+    // issues the wrong kind of transaction control.
+    // =================================================================
+
+    test('database is usable after a deferred-FK commit failure', () async {
+      // Set up a parent/child schema with a DEFERRABLE INITIALLY DEFERRED
+      // foreign key. Deferred constraints are checked at COMMIT time, so
+      // inserting a child with a non-existent parent succeeds inside the
+      // transaction but fails at commit, which is exactly the error path
+      // we want to exercise on the writer isolate.
+      await db.execute('PRAGMA foreign_keys = ON');
+      await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
+      await db.execute('''
+        CREATE TABLE child(
+          id INTEGER PRIMARY KEY,
+          pid INTEGER NOT NULL,
+          FOREIGN KEY (pid) REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED
+        )
+      ''');
+
+      // The commit must throw — the insert targets a non-existent parent
+      // and the deferred FK check fails at COMMIT time.
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.execute('INSERT INTO child(pid) VALUES (?)', [999]);
+        }),
+        throwsA(isA<Exception>()),
+      );
+
+      // After the failed commit, both the write lock and the writer's
+      // txDepth must be back to zero. A fresh top-level transaction
+      // should open BEGIN IMMEDIATE (not SAVEPOINT s1) and commit
+      // normally.
+      await db.execute('INSERT INTO parent(id) VALUES (?)', [1]);
+      await db.transaction((tx) async {
+        await tx.execute('INSERT INTO child(pid) VALUES (?)', [1]);
+      });
+
+      final rows = await db.select(
+        'SELECT pid FROM child ORDER BY id',
+      );
+      expect(rows, hasLength(1));
+      expect(rows[0]['pid'], 1);
+    });
+
+    test('nested transaction followed by commit failure leaves writer '
+        'depth at zero', () async {
+      // Outer transaction with a successful inner savepoint; outer commit
+      // fails at deferred FK check time. This exercises the full depth-0
+      // recovery path after a nested RELEASE succeeded (so `txDepth` was
+      // bumped up and back down) and then the outer COMMIT failed.
+      //
+      // Crucially we follow the failure with *another* top-level
+      // transaction — the bug this catches is the writer isolate
+      // preserving stale `txDepth > 0` after a commit failure, in which
+      // case the next BeginRequest would issue a SAVEPOINT against a
+      // non-existent transaction instead of BEGIN IMMEDIATE.
+      await db.execute('PRAGMA foreign_keys = ON');
+      await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
+      await db.execute('''
+        CREATE TABLE child(
+          id INTEGER PRIMARY KEY,
+          pid INTEGER NOT NULL,
+          FOREIGN KEY (pid) REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED
+        )
+      ''');
+
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.execute('INSERT INTO child(pid) VALUES (?)', [999]);
+          await tx.transaction((inner) async {
+            // Inner insert is fine on its own — the deferred FK only
+            // trips at the outermost commit.
+            await inner.execute('INSERT INTO parent(id) VALUES (?)', [1]);
+          });
+        }),
+        throwsA(isA<Exception>()),
+      );
+
+      // A brand-new top-level transaction must start cleanly. Under the
+      // stale-depth bug, this would send SAVEPOINT s1 against no active
+      // transaction and either fail or silently corrupt state.
+      await db.transaction((tx) async {
+        await tx.execute('INSERT INTO parent(id) VALUES (?)', [2]);
+        await tx.execute('INSERT INTO child(pid) VALUES (?)', [2]);
+      });
+
+      final children = await db.select('SELECT pid FROM child ORDER BY id');
+      expect(children, hasLength(1));
+      expect(children[0]['pid'], 2);
+
+      final parents = await db.select('SELECT id FROM parent ORDER BY id');
+      expect(parents, hasLength(1));
+      expect(parents[0]['id'], 2);
+    });
   });
 }
