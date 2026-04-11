@@ -237,9 +237,24 @@ void writerEntrypoint(List<Object> args) {
             if (rc != 0) {
               final errMsg = resqliteErrmsg(dbHandle).toDartString();
               // RELEASE failed — the savepoint is still live in SQLite.
-              // Force-clean it with ROLLBACK TO + RELEASE so depth tracking
-              // and SQLite's savepoint stack stay in sync. Swallow errors
-              // from the cleanup path — we're already returning an error.
+              //
+              // Policy trade-off: we force-clean the savepoint via
+              // ROLLBACK TO + RELEASE, which *discards* the writes the
+              // caller was trying to commit. The alternative would be to
+              // leave the savepoint alive and let the outer scope decide,
+              // but that would require the writer to hold per-depth
+              // "still-active" state and propagate it back to Dart so
+              // `_runTransaction` could issue additional RollbackRequests
+              // up the savepoint stack — a bigger refactor for a rare
+              // error path. (SQLite doesn't fire deferred FK checks on
+              // RELEASE, only on the outermost COMMIT, so in practice
+              // this fires only on I/O errors or corruption, at which
+              // point the writes are not recoverable anyway.)
+              //
+              // The caller still sees the original RELEASE error and can
+              // make their own recovery decision at the enclosing scope.
+              // Errors from the cleanup path itself are swallowed — we
+              // are already returning an error and cannot surface two.
               final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
               final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
               resqliteExec(dbHandle, rollbackSp);

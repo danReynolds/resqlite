@@ -350,7 +350,7 @@ final class Database {
   Future<T> _runTransaction<T>(Future<T> Function(Transaction tx) body) async {
     await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
 
-    late final T result;
+    final T result;
     try {
       final tx = Transaction._(this);
       result = await runZoned(

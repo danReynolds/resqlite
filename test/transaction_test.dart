@@ -153,6 +153,51 @@ void main() {
       expect(rows, hasLength(2));
     });
 
+    test('close() during contention rejects queued writers without '
+        'hanging', () async {
+      // Exercises the _ensureOpen() re-check inside _withWriteLock that
+      // wakes after an awaited lock completes. Without it, writers queued
+      // on the write lock when close() fires would wake, create a fresh
+      // lock, and send an ExecuteRequest to a writer isolate whose
+      // receive port is about to close — hanging forever.
+      //
+      // Single synchronous turn:
+      //   - W1 enters _withWriteLock, acquires the lock, sends its
+      //     ExecuteRequest to the writer, then awaits.
+      //   - W2, W3 enter _withWriteLock and await W1's lock.future.
+      //   - close() sets _closed=true and enqueues CloseRequest on the
+      //     writer (after W1's ExecuteRequest).
+      //
+      // Later:
+      //   - Writer processes W1, replies. W1's body returns, lock
+      //     releases, W2 and W3 wake from their await.
+      //   - On wake they re-run _ensureOpen(), see _closed, and throw
+      //     ResqliteConnectionException.
+      //   - Writer processes CloseRequest and shuts down.
+      //
+      // Per-future timeouts turn a regression into a deterministic test
+      // failure instead of a stuck suite.
+      final w1 = db.execute('INSERT INTO items(name) VALUES (?)', ['w1']);
+      final w2 = db.execute('INSERT INTO items(name) VALUES (?)', ['w2']);
+      final w3 = db.execute('INSERT INTO items(name) VALUES (?)', ['w3']);
+      final closeFuture = db.close();
+
+      // W1 was in-flight before close(); it completes normally.
+      await w1.timeout(const Duration(seconds: 2));
+
+      // W2 and W3 were still queued on the write lock when close() ran.
+      await expectLater(
+        w2.timeout(const Duration(seconds: 2)),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+      await expectLater(
+        w3.timeout(const Duration(seconds: 2)),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+
+      await closeFuture.timeout(const Duration(seconds: 2));
+    });
+
     // =================================================================
     // Zone-based transparent routing — db.* calls inside a transaction
     // body are automatically routed through the active Transaction.

@@ -155,7 +155,35 @@ void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
-) => _runBatch(dbHandle, sql, paramSets, nested: false);
+) {
+  if (paramSets.isEmpty) return;
+
+  final paramCount = paramSets.first.length;
+  final sqlNative = sql.toNativeUtf8();
+
+  // Flatten all param sets into one contiguous native array.
+  final allParams = <Object?>[];
+  for (final set in paramSets) {
+    allParams.addAll(set);
+  }
+  final paramsNative = allocateParams(allParams);
+
+  try {
+    final rc = resqliteRunBatch(
+      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
+    );
+    if (rc != 0) {
+      throw ResqliteQueryException(
+        'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
+        sql: sql,
+        sqliteCode: rc,
+      );
+    }
+  } finally {
+    freeParams(paramsNative, allParams);
+    calloc.free(sqlNative);
+  }
+}
 
 /// Execute a batch inside an already-open transaction (top-level or savepoint).
 /// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
@@ -165,39 +193,22 @@ void executeBatchWriteNested(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
-) => _runBatch(dbHandle, sql, paramSets, nested: true);
-
-void _runBatch(
-  ffi.Pointer<ffi.Void> dbHandle,
-  String sql,
-  List<List<Object?>> paramSets, {
-  required bool nested,
-}) {
+) {
   if (paramSets.isEmpty) return;
 
-  final setCount = paramSets.length;
   final paramCount = paramSets.first.length;
   final sqlNative = sql.toNativeUtf8();
 
-  // Flatten all param sets into one contiguous native array in a single
-  // pre-sized list — avoids the per-set growth of `List.addAll` on a
-  // default-capacity list for large batches.
-  final allParams = List<Object?>.filled(setCount * paramCount, null);
-  for (var i = 0; i < setCount; i++) {
-    final set = paramSets[i];
-    final base = i * paramCount;
-    for (var j = 0; j < paramCount; j++) {
-      allParams[base + j] = set[j];
-    }
+  final allParams = <Object?>[];
+  for (final set in paramSets) {
+    allParams.addAll(set);
   }
   final paramsNative = allocateParams(allParams);
 
   try {
-    final rc = nested
-        ? resqliteRunBatchNested(
-            dbHandle, sqlNative, paramsNative, paramCount, setCount)
-        : resqliteRunBatch(
-            dbHandle, sqlNative, paramsNative, paramCount, setCount);
+    final rc = resqliteRunBatchNested(
+      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
+    );
     if (rc != 0) {
       throw ResqliteQueryException(
         'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
