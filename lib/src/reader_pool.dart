@@ -151,11 +151,15 @@ final class ReaderPool {
     }
   }
 
-  void close() {
-    for (final slot in _workers) {
-      slot.close();
-    }
-  }
+  /// Drains any in-flight read and then shuts every worker down.
+  ///
+  /// Returns a Future that completes when all worker isolates have
+  /// finished their current request and released their SQLite
+  /// connections. This matches the writer-side drain in
+  /// `Database.close()` so `resqliteClose(handle)` never runs while a
+  /// reader worker is still stepping over the handle.
+  Future<void> close() =>
+      Future.wait(_workers.map((slot) => slot.close()));
 }
 
 /// Manages a single worker isolate's lifecycle.
@@ -301,8 +305,20 @@ class _WorkerSlot {
     return completer.future;
   }
 
-  void close() {
+  /// Drain-then-shutdown. If a query is in flight, we wait for it to
+  /// complete before signalling the worker to exit — otherwise the
+  /// worker could still be stepping over the shared SQLite handle when
+  /// `Database.close()` frees it a few lines later.
+  Future<void> close() async {
     _closed = true;
+    final pending = _pendingCompleter;
+    if (pending != null) {
+      try {
+        await pending.future;
+      } catch (_) {
+        // We only need the completion signal; the caller handles errors.
+      }
+    }
     _sendPort?.send(null);
     _alive = false;
     _sendPort = null;

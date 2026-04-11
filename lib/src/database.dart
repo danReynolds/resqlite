@@ -577,7 +577,11 @@ final class Database {
     }
 
     _streamEngine.closeAll();
-    _readerPool?.close();
+    // Drain the reader pool: wait for any in-flight reads to return
+    // before tearing down, so resqliteClose(_handle) can't free the
+    // SQLite handle out from under a worker that's still stepping over
+    // it. Matches the writer-side drain above.
+    await _readerPool?.close();
 
     // Send CloseRequest directly, not via `_writerRequest` which now
     // rejects post-close calls. This is the one place that needs to

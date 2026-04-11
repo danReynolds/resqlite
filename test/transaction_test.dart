@@ -903,6 +903,32 @@ void main() {
     // rather than pull the writer out from under the transaction body.
     // =================================================================
 
+    test('close() drains an in-flight read before freeing the handle',
+        () async {
+      // Seed enough rows that the SELECT actually spends measurable
+      // time in C, giving close() a chance to race against the read.
+      // Without the reader-pool drain, resqliteClose(_handle) could
+      // run while the worker is still stepping over the SQLite handle,
+      // causing a use-after-free in native code.
+      final seeds = [
+        for (var i = 0; i < 5000; i++) ['row_$i'],
+      ];
+      await db.executeBatch(
+        'INSERT INTO items(name) VALUES (?)',
+        seeds,
+      );
+
+      // Kick off a read in the same synchronous turn as close.
+      final readFuture = db.select('SELECT name FROM items ORDER BY id');
+      final closeFuture = db.close();
+
+      // The read must complete successfully; close() must not return
+      // until it has.
+      final rows = await readFuture.timeout(const Duration(seconds: 5));
+      expect(rows, hasLength(5000));
+      await closeFuture.timeout(const Duration(seconds: 5));
+    });
+
     test('close() drains an in-flight transaction body', () async {
       // Start a transaction whose body intentionally awaits an external
       // completer we control. While that's yielded, call close() from
