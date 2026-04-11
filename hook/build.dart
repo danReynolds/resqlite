@@ -223,6 +223,8 @@ const _exportedSymbols = [
   'resqlite_db_status_total',
   'resqlite_writer_handle',
   'resqlite_stmt_acquire',
+  'resqlite_stmt_acquire_on',
+  'resqlite_stmt_acquire_writer',
   'resqlite_stmt_release',
   'resqlite_query_bytes',
   'resqlite_step_row',
