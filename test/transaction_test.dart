@@ -293,6 +293,44 @@ void main() {
       expect(rows[1]['name'], 'y');
     });
 
+    test('executeBatch rejects non-uniform parameter row lengths', () async {
+      // The C-level batch runner treats the flattened param array as a
+      // fixed-shape matrix (setCount × paramCount). Non-uniform rows
+      // would either silently truncate or read past the allocated buffer
+      // depending on which direction the shape drifts. Guard at the
+      // Dart layer before any native allocation.
+      expect(
+        () => db.executeBatch(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          [
+            [1, 'a'],
+            [2], // short row
+          ],
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => db.executeBatch(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          [
+            [1, 'a'],
+            [2, 'b', 'c'], // long row
+          ],
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      // Uniform rows pass.
+      await db.executeBatch(
+        'INSERT INTO items(id, name) VALUES (?, ?)',
+        [
+          [1, 'a'],
+          [2, 'b'],
+        ],
+      );
+      final rows = await db.select('SELECT id, name FROM items ORDER BY id');
+      expect(rows, hasLength(2));
+    });
+
     test('executeBatch inside nested transaction rolls back on throw', () async {
       // A batch insert inside a nested transaction that throws should
       // roll back only the nested portion.
@@ -639,6 +677,62 @@ void main() {
     // intact, rather than collapsing everything into a stringified
     // message the user cannot programmatically inspect.
     // =================================================================
+
+    // =================================================================
+    // WriteResult accuracy — affected row counts and last-insert IDs
+    // must be populated for both the parameterized and unparameterized
+    // execute paths. The unparameterized path used to hardcode zero.
+    // =================================================================
+
+    test('db.execute without parameters returns accurate affectedRows '
+        'and lastInsertId', () async {
+      // Seed with a parameterized insert so we have a known
+      // last_insert_rowid baseline.
+      final seed = await db.execute(
+        'INSERT INTO items(name) VALUES (?)',
+        ['seed'],
+      );
+      expect(seed.affectedRows, 1);
+      expect(seed.lastInsertId, greaterThan(0));
+
+      // Unparameterized INSERT — used to hit the empty-params fast
+      // path that hardcoded WriteResult(0, 0).
+      final inserted = await db.execute(
+        "INSERT INTO items(name) VALUES ('no_params')",
+      );
+      expect(inserted.affectedRows, 1);
+      expect(inserted.lastInsertId, greaterThan(seed.lastInsertId));
+
+      // Unparameterized DELETE should report the real deleted count.
+      final deleted = await db.execute(
+        "DELETE FROM items WHERE name IN ('seed', 'no_params')",
+      );
+      expect(deleted.affectedRows, 2);
+
+      // DDL: rows unaffected, but we should not crash or return negative.
+      final ddl = await db.execute('CREATE TABLE extra(id INTEGER PRIMARY KEY)');
+      expect(ddl.affectedRows, 0);
+    });
+
+    test('db.execute supports multi-statement SQL without parameters',
+        () async {
+      // The unparameterized path uses sqlite3_exec which walks the
+      // string statement-by-statement. The parameterized path only
+      // runs the first statement (sqlite3_prepare limitation). This
+      // test exists to document the distinction and prevent a
+      // refactor from collapsing the two paths.
+      await db.execute('''
+        CREATE TABLE a(id INTEGER PRIMARY KEY);
+        CREATE TABLE b(id INTEGER PRIMARY KEY);
+      ''');
+      // Both tables should exist.
+      await db.execute('INSERT INTO a(id) VALUES (1)');
+      await db.execute('INSERT INTO b(id) VALUES (1)');
+      final rowsA = await db.select('SELECT id FROM a');
+      final rowsB = await db.select('SELECT id FROM b');
+      expect(rowsA, hasLength(1));
+      expect(rowsB, hasLength(1));
+    });
 
     test('ResqliteQueryException surfaces sqliteCode for constraint '
         'violations', () async {

@@ -42,6 +42,19 @@ external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
     ffi.Pointer<ffi.Void>,
     ffi.Pointer<Utf8>,
     ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'resqlite_exec_with_result', isLeaf: true)
+external int resqliteExecWithResult(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> outResult,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
     ffi.Int,
     ffi.Pointer<ffi.Uint8>,  // resqlite_write_result* (affected_rows + last_insert_id)
   )
@@ -113,6 +126,48 @@ final class WriteResult {
   final int lastInsertId;
 }
 
+/// Execute a statement with no parameters via the direct `sqlite3_exec`
+/// path, capturing affected row count and last insert rowid.
+///
+/// Unlike [executeWrite] this supports multi-statement SQL such as
+/// `"CREATE TABLE a; CREATE INDEX ..."` which cannot be prepared in one
+/// step. The trade-off is that prepared-statement caching is bypassed —
+/// use the parameterized path for hot write statements.
+WriteResult execNoParams(ffi.Pointer<ffi.Void> dbHandle, String sql) {
+  final sqlNative = sql.toNativeUtf8();
+  try {
+    final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
+    try {
+      final rc = resqliteExecWithResult(dbHandle, sqlNative, resultBuf);
+      if (rc != 0) {
+        // Read the error message carefully — if the connection is in a
+        // bad state the pointer may be invalid.
+        String errMsg;
+        try {
+          errMsg = resqliteErrmsg(dbHandle).toDartString();
+        } catch (_) {
+          errMsg = 'unknown error';
+        }
+        throw ResqliteQueryException(
+          errMsg,
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+      final view =
+          ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
+      return WriteResult(
+        view.getInt32(_writeResultOffAffected, Endian.little),
+        view.getInt64(_writeResultOffLastId, Endian.little),
+      );
+    } finally {
+      calloc.free(resultBuf);
+    }
+  } finally {
+    calloc.free(sqlNative);
+  }
+}
+
 /// Execute a parameterized write statement. Returns affected rows + last insert ID.
 ///
 /// Uses nested try/finally so each allocation is protected by the time
@@ -166,6 +221,29 @@ WriteResult executeWrite(
   }
 }
 
+/// Validates that every row in [paramSets] has the same length. The
+/// C-level batch runner treats the flattened param array as a fixed-
+/// shape matrix (`setCount × paramCount`), so non-uniform rows either
+/// silently truncate or read past the allocated buffer depending on
+/// which direction the shape drifts.
+void _assertUniformParamSets(
+  String sql,
+  List<List<Object?>> paramSets,
+  int paramCount,
+) {
+  for (var i = 0; i < paramSets.length; i++) {
+    if (paramSets[i].length != paramCount) {
+      throw ArgumentError.value(
+        paramSets,
+        'paramSets',
+        'every row must have the same number of parameters. '
+            'Row 0 has $paramCount, row $i has ${paramSets[i].length}. '
+            'SQL: $sql',
+      );
+    }
+  }
+}
+
 /// Execute a batch: one SQL, many param sets, wrapped in a fresh
 /// BEGIN IMMEDIATE / COMMIT transaction.
 void executeBatchWrite(
@@ -175,6 +253,7 @@ void executeBatchWrite(
 ) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
+  _assertUniformParamSets(sql, paramSets, paramCount);
 
   final sqlNative = sql.toNativeUtf8();
   try {
@@ -213,6 +292,7 @@ void executeBatchWriteNested(
 ) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
+  _assertUniformParamSets(sql, paramSets, paramCount);
 
   final sqlNative = sql.toNativeUtf8();
   try {

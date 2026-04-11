@@ -215,6 +215,7 @@ const _exportedSymbols = [
   'resqlite_close',
   'resqlite_errmsg',
   'resqlite_exec',
+  'resqlite_exec_with_result',
   'resqlite_execute',
   'resqlite_run_batch',
   'resqlite_run_batch_nested',

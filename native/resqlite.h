@@ -56,6 +56,16 @@ typedef struct {
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 
+// Like resqlite_exec but also fills in affected row count and last
+// insert rowid. Enables the no-parameters execute path to return
+// accurate WriteResult fields for statements like
+// `DELETE FROM t WHERE x = 5` that don't have bound parameters.
+int resqlite_exec_with_result(
+    resqlite_db* db,
+    const char* sql,
+    resqlite_write_result* out_result
+);
+
 // Execute a parameterized write statement. Returns result info.
 int resqlite_execute(
     resqlite_db* db,

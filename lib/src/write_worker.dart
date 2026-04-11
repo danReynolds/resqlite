@@ -266,27 +266,16 @@ ErrorResponse _marshalException(ResqliteException e) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  final WriteResult result;
-  if (msg.params.isEmpty) {
-    // Fast path for DDL / simple statements: sqlite3_exec via
-    // resqlite_exec, no prepared statement or parameter marshalling.
-    final sqlNative = msg.sql.toNativeUtf8();
-    try {
-      final rc = resqliteExec(state.dbHandle, sqlNative);
-      if (rc != 0) {
-        throw ResqliteQueryException(
-          resqliteErrmsg(state.dbHandle).toDartString(),
-          sql: msg.sql,
-          sqliteCode: rc,
-        );
-      }
-    } finally {
-      calloc.free(sqlNative);
-    }
-    result = const WriteResult(0, 0);
-  } else {
-    result = executeWrite(state.dbHandle, msg.sql, msg.params);
-  }
+  // Parameterized writes use the prepared-statement cache (executeWrite).
+  // Unparameterized writes use the direct sqlite3_exec path (execNoParams)
+  // which supports multi-statement SQL like `CREATE TABLE a; CREATE INDEX`.
+  // Both paths populate affectedRows and lastInsertId from the writer
+  // connection — the empty-params path used to hardcode WriteResult(0, 0),
+  // which silently dropped the affected-row count for statements like
+  // `DELETE FROM t WHERE x = 5`.
+  final result = msg.params.isEmpty
+      ? execNoParams(state.dbHandle, msg.sql)
+      : executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
   // outermost commit harvests them.
