@@ -582,11 +582,34 @@ final class Database {
     }
 
     _streamEngine.closeAll();
+
+    // If the reader pool is still spawning, wait for it to finish so we
+    // drain a fully-live pool instead of leaking the just-spawned worker
+    // isolates. The spawn's `.then` callback is what sets `_readerPool`,
+    // so after the await the field is populated (unless spawn threw).
+    if (_readerPool == null && _readerPoolReady != null) {
+      try {
+        await _readerPoolReady;
+      } catch (_) {
+        // Spawn failed — no pool to drain.
+      }
+    }
     // Drain the reader pool: wait for any in-flight reads to return
     // before tearing down, so resqliteClose(_handle) can't free the
     // SQLite handle out from under a worker that's still stepping over
-    // it. Matches the writer-side drain above.
+    // it.
     await _readerPool?.close();
+
+    // Same story for the writer: wait for its spawn to complete before
+    // sending CloseRequest, otherwise the writer isolate lives on
+    // forever listening on a port no one can reach.
+    if (_writerPort == null && _writerReady != null) {
+      try {
+        await _writerReady;
+      } catch (_) {
+        // Spawn failed — skip the CloseRequest send.
+      }
+    }
 
     // Send CloseRequest directly, not via `_writerRequest` which now
     // rejects post-close calls. This is the one place that needs to

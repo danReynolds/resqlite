@@ -974,6 +974,32 @@ void main() {
       await closeFuture.timeout(const Duration(seconds: 2));
     });
 
+    test('close() during worker spawn waits for spawn to finish', () async {
+      // Open a second database and immediately close it before making
+      // any read or write call. The writer and reader-pool isolates are
+      // spawned lazily in the background; close() must wait for both
+      // spawns to settle before freeing the native handle, otherwise
+      // the spawned isolates would hold a Pointer to a freed SQLite
+      // connection and either leak or crash on first touch.
+      final spawnRaceDir =
+          await Directory.systemTemp.createTemp('resqlite_spawn_race_');
+      try {
+        final db2 = await Database.open('${spawnRaceDir.path}/race.db');
+        // No operations in between — the pool and writer are still
+        // spawning asynchronously when we call close().
+        await db2.close().timeout(const Duration(seconds: 5));
+        // The database is closed cleanly; subsequent operations throw.
+        expect(
+          () => db2.execute('CREATE TABLE t(id INTEGER)'),
+          throwsA(isA<ResqliteConnectionException>()),
+        );
+      } finally {
+        if (await spawnRaceDir.exists()) {
+          await spawnRaceDir.delete(recursive: true);
+        }
+      }
+    });
+
     test('close() is idempotent under concurrent callers', () async {
       // Two concurrent calls to close() should share the same
       // in-progress future. Without the _closeFuture cache, the second
