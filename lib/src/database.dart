@@ -44,6 +44,39 @@ final class Database {
   SendPort? _writerPort;
   Future<SendPort>? _writerReady;
 
+  // Write lock — ensures concurrent db.execute() / db.transaction() calls
+  // don't interleave on the writer isolate. Callers wait for the lock;
+  // the lock holder has exclusive write access until released.
+  Completer<void>? _writeLock;
+
+  /// Zone key storing the active [Transaction] when inside a transaction body.
+  /// Database methods check this to transparently route through the transaction
+  /// instead of deadlocking on the write lock.
+  static const _activeTransactionZone = #_activeTransaction;
+
+  /// Returns the active [Transaction] if called from within a transaction
+  /// body's Zone, or `null` otherwise.
+  static Transaction? get _activeTx =>
+      Zone.current[_activeTransactionZone] as Transaction?;
+
+  /// Acquires exclusive write access, runs [body], then releases the lock.
+  Future<T> _withWriteLock<T>(Future<T> Function() body) async {
+    _ensureOpen();
+    while (true) {
+      final lock = _writeLock;
+      if (lock == null) break;
+      await lock.future;
+    }
+    _writeLock = Completer<void>();
+    try {
+      return await body();
+    } finally {
+      final lock = _writeLock;
+      _writeLock = null;
+      lock?.complete();
+    }
+  }
+
   // Persistent reader pool.
   ReaderPool? _readerPool;
   Future<ReaderPool>? _readerPoolReady;
@@ -212,13 +245,16 @@ final class Database {
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
-  ]) async {
-    _ensureOpen();
-    final response = await _writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
-    return response.result;
+  ]) {
+    final tx = _activeTx;
+    if (tx != null) return tx.execute(sql, parameters);
+    return _withWriteLock(() async {
+      final response = await _writerRequest<ExecuteResponse>(
+        (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      );
+      _streamEngine.handleDirtyTables(response.dirtyTables);
+      return response.result;
+    });
   }
 
   /// Executes one SQL statement across many parameter sets in a single
@@ -240,12 +276,15 @@ final class Database {
   /// Streams watching the affected table fire once on commit, not per row.
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
-    _ensureOpen();
-    final response = await _writerRequest<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) {
+    final tx = _activeTx;
+    if (tx != null) return tx.executeBatch(sql, paramSets);
+    return _withWriteLock(() async {
+      final response = await _writerRequest<BatchResponse>(
+        (replyPort) => BatchRequest(sql, paramSets, replyPort),
+      );
+      _streamEngine.handleDirtyTables(response.dirtyTables);
+    });
   }
 
   /// Runs [body] inside a database transaction.
@@ -270,13 +309,23 @@ final class Database {
   /// Rolled-back transactions do not trigger stream re-queries.
   ///
   /// Returns the value returned by [body].
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
-    _ensureOpen();
-    await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
+    final tx = _activeTx;
+    if (tx != null) return tx.transaction(body);
+    return _withWriteLock(() => _runTransaction(body));
+  }
 
+  /// Runs a transaction without acquiring the write lock. Used by both
+  /// [transaction] (which acquires the lock first) and [Transaction.transaction]
+  /// (which already holds the lock from the outer transaction).
+  Future<T> _runTransaction<T>(Future<T> Function(Transaction tx) body) async {
+    await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
     try {
       final tx = Transaction._(this);
-      final result = await body(tx);
+      final result = await runZoned(
+        () => body(tx),
+        zoneValues: {_activeTransactionZone: tx},
+      );
       final response = await _writerRequest<BatchResponse>(
         (replyPort) => CommitRequest(replyPort),
       );
@@ -324,6 +373,8 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
+    final tx = _activeTx;
+    if (tx != null) return tx.select(sql, parameters);
     _ensureOpen();
     final pool = await _readers;
     return pool.select(sql, parameters);
@@ -427,11 +478,21 @@ final class Database {
 /// connection, so reads see uncommitted writes from earlier statements
 /// in the same transaction.
 ///
+/// Supports nested transactions via [transaction], which uses SQLite
+/// SAVEPOINTs under the hood:
+///
 /// ```dart
 /// await db.transaction((tx) async {
 ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+///
+///   // Nested transaction — uses SAVEPOINT internally.
+///   await tx.transaction((inner) async {
+///     await inner.execute('INSERT INTO users(name) VALUES (?)', ['Bob']);
+///     // Throw here to roll back only Bob's insert.
+///   });
+///
 ///   final rows = await tx.select('SELECT COUNT(*) as c FROM users');
-///   print(rows.first['c']); // includes the just-inserted row
+///   print(rows.first['c']); // includes Ada (and Bob if inner didn't throw)
 /// });
 /// ```
 ///
@@ -468,5 +529,57 @@ final class Transaction {
       (replyPort) => QueryRequest(sql, parameters, replyPort),
     );
     return response.rows;
+  }
+
+  /// Executes one SQL statement across many parameter sets within this
+  /// transaction.
+  ///
+  /// ```dart
+  /// await db.transaction((tx) async {
+  ///   await tx.executeBatch(
+  ///     'INSERT INTO users(name) VALUES (?)',
+  ///     [['Ada'], ['Grace'], ['Sonja']],
+  ///   );
+  /// });
+  /// ```
+  ///
+  /// Each parameter set is executed individually on the writer connection.
+  /// The enclosing transaction provides atomicity — no separate
+  /// BEGIN/COMMIT is needed. The SQLite statement cache prevents
+  /// re-preparation across calls with the same SQL.
+  Future<void> executeBatch(
+    String sql,
+    List<List<Object?>> paramSets,
+  ) async {
+    for (final params in paramSets) {
+      await execute(sql, params);
+    }
+  }
+
+  /// Runs [body] inside a nested transaction (SAVEPOINT).
+  ///
+  /// If [body] completes normally, the savepoint is released (changes
+  /// become part of the enclosing transaction). If [body] throws, the
+  /// savepoint is rolled back (only this nested transaction's changes
+  /// are undone) and the exception is rethrown.
+  ///
+  /// ```dart
+  /// await db.transaction((tx) async {
+  ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+  ///   try {
+  ///     await tx.transaction((inner) async {
+  ///       await inner.execute('INSERT INTO users(name) VALUES (?)', ['Bob']);
+  ///       throw StateError('oops');
+  ///     });
+  ///   } on StateError {
+  ///     // Bob's insert is rolled back; Ada's remains.
+  ///   }
+  /// });
+  /// ```
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
+    // Already holds the write lock from the outer transaction.
+    // _runTransaction sends Begin (→ SAVEPOINT) / Commit (→ RELEASE)
+    // / Rollback (→ ROLLBACK TO) to the writer isolate.
+    return _db._runTransaction(body);
   }
 }
