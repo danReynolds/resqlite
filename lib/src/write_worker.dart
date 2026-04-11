@@ -172,9 +172,16 @@ void writerEntrypoint(List<Object> args) {
           _handleQuery(dbHandle, sql, params, replyPort);
 
         case BatchRequest(:final sql, :final paramSets, :final replyPort):
-          executeBatchWrite(dbHandle, sql, paramSets);
-          final dirty = getDirtyTables(dbHandle);
-          replyPort.send(BatchResponse(dirty));
+          // Inside an open transaction (either from db.transaction or
+          // tx.transaction savepoint), skip the batch's own BEGIN/COMMIT and
+          // let dirty tables accumulate until the outer commit.
+          if (txDepth > 0) {
+            executeBatchWriteNested(dbHandle, sql, paramSets);
+            replyPort.send(const BatchResponse(<String>[]));
+          } else {
+            executeBatchWrite(dbHandle, sql, paramSets);
+            replyPort.send(BatchResponse(getDirtyTables(dbHandle)));
+          }
 
         case BeginRequest(:final replyPort):
           if (txDepth == 0) {

@@ -585,6 +585,47 @@ int resqlite_execute(
     return rc;
 }
 
+// Shared batch loop: prepare (or reuse cached) the statement, then bind+step
+// each param set. Assumes the caller holds writer_mutex and that any
+// enclosing transaction control (BEGIN/COMMIT/SAVEPOINT) is managed externally.
+// On error, leaves the statement reset and returns the sqlite error code.
+static int run_batch_locked(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+) {
+    sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
+    if (stmt) {
+        sqlite3_reset(stmt);
+    } else {
+        int rc = sqlite3_prepare_v3(
+            db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+        if (rc != SQLITE_OK) return rc;
+        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+    }
+
+    for (int i = 0; i < set_count; i++) {
+        sqlite3_reset(stmt);
+
+        int rc = bind_params(stmt, &param_sets[i * param_count], param_count);
+        if (rc != SQLITE_OK) {
+            sqlite3_reset(stmt);
+            return rc;
+        }
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+            sqlite3_reset(stmt);
+            return rc;
+        }
+    }
+
+    sqlite3_reset(stmt);
+    return SQLITE_OK;
+}
+
 int resqlite_run_batch(
     resqlite_db* db,
     const char* sql,
@@ -594,55 +635,38 @@ int resqlite_run_batch(
 ) {
     sqlite3_mutex_enter(db->writer_mutex);
 
-    // Begin transaction — IMMEDIATE acquires the write lock upfront,
-    // avoiding the lock-upgrade path since we know we're writing.
+    // BEGIN IMMEDIATE acquires the write lock upfront, avoiding the
+    // lock-upgrade path since we know we're writing.
     int rc = sqlite3_exec(db->writer, "BEGIN IMMEDIATE", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
     }
 
-    // Prepare statement once.
-    sqlite3_stmt* stmt = NULL;
-    rc = SQLITE_OK;
-    stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
-    if (stmt) {
-        sqlite3_reset(stmt);
+    rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
     } else {
-        rc = sqlite3_prepare_v3(db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
-        if (rc != SQLITE_OK) {
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
     }
 
-    // Execute for each param set.
-    for (int i = 0; i < set_count; i++) {
-        sqlite3_reset(stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
 
-        rc = bind_params(stmt, &param_sets[i * param_count], param_count);
-        if (rc != SQLITE_OK) {
-            sqlite3_reset(stmt);
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-
-        rc = sqlite3_step(stmt);
-        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-            sqlite3_reset(stmt);
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-    }
-
-    sqlite3_reset(stmt);
-
-    // Commit.
-    rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
+int resqlite_run_batch_nested(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+) {
+    // Caller owns the enclosing transaction (BEGIN IMMEDIATE or SAVEPOINT),
+    // so we do not start/commit/rollback here. On error we return the code
+    // and the Dart-level caller decides whether to ROLLBACK (top-level tx)
+    // or ROLLBACK TO a savepoint.
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
 }

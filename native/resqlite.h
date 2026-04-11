@@ -76,6 +76,19 @@ int resqlite_run_batch(
     int set_count                      // number of param sets
 );
 
+// Execute a batch inside a caller-managed transaction. Unlike resqlite_run_batch,
+// this does NOT start or commit a transaction — the caller must have already
+// opened one (BEGIN IMMEDIATE or SAVEPOINT). On error returns the sqlite code
+// without rolling back; the caller is responsible for choosing the correct
+// rollback scope (full ROLLBACK vs ROLLBACK TO savepoint).
+int resqlite_run_batch_nested(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+);
+
 // ---------------------------------------------------------------------------
 // Dirty table tracking (for stream invalidation)
 // ---------------------------------------------------------------------------

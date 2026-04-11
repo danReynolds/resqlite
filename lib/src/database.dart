@@ -47,6 +47,12 @@ final class Database {
   // Write lock — ensures concurrent db.execute() / db.transaction() calls
   // don't interleave on the writer isolate. Callers wait for the lock;
   // the lock holder has exclusive write access until released.
+  //
+  // FIFO fairness: Dart fires Future `.then` callbacks in registration order,
+  // and the single-threaded event loop guarantees that when a waiter wakes it
+  // re-registers on the new completer before any later-arriving caller can
+  // enter `_withWriteLock`. So waiters are served in arrival order and no
+  // starvation is possible.
   Completer<void>? _writeLock;
 
   /// Zone key storing the active [Transaction] when inside a transaction body.
@@ -66,6 +72,9 @@ final class Database {
       final lock = _writeLock;
       if (lock == null) break;
       await lock.future;
+      // After waking, re-check _closed so callers queued before close()
+      // don't proceed to run against a torn-down writer.
+      _ensureOpen();
     }
     _writeLock = Completer<void>();
     try {
@@ -543,17 +552,20 @@ final class Transaction {
   /// });
   /// ```
   ///
-  /// Each parameter set is executed individually on the writer connection.
-  /// The enclosing transaction provides atomicity — no separate
-  /// BEGIN/COMMIT is needed. The SQLite statement cache prevents
-  /// re-preparation across calls with the same SQL.
+  /// Runs as a single isolate round-trip: the flattened param array crosses
+  /// once, the statement is prepared (or fetched from the writer cache) once,
+  /// and bind+step is looped entirely in C. The enclosing transaction provides
+  /// atomicity — no inner BEGIN/COMMIT is issued. On error this throws, and
+  /// the enclosing scope (top-level transaction or savepoint) rolls back.
   Future<void> executeBatch(
     String sql,
     List<List<Object?>> paramSets,
   ) async {
-    for (final params in paramSets) {
-      await execute(sql, params);
-    }
+    if (paramSets.isEmpty) return;
+    await _db._writerRequest<BatchResponse>(
+      (replyPort) => BatchRequest(sql, paramSets, replyPort),
+    );
+    // Dirty tables accumulate in C until the outer commit collects them.
   }
 
   /// Runs [body] inside a nested transaction (SAVEPOINT).

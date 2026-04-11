@@ -74,6 +74,23 @@ external int resqliteRunBatch(
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_run_batch_nested', isLeaf: true)
+external int resqliteRunBatchNested(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
     ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Int,
   )
@@ -132,28 +149,55 @@ WriteResult executeWrite(ffi.Pointer<ffi.Void> dbHandle, String sql, List<Object
   }
 }
 
-/// Execute a batch: one SQL, many param sets, in a transaction.
+/// Execute a batch: one SQL, many param sets, wrapped in a fresh
+/// BEGIN IMMEDIATE / COMMIT transaction.
 void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
-) {
+) => _runBatch(dbHandle, sql, paramSets, nested: false);
+
+/// Execute a batch inside an already-open transaction (top-level or savepoint).
+/// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
+/// without issuing any rollback, so the caller can roll back at the correct
+/// scope (full ROLLBACK vs ROLLBACK TO savepoint).
+void executeBatchWriteNested(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) => _runBatch(dbHandle, sql, paramSets, nested: true);
+
+void _runBatch(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets, {
+  required bool nested,
+}) {
   if (paramSets.isEmpty) return;
 
+  final setCount = paramSets.length;
   final paramCount = paramSets.first.length;
   final sqlNative = sql.toNativeUtf8();
 
-  // Flatten all param sets into one contiguous native array.
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
+  // Flatten all param sets into one contiguous native array in a single
+  // pre-sized list — avoids the per-set growth of `List.addAll` on a
+  // default-capacity list for large batches.
+  final allParams = List<Object?>.filled(setCount * paramCount, null);
+  for (var i = 0; i < setCount; i++) {
+    final set = paramSets[i];
+    final base = i * paramCount;
+    for (var j = 0; j < paramCount; j++) {
+      allParams[base + j] = set[j];
+    }
   }
   final paramsNative = allocateParams(allParams);
 
   try {
-    final rc = resqliteRunBatch(
-      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
-    );
+    final rc = nested
+        ? resqliteRunBatchNested(
+            dbHandle, sqlNative, paramsNative, paramCount, setCount)
+        : resqliteRunBatch(
+            dbHandle, sqlNative, paramsNative, paramCount, setCount);
     if (rc != 0) {
       throw ResqliteQueryException(
         'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',

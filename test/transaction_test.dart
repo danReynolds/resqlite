@@ -211,8 +211,10 @@ void main() {
 
     test('db.executeBatch() inside a transaction routes through tx', () async {
       // Calling db.executeBatch() inside a transaction body should route
-      // through tx.executeBatch(), which loops individual executes on the
-      // writer connection. The enclosing transaction provides atomicity.
+      // through tx.executeBatch(), which sends a single BatchRequest to the
+      // writer isolate. The writer detects the active transaction and runs
+      // the batch without its own BEGIN/COMMIT — the enclosing transaction
+      // provides atomicity.
       await db.transaction((tx) async {
         await db.executeBatch(
           'INSERT INTO items(name) VALUES (?)',
