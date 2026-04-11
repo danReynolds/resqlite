@@ -632,6 +632,288 @@ void main() {
       expect(rows[0]['pid'], 1);
     });
 
+    // =================================================================
+    // Structured error propagation — the writer isolate must marshal
+    // ResqliteQueryException / ResqliteTransactionException back to the
+    // main isolate with sqliteCode, sql, parameters, and operation
+    // intact, rather than collapsing everything into a stringified
+    // message the user cannot programmatically inspect.
+    // =================================================================
+
+    test('ResqliteQueryException surfaces sqliteCode for constraint '
+        'violations', () async {
+      // UNIQUE PK violation → SQLITE_CONSTRAINT = 19.
+      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'a']);
+      try {
+        await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'b']);
+        fail('expected constraint violation');
+      } on ResqliteQueryException catch (e) {
+        expect(e.sqliteCode, 19);
+        // Message should be the raw SQLite text, not double-prefixed.
+        expect(e.message, isNot(contains('ResqliteQueryException')));
+        expect(e.message, isNot(contains('execute failed:')));
+        expect(e.sql, 'INSERT INTO items(id, name) VALUES (?, ?)');
+        expect(e.parameters, [1, 'b']);
+      }
+    });
+
+    test('ResqliteQueryException surfaces sqliteCode for batch failures',
+        () async {
+      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'seed']);
+      try {
+        await db.executeBatch(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          [
+            [2, 'a'],
+            [1, 'b'], // duplicates the seed row → constraint violation
+            [3, 'c'],
+          ],
+        );
+        fail('expected constraint violation');
+      } on ResqliteQueryException catch (e) {
+        expect(e.sqliteCode, 19);
+        expect(e.sql, 'INSERT INTO items(id, name) VALUES (?, ?)');
+      }
+
+      // Entire batch rolls back atomically → only the seed row survives.
+      final rows = await db.select('SELECT id FROM items ORDER BY id');
+      expect(rows, hasLength(1));
+      expect(rows[0]['id'], 1);
+    });
+
+    test('ResqliteTransactionException surfaces sqliteCode and operation '
+        'on commit failure', () async {
+      await db.execute('PRAGMA foreign_keys = ON');
+      await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
+      await db.execute('''
+        CREATE TABLE child(
+          id INTEGER PRIMARY KEY,
+          pid INTEGER NOT NULL,
+          FOREIGN KEY (pid) REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED
+        )
+      ''');
+
+      try {
+        await db.transaction((tx) async {
+          await tx.execute('INSERT INTO child(pid) VALUES (?)', [999]);
+        });
+        fail('expected commit failure');
+      } on ResqliteTransactionException catch (e) {
+        expect(e.operation, 'commit');
+        // SQLITE_CONSTRAINT (19) or a SQLITE_CONSTRAINT_FOREIGNKEY
+        // extended code (787). We accept either — which one SQLite
+        // returns depends on the build's extended-result-code flag.
+        expect(
+          e.sqliteCode,
+          anyOf(equals(19), equals(787)),
+          reason: 'expected SQLITE_CONSTRAINT or extended FOREIGN KEY code, '
+              'got ${e.sqliteCode}',
+        );
+      }
+    });
+
+    // =================================================================
+    // Leaked Transaction rejection — a Transaction reference carried out
+    // of the body must not silently execute against the writer.
+    // =================================================================
+
+    test('Transaction methods throw StateError after the body returns',
+        () async {
+      Transaction? leaked;
+      await db.transaction((tx) async {
+        leaked = tx;
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['ok']);
+      });
+      expect(leaked, isNotNull);
+
+      // Every entry point must reject.
+      expect(
+        () => leaked!.execute('INSERT INTO items(name) VALUES (?)', ['late']),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => leaked!.select('SELECT * FROM items'),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => leaked!.executeBatch(
+          'INSERT INTO items(name) VALUES (?)',
+          [['x'], ['y']],
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => leaked!.transaction((_) async {}),
+        throwsA(isA<StateError>()),
+      );
+
+      // And the write that ran inside the body is still the only one
+      // persisted — the leaked calls never reached SQLite.
+      final rows = await db.select('SELECT name FROM items');
+      expect(rows, hasLength(1));
+      expect(rows[0]['name'], 'ok');
+    });
+
+    test('Leaked Transaction from rollback is also rejected', () async {
+      // Even if the transaction body throws (so the outer tx rolls back),
+      // the Transaction object must still be deactivated — otherwise a
+      // leaked reference could run autocommit writes on the writer and
+      // skip stream invalidation.
+      Transaction? leaked;
+      try {
+        await db.transaction((tx) async {
+          leaked = tx;
+          throw StateError('abort');
+        });
+      } on StateError {
+        // expected
+      }
+      expect(leaked, isNotNull);
+      expect(
+        () => leaked!.execute('INSERT INTO items(name) VALUES (?)', ['late']),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    // =================================================================
+    // FIFO fairness — the write-lock comment promises arrival-order
+    // service. Assert it observationally.
+    // =================================================================
+
+    test('write lock serves concurrent writers in FIFO order', () async {
+      // Launch 10 inserts in a single synchronous turn so their arrival
+      // order on the lock is deterministic. Each inserts a name encoding
+      // its launch index, and we read them back ordered by rowid (which
+      // is the real execution order on the writer connection).
+      final futures = <Future<WriteResult>>[];
+      for (var i = 0; i < 10; i++) {
+        futures.add(
+          db.execute('INSERT INTO items(name) VALUES (?)', ['launch_$i']),
+        );
+      }
+      await Future.wait(futures);
+
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(10));
+      for (var i = 0; i < 10; i++) {
+        expect(
+          rows[i]['name'],
+          'launch_$i',
+          reason: 'row $i should be launch_$i but was ${rows[i]['name']}',
+        );
+      }
+    });
+
+    // =================================================================
+    // Close during an in-flight transaction — close() must *drain*
+    // rather than pull the writer out from under the transaction body.
+    // =================================================================
+
+    test('close() drains an in-flight transaction body', () async {
+      // Start a transaction whose body intentionally awaits an external
+      // completer we control. While that's yielded, call close() from
+      // another code path. Expectations:
+      //
+      // 1. The in-flight transaction body can still use its tx object
+      //    to issue writes after the yield — close() is waiting for
+      //    the write lock to release.
+      // 2. The transaction commits successfully.
+      // 3. close() then completes.
+      final resume = Completer<void>();
+      final txFuture = db.transaction((tx) async {
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['before']);
+        // Yield to the event loop so close() can run.
+        await resume.future;
+        // This must still work even though close() has run and set
+        // _closed=true — the writer isolate stays alive until we release
+        // the write lock.
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['after']);
+      });
+
+      // Give the transaction body a chance to park on `resume.future`.
+      await Future<void>.delayed(Duration.zero);
+
+      // Kick off close — this sets _closed and waits for the write lock.
+      final closeFuture = db.close();
+
+      // Let the body finish.
+      resume.complete();
+
+      // Both futures resolve cleanly; no hang.
+      await txFuture.timeout(const Duration(seconds: 2));
+      await closeFuture.timeout(const Duration(seconds: 2));
+    });
+
+    test('close() is idempotent under concurrent callers', () async {
+      // Two concurrent calls to close() should share the same
+      // in-progress future. Without the _closeFuture cache, the second
+      // caller would return immediately (seeing _closed=true) while the
+      // first was still mid-shutdown, causing callers that awaited the
+      // second to race with teardown.
+      final f1 = db.close();
+      final f2 = db.close();
+      final f3 = db.close();
+      await Future.wait([f1, f2, f3]).timeout(const Duration(seconds: 2));
+      // After any of them resolves, the database is closed.
+      expect(
+        () => db.execute('INSERT INTO items(name) VALUES (?)', ['late']),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+    });
+
+    // =================================================================
+    // Concurrent transactions on two independent Databases — they each
+    // have their own writer isolate and write lock, so they should run
+    // in parallel without interference.
+    // =================================================================
+
+    test('two databases run transactions concurrently without '
+        'interference', () async {
+      final dbB = await Database.open('${tempDir.path}/parallel.db');
+      await dbB.execute(
+        'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      );
+
+      try {
+        // Launch transactions on both databases in the same synchronous
+        // turn. If the write lock or Zone key leaked between instances
+        // they would interfere. With proper instance isolation each
+        // completes on its own writer.
+        final txA = db.transaction((tx) async {
+          for (var i = 0; i < 10; i++) {
+            await tx.execute(
+              'INSERT INTO items(name) VALUES (?)',
+              ['A_$i'],
+            );
+          }
+        });
+        final txB = dbB.transaction((tx) async {
+          for (var i = 0; i < 10; i++) {
+            await tx.execute(
+              'INSERT INTO items(name) VALUES (?)',
+              ['B_$i'],
+            );
+          }
+        });
+
+        await Future.wait([txA, txB]);
+
+        final rowsA = await db.select('SELECT name FROM items ORDER BY id');
+        expect(rowsA, hasLength(10));
+        for (var i = 0; i < 10; i++) {
+          expect(rowsA[i]['name'], 'A_$i');
+        }
+
+        final rowsB = await dbB.select('SELECT name FROM items ORDER BY id');
+        expect(rowsB, hasLength(10));
+        for (var i = 0; i < 10; i++) {
+          expect(rowsB[i]['name'], 'B_$i');
+        }
+      } finally {
+        await dbB.close();
+      }
+    });
+
     test('nested transaction followed by commit failure leaves writer '
         'depth at zero', () async {
       // Outer transaction with a successful inner savepoint; outer commit

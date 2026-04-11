@@ -218,19 +218,37 @@ final class Database {
     port.handler = (Object? response) {
       port.close();
       if (response is ErrorResponse) {
-        completer.completeError(
-          ResqliteQueryException(
-            response.message,
-            sql: response.sql ?? '<unknown>',
-            parameters: response.parameters,
-          ),
-        );
+        completer.completeError(_exceptionFromResponse(response));
       } else {
         completer.complete(response as T);
       }
     };
     writer.send(build(port.sendPort));
     return completer.future;
+  }
+
+  /// Reconstruct the exact [ResqliteException] subtype from the structured
+  /// fields the writer isolate marshalled over. Preserves `sqliteCode`,
+  /// `sql`, `parameters`, and `operation` so the caller sees the same
+  /// information they would have if the error had originated in-process.
+  static ResqliteException _exceptionFromResponse(ErrorResponse response) {
+    switch (response.kind) {
+      case 'query':
+        return ResqliteQueryException(
+          response.message,
+          sql: response.sql ?? '<unknown>',
+          parameters: response.parameters,
+          sqliteCode: response.sqliteCode,
+        );
+      case 'transaction':
+        return ResqliteTransactionException(
+          response.message,
+          operation: response.operation ?? 'unknown',
+          sqliteCode: response.sqliteCode,
+        );
+      default:
+        return ResqliteException(response.message);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -295,6 +313,12 @@ final class Database {
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
   Future<void> executeBatch(String sql, List<List<Object?>> paramSets) {
+    // Empty batch is a no-op — short-circuit before acquiring the write
+    // lock so we don't pay for an isolate round-trip on empty input.
+    if (paramSets.isEmpty) {
+      _ensureOpen();
+      return Future.value();
+    }
     final tx = _activeTx;
     if (tx != null) return tx.executeBatch(sql, paramSets);
     return _withWriteLock(() async {
@@ -350,13 +374,22 @@ final class Database {
   Future<T> _runTransaction<T>(Future<T> Function(Transaction tx) body) async {
     await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
 
+    final tx = Transaction._(this);
     final T result;
     try {
-      final tx = Transaction._(this);
-      result = await runZoned(
-        () => body(tx),
-        zoneValues: {_activeTransactionZone: tx},
-      );
+      try {
+        result = await runZoned(
+          () => body(tx),
+          zoneValues: {_activeTransactionZone: tx},
+        );
+      } finally {
+        // Deactivate the Transaction object as soon as body() returns
+        // (success *or* failure). If the user leaked a reference to `tx`
+        // outside the closure, subsequent calls will now throw a clear
+        // StateError instead of silently executing as autocommit writes
+        // on a stale connection.
+        tx._active = false;
+      }
     } catch (_) {
       try {
         await _writerRequest<bool>((replyPort) => RollbackRequest(replyPort));
@@ -420,6 +453,10 @@ final class Database {
     if (tx != null) return tx.select(sql, parameters);
     _ensureOpen();
     final pool = await _readers;
+    // Re-check after awaiting the pool future — close() may have run
+    // while we were parked, and dispatching into a closed pool would
+    // hit a torn-down handle.
+    _ensureOpen();
     return pool.select(sql, parameters);
   }
 
@@ -448,6 +485,7 @@ final class Database {
   ]) async {
     _ensureOpen();
     final pool = await _readers;
+    _ensureOpen();
     return pool.selectBytes(sql, parameters);
   }
 
@@ -495,18 +533,67 @@ final class Database {
   /// Closes this database, shutting down all worker isolates and releasing
   /// native resources.
   ///
-  /// All active streams are closed. Safe to call multiple times.
+  /// Semantics:
   ///
-  /// After calling [close], any further operations on this [Database]
+  /// 1. Sets the "closed" flag so every new `db.*` call throws
+  ///    [ResqliteConnectionException] on entry.
+  /// 2. *Drains* the write lock — waits for any in-flight writer
+  ///    operation (including a transaction body that is awaiting external
+  ///    work) to release. Callers queued on the write lock already re-check
+  ///    `_ensureOpen()` on wake and bail out, so only the current holder
+  ///    keeps us here. This avoids yanking the writer port out from under
+  ///    a live transaction.
+  /// 3. Closes the stream engine and reader pool.
+  /// 4. Sends `CloseRequest` directly to the writer port (bypassing
+  ///    `_writerRequest`, which rejects post-close calls) and awaits the
+  ///    writer isolate's acknowledgement.
+  /// 5. Frees the native handle.
+  ///
+  /// Safe and idempotent: concurrent or repeated calls share a single
+  /// in-progress close future, so the second caller sees the same
+  /// completion as the first instead of racing ahead.
+  ///
+  /// After `close()` resolves, any further operations on this [Database]
   /// throw a [ResqliteConnectionException].
-  Future<void> close() async {
-    if (_closed) return;
+  Future<void> close() => _closeFuture ??= _doClose();
+  Future<void>? _closeFuture;
+
+  Future<void> _doClose() async {
     _closed = true;
+
+    // Drain: wait for any in-flight writer to release the lock. Queued
+    // waiters will re-check `_ensureOpen()` on wake and throw
+    // ResqliteConnectionException, so we only block here for the current
+    // holder. If the holder is a transaction body awaiting external work,
+    // we wait for it — this matches the behaviour most database libraries
+    // have around close and avoids interrupting a commit mid-flight.
+    while (_writeLock != null) {
+      try {
+        await _writeLock!.future;
+      } catch (_) {
+        // Ignore errors from the in-flight operation; we just need to
+        // know it's done.
+      }
+    }
+
     _streamEngine.closeAll();
     _readerPool?.close();
-    if (_writerPort != null) {
-      await _writerRequest<bool>((replyPort) => CloseRequest(replyPort));
+
+    // Send CloseRequest directly, not via `_writerRequest` which now
+    // rejects post-close calls. This is the one place that needs to
+    // reach the writer after `_closed == true`.
+    final writerPort = _writerPort;
+    if (writerPort != null) {
+      final port = RawReceivePort();
+      final done = Completer<void>();
+      port.handler = (_) {
+        port.close();
+        if (!done.isCompleted) done.complete();
+      };
+      writerPort.send(CloseRequest(port.sendPort));
+      await done.future;
     }
+
     resqliteClose(_handle);
   }
 
@@ -539,6 +626,11 @@ final class Database {
 /// });
 /// ```
 ///
+/// `Transaction` instances are only valid *inside* the body passed to
+/// [Database.transaction]. Holding a reference past the end of the body
+/// and calling a method on it afterwards throws [StateError] — see the
+/// note on [execute], [select], [executeBatch], and [transaction].
+///
 /// See also:
 ///
 /// - [Database.transaction], which creates and manages this object
@@ -546,14 +638,44 @@ final class Transaction {
   Transaction._(this._db);
   final Database _db;
 
+  /// Whether this `Transaction` is still attached to a live scope.
+  ///
+  /// Set to `false` by `_runTransaction`'s finally block as soon as the
+  /// user's body function returns (successfully or not), *before* the
+  /// commit/rollback is issued. Every public method checks this flag so
+  /// that:
+  ///
+  /// 1. A reference accidentally leaked out of the body (`leaked = tx;`)
+  ///    cannot silently run writes in a different transaction's scope or
+  ///    as autocommit statements on the writer.
+  /// 2. Dirty-table notifications don't go unhandled — those would be
+  ///    dropped on the floor by `Transaction.execute`, breaking stream
+  ///    invalidation for any write routed through a leaked Transaction.
+  bool _active = true;
+
+  void _ensureActive() {
+    if (!_active) {
+      throw StateError(
+        'Transaction is no longer active. A Transaction may only be '
+        'used inside the body passed to Database.transaction() or '
+        'Transaction.transaction(). Do not hold references past the end '
+        'of the body.',
+      );
+    }
+  }
+
   /// Executes a write statement within this transaction.
   ///
   /// Same as [Database.execute], but the write is part of the enclosing
   /// transaction and only commits when the transaction completes.
+  ///
+  /// Throws [StateError] if called after the enclosing transaction body
+  /// has returned.
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
+    _ensureActive();
     final response = await _db._writerRequest<ExecuteResponse>(
       (replyPort) => ExecuteRequest(sql, parameters, replyPort),
     );
@@ -564,10 +686,14 @@ final class Transaction {
   ///
   /// This runs on the writer connection (not the reader pool) so it can
   /// see rows inserted or updated earlier in the same transaction.
+  ///
+  /// Throws [StateError] if called after the enclosing transaction body
+  /// has returned.
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
+    _ensureActive();
     final response = await _db._writerRequest<QueryResponse>(
       (replyPort) => QueryRequest(sql, parameters, replyPort),
     );
@@ -591,10 +717,14 @@ final class Transaction {
   /// and bind+step is looped entirely in C. The enclosing transaction provides
   /// atomicity — no inner BEGIN/COMMIT is issued. On error this throws, and
   /// the enclosing scope (top-level transaction or savepoint) rolls back.
+  ///
+  /// Throws [StateError] if called after the enclosing transaction body
+  /// has returned.
   Future<void> executeBatch(
     String sql,
     List<List<Object?>> paramSets,
   ) async {
+    _ensureActive();
     if (paramSets.isEmpty) return;
     await _db._writerRequest<BatchResponse>(
       (replyPort) => BatchRequest(sql, paramSets, replyPort),
@@ -622,7 +752,11 @@ final class Transaction {
   ///   }
   /// });
   /// ```
+  ///
+  /// Throws [StateError] if called after the enclosing transaction body
+  /// has returned.
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
+    _ensureActive();
     // Already holds the write lock from the outer transaction.
     // _runTransaction sends Begin (→ SAVEPOINT) / Commit (→ RELEASE)
     // / Rollback (→ ROLLBACK TO) to the writer isolate.

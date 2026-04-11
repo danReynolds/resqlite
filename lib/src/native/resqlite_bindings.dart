@@ -114,38 +114,55 @@ final class WriteResult {
 }
 
 /// Execute a parameterized write statement. Returns affected rows + last insert ID.
-WriteResult executeWrite(ffi.Pointer<ffi.Void> dbHandle, String sql, List<Object?> params) {
+///
+/// Uses nested try/finally so each allocation is protected by the time
+/// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
+/// the earlier resources are still released. Flat sequential allocation
+/// would leak on allocator failure, which is rare but real.
+WriteResult executeWrite(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<Object?> params,
+) {
   final sqlNative = sql.toNativeUtf8();
-  final paramsNative = allocateParams(params);
-  final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
   try {
-    final rc = resqliteExecute(
-      dbHandle, sqlNative, paramsNative, params.length, resultBuf,
-    );
-    if (rc != 0) {
-      // Read error message carefully — it may be invalid if the connection is in a bad state.
-      String errMsg;
+    final paramsNative = allocateParams(params);
+    try {
+      final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
       try {
-        errMsg = resqliteErrmsg(dbHandle).toDartString();
-      } catch (_) {
-        errMsg = 'unknown error';
+        final rc = resqliteExecute(
+          dbHandle, sqlNative, paramsNative, params.length, resultBuf,
+        );
+        if (rc != 0) {
+          // Read the error message carefully — if the connection is in a
+          // bad state the pointer may be invalid.
+          String errMsg;
+          try {
+            errMsg = resqliteErrmsg(dbHandle).toDartString();
+          } catch (_) {
+            errMsg = 'unknown error';
+          }
+          throw ResqliteQueryException(
+            errMsg,
+            sql: sql,
+            parameters: params,
+            sqliteCode: rc,
+          );
+        }
+        final view =
+            ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
+        return WriteResult(
+          view.getInt32(_writeResultOffAffected, Endian.little),
+          view.getInt64(_writeResultOffLastId, Endian.little),
+        );
+      } finally {
+        calloc.free(resultBuf);
       }
-      throw ResqliteQueryException(
-        'execute failed: $errMsg (code $rc)',
-        sql: sql,
-        parameters: params,
-        sqliteCode: rc,
-      );
+    } finally {
+      freeParams(paramsNative, params);
     }
-    final view = ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
-    return WriteResult(
-      view.getInt32(_writeResultOffAffected, Endian.little),
-      view.getInt64(_writeResultOffLastId, Endian.little),
-    );
   } finally {
-    freeParams(paramsNative, params);
     calloc.free(sqlNative);
-    calloc.free(resultBuf);
   }
 }
 
@@ -157,30 +174,30 @@ void executeBatchWrite(
   List<List<Object?>> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-
   final paramCount = paramSets.first.length;
+
   final sqlNative = sql.toNativeUtf8();
-
-  // Flatten all param sets into one contiguous native array.
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
-
   try {
-    final rc = resqliteRunBatch(
-      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
-    );
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
-        sql: sql,
-        sqliteCode: rc,
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatch(
+        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
       );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
     }
   } finally {
-    freeParams(paramsNative, allParams);
     calloc.free(sqlNative);
   }
 }
@@ -195,29 +212,30 @@ void executeBatchWriteNested(
   List<List<Object?>> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-
   final paramCount = paramSets.first.length;
+
   final sqlNative = sql.toNativeUtf8();
-
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
-
   try {
-    final rc = resqliteRunBatchNested(
-      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
-    );
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
-        sql: sql,
-        sqliteCode: rc,
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatchNested(
+        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
       );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
     }
   } finally {
-    freeParams(paramsNative, allParams);
     calloc.free(sqlNative);
   }
 }
