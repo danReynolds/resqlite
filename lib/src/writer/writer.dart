@@ -195,18 +195,20 @@ class Writer {
   Future<void> close() async {
     _closed = true;
 
-    // Send CloseRequest directly, not via `_writerRequest` which now
-    // rejects post-close calls. This is the one place that needs to
-    // reach the writer after `_closed == true`.
-    if (await _workerPort case SendPort workerPort) {
-      final port = RawReceivePort();
-      final done = Completer<void>();
-      port.handler = (_) {
-        port.close();
-        if (!done.isCompleted) done.complete();
-      };
-      workerPort.send(CloseRequest(port.sendPort));
-      await done.future;
-    }
+    await _mutex.run(() async {
+      // Send CloseRequest directly, not via `_writerRequest` which now
+      // rejects post-close calls. This is the one place that needs to
+      // reach the writer after `_closed == true`.
+      if (await _workerPort case SendPort workerPort) {
+        final port = RawReceivePort();
+        final done = Completer<void>();
+        port.handler = (_) {
+          port.close();
+          if (!done.isCompleted) done.complete();
+        };
+        workerPort.send(CloseRequest(port.sendPort));
+        await done.future;
+      }
+    });
   }
 }

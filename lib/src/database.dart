@@ -328,7 +328,7 @@ final class Database {
     }
 
     final writer = await _writer;
-    return writer.locked(() => execute(sql, parameters));
+    return writer.locked(() => writer.execute(sql, parameters));
   }
 
   /// Executes one SQL statement across many parameter sets in a single
