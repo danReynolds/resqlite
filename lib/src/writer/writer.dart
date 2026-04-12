@@ -91,7 +91,17 @@ class Writer {
     return completer.future;
   }
 
-  Future<T> locked<T>(Future<T> Function() body) => _mutex.run(body);
+  Future<T> locked<T>(Future<T> Function() body) async {
+    try {
+      await _mutex.lock();
+      if (_closed) {
+        throw ResqliteConnectionException('Database is closed.');
+      }
+      return await body();
+    } finally {
+      _mutex.unlock();
+    }
+  }
 
   Future<WriteResult> execute(
     String sql, [

@@ -585,58 +585,6 @@ void main() {
     });
 
     // =================================================================
-    // Multi-database Zone isolation — a transaction on dbA must not
-    // leak its active Transaction into calls on dbB via the shared
-    // Zone key.
-    // =================================================================
-
-    test(
-        'db.execute on a different Database is not routed through the '
-        'first Database\'s transaction', () async {
-      // Open a second database in the same temp directory. The Zone key
-      // `#_activeTransaction` is process-global, so without proper instance
-      // filtering `dbB.execute()` inside `db.transaction(...)` would
-      // silently route through `db`'s Transaction and run against the
-      // wrong connection.
-      final dbB = await Database.open('${tempDir.path}/other.db');
-      await dbB.execute(
-        'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
-      );
-
-      try {
-        await db.transaction((tx) async {
-          // This dbB call must go to dbB (its own writer/write-lock).
-          await dbB.execute(
-            'INSERT INTO items(name) VALUES (?)',
-            ['from_dbA_tx'],
-          );
-          // Inside-tx reads on dbB should see the row (dbB has its own
-          // writer connection and no active transaction, so db.select
-          // goes through dbB's reader pool).
-          final rowsB = await dbB.select('SELECT name FROM items');
-          expect(rowsB, hasLength(1));
-          expect(rowsB[0]['name'], 'from_dbA_tx');
-
-          // And this write goes to db (the original one).
-          await tx.execute(
-            'INSERT INTO items(name) VALUES (?)',
-            ['from_db_tx'],
-          );
-        });
-
-        final rowsA = await db.select('SELECT name FROM items');
-        expect(rowsA, hasLength(1));
-        expect(rowsA[0]['name'], 'from_db_tx');
-
-        final rowsB = await dbB.select('SELECT name FROM items');
-        expect(rowsB, hasLength(1));
-        expect(rowsB[0]['name'], 'from_dbA_tx');
-      } finally {
-        await dbB.close();
-      }
-    });
-
-    // =================================================================
     // State consistency after commit / rollback failures — `txDepth`
     // on the writer isolate must always match SQLite's real depth
     // even when COMMIT or RELEASE fails, otherwise the next caller

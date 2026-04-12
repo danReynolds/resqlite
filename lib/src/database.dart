@@ -47,7 +47,7 @@ final class Database {
   late final Future<ReaderPool> _readerPool;
 
   final ffi.Pointer<ffi.Void> _handle;
-  bool _closed = false;
+  Completer<void>? _closedCompleter = null;
 
   // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
   late final StreamEngine _streamEngine = StreamEngine(() => _readerPool);
@@ -69,7 +69,8 @@ final class Database {
   // -------------------------------------------------------------------------
 
   void _ensureOpen() {
-    if (_closed) throw ResqliteConnectionException('Database is closed.');
+    if (_closedCompleter != null)
+      throw ResqliteConnectionException('Database is closed.');
   }
 
   /// Opens or creates a SQLite database at [path].
@@ -154,11 +155,11 @@ final class Database {
   /// After `close()` resolves, any further operations on this [Database]
   /// throw a [ResqliteConnectionException].
   Future<void> close() async {
-    if (_closed) {
-      return;
+    if (_closedCompleter case Completer<void> completer) {
+      return completer.future;
     }
 
-    _closed = true;
+    final completer = _closedCompleter = Completer();
 
     final (writer, readerPool) = await (_writer, _readerPool).wait;
 
@@ -168,6 +169,8 @@ final class Database {
     await writer.close();
 
     resqliteClose(_handle);
+
+    completer.complete();
   }
 
   // -------------------------------------------------------------------------

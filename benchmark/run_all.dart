@@ -419,12 +419,17 @@ String _generateComparison(
       math.max(prev, curr) * (thresholdPct / 100),
     );
 
+    // For most metrics lower is better (ms), but for throughput metrics
+    // (qps) higher is better — invert the comparison.
+    final higherIsBetter = key.contains('qps');
+    final improvementDelta = higherIsBetter ? -delta : delta;
+
     String status;
-    if (delta < -thresholdMs) {
+    if (improvementDelta < -thresholdMs) {
       status = '🟢 Win (${pct.toStringAsFixed(0)}%)';
       wins++;
-    } else if (delta > thresholdMs) {
-      status = '🔴 Regression (+${pct.toStringAsFixed(0)}%)';
+    } else if (improvementDelta > thresholdMs) {
+      status = '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
       regressions++;
     } else {
       status = stats.runs.length > 1
