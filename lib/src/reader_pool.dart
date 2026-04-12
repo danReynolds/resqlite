@@ -10,7 +10,6 @@ import 'dart:typed_data';
 
 import 'exceptions.dart';
 import 'read_worker.dart';
-import 'row.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
 ///
@@ -63,16 +62,9 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final (result, sacrificed) = await _dispatch(
+    final result = await _dispatch(
       (replyPort) => SelectRequest(replyPort, sql, parameters),
     );
-    if (sacrificed) {
-      // Sacrifice path sends raw components (primitives only) to avoid
-      // Isolate.exit serialization issues. Reconstruct ResultSet here.
-      final (values, columns, rowCount) =
-          result as (List<Object?>, List<String>, int);
-      return ResultSet(values, RowSchema(columns), rowCount);
-    }
     return result as List<Map<String, Object?>>;
   }
 
@@ -81,18 +73,9 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final (result, sacrificed) = await _dispatch(
+    final result = await _dispatch(
       (replyPort) => SelectWithDepsRequest(replyPort, sql, parameters),
     );
-    if (sacrificed) {
-      final (values, columns, rowCount, readTables) =
-          result as (List<Object?>, List<String>, int, List<String>);
-      return (
-        ResultSet(values, RowSchema(columns), rowCount)
-            as List<Map<String, Object?>>,
-        readTables,
-      );
-    }
     return result as (List<Map<String, Object?>>, List<String>);
   }
 
@@ -101,7 +84,7 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final (result, _) = await _dispatch(
+    final result = await _dispatch(
       (replyPort) => SelectBytesRequest(replyPort, sql, parameters),
     );
     return result as Uint8List;
@@ -114,26 +97,16 @@ final class ReaderPool {
     List<Object?> parameters,
     int lastResultHash,
   ) async {
-    final (result, sacrificed) = await _dispatch(
+    final result = await _dispatch(
       (replyPort) => SelectIfChangedRequest(
         replyPort, sql, parameters, lastResultHash,
       ),
     );
-    if (sacrificed) {
-      final (hash, values, columns, rowCount) =
-          result as (int, List<Object?>, List<String>, int);
-      return (
-        ResultSet(values, RowSchema(columns), rowCount)
-            as List<Map<String, Object?>>?,
-        hash,
-      );
-    }
     final (hash, rows) = result as (int, List<Map<String, Object?>>?);
     return (rows, hash);
   }
 
-  /// Returns (result, sacrificed) — callers reconstruct typed results.
-  Future<(Object?, bool)> _dispatch(
+  Future<Object?> _dispatch(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) async {
     // Fail fast on a closed pool so a caller who slipped past the
@@ -278,7 +251,7 @@ class _WorkerSlot {
       if (error != null) {
         pending?.completeError(StateError(error));
       } else {
-        pending?.complete((result, true));
+        pending?.complete(result);
       }
       if (!_closed) unawaited(spawn(_dbHandleAddr));
       // Don't _notifyPool here — wait for spawn to complete.
@@ -295,7 +268,7 @@ class _WorkerSlot {
     _notifyPool();
   }
 
-  Future<(Object?, bool)> request(
+  Future<Object?> request(
     ReadRequest Function(SendPort replyPort) buildRequest,
   ) {
     final port = _sendPort;
@@ -303,7 +276,7 @@ class _WorkerSlot {
 
     _busy = true;
     final replyPort = RawReceivePort();
-    final completer = Completer<(Object?, bool)>.sync();
+    final completer = Completer<Object?>.sync();
 
     _pendingCompleter = completer;
     _pendingReplyPort = replyPort;
@@ -325,7 +298,7 @@ class _WorkerSlot {
 
       _busy = false;
       _notifyPool();
-      completer.complete((result, false));
+      completer.complete(result);
     };
 
     port.send(buildRequest(replyPort.sendPort));

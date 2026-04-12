@@ -266,16 +266,11 @@ ErrorResponse _marshalException(ResqliteException e) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  // Parameterized writes use the prepared-statement cache (executeWrite).
-  // Unparameterized writes use the direct sqlite3_exec path (execNoParams)
-  // which supports multi-statement SQL like `CREATE TABLE a; CREATE INDEX`.
-  // Both paths populate affectedRows and lastInsertId from the writer
-  // connection — the empty-params path used to hardcode WriteResult(0, 0),
-  // which silently dropped the affected-row count for statements like
-  // `DELETE FROM t WHERE x = 5`.
-  final result = msg.params.isEmpty
-      ? execNoParams(state.dbHandle, msg.sql)
-      : executeWrite(state.dbHandle, msg.sql, msg.params);
+  // All writes go through executeWrite → resqlite_execute, which uses the
+  // prepared-statement cache for single-statement SQL and automatically
+  // falls back to sqlite3_exec for multi-statement SQL (detected via
+  // pzTail from sqlite3_prepare_v3).
+  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
   // outermost commit harvests them.

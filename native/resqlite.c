@@ -530,42 +530,21 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
     return rc;
 }
 
-// Like resqlite_exec but also captures affected row count and
-// last-insert rowid from the writer connection. Used for the
-// no-parameters fast path on `Database.execute` so callers get
-// accurate WriteResult fields for multi-statement DDL/DML.
-//
-// sqlite3_changes and sqlite3_last_insert_rowid are per-connection
-// state that must be read while holding the writer mutex to match the
-// exec call — otherwise a concurrent writer call could clobber them
-// between the exec and the read. (In practice only the writer isolate
-// touches this connection, but the defensive mutex keeps the contract
-// consistent with resqlite_execute.)
-int resqlite_exec_with_result(
-    resqlite_db* db,
-    const char* sql,
-    resqlite_write_result* out_result
-) {
-    sqlite3_mutex_enter(db->writer_mutex);
-    int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
-    if (out_result) {
-        out_result->affected_rows = sqlite3_changes(db->writer);
-        out_result->last_insert_id = sqlite3_last_insert_rowid(db->writer);
-    }
-    sqlite3_mutex_leave(db->writer_mutex);
-    return rc;
-}
-
 static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
-                                            int sql_len, int* out_rc) {
+                                            int sql_len, int* out_rc,
+                                            const char** out_tail) {
     sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, sql_len);
     if (stmt) {
         sqlite3_reset(stmt);
         *out_rc = SQLITE_OK;
+        // Cached statements are always single-statement (multi-statement SQL
+        // is never prepared via this function), so signal "no trailing SQL".
+        *out_tail = sql + sql_len;
         return stmt;
     }
 
-    int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+    int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT,
+                                &stmt, out_tail);
     if (rc != SQLITE_OK) {
         *out_rc = rc;
         return NULL;
@@ -586,12 +565,39 @@ int resqlite_execute(
     sqlite3_mutex_enter(db->writer_mutex);
 
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    const char* tail = NULL;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
+                                               &tail);
     if (!stmt) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
     }
 
+    // Detect multi-statement SQL via pzTail. Skip whitespace and bare
+    // semicolons — only real SQL text beyond the first statement counts.
+    if (tail && param_count == 0) {
+        const char* p = tail;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'
+               || *p == ';') p++;
+        if (*p != '\0') {
+            // Multi-statement SQL with no parameters: fall back to
+            // sqlite3_exec which walks the full string statement-by-
+            // statement. The prepared stmt stays in the cache harmlessly
+            // (it covers just the first statement).
+            sqlite3_reset(stmt);
+            rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
+            if (out_result) {
+                out_result->affected_rows = sqlite3_changes(db->writer);
+                out_result->last_insert_id =
+                    sqlite3_last_insert_rowid(db->writer);
+            }
+            sqlite3_mutex_leave(db->writer_mutex);
+            return rc;
+        }
+    }
+
+    // Single statement (or multi-statement with params — existing
+    // behavior: only the first statement executes via prepare).
     rc = bind_params(stmt, params, param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
@@ -977,7 +983,9 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
     int param_count
 ) {
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    const char* tail;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
+                                               &tail);
     if (!stmt) return NULL;
 
     rc = bind_params(stmt, params, param_count);
