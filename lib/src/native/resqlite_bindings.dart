@@ -12,7 +12,9 @@ import '../exceptions.dart';
 // C-level connection handle
 // ---------------------------------------------------------------------------
 
-@ffi.Native<ffi.Pointer<ffi.Void> Function(ffi.Pointer<Utf8>, ffi.Int, ffi.Pointer<Utf8>)>(
+@ffi.Native<
+    ffi.Pointer<ffi.Void> Function(
+        ffi.Pointer<Utf8>, ffi.Int, ffi.Pointer<Utf8>)>(
   symbol: 'resqlite_open',
   isLeaf: true,
 )
@@ -22,7 +24,8 @@ external ffi.Pointer<ffi.Void> resqliteOpen(
   ffi.Pointer<Utf8> encryptionKeyHex,
 );
 
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(symbol: 'resqlite_close', isLeaf: true)
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+    symbol: 'resqlite_close', isLeaf: true)
 external void resqliteClose(ffi.Pointer<ffi.Void> db);
 
 @ffi.Native<ffi.Pointer<Utf8> Function(ffi.Pointer<ffi.Void>)>(
@@ -38,14 +41,14 @@ external ffi.Pointer<Utf8> resqliteErrmsg(ffi.Pointer<ffi.Void> db);
 external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Pointer<ffi.Uint8>,  // resqlite_write_result* (affected_rows + last_insert_id)
-  )
->(symbol: 'resqlite_execute', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Pointer<
+          ffi.Uint8>, // resqlite_write_result* (affected_rows + last_insert_id)
+    )>(symbol: 'resqlite_execute', isLeaf: true)
 external int resqliteExecute(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<Utf8> sql,
@@ -55,14 +58,13 @@ external int resqliteExecute(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Int,
-  )
->(symbol: 'resqlite_run_batch', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Int,
+    )>(symbol: 'resqlite_run_batch', isLeaf: true)
 external int resqliteRunBatch(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<Utf8> sql,
@@ -72,14 +74,13 @@ external int resqliteRunBatch(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Int,
-  )
->(symbol: 'resqlite_run_batch_nested', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Int,
+    )>(symbol: 'resqlite_run_batch_nested', isLeaf: true)
 external int resqliteRunBatchNested(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<Utf8> sql,
@@ -89,12 +90,11 @@ external int resqliteRunBatchNested(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_dirty_tables', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Int,
+    )>(symbol: 'resqlite_get_dirty_tables', isLeaf: true)
 external int resqliteGetDirtyTables(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Pointer<Utf8>> outTables,
@@ -131,7 +131,11 @@ WriteResult executeWrite(
       final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
       try {
         final rc = resqliteExecute(
-          dbHandle, sqlNative, paramsNative, params.length, resultBuf,
+          dbHandle,
+          sqlNative,
+          paramsNative,
+          params.length,
+          resultBuf,
         );
         if (rc != 0) {
           // Read the error message carefully — if the connection is in a
@@ -214,7 +218,11 @@ void executeBatchWrite(
     final paramsNative = allocateParams(allParams);
     try {
       final rc = resqliteRunBatch(
-        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
+        dbHandle,
+        sqlNative,
+        paramsNative,
+        paramCount,
+        paramSets.length,
       );
       if (rc != 0) {
         throw ResqliteQueryException(
@@ -235,7 +243,7 @@ void executeBatchWrite(
 /// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
 /// without issuing any rollback, so the caller can roll back at the correct
 /// scope (full ROLLBACK vs ROLLBACK TO savepoint).
-void executeBatchWriteNested(
+void executeNestedBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
@@ -252,7 +260,11 @@ void executeBatchWriteNested(
     final paramsNative = allocateParams(allParams);
     try {
       final rc = resqliteRunBatchNested(
-        dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
+        dbHandle,
+        sqlNative,
+        paramsNative,
+        paramCount,
+        paramSets.length,
       );
       if (rc != 0) {
         throw ResqliteQueryException(
@@ -289,13 +301,12 @@ List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_read_tables', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Int,
+    )>(symbol: 'resqlite_get_read_tables', isLeaf: true)
 external int resqliteGetReadTables(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -304,14 +315,13 @@ external int resqliteGetReadTables(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Int,
-    ffi.Pointer<ffi.Int>,
-    ffi.Pointer<ffi.Int>,
-  )
->(symbol: 'resqlite_db_status_total', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Int,
+      ffi.Pointer<ffi.Int>,
+      ffi.Pointer<ffi.Int>,
+    )>(symbol: 'resqlite_db_status_total', isLeaf: true)
 external int resqliteDbStatusTotal(
   ffi.Pointer<ffi.Void> db,
   int op,
@@ -376,7 +386,8 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
   final buf = calloc<ffi.Uint8>(_paramStructSize * params.length);
-  final view = buf.cast<ffi.Uint8>().asTypedList(_paramStructSize * params.length);
+  final view =
+      buf.cast<ffi.Uint8>().asTypedList(_paramStructSize * params.length);
   final byteData = ByteData.sublistView(view);
 
   for (var i = 0; i < params.length; i++) {
@@ -434,16 +445,15 @@ void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> params) {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-    ffi.Pointer<ffi.Int>,
-  )
->(symbol: 'resqlite_query_bytes', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.Int>,
+    )>(symbol: 'resqlite_query_bytes', isLeaf: true)
 external int resqliteQueryBytes(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -454,7 +464,8 @@ external int resqliteQueryBytes(
   ffi.Pointer<ffi.Int> outLen,
 );
 
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(symbol: 'resqlite_free', isLeaf: true)
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+    symbol: 'resqlite_free', isLeaf: true)
 external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 
 // ---------------------------------------------------------------------------
@@ -475,7 +486,13 @@ NativeBuffer queryBytes(
   final pLen = calloc<ffi.Int>();
   try {
     final rc = resqliteQueryBytes(
-      dbHandle, readerId, sqlNative, paramsNative, params.length, pBuf, pLen,
+      dbHandle,
+      readerId,
+      sqlNative,
+      paramsNative,
+      params.length,
+      pBuf,
+      pLen,
     );
     if (rc != 0) {
       final bufPtr = pBuf.value;

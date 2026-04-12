@@ -1,4 +1,7 @@
-part of 'package:resqlite/resqlite.dart';
+import 'dart:async';
+
+import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/writer/writer.dart';
 
 /// A transaction proxy object for executing writes and reads atomically.
 ///
@@ -24,11 +27,21 @@ part of 'package:resqlite/resqlite.dart';
 /// });
 /// ```
 final class Transaction {
-  Transaction._(this._db);
-  final Database _db;
+  final Writer _writer;
 
-  /// Whether this `Transaction` is still attached to a live scope.
   bool _active = true;
+
+  Transaction(this._writer);
+
+  /// Zone key storing the active [Transaction] when inside a transaction body.
+  /// Database methods check this to transparently route through the transaction
+  /// instead of deadlocking on the write lock.
+  static const currentZoneKey = #_activeTransaction;
+
+  /// Returns the current [Transaction] if any.
+  static Transaction? get current {
+    return Zone.current[currentZoneKey] as Transaction?;
+  }
 
   void _ensureActive() {
     if (!_active) {
@@ -53,10 +66,7 @@ final class Transaction {
     List<Object?> parameters = const [],
   ]) async {
     _ensureActive();
-    final response = await _db._writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
-    return response.result;
+    return _writer.execute(sql, parameters);
   }
 
   /// Executes a query within this transaction, seeing uncommitted writes.
@@ -71,10 +81,7 @@ final class Transaction {
     List<Object?> parameters = const [],
   ]) async {
     _ensureActive();
-    final response = await _db._writerRequest<QueryResponse>(
-      (replyPort) => QueryRequest(sql, parameters, replyPort),
-    );
-    return response.rows;
+    return _writer.select(sql, parameters);
   }
 
   /// Executes one SQL statement across many parameter sets within this
@@ -102,11 +109,7 @@ final class Transaction {
     List<List<Object?>> paramSets,
   ) async {
     _ensureActive();
-    if (paramSets.isEmpty) return;
-    assertUniformParamSets(sql, paramSets);
-    await _db._writerRequest<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
-    );
+    await _writer.executeBatch(sql, paramSets);
   }
 
   /// Initiates a nested transaction as a new savepoint. If [body] completes normally,
@@ -129,6 +132,10 @@ final class Transaction {
   /// ```
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
     _ensureActive();
-    return _db._runTransaction(body);
+    return _writer.transaction(body);
+  }
+
+  void close() {
+    _active = false;
   }
 }

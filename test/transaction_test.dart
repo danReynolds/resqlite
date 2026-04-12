@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/transaction.dart';
 import 'package:test/test.dart';
 
 /// Deterministic stream probe — avoids timing-sensitive Future.delayed waits.
@@ -11,8 +12,7 @@ final class _StreamProbe<T> {
   _StreamProbe(Stream<T> stream) {
     _subscription = stream.listen((event) {
       _events.add(event);
-      final ready =
-          _waiters.where((w) => w.count <= _events.length).toList();
+      final ready = _waiters.where((w) => w.count <= _events.length).toList();
       for (final w in ready) {
         _waiters.remove(w);
         if (!w.completer.isCompleted) {
@@ -153,7 +153,8 @@ void main() {
       expect(rows, hasLength(2));
     });
 
-    test('close() during contention rejects queued writers without '
+    test(
+        'close() during contention rejects queued writers without '
         'hanging', () async {
       // Exercises the _ensureOpen() re-check inside _withWriteLock that
       // wakes after an awaited lock completes. Without it, writers queued
@@ -263,7 +264,11 @@ void main() {
       await db.transaction((tx) async {
         await db.executeBatch(
           'INSERT INTO items(name) VALUES (?)',
-          [['a'], ['b'], ['c']],
+          [
+            ['a'],
+            ['b'],
+            ['c']
+          ],
         );
         // All three should be visible within the transaction.
         final rows = await tx.select('SELECT name FROM items ORDER BY id');
@@ -283,7 +288,10 @@ void main() {
       await db.transaction((tx) async {
         await tx.executeBatch(
           'INSERT INTO items(name) VALUES (?)',
-          [['x'], ['y']],
+          [
+            ['x'],
+            ['y']
+          ],
         );
       });
 
@@ -331,7 +339,8 @@ void main() {
       expect(rows, hasLength(2));
     });
 
-    test('executeBatch inside nested transaction rolls back on throw', () async {
+    test('executeBatch inside nested transaction rolls back on throw',
+        () async {
       // A batch insert inside a nested transaction that throws should
       // roll back only the nested portion.
       await db.transaction((tx) async {
@@ -341,7 +350,10 @@ void main() {
           await tx.transaction((inner) async {
             await inner.executeBatch(
               'INSERT INTO items(name) VALUES (?)',
-              [['inner_a'], ['inner_b']],
+              [
+                ['inner_a'],
+                ['inner_b']
+              ],
             );
             throw StateError('rollback inner');
           });
@@ -415,7 +427,8 @@ void main() {
       expect(rows[0]['name'], 'outer');
     });
 
-    test('outer rollback undoes everything including committed inner', () async {
+    test('outer rollback undoes everything including committed inner',
+        () async {
       // The inner transaction commits (RELEASE SAVEPOINT), but then the
       // outer transaction throws — ROLLBACK undoes all changes including
       // the inner's.
@@ -577,7 +590,8 @@ void main() {
     // Zone key.
     // =================================================================
 
-    test('db.execute on a different Database is not routed through the '
+    test(
+        'db.execute on a different Database is not routed through the '
         'first Database\'s transaction', () async {
       // Open a second database in the same temp directory. The Zone key
       // `#_activeTransaction` is process-global, so without proper instance
@@ -684,7 +698,8 @@ void main() {
     // execute paths. The unparameterized path used to hardcode zero.
     // =================================================================
 
-    test('db.execute without parameters returns accurate affectedRows '
+    test(
+        'db.execute without parameters returns accurate affectedRows '
         'and lastInsertId', () async {
       // Seed with a parameterized insert so we have a known
       // last_insert_rowid baseline.
@@ -738,7 +753,8 @@ void main() {
       expect(rowsB, hasLength(1));
     });
 
-    test('ResqliteQueryException surfaces sqliteCode for constraint '
+    test(
+        'ResqliteQueryException surfaces sqliteCode for constraint '
         'violations', () async {
       // UNIQUE PK violation → SQLITE_CONSTRAINT = 19.
       await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'a']);
@@ -757,7 +773,8 @@ void main() {
 
     test('ResqliteQueryException surfaces sqliteCode for batch failures',
         () async {
-      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'seed']);
+      await db
+          .execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'seed']);
       try {
         await db.executeBatch(
           'INSERT INTO items(id, name) VALUES (?, ?)',
@@ -779,7 +796,8 @@ void main() {
       expect(rows[0]['id'], 1);
     });
 
-    test('ResqliteTransactionException surfaces sqliteCode and operation '
+    test(
+        'ResqliteTransactionException surfaces sqliteCode and operation '
         'on commit failure', () async {
       await db.execute('PRAGMA foreign_keys = ON');
       await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
@@ -836,7 +854,10 @@ void main() {
       expect(
         () => leaked!.executeBatch(
           'INSERT INTO items(name) VALUES (?)',
-          [['x'], ['y']],
+          [
+            ['x'],
+            ['y']
+          ],
         ),
         throwsA(isA<StateError>()),
       );
@@ -1023,7 +1044,8 @@ void main() {
     // in parallel without interference.
     // =================================================================
 
-    test('two databases run transactions concurrently without '
+    test(
+        'two databases run transactions concurrently without '
         'interference', () async {
       final dbB = await Database.open('${tempDir.path}/parallel.db');
       await dbB.execute(
@@ -1070,7 +1092,8 @@ void main() {
       }
     });
 
-    test('nested transaction followed by commit failure leaves writer '
+    test(
+        'nested transaction followed by commit failure leaves writer '
         'depth at zero', () async {
       // Outer transaction with a successful inner savepoint; outer commit
       // fails at deferred FK check time. This exercises the full depth-0

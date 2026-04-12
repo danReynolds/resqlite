@@ -12,10 +12,10 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
-import 'native/resqlite_bindings.dart';
-import 'query_decoder.dart';
-import 'result_hash.dart';
-import 'row.dart';
+import '../native/resqlite_bindings.dart';
+import '../query_decoder.dart';
+import '../result_hash.dart';
+import '../row.dart';
 
 // ---------------------------------------------------------------------------
 // Request types — sent from pool to worker via SendPort

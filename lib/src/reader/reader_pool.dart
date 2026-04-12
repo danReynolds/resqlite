@@ -8,7 +8,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'exceptions.dart';
+import '../exceptions.dart';
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -46,6 +46,7 @@ final class ReaderPool {
     );
     await Future.wait(slots.map((s) => s.spawn(dbHandleAddr)));
     pool._workers.addAll(slots);
+
     return pool;
   }
 
@@ -99,7 +100,10 @@ final class ReaderPool {
   ) async {
     final result = await _dispatch(
       (replyPort) => SelectIfChangedRequest(
-        replyPort, sql, parameters, lastResultHash,
+        replyPort,
+        sql,
+        parameters,
+        lastResultHash,
       ),
     );
     final (hash, rows) = result as (int, List<Map<String, Object?>>?);

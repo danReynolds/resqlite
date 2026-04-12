@@ -12,10 +12,10 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-import 'exceptions.dart';
-import 'native/resqlite_bindings.dart';
-import 'query_decoder.dart';
-import 'row.dart';
+import '../exceptions.dart';
+import '../native/resqlite_bindings.dart';
+import '../query_decoder.dart';
+import '../row.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -266,17 +266,12 @@ ErrorResponse _marshalException(ResqliteException e) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  // All writes go through executeWrite → resqlite_execute, which uses the
-  // prepared-statement cache for single-statement SQL and automatically
-  // falls back to sqlite3_exec for multi-statement SQL (detected via
-  // pzTail from sqlite3_prepare_v3).
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
-  // outermost commit harvests them.
-  final dirty = state.txDepth > 0
-      ? const <String>[]
-      : getDirtyTables(state.dbHandle);
+  // outermost transaction completes.
+  final dirty =
+      state.txDepth > 0 ? const <String>[] : getDirtyTables(state.dbHandle);
   msg.replyPort.send(ExecuteResponse(result, dirty));
 }
 
@@ -284,7 +279,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    executeBatchWriteNested(state.dbHandle, msg.sql, msg.paramSets);
+    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     msg.replyPort.send(const BatchResponse(<String>[]));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);

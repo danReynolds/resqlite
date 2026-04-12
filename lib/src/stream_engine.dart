@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'reader_pool.dart';
+import 'reader/reader_pool.dart';
 import 'result_hash.dart';
 
 /// Stream engine — reactive query lifecycle.
@@ -84,7 +84,7 @@ final class StreamEngine {
   }
 
   /// Close all streams and clear state.
-  void closeAll() {
+  void close() {
     for (final entry in _entries.values) {
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.close();
@@ -127,43 +127,41 @@ final class StreamEngine {
     final generationBefore = _writeGeneration;
 
     // Run initial query on the reader pool to discover read tables.
-    _pool()
-        .then((pool) => pool.selectWithDeps(sql, params))
-        .then(
-          (result) {
-            if (entry.subscribers.isEmpty) {
-              return; // cancelled before query finished
-            }
+    _pool().then((pool) => pool.selectWithDeps(sql, params)).then(
+      (result) {
+        if (entry.subscribers.isEmpty) {
+          return; // cancelled before query finished
+        }
 
-            final initialRows = result.$1;
-            final readTables = result.$2;
+        final initialRows = result.$1;
+        final readTables = result.$2;
 
-            // Set real read tables so future writes trigger invalidation.
-            _updateReadTables(key, readTables);
-            entry.lastResult = initialRows;
-            entry.lastResultHash = _hashResult(initialRows);
+        // Set real read tables so future writes trigger invalidation.
+        _updateReadTables(key, readTables);
+        entry.lastResult = initialRows;
+        entry.lastResultHash = _hashResult(initialRows);
 
-            // Push initial result to all subscribers.
-            for (final sub in entry.subscribers) {
-              if (!sub.isClosed) sub.add(initialRows);
-            }
+        // Push initial result to all subscribers.
+        for (final sub in entry.subscribers) {
+          if (!sub.isClosed) sub.add(initialRows);
+        }
 
-            // If a write happened while the initial query was in-flight,
-            // the data may be stale. Re-query to catch up. The hash check
-            // in _emitResult suppresses the emission if data is unchanged.
-            if (_writeGeneration != generationBefore) {
-              entry.reQueryGeneration++;
-              unawaited(_reQuery(entry, entry.reQueryGeneration));
-            }
-          },
-          onError: (Object error) {
-            // Propagate error to all subscribers so they don't hang.
-            for (final sub in entry.subscribers) {
-              if (!sub.isClosed) sub.addError(error);
-            }
-            _remove(key);
-          },
-        );
+        // If a write happened while the initial query was in-flight,
+        // the data may be stale. Re-query to catch up. The hash check
+        // in _emitResult suppresses the emission if data is unchanged.
+        if (_writeGeneration != generationBefore) {
+          entry.reQueryGeneration++;
+          unawaited(_reQuery(entry, entry.reQueryGeneration));
+        }
+      },
+      onError: (Object error) {
+        // Propagate error to all subscribers so they don't hang.
+        for (final sub in entry.subscribers) {
+          if (!sub.isClosed) sub.addError(error);
+        }
+        _remove(key);
+      },
+    );
 
     return subscriberStream;
   }
@@ -177,7 +175,9 @@ final class StreamEngine {
     try {
       final pool = await _pool();
       final (rows, newHash) = await pool.selectIfChanged(
-        entry.sql, entry.params, entry.lastResultHash,
+        entry.sql,
+        entry.params,
+        entry.lastResultHash,
       );
       // Discard if a newer re-query was dispatched while we were running.
       if (entry.reQueryGeneration != generation) return;

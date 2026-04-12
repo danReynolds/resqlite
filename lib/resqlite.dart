@@ -1,6 +1,6 @@
 library;
 
-export 'src/database.dart' show Database, Transaction;
+export 'src/database.dart' show Database;
 export 'src/exceptions.dart'
     show
         ResqliteConnectionException,
