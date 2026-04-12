@@ -132,26 +132,6 @@ final class Database {
   /// Closes this database, shutting down all worker isolates and releasing
   /// native resources.
   ///
-  /// Semantics:
-  ///
-  /// 1. Sets the "closed" flag so every new `db.*` call throws
-  ///    [ResqliteConnectionException] on entry.
-  /// 2. *Drains* the write lock — waits for any in-flight writer
-  ///    operation (including a transaction body that is awaiting external
-  ///    work) to release. Callers queued on the write lock already re-check
-  ///    `_ensureOpen()` on wake and bail out, so only the current holder
-  ///    keeps us here. This avoids yanking the writer port out from under
-  ///    a live transaction.
-  /// 3. Closes the stream engine and reader pool.
-  /// 4. Sends `CloseRequest` directly to the writer port (bypassing
-  ///    `_writerRequest`, which rejects post-close calls) and awaits the
-  ///    writer isolate's acknowledgement.
-  /// 5. Frees the native handle.
-  ///
-  /// Safe and idempotent: concurrent or repeated calls share a single
-  /// in-progress close future, so the second caller sees the same
-  /// completion as the first instead of racing ahead.
-  ///
   /// After `close()` resolves, any further operations on this [Database]
   /// throw a [ResqliteConnectionException].
   Future<void> close() async {

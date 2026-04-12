@@ -8,7 +8,7 @@ import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/transaction.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
-class Writer {
+final class Writer {
   final StreamEngine _streamEngine;
 
   final _workerPort = Completer<SendPort>();
@@ -43,10 +43,6 @@ class Writer {
     await writer._workerPort.future;
 
     return writer;
-  }
-
-  void _ensureOpen() {
-    if (_closed) throw ResqliteConnectionException('Writer is closed.');
   }
 
   /// Reconstruct the exact [ResqliteException] subtype from the structured
@@ -122,7 +118,6 @@ class Writer {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
-      _ensureOpen();
       return Future.value();
     }
     // Validate on the main isolate so ArgumentError reaches the caller
