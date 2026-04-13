@@ -188,6 +188,8 @@ await db.executeBatch(
 - **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_count.html) for write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
+- [Full Breakdown](./docs/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
+
 
 ## Getting Started
 
