@@ -39,13 +39,13 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 
 | Metric | Wall time | Main isolate time |
 |---|---:|---:|
-| Point query (1 row) | 0.016ms | 0.016ms |
-| 5,000-row read | 3.5ms | 0.7ms |
-| 20,000-row read | 19ms | 3ms |
-| Stream invalidation | 0.1ms | — |
-| Batch insert (1,000 rows) | 0.8ms | — |
+| Point query (1 row) | 0.010ms | 0.010ms |
+| 1,000-row read | 0.38ms | 0.10ms |
+| 10,000-row read | 4.9ms | 1.0ms |
+| Batch insert (1,000 rows) | 0.45ms | 0.00ms |
+| Stream invalidation | 0.04ms | 0.04ms |
 
-~65K point queries/sec. Sub-millisecond stream invalidation.
+~105K point queries/sec. Sub-millisecond stream invalidation.
 
 Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware.
 
@@ -99,7 +99,7 @@ await db.close();
 
 ### Large reads without jank
 
-Your UI renders at 60fps — 16ms per frame. A 5,000-row [`select`](./lib/src/database.dart) takes 3.5ms total, but only **0.7ms on the main isolate:**
+Your UI renders at 60fps — 16ms per frame. A 5,000-row [`select`](./lib/src/database.dart) takes 2.5ms total, but only **0.65ms on the main isolate:**
 
 ```dart
 final items = await db.select(
@@ -166,7 +166,7 @@ Future<Response> handleProducts(Request request) async {
 }
 ```
 
-String escaping, number formatting, and JSON structure are handled in native code. The result crosses to Dart as a single [`Uint8List`](https://api.dart.dev/dart-typed_data/Uint8List-class.html). At 1,000 rows this is **4× faster** than building Dart maps and calling [`jsonEncode`](https://api.dart.dev/dart-convert/jsonEncode.html), and uses **0ms of main-isolate time.**
+String escaping, number formatting, and JSON structure are handled in native code. The result crosses to Dart as a single [`Uint8List`](https://api.dart.dev/dart-typed_data/Uint8List-class.html). At 1,000 rows this is **5× faster** than building Dart maps and calling [`jsonEncode`](https://api.dart.dev/dart-convert/jsonEncode.html), and uses **0ms of main-isolate time.**
 
 ### Bulk sync
 
