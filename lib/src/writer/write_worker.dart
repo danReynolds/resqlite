@@ -92,38 +92,6 @@ final class BatchResponse {
   final List<String> dirtyTables;
 }
 
-/// Structured error marshalled from the writer isolate back to the main
-/// isolate. The main isolate uses [kind] to reconstruct the correct
-/// [ResqliteException] subtype with its structured fields intact rather
-/// than collapsing everything into a stringified message.
-///
-/// Kinds:
-/// - `query` — an error from an `ExecuteRequest`, `QueryRequest`, or
-///   `BatchRequest`. Reconstructed as [ResqliteQueryException] with
-///   [sql], [parameters], and [sqliteCode].
-/// - `transaction` — a BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE /
-///   ROLLBACK TO failure. Reconstructed as [ResqliteTransactionException]
-///   with [operation] and [sqliteCode].
-/// - `internal` — a non-SQLite error that slipped through (should be
-///   rare). Reconstructed as a bare [ResqliteException].
-final class ErrorResponse {
-  const ErrorResponse(
-    this.kind,
-    this.message, {
-    this.sql,
-    this.parameters,
-    this.sqliteCode,
-    this.operation,
-  });
-
-  final String kind;
-  final String message;
-  final String? sql;
-  final List<Object?>? parameters;
-  final int? sqliteCode;
-  final String? operation;
-}
-
 // ---------------------------------------------------------------------------
 // Writer-specific FFI binding
 // ---------------------------------------------------------------------------
@@ -217,48 +185,22 @@ void writerEntrypoint(List<Object> args) {
           message.replyPort.send(true);
       }
     } on ResqliteException catch (e) {
-      // Typed resqlite exceptions are marshalled with their structured
-      // fields intact so the main isolate can reconstruct the exact
-      // subtype (ResqliteQueryException / ResqliteTransactionException)
-      // with sqliteCode, sql, and operation preserved for user inspection.
-      message.replyPort.send(_marshalException(e));
+      // Same-group isolates (Isolate.spawn) deep-copy objects across
+      // SendPort, so we send the typed exception directly. The main
+      // isolate receives the exact subtype (ResqliteQueryException,
+      // ResqliteTransactionException) with all structured fields intact.
+      message.replyPort.send(e);
     } on Error catch (e, st) {
       // Errors (StackOverflowError, OutOfMemoryError, assertion failures,
       // etc.) indicate bugs or unrecoverable VM state — not query errors.
       // We cannot rethrow from an isolate event handler without crashing
       // the isolate and leaving the main side hanging on a reply, so we
-      // surface a distinct "internal" error kind and continue. The main
-      // isolate will rewrap this as a plain ResqliteException so users
-      // can see the stack rather than silently swallowing it.
-      message.replyPort.send(ErrorResponse(
-        'internal',
-        'Internal error in writer isolate: $e\n$st',
-      ));
+      // wrap as a ResqliteException and continue.
+      message.replyPort.send(
+        ResqliteException('Internal error in writer isolate: $e\n$st'),
+      );
     }
   };
-}
-
-/// Convert a typed resqlite exception into a marshalable `ErrorResponse`
-/// that the main isolate can reconstruct back into the exact subtype.
-ErrorResponse _marshalException(ResqliteException e) {
-  if (e is ResqliteQueryException) {
-    return ErrorResponse(
-      'query',
-      e.message,
-      sql: e.sql,
-      parameters: e.parameters,
-      sqliteCode: e.sqliteCode,
-    );
-  }
-  if (e is ResqliteTransactionException) {
-    return ErrorResponse(
-      'transaction',
-      e.message,
-      sqliteCode: e.sqliteCode,
-      operation: e.operation,
-    );
-  }
-  return ErrorResponse('internal', e.message);
 }
 
 // ---------------------------------------------------------------------------

@@ -45,30 +45,6 @@ final class Writer {
     return writer;
   }
 
-  /// Reconstruct the exact [ResqliteException] subtype from the structured
-  /// fields the writer isolate marshalled over. Preserves `sqliteCode`,
-  /// `sql`, `parameters`, and `operation` so the caller sees the same
-  /// information they would have if the error had originated in-process.
-  static ResqliteException _exceptionFromResponse(ErrorResponse response) {
-    switch (response.kind) {
-      case 'query':
-        return ResqliteQueryException(
-          response.message,
-          sql: response.sql ?? '<unknown>',
-          parameters: response.parameters,
-          sqliteCode: response.sqliteCode,
-        );
-      case 'transaction':
-        return ResqliteTransactionException(
-          response.message,
-          operation: response.operation ?? 'unknown',
-          sqliteCode: response.sqliteCode,
-        );
-      default:
-        return ResqliteException(response.message);
-    }
-  }
-
   Future<T> _request<T>(
     WriterRequest Function(SendPort replyPort) build,
   ) async {
@@ -77,8 +53,8 @@ final class Writer {
     final completer = Completer<T>();
     port.handler = (Object? response) {
       port.close();
-      if (response is ErrorResponse) {
-        completer.completeError(_exceptionFromResponse(response));
+      if (response is ResqliteException) {
+        completer.completeError(response);
       } else {
         completer.complete(response as T);
       }

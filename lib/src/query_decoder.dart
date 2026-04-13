@@ -6,6 +6,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:typed_data';
@@ -89,10 +90,15 @@ ffi.Pointer<ffi.Uint8> ensureCellBuffer(int colCount) {
   return cellsBuf;
 }
 
-/// Per-worker schema cache. Column names for the same SQL are always identical,
-/// so we cache RowSchema keyed by SQL string to avoid N FFI calls + N String
-/// allocations per query on cache hit.
-final Map<String, RowSchema> schemaCache = {};
+/// Per-worker schema cache with LRU eviction. Column names for the same SQL
+/// are always identical, so we cache RowSchema keyed by SQL string to avoid
+/// N FFI calls + N String allocations per query on cache hit.
+///
+/// Capped at [_schemaCacheMax] entries (matching the C-level statement cache)
+/// to bound memory for apps with dynamic SQL. On eviction, the oldest entry
+/// is removed (FIFO via insertion order of [LinkedHashMap]).
+const int _schemaCacheMax = 32;
+final Map<String, RowSchema> schemaCache = LinkedHashMap<String, RowSchema>();
 
 // ---------------------------------------------------------------------------
 // Text decode
@@ -146,16 +152,22 @@ final class RawQueryResult {
 /// The caller must NOT finalize the statement — it's owned by the C cache.
 RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final colCount = sqlite3ColumnCount(stmt);
-  final schema = schemaCache[sql] ??
-      () {
-        final s = RowSchema(List<String>.generate(colCount, (i) {
-          final namePtr = sqlite3ColumnName(stmt, i);
-          final nameLen = cStrlen(namePtr.cast());
-          return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
-        }, growable: false));
-        schemaCache[sql] = s;
-        return s;
-      }();
+  var schema = schemaCache.remove(sql);
+  if (schema != null) {
+    // LRU promotion: re-insert so this entry moves to the end (most recent).
+    schemaCache[sql] = schema;
+  } else {
+    schema = RowSchema(List<String>.generate(colCount, (i) {
+      final namePtr = sqlite3ColumnName(stmt, i);
+      final nameLen = cStrlen(namePtr.cast());
+      return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
+    }, growable: false));
+    schemaCache[sql] = schema;
+    // Evict oldest entry if cache is full.
+    if (schemaCache.length > _schemaCacheMax) {
+      schemaCache.remove(schemaCache.keys.first);
+    }
+  }
 
   final buf = ensureCellBuffer(colCount);
   final cellsTyped = buf.asTypedList(cellSize * colCount);

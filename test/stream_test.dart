@@ -532,10 +532,10 @@ void main() {
     test('stream with invalid SQL propagates error', () async {
       final stream = db.stream('SELECT * FROM nonexistent_table');
 
-      // The stream should emit an error, not hang forever.
+      // The stream should emit a typed query error, not hang forever.
       await expectLater(
         stream.first,
-        throwsA(isA<Error>()),
+        throwsA(isA<ResqliteQueryException>()),
       );
     });
 
@@ -560,7 +560,7 @@ void main() {
       await sub.cancel();
     });
 
-    test('re-query failure after initial success is suppressed and recovers', () async {
+    test('re-query failure after initial success propagates error and recovers', () async {
       await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
         'alice',
         1,
@@ -568,9 +568,8 @@ void main() {
 
       final initial = Completer<void>();
       final recovered = Completer<void>();
-      final unexpectedDuringFailure = Completer<void>();
+      final errorReceived = Completer<void>();
       final results = <List<Map<String, Object?>>>[];
-      var expectFailureSilence = false;
       Object? streamError;
 
       final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
@@ -580,16 +579,13 @@ void main() {
             initial.complete();
             return;
           }
-          if (expectFailureSilence && !unexpectedDuringFailure.isCompleted) {
-            unexpectedDuringFailure.complete();
-            return;
-          }
           if (!recovered.isCompleted) {
             recovered.complete();
           }
         },
         onError: (error, stackTrace) {
           streamError = error;
+          if (!errorReceived.isCompleted) errorReceived.complete();
         },
       );
 
@@ -597,20 +593,17 @@ void main() {
       expect(results, hasLength(1));
       expect(results[0][0]['name'], 'alice');
 
+      // Break the query by renaming the column it selects.
       await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-      expectFailureSilence = true;
       db.streamEngine.handleDirtyTables(['items']);
 
-      await expectLater(
-        unexpectedDuringFailure.future.timeout(
-          const Duration(milliseconds: 150),
-        ),
-        throwsA(isA<TimeoutException>()),
-      );
-      expect(streamError, isNull);
-      expect(results, hasLength(1));
+      // Error should be delivered to onError, not swallowed.
+      await errorReceived.future.timeout(const Duration(seconds: 2));
+      expect(streamError, isA<ResqliteQueryException>());
+      expect(results, hasLength(1)); // No data emission during failure.
 
-      expectFailureSilence = false;
+      // Fix the schema and insert — stream should recover.
+      streamError = null;
       await db.execute('ALTER TABLE items RENAME COLUMN title TO name');
       await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
         'bob',
@@ -618,7 +611,7 @@ void main() {
       ]);
 
       await recovered.future.timeout(const Duration(seconds: 2));
-      expect(streamError, isNull);
+      expect(streamError, isNull); // No new errors after recovery.
       expect(results, hasLength(2));
       expect(results[1].map((row) => row['name']), ['alice', 'bob']);
 
