@@ -389,6 +389,16 @@ static int writer_wal_hook(
     return rc;
 }
 
+// sqlite3_exec callback for PRAGMA journal_mode — sets *arg to 1 if the
+// returned mode is "wal" (case-insensitive first 3 chars).
+static int _wal_check_cb(void* arg, int ncols, char** values, char** names) {
+    (void)ncols; (void)names;
+    if (values[0] && values[0][0] == 'w' && values[0][1] == 'a' && values[0][2] == 'l') {
+        *(int*)arg = 1;
+    }
+    return 0;
+}
+
 // Open a connection with optional encryption.
 // encryption_key_hex: hex string like "aabb01..." or NULL for no encryption.
 static sqlite3* open_connection(const char* path, int read_only,
@@ -433,12 +443,16 @@ static sqlite3* open_connection(const char* path, int read_only,
     }
 
     // WAL mode is required — the entire reader/writer architecture depends
-    // on it for concurrent reads during writes. Fail the connection if it
-    // cannot be set (e.g., read-only filesystem, VFS that doesn't support it).
-    rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL", NULL, NULL, NULL);
-    if (rc != SQLITE_OK) {
-        sqlite3_close_v2(db);
-        return NULL;
+    // on it for concurrent reads during writes. sqlite3_exec returns
+    // SQLITE_OK even if the mode wasn't changed (the current mode is
+    // returned as a result row), so we must verify the actual value.
+    {
+        int wal_ok = 0;
+        rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL", _wal_check_cb, &wal_ok, NULL);
+        if (rc != SQLITE_OK || !wal_ok) {
+            sqlite3_close_v2(db);
+            return NULL;
+        }
     }
     sqlite3_exec(db, "PRAGMA busy_timeout = 5000", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA mmap_size = 268435456", NULL, NULL, NULL);  // 256 MB
@@ -486,21 +500,26 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     sqlite3_wal_hook(writer, writer_wal_hook, db);
 
     // Open reader connections with authorizer hooks for dependency tracking.
+    // Use reader_count as the insertion index so successful readers are
+    // packed contiguously — no gaps if an earlier open/init fails.
     db->reader_count = 0;
     for (int i = 0; i < max_readers; i++) {
         sqlite3* rdb = open_connection(path, 1, encryption_key_hex);
         if (!rdb) continue;
-        db->readers[i].db = rdb;
-        stmt_cache_init(&db->readers[i].cache);
-        read_set_init(&db->readers[i].read_tables);
-        if (buf_init(&db->readers[i].json_buf, 16384) != 0) {
+
+        int idx = db->reader_count;
+        db->readers[idx].db = rdb;
+        stmt_cache_init(&db->readers[idx].cache);
+        read_set_init(&db->readers[idx].read_tables);
+        if (buf_init(&db->readers[idx].json_buf, 16384) != 0) {
             sqlite3_close_v2(rdb);
+            db->readers[idx].db = NULL;
             continue;
         }
-        db->readers[i].in_use = 0;
+        db->readers[idx].in_use = 0;
 
         // Install authorizer to capture read dependencies.
-        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[i].read_tables);
+        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[idx].read_tables);
 
         db->reader_count++;
     }
@@ -568,7 +587,13 @@ static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
         return NULL;
     }
 
-    stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt);
+    if (!stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt)) {
+        // OOM — can't cache, and nobody else holds a reference to finalize
+        // this stmt later. Finalize and fail the query.
+        sqlite3_finalize(stmt);
+        *out_rc = SQLITE_NOMEM;
+        return NULL;
+    }
     *out_rc = SQLITE_OK;
     return stmt;
 }
@@ -653,7 +678,10 @@ static int run_batch_locked(
         int rc = sqlite3_prepare_v3(
             db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
         if (rc != SQLITE_OK) return rc;
-        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        if (!stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt)) {
+            sqlite3_finalize(stmt);
+            return SQLITE_NOMEM;
+        }
     }
 
     for (int i = 0; i < set_count; i++) {
@@ -878,6 +906,11 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
     }
 
     entry = stmt_cache_insert(&reader->cache, sql, sql_len, stmt);
+    if (!entry) {
+        sqlite3_finalize(stmt);
+        *out_rc = SQLITE_NOMEM;
+        return NULL;
+    }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
     *out_rc = SQLITE_OK;
     return stmt;
@@ -1207,7 +1240,7 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
                     break;
                 }
                 default:
-                    buf_write_str(b, "null", 4);
+                    JSON_CHECK(buf_write_str(b, "null", 4));
                     break;
             }
         }

@@ -188,14 +188,14 @@ final class StreamEngine {
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.add(rows);
       }
-    } catch (e) {
+    } catch (e, st) {
       // Discard if a newer re-query was dispatched while we were running.
       if (entry.reQueryGeneration != generation) return;
       // Propagate error to subscribers so they can handle it (e.g., table
       // dropped, schema changed). Silent failure would leave the stream
       // stuck with stale data and no signal to the listener.
       for (final sub in entry.subscribers) {
-        if (!sub.isClosed) sub.addError(e);
+        if (!sub.isClosed) sub.addError(e, st);
       }
     }
   }
