@@ -10,24 +10,77 @@ Community-submitted benchmark results across different hardware.
    dart run benchmark/run_all.dart "your-device" --repeat=3 --hardware-summary
    ```
 
-2. The output includes a pre-formatted table row. Copy it and add it below.
+2. The output includes pre-formatted rows for each table below. Copy them in and fill in your device details.
 
 3. Submit a PR.
 
-## What's Measured
+## Devices
 
-| Category | What it tests |
-|---|---|
-| **select 1K rows** | Read throughput — building Dart objects from 1,000 rows |
-| **selectBytes 1K rows** | JSON serialization — C-native JSON for 1,000 rows |
-| **Point query qps** | Latency floor — single-row lookups per second |
-| **Batch insert 1K** | Write throughput — 1,000 rows in one transaction |
-| **Stream invalidation** | Reactivity — time from write commit to stream re-emission |
+| Device | CPU | OS | Dart | Date | By |
+|---|---|---|---|---|---|
+| MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-13 | @danReynolds |
 
-These cover the five performance dimensions that matter for real apps: read throughput, serialization, point query latency, write throughput, and reactive responsiveness.
+## Select → Maps (ms)
 
-## Results
+Read throughput — building Dart `Map` objects from query results.
+Wall = total time, main = time on the UI isolate, worker = time offloaded to background.
 
-| Device | CPU | OS | Dart | select 1K | bytes 1K | Point qps | Batch 1K | Stream inv. | Date | By |
-|---|---|---|---|---:|---:|---:|---:|---:|---|---|
-| MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 0.43ms | 0.62ms | 68K | 0.80ms | 0.11ms | 2026-04-09 | @danReynolds |
+| Device | Timing | 10 rows | 100 rows | 1K rows | 10K rows |
+|---|---|---:|---:|---:|---:|
+| MacBook Pro 14" | wall | 0.01 | 0.06 | 0.38 | 4.89 |
+| MacBook Pro 14" | main | 0.00 | 0.02 | 0.10 | 0.99 |
+| MacBook Pro 14" | worker | 0.01 | 0.04 | 0.28 | 3.90 |
+
+## Select → JSON Bytes (ms)
+
+C-native JSON serialization — entire result as a `Uint8List`, zero Dart-side allocation.
+Main isolate time is near-zero regardless of result size.
+
+| Device | Timing | 10 rows | 100 rows | 1K rows | 10K rows |
+|---|---|---:|---:|---:|---:|
+| MacBook Pro 14" | wall | 0.01 | 0.06 | 0.50 | 5.57 |
+| MacBook Pro 14" | main | 0.00 | 0.00 | 0.00 | 0.00 |
+| MacBook Pro 14" | worker | 0.01 | 0.06 | 0.50 | 5.57 |
+
+## Point Query Throughput
+
+Single-row lookups by primary key — measures the async dispatch latency floor.
+
+| Device | qps |
+|---|---:|
+| MacBook Pro 14" | 105K |
+
+## Batch Insert (ms)
+
+`executeBatch()` — all rows in one transaction via a single isolate round-trip.
+Main isolate just dispatches; the writer isolate does all the work.
+
+| Device | Timing | 100 rows | 1K rows | 10K rows |
+|---|---|---:|---:|---:|
+| MacBook Pro 14" | wall | 0.06 | 0.45 | 4.60 |
+| MacBook Pro 14" | main | 0.00 | 0.00 | 0.00 |
+| MacBook Pro 14" | worker | 0.06 | 0.45 | 4.60 |
+
+## Concurrent Reads — 1K rows per query (ms wall)
+
+Parallel `select()` calls via `Future.wait` — shows reader pool scaling.
+
+| Device | 1× | 2× | 4× | 8× |
+|---|---:|---:|---:|---:|
+| MacBook Pro 14" | 0.29 | 0.32 | 0.37 | 0.72 |
+
+## Transaction (ms)
+
+Interactive transaction — insert + select + conditional delete in one `transaction()` block.
+
+| Device | mixed |
+|---|---:|
+| MacBook Pro 14" | 0.06 |
+
+## Stream Reactivity (ms)
+
+Time from write commit to stream re-emission.
+
+| Device | invalidation | fan-out 10× |
+|---|---:|---:|
+| MacBook Pro 14" | 0.04 | 0.20 |

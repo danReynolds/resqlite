@@ -132,10 +132,15 @@ Future<String> runWritesBenchmark() async {
 
       final tResqlite = BenchmarkTiming('resqlite executeBatch()');
       for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
+        final swWall = Stopwatch()..start();
         await resqliteDb.executeBatch(insertSql, paramSets);
-        sw.stop();
-        tResqlite.recordWallOnly(sw.elapsedMicroseconds);
+        final swMain = Stopwatch()..start();
+        swMain.stop();
+        swWall.stop();
+        tResqlite.record(
+          wallMicroseconds: swWall.elapsedMicroseconds,
+          mainMicroseconds: swMain.elapsedMicroseconds,
+        );
         await resqliteDb.execute('DELETE FROM t');
       }
 

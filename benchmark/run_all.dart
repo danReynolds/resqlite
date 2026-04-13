@@ -102,21 +102,30 @@ void _printHardwareSummary(
   Map<String, _AggregateStats> metrics,
   String label,
 ) {
-  String? _find(String substring) {
+  // Use section-specific prefixes to avoid ambiguity
+  // (e.g. 'resqlite select' would match both select() and selectBytes()).
+  // The [main] suffix is at the end of the full key, so we need to match
+  // both the section substring and the suffix independently.
+  double? _median(String substring, {bool main = false}) {
     for (final key in metrics.keys) {
-      if (key.contains(substring)) {
-        return metrics[key]!.median.toStringAsFixed(2);
-      }
+      if (!key.contains(substring)) continue;
+      if (main && !key.endsWith('[main]')) continue;
+      if (!main && key.endsWith('[main]')) continue;
+      return metrics[key]!.median;
     }
-    return '?';
+    return null;
   }
 
-  final select1k = _find('1000 rows / resqlite select');
-  final bytes1k = _find('1000 rows / resqlite selectBytes');
-  final batch1k = _find('Batch Insert (1000 rows)');
-  final invalidation = _find('Invalidation Latency');
+  String _ms(String substring, {bool main = false}) =>
+      _median(substring, main: main)?.toStringAsFixed(2) ?? '?';
 
-  // Point qps: find the raw qps value and format as "65K".
+  String _worker(String substring) {
+    final wall = _median(substring);
+    final mainVal = _median(substring, main: true);
+    if (wall == null || mainVal == null) return '?';
+    return (wall - mainVal).toStringAsFixed(2);
+  }
+
   var pointDisplay = '?';
   for (final key in metrics.keys) {
     if (key.contains('resqlite qps')) {
@@ -126,23 +135,76 @@ void _printHardwareSummary(
     }
   }
 
+  final date = DateTime.now().toIso8601String().split('T').first;
+
   print('');
   print('=== Hardware Summary ===');
-  print('Copy this row to benchmark/HARDWARE_RESULTS.md and submit a PR:');
+  print('Copy these rows into the matching tables in');
+  print('benchmark/HARDWARE_RESULTS.md and submit a PR.');
   print('');
-  print(
-    '| $label '
-    '| [your CPU] '
-    '| [your OS] '
-    '| [Dart version] '
-    '| ${select1k}ms '
-    '| ${bytes1k}ms '
-    '| ${pointDisplay} '
-    '| ${batch1k}ms '
-    '| ${invalidation}ms '
-    '| ${DateTime.now().toIso8601String().split("T").first} '
-    '| @[your-github] |',
-  );
+
+  print('Devices:');
+  print('| $label | [CPU] | [OS] | [Dart] | $date | @[github] |');
+  print('');
+
+  void _printTimingRows(
+    String sectionName,
+    List<String> substrings,
+  ) {
+    print('| $label | wall '
+        '| ${substrings.map((s) => _ms(s)).join(' | ')} |');
+    print('| $label | main '
+        '| ${substrings.map((s) => _ms(s, main: true)).join(' | ')} |');
+    print('| $label | worker '
+        '| ${substrings.map(_worker).join(' | ')} |');
+  }
+
+  print('Select → Maps (ms):');
+  _printTimingRows('Select → Maps', [
+    'Maps / 10 rows',
+    'Maps / 100 rows',
+    'Maps / 1000 rows',
+    'Maps / 10000 rows',
+  ]);
+  print('');
+
+  print('Select → JSON Bytes (ms):');
+  _printTimingRows('Select → JSON Bytes', [
+    'Bytes / 10 rows',
+    'Bytes / 100 rows',
+    'Bytes / 1000 rows',
+    'Bytes / 10000 rows',
+  ]);
+  print('');
+
+  print('Point Query:');
+  print('| $label | $pointDisplay |');
+  print('');
+
+  print('Batch Insert (ms):');
+  _printTimingRows('Batch Insert', [
+    'Batch Insert (100 rows)',
+    'Batch Insert (1000 rows)',
+    'Batch Insert (10000 rows)',
+  ]);
+  print('');
+
+  print('Concurrent Reads (ms):');
+  print('| $label '
+      '| ${_ms("concurrent 1x")} '
+      '| ${_ms("concurrent 2x")} '
+      '| ${_ms("concurrent 4x")} '
+      '| ${_ms("concurrent 8x")} |');
+  print('');
+
+  print('Transaction (ms):');
+  print('| $label | ${_ms("Interactive Transaction")} |');
+  print('');
+
+  print('Stream Reactivity (ms):');
+  print('| $label '
+      '| ${_ms("Invalidation Latency")} '
+      '| ${_ms("Fan-out (10 streams)")} |');
 }
 
 Future<String> _runSuiteOnce() async {
@@ -289,6 +351,35 @@ Map<String, double> _extractResqliteMedians(String content) {
               ? '$currentSection / $currentSubsection / $label'
               : '$currentSection / $label';
           results[key] = wallMed;
+        }
+        // Also extract main isolate median (column index 3).
+        if (parts.length >= 4) {
+          final mainMed = double.tryParse(parts[3]);
+          if (mainMed != null) {
+            final key = currentSubsection != null
+                ? '$currentSection / $currentSubsection / $label [main]'
+                : '$currentSection / $label [main]';
+            results[key] = mainMed;
+          }
+        }
+      }
+    } else if (currentSection != null &&
+        currentSection.contains('Concurrent Reads') &&
+        line.startsWith('| ') &&
+        !line.startsWith('|---') &&
+        !line.startsWith('| Concurrency')) {
+      // Concurrent reads: rows like "| 4 | 0.88 | 0.22 | 1.83 | 0.46 |"
+      final parts = line
+          .split('|')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.length >= 2) {
+        final concurrency = int.tryParse(parts[0]);
+        final wallTime = double.tryParse(parts[1]);
+        if (concurrency != null && wallTime != null) {
+          results['$currentSection / resqlite concurrent ${concurrency}x'] =
+              wallTime;
         }
       }
     }
