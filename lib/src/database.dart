@@ -40,7 +40,7 @@ final class Database {
     _writer = Writer.spawn(_streamEngine, _handle);
 
     // Spawn the reader pool.
-    _readerPool = ReaderPool.spawn(handle.address, readerCount);
+    _readerPool = ReaderPool.spawn(_handle.address, readerCount);
   }
 
   late final Future<Writer> _writer;
@@ -141,16 +141,21 @@ final class Database {
 
     final completer = _closedCompleter = Completer();
 
-    final (writer, readerPool) = await (_writer, _readerPool).wait;
+    try {
+      final (writer, readerPool) = await (_writer, _readerPool).wait;
 
-    _streamEngine.close();
+      _streamEngine.close();
 
-    await readerPool.close();
-    await writer.close();
+      await readerPool.close();
+      await writer.close();
 
-    resqliteClose(_handle);
+      resqliteClose(_handle);
 
-    completer.complete();
+      completer.complete();
+    } catch (e) {
+      completer.completeError(e);
+      rethrow;
+    }
   }
 
   // -------------------------------------------------------------------------
