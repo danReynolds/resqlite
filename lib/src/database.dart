@@ -157,7 +157,7 @@ final class Database {
   // Read operations
   // -------------------------------------------------------------------------
 
-  /// Executes a query and returns all matching rows.
+  /// Runs a query and returns all matching rows.
   ///
   /// ```dart
   /// final users = await db.select(
@@ -189,12 +189,12 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    _ensureOpen();
-
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.select(sql, parameters);
     }
+
+    _ensureOpen();
 
     final pool = await _readerPool;
     // No post-await _ensureOpen re-check: if close() has run while we
@@ -303,15 +303,19 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    _ensureOpen();
-
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.execute(sql, parameters);
     }
 
+    _ensureOpen();
+
     final writer = await _writer;
-    return writer.locked(() => writer.execute(sql, parameters));
+    final response = await writer.locked(() => writer.execute(sql, parameters));
+
+    _streamEngine.handleDirtyTables(response.dirtyTables);
+
+    return response.result;
   }
 
   /// Executes one SQL statement across many parameter sets in a single
@@ -334,15 +338,20 @@ final class Database {
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
   Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
-    _ensureOpen();
-
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.executeBatch(sql, paramSets);
     }
 
+    _ensureOpen();
+
     final writer = await _writer;
-    return writer.locked(() => writer.executeBatch(sql, paramSets));
+    final reponse =
+        await writer.locked(() => writer.executeBatch(sql, paramSets));
+
+    if (reponse?.dirtyTables case List<String> dirtyTables) {
+      _streamEngine.handleDirtyTables(dirtyTables);
+    }
   }
 
   /// Runs [body] inside a database transaction.
@@ -368,12 +377,12 @@ final class Database {
   ///
   /// Returns the value returned by [body].
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
-    _ensureOpen();
-
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.transaction(body);
     }
+
+    _ensureOpen();
 
     final writer = await _writer;
     return writer.locked(() => writer.transaction(body));

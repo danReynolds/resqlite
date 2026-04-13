@@ -66,7 +66,8 @@ final class Transaction {
     List<Object?> parameters = const [],
   ]) async {
     _ensureActive();
-    return _writer.execute(sql, parameters);
+    final response = await _writer.execute(sql, parameters);
+    return response.result;
   }
 
   /// Executes a query within this transaction, seeing uncommitted writes.

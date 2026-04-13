@@ -5,7 +5,6 @@ import 'dart:isolate';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
-import 'package:resqlite/src/transaction.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -35,6 +34,7 @@ final class Writer {
     receivePort.listen((message) {
       if (message is SendPort) {
         writer._workerPort.complete(message);
+        receivePort.close();
       }
     });
 
@@ -99,22 +99,17 @@ final class Writer {
     }
   }
 
-  Future<WriteResult> execute(
+  Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final response = await _request<ExecuteResponse>(
+    return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(sql, parameters, replyPort),
     );
-
-    if (Transaction.current == null) {
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-    }
-
-    return response.result;
   }
 
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
+  Future<BatchResponse?> executeBatch(
+      String sql, List<List<Object?>> paramSets) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -125,13 +120,9 @@ final class Writer {
     // "internal error" response.
     assertUniformParamSets(sql, paramSets);
 
-    final response = await _request<BatchResponse>(
+    return _request<BatchResponse>(
       (replyPort) => BatchRequest(sql, paramSets, replyPort),
     );
-
-    if (Transaction.current == null) {
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-    }
   }
 
   Future<List<Map<String, Object?>>> select(
