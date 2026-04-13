@@ -1051,6 +1051,46 @@ __attribute__((hot)) static int fast_i64_to_str(long long val, char* buf) {
 // JSON output
 // ---------------------------------------------------------------------------
 
+static const char b64_table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Write a base64-encoded blob as a quoted JSON string.
+__attribute__((hot)) static int json_write_base64(resqlite_buf* __restrict b,
+                                                   const unsigned char* data,
+                                                   int len) {
+    // Output size: 4 chars per 3 bytes, rounded up, plus quotes.
+    int encoded_len = ((len + 2) / 3) * 4;
+    if (buf_write_char(b, '"') != 0) return -1;
+    if (buf_ensure(b, encoded_len) != 0) return -1;
+
+    unsigned char* out = b->data + b->len;
+    int i = 0;
+
+    // Process 3-byte groups.
+    for (; i + 2 < len; i += 3) {
+        unsigned int v = ((unsigned int)data[i] << 16) |
+                         ((unsigned int)data[i + 1] << 8) |
+                          (unsigned int)data[i + 2];
+        *out++ = b64_table[(v >> 18) & 0x3F];
+        *out++ = b64_table[(v >> 12) & 0x3F];
+        *out++ = b64_table[(v >> 6)  & 0x3F];
+        *out++ = b64_table[ v        & 0x3F];
+    }
+
+    // Remaining 1 or 2 bytes with padding.
+    if (i < len) {
+        unsigned int v = (unsigned int)data[i] << 16;
+        if (i + 1 < len) v |= (unsigned int)data[i + 1] << 8;
+        *out++ = b64_table[(v >> 18) & 0x3F];
+        *out++ = b64_table[(v >> 12) & 0x3F];
+        *out++ = (i + 1 < len) ? b64_table[(v >> 6) & 0x3F] : '=';
+        *out++ = '=';
+    }
+
+    b->len += encoded_len;
+    return buf_write_char(b, '"');
+}
+
 __attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
     if (buf_write_char(b, '"') != 0) return -1;
 
@@ -1163,13 +1203,7 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
                     int blob_len = sqlite3_column_bytes(stmt, i);
                     const unsigned char* blob =
                         (const unsigned char*)sqlite3_column_blob(stmt, i);
-                    JSON_CHECK(buf_write_char(b, '"'));
-                    static const char hex[] = "0123456789abcdef";
-                    for (int j = 0; j < blob_len; j++) {
-                        JSON_CHECK(buf_write_byte(b, hex[blob[j] >> 4]));
-                        JSON_CHECK(buf_write_byte(b, hex[blob[j] & 0x0f]));
-                    }
-                    JSON_CHECK(buf_write_char(b, '"'));
+                    JSON_CHECK(json_write_base64(b, blob, blob_len));
                     break;
                 }
                 default:
