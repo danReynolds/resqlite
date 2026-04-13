@@ -79,10 +79,10 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  // Pick median run for each case (by the headline metric).
+  // Aggregate runs: emit median values with min/max/MAD stability data.
   final cases = <String, Object?>{};
   for (final entry in allRuns.entries) {
-    cases[entry.key] = _medianResult(entry.value);
+    cases[entry.key] = _aggregateRuns(entry.value);
   }
 
   final results = <String, Object?>{
@@ -99,23 +99,52 @@ Future<void> main(List<String> args) async {
   exit(0);
 }
 
-/// Pick the median result from multiple runs, using the first numeric metric
-/// as the sort key.
-Map<String, Object?> _medianResult(List<Map<String, Object?>> runs) {
+/// Aggregate multiple runs into a single result with stability metrics.
+///
+/// For each numeric metric, emits the median value as the headline and adds
+/// `_min`, `_max`, `_mad` (median absolute deviation), and `_stability`
+/// suffixed fields so consumers can assess noise without needing raw runs.
+Map<String, Object?> _aggregateRuns(List<Map<String, Object?>> runs) {
   if (runs.length == 1) return runs.first;
-  // Find the first numeric metric to sort by.
-  String? sortKey;
-  for (final key in runs.first.keys) {
-    if (key != 'supported' && key != 'note' && runs.first[key] is num) {
-      sortKey = key;
-      break;
+
+  // Collect all numeric keys.
+  final numericKeys = runs.first.keys
+      .where((k) => k != 'supported' && k != 'note' && runs.first[k] is num)
+      .toList();
+
+  final result = <String, Object?>{
+    'supported': runs.first['supported'],
+  };
+
+  for (final key in numericKeys) {
+    final values = runs.map((r) => (r[key] as num).toDouble()).toList()..sort();
+    final median = values[values.length ~/ 2];
+    final min = values.first;
+    final max = values.last;
+
+    // MAD: median absolute deviation, expressed as percentage of median.
+    final deviations = values.map((v) => (v - median).abs()).toList()..sort();
+    final mad = deviations[deviations.length ~/ 2];
+    final madPct = median > 0 ? (mad / median * 100) : 0.0;
+    final rangePct = median > 0 ? ((max - min) / median * 100) : 0.0;
+
+    String stability;
+    if (madPct < 5 && rangePct < 15) {
+      stability = 'stable';
+    } else if (madPct < 15 && rangePct < 40) {
+      stability = 'moderate';
+    } else {
+      stability = 'noisy';
     }
+
+    result[key] = median;
+    result['${key}_min'] = min;
+    result['${key}_max'] = max;
+    result['${key}_mad_pct'] = double.parse(madPct.toStringAsFixed(1));
+    result['${key}_stability'] = stability;
   }
-  if (sortKey == null) return runs.last; // no numeric metric, use last run
-  final sorted = List<Map<String, Object?>>.from(runs)
-    ..sort((a, b) => ((a[sortKey] as num?) ?? 0)
-        .compareTo((b[sortKey] as num?) ?? 0));
-  return sorted[sorted.length ~/ 2];
+
+  return result;
 }
 
 Future<Map<String, Object?>> _captureCase(
@@ -137,7 +166,7 @@ class _Options {
 
 _Options _parseArgs(List<String> args) {
   String? outPath;
-  var repeat = 1;
+  var repeat = 3;
   for (final arg in args) {
     if (arg.startsWith('--out=')) {
       outPath = arg.substring('--out='.length);

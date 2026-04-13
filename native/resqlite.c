@@ -531,15 +531,20 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
 }
 
 static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
-                                            int sql_len, int* out_rc) {
+                                            int sql_len, int* out_rc,
+                                            const char** out_tail) {
     sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, sql_len);
     if (stmt) {
         sqlite3_reset(stmt);
         *out_rc = SQLITE_OK;
+        // Cached statements are always single-statement (multi-statement SQL
+        // is never prepared via this function), so signal "no trailing SQL".
+        *out_tail = sql + sql_len;
         return stmt;
     }
 
-    int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+    int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT,
+                                &stmt, out_tail);
     if (rc != SQLITE_OK) {
         *out_rc = rc;
         return NULL;
@@ -560,12 +565,39 @@ int resqlite_execute(
     sqlite3_mutex_enter(db->writer_mutex);
 
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    const char* tail = NULL;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
+                                               &tail);
     if (!stmt) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
     }
 
+    // Detect multi-statement SQL via pzTail. Skip whitespace and bare
+    // semicolons — only real SQL text beyond the first statement counts.
+    if (tail && param_count == 0) {
+        const char* p = tail;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'
+               || *p == ';') p++;
+        if (*p != '\0') {
+            // Multi-statement SQL with no parameters: fall back to
+            // sqlite3_exec which walks the full string statement-by-
+            // statement. The prepared stmt stays in the cache harmlessly
+            // (it covers just the first statement).
+            sqlite3_reset(stmt);
+            rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
+            if (out_result) {
+                out_result->affected_rows = sqlite3_changes(db->writer);
+                out_result->last_insert_id =
+                    sqlite3_last_insert_rowid(db->writer);
+            }
+            sqlite3_mutex_leave(db->writer_mutex);
+            return rc;
+        }
+    }
+
+    // Single statement (or multi-statement with params — existing
+    // behavior: only the first statement executes via prepare).
     rc = bind_params(stmt, params, param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
@@ -585,6 +617,47 @@ int resqlite_execute(
     return rc;
 }
 
+// Shared batch loop: prepare (or reuse cached) the statement, then bind+step
+// each param set. Assumes the caller holds writer_mutex and that any
+// enclosing transaction control (BEGIN/COMMIT/SAVEPOINT) is managed externally.
+// On error, leaves the statement reset and returns the sqlite error code.
+static int run_batch_locked(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+) {
+    sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
+    if (stmt) {
+        sqlite3_reset(stmt);
+    } else {
+        int rc = sqlite3_prepare_v3(
+            db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+        if (rc != SQLITE_OK) return rc;
+        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+    }
+
+    for (int i = 0; i < set_count; i++) {
+        sqlite3_reset(stmt);
+
+        int rc = bind_params(stmt, &param_sets[i * param_count], param_count);
+        if (rc != SQLITE_OK) {
+            sqlite3_reset(stmt);
+            return rc;
+        }
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+            sqlite3_reset(stmt);
+            return rc;
+        }
+    }
+
+    sqlite3_reset(stmt);
+    return SQLITE_OK;
+}
+
 int resqlite_run_batch(
     resqlite_db* db,
     const char* sql,
@@ -594,55 +667,38 @@ int resqlite_run_batch(
 ) {
     sqlite3_mutex_enter(db->writer_mutex);
 
-    // Begin transaction — IMMEDIATE acquires the write lock upfront,
-    // avoiding the lock-upgrade path since we know we're writing.
+    // BEGIN IMMEDIATE acquires the write lock upfront, avoiding the
+    // lock-upgrade path since we know we're writing.
     int rc = sqlite3_exec(db->writer, "BEGIN IMMEDIATE", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
     }
 
-    // Prepare statement once.
-    sqlite3_stmt* stmt = NULL;
-    rc = SQLITE_OK;
-    stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
-    if (stmt) {
-        sqlite3_reset(stmt);
+    rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
+    if (rc != SQLITE_OK) {
+        sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
     } else {
-        rc = sqlite3_prepare_v3(db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
-        if (rc != SQLITE_OK) {
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
     }
 
-    // Execute for each param set.
-    for (int i = 0; i < set_count; i++) {
-        sqlite3_reset(stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
 
-        rc = bind_params(stmt, &param_sets[i * param_count], param_count);
-        if (rc != SQLITE_OK) {
-            sqlite3_reset(stmt);
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-
-        rc = sqlite3_step(stmt);
-        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-            sqlite3_reset(stmt);
-            sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-    }
-
-    sqlite3_reset(stmt);
-
-    // Commit.
-    rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
+int resqlite_run_batch_nested(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
+) {
+    // Caller owns the enclosing transaction (BEGIN IMMEDIATE or SAVEPOINT),
+    // so we do not start/commit/rollback here. On error we return the code
+    // and the Dart-level caller decides whether to ROLLBACK (top-level tx)
+    // or ROLLBACK TO a savepoint.
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
 }
@@ -927,7 +983,9 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
     int param_count
 ) {
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc);
+    const char* tail;
+    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
+                                               &tail);
     if (!stmt) return NULL;
 
     rc = bind_params(stmt, params, param_count);

@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io' show Platform;
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:resqlite/src/transaction.dart';
+import 'package:resqlite/src/writer/writer.dart';
 
 import 'exceptions.dart';
 import 'native/resqlite_bindings.dart';
-import 'reader_pool.dart';
+import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
-import 'write_worker.dart';
 
 /// A high-performance SQLite database with reactive queries.
 ///
@@ -35,21 +35,22 @@ import 'write_worker.dart';
 /// - [Transaction], for multi-statement atomic writes with read visibility
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
-  Database._(this._handle);
+  Database._(this._handle, int readerCount) {
+    // Spawn the single writer isolate.
+    _writer = Writer.spawn(_streamEngine, _handle);
+
+    // Spawn the reader pool.
+    _readerPool = ReaderPool.spawn(_handle.address, readerCount);
+  }
+
+  late final Future<Writer> _writer;
+  late final Future<ReaderPool> _readerPool;
 
   final ffi.Pointer<ffi.Void> _handle;
-  bool _closed = false;
-
-  // Writer isolate — spawned non-blocking on open, awaited on first write.
-  SendPort? _writerPort;
-  Future<SendPort>? _writerReady;
-
-  // Persistent reader pool.
-  ReaderPool? _readerPool;
-  Future<ReaderPool>? _readerPoolReady;
+  Completer<void>? _closedCompleter = null;
 
   // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
-  late final StreamEngine _streamEngine = StreamEngine(() => _readers);
+  late final StreamEngine _streamEngine = StreamEngine(() => _readerPool);
 
   /// The raw native database handle.
   ///
@@ -62,6 +63,15 @@ final class Database {
   /// Exposed for testing stream cleanup behavior. Use [stream] for the
   /// public reactive query API.
   StreamEngine get streamEngine => _streamEngine;
+
+  // -------------------------------------------------------------------------
+  // Lifecycle
+  // -------------------------------------------------------------------------
+
+  void _ensureOpen() {
+    if (_closedCompleter != null)
+      throw ResqliteConnectionException('Database is closed.');
+  }
 
   /// Opens or creates a SQLite database at [path].
   ///
@@ -97,7 +107,13 @@ final class Database {
         ? encryptionKey.toNativeUtf8()
         : ffi.nullptr.cast<Utf8>();
     try {
-      final readerCount = _defaultReaderCount();
+      // Determine the number of reader isolates to spawn.
+      // cores - 1: leave one core for the main isolate (UI thread in Flutter).
+      // min 2: so one worker sacrifice doesn't leave zero capacity.
+      // max 4: benchmarked 2/4/8 workers — concurrent query throughput plateaus
+      //   at 4. Each idle worker costs ~30KB + one C reader connection.
+      final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
+
       final handle = resqliteOpen(pathNative, readerCount, keyNative);
       if (handle == ffi.nullptr) {
         throw ResqliteConnectionException(
@@ -105,185 +121,39 @@ final class Database {
           '${encryptionKey != null ? ' (check encryption key)' : ''}',
         );
       }
-      final db = Database._(handle);
-      db._spawnWriter(); // non-blocking
-      db._spawnReaderPool(size: readerCount); // non-blocking
-      return db;
+
+      return Database._(handle, readerCount);
     } finally {
       calloc.free(pathNative);
       if (encryptionKey != null) calloc.free(keyNative);
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Subsystem initialization
-  // -------------------------------------------------------------------------
+  /// Closes this database, shutting down all worker isolates and releasing
+  /// native resources.
+  ///
+  /// After `close()` resolves, any further operations on this [Database]
+  /// throw a [ResqliteConnectionException].
+  Future<void> close() async {
+    if (_closedCompleter case Completer<void> completer) {
+      return completer.future;
+    }
 
-  void _spawnWriter() {
-    final completer = Completer<SendPort>();
-    _writerReady = completer.future;
-
-    final receivePort = ReceivePort();
-    receivePort.listen((message) {
-      if (message is SendPort) {
-        _writerPort = message;
-        completer.complete(message);
-      }
-    });
-
-    Isolate.spawn(writerEntrypoint, [receivePort.sendPort, _handle.address]);
-  }
-
-  // cores - 1: leave one core for the main isolate (UI thread in Flutter).
-  // min 2: so one worker sacrifice doesn't leave zero capacity.
-  // max 4: benchmarked 2/4/8 workers — concurrent query throughput plateaus
-  //   at 4. Each idle worker costs ~30KB + one C reader connection.
-  static int _defaultReaderCount() =>
-      (Platform.numberOfProcessors - 1).clamp(2, 4);
-
-  void _spawnReaderPool({required int size}) {
-    _readerPoolReady = ReaderPool.spawn(_handle.address, size).then((pool) {
-      _readerPool = pool;
-      return pool;
-    });
-  }
-
-  Future<ReaderPool> get _readers async {
-    if (_readerPool != null) return _readerPool!;
-    return _readerPoolReady!;
-  }
-
-  Future<SendPort> get _writer async {
-    if (_writerPort != null) return _writerPort!;
-    return _writerReady!;
-  }
-
-  Future<T> _writerRequest<T>(
-    WriterRequest Function(SendPort replyPort) build,
-  ) async {
-    final writer = await _writer;
-    final port = RawReceivePort();
-    final completer = Completer<T>();
-    port.handler = (Object? response) {
-      port.close();
-      if (response is ErrorResponse) {
-        completer.completeError(
-          ResqliteQueryException(
-            response.message,
-            sql: response.sql ?? '<unknown>',
-            parameters: response.parameters,
-          ),
-        );
-      } else {
-        completer.complete(response as T);
-      }
-    };
-    writer.send(build(port.sendPort));
-    return completer.future;
-  }
-
-  // -------------------------------------------------------------------------
-  // Write operations
-  // -------------------------------------------------------------------------
-
-  /// Executes a write statement and returns the result.
-  ///
-  /// ```dart
-  /// final result = await db.execute(
-  ///   'INSERT INTO users(name, email) VALUES (?, ?)',
-  ///   ['Ada', 'ada@example.com'],
-  /// );
-  /// print('Inserted row ${result.lastInsertId}');
-  /// print('${result.affectedRows} row(s) affected');
-  /// ```
-  ///
-  /// The [parameters] list is bound positionally to `?` placeholders in
-  /// [sql]. Each element must be a [String], [int], [double], [Uint8List]
-  /// (for blobs), or `null`.
-  ///
-  /// Suitable for INSERT, UPDATE, DELETE, and DDL statements. For queries
-  /// that return rows, use [select] instead.
-  ///
-  /// Any active [stream] queries watching the affected tables are
-  /// automatically re-queried after this write commits.
-  ///
-  /// Throws a [ResqliteQueryException] if the SQL is malformed or
-  /// violates a constraint.
-  Future<WriteResult> execute(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    _ensureOpen();
-    final response = await _writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
-    return response.result;
-  }
-
-  /// Executes one SQL statement across many parameter sets in a single
-  /// transaction.
-  ///
-  /// ```dart
-  /// await db.executeBatch(
-  ///   'INSERT INTO users(name) VALUES (?)',
-  ///   [['Ada'], ['Grace'], ['Sonja']],
-  /// );
-  /// ```
-  ///
-  /// The statement is prepared once and reused across all [paramSets],
-  /// wrapped in a single BEGIN/COMMIT transaction. This is significantly
-  /// faster than calling [execute] in a loop.
-  ///
-  /// All-or-nothing: if any row fails, the entire batch rolls back.
-  ///
-  /// Streams watching the affected table fire once on commit, not per row.
-  ///
-  /// Throws a [ResqliteQueryException] if any statement fails.
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
-    _ensureOpen();
-    final response = await _writerRequest<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
-    );
-    _streamEngine.handleDirtyTables(response.dirtyTables);
-  }
-
-  /// Runs [body] inside a database transaction.
-  ///
-  /// ```dart
-  /// final count = await db.transaction((tx) async {
-  ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
-  ///   final rows = await tx.select('SELECT COUNT(*) as c FROM users');
-  ///   return rows.first['c'] as int;
-  /// });
-  /// ```
-  ///
-  /// All operations within [body] are applied atomically. If [body]
-  /// completes normally, the transaction commits. If [body] throws,
-  /// the transaction rolls back and the exception is rethrown.
-  ///
-  /// The [Transaction] passed to [body] supports both [Transaction.execute]
-  /// and [Transaction.select]. Reads inside the transaction see uncommitted
-  /// writes from earlier statements in the same transaction.
-  ///
-  /// Stream invalidation happens once on commit, not per statement.
-  /// Rolled-back transactions do not trigger stream re-queries.
-  ///
-  /// Returns the value returned by [body].
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
-    _ensureOpen();
-    await _writerRequest<bool>((replyPort) => BeginRequest(replyPort));
+    final completer = _closedCompleter = Completer();
 
     try {
-      final tx = Transaction._(this);
-      final result = await body(tx);
-      final response = await _writerRequest<BatchResponse>(
-        (replyPort) => CommitRequest(replyPort),
-      );
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-      return result;
+      final (writer, readerPool) = await (_writer, _readerPool).wait;
+
+      _streamEngine.close();
+
+      await readerPool.close();
+      await writer.close();
+
+      resqliteClose(_handle);
+
+      completer.complete();
     } catch (e) {
-      await _writerRequest<bool>((replyPort) => RollbackRequest(replyPort));
+      completer.completeError(e);
       rethrow;
     }
   }
@@ -292,7 +162,7 @@ final class Database {
   // Read operations
   // -------------------------------------------------------------------------
 
-  /// Executes a query and returns all matching rows.
+  /// Runs a query and returns all matching rows.
   ///
   /// ```dart
   /// final users = await db.select(
@@ -324,8 +194,20 @@ final class Database {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      return transaction.select(sql, parameters);
+    }
+
     _ensureOpen();
-    final pool = await _readers;
+
+    final pool = await _readerPool;
+    // No post-await _ensureOpen re-check: if close() has run while we
+    // were parked, the pool itself now rejects dispatch with
+    // ResqliteConnectionException (see ReaderPool._dispatch). That lets
+    // *in-flight* reads that had already dispatched to a worker finish
+    // via the pool's drain semantics, while reads still parked on the
+    // pool future bail out cleanly.
     return pool.select(sql, parameters);
   }
 
@@ -353,7 +235,8 @@ final class Database {
     List<Object?> parameters = const [],
   ]) async {
     _ensureOpen();
-    final pool = await _readers;
+
+    final pool = await _readerPool;
     return pool.selectBytes(sql, parameters);
   }
 
@@ -395,78 +278,118 @@ final class Database {
   }
 
   // -------------------------------------------------------------------------
-  // Lifecycle
+  // Write operations
   // -------------------------------------------------------------------------
 
-  /// Closes this database, shutting down all worker isolates and releasing
-  /// native resources.
+  /// Executes a write statement and returns the result.
   ///
-  /// All active streams are closed. Safe to call multiple times.
+  /// ```dart
+  /// final result = await db.execute(
+  ///   'INSERT INTO users(name, email) VALUES (?, ?)',
+  ///   ['Ada', 'ada@example.com'],
+  /// );
+  /// print('Inserted row ${result.lastInsertId}');
+  /// print('${result.affectedRows} row(s) affected');
+  /// ```
   ///
-  /// After calling [close], any further operations on this [Database]
-  /// throw a [ResqliteConnectionException].
-  Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
-    _streamEngine.closeAll();
-    _readerPool?.close();
-    if (_writerPort != null) {
-      await _writerRequest<bool>((replyPort) => CloseRequest(replyPort));
-    }
-    resqliteClose(_handle);
-  }
-
-  void _ensureOpen() {
-    if (_closed) throw ResqliteConnectionException('Database is closed.');
-  }
-}
-
-/// A transaction proxy for executing writes and reads atomically.
-///
-/// Obtained via [Database.transaction]. All operations use the writer
-/// connection, so reads see uncommitted writes from earlier statements
-/// in the same transaction.
-///
-/// ```dart
-/// await db.transaction((tx) async {
-///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
-///   final rows = await tx.select('SELECT COUNT(*) as c FROM users');
-///   print(rows.first['c']); // includes the just-inserted row
-/// });
-/// ```
-///
-/// See also:
-///
-/// - [Database.transaction], which creates and manages this object
-final class Transaction {
-  Transaction._(this._db);
-  final Database _db;
-
-  /// Executes a write statement within this transaction.
+  /// The [parameters] list is bound positionally to `?` placeholders in
+  /// [sql]. Each element must be a [String], [int], [double], [Uint8List]
+  /// (for blobs), or `null`.
   ///
-  /// Same as [Database.execute], but the write is part of the enclosing
-  /// transaction and only commits when the transaction completes.
+  /// Suitable for INSERT, UPDATE, DELETE, and DDL statements. For queries
+  /// that return rows, use [select] instead.
+  ///
+  /// Any active [stream] queries watching the affected tables are
+  /// automatically re-queried after this write commits.
+  ///
+  /// Throws a [ResqliteQueryException] if the SQL is malformed or
+  /// violates a constraint.
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final response = await _db._writerRequest<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
-    );
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      return transaction.execute(sql, parameters);
+    }
+
+    _ensureOpen();
+
+    final writer = await _writer;
+    final response = await writer.locked(() => writer.execute(sql, parameters));
+
+    _streamEngine.handleDirtyTables(response.dirtyTables);
+
     return response.result;
   }
 
-  /// Executes a query within this transaction, seeing uncommitted writes.
+  /// Executes one SQL statement across many parameter sets in a single
+  /// transaction.
   ///
-  /// This runs on the writer connection (not the reader pool) so it can
-  /// see rows inserted or updated earlier in the same transaction.
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    final response = await _db._writerRequest<QueryResponse>(
-      (replyPort) => QueryRequest(sql, parameters, replyPort),
-    );
-    return response.rows;
+  /// ```dart
+  /// await db.executeBatch(
+  ///   'INSERT INTO users(name) VALUES (?)',
+  ///   [['Ada'], ['Grace'], ['Sonja']],
+  /// );
+  /// ```
+  ///
+  /// The statement is prepared once and reused across all [paramSets],
+  /// wrapped in a single BEGIN/COMMIT transaction. This is significantly
+  /// faster than calling [execute] in a loop.
+  ///
+  /// All-or-nothing: if any row fails, the entire batch rolls back.
+  ///
+  /// Streams watching the affected table fire once on commit, not per row.
+  ///
+  /// Throws a [ResqliteQueryException] if any statement fails.
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      return transaction.executeBatch(sql, paramSets);
+    }
+
+    _ensureOpen();
+
+    final writer = await _writer;
+    final reponse =
+        await writer.locked(() => writer.executeBatch(sql, paramSets));
+
+    if (reponse?.dirtyTables case List<String> dirtyTables) {
+      _streamEngine.handleDirtyTables(dirtyTables);
+    }
+  }
+
+  /// Runs [body] inside a database transaction.
+  ///
+  /// ```dart
+  /// final count = await db.transaction((tx) async {
+  ///   await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+  ///   final rows = await tx.select('SELECT COUNT(*) as c FROM users');
+  ///   return rows.first['c'] as int;
+  /// });
+  /// ```
+  ///
+  /// All operations within [body] are applied atomically. If [body]
+  /// completes normally, the transaction commits. If [body] throws,
+  /// the transaction rolls back and the exception is rethrown.
+  ///
+  /// The [Transaction] passed to [body] supports both [Transaction.execute]
+  /// and [Transaction.select]. Reads inside the transaction see uncommitted
+  /// writes from earlier statements in the same transaction.
+  ///
+  /// Stream invalidation happens once on commit, not per statement.
+  /// Rolled-back transactions do not trigger stream re-queries.
+  ///
+  /// Returns the value returned by [body].
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      return transaction.transaction(body);
+    }
+
+    _ensureOpen();
+
+    final writer = await _writer;
+    return writer.locked(() => writer.transaction(body));
   }
 }

@@ -12,7 +12,9 @@ import '../exceptions.dart';
 // C-level connection handle
 // ---------------------------------------------------------------------------
 
-@ffi.Native<ffi.Pointer<ffi.Void> Function(ffi.Pointer<Utf8>, ffi.Int, ffi.Pointer<Utf8>)>(
+@ffi.Native<
+    ffi.Pointer<ffi.Void> Function(
+        ffi.Pointer<Utf8>, ffi.Int, ffi.Pointer<Utf8>)>(
   symbol: 'resqlite_open',
   isLeaf: true,
 )
@@ -22,7 +24,8 @@ external ffi.Pointer<ffi.Void> resqliteOpen(
   ffi.Pointer<Utf8> encryptionKeyHex,
 );
 
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(symbol: 'resqlite_close', isLeaf: true)
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+    symbol: 'resqlite_close', isLeaf: true)
 external void resqliteClose(ffi.Pointer<ffi.Void> db);
 
 @ffi.Native<ffi.Pointer<Utf8> Function(ffi.Pointer<ffi.Void>)>(
@@ -38,14 +41,14 @@ external ffi.Pointer<Utf8> resqliteErrmsg(ffi.Pointer<ffi.Void> db);
 external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Pointer<ffi.Uint8>,  // resqlite_write_result* (affected_rows + last_insert_id)
-  )
->(symbol: 'resqlite_execute', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Pointer<
+          ffi.Uint8>, // resqlite_write_result* (affected_rows + last_insert_id)
+    )>(symbol: 'resqlite_execute', isLeaf: true)
 external int resqliteExecute(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<Utf8> sql,
@@ -55,14 +58,13 @@ external int resqliteExecute(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Int,
-  )
->(symbol: 'resqlite_run_batch', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Int,
+    )>(symbol: 'resqlite_run_batch', isLeaf: true)
 external int resqliteRunBatch(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<Utf8> sql,
@@ -72,12 +74,27 @@ external int resqliteRunBatch(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_dirty_tables', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Int,
+    )>(symbol: 'resqlite_run_batch_nested', isLeaf: true)
+external int resqliteRunBatchNested(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+);
+
+@ffi.Native<
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Int,
+    )>(symbol: 'resqlite_get_dirty_tables', isLeaf: true)
 external int resqliteGetDirtyTables(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Pointer<Utf8>> outTables,
@@ -96,73 +113,170 @@ final class WriteResult {
   final int lastInsertId;
 }
 
-/// Execute a parameterized write statement. Returns affected rows + last insert ID.
-WriteResult executeWrite(ffi.Pointer<ffi.Void> dbHandle, String sql, List<Object?> params) {
+/// Execute a write statement. Returns affected rows + last insert ID.
+///
+/// Uses nested try/finally so each allocation is protected by the time
+/// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
+/// the earlier resources are still released. Flat sequential allocation
+/// would leak on allocator failure, which is rare but real.
+WriteResult executeWrite(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<Object?> params,
+) {
   final sqlNative = sql.toNativeUtf8();
-  final paramsNative = allocateParams(params);
-  final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
   try {
-    final rc = resqliteExecute(
-      dbHandle, sqlNative, paramsNative, params.length, resultBuf,
-    );
-    if (rc != 0) {
-      // Read error message carefully — it may be invalid if the connection is in a bad state.
-      String errMsg;
+    final paramsNative = allocateParams(params);
+    try {
+      final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
       try {
-        errMsg = resqliteErrmsg(dbHandle).toDartString();
-      } catch (_) {
-        errMsg = 'unknown error';
+        final rc = resqliteExecute(
+          dbHandle,
+          sqlNative,
+          paramsNative,
+          params.length,
+          resultBuf,
+        );
+        if (rc != 0) {
+          // Read the error message carefully — if the connection is in a
+          // bad state the pointer may be invalid.
+          String errMsg;
+          try {
+            errMsg = resqliteErrmsg(dbHandle).toDartString();
+          } catch (_) {
+            errMsg = 'unknown error';
+          }
+          throw ResqliteQueryException(
+            errMsg,
+            sql: sql,
+            parameters: params,
+            sqliteCode: rc,
+          );
+        }
+        final view =
+            ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
+        return WriteResult(
+          view.getInt32(_writeResultOffAffected, Endian.little),
+          view.getInt64(_writeResultOffLastId, Endian.little),
+        );
+      } finally {
+        calloc.free(resultBuf);
       }
-      throw ResqliteQueryException(
-        'execute failed: $errMsg (code $rc)',
-        sql: sql,
-        parameters: params,
-        sqliteCode: rc,
-      );
+    } finally {
+      freeParams(paramsNative, params);
     }
-    final view = ByteData.sublistView(resultBuf.asTypedList(_writeResultSize));
-    return WriteResult(
-      view.getInt32(_writeResultOffAffected, Endian.little),
-      view.getInt64(_writeResultOffLastId, Endian.little),
-    );
   } finally {
-    freeParams(paramsNative, params);
     calloc.free(sqlNative);
-    calloc.free(resultBuf);
   }
 }
 
-/// Execute a batch: one SQL, many param sets, in a transaction.
+/// Validates that every row in [paramSets] has the same length. The
+/// C-level batch runner treats the flattened param array as a fixed-
+/// shape matrix (`setCount × paramCount`), so non-uniform rows either
+/// silently truncate or read past the allocated buffer depending on
+/// which direction the shape drifts.
+///
+/// Callers should invoke this on the *main* isolate before sending the
+/// paramSets to the writer — we want [ArgumentError] to surface
+/// directly to the user rather than crossing the isolate boundary as
+/// a generic "internal writer error".
+void assertUniformParamSets(
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  if (paramSets.isEmpty) return;
+  final paramCount = paramSets.first.length;
+  for (var i = 0; i < paramSets.length; i++) {
+    if (paramSets[i].length != paramCount) {
+      throw ArgumentError.value(
+        paramSets,
+        'paramSets',
+        'every row must have the same number of parameters. '
+            'Row 0 has $paramCount, row $i has ${paramSets[i].length}. '
+            'SQL: $sql',
+      );
+    }
+  }
+}
+
+/// Execute a batch: one SQL, many param sets, wrapped in a fresh
+/// BEGIN IMMEDIATE / COMMIT transaction.
 void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
   List<List<Object?>> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-
   final paramCount = paramSets.first.length;
+
   final sqlNative = sql.toNativeUtf8();
-
-  // Flatten all param sets into one contiguous native array.
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
-
   try {
-    final rc = resqliteRunBatch(
-      dbHandle, sqlNative, paramsNative, paramCount, paramSets.length,
-    );
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        'batch failed: ${resqliteErrmsg(dbHandle).toDartString()} (code $rc)',
-        sql: sql,
-        sqliteCode: rc,
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatch(
+        dbHandle,
+        sqlNative,
+        paramsNative,
+        paramCount,
+        paramSets.length,
       );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
     }
   } finally {
-    freeParams(paramsNative, allParams);
+    calloc.free(sqlNative);
+  }
+}
+
+/// Execute a batch inside an already-open transaction (top-level or savepoint).
+/// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
+/// without issuing any rollback, so the caller can roll back at the correct
+/// scope (full ROLLBACK vs ROLLBACK TO savepoint).
+void executeNestedBatchWrite(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  if (paramSets.isEmpty) return;
+  final paramCount = paramSets.first.length;
+
+  final sqlNative = sql.toNativeUtf8();
+  try {
+    final allParams = <Object?>[];
+    for (final set in paramSets) {
+      allParams.addAll(set);
+    }
+    final paramsNative = allocateParams(allParams);
+    try {
+      final rc = resqliteRunBatchNested(
+        dbHandle,
+        sqlNative,
+        paramsNative,
+        paramCount,
+        paramSets.length,
+      );
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(dbHandle).toDartString(),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      freeParams(paramsNative, allParams);
+    }
+  } finally {
     calloc.free(sqlNative);
   }
 }
@@ -187,13 +301,12 @@ List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_read_tables', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Int,
+    )>(symbol: 'resqlite_get_read_tables', isLeaf: true)
 external int resqliteGetReadTables(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -202,14 +315,13 @@ external int resqliteGetReadTables(
 );
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Int,
-    ffi.Pointer<ffi.Int>,
-    ffi.Pointer<ffi.Int>,
-  )
->(symbol: 'resqlite_db_status_total', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Int,
+      ffi.Pointer<ffi.Int>,
+      ffi.Pointer<ffi.Int>,
+    )>(symbol: 'resqlite_db_status_total', isLeaf: true)
 external int resqliteDbStatusTotal(
   ffi.Pointer<ffi.Void> db,
   int op,
@@ -274,7 +386,8 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
   final buf = calloc<ffi.Uint8>(_paramStructSize * params.length);
-  final view = buf.cast<ffi.Uint8>().asTypedList(_paramStructSize * params.length);
+  final view =
+      buf.cast<ffi.Uint8>().asTypedList(_paramStructSize * params.length);
   final byteData = ByteData.sublistView(view);
 
   for (var i = 0; i < params.length; i++) {
@@ -332,16 +445,15 @@ void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> params) {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<Utf8>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-    ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-    ffi.Pointer<ffi.Int>,
-  )
->(symbol: 'resqlite_query_bytes', isLeaf: true)
+    ffi.Int Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.Int>,
+    )>(symbol: 'resqlite_query_bytes', isLeaf: true)
 external int resqliteQueryBytes(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -352,7 +464,8 @@ external int resqliteQueryBytes(
   ffi.Pointer<ffi.Int> outLen,
 );
 
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(symbol: 'resqlite_free', isLeaf: true)
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+    symbol: 'resqlite_free', isLeaf: true)
 external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 
 // ---------------------------------------------------------------------------
@@ -373,7 +486,13 @@ NativeBuffer queryBytes(
   final pLen = calloc<ffi.Int>();
   try {
     final rc = resqliteQueryBytes(
-      dbHandle, readerId, sqlNative, paramsNative, params.length, pBuf, pLen,
+      dbHandle,
+      readerId,
+      sqlNative,
+      paramsNative,
+      params.length,
+      pBuf,
+      pLen,
     );
     if (rc != 0) {
       final bufPtr = pBuf.value;

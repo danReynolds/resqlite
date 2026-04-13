@@ -12,10 +12,10 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
-import 'native/resqlite_bindings.dart';
-import 'query_decoder.dart';
-import 'result_hash.dart';
-import 'row.dart';
+import '../native/resqlite_bindings.dart';
+import '../query_decoder.dart';
+import '../result_hash.dart';
+import '../row.dart';
 
 // ---------------------------------------------------------------------------
 // Request types — sent from pool to worker via SendPort
@@ -96,9 +96,7 @@ void readerEntrypoint(List<Object> args) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = sacrifice
-              ? (raw.values, raw.schema.names, raw.rowCount)
-              : ResultSet(raw.values, raw.schema, raw.rowCount);
+          result = ResultSet(raw.values, raw.schema, raw.rowCount);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
           final (raw, readTables) = executeQueryWithDeps(
@@ -108,13 +106,11 @@ void readerEntrypoint(List<Object> args) {
             parameters,
           );
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = sacrifice
-              ? (raw.values, raw.schema.names, raw.rowCount, readTables)
-              : (
-                  ResultSet(raw.values, raw.schema, raw.rowCount)
-                      as List<Map<String, Object?>>,
-                  readTables,
-                );
+          result = (
+            ResultSet(raw.values, raw.schema, raw.rowCount)
+                as List<Map<String, Object?>>,
+            readTables,
+          );
 
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes =
@@ -134,13 +130,11 @@ void readerEntrypoint(List<Object> args) {
             sacrifice = false;
           } else {
             sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-            result = sacrifice
-                ? (newHash, raw.values, raw.schema.names, raw.rowCount)
-                : (
-                    newHash,
-                    ResultSet(raw.values, raw.schema, raw.rowCount)
-                        as List<Map<String, Object?>>
-                  );
+            result = (
+              newHash,
+              ResultSet(raw.values, raw.schema, raw.rowCount)
+                  as List<Map<String, Object?>>
+            );
           }
       }
 

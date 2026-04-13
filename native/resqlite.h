@@ -56,7 +56,10 @@ typedef struct {
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 
-// Execute a parameterized write statement. Returns result info.
+// Execute a write statement. Returns result info.
+// Supports both parameterized (param_count > 0) and unparameterized
+// (param_count == 0) writes. For unparameterized calls, automatically
+// detects multi-statement SQL via pzTail and falls back to sqlite3_exec.
 int resqlite_execute(
     resqlite_db* db,
     const char* sql,
@@ -74,6 +77,19 @@ int resqlite_run_batch(
     const resqlite_param* param_sets,  // flat array: param_sets[i * param_count + j]
     int param_count,                   // params per statement
     int set_count                      // number of param sets
+);
+
+// Execute a batch inside a caller-managed transaction. Unlike resqlite_run_batch,
+// this does NOT start or commit a transaction — the caller must have already
+// opened one (BEGIN IMMEDIATE or SAVEPOINT). On error returns the sqlite code
+// without rolling back; the caller is responsible for choosing the correct
+// rollback scope (full ROLLBACK vs ROLLBACK TO savepoint).
+int resqlite_run_batch_nested(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count
 );
 
 // ---------------------------------------------------------------------------
