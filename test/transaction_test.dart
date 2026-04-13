@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/transaction.dart';
 import 'package:test/test.dart';
 
 /// Deterministic stream probe — avoids timing-sensitive Future.delayed waits.
