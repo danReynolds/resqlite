@@ -17,60 +17,67 @@ typedef struct {
     int cap;
 } resqlite_buf;
 
-static void buf_init(resqlite_buf* b, int initial_cap) {
+static int buf_init(resqlite_buf* b, int initial_cap) {
     b->data = (unsigned char*)malloc(initial_cap);
+    if (!b->data) { b->len = 0; b->cap = 0; return -1; }
     b->len = 0;
     b->cap = initial_cap;
+    return 0;
 }
 
-__attribute__((hot)) static void buf_ensure(resqlite_buf* b, int extra) {
-    if (__builtin_expect(b->len + extra <= b->cap, 1)) return;
+__attribute__((hot)) static int buf_ensure(resqlite_buf* b, int extra) {
+    if (__builtin_expect(b->len + extra <= b->cap, 1)) return 0;
     int new_cap = b->cap;
     while (new_cap < b->len + extra) new_cap *= 2;
-    b->data = (unsigned char*)realloc(b->data, new_cap);
+    unsigned char* p = (unsigned char*)realloc(b->data, new_cap);
+    if (!p) return -1;
+    b->data = p;
     b->cap = new_cap;
+    return 0;
 }
 
-__attribute__((hot)) static void buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
-    buf_ensure(b, n);
+__attribute__((hot)) static int buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
+    if (buf_ensure(b, n) != 0) return -1;
     memcpy(b->data + b->len, src, n);
     b->len += n;
+    return 0;
 }
 
-static void buf_write_byte(resqlite_buf* b, unsigned char v) {
-    buf_ensure(b, 1);
+static int buf_write_byte(resqlite_buf* b, unsigned char v) {
+    if (buf_ensure(b, 1) != 0) return -1;
     b->data[b->len++] = v;
+    return 0;
 }
 
-static void buf_write_i32(resqlite_buf* b, int v) {
+static int buf_write_i32(resqlite_buf* b, int v) {
     unsigned char tmp[4];
     tmp[0] = (unsigned char)(v & 0xff);
     tmp[1] = (unsigned char)((v >> 8) & 0xff);
     tmp[2] = (unsigned char)((v >> 16) & 0xff);
     tmp[3] = (unsigned char)((v >> 24) & 0xff);
-    buf_write(b, tmp, 4);
+    return buf_write(b, tmp, 4);
 }
 
-static void buf_write_i64(resqlite_buf* b, long long v) {
+static int buf_write_i64(resqlite_buf* b, long long v) {
     unsigned char tmp[8];
     for (int i = 0; i < 8; i++) {
         tmp[i] = (unsigned char)((v >> (i * 8)) & 0xff);
     }
-    buf_write(b, tmp, 8);
+    return buf_write(b, tmp, 8);
 }
 
-static void buf_write_f64(resqlite_buf* b, double v) {
+static int buf_write_f64(resqlite_buf* b, double v) {
     unsigned char tmp[8];
     memcpy(tmp, &v, 8);
-    buf_write(b, tmp, 8);
+    return buf_write(b, tmp, 8);
 }
 
-static void buf_write_char(resqlite_buf* b, char c) {
-    buf_write_byte(b, (unsigned char)c);
+static int buf_write_char(resqlite_buf* b, char c) {
+    return buf_write_byte(b, (unsigned char)c);
 }
 
-static void buf_write_str(resqlite_buf* b, const char* s, int len) {
-    buf_write(b, s, len);
+static int buf_write_str(resqlite_buf* b, const char* s, int len) {
+    return buf_write(b, s, len);
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +142,7 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
         c->count = STMT_CACHE_MAX - 1;
     }
     char* sql_copy = (char*)malloc(sql_len + 1);
+    if (!sql_copy) return NULL;
     memcpy(sql_copy, sql, sql_len);
     sql_copy[sql_len] = '\0';
 
@@ -381,6 +389,16 @@ static int writer_wal_hook(
     return rc;
 }
 
+// sqlite3_exec callback for PRAGMA journal_mode — sets *arg to 1 if the
+// returned mode is "wal" (case-insensitive first 3 chars).
+static int _wal_check_cb(void* arg, int ncols, char** values, char** names) {
+    (void)ncols; (void)names;
+    if (values[0] && values[0][0] == 'w' && values[0][1] == 'a' && values[0][2] == 'l') {
+        *(int*)arg = 1;
+    }
+    return 0;
+}
+
 // Open a connection with optional encryption.
 // encryption_key_hex: hex string like "aabb01..." or NULL for no encryption.
 static sqlite3* open_connection(const char* path, int read_only,
@@ -424,7 +442,18 @@ static sqlite3* open_connection(const char* path, int read_only,
         }
     }
 
-    sqlite3_exec(db, "PRAGMA journal_mode = WAL", NULL, NULL, NULL);
+    // WAL mode is required — the entire reader/writer architecture depends
+    // on it for concurrent reads during writes. sqlite3_exec returns
+    // SQLITE_OK even if the mode wasn't changed (the current mode is
+    // returned as a result row), so we must verify the actual value.
+    {
+        int wal_ok = 0;
+        rc = sqlite3_exec(db, "PRAGMA journal_mode = WAL", _wal_check_cb, &wal_ok, NULL);
+        if (rc != SQLITE_OK || !wal_ok) {
+            sqlite3_close_v2(db);
+            return NULL;
+        }
+    }
     sqlite3_exec(db, "PRAGMA busy_timeout = 5000", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA mmap_size = 268435456", NULL, NULL, NULL);  // 256 MB
     sqlite3_exec(db, "PRAGMA cache_size = -8192", NULL, NULL, NULL);    // 8 MB
@@ -471,18 +500,26 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     sqlite3_wal_hook(writer, writer_wal_hook, db);
 
     // Open reader connections with authorizer hooks for dependency tracking.
+    // Use reader_count as the insertion index so successful readers are
+    // packed contiguously — no gaps if an earlier open/init fails.
     db->reader_count = 0;
     for (int i = 0; i < max_readers; i++) {
         sqlite3* rdb = open_connection(path, 1, encryption_key_hex);
         if (!rdb) continue;
-        db->readers[i].db = rdb;
-        stmt_cache_init(&db->readers[i].cache);
-        read_set_init(&db->readers[i].read_tables);
-        buf_init(&db->readers[i].json_buf, 16384);
-        db->readers[i].in_use = 0;
+
+        int idx = db->reader_count;
+        db->readers[idx].db = rdb;
+        stmt_cache_init(&db->readers[idx].cache);
+        read_set_init(&db->readers[idx].read_tables);
+        if (buf_init(&db->readers[idx].json_buf, 16384) != 0) {
+            sqlite3_close_v2(rdb);
+            db->readers[idx].db = NULL;
+            continue;
+        }
+        db->readers[idx].in_use = 0;
 
         // Install authorizer to capture read dependencies.
-        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[i].read_tables);
+        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[idx].read_tables);
 
         db->reader_count++;
     }
@@ -550,7 +587,13 @@ static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
         return NULL;
     }
 
-    stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt);
+    if (!stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt)) {
+        // OOM — can't cache, and nobody else holds a reference to finalize
+        // this stmt later. Finalize and fail the query.
+        sqlite3_finalize(stmt);
+        *out_rc = SQLITE_NOMEM;
+        return NULL;
+    }
     *out_rc = SQLITE_OK;
     return stmt;
 }
@@ -635,7 +678,10 @@ static int run_batch_locked(
         int rc = sqlite3_prepare_v3(
             db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
         if (rc != SQLITE_OK) return rc;
-        stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        if (!stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt)) {
+            sqlite3_finalize(stmt);
+            return SQLITE_NOMEM;
+        }
     }
 
     for (int i = 0; i < set_count; i++) {
@@ -860,6 +906,11 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
     }
 
     entry = stmt_cache_insert(&reader->cache, sql, sql_len, stmt);
+    if (!entry) {
+        sqlite3_finalize(stmt);
+        *out_rc = SQLITE_NOMEM;
+        return NULL;
+    }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
     *out_rc = SQLITE_OK;
     return stmt;
@@ -1033,8 +1084,48 @@ __attribute__((hot)) static int fast_i64_to_str(long long val, char* buf) {
 // JSON output
 // ---------------------------------------------------------------------------
 
-__attribute__((hot)) static void json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
-    buf_write_char(b, '"');
+static const char b64_table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Write a base64-encoded blob as a quoted JSON string.
+__attribute__((hot)) static int json_write_base64(resqlite_buf* __restrict b,
+                                                   const unsigned char* data,
+                                                   int len) {
+    // Output size: 4 chars per 3 bytes, rounded up, plus quotes.
+    int encoded_len = ((len + 2) / 3) * 4;
+    if (buf_write_char(b, '"') != 0) return -1;
+    if (buf_ensure(b, encoded_len) != 0) return -1;
+
+    unsigned char* out = b->data + b->len;
+    int i = 0;
+
+    // Process 3-byte groups.
+    for (; i + 2 < len; i += 3) {
+        unsigned int v = ((unsigned int)data[i] << 16) |
+                         ((unsigned int)data[i + 1] << 8) |
+                          (unsigned int)data[i + 2];
+        *out++ = b64_table[(v >> 18) & 0x3F];
+        *out++ = b64_table[(v >> 12) & 0x3F];
+        *out++ = b64_table[(v >> 6)  & 0x3F];
+        *out++ = b64_table[ v        & 0x3F];
+    }
+
+    // Remaining 1 or 2 bytes with padding.
+    if (i < len) {
+        unsigned int v = (unsigned int)data[i] << 16;
+        if (i + 1 < len) v |= (unsigned int)data[i + 1] << 8;
+        *out++ = b64_table[(v >> 18) & 0x3F];
+        *out++ = b64_table[(v >> 12) & 0x3F];
+        *out++ = (i + 1 < len) ? b64_table[(v >> 6) & 0x3F] : '=';
+        *out++ = '=';
+    }
+
+    b->len += encoded_len;
+    return buf_write_char(b, '"');
+}
+
+__attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
+    if (buf_write_char(b, '"') != 0) return -1;
 
     // Scan-then-flush: write spans of safe characters in one memcpy,
     // only stopping for characters that need escaping.
@@ -1060,16 +1151,19 @@ __attribute__((hot)) static void json_write_string(resqlite_buf* __restrict b, c
 
         if (esc) {
             // Flush unescaped span.
-            if (i > start) buf_write(b, s + start, i - start);
-            buf_write(b, esc, esc_len);
+            if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
+            if (buf_write(b, esc, esc_len) != 0) return -1;
             start = i + 1;
         }
     }
     // Flush remaining unescaped span.
-    if (start < len) buf_write(b, s + start, len - start);
+    if (start < len && buf_write(b, s + start, len - start) != 0) return -1;
 
-    buf_write_char(b, '"');
+    return buf_write_char(b, '"');
 }
+
+// Macro to bail out of write_json_to_buf on OOM without leaking.
+#define JSON_CHECK(expr) do { if ((expr) != 0) { rc = SQLITE_NOMEM; goto cleanup; } } while (0)
 
 __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
     int col_count = sqlite3_column_count(stmt);
@@ -1080,16 +1174,19 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
     const char** col_names = (col_count <= 64) ? _col_names_stack : NULL;
     int* col_name_lens = (col_count <= 64) ? _col_name_lens_stack : NULL;
     int col_names_init = 0;
-
-    buf_write_char(b, '[');
-
     int row_index = 0;
     int rc;
+
+    JSON_CHECK(buf_write_char(b, '['));
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         if (!col_names_init) {
             if (col_count > 64) {
                 col_names = (const char**)malloc(col_count * sizeof(const char*));
                 col_name_lens = (int*)malloc(col_count * sizeof(int));
+                if (!col_names || !col_name_lens) {
+                    rc = SQLITE_NOMEM;
+                    goto cleanup;
+                }
             }
             col_names_init = 1;
             for (int i = 0; i < col_count; i++) {
@@ -1098,32 +1195,32 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
             }
         }
 
-        if (row_index > 0) buf_write_char(b, ',');
-        buf_write_char(b, '{');
+        if (row_index > 0) JSON_CHECK(buf_write_char(b, ','));
+        JSON_CHECK(buf_write_char(b, '{'));
 
         for (int i = 0; i < col_count; i++) {
-            if (i > 0) buf_write_char(b, ',');
+            if (i > 0) JSON_CHECK(buf_write_char(b, ','));
 
-            json_write_string(b, col_names[i], col_name_lens[i]);
-            buf_write_char(b, ':');
+            JSON_CHECK(json_write_string(b, col_names[i], col_name_lens[i]));
+            JSON_CHECK(buf_write_char(b, ':'));
 
             int type = sqlite3_column_type(stmt, i);
             switch (type) {
                 case SQLITE_NULL:
-                    buf_write_str(b, "null", 4);
+                    JSON_CHECK(buf_write_str(b, "null", 4));
                     break;
                 case SQLITE_INTEGER: {
                     char num[24];
                     int num_len = fast_i64_to_str(
                         sqlite3_column_int64(stmt, i), num);
-                    buf_write_str(b, num, num_len);
+                    JSON_CHECK(buf_write_str(b, num, num_len));
                     break;
                 }
                 case SQLITE_FLOAT: {
                     char num[32];
                     int num_len = snprintf(num, sizeof(num), "%.17g",
                                            sqlite3_column_double(stmt, i));
-                    buf_write_str(b, num, num_len);
+                    JSON_CHECK(buf_write_str(b, num, num_len));
                     break;
                 }
                 case SQLITE_TEXT: {
@@ -1132,44 +1229,42 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
                     // invalidates the text pointer.
                     const char* text = (const char*)sqlite3_column_text(stmt, i);
                     int text_len = sqlite3_column_bytes(stmt, i);
-                    json_write_string(b, text, text_len);
+                    JSON_CHECK(json_write_string(b, text, text_len));
                     break;
                 }
                 case SQLITE_BLOB: {
                     int blob_len = sqlite3_column_bytes(stmt, i);
                     const unsigned char* blob =
                         (const unsigned char*)sqlite3_column_blob(stmt, i);
-                    buf_write_char(b, '"');
-                    static const char hex[] = "0123456789abcdef";
-                    for (int j = 0; j < blob_len; j++) {
-                        buf_write_byte(b, hex[blob[j] >> 4]);
-                        buf_write_byte(b, hex[blob[j] & 0x0f]);
-                    }
-                    buf_write_char(b, '"');
+                    JSON_CHECK(json_write_base64(b, blob, blob_len));
                     break;
                 }
                 default:
-                    buf_write_str(b, "null", 4);
+                    JSON_CHECK(buf_write_str(b, "null", 4));
                     break;
             }
         }
 
-        buf_write_char(b, '}');
+        JSON_CHECK(buf_write_char(b, '}'));
         row_index++;
     }
 
-    buf_write_char(b, ']');
+    JSON_CHECK(buf_write_char(b, ']'));
 
+cleanup:
     sqlite3_reset(stmt);
     if (col_count > 64) {
         free(col_names);
         free(col_name_lens);
     }
 
+    if (rc == SQLITE_NOMEM) return rc;
     if (rc != SQLITE_DONE) return rc;
 
     return SQLITE_OK;
 }
+
+#undef JSON_CHECK
 
 int resqlite_query_bytes(
     resqlite_db* db,

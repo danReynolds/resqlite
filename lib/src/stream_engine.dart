@@ -188,9 +188,15 @@ final class StreamEngine {
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.add(rows);
       }
-    } catch (e) {
-      // Re-query failed — silently drop. The stream will get the
-      // next re-query result on the next write.
+    } catch (e, st) {
+      // Discard if a newer re-query was dispatched while we were running.
+      if (entry.reQueryGeneration != generation) return;
+      // Propagate error to subscribers so they can handle it (e.g., table
+      // dropped, schema changed). Silent failure would leave the stream
+      // stuck with stale data and no signal to the listener.
+      for (final sub in entry.subscribers) {
+        if (!sub.isClosed) sub.addError(e, st);
+      }
     }
   }
 
@@ -312,13 +318,16 @@ int _streamKey(String sql, List<Object?> params) {
 }
 
 /// Hash a query result for change detection using shared FNV-1a.
+///
+/// Uses [stableValueHash] instead of `Object.hashCode` so that
+/// `Uint8List` values are hashed by content, not by identity.
 int _hashResult(List<Map<String, Object?>> rows) {
   if (rows.isEmpty) return 0;
   var hash = fnvOffsetBasis;
   hash = fnvCombine(hash, rows.length);
   for (final row in rows) {
     for (final value in row.values) {
-      hash = fnvCombine(hash, value == null ? 0 : value.hashCode);
+      hash = fnvCombine(hash, stableValueHash(value));
     }
   }
   return hash;

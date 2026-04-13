@@ -361,6 +361,41 @@ void main() {
       }
     });
 
+    test('selectBytes encodes blobs as base64', () async {
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, data BLOB)',
+      );
+
+      // Test various sizes: empty, 1 byte (padding ==), 2 bytes (padding =),
+      // 3 bytes (no padding), and a larger payload.
+      final cases = <(String, Uint8List, String)>[
+        ('empty', Uint8List(0), ''),
+        ('1 byte', Uint8List.fromList([0xDE]), '3g=='),
+        ('2 bytes', Uint8List.fromList([0xDE, 0xAD]), '3q0='),
+        ('3 bytes', Uint8List.fromList([0xDE, 0xAD, 0xBE]), '3q2+'),
+        (
+          '6 bytes',
+          Uint8List.fromList([0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21]),
+          'SGVsbG8h',
+        ),
+      ];
+
+      for (final (label, blob, expectedB64) in cases) {
+        await db.execute('DELETE FROM t');
+        await db.execute('INSERT INTO t(data) VALUES (?)', [blob]);
+
+        final bytes = await db.selectBytes('SELECT data FROM t');
+        final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+        final value = (decoded[0] as Map)['data'] as String;
+        expect(value, expectedB64, reason: label);
+
+        // Round-trip: decode the base64 back and compare to original bytes.
+        if (blob.isNotEmpty) {
+          expect(base64Decode(value), blob, reason: '$label round-trip');
+        }
+      }
+    });
+
     // ----- executeBatch -----
 
     test('executeBatch inserts multiple rows', () async {

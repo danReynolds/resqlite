@@ -229,11 +229,22 @@ final class Database {
   /// This is ideal for HTTP responses, file export, or any path where the
   /// end consumer wants JSON bytes rather than Dart objects.
   ///
+  /// **Note:** This method always reads from the reader pool, even inside
+  /// a [transaction]. Use [select] if you need to see uncommitted writes.
+  ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed.
+  /// Throws [StateError] if called inside a [transaction] body.
   Future<Uint8List> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
+    if (Transaction.current != null) {
+      throw StateError(
+        'selectBytes() cannot be used inside a transaction. '
+        'Use select() instead, which sees uncommitted writes.',
+      );
+    }
+
     _ensureOpen();
 
     final pool = await _readerPool;

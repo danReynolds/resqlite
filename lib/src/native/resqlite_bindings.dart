@@ -495,8 +495,10 @@ NativeBuffer queryBytes(
       pLen,
     );
     if (rc != 0) {
-      final bufPtr = pBuf.value;
-      if (bufPtr != ffi.nullptr) resqliteFree(bufPtr.cast());
+      // Don't free pBuf — it points to the reader's persistent json_buf,
+      // which is owned by the C connection pool. The C code sets it to
+      // NULL on error anyway, but even if it didn't, freeing it would
+      // corrupt the reader's buffer for future queries.
       throw ResqliteQueryException(
         'resqlite_query_bytes failed with code $rc',
         sql: sql,

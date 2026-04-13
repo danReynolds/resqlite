@@ -12,6 +12,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../exceptions.dart';
 import '../native/resqlite_bindings.dart';
 import '../query_decoder.dart';
 import '../result_hash.dart';
@@ -144,7 +145,18 @@ void readerEntrypoint(List<Object> args) {
       }
       request.replyPort.send((result, false, null));
     } catch (e) {
-      request.replyPort.send((null, false, e.toString()));
+      // Same-group isolates (Isolate.spawn) can send arbitrary objects
+      // via SendPort — the VM deep-copies them. Wrap non-resqlite errors
+      // with the request's SQL context so callers always get a typed
+      // exception with sql/parameters intact.
+      final error = e is ResqliteException
+          ? e
+          : ResqliteQueryException(
+              e.toString(),
+              sql: request.sql,
+              parameters: request.parameters,
+            );
+      request.replyPort.send((null, false, error));
     }
   };
 }

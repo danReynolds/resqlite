@@ -246,14 +246,14 @@ class _WorkerSlot {
       final pending = _pendingCompleter;
       _pendingCompleter = null;
 
-      final (result, _, error) = msg as (Object?, bool, String?);
+      final (result, _, error) = msg as (Object?, bool, ResqliteException?);
 
       _alive = false;
       _sendPort = null;
       _busy = false;
 
       if (error != null) {
-        pending?.completeError(StateError(error));
+        pending?.completeError(error);
       } else {
         pending?.complete(result);
       }
@@ -291,12 +291,12 @@ class _WorkerSlot {
       _pendingReplyPort = null;
 
       // Normal (non-sacrifice) reply via SendPort.send.
-      final (result, _, error) = msg as (Object?, bool, String?);
+      final (result, _, error) = msg as (Object?, bool, ResqliteException?);
 
       if (error != null) {
         _busy = false;
         _notifyPool();
-        completer.completeError(StateError(error));
+        completer.completeError(error);
         return;
       }
 
