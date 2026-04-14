@@ -63,7 +63,7 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch(() => SelectRequest(sql, parameters));
+    final result = await _dispatch(SelectRequest(sql, parameters));
     return result as List<Map<String, Object?>>;
   }
 
@@ -73,7 +73,7 @@ final class ReaderPool {
     List<Object?> parameters = const [],
   ]) async {
     final result = await _dispatch(
-      () => SelectWithDepsRequest(sql, parameters),
+      SelectWithDepsRequest(sql, parameters),
     );
     return result as (List<Map<String, Object?>>, List<String>);
   }
@@ -83,7 +83,7 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch(() => SelectBytesRequest(sql, parameters));
+    final result = await _dispatch(SelectBytesRequest(sql, parameters));
     return result as Uint8List;
   }
 
@@ -95,13 +95,13 @@ final class ReaderPool {
     int lastResultHash,
   ) async {
     final result = await _dispatch(
-      () => SelectIfChangedRequest(sql, parameters, lastResultHash),
+      SelectIfChangedRequest(sql, parameters, lastResultHash),
     );
     final (hash, rows) = result as (int, List<Map<String, Object?>>?);
     return (rows, hash);
   }
 
-  Future<Object?> _dispatch(ReadRequest Function() buildRequest) async {
+  Future<Object?> _dispatch(ReadRequest request) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever on `_workerAvailable`
@@ -117,7 +117,7 @@ final class ReaderPool {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
-          return slot.request(buildRequest);
+          return slot.request(request);
         }
       }
 
@@ -267,13 +267,16 @@ class _WorkerSlot {
         // Otherwise, deliver the result and notify the pool that this worker is available
         // for its next request.
       } else {
+        // Notify the pool that this worker is available again. This should be done *before* returning
+        // the result, so that a worker is already available *before* the caller that the result will be returned
+        // to can attempt to request more work.
+        _notifyPool();
+
         if (error == null) {
           pending.complete(result);
         } else {
           pending.completeError(error);
         }
-
-        _notifyPool();
       }
     };
 
@@ -290,7 +293,7 @@ class _WorkerSlot {
     _notifyPool();
   }
 
-  Future<Object?> request(ReadRequest Function() buildRequest) {
+  Future<Object?> request(ReadRequest request) {
     final port = _sendPort;
     if (port == null) throw StateError('Worker not alive');
     if (_pendingCompleter != null) {
@@ -298,7 +301,7 @@ class _WorkerSlot {
     }
 
     final completer = _pendingCompleter = Completer<Object?>.sync();
-    port.send(buildRequest());
+    port.send(request);
     return completer.future;
   }
 
