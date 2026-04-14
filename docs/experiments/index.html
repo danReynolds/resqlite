@@ -255,6 +255,26 @@
   .badge.accepted { background: rgba(63,185,80,0.15); color: var(--green); }
   .badge.rejected { background: rgba(248,81,73,0.15); color: var(--red); }
 
+  .chart-improvements {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+  .improv-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    background: rgba(63,185,80,0.1);
+    color: var(--green);
+    border: 1px solid rgba(63,185,80,0.2);
+  }
+  .improv-pill .metric-name { color: var(--muted); }
+  .improv-pill .arrow { font-size: 0.8em; }
+
   .loading { text-align: center; padding: 3rem; color: var(--muted); }
 
   @media (max-width: 900px) {
@@ -293,23 +313,27 @@
     </div>
 
     <div class="chart-panel active" id="panelReads">
-      <h2>Read Performance</h2>
-      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms) — <strong>lower is better</strong></div>
+      <h2>Read Performance <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms)</div>
+      <div class="chart-improvements" id="improvReads"></div>
       <div class="chart-canvas-wrap"><canvas id="chartReads"></canvas></div>
     </div>
     <div class="chart-panel" id="panelWrites">
-      <h2>Write Performance</h2>
-      <div class="desc">Single inserts (100 sequential) and batch inserts (1K rows), wall time (ms) — <strong>lower is better</strong></div>
+      <h2>Write Performance <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">Single inserts (100 sequential) and batch inserts (1K rows), wall time (ms)</div>
+      <div class="chart-improvements" id="improvWrites"></div>
       <div class="chart-canvas-wrap"><canvas id="chartWrites"></canvas></div>
     </div>
     <div class="chart-panel" id="panelConcurrency">
-      <h2>Concurrency &amp; Parameterized</h2>
-      <div class="desc">4x concurrent reads and 100-query parameterized workload, wall time (ms) — <strong>lower is better</strong></div>
+      <h2>Concurrency &amp; Parameterized <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">4x concurrent reads and 100-query parameterized workload, wall time (ms)</div>
+      <div class="chart-improvements" id="improvConcurrency"></div>
       <div class="chart-canvas-wrap"><canvas id="chartConcurrency"></canvas></div>
     </div>
     <div class="chart-panel" id="panelStreaming">
       <h2>Streaming &amp; Throughput</h2>
-      <div class="desc">Invalidation latency (ms, left — <strong>lower is better</strong>) and point query throughput (qps, right — <strong>higher is better</strong>)</div>
+      <div class="desc">Invalidation latency (ms, left — lower is better) and point query throughput (qps, right — higher is better)</div>
+      <div class="chart-improvements" id="improvStreaming"></div>
       <div class="chart-canvas-wrap"><canvas id="chartStreaming"></canvas></div>
     </div>
   </div>
@@ -495,6 +519,46 @@ function buildCharts() {
         selectExp(exp.id);
       }
     });
+
+    // Compute improvement annotations for this chart.
+    const improvId = chartId.replace('chart', 'improv');
+    const improvEl = document.getElementById(improvId);
+    if (improvEl) {
+      const pills = [];
+      for (const ds of datasets) {
+        // Find first and last non-null values.
+        const nonNull = ds.data.map((v, i) => [v, i]).filter(([v]) => v !== null);
+        if (nonNull.length < 2) continue;
+        const [first] = nonNull[0];
+        const [last] = nonNull[nonNull.length - 1];
+        if (first === 0 && last === 0) continue;
+
+        const isQps = ds.yAxisID === 'yQps';
+        let ratio, improved;
+        if (isQps) {
+          ratio = last / first;
+          improved = last > first;
+        } else {
+          ratio = first / last;
+          improved = last < first;
+        }
+
+        const fmtVal = v => isQps ? Math.round(v).toLocaleString() : v.toFixed(2);
+        const unit = isQps ? ' qps' : ' ms';
+        const ratioStr = ratio >= 1 ? ratio.toFixed(1) + 'x' : (1/ratio).toFixed(1) + 'x';
+
+        if (improved && ratio > 1.05) {
+          pills.push(
+            `<span class="improv-pill">` +
+            `<span class="metric-name">${ds.label}</span> ` +
+            `${fmtVal(first)}${unit} <span class="arrow">\u2192</span> ${fmtVal(last)}${unit} ` +
+            `<strong>(${ratioStr} ${isQps ? 'faster' : 'faster'})</strong>` +
+            `</span>`
+          );
+        }
+      }
+      improvEl.innerHTML = pills.join('');
+    }
   }
 }
 
