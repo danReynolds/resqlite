@@ -473,21 +473,59 @@ function findRunIndexForExp(exp) {
   return bestDist < 2 * 86400000 ? bestIdx : -1;
 }
 
-// ── Highlight a data point on all visible charts ──
-function highlightChartIndex(runIndex) {
-  for (const chart of Object.values(chartInstances)) {
-    if (runIndex >= 0) {
-      chart.setActiveElements(
-        chart.data.datasets.map((ds, di) => ({ datasetIndex: di, index: runIndex }))
-      );
-      chart.tooltip.setActiveElements(
-        chart.data.datasets.map((ds, di) => ({ datasetIndex: di, index: runIndex })),
-        { x: 0, y: 0 }
-      );
-    } else {
-      chart.setActiveElements([]);
-      chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+// ── Highlight a data point on all charts with vertical line + dim ──
+let highlightedRunIndex = -1;
+
+// Custom plugin: draws a vertical highlight line at the active index.
+const verticalLinePlugin = {
+  id: 'verticalHighlight',
+  afterDraw(chart) {
+    if (highlightedRunIndex < 0) return;
+    const meta = chart.getDatasetMeta(0);
+    if (!meta.data[highlightedRunIndex]) return;
+    const x = meta.data[highlightedRunIndex].x;
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(88, 166, 255, 0.5)';
+    ctx.stroke();
+    // Draw larger dots at the highlighted index.
+    for (const ds of chart.data.datasets) {
+      const dsMeta = chart.getDatasetMeta(chart.data.datasets.indexOf(ds));
+      const pt = dsMeta.data[highlightedRunIndex];
+      if (!pt || ds.data[highlightedRunIndex] === null) continue;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = ds.borderColor;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#0d1117';
+      ctx.stroke();
     }
+    ctx.restore();
+  },
+};
+Chart.register(verticalLinePlugin);
+
+function highlightChartIndex(runIndex) {
+  highlightedRunIndex = runIndex;
+  for (const chart of Object.values(chartInstances)) {
+    // Dim all datasets when a point is highlighted, restore when cleared.
+    chart.data.datasets.forEach(ds => {
+      if (!ds._origBorderColor) ds._origBorderColor = ds.borderColor;
+      if (!ds._origBgColor) ds._origBgColor = ds.backgroundColor;
+      if (runIndex >= 0) {
+        ds.borderColor = ds._origBorderColor + '40';
+        ds.backgroundColor = ds._origBgColor.replace(/33$/, '10');
+      } else {
+        ds.borderColor = ds._origBorderColor;
+        ds.backgroundColor = ds._origBgColor;
+      }
+    });
     chart.update('none');
   }
 }
@@ -511,17 +549,19 @@ function renderExpList() {
     </div>
   `).join('');
 
-  // Attach event listeners.
-  container.querySelectorAll('.exp-item').forEach(el => {
-    const id = el.dataset.id;
-    el.addEventListener('click', () => selectExp(id));
-    el.addEventListener('mouseenter', () => {
-      const exp = DATA.experiments.find(e => e.id === id);
-      if (exp) highlightChartIndex(findRunIndexForExp(exp));
-    });
-    el.addEventListener('mouseleave', () => {
-      highlightChartIndex(-1);
-    });
+  // Event delegation on the list container for reliable hover + click.
+  container.addEventListener('click', (e) => {
+    const item = e.target.closest('.exp-item');
+    if (item) selectExp(item.dataset.id);
+  });
+  container.addEventListener('mouseover', (e) => {
+    const item = e.target.closest('.exp-item');
+    if (!item) return;
+    const exp = DATA.experiments.find(ex => ex.id === item.dataset.id);
+    if (exp) highlightChartIndex(findRunIndexForExp(exp));
+  });
+  container.addEventListener('mouseleave', () => {
+    if (!selectedExpId) highlightChartIndex(-1);
   });
 }
 
@@ -580,9 +620,19 @@ function selectExp(id) {
 
 function closeDetail() {
   document.getElementById('rightCol').classList.remove('detail-open');
-  highlightChartIndex(-1);
   selectedExpId = null;
+  highlightChartIndex(-1);
 }
+
+// When mouse leaves an individual item but stays in the list, clear hover highlight
+// (unless an experiment is selected in detail view).
+document.getElementById('expList')?.addEventListener('mouseout', (e) => {
+  const item = e.target.closest('.exp-item');
+  const related = e.relatedTarget?.closest?.('.exp-item');
+  if (item && !related && !selectedExpId) {
+    highlightChartIndex(-1);
+  }
+});
 
 // ── Chart click → find nearest experiment ──
 function selectExpByRun(run) {
