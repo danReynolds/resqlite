@@ -122,7 +122,10 @@
     border-left: 3px solid transparent;
     transition: background 0.1s, border-color 0.15s;
   }
-  .exp-item:hover { background: rgba(88,166,255,0.06); }
+  .exp-item:hover {
+    background: rgba(88,166,255,0.06);
+    border-left-color: rgba(88,166,255,0.3);
+  }
   .exp-item.selected {
     background: rgba(88,166,255,0.08);
     border-left-color: var(--accent);
@@ -504,7 +507,7 @@ function findExpForRun(run) {
 // ── Highlight a data point on all charts with vertical line + dim ──
 let highlightedRunIndex = -1;
 
-// Custom plugin: draws a vertical highlight line at the active index.
+// Custom plugin: draws a vertical highlight line + date label at the active index.
 const verticalLinePlugin = {
   id: 'verticalHighlight',
   afterDraw(chart) {
@@ -512,23 +515,38 @@ const verticalLinePlugin = {
     const meta = chart.getDatasetMeta(0);
     if (!meta.data[highlightedRunIndex]) return;
     const x = meta.data[highlightedRunIndex].x;
-    const { top, bottom } = chart.chartArea;
+    const { top, bottom, left, right } = chart.chartArea;
     const ctx = chart.ctx;
     ctx.save();
+
+    // Vertical line.
     ctx.beginPath();
     ctx.moveTo(x, top);
     ctx.lineTo(x, bottom);
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(88, 166, 255, 0.5)';
     ctx.stroke();
-    // Draw larger dots at the highlighted index.
+
+    // Date label at top of line.
+    if (DATA && DATA.runs[highlightedRunIndex]) {
+      const run = DATA.runs[highlightedRunIndex];
+      const label = run.date;
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillStyle = 'rgba(88, 166, 255, 0.9)';
+      ctx.textAlign = x > (left + right) / 2 ? 'right' : 'left';
+      const offset = x > (left + right) / 2 ? -6 : 6;
+      ctx.fillText(label, x + offset, top + 12);
+    }
+
+    // Draw larger dots at the highlighted index using original colors.
     for (const ds of chart.data.datasets) {
       const dsMeta = chart.getDatasetMeta(chart.data.datasets.indexOf(ds));
       const pt = dsMeta.data[highlightedRunIndex];
       if (!pt || ds.data[highlightedRunIndex] === null) continue;
+      const color = ds._origBorderColor || ds.borderColor;
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = ds.borderColor;
+      ctx.fillStyle = color;
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#0d1117';
@@ -597,7 +615,10 @@ function renderExpList() {
     const item = e.target.closest('.exp-item');
     if (!item) return;
     const exp = DATA.experiments.find(ex => ex.id === item.dataset.id);
-    if (exp) highlightChartIndex(findRunIndexForExp(exp));
+    if (!exp) return;
+    const idx = findRunIndexForExp(exp);
+    // Only highlight if we have a valid run index — don't clear for unmapped experiments.
+    if (idx >= 0) highlightChartIndex(idx);
   });
   container.addEventListener('mouseleave', () => {
     if (!selectedExpId) highlightChartIndex(-1);
