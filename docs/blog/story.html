@@ -85,7 +85,7 @@
   <article class="post">
     <span class="post-category">Engineering Story</span>
     <h1>40 Experiments Later: How We Built a Blazing Fast SQLite Library for Flutter</h1>
-<p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.</p>
+<p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. Over 40 experiments, we ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.</p>
 <p><strong>The bottom line:</strong> resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.</p>
 <h2>The Problem We Were Trying to Solve</h2>
 <p>We were building a Flutter app backed by <a href="https://sqlite.org/">SQLite</a> — the embedded database that runs on basically everything. The <a href="https://pub.dev/packages/sqlite3">sqlite3</a> package worked, but we were hitting two problems:</p>
@@ -147,7 +147,7 @@ final rows = await Isolate.run(() {
 </tr>
 </tbody></table></div>
 
-<p>Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but the Dart VM still needed to walk and validate every object in the graph before accepting it. 5,000 rows × 6 columns = ~200,000 Dart objects (maps, strings, keys). Validating them all took nearly as long as building them.</p>
+<p>Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but the Dart VM still needed to walk and validate every object in the graph before accepting it. 5,000 rows × 6 columns means ~5,000 <code>LinkedHashMap</code> instances, each with ~8-10 internal objects (hash buckets, linked list nodes), plus ~60,000 key and value objects. Over 100,000 Dart heap objects to validate. That took nearly as long as building them.</p>
 <p>But returning raw bytes (<code>Uint8List</code>) — a single contiguous block of memory — cost 0.00ms on main. One object, instant validation.</p>
 <p><strong>Lesson:</strong> The cost of <code>Isolate.exit()</code> isn't the transfer — it's the validation walk. The fewer Dart objects in the result, the cheaper it is. This insight drove everything that followed.</p>
 <h2>Attempt 2: A New Library, Built on Raw FFI</h2>
@@ -283,7 +283,7 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, row1_col1, ...]
 <li>1 <code>List&lt;Object?&gt;</code> (the flat value list)</li>
 <li>The actual value objects (strings, ints, doubles)</li>
 </ul>
-<p>Zero <code>Row</code> objects. Zero <code>Map</code> internals. The structural object count dropped from ~200,000 to <strong>3</strong>.</p>
+<p>Zero <code>Row</code> objects. Zero <code>Map</code> internals. At 20,000 rows, the structural object count dropped from hundreds of thousands to <strong>3</strong>.</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
 <th>Implementation (20k rows)</th>
@@ -369,8 +369,8 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, row1_col1, ...]
 </tr>
 </tbody></table></div>
 
-<h2>The Final Numbers</h2>
-<p>Two methods. Clean API. Fastest in the ecosystem.</p>
+<h2>Where We Stood After Act One</h2>
+<p>Two read methods. Clean API. Competitive with every library in the ecosystem.</p>
 <pre><code class="lang-dart">
 // Maps — flat-list Row wrappers, Isolate.exit zero-copy, near-zero main jank
 final users = await db.select('SELECT * FROM users WHERE active = ?', [1]);
@@ -572,7 +572,7 @@ return Response(200, body: bytes, headers: {'Content-Type': 'application/json'})
 <p><strong>Row Map facade (experiment 032).</strong> Our flat-list <code>Row</code> type implemented Dart's <code>Map</code> interface via <code>MapMixin</code>, which provides default implementations for methods like <code>containsKey</code>, <code>forEach</code>, and <code>entries</code>. Those defaults work but they're not optimal — they allocate iterators and call through generic interfaces. We overrode the key methods with direct implementations that index into the flat list. Same external API, measurably faster on the main isolate where Row access actually happens.</p>
 <p><strong>Event-port cleanup (experiment 040).</strong> The reader pool used a complex protocol: workers would send results, then send a &quot;done&quot; signal, and the pool would track state across both messages. We simplified to a single-message protocol — result + metadata in one shot. Fewer event port registrations, fewer microtask hops. Point queries jumped from ~68K to 107K qps. Sometimes the biggest wins come from removing complexity, not adding it.</p>
 <h3>Where It Landed</h3>
-<p>40 documented experiments — 16 accepted, 18 rejected. 9 benchmark suites with 3-repeat medians. The numbers, measured on a 10-core M1 Pro:</p>
+<p>40+ documented experiments — 16 accepted, 14 rejected, the rest explored and set aside. 9 benchmark suites with 3-repeat medians. The numbers, measured on a 10-core M1 Pro:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
 <th>Metric</th>
@@ -624,7 +624,7 @@ return Response(200, body: bytes, headers: {'Content-Type': 'application/json'})
 <p><strong>C connection pools beat Dart worker pools — until they don't.</strong> Early on, <code>pthread_mutex</code> coordination was faster than Dart isolate dispatch. But once we had persistent workers with 1:1 reader assignment, the C mutex became pure overhead. Removing it (dedicated readers, experiment 030) gave us a 40% point query improvement. The architecture that's right at one scale becomes the bottleneck at the next.</p>
 <p><strong>Tests find concurrency bugs that benchmarks hide.</strong> The sacrifice race (replyPort fires before exitPort, callers claim a dead slot) never showed up in benchmarks — queries just silently hung. It took a stress test firing 8 concurrent large queries to expose it. Write concurrent tests before you think you need them.</p>
 <p><strong>Single-run benchmarks lie.</strong> We cited 65K point queries/sec for weeks before running 3-repeat measurements and discovering the real stable number was closer to 50-68K depending on thermal state. The first run of any benchmark is always the worst (cold JIT, cold caches). At minimum, run 3 times and take the median.</p>
-<p><strong>The last 30% comes from micro-optimization, not architecture.</strong> After the big wins (flat lists, connection pool, persistent workers), the remaining gains came from reducing FFI crossings, adding compiler hints, and simplifying protocols. These aren't exciting, but they compound — thirteen small experiments got us from 68K to 107K point queries/sec.</p>
+<p><strong>The last 30% comes from micro-optimization, not architecture.</strong> After the big wins (flat lists, connection pool, persistent workers), the remaining gains came from reducing FFI crossings, adding compiler hints, and simplifying protocols. These aren't exciting, but they compound — a dozen small experiments got us from 68K to 107K point queries/sec.</p>
 <p><strong>Benchmark everything, believe nothing.</strong> String interning sounded smart. Binary codecs sounded efficient. Lazy byte-backed maps sounded like the best of both worlds. All three were slower where it mattered. The ideas that actually worked — flat lists, lazy <code>Row</code> wrappers, per-query <code>NOMUTEX</code>, dedicated readers — weren't the ones we'd have bet on at the start.</p>
 
   </article>
