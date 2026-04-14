@@ -314,6 +314,58 @@ Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
 Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
+// Plugin: draw winner labels on bar charts.
+// For each x-index group, finds the smallest bar (lower is better),
+// draws the library color dot + "N.Nx" above it.
+Chart.register({
+  id: 'winnerLabels',
+  afterDraw(chart) {
+    if (chart.config.type !== 'bar') return;
+    const datasets = chart.data.datasets;
+    if (datasets.length < 2) return;
+
+    const ctx = chart.ctx;
+    const labelCount = chart.data.labels.length;
+
+    for (let i = 0; i < labelCount; i++) {
+      // Gather values and metadata for this x-index across all datasets.
+      const entries = [];
+      for (let di = 0; di < datasets.length; di++) {
+        const val = datasets[di].data[i];
+        if (val == null || val === 0) continue;
+        const meta = chart.getDatasetMeta(di);
+        if (meta.hidden) continue;
+        const bar = meta.data[i];
+        if (!bar) continue;
+        const color = Array.isArray(datasets[di].backgroundColor)
+          ? datasets[di].backgroundColor[i]
+          : datasets[di].backgroundColor;
+        entries.push({ val, bar, color, di });
+      }
+      if (entries.length < 2) continue;
+
+      // Find winner (lowest value) and runner-up.
+      entries.sort((a, b) => a.val - b.val);
+      const winner = entries[0];
+      const runnerUp = entries[1];
+      const speedup = runnerUp.val / winner.val;
+      if (speedup < 1.05) continue; // Skip if negligible difference.
+
+      // Draw label above the winner bar.
+      const x = winner.bar.x;
+      const y = winner.bar.y - 8;
+
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillStyle = winner.color || '#3fb950';
+      ctx.fillText(`${speedup.toFixed(1)}x`, x, y);
+      ctx.restore();
+    }
+  },
+});
+
 const scaleRows = [10, 50, 100, 500, 1000, 2000, 5000, 10000, 20000];
 const scaleMapsR = [0.02, 0.04, 0.05, 0.22, 0.41, 0.88, 2.48, 5.24, 12.89];
 const scaleMapsS = [0.01, 0.04, 0.08, 0.39, 0.81, 1.58, 3.99, 8.14, 24.62];
