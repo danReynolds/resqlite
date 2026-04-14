@@ -478,18 +478,22 @@ function buildCharts() {
           },
         },
         scales,
-        onClick(evt, elements) {
-          if (!elements.length) return;
-          const exp = chartExpOrder[elements[0].dataIndex];
-          if (exp) {
-            if (selectedExpId === exp.id) {
-              closeDetail();
-            } else {
-              selectExp(exp.id);
-            }
-          }
-        },
       },
+    });
+
+    // Chart.js onClick is unreliable with interaction modes — use a direct
+    // canvas click listener with getElementsAtEventForMode instead.
+    canvas.addEventListener('click', (e) => {
+      const chart = chartInstances[chartId];
+      const elements = chart.getElementsAtEventForMode(e, 'index', { intersect: false }, false);
+      if (!elements.length) return;
+      const exp = chartExpOrder[elements[0].index];
+      if (!exp) return;
+      if (selectedExpId === exp.id) {
+        closeDetail();
+      } else {
+        selectExp(exp.id);
+      }
     });
   }
 }
