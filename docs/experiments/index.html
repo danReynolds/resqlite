@@ -455,13 +455,7 @@ function buildCharts() {
         scales,
         onClick(evt, elements) {
           if (!elements.length) return;
-          const runIdx = elements[0].index;
-          // Use the precomputed reverse mapping first — it respects the
-          // spread distribution so each run index maps to a unique experiment.
-          const expId = runToExpId[runIdx];
-          const exp = expId
-            ? DATA.experiments.find(e => e.id === expId)
-            : findExpForRun(runs[runIdx]);
+          const exp = findExpForRunIndex(elements[0].index);
           if (exp) {
             if (selectedExpId === exp.id) {
               closeDetail();
@@ -535,20 +529,20 @@ function findRunIndexForExp(exp) {
   return expToRunIndex[exp.id] ?? -1;
 }
 
-function findExpForRun(run) {
-  const idx = DATA.runs.indexOf(run);
-  const expId = runToExpId[idx];
-  if (expId) return DATA.experiments.find(e => e.id === expId);
-  // Fallback: closest experiment by date.
-  const runTs = new Date(run.timestamp).getTime();
-  let best = null;
-  let bestDist = Infinity;
-  for (const exp of DATA.experiments) {
-    if (!exp.date) continue;
-    const dist = Math.abs(new Date(exp.date).getTime() - runTs);
-    if (dist < bestDist) { bestDist = dist; best = exp; }
+function findExpForRunIndex(idx) {
+  // Direct mapping from the spread distribution.
+  if (runToExpId[idx]) {
+    return DATA.experiments.find(e => e.id === runToExpId[idx]);
   }
-  return best && bestDist < 2 * 86400000 ? best : null;
+  // Fallback: find the nearest mapped run index and use its experiment.
+  let bestExpId = null;
+  let bestDist = Infinity;
+  for (const [mappedIdx, expId] of Object.entries(runToExpId)) {
+    const dist = Math.abs(+mappedIdx - idx);
+    if (dist < bestDist) { bestDist = dist; bestExpId = expId; }
+  }
+  if (bestExpId) return DATA.experiments.find(e => e.id === bestExpId);
+  return null;
 }
 
 // ── Highlight a data point on all charts with vertical line + dim ──
