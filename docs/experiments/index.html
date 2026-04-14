@@ -88,7 +88,7 @@
   .chart-panel .desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.75rem; }
   .chart-canvas-wrap { flex: 1; position: relative; min-height: 0; }
 
-  /* Right column: experiment list + detail */
+  /* Right column */
   .right-col {
     display: flex;
     flex-direction: column;
@@ -103,98 +103,15 @@
     color: var(--muted);
   }
 
-  /* Detail view (shown when an experiment is selected) */
-  .exp-detail {
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    max-height: 45%;
-    overflow-y: auto;
-    display: none;
-  }
-  .exp-detail.visible { display: block; }
-  .exp-detail .detail-header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-  }
-  .exp-detail .detail-num {
-    font-size: 1.6rem;
-    font-weight: 700;
-  }
-  .exp-detail .detail-num.accepted { color: var(--green); }
-  .exp-detail .detail-num.rejected { color: var(--muted); }
-  .exp-detail .detail-title { font-size: 1.15rem; font-weight: 600; }
-  .exp-detail .detail-meta {
-    display: flex; gap: 1rem; margin-bottom: 1rem;
-    font-size: 0.8rem; color: var(--muted);
-  }
-  .exp-detail .detail-section { margin-bottom: 0.75rem; }
-  .exp-detail .detail-section h4 {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    margin-bottom: 0.25rem;
-  }
-  .exp-detail .detail-section p {
-    font-size: 0.85rem;
-    color: var(--text);
-    line-height: 1.6;
-    margin-bottom: 0.4rem;
-  }
-  .exp-detail .detail-section ul,
-  .exp-detail .detail-section ol {
-    font-size: 0.85rem;
-    padding-left: 1.25rem;
-    margin-bottom: 0.5rem;
-    color: var(--text);
-  }
-  .exp-detail .detail-section li {
-    margin-bottom: 0.2rem;
-    line-height: 1.5;
-  }
-  .exp-detail .detail-section table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-    margin-bottom: 0.5rem;
-  }
-  .exp-detail .detail-section table td {
-    padding: 0.3rem 0.6rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .exp-detail .detail-section table tr:first-child td {
-    font-weight: 600;
-    color: var(--muted);
-  }
-  .exp-detail .detail-section code {
-    background: rgba(88,166,255,0.08);
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-    font-size: 0.82em;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-  .exp-detail .close-btn {
-    float: right;
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    border-radius: 6px;
-    padding: 0.2rem 0.6rem;
-    cursor: pointer;
-    font-size: 0.78rem;
-    font-family: inherit;
-  }
-  .exp-detail .close-btn:hover { color: var(--text); border-color: var(--muted); }
-
   /* Experiment list */
   .exp-list {
     flex: 1;
     overflow-y: auto;
     padding: 0.5rem 0;
   }
+  .right-col.detail-open .exp-list { display: none; }
+  .right-col.detail-open .right-col-header { display: none; }
+
   .exp-item {
     display: grid;
     grid-template-columns: 3rem 1fr auto;
@@ -205,7 +122,7 @@
     border-left: 3px solid transparent;
     transition: background 0.1s, border-color 0.15s;
   }
-  .exp-item:hover { background: rgba(88,166,255,0.04); }
+  .exp-item:hover { background: rgba(88,166,255,0.06); }
   .exp-item.selected {
     background: rgba(88,166,255,0.08);
     border-left-color: var(--accent);
@@ -222,6 +139,106 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .exp-item .item-meta { font-size: 0.72rem; color: var(--muted); text-align: right; }
+
+  /* Full detail view — replaces the list */
+  .exp-detail {
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+  }
+  .right-col.detail-open .exp-detail { display: block; }
+
+  .exp-detail .detail-top-bar {
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 0.6rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 1;
+  }
+  .exp-detail .back-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 0.25rem 0.7rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: color 0.1s, border-color 0.1s;
+  }
+  .exp-detail .back-btn:hover { color: var(--text); border-color: var(--muted); }
+  .exp-detail .detail-top-title {
+    font-size: 0.85rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .exp-detail .detail-content { padding: 1.5rem; }
+  .exp-detail .detail-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .exp-detail .detail-num {
+    font-size: 1.6rem;
+    font-weight: 700;
+  }
+  .exp-detail .detail-num.accepted { color: var(--green); }
+  .exp-detail .detail-num.rejected { color: var(--muted); }
+  .exp-detail .detail-title { font-size: 1.15rem; font-weight: 600; }
+  .exp-detail .detail-meta {
+    display: flex; gap: 1rem; margin-bottom: 1.25rem;
+    font-size: 0.8rem; color: var(--muted);
+  }
+  .detail-section { margin-bottom: 1rem; }
+  .detail-section h4 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  .detail-section p {
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.6;
+    margin-bottom: 0.4rem;
+  }
+  .detail-section ul, .detail-section ol {
+    font-size: 0.85rem;
+    padding-left: 1.25rem;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+  .detail-section li { margin-bottom: 0.2rem; line-height: 1.5; }
+  .detail-section table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+  .detail-section table td {
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-section table tr:first-child td {
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .detail-section code {
+    background: rgba(88,166,255,0.08);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
 
   .badge {
     display: inline-block;
@@ -294,17 +311,17 @@
     </div>
   </div>
 
-  <!-- RIGHT: Experiment detail + list -->
-  <div class="right-col">
+  <!-- RIGHT: Experiment list OR full detail -->
+  <div class="right-col" id="rightCol">
     <div class="right-col-header">
-      30 experiments &mdash; click to view details, or click a chart point
+      30 experiments — hover to highlight on chart, click for details
     </div>
-
-    <div class="exp-detail" id="expDetail"></div>
 
     <div class="exp-list" id="expList">
       <div class="loading">Loading experiments...</div>
     </div>
+
+    <div class="exp-detail" id="expDetail"></div>
   </div>
 </div>
 
@@ -358,9 +375,7 @@ document.querySelectorAll('.chart-tab').forEach(tab => {
     document.querySelectorAll('.chart-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById(tab.dataset.panel).classList.add('active');
-    // Resize chart so it fills the panel correctly.
-    const panelId = tab.dataset.panel;
-    const chartId = panelId.replace('panel', 'chart');
+    const chartId = tab.dataset.panel.replace('panel', 'chart');
     if (chartInstances[chartId]) chartInstances[chartId].resize();
   });
 });
@@ -444,13 +459,46 @@ function buildCharts() {
   }
 }
 
+// ── Find the chart run index closest to an experiment date ──
+function findRunIndexForExp(exp) {
+  if (!exp.date || !DATA) return -1;
+  const runs = DATA.runs;
+  const expTs = new Date(exp.date).getTime();
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < runs.length; i++) {
+    const dist = Math.abs(new Date(runs[i].timestamp).getTime() - expTs);
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+  }
+  return bestDist < 2 * 86400000 ? bestIdx : -1;
+}
+
+// ── Highlight a data point on all visible charts ──
+function highlightChartIndex(runIndex) {
+  for (const chart of Object.values(chartInstances)) {
+    if (runIndex >= 0) {
+      chart.setActiveElements(
+        chart.data.datasets.map((ds, di) => ({ datasetIndex: di, index: runIndex }))
+      );
+      chart.tooltip.setActiveElements(
+        chart.data.datasets.map((ds, di) => ({ datasetIndex: di, index: runIndex })),
+        { x: 0, y: 0 }
+      );
+    } else {
+      chart.setActiveElements([]);
+      chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    }
+    chart.update('none');
+  }
+}
+
 // ── Experiment list ──
 function renderExpList() {
   const container = document.getElementById('expList');
   const exps = DATA.experiments;
 
   container.innerHTML = exps.map(exp => `
-    <div class="exp-item ${exp.status}" data-id="${exp.id}" onclick="selectExp('${exp.id}')">
+    <div class="exp-item ${exp.status}" data-id="${exp.id}">
       <div class="item-num">#${exp.id}</div>
       <div class="item-body">
         <h3>${esc(exp.title)}</h3>
@@ -462,23 +510,41 @@ function renderExpList() {
       </div>
     </div>
   `).join('');
+
+  // Attach event listeners.
+  container.querySelectorAll('.exp-item').forEach(el => {
+    const id = el.dataset.id;
+    el.addEventListener('click', () => selectExp(id));
+    el.addEventListener('mouseenter', () => {
+      const exp = DATA.experiments.find(e => e.id === id);
+      if (exp) highlightChartIndex(findRunIndexForExp(exp));
+    });
+    el.addEventListener('mouseleave', () => {
+      highlightChartIndex(-1);
+    });
+  });
 }
 
-// ── Select experiment ──
+// ── Select experiment → full detail view ──
 function selectExp(id) {
   const exp = DATA.experiments.find(e => e.id === id);
   if (!exp) return;
 
   selectedExpId = id;
+  const rightCol = document.getElementById('rightCol');
+  rightCol.classList.add('detail-open');
 
-  // Highlight in list.
-  document.querySelectorAll('.exp-item').forEach(el => {
-    el.classList.toggle('selected', el.dataset.id === id);
-  });
+  // Highlight on chart.
+  highlightChartIndex(findRunIndexForExp(exp));
 
   // Build detail view.
   const detail = document.getElementById('expDetail');
-  let html = `<button class="close-btn" onclick="closeDetail()">Close</button>`;
+  let html = `<div class="detail-top-bar">`;
+  html += `<button class="back-btn" onclick="closeDetail()">&larr; Back</button>`;
+  html += `<span class="detail-top-title">${esc(exp.title)}</span>`;
+  html += `</div>`;
+
+  html += `<div class="detail-content">`;
   html += `<div class="detail-header">`;
   html += `<span class="detail-num ${exp.status}">#${exp.id}</span>`;
   html += `<span class="detail-title">${esc(exp.title)}</span>`;
@@ -507,17 +573,14 @@ function selectExp(id) {
     html += `<div class="detail-section"><h4>${exp.status === 'accepted' ? 'Why Accepted' : 'Why Rejected'}</h4>${renderMd(exp.reasoning)}</div>`;
   }
 
+  html += `</div>`; // .detail-content
   detail.innerHTML = html;
-  detail.classList.add('visible');
-
-  // Scroll list item into view.
-  const listItem = document.querySelector(`.exp-item[data-id="${id}"]`);
-  if (listItem) listItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  detail.scrollTop = 0;
 }
 
 function closeDetail() {
-  document.getElementById('expDetail').classList.remove('visible');
-  document.querySelectorAll('.exp-item').forEach(el => el.classList.remove('selected'));
+  document.getElementById('rightCol').classList.remove('detail-open');
+  highlightChartIndex(-1);
   selectedExpId = null;
 }
 
@@ -559,7 +622,7 @@ function renderMd(text) {
 
     // Table rows
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      if (trimmed.match(/^\|[\s\-:|]+\|$/)) continue; // separator row
+      if (trimmed.match(/^\|[\s\-:|]+\|$/)) continue;
       const cells = trimmed.split('|').filter(c => c.trim()).map(c => `<td>${esc(c.trim())}</td>`);
       if (!inTable) { html += '<table>'; inTable = true; }
       html += `<tr>${cells.join('')}</tr>`;
@@ -573,18 +636,14 @@ function renderMd(text) {
       html += `<li>${escInline(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
       continue;
     }
-    // Numbered list
     if (trimmed.match(/^\d+\.\s/)) {
       if (!inList) { html += '<ol>'; inList = true; }
       html += `<li>${escInline(trimmed.replace(/^\d+\.\s+/, ''))}</li>`;
       continue;
     }
-    if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = false; }
+    if (inList) { html += '</ul>'; inList = false; }
 
-    // Blank line
     if (!trimmed) continue;
-
-    // Paragraph
     html += `<p>${escInline(trimmed)}</p>`;
   }
   if (inList) html += '</ul>';
@@ -592,7 +651,6 @@ function renderMd(text) {
   return html;
 }
 
-// Inline formatting: bold, code, links.
 function escInline(s) {
   return esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
