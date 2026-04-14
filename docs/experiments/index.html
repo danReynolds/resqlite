@@ -398,23 +398,30 @@ async function init() {
 }
 
 // ── Charts ──
-// Each run gets a unique numeric label so Chart.js treats every data
-// point as a distinct x position. We show dates only where they change.
+// One chart point per experiment. We pick the best representative run
+// for each experiment and only plot those, giving a clean 1:1 mapping.
+let chartExpOrder = []; // experiments in chart order (for click lookup)
+let chartRunIndices = []; // which run index each chart point uses
+
 function buildCharts() {
   const runs = DATA.runs;
+  const exps = DATA.experiments;
 
-  // Unique sequential labels — prevents Chart.js from collapsing
-  // duplicate date strings into shared x positions.
-  const labels = runs.map((_, i) => String(i));
+  // Build chart data: one point per experiment, using the mapped run's metrics.
+  chartExpOrder = [];
+  chartRunIndices = [];
+  const labels = [];
 
-  // Build date tick labels: show the date only on the first run of each day.
-  const dateTicks = {};
   let prevDate = '';
-  for (let i = 0; i < runs.length; i++) {
-    if (runs[i].date !== prevDate) {
-      dateTicks[i] = runs[i].date;
-      prevDate = runs[i].date;
-    }
+  for (const exp of exps) {
+    const runIdx = expToRunIndex[exp.id];
+    if (runIdx == null || runIdx < 0) continue;
+    chartExpOrder.push(exp);
+    chartRunIndices.push(runIdx);
+    // Show date on first occurrence of each day.
+    const date = runs[runIdx].date;
+    labels.push(date !== prevDate ? date : '');
+    prevDate = date;
   }
 
   for (const [chartId, metricKeys] of Object.entries(CHART_GROUPS)) {
@@ -425,7 +432,7 @@ function buildCharts() {
       const isQps = key.includes('qps');
       return {
         label: DISPLAY[key] || key,
-        data: runs.map(r => r.metrics[key] ?? null),
+        data: chartRunIndices.map(ri => runs[ri].metrics[key] ?? null),
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,
@@ -439,13 +446,7 @@ function buildCharts() {
     const scales = {
       x: {
         grid: { color: '#21262d' },
-        ticks: {
-          maxRotation: 45,
-          font: { size: 10 },
-          callback(value, index) {
-            return dateTicks[index] || '';
-          },
-        },
+        ticks: { maxRotation: 45, font: { size: 10 } },
       },
       y: { title: { display: true, text: 'ms' }, grid: { color: '#21262d' }, beginAtZero: true },
     };
@@ -464,8 +465,8 @@ function buildCharts() {
           tooltip: {
             callbacks: {
               title(items) {
-                const run = runs[items[0].dataIndex];
-                return `${run.label} (${run.date})`;
+                const exp = chartExpOrder[items[0].dataIndex];
+                return exp ? `#${exp.id} ${exp.title}` : '';
               },
               label(item) {
                 const key = metricKeys[item.datasetIndex];
@@ -479,8 +480,7 @@ function buildCharts() {
         scales,
         onClick(evt, elements) {
           if (!elements.length) return;
-          const idx = elements[0].index;
-          const exp = findExpForRunIndex(idx);
+          const exp = chartExpOrder[elements[0].dataIndex];
           if (exp) {
             if (selectedExpId === exp.id) {
               closeDetail();
@@ -593,10 +593,10 @@ const verticalLinePlugin = {
     ctx.strokeStyle = 'rgba(88, 166, 255, 0.5)';
     ctx.stroke();
 
-    // Date label at top of line.
-    if (DATA && DATA.runs[highlightedRunIndex]) {
-      const run = DATA.runs[highlightedRunIndex];
-      const label = run.date;
+    // Experiment label at top of line.
+    if (chartExpOrder[highlightedRunIndex]) {
+      const exp = chartExpOrder[highlightedRunIndex];
+      const label = `#${exp.id}`;
       ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.fillStyle = 'rgba(88, 166, 255, 0.9)';
       ctx.textAlign = x > (left + right) / 2 ? 'right' : 'left';
@@ -680,11 +680,8 @@ function renderExpList() {
   container.addEventListener('mouseover', (e) => {
     const item = e.target.closest('.exp-item');
     if (!item) return;
-    const exp = DATA.experiments.find(ex => ex.id === item.dataset.id);
-    if (!exp) return;
-    const idx = findRunIndexForExp(exp);
-    // Only highlight if we have a valid run index — don't clear for unmapped experiments.
-    if (idx >= 0) highlightChartIndex(idx);
+    const chartIdx = chartExpOrder.findIndex(ex => ex.id === item.dataset.id);
+    if (chartIdx >= 0) highlightChartIndex(chartIdx);
   });
   container.addEventListener('mouseleave', () => {
     if (!selectedExpId) highlightChartIndex(-1);
@@ -701,7 +698,8 @@ function selectExp(id) {
   rightCol.classList.add('detail-open');
 
   // Highlight on chart.
-  highlightChartIndex(findRunIndexForExp(exp));
+  const chartIdx = chartExpOrder.findIndex(ex => ex.id === id);
+  if (chartIdx >= 0) highlightChartIndex(chartIdx);
 
   // Build detail view.
   const detail = document.getElementById('expDetail');
