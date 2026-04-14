@@ -13,16 +13,16 @@ import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
 ///
-/// Each worker handles one query at a time. Small results return via SendPort
-/// (fast round-trip). Large results trigger sacrifice — the worker sends the
-/// result via Isolate.exit (zero-copy) and the isolate terminates. The pool
-/// detects the sacrifice and initiates respawn immediately.
+/// Each worker handles one query at a time. All worker events flow through a
+/// single event port per worker lifetime: the initial command SendPort,
+/// normal replies, sacrifice payloads sent via Isolate.exit, and onExit
+/// notifications.
 ///
-/// Sacrifice and crash detection share a single control port per worker,
-/// which receives both the Isolate.exit data and the onExit notification.
-/// Because these arrive on the same port, the VM's same-port FIFO ordering
-/// guarantees the data message is processed before the exit notification,
-/// eliminating the race condition between the two.
+/// Large results trigger sacrifice — the worker sends the result via
+/// Isolate.exit (zero-copy) and the isolate terminates. Because the
+/// sacrifice payload and onExit notification arrive on the same port, the
+/// VM's same-port FIFO ordering guarantees the payload is processed before
+/// the exit notification, eliminating the race condition between the two.
 ///
 /// Dispatch never sends two queries to the same worker. If all workers are
 /// busy, callers wait until one becomes available (finishes its query or
@@ -63,9 +63,7 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch(
-      (replyPort) => SelectRequest(replyPort, sql, parameters),
-    );
+    final result = await _dispatch(() => SelectRequest(sql, parameters));
     return result as List<Map<String, Object?>>;
   }
 
@@ -75,7 +73,7 @@ final class ReaderPool {
     List<Object?> parameters = const [],
   ]) async {
     final result = await _dispatch(
-      (replyPort) => SelectWithDepsRequest(replyPort, sql, parameters),
+      () => SelectWithDepsRequest(sql, parameters),
     );
     return result as (List<Map<String, Object?>>, List<String>);
   }
@@ -85,9 +83,7 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch(
-      (replyPort) => SelectBytesRequest(replyPort, sql, parameters),
-    );
+    final result = await _dispatch(() => SelectBytesRequest(sql, parameters));
     return result as Uint8List;
   }
 
@@ -99,20 +95,13 @@ final class ReaderPool {
     int lastResultHash,
   ) async {
     final result = await _dispatch(
-      (replyPort) => SelectIfChangedRequest(
-        replyPort,
-        sql,
-        parameters,
-        lastResultHash,
-      ),
+      () => SelectIfChangedRequest(sql, parameters, lastResultHash),
     );
     final (hash, rows) = result as (int, List<Map<String, Object?>>?);
     return (rows, hash);
   }
 
-  Future<Object?> _dispatch(
-    ReadRequest Function(SendPort replyPort) buildRequest,
-  ) async {
+  Future<Object?> _dispatch(ReadRequest Function() buildRequest) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever on `_workerAvailable`
@@ -168,11 +157,12 @@ final class ReaderPool {
 
 /// Manages a single worker isolate's lifecycle.
 ///
-/// Uses a persistent control port per worker that receives both sacrifice
-/// data (via Isolate.exit) and onExit notifications. Because both arrive
-/// on the same port, the VM's same-port FIFO ordering guarantees the
-/// Isolate.exit data is processed before the onExit null — eliminating
-/// the race condition that previously caused false crash detection.
+/// Uses a persistent event port per worker that receives the initial command
+/// SendPort, normal replies, sacrifice data (via Isolate.exit), and onExit
+/// notifications. Because sacrifice data and onExit arrive on the same port,
+/// the VM's same-port FIFO ordering guarantees the Isolate.exit data is
+/// processed before the onExit null — eliminating the race condition that
+/// previously caused false crash detection.
 ///
 /// This is the same pattern the Dart SDK uses in Isolate.run.
 class _WorkerSlot {
@@ -182,130 +172,133 @@ class _WorkerSlot {
   final int _readerId;
   int _dbHandleAddr = 0;
   SendPort? _sendPort;
-  bool _alive = false;
-  bool _busy = false;
   bool _closed = false;
 
-  /// Persistent control port — receives sacrifice data (via Isolate.exit)
-  /// and onExit notifications on the same port for ordering guarantees.
-  RawReceivePort? _controlPort;
+  /// Persistent worker event port for this isolate lifetime.
+  /// First message is the worker's command SendPort, then runtime events:
+  /// normal replies, sacrifice payloads, and onExit notifications.
+  /// Recreated on respawn so stale events die with the old isolate.
+  RawReceivePort? _workerPort;
 
-  /// The in-flight request's completer and replyPort, if any.
-  /// Used by the control port handler to fail the request if the worker
-  /// dies without sending a reply (genuine native crash).
+  /// The in-flight request's completer, if any.
+  /// Used by the event port handler to fail the request if the worker
+  /// dies without sending a reply (genuine native crash). This is also the
+  /// authoritative "busy" bit for the slot: if it's non-null, dispatch must
+  /// not send another request to this worker.
   Completer<Object?>? _pendingCompleter;
-  RawReceivePort? _pendingReplyPort;
 
-  /// A worker is available if it's alive, has a SendPort, and isn't busy.
-  bool get isAvailable => _alive && _sendPort != null && !_busy;
+  /// A worker is available if it has a command port and no in-flight request.
+  bool get isAvailable => _sendPort != null && _pendingCompleter == null;
 
   Future<void> spawn(int dbHandleAddr) async {
     if (_closed) return;
-    _alive = false;
     _dbHandleAddr = dbHandleAddr;
 
-    final readyPort = RawReceivePort();
     final completer = Completer<SendPort>.sync();
-    readyPort.handler = (Object? msg) {
-      readyPort.close();
-      completer.complete(msg as SendPort);
-    };
 
-    // Create a fresh control port for this worker's lifetime.
-    // Both Isolate.exit data and onExit notifications arrive here.
-    _controlPort?.close();
-    _controlPort = RawReceivePort();
-    _controlPort!.handler = (Object? msg) {
+    final workerPort = _workerPort = RawReceivePort();
+    workerPort.handler = (Object? msg) {
+      if (msg case SendPort sendPort) {
+        // Startup handshake: the worker publishes its send port.
+        completer.complete(sendPort);
+        return;
+      }
+
+      // onExit notification — the isolate has terminated.
+      // If there's a pending completer, the worker crashed without
+      // sending any reply (genuine native crash). If the completer
+      // was already resolved by a prior event, this is a normal
+      // post-sacrifice/post-close exit and we ignore it.
       if (msg == null) {
-        // onExit notification — the isolate has terminated.
-        // If there's a pending completer, the worker crashed without
-        // sending data (genuine native crash). If the completer was
-        // already resolved by a sacrifice data message, this is a no-op.
-        final pending = _pendingCompleter;
-        if (pending != null && !pending.isCompleted) {
-          _pendingReplyPort?.close();
-          _pendingReplyPort = null;
+        // If the worker has been respawned by the preceding [Isolate.exit] message, then this exit message is a no-op.
+        if (_workerPort != workerPort) {
+          return;
+        }
+
+        _workerPort?.close();
+        _workerPort = null;
+
+        // An exit on startup indicates some crash most have occurred.
+        if (!completer.isCompleted) {
+          completer.completeError(
+            StateError('Worker isolate crashed during startup'),
+          );
+          return;
+        }
+
+        // An exit with a pending completer indicates a crash during query execution.
+        if (_pendingCompleter case Completer completer) {
           _pendingCompleter = null;
-          _alive = false;
           _sendPort = null;
-          _busy = false;
-          pending.completeError(StateError(
-            'Worker isolate crashed during query execution',
-          ));
+          completer.completeError(
+            StateError('Worker isolate crashed during query execution'),
+          );
           if (!_closed) unawaited(spawn(dbHandleAddr));
           _notifyPool();
         }
         return;
       }
 
-      // Sacrifice data arrived via Isolate.exit (zero-copy).
-      // The onExit null will follow on this same port but the completer
-      // will already be resolved, making it a no-op.
-      _pendingReplyPort?.close();
-      _pendingReplyPort = null;
       final pending = _pendingCompleter;
       _pendingCompleter = null;
-
-      final (result, _, error) = msg as (Object?, bool, ResqliteException?);
-
-      _alive = false;
-      _sendPort = null;
-      _busy = false;
-
-      if (error != null) {
-        pending?.completeError(error);
-      } else {
-        pending?.complete(result);
-      }
-      if (!_closed) unawaited(spawn(_dbHandleAddr));
-      // Don't _notifyPool here — wait for spawn to complete.
-    };
-
-    await Isolate.spawn(
-      readerEntrypoint,
-      [readyPort.sendPort, dbHandleAddr, _readerId, _controlPort!.sendPort],
-      onExit: _controlPort!.sendPort,
-    );
-
-    _sendPort = await completer.future;
-    _alive = true;
-    _notifyPool();
-  }
-
-  Future<Object?> request(
-    ReadRequest Function(SendPort replyPort) buildRequest,
-  ) {
-    final port = _sendPort;
-    if (port == null) throw StateError('Worker not alive');
-
-    _busy = true;
-    final replyPort = RawReceivePort();
-    final completer = Completer<Object?>.sync();
-
-    _pendingCompleter = completer;
-    _pendingReplyPort = replyPort;
-
-    replyPort.handler = (Object? msg) {
-      replyPort.close();
-      _pendingCompleter = null;
-      _pendingReplyPort = null;
-
-      // Normal (non-sacrifice) reply via SendPort.send.
-      final (result, _, error) = msg as (Object?, bool, ResqliteException?);
-
-      if (error != null) {
-        _busy = false;
-        _notifyPool();
-        completer.completeError(error);
+      if (pending == null) {
+        // Late event for a worker lifecycle we've already resolved.
         return;
       }
 
-      _busy = false;
-      _notifyPool();
-      completer.complete(result);
+      final (result, sacrificed, error) =
+          msg as (Object?, bool, ResqliteException?);
+
+      // If the isolate has sacrified itself in order to return a large response,
+      // then the pending request is resolved with the response and the worker
+      // spawns a new isolate to replace it.
+      if (sacrificed) {
+        _sendPort = null;
+        _workerPort?.close();
+        _workerPort = null;
+
+        if (error != null) {
+          pending.completeError(error);
+        } else {
+          pending.complete(result);
+        }
+        if (!_closed) unawaited(spawn(_dbHandleAddr));
+
+        // Otherwise, deliver the result and notify the pool that this worker is available
+        // for its next request.
+      } else {
+        if (error == null) {
+          pending.complete(result);
+        } else {
+          pending.completeError(error);
+        }
+
+        _notifyPool();
+      }
     };
 
-    port.send(buildRequest(replyPort.sendPort));
+    await Isolate.spawn(
+        readerEntrypoint,
+        [
+          dbHandleAddr,
+          _readerId,
+          workerPort.sendPort,
+        ],
+        onExit: workerPort.sendPort);
+
+    _sendPort = await completer.future;
+    _notifyPool();
+  }
+
+  Future<Object?> request(ReadRequest Function() buildRequest) {
+    final port = _sendPort;
+    if (port == null) throw StateError('Worker not alive');
+    if (_pendingCompleter != null) {
+      throw StateError('Worker already has an in-flight request');
+    }
+
+    final completer = _pendingCompleter = Completer<Object?>.sync();
+    port.send(buildRequest());
     return completer.future;
   }
 
@@ -324,9 +317,8 @@ class _WorkerSlot {
       }
     }
     _sendPort?.send(null);
-    _alive = false;
     _sendPort = null;
-    _controlPort?.close();
-    _controlPort = null;
+    _workerPort?.close();
+    _workerPort = null;
   }
 }

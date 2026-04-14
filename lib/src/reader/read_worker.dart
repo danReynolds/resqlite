@@ -24,36 +24,30 @@ import '../row.dart';
 
 /// Base class for read requests sent from the pool to a worker isolate.
 sealed class ReadRequest {
-  ReadRequest(this.replyPort, this.sql, this.parameters);
-  final SendPort replyPort;
+  ReadRequest(this.sql, this.parameters);
   final String sql;
   final List<Object?> parameters;
 }
 
 /// Standard row query — returns a [ResultSet].
 final class SelectRequest extends ReadRequest {
-  SelectRequest(super.replyPort, super.sql, super.parameters);
+  SelectRequest(super.sql, super.parameters);
 }
 
 /// Row query that also captures read table dependencies via the SQLite
 /// authorizer hook. Used for initial stream registration in [StreamEngine].
 final class SelectWithDepsRequest extends ReadRequest {
-  SelectWithDepsRequest(super.replyPort, super.sql, super.parameters);
+  SelectWithDepsRequest(super.sql, super.parameters);
 }
 
 /// JSON bytes query — serialized entirely in C, no Dart objects for result data.
 final class SelectBytesRequest extends ReadRequest {
-  SelectBytesRequest(super.replyPort, super.sql, super.parameters);
+  SelectBytesRequest(super.sql, super.parameters);
 }
 
 /// Stream re-query with worker-side hash comparison.
 final class SelectIfChangedRequest extends ReadRequest {
-  SelectIfChangedRequest(
-    super.replyPort,
-    super.sql,
-    super.parameters,
-    this.lastResultHash,
-  );
+  SelectIfChangedRequest(super.sql, super.parameters, this.lastResultHash);
   final int lastResultHash;
 }
 
@@ -71,15 +65,14 @@ const int sacrificeByteThreshold = 256 * 1024; // 256 KB
 // ---------------------------------------------------------------------------
 
 /// Worker entrypoint args:
-///   [SendPort mainPort, int dbHandleAddr, int readerId, SendPort controlPort]
+///   [int dbHandleAddr, int readerId, SendPort eventPort]
 void readerEntrypoint(List<Object> args) {
-  final mainPort = args[0] as SendPort;
-  final dbHandleAddr = args[1] as int;
-  final readerId = args[2] as int;
-  final controlPort = args[3] as SendPort;
+  final dbHandleAddr = args[0] as int;
+  final readerId = args[1] as int;
+  final eventPort = args[2] as SendPort;
 
   final receivePort = RawReceivePort();
-  mainPort.send(receivePort.sendPort);
+  eventPort.send(receivePort.sendPort);
 
   receivePort.handler = (Object? message) {
     if (message == null) {
@@ -114,16 +107,20 @@ void readerEntrypoint(List<Object> args) {
           );
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes =
-              executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
+          final bytes = executeQueryBytes(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+          );
           result = bytes;
           sacrifice = bytes.length > sacrificeByteThreshold;
 
         case SelectIfChangedRequest(
-            :final sql,
-            :final parameters,
-            :final lastResultHash,
-          ):
+          :final sql,
+          :final parameters,
+          :final lastResultHash,
+        ):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
           final newHash = hashRawResult(raw);
           if (newHash == lastResultHash) {
@@ -134,16 +131,16 @@ void readerEntrypoint(List<Object> args) {
             result = (
               newHash,
               ResultSet(raw.values, raw.schema, raw.rowCount)
-                  as List<Map<String, Object?>>
+                  as List<Map<String, Object?>>,
             );
           }
       }
 
       if (sacrifice) {
         receivePort.close();
-        Isolate.exit(controlPort, (result, true, null));
+        Isolate.exit(eventPort, (result, true, null));
       }
-      request.replyPort.send((result, false, null));
+      eventPort.send((result, false, null));
     } catch (e) {
       // Same-group isolates (Isolate.spawn) can send arbitrary objects
       // via SendPort — the VM deep-copies them. Wrap non-resqlite errors
@@ -156,7 +153,7 @@ void readerEntrypoint(List<Object> args) {
               sql: request.sql,
               parameters: request.parameters,
             );
-      request.replyPort.send((null, false, error));
+      eventPort.send((null, false, error));
     }
   };
 }
@@ -167,13 +164,14 @@ void readerEntrypoint(List<Object> args) {
 
 // Dedicated reader variant — no pool mutex.
 @ffi.Native<
-    ffi.Pointer<ffi.Void> Function(
-      ffi.Pointer<ffi.Void>,
-      ffi.Int,
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Uint8>,
-      ffi.Int,
-    )>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Int,
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -257,8 +255,9 @@ Uint8List executeQueryBytes(
   try {
     final raw = decodeQuery(stmt, sql);
 
-    final readTables =
-        captureReadTables ? getReadTables(dbHandle, readerId) : null;
+    final readTables = captureReadTables
+        ? getReadTables(dbHandle, readerId)
+        : null;
 
     return (raw, readTables);
   } finally {
