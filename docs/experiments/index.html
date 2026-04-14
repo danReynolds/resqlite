@@ -455,10 +455,14 @@ function buildCharts() {
         scales,
         onClick(evt, elements) {
           if (!elements.length) return;
-          const run = runs[elements[0].index];
-          const exp = findExpForRun(run);
+          const runIdx = elements[0].index;
+          // Use the precomputed reverse mapping first — it respects the
+          // spread distribution so each run index maps to a unique experiment.
+          const expId = runToExpId[runIdx];
+          const exp = expId
+            ? DATA.experiments.find(e => e.id === expId)
+            : findExpForRun(runs[runIdx]);
           if (exp) {
-            // Toggle: if already selected, deselect.
             if (selectedExpId === exp.id) {
               closeDetail();
             } else {
