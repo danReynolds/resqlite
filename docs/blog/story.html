@@ -88,25 +88,32 @@
 <p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.</p>
 <p><strong>The bottom line:</strong> resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.</p>
 <h2>The Problem We Were Trying to Solve</h2>
-<p>We were building an HTTP endpoint backed by <a href="https://sqlite.org/">SQLite</a> — the embedded database that runs on basically everything. SQLite is written in C and runs in-process, so there's no network overhead. The bottleneck isn't the database — it's getting the results into Dart.</p>
-<p>The code was simple:</p>
-<pre><code class="lang-dart">
-final rows = await db.select('SELECT * FROM items');
-return Response(200, body: jsonEncode(rows));
-</code></pre>
-<p>But profiling told a different story. For 5,000 rows, 8.6ms of the 15ms total was happening on the main isolate — half a frame budget in Flutter. Here's why:</p>
+<p>We were building a Flutter app backed by <a href="https://sqlite.org/">SQLite</a> — the embedded database that runs on basically everything. The <a href="https://pub.dev/packages/sqlite3">sqlite3</a> package worked, but we were hitting two problems:</p>
+<ol>
+<li><strong>Jank.</strong> Loading a screen with a few thousand rows caused visible frame drops. The sqlite3 package runs synchronously on whatever thread you call it from — and in Flutter, that's the main isolate, the same thread responsible for rendering your UI at 60fps. A query that takes 4ms blocks 4ms of frame time.</li>
+</ol>
+<ol>
+<li><strong>No reactivity.</strong> We wanted live-updating UI — when a write modifies the database, every widget showing that data should update automatically. sqlite3 gives you one-shot queries. We were manually invalidating, polling, and managing state ourselves.</li>
+</ol>
+<p>We looked at <a href="https://pub.dev/packages/sqlite_async">sqlite_async</a> (PowerSync), which solves both — it has an async worker pool and a <code>watch()</code> API for reactive queries. But profiling showed that even with async libraries, the data transfer path from SQLite to Dart still put significant work on the main isolate. At 5,000 rows, we measured 0.87ms of main-isolate time with sqlite_async. Not terrible, but not invisible either — especially in screens with multiple concurrent queries.</p>
+<p>We decided to see how far we could push it. Could we get main-isolate time close to zero?</p>
 <p>If you're not familiar with Dart: your application runs on the &quot;main isolate&quot; — a single thread that handles UI rendering, user input, and your application logic. Think of it like JavaScript's main thread, but stricter. <a href="https://dart.dev/language/isolates">Isolates</a> are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages (no shared memory, no locks). <a href="https://dart.dev/interop/c-interop">FFI</a> (Foreign Function Interface) is how Dart calls C code — each call has a small overhead. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.</p>
-<p>The data path looked like this:</p>
+<p>The data path with the sqlite3 package looked like this:</p>
 <pre><code class="lang-">
 SQLite C engine
   → sqlite3 package reads each cell via FFI (30,000 FFI calls for 5k × 6 columns)
-  → Dart Map objects created on the worker isolate
-  → SendPort.send() deep-copies every map to the main isolate
-  → Main isolate jsonEncode()s the maps
-  → utf8.encode() to bytes
-  → Hand to shelf (Dart's HTTP server)
+  → Dart Map objects created (on the main isolate — sqlite3 is synchronous)
+  → All 5,000 maps available immediately (no transfer needed, but main is blocked)
 </code></pre>
-<p>Three intermediate representations (Dart maps, JSON string, UTF-8 bytes) for what should be a straight pipeline from database to socket. And the main isolate was doing the heaviest work — the JSON serialization.</p>
+<p>With an async library, you move the query to a background isolate, but now you need to transfer the result back:</p>
+<pre><code class="lang-">
+Worker isolate:
+  → sqlite3 reads each cell via FFI → Dart Map objects
+  → SendPort.send() deep-copies every map to main isolate
+Main isolate:
+  → Receives deep-copied maps (allocation + validation cost)
+</code></pre>
+<p>Either way, the main isolate was doing real work — either running the query directly, or receiving and validating thousands of Dart objects transferred from a worker.</p>
 <p>We set ourselves a principle: <strong>minimize main-isolate work above all else.</strong> In Flutter, the main isolate runs your UI at 60fps — that's a 16ms budget per frame. Every millisecond spent on database work there is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. Total wall time matters, but main-isolate time is what users feel.</p>
 <h2>Attempt 1: Move the JSON Encoding Off Main</h2>
 <p>We built <code>db.compute()</code> — spawn a one-off isolate, JSON-encode there, return bytes. Dart's <code>Isolate.run()</code> uses <code>Isolate.exit()</code> under the hood, which transfers the return value to the receiving isolate <strong>without copying</strong>. This is different from <code>SendPort.send()</code>, which deep-copies everything. The trade-off: <code>Isolate.exit()</code> kills the sending isolate, so it only works for one-off workers.</p>
@@ -144,7 +151,7 @@ final bytes = await db.compute((db) {
 
 <p>Returning bytes: 0.00ms on main. Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but <code>jsonEncode</code> still ran on main after they arrived.</p>
 <p><strong>Lesson:</strong> Moving work off main only helps if the result arrives in a form the main isolate doesn't need to process further.</p>
-<p>This got us thinking — what if the JSON encoding happened in C?</p>
+<p>The bytes result was interesting — 0ms on main. If we could get the data into <code>Uint8List</code> form without touching Dart objects at all, the transfer would be essentially free. That wouldn't help for the common Flutter case (you need Dart maps to build widgets), but it planted a seed: the fewer Dart objects in the result, the cheaper the transfer.</p>
 <h2>Attempt 2: A New Library, Raw FFI, C-Native JSON</h2>
 <p>We started resqlite from scratch. No dependency on the existing <code>sqlite3</code> Dart package. Raw <a href="https://dart.dev/interop/c-interop">FFI</a> (Foreign Function Interface) bindings to SQLite's C API — Dart can call C functions directly with ~100ns overhead per call. We bundled the SQLite amalgamation (the entire database engine as a single C file) and compiled it as part of our build.</p>
 <p>We wrote a C function that reads SQLite columns and writes JSON directly into a <code>malloc</code>'d buffer — zero Dart objects involved:</p>
