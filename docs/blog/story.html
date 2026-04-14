@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Building resqlite: Zero-Jank SQLite for Flutter — resqlite</title>
+<title>Building a Jank-Free SQLite Library for Flutter with AI-Driven Experimentation — resqlite</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d;
@@ -84,7 +84,7 @@
   </nav>
   <article class="post">
     <span class="post-category">Engineering Story</span>
-    <h1>Building resqlite: Zero-Jank SQLite for Flutter</h1>
+    <h1>Building a Jank-Free SQLite Library for Flutter with AI-Driven Experimentation</h1>
 <p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.</p>
 <p><strong>The bottom line:</strong> resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.</p>
 <h2>The Problem We Were Trying to Solve</h2>
