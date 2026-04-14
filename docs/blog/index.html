@@ -61,22 +61,22 @@
     <a class="post-card" href="architecture.html">
       <span class="post-category">Architecture</span>
       <h2>resqlite Architecture</h2>
-      <p>resqlite is a high-performance SQLite library for Dart built on raw C FFI. It's designed around a single principle: **minimize main-isolate work**. In a Flutter app, the main isolate runs the UI — ...</p>
+      <p>resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: **minimize main-isola...</p>
     </a>
     <a class="post-card" href="reading.html">
       <span class="post-category">Deep Dive</span>
-      <h2>Reading: select() and selectBytes()</h2>
-      <p></p>
+      <h2>How resqlite Reads Data</h2>
+      <p>Reads are the most common database operation — and the place where most SQLite libraries waste the most time on your UI thread. This post explains how resqlite's read path works, from the API call ...</p>
     </a>
     <a class="post-card" href="writing.html">
       <span class="post-category">Deep Dive</span>
-      <h2>Writing: execute(), executeBatch(), transaction()</h2>
-      <p></p>
+      <h2>How resqlite Writes Data</h2>
+      <p>SQLite only allows one writer at a time — that's a fundamental constraint of the database engine. resqlite embraces this by routing all writes through a single dedicated background isolate, keeping...</p>
     </a>
     <a class="post-card" href="streaming.html">
       <span class="post-category">Deep Dive</span>
-      <h2>Streaming: stream()</h2>
-      <p></p>
+      <h2>How resqlite Makes Queries Reactive</h2>
+      <p>Most database libraries give you a one-shot query: ask for data, get data, done. resqlite's `stream()` API turns any query into a live data source — it emits results immediately and then re-emits w...</p>
     </a>
   </div>
 </div>

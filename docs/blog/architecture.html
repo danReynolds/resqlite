@@ -52,6 +52,25 @@
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 
 </style>
 </head>
@@ -66,8 +85,9 @@
   <article class="post">
     <span class="post-category">Architecture</span>
     <h1>resqlite Architecture</h1>
-<p>resqlite is a high-performance SQLite library for Dart built on raw C FFI. It's designed around a single principle: <strong>minimize main-isolate work</strong>. In a Flutter app, the main isolate runs the UI — every millisecond spent there risks dropped frames.</p>
-<p>This document provides a high-level overview of how the system works. Detailed design docs for each subsystem are linked below.</p>
+<p>resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: <strong>minimize main-isolate work</strong>.</p>
+<p>In a Flutter app, the main isolate is the single thread responsible for rendering your UI at 60fps — that's a 16ms budget per frame. Every millisecond your database spends on the main isolate is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. resqlite pushes virtually all database work off the main isolate, leaving it free for what it's meant to do: render your UI.</p>
+<p>This post walks through the high-level architecture — how the pieces fit together and why they're designed this way.</p>
 <h2>System Overview</h2>
 <pre><code class="lang-">
 ┌─────────────────────────────────────────────────────────────┐

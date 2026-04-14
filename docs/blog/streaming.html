@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Streaming: stream() — resqlite</title>
+<title>How resqlite Makes Queries Reactive — resqlite</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d;
@@ -52,6 +52,25 @@
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 
 </style>
 </head>
@@ -65,7 +84,8 @@
   </nav>
   <article class="post">
     <span class="post-category">Deep Dive</span>
-    <h1>Streaming: stream()</h1>
+    <h1>How resqlite Makes Queries Reactive</h1>
+<p>Most database libraries give you a one-shot query: ask for data, get data, done. resqlite's <code>stream()</code> API turns any query into a live data source — it emits results immediately and then re-emits whenever the underlying data changes. No polling, no manual invalidation, no table lists to maintain.</p>
 <h2>Overview</h2>
 <pre><code class="lang-dart">
 final stream = db.stream('SELECT * FROM users WHERE active = ?', [1]);
@@ -195,10 +215,25 @@ db.stream(sql, params)
 <h3>Throttling</h3>
 <p>resqlite currently re-queries immediately on every write. sqlite_async uses a 30ms default throttle to batch rapid writes. For resqlite, throttling is left as a future enhancement — the unthrottled approach gives the lowest possible latency. Apps that need throttling can debounce on the stream consumer side.</p>
 <h2>Performance Characteristics</h2>
-<p>| Metric | resqlite | sqlite_async |</p>
-<p>|---|---|---|</p>
-<p>| Initial emission | <strong>0.01 ms</strong> | 0.64 ms |</p>
-<p>| Invalidation latency | <strong>0.36 ms</strong> | 32.61 ms* |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>resqlite</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Initial emission</td>
+<td><strong>0.01 ms</strong></td>
+<td>0.64 ms</td>
+</tr>
+<tr>
+<td>Invalidation latency</td>
+<td><strong>0.36 ms</strong></td>
+<td>32.61 ms*</td>
+</tr>
+</tbody></table></div>
+
 <p>*sqlite_async has a 30ms default throttle. The comparison shows raw latency, not typical throttled behavior.</p>
 <h2>Key Files</h2>
 <ul>

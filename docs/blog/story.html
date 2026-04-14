@@ -52,6 +52,25 @@
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 
 </style>
 </head>
@@ -67,6 +86,7 @@
     <span class="post-category">Engineering Story</span>
     <h1>How We Built the Fastest SQLite Library for Dart</h1>
 <p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something that beats every existing library on every benchmark that matters. Here's the story of how we got there — including the dead ends.</p>
+<p><strong>The bottom line:</strong> resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.</p>
 <h2>The Problem We Were Trying to Solve</h2>
 <p>We were building an HTTP endpoint backed by <a href="https://sqlite.org/">SQLite</a> — the embedded database that runs on basically everything. SQLite is written in C and runs in-process, so there's no network overhead. The bottleneck isn't the database — it's getting the results into Dart.</p>
 <p>The code was simple:</p>
@@ -75,7 +95,7 @@ final rows = await db.select('SELECT * FROM items');
 return Response(200, body: jsonEncode(rows));
 </code></pre>
 <p>But profiling told a different story. For 5,000 rows, 8.6ms of the 15ms total was happening on the main isolate — half a frame budget in Flutter. Here's why:</p>
-<p>In Dart, your application runs on the &quot;main isolate&quot; — a single thread that handles UI rendering, user input, and your application logic. <a href="https://dart.dev/language/isolates">Isolates</a> are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.</p>
+<p>If you're not familiar with Dart: your application runs on the &quot;main isolate&quot; — a single thread that handles UI rendering, user input, and your application logic. Think of it like JavaScript's main thread, but stricter. <a href="https://dart.dev/language/isolates">Isolates</a> are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages (no shared memory, no locks). <a href="https://dart.dev/interop/c-interop">FFI</a> (Foreign Function Interface) is how Dart calls C code — each call has a small overhead. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.</p>
 <p>The data path looked like this:</p>
 <pre><code class="lang-">
 SQLite C engine
@@ -98,11 +118,30 @@ final bytes = await db.compute((db) {
 });
 </code></pre>
 <p>We measured wall time and main-isolate time separately:</p>
-<p>| Path (5,000 rows) | Wall | Main |</p>
-<p>|---|---|---|</p>
-<p>| Worker pool + jsonEncode on main | 15.30 ms | <strong>8.64 ms</strong> |</p>
-<p>| <code>compute()</code> → <code>Uint8List</code> bytes | 16.03 ms | <strong>0.00 ms</strong> |</p>
-<p>| <code>compute()</code> → <code>List&lt;Map&gt;</code> | 15.15 ms | <strong>7.84 ms</strong> |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Path (5,000 rows)</th>
+<th>Wall</th>
+<th>Main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Worker pool + jsonEncode on main</td>
+<td>15.30 ms</td>
+<td><strong>8.64 ms</strong></td>
+</tr>
+<tr>
+<td><code>compute()</code> → <code>Uint8List</code> bytes</td>
+<td>16.03 ms</td>
+<td><strong>0.00 ms</strong></td>
+</tr>
+<tr>
+<td><code>compute()</code> → <code>List&lt;Map&gt;</code></td>
+<td>15.15 ms</td>
+<td><strong>7.84 ms</strong></td>
+</tr>
+</tbody></table></div>
+
 <p>Returning bytes: 0.00ms on main. Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but <code>jsonEncode</code> still ran on main after they arrived.</p>
 <p><strong>Lesson:</strong> Moving work off main only helps if the result arrives in a form the main isolate doesn't need to process further.</p>
 <p>This got us thinking — what if the JSON encoding happened in C?</p>
@@ -117,10 +156,22 @@ int resqlite_query_to_bytes(sqlite3_stmt* stmt, unsigned char** out_buf, int* ou
 }
 </code></pre>
 <p>At 5,000 rows:</p>
-<p>| Path | Wall |</p>
-<p>|---|---|</p>
-<p>| resqlite <code>selectBytes()</code> | <strong>4.35 ms</strong> |</p>
-<p>| sqlite3 + jsonEncode | 15.02 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Path</th>
+<th>Wall</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>resqlite <code>selectBytes()</code></td>
+<td><strong>4.35 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite3 + jsonEncode</td>
+<td>15.02 ms</td>
+</tr>
+</tbody></table></div>
+
 <p><strong>3.5x faster.</strong> The C function did everything in one pass — read columns, escape strings, format numbers. Zero Dart objects for the result data. The <code>Uint8List</code> containing the JSON transferred to the main isolate via <code>Isolate.exit()</code> at effectively zero cost.</p>
 <p>For maps though, the story was different. We also wrote a C function that packed results into a compact binary buffer, then decoded it to maps in Dart. This was only ~7% faster than the <code>sqlite3</code> package's per-cell FFI approach. The Dart object allocation cost (creating <code>Map</code>, <code>String</code>, etc.) was the floor that everyone hits regardless of how they read the data.</p>
 <h2>Attempt 3: C-Level Connection That Outlives Isolates</h2>
@@ -130,19 +181,61 @@ int resqlite_query_to_bytes(sqlite3_stmt* stmt, unsigned char** out_buf, int* ou
 <p>Wall time dropped from 4.92ms to 4.21ms at 5,000 rows. Incremental, but the architecture was now clean.</p>
 <h2>The Scaling Cliff</h2>
 <p>Everything looked good up to ~5,000 rows. Then we ran the scaling benchmark and saw this:</p>
-<p>| Rows | resqlite | sqlite3 |</p>
-<p>|---|---|---|</p>
-<p>| 5,000 | 4.82 ms | 4.43 ms |</p>
-<p>| 10,000 | 12.85 ms | 8.65 ms |</p>
-<p>| 20,000 | 26.81 ms | 22.37 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite</th>
+<th>sqlite3</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>5,000</td>
+<td>4.82 ms</td>
+<td>4.43 ms</td>
+</tr>
+<tr>
+<td>10,000</td>
+<td>12.85 ms</td>
+<td>8.65 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td>26.81 ms</td>
+<td>22.37 ms</td>
+</tr>
+</tbody></table></div>
+
 <p>The gap grew with result size. Something was scaling worse than linear.</p>
 <p>We wrote a breakdown benchmark that timed each phase independently:</p>
-<p>| Phase (20,000 rows) | Cost | % |</p>
-<p>|---|---|---|</p>
-<p>| Isolate spawn | 0.09 ms | 0.4% |</p>
-<p>| SQLite step | 2.10 ms | 9.5% |</p>
-<p>| Map building | 11.50 ms | 52.0% |</p>
-<p>| <strong>Isolate.exit validation</strong> | <strong>8.44 ms</strong> | <strong>38.1%</strong> |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Phase (20,000 rows)</th>
+<th>Cost</th>
+<th>%</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Isolate spawn</td>
+<td>0.09 ms</td>
+<td>0.4%</td>
+</tr>
+<tr>
+<td>SQLite step</td>
+<td>2.10 ms</td>
+<td>9.5%</td>
+</tr>
+<tr>
+<td>Map building</td>
+<td>11.50 ms</td>
+<td>52.0%</td>
+</tr>
+<tr>
+<td><strong>Isolate.exit validation</strong></td>
+<td><strong>8.44 ms</strong></td>
+<td><strong>38.1%</strong></td>
+</tr>
+</tbody></table></div>
+
 <p>Almost 40% of the time was in <code>Isolate.exit()</code> — the thing we'd assumed was free.</p>
 <h2>Down the Rabbit Hole: What Does &quot;Zero-Copy&quot; Actually Mean?</h2>
 <p>We dug into the Dart VM source code. In <code>runtime/lib/isolate.cc</code>, before <code>Isolate.exit()</code> transfers any message, a <code>MessageValidator</code> walks the <strong>entire object graph</strong> to verify every object is safe to transfer between isolates. Some types can't cross isolate boundaries (open ports, native finalizers, closures over mutable state), so the VM must check. This walk is O(n) in the number of Dart heap objects.</p>
@@ -158,11 +251,30 @@ int resqlite_query_to_bytes(sqlite3_stmt* stmt, unsigned char** out_buf, int* ou
 <h2>A Tempting Path: Lazy Byte-Backed Maps</h2>
 <p>Knowing that <code>Uint8List</code> transfers in O(1) but maps transfer in O(n), we tried a hybrid. The worker packed results into a <code>Uint8List</code> using our C binary format (O(1) transfer via <code>Isolate.exit</code>). The main isolate wrapped it in a <code>ByteBackedResultSet</code> — a <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> where each map decoded values lazily from the byte buffer only when the caller accessed them.</p>
 <p>At 20,000 rows:</p>
-<p>| Path | Wall | Main |</p>
-<p>|---|---|---|</p>
-<p>| Direct maps + Isolate.exit | 27.45 ms | <strong>2.12 ms</strong> |</p>
-<p>| ByteBackedResultSet (full iteration) | <strong>11.92 ms</strong> | 7.29 ms |</p>
-<p>| ByteBackedResultSet (20 rows only) | <strong>4.50 ms</strong> | <strong>0.01 ms</strong> |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Path</th>
+<th>Wall</th>
+<th>Main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Direct maps + Isolate.exit</td>
+<td>27.45 ms</td>
+<td><strong>2.12 ms</strong></td>
+</tr>
+<tr>
+<td>ByteBackedResultSet (full iteration)</td>
+<td><strong>11.92 ms</strong></td>
+<td>7.29 ms</td>
+</tr>
+<tr>
+<td>ByteBackedResultSet (20 rows only)</td>
+<td><strong>4.50 ms</strong></td>
+<td><strong>0.01 ms</strong></td>
+</tr>
+</tbody></table></div>
+
 <p>For partial access — like a Flutter <code>ListView</code> rendering 20 visible items from a 20,000-row result — this was spectacular. 4.50ms wall, 0.01ms main. The lazy decode meant you only paid for what you rendered.</p>
 <p>But for full iteration, the decode happened on the main isolate: <strong>7.29ms of main-isolate work</strong>. Each <code>row['name']</code> access triggered <code>utf8.decode</code> on the byte buffer, on main, at access time. Our direct maps approach put only 2.12ms on main because the maps arrived pre-built — all the decode work happened on the worker.</p>
 <p>We had to choose: better wall time (byte-backed), or less main-isolate jank (direct maps)? Given our guiding principle, we chose direct maps. A library can't predict how callers will access their data, but it can guarantee that the main isolate doesn't do heavy lifting. The byte-backed approach optimized for the wrong metric.</p>
@@ -191,27 +303,91 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, row1_col1, ...]
 <li>The actual value objects (strings, ints, doubles)</li>
 </ul>
 <p>Zero <code>Row</code> objects. Zero <code>Map</code> internals. The structural object count dropped from ~200,000 to <strong>3</strong>.</p>
-<p>| Implementation (20k rows) | Wall | Main | vs sqlite3 |</p>
-<p>|---|---|---|---|</p>
-<p>| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |</p>
-<p>| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |</p>
-<p>| <strong>Flat list + lazy ResultSet</strong> | <strong>18.03 ms</strong> | <strong>2.52 ms</strong> | <strong>-13% faster</strong> |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Implementation (20k rows)</th>
+<th>Wall</th>
+<th>Main</th>
+<th>vs sqlite3</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>LinkedHashMap + Isolate.exit</td>
+<td>24.95 ms</td>
+<td>1.57 ms</td>
+<td>+12% slower</td>
+</tr>
+<tr>
+<td>Flat list + eager Row wrappers</td>
+<td>19.39 ms</td>
+<td>1.74 ms</td>
+<td>-12% faster</td>
+</tr>
+<tr>
+<td><strong>Flat list + lazy ResultSet</strong></td>
+<td><strong>18.03 ms</strong></td>
+<td><strong>2.52 ms</strong></td>
+<td><strong>-13% faster</strong></td>
+</tr>
+</tbody></table></div>
+
 <p>And main-isolate time stayed well under a frame budget at every size:</p>
-<p>| Rows | resqlite main | sqlite3 main | sqlite_async main |</p>
-<p>|---|---|---|---|</p>
-<p>| 1,000 | <strong>0.10 ms</strong> | 0.79 ms | 0.17 ms |</p>
-<p>| 5,000 | <strong>0.47 ms</strong> | 3.90 ms | 0.87 ms |</p>
-<p>| 20,000 | <strong>2.52 ms</strong> | 20.65 ms | — |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite main</th>
+<th>sqlite3 main</th>
+<th>sqlite_async main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1,000</td>
+<td><strong>0.10 ms</strong></td>
+<td>0.79 ms</td>
+<td>0.17 ms</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td><strong>0.47 ms</strong></td>
+<td>3.90 ms</td>
+<td>0.87 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td><strong>2.52 ms</strong></td>
+<td>20.65 ms</td>
+<td>—</td>
+</tr>
+</tbody></table></div>
+
 <p>At 5,000 rows — a large query for most Flutter apps — resqlite puts 0.47ms on main. The <code>sqlite3</code> package puts 3.90ms (it runs everything synchronously on the calling isolate). <code>sqlite_async</code> (PowerSync's library, which uses a Dart-side worker pool) puts 0.87ms.</p>
 <h2>Connection Pool: Winning on Concurrency</h2>
 <p>One weakness remained. Each query spawned its own <code>Isolate.run</code>, and they all funneled into a single C connection behind a mutex. Concurrent reads serialized — query 2 waited for query 1 to finish.</p>
 <p>SQLite in <a href="https://sqlite.org/wal.html">WAL mode</a> (Write-Ahead Logging) supports multiple simultaneous readers. <code>sqlite_async</code> exploits this with a Dart-side connection pool — multiple worker isolates, each with its own connection.</p>
 <p>We added a C-level reader pool — multiple <code>sqlite3*</code> handles opened in read-only mode, each with its own statement cache, coordinated by a <code>pthread_cond_t</code> (POSIX condition variable). When a query arrives, <code>resqlite_stmt_acquire()</code> grabs an idle reader; when it finishes, <code>resqlite_stmt_release()</code> returns it. Multiple Dart isolates can query truly in parallel, each on its own reader connection.</p>
 <p>The key advantage over a Dart-side pool: thread synchronization in C (<code>pthread_mutex</code>, <code>pthread_cond_signal</code>) takes nanoseconds. Dart isolate coordination (sending messages between isolates, scheduling microtasks) takes microseconds.</p>
-<p>| Concurrency | Before pool | After pool | sqlite_async |</p>
-<p>|---|---|---|---|</p>
-<p>| 4 parallel | 2.83 ms | <strong>0.70 ms</strong> | 0.80 ms |</p>
-<p>| 8 parallel | 5.64 ms | <strong>1.29 ms</strong> | 1.58 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Concurrency</th>
+<th>Before pool</th>
+<th>After pool</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>4 parallel</td>
+<td>2.83 ms</td>
+<td><strong>0.70 ms</strong></td>
+<td>0.80 ms</td>
+</tr>
+<tr>
+<td>8 parallel</td>
+<td>5.64 ms</td>
+<td><strong>1.29 ms</strong></td>
+<td>1.58 ms</td>
+</tr>
+</tbody></table></div>
+
 <h2>The Final Numbers</h2>
 <p>Two methods. Clean API. Fastest in the ecosystem.</p>
 <pre><code class="lang-dart">
@@ -227,40 +403,157 @@ return Response(200, body: bytes, headers: {'Content-Type': 'application/json'})
 </code></pre>
 <p>The caller sees standard Dart types — <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> for maps, <code>Uint8List</code> for bytes. The <code>Row</code> type implements <code>Map</code> via <code>MapMixin</code>, so <code>row['name']</code>, <code>row.keys</code>, <code>row.forEach</code>, and <code>jsonEncode(row)</code> all work exactly as expected. The flat list, lazy construction, C connection pool, and <code>Isolate.exit</code> transfer are all invisible to the consumer.</p>
 <h3>Wall time: maps</h3>
-<p>| Rows | resqlite | sqlite3 | sqlite_async |</p>
-<p>|---|---|---|---|</p>
-<p>| 1,000 | <strong>0.59 ms</strong> | 0.77 ms | 0.57 ms |</p>
-<p>| 5,000 | <strong>2.96 ms</strong> | 3.83 ms | 2.83 ms |</p>
-<p>| 20,000 | <strong>18.03 ms</strong> | 20.65 ms | 21.26 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1,000</td>
+<td><strong>0.59 ms</strong></td>
+<td>0.77 ms</td>
+<td>0.57 ms</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td><strong>2.96 ms</strong></td>
+<td>3.83 ms</td>
+<td>2.83 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td><strong>18.03 ms</strong></td>
+<td>20.65 ms</td>
+<td>21.26 ms</td>
+</tr>
+</tbody></table></div>
+
 <h3>Wall time: bytes (JSON for HTTP responses)</h3>
-<p>| Rows | resqlite | sqlite3 + jsonEncode | sqlite_async + jsonEncode |</p>
-<p>|---|---|---|---|</p>
-<p>| 5,000 | <strong>3.80 ms</strong> | 15.23 ms | 15.09 ms |</p>
-<p>| 20,000 | <strong>17.34 ms</strong> | 62.14 ms | 67.67 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite</th>
+<th>sqlite3 + jsonEncode</th>
+<th>sqlite_async + jsonEncode</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>5,000</td>
+<td><strong>3.80 ms</strong></td>
+<td>15.23 ms</td>
+<td>15.09 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td><strong>17.34 ms</strong></td>
+<td>62.14 ms</td>
+<td>67.67 ms</td>
+</tr>
+</tbody></table></div>
+
 <p>4x faster. Zero main-isolate work.</p>
 <h3>Main-isolate time (what Flutter developers feel)</h3>
-<p>| Rows | resqlite | sqlite3 | sqlite_async |</p>
-<p>|---|---|---|---|</p>
-<p>| 1,000 | <strong>0.10 ms</strong> | 0.79 ms | 0.17 ms |</p>
-<p>| 5,000 | <strong>0.47 ms</strong> | 3.90 ms | 0.87 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1,000</td>
+<td><strong>0.10 ms</strong></td>
+<td>0.79 ms</td>
+<td>0.17 ms</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td><strong>0.47 ms</strong></td>
+<td>3.90 ms</td>
+<td>0.87 ms</td>
+</tr>
+</tbody></table></div>
+
 <h3>Concurrent reads (1,000 rows, 8 parallel queries)</h3>
-<p>| Library | Total wall | Per query |</p>
-<p>|---|---|---|</p>
-<p>| <strong>resqlite</strong> | <strong>1.29 ms</strong> | <strong>0.16 ms</strong> |</p>
-<p>| sqlite_async | 1.58 ms | 0.20 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Library</th>
+<th>Total wall</th>
+<th>Per query</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>resqlite</strong></td>
+<td><strong>1.29 ms</strong></td>
+<td><strong>0.16 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite_async</td>
+<td>1.58 ms</td>
+<td>0.20 ms</td>
+</tr>
+</tbody></table></div>
+
 <h3>Schema shapes (1,000 rows)</h3>
-<p>| Shape | resqlite | sqlite3 | sqlite_async |</p>
-<p>|---|---|---|---|</p>
-<p>| Narrow (2 cols) | <strong>0.18 ms</strong> | 0.24 ms | 0.30 ms |</p>
-<p>| Wide (20 cols) | <strong>1.44 ms</strong> | 1.96 ms | 1.68 ms |</p>
-<p>| Text-heavy | <strong>0.89 ms</strong> | 1.07 ms | 1.07 ms |</p>
-<p>| Numeric-heavy | <strong>0.47 ms</strong> | 0.63 ms | 0.63 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Shape</th>
+<th>resqlite</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Narrow (2 cols)</td>
+<td><strong>0.18 ms</strong></td>
+<td>0.24 ms</td>
+<td>0.30 ms</td>
+</tr>
+<tr>
+<td>Wide (20 cols)</td>
+<td><strong>1.44 ms</strong></td>
+<td>1.96 ms</td>
+<td>1.68 ms</td>
+</tr>
+<tr>
+<td>Text-heavy</td>
+<td><strong>0.89 ms</strong></td>
+<td>1.07 ms</td>
+<td>1.07 ms</td>
+</tr>
+<tr>
+<td>Numeric-heavy</td>
+<td><strong>0.47 ms</strong></td>
+<td>0.63 ms</td>
+<td>0.63 ms</td>
+</tr>
+</tbody></table></div>
+
 <h3>Parameterized queries (100 queries × ~500 rows)</h3>
-<p>| Library | Wall |</p>
-<p>|---|---|</p>
-<p>| <strong>resqlite</strong> | <strong>23.02 ms</strong> |</p>
-<p>| sqlite3 (cached) | 23.57 ms |</p>
-<p>| sqlite_async | 25.68 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Library</th>
+<th>Wall</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>resqlite</strong></td>
+<td><strong>23.02 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite3 (cached)</td>
+<td>23.57 ms</td>
+</tr>
+<tr>
+<td>sqlite_async</td>
+<td>25.68 ms</td>
+</tr>
+</tbody></table></div>
+
 <h2>Act Two: The Reader Pool</h2>
 <p>The library worked. It was fast. But every <code>select()</code> call spawned a fresh isolate, did its work, and died via <code>Isolate.exit</code>. The spawn cost was ~100-200µs — negligible for large queries where execution dominates, but for point queries (single-row lookups), spawn time was the entire cost. We were paying the setup tax on every read.</p>
 <p>The obvious fix: persistent worker isolates. A pool of 2-4 workers that stay alive between queries. Small results return via <code>SendPort.send</code> (fast, no spawn). Large results still use the <code>Isolate.exit</code> sacrifice path (zero-copy). The pool auto-respawns workers that sacrifice.</p>
@@ -278,13 +571,40 @@ return Response(200, body: bytes, headers: {'Content-Type': 'application/json'})
 <p>The key insight was moving the result hash to the worker isolate. For stream re-queries where the data hasn't changed (common in fanout scenarios — many streams, one write), the worker computes a hash and compares against the last emission. If unchanged, it sends back a single integer instead of the full ResultSet. No SendPort copy, no main-isolate hash computation, no subscriber notification. Shared fanout (25 watchers, one query) improved 33%.</p>
 <h3>Where It Landed</h3>
 <p>41 documented experiments. 85 tests. 9 benchmark suites. The numbers, measured honestly with 3-repeat medians:</p>
-<p>| Metric | Wall time | Main isolate |</p>
-<p>|---|---:|---:|</p>
-<p>| Point query | 0.016ms (65K qps) | 0.016ms |</p>
-<p>| 5,000-row read | 3.5ms | 0.7ms |</p>
-<p>| 20,000-row read | 19ms | 3ms |</p>
-<p>| Stream invalidation | 0.1ms | — |</p>
-<p>| Batch 1,000 rows | 0.8ms | — |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>Wall time</th>
+<th>Main isolate</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Point query</td>
+<td>0.016ms (65K qps)</td>
+<td>0.016ms</td>
+</tr>
+<tr>
+<td>5,000-row read</td>
+<td>3.5ms</td>
+<td>0.7ms</td>
+</tr>
+<tr>
+<td>20,000-row read</td>
+<td>19ms</td>
+<td>3ms</td>
+</tr>
+<tr>
+<td>Stream invalidation</td>
+<td>0.1ms</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Batch 1,000 rows</td>
+<td>0.8ms</td>
+<td>—</td>
+</tr>
+</tbody></table></div>
+
 <p>Against async peer libraries (sqlite_reactive, sqlite_async), resqlite wins 9 of 12 benchmark cases. The two losses are batch write (we wrap in a transaction for atomicity — they don't) and unique fanout (they pin streams to readers — we dispatch through the pool).</p>
 <h2>What We'd Tell Our Past Selves</h2>
 <p><strong>Measure main-isolate time separately from wall time.</strong> A library can look fast on wall time while putting all the work on the thread that renders your UI. These are different metrics and you need to optimize for both, but main-isolate time is what your users actually feel.</p>

@@ -1,10 +1,10 @@
-# Writing: execute(), executeBatch(), transaction()
+# How resqlite Writes Data
 
-## Overview
+SQLite only allows one writer at a time — that's a fundamental constraint of the database engine. resqlite embraces this by routing all writes through a single dedicated background isolate, keeping the main isolate free and providing clean transaction semantics.
 
-All writes go through a **persistent writer isolate** — a single long-lived Dart isolate that owns the writer connection and processes messages sequentially. This mirrors SQLite's own model: one writer at a time.
+## Three Write APIs
 
-Three write APIs:
+All writes go through a **persistent writer isolate** — a single long-lived background thread that owns the write connection and processes messages sequentially. This mirrors SQLite's own model: one writer at a time, with queued access.
 
 - **`execute(sql, params)`** → `Future<WriteResult>` — single write, returns affected rows + last insert ID
 - **`executeBatch(sql, paramSets)`** → `Future<void>` — one SQL with many param sets in a transaction

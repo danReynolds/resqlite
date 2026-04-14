@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Writing: execute(), executeBatch(), transaction() — resqlite</title>
+<title>How resqlite Writes Data — resqlite</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d;
@@ -52,6 +52,25 @@
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 
 </style>
 </head>
@@ -65,10 +84,10 @@
   </nav>
   <article class="post">
     <span class="post-category">Deep Dive</span>
-    <h1>Writing: execute(), executeBatch(), transaction()</h1>
-<h2>Overview</h2>
-<p>All writes go through a <strong>persistent writer isolate</strong> — a single long-lived Dart isolate that owns the writer connection and processes messages sequentially. This mirrors SQLite's own model: one writer at a time.</p>
-<p>Three write APIs:</p>
+    <h1>How resqlite Writes Data</h1>
+<p>SQLite only allows one writer at a time — that's a fundamental constraint of the database engine. resqlite embraces this by routing all writes through a single dedicated background isolate, keeping the main isolate free and providing clean transaction semantics.</p>
+<h2>Three Write APIs</h2>
+<p>All writes go through a <strong>persistent writer isolate</strong> — a single long-lived background thread that owns the write connection and processes messages sequentially. This mirrors SQLite's own model: one writer at a time, with queued access.</p>
 <ul>
 <li><strong><code>execute(sql, params)</code></strong> → <code>Future&lt;WriteResult&gt;</code> — single write, returns affected rows + last insert ID</li>
 <li><strong><code>executeBatch(sql, paramSets)</code></strong> → <code>Future&lt;void&gt;</code> — one SQL with many param sets in a transaction</li>
@@ -88,14 +107,45 @@
 <p>We chose option 3. The persistent isolate spawns non-blocking during <code>Database.open()</code>. The first write awaits it being ready. If the app never writes, the isolate still spawns but sits idle.</p>
 <h2>Writer Isolate Message Protocol</h2>
 <p>Six message types, each a sealed class in <code>write_worker.dart</code>:</p>
-<p>| Message | Purpose | Response |</p>
-<p>|---|---|---|</p>
-<p>| <code>ExecuteRequest</code> | Single parameterized write | <code>ExecuteResponse(WriteResult, dirtyTables)</code> |</p>
-<p>| <code>QueryRequest</code> | Read within a transaction | <code>QueryResponse(rows, dirtyTables)</code> |</p>
-<p>| <code>BatchRequest</code> | Batch write | <code>BatchResponse(dirtyTables)</code> |</p>
-<p>| <code>BeginRequest</code> | Start transaction | <code>true</code> |</p>
-<p>| <code>CommitRequest</code> | Commit transaction | <code>BatchResponse(dirtyTables)</code> |</p>
-<p>| <code>RollbackRequest</code> | Rollback transaction | <code>true</code> |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Message</th>
+<th>Purpose</th>
+<th>Response</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>ExecuteRequest</code></td>
+<td>Single parameterized write</td>
+<td><code>ExecuteResponse(WriteResult, dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>QueryRequest</code></td>
+<td>Read within a transaction</td>
+<td><code>QueryResponse(rows, dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>BatchRequest</code></td>
+<td>Batch write</td>
+<td><code>BatchResponse(dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>BeginRequest</code></td>
+<td>Start transaction</td>
+<td><code>true</code></td>
+</tr>
+<tr>
+<td><code>CommitRequest</code></td>
+<td>Commit transaction</td>
+<td><code>BatchResponse(dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>RollbackRequest</code></td>
+<td>Rollback transaction</td>
+<td><code>true</code></td>
+</tr>
+</tbody></table></div>
+
 <p>Each request carries a <code>SendPort replyPort</code> for the response. The writer isolate pattern-matches on the message type and dispatches to the appropriate C function.</p>
 <h3>Transaction state</h3>
 <p>The writer isolate tracks <code>inTransaction</code> as a boolean. When true:</p>
@@ -158,22 +208,64 @@ final result = await db.transaction((tx) async {
 <p>For rolled-back transactions: dirty tables are cleared without returning them. Rolled-back writes don't trigger stream invalidation.</p>
 <h2>Performance Characteristics</h2>
 <p>Single inserts (100 sequential):</p>
-<p>| Library | Wall time |</p>
-<p>|---|---|</p>
-<p>| resqlite | <strong>1.73 ms</strong> |</p>
-<p>| sqlite3 | 5.19 ms |</p>
-<p>| sqlite_async | 4.10 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Library</th>
+<th>Wall time</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>resqlite</td>
+<td><strong>1.73 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite3</td>
+<td>5.19 ms</td>
+</tr>
+<tr>
+<td>sqlite_async</td>
+<td>4.10 ms</td>
+</tr>
+</tbody></table></div>
+
 <p>Batch insert (1,000 rows):</p>
-<p>| Library | Wall time |</p>
-<p>|---|---|</p>
-<p>| resqlite | <strong>0.48 ms</strong> |</p>
-<p>| sqlite3 (manual) | 0.57 ms |</p>
-<p>| sqlite_async | 0.63 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Library</th>
+<th>Wall time</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>resqlite</td>
+<td><strong>0.48 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite3 (manual)</td>
+<td>0.57 ms</td>
+</tr>
+<tr>
+<td>sqlite_async</td>
+<td>0.63 ms</td>
+</tr>
+</tbody></table></div>
+
 <p>Interactive transaction (insert + select + conditional delete):</p>
-<p>| Library | Wall time |</p>
-<p>|---|---|</p>
-<p>| resqlite | <strong>0.06 ms</strong> |</p>
-<p>| sqlite_async | 0.12 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Library</th>
+<th>Wall time</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>resqlite</td>
+<td><strong>0.06 ms</strong></td>
+</tr>
+<tr>
+<td>sqlite_async</td>
+<td>0.12 ms</td>
+</tr>
+</tbody></table></div>
+
 <h2>Key Files</h2>
 <ul>
 <li><code>lib/src/database.dart</code> — <code>execute()</code>, <code>executeBatch()</code>, <code>transaction()</code>, <code>Transaction</code> class</li>

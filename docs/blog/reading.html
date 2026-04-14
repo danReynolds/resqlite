@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Reading: select() and selectBytes() — resqlite</title>
+<title>How resqlite Reads Data — resqlite</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d;
@@ -52,6 +52,25 @@
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 
 </style>
 </head>
@@ -65,14 +84,15 @@
   </nav>
   <article class="post">
     <span class="post-category">Deep Dive</span>
-    <h1>Reading: select() and selectBytes()</h1>
-<h2>Overview</h2>
-<p>Reads are resqlite's core strength. Two APIs serve different use cases:</p>
+    <h1>How resqlite Reads Data</h1>
+<p>Reads are the most common database operation — and the place where most SQLite libraries waste the most time on your UI thread. This post explains how resqlite's read path works, from the API call to the result landing on the main isolate.</p>
+<h2>Two APIs, One Architecture</h2>
+<p>resqlite offers two read APIs:</p>
 <ul>
-<li><strong><code>select(sql, params)</code></strong> → <code>Future&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt;</code> — standard row access</li>
-<li><strong><code>selectBytes(sql, params)</code></strong> → <code>Future&lt;Uint8List&gt;</code> — JSON bytes for HTTP responses</li>
+<li><strong><code>select(sql, params)</code></strong> → <code>Future&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt;</code> — standard row access, what you'd use in most Flutter apps</li>
+<li><strong><code>selectBytes(sql, params)</code></strong> → <code>Future&lt;Uint8List&gt;</code> — raw JSON bytes, ideal for HTTP server responses where you don't need Dart objects</li>
 </ul>
-<p>Both use the same architecture: a <strong>persistent reader pool</strong> of worker isolates that dispatch queries to the C connection pool. Small results return via SendPort (fast round-trip). Large results trigger Isolate.exit for zero-copy transfer — the pool auto-respawns the worker.</p>
+<p>Both use the same architecture under the hood: a <strong>persistent reader pool</strong> of background worker isolates that dispatch queries to a C-level connection pool. Small results return via Dart's <code>SendPort</code> (fast round-trip, copies the data). Large results trigger <code>Isolate.exit</code> for zero-copy transfer — the worker sacrifices itself to avoid copying, and the pool auto-respawns a replacement.</p>
 <h2>Architecture</h2>
 <pre><code class="lang-">
 select()/selectBytes()
@@ -134,10 +154,31 @@ int resqlite_query_bytes(resqlite_db* db, const char* sql, ...);
 </ul>
 <h2>Performance Characteristics</h2>
 <p>At 5,000 rows (6 columns, mixed types):</p>
-<p>| Metric | select() | selectBytes() | sqlite3 | sqlite_async |</p>
-<p>|---|---|---|---|---|</p>
-<p>| Wall time | 2.25 ms | 3.14 ms | 4.20 ms | 4.10 ms |</p>
-<p>| Main-isolate time | 0.49 ms | 0.00 ms | 4.20 ms | 0.83 ms |</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>select()</th>
+<th>selectBytes()</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Wall time</td>
+<td>2.25 ms</td>
+<td>3.14 ms</td>
+<td>4.20 ms</td>
+<td>4.10 ms</td>
+</tr>
+<tr>
+<td>Main-isolate time</td>
+<td>0.49 ms</td>
+<td>0.00 ms</td>
+<td>4.20 ms</td>
+<td>0.83 ms</td>
+</tr>
+</tbody></table></div>
+
 <h2>Key Files</h2>
 <ul>
 <li><code>lib/src/database.dart</code> — <code>select()</code>, <code>selectBytes()</code> (delegates to reader pool)</li>

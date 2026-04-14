@@ -1,4 +1,6 @@
-# Streaming: stream()
+# How resqlite Makes Queries Reactive
+
+Most database libraries give you a one-shot query: ask for data, get data, done. resqlite's `stream()` API turns any query into a live data source — it emits results immediately and then re-emits whenever the underlying data changes. No polling, no manual invalidation, no table lists to maintain.
 
 ## Overview
 

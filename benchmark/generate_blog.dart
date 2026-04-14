@@ -186,19 +186,27 @@ ${_articleCss()}
 }
 
 /// Convert markdown to HTML. Handles headings, paragraphs, code blocks,
-/// inline code, bold, lists, and horizontal rules.
+/// inline code, bold, lists, tables, and horizontal rules.
 String _markdownToHtml(String md) {
   final lines = md.split('\n');
   final buf = StringBuffer();
   var inCodeBlock = false;
   var inList = false;
   var listType = '';
+  final tableRows = <String>[];
+
+  void _flushTable() {
+    if (tableRows.isEmpty) return;
+    buf.writeln(_renderTable(tableRows));
+    tableRows.clear();
+  }
 
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
 
     // Code blocks.
     if (line.startsWith('```')) {
+      _flushTable();
       if (inCodeBlock) {
         buf.writeln('</code></pre>');
         inCodeBlock = false;
@@ -216,6 +224,14 @@ String _markdownToHtml(String md) {
     }
 
     final trimmed = line.trim();
+
+    // Table rows: collect and render as a batch.
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+      tableRows.add(trimmed);
+      continue;
+    }
+    _flushTable();
 
     // Blank line — close list if open.
     if (trimmed.isEmpty) {
@@ -257,8 +273,86 @@ String _markdownToHtml(String md) {
       buf.writeln('<p>${_inline(trimmed)}</p>');
     }
   }
+  _flushTable();
   if (inList) buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
   if (inCodeBlock) buf.writeln('</code></pre>');
+
+  return buf.toString();
+}
+
+/// Render a markdown table as a styled HTML table with winner highlighting.
+/// For numeric columns, the best value (lowest, or highest for qps/ops) gets
+/// a green highlight.
+String _renderTable(List<String> rows) {
+  if (rows.isEmpty) return '';
+
+  // Parse cells from each row.
+  List<String> parseCells(String row) =>
+      row.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+
+  // Skip separator rows (|---|---|).
+  final dataRows = rows
+      .where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r))
+      .toList();
+  if (dataRows.isEmpty) return '';
+
+  final headerCells = parseCells(dataRows[0]);
+  final bodyRows = dataRows.skip(1).map(parseCells).toList();
+
+  // Detect which columns are numeric (for winner highlighting).
+  final numericCols = <int>{};
+  for (final row in bodyRows) {
+    for (var c = 0; c < row.length; c++) {
+      final val = row[c].replaceAll(RegExp(r'[*`]'), '');
+      if (double.tryParse(val) != null) numericCols.add(c);
+    }
+  }
+
+  // For each numeric column, find the best value.
+  // "Best" = lowest, unless column header contains qps/ops/throughput.
+  final colBest = <int, double>{};
+  for (final c in numericCols) {
+    final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
+    final higherIsBetter = header.contains('qps') || header.contains('ops') ||
+        header.contains('throughput');
+    double? best;
+    for (final row in bodyRows) {
+      if (c >= row.length) continue;
+      final val = double.tryParse(row[c].replaceAll(RegExp(r'[*`]'), ''));
+      if (val == null) continue;
+      if (best == null ||
+          (higherIsBetter ? val > best : val < best)) {
+        best = val;
+      }
+    }
+    if (best != null) colBest[c] = best;
+  }
+
+  final buf = StringBuffer();
+  buf.writeln('<div class="table-wrap"><table class="bench-table">');
+
+  // Header.
+  buf.writeln('<thead><tr>');
+  for (final cell in headerCells) {
+    buf.writeln('<th>${_inline(cell)}</th>');
+  }
+  buf.writeln('</tr></thead>');
+
+  // Body rows.
+  buf.writeln('<tbody>');
+  for (final row in bodyRows) {
+    buf.writeln('<tr>');
+    for (var c = 0; c < row.length; c++) {
+      final raw = row[c];
+      final clean = raw.replaceAll(RegExp(r'[*`]'), '');
+      final val = double.tryParse(clean);
+      final isBest = val != null && colBest[c] == val && bodyRows.length > 1;
+      final cls = isBest ? ' class="winner"' : '';
+      buf.writeln('<td$cls>${_inline(raw)}</td>');
+    }
+    buf.writeln('</tr>');
+  }
+  buf.writeln('</tbody></table></div>');
 
   return buf.toString();
 }
@@ -347,4 +441,23 @@ String _articleCss() => '''
   }
   .post strong { color: var(--text); }
   .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
 ''';

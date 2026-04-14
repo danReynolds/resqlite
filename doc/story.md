@@ -2,6 +2,8 @@
 
 Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something that beats every existing library on every benchmark that matters. Here's the story of how we got there — including the dead ends.
 
+**The bottom line:** resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.
+
 ## The Problem We Were Trying to Solve
 
 We were building an HTTP endpoint backed by [SQLite](https://sqlite.org/) — the embedded database that runs on basically everything. SQLite is written in C and runs in-process, so there's no network overhead. The bottleneck isn't the database — it's getting the results into Dart.
@@ -15,7 +17,7 @@ return Response(200, body: jsonEncode(rows));
 
 But profiling told a different story. For 5,000 rows, 8.6ms of the 15ms total was happening on the main isolate — half a frame budget in Flutter. Here's why:
 
-In Dart, your application runs on the "main isolate" — a single thread that handles UI rendering, user input, and your application logic. [Isolates](https://dart.dev/language/isolates) are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.
+If you're not familiar with Dart: your application runs on the "main isolate" — a single thread that handles UI rendering, user input, and your application logic. Think of it like JavaScript's main thread, but stricter. [Isolates](https://dart.dev/language/isolates) are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages (no shared memory, no locks). [FFI](https://dart.dev/interop/c-interop) (Foreign Function Interface) is how Dart calls C code — each call has a small overhead. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.
 
 The data path looked like this:
 

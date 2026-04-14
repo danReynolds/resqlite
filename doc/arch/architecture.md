@@ -1,8 +1,10 @@
 # resqlite Architecture
 
-resqlite is a high-performance SQLite library for Dart built on raw C FFI. It's designed around a single principle: **minimize main-isolate work**. In a Flutter app, the main isolate runs the UI — every millisecond spent there risks dropped frames.
+resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: **minimize main-isolate work**.
 
-This document provides a high-level overview of how the system works. Detailed design docs for each subsystem are linked below.
+In a Flutter app, the main isolate is the single thread responsible for rendering your UI at 60fps — that's a 16ms budget per frame. Every millisecond your database spends on the main isolate is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. resqlite pushes virtually all database work off the main isolate, leaving it free for what it's meant to do: render your UI.
+
+This post walks through the high-level architecture — how the pieces fit together and why they're designed this way.
 
 ## System Overview
 

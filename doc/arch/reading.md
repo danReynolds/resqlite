@@ -1,13 +1,15 @@
-# Reading: select() and selectBytes()
+# How resqlite Reads Data
 
-## Overview
+Reads are the most common database operation — and the place where most SQLite libraries waste the most time on your UI thread. This post explains how resqlite's read path works, from the API call to the result landing on the main isolate.
 
-Reads are resqlite's core strength. Two APIs serve different use cases:
+## Two APIs, One Architecture
 
-- **`select(sql, params)`** → `Future<List<Map<String, Object?>>>` — standard row access
-- **`selectBytes(sql, params)`** → `Future<Uint8List>` — JSON bytes for HTTP responses
+resqlite offers two read APIs:
 
-Both use the same architecture: a **persistent reader pool** of worker isolates that dispatch queries to the C connection pool. Small results return via SendPort (fast round-trip). Large results trigger Isolate.exit for zero-copy transfer — the pool auto-respawns the worker.
+- **`select(sql, params)`** → `Future<List<Map<String, Object?>>>` — standard row access, what you'd use in most Flutter apps
+- **`selectBytes(sql, params)`** → `Future<Uint8List>` — raw JSON bytes, ideal for HTTP server responses where you don't need Dart objects
+
+Both use the same architecture under the hood: a **persistent reader pool** of background worker isolates that dispatch queries to a C-level connection pool. Small results return via Dart's `SendPort` (fast round-trip, copies the data). Large results trigger `Isolate.exit` for zero-copy transfer — the worker sacrifices itself to avoid copying, and the pool auto-respawns a replacement.
 
 ## Architecture
 
