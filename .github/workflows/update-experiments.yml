@@ -1,0 +1,41 @@
+name: Update Experiments Page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/*.md'
+      - 'benchmark/results/*.md'
+      - 'benchmark/shared/parse_results.dart'
+      - 'benchmark/generate_history.dart'
+
+jobs:
+  regenerate:
+    name: Regenerate history JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Generate history JSON
+        run: dart run benchmark/generate_history.dart
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet docs/experiments/history.json && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/experiments/history.json
+          git commit -m "Auto-update experiments history JSON"
+          git push
