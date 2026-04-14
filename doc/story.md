@@ -1,4 +1,4 @@
-# Building a Jank-Free SQLite Library for Flutter with AI-Driven Experimentation
+# 40 Experiments Later: How We Built a Blazing Fast SQLite Library for Flutter
 
 Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.
 
