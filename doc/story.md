@@ -319,19 +319,58 @@ Reactive queries started as ~50 lines embedded in `database.dart`. By the time w
 
 The key insight was moving the result hash to the worker isolate. For stream re-queries where the data hasn't changed (common in fanout scenarios — many streams, one write), the worker computes a hash and compares against the last emission. If unchanged, it sends back a single integer instead of the full ResultSet. No SendPort copy, no main-isolate hash computation, no subscriber notification. Shared fanout (25 watchers, one query) improved 33%.
 
+## Tuning the Last 30%
+
+The big architectural wins were in. But profiling showed there was still performance left on the table — not from design changes, but from disciplined micro-optimization.
+
+**Batch FFI (experiment 009).** Each row required ~16 individual FFI calls: `sqlite3_step`, then `sqlite3_column_type`, `sqlite3_column_text`, `sqlite3_column_bytes` for each column. FFI calls aren't free — each one involves a thread state transition. We wrote `resqlite_step_row()`: one C function call per row that reads all columns into a pre-allocated buffer. 9-21% improvement across every benchmark, just by reducing FFI boundary crossings.
+
+**isLeaf annotations (experiment 013).** Dart's FFI system has a flag called `isLeaf` that tells the VM "this C function won't call back into Dart." When set, the VM skips safepoint checks and thread state transitions on every call. We audited all 33 `@ffi.Native` bindings and added `isLeaf: true` to every one. 12-19% improvement on small results, 5-9% across the board. Zero code changes to the C side — purely a Dart annotation.
+
+**Static parameter binding (experiment 028).** When binding text and blob parameters, we were allocating fresh native memory for each query, copying the bytes, then freeing after execution. For queries that run thousands of times (parameterized workloads), this add up. We switched to `SQLITE_STATIC` binding — telling SQLite the memory is valid for the duration of the call, avoiding the copy. Measurable improvement on parameterized query benchmarks.
+
+None of these changed the architecture. They're the kind of optimizations you only find by profiling with `dart:developer` timeline events and reading the Dart VM source code. Together they shaved another 15-20% off the baseline.
+
+## The Write Path
+
+Reads got most of our attention, but writes matter too. SQLite only allows one writer at a time — that's a fundamental constraint of the database engine. We tried three approaches:
+
+1. **One-off `Isolate.run` per write** — works, but you can't hold transaction state across isolate deaths.
+2. **Run on main isolate** — defeats the whole purpose.
+3. **Persistent writer isolate** — a single long-lived background thread that owns the write connection.
+
+Option 3 won. The writer isolate receives messages (execute, batch, begin transaction, commit, rollback), processes them sequentially, and sends back results with the list of tables that were modified. That last part — dirty table tracking — is critical for the stream engine.
+
+**Dirty tables via preupdate hook.** SQLite has a [preupdate hook](https://sqlite.org/c3ref/preupdate_count.html) that fires before every row modification. We register a callback that records which table was touched. After a write completes, the accumulated set of dirty table names rides back to the main isolate alongside the write result. The stream engine checks those names against its inverted index and re-queries affected streams. No polling, no separate notification channel — the write response itself carries the invalidation signal.
+
+**Periodic checkpointing (experiment 029).** In WAL mode, SQLite appends writes to a log file. Periodically, a "checkpoint" moves those changes back to the main database file. By default, this can happen at unpredictable times, causing p95/p99 write latency spikes. We added writer-side PASSIVE checkpointing on a schedule — the writer isolate checkpoints between messages when the WAL exceeds a threshold. Much smoother tail latency.
+
+**Batch execution.** `executeBatch('INSERT INTO t(a,b) VALUES (?,?)', [[1,'x'],[2,'y']])` serializes all parameter sets into one contiguous native buffer, crosses the FFI boundary once, and the C side loops: prepare once, bind+step for each set, commit. 1,000 rows in 0.43ms. The main isolate just dispatches the message — all the work happens on the writer.
+
+## The Final Push
+
+Two more experiments closed the gap between "fast" and "fastest."
+
+**Row Map facade (experiment 032).** Our flat-list `Row` type implemented Dart's `Map` interface via `MapMixin`, which provides default implementations for methods like `containsKey`, `forEach`, and `entries`. Those defaults work but they're not optimal — they allocate iterators and call through generic interfaces. We overrode the key methods with direct implementations that index into the flat list. Same external API, measurably faster on the main isolate where Row access actually happens.
+
+**Event-port cleanup (experiment 040).** The reader pool used a complex protocol: workers would send results, then send a "done" signal, and the pool would track state across both messages. We simplified to a single-message protocol — result + metadata in one shot. Fewer event port registrations, fewer microtask hops. Point queries jumped from ~68K to 107K qps. Sometimes the biggest wins come from removing complexity, not adding it.
+
 ### Where It Landed
 
-41 documented experiments. 85 tests. 9 benchmark suites. The numbers, measured honestly with 3-repeat medians:
+40 documented experiments — 16 accepted, 18 rejected. 9 benchmark suites with 3-repeat medians. The numbers, measured on a 10-core M1 Pro:
 
 | Metric | Wall time | Main isolate |
 |---|---:|---:|
-| Point query | 0.016ms (65K qps) | 0.016ms |
-| 5,000-row read | 3.5ms | 0.7ms |
-| 20,000-row read | 19ms | 3ms |
-| Stream invalidation | 0.1ms | — |
-| Batch 1,000 rows | 0.8ms | — |
+| Point query | 0.009ms (107K qps) | 0.009ms |
+| 1,000-row select() | 0.40ms | 0.10ms |
+| 10,000-row select() | 5.60ms | 1.01ms |
+| Batch insert 1,000 rows | 0.43ms | 0.00ms |
+| Stream invalidation | 0.05ms | 0.05ms |
+| Concurrent 8× reads | 0.74ms | — |
 
-Against async peer libraries (sqlite_reactive, sqlite_async), resqlite wins 9 of 12 benchmark cases. The two losses are batch write (we wrap in a transaction for atomicity — they don't) and unique fanout (they pin streams to readers — we dispatch through the pool).
+1.8x faster reads, 2.1x faster writes, and sub-millisecond main-isolate time at 1K rows — using the same APIs (`select`, `execute`) that every library shares.
+
+The full experiment log — every accepted optimization and every rejected dead end — is available on the [experiments page](https://danreynolds.github.io/resqlite/experiments/), with interactive charts showing how each metric evolved over time.
 
 ## What We'd Tell Our Past Selves
 
@@ -350,5 +389,7 @@ Against async peer libraries (sqlite_reactive, sqlite_async), resqlite wins 9 of
 **Tests find concurrency bugs that benchmarks hide.** The sacrifice race (replyPort fires before exitPort, callers claim a dead slot) never showed up in benchmarks — queries just silently hung. It took a stress test firing 8 concurrent large queries to expose it. Write concurrent tests before you think you need them.
 
 **Single-run benchmarks lie.** We cited 65K point queries/sec for weeks before running 3-repeat measurements and discovering the real stable number was closer to 50-68K depending on thermal state. The first run of any benchmark is always the worst (cold JIT, cold caches). At minimum, run 3 times and take the median.
+
+**The last 30% comes from micro-optimization, not architecture.** After the big wins (flat lists, connection pool, persistent workers), the remaining gains came from reducing FFI crossings, adding compiler hints, and simplifying protocols. These aren't exciting, but they compound — thirteen small experiments got us from 68K to 107K point queries/sec.
 
 **Benchmark everything, believe nothing.** String interning sounded smart. Binary codecs sounded efficient. Lazy byte-backed maps sounded like the best of both worlds. All three were slower where it mattered. The ideas that actually worked — flat lists, lazy `Row` wrappers, per-query `NOMUTEX`, dedicated readers — weren't the ones we'd have bet on at the start.
