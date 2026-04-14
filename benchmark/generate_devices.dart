@@ -2,7 +2,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// Parses `benchmark/HARDWARE_RESULTS.md` into `docs/benchmarks/devices.json`.
+/// Parses `benchmark/HARDWARE_RESULTS.md` device registry and extracts
+/// full cross-library benchmark data from referenced result files into
+/// `docs/benchmarks/devices.json`.
 ///
 /// Usage:
 ///   dart run benchmark/generate_devices.dart
@@ -16,113 +18,160 @@ void main() {
   }
 
   final content = mdFile.readAsStringSync();
-  final lines = content.split('\n');
+  final devices = _parseDeviceRegistry(content);
 
-  // 1. Parse device metadata from ## Devices table.
-  final devices = <String, Map<String, String>>{};
-  // 2. Parse benchmark sections into structured data.
-  final sections = <Map<String, Object?>>[];
-
-  String? currentSection;
-  String? currentDescription;
-  List<String>? columnHeaders;
-
-  for (var i = 0; i < lines.length; i++) {
-    final line = lines[i];
-
-    // Section headers.
-    if (line.startsWith('## ')) {
-      final title = line.substring(3).trim();
-
-      // Grab the description line(s) that follow the header.
-      currentDescription = '';
-      for (var j = i + 1; j < lines.length; j++) {
-        final next = lines[j].trim();
-        if (next.isEmpty) continue;
-        if (next.startsWith('|') || next.startsWith('#')) break;
-        currentDescription = next;
-        break;
-      }
-
-      if (title == 'Devices') {
-        currentSection = 'devices';
-      } else if (title != 'How to Submit') {
-        currentSection = title;
-        columnHeaders = null;
-      }
-      continue;
-    }
-
-    // Table rows.
-    if (!line.startsWith('|')) continue;
-    if (line.contains('---')) continue; // separator
-
-    final cells =
-        line.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-
-    if (currentSection == 'devices') {
-      // Header row.
-      if (cells.first == 'Device') continue;
-      // Data row: Device | CPU | OS | Dart | Date | By
-      if (cells.length >= 6) {
-        final name = cells[0];
-        devices[name] = {
-          'cpu': cells[1],
-          'os': cells[2],
-          'dart': cells[3],
-          'date': cells[4],
-          'by': cells[5],
-        };
-      }
-      continue;
-    }
-
-    if (currentSection == null) continue;
-
-    // First data row in a section — detect column headers.
-    if (columnHeaders == null) {
-      columnHeaders = cells;
-      // Start a new section entry.
-      sections.add({
-        'title': currentSection,
-        'description': currentDescription,
-        'columns': List<String>.from(cells.skip(1)), // skip Device column
-        'rows': <Map<String, Object?>>[],
-      });
-      continue;
-    }
-
-    // Data rows.
-    final section = sections.last;
-    final rows = section['rows'] as List<Map<String, Object?>>;
-
-    final device = cells[0];
-    final values = <String, Object?>{};
-    for (var c = 1; c < cells.length && c < columnHeaders.length; c++) {
-      final header = columnHeaders[c];
-      final raw = cells[c];
-      // Try to parse as number, keep as string if not.
-      final numVal = double.tryParse(raw.replaceAll(RegExp(r'[Kk]$'), ''));
-      if (raw.endsWith('K') || raw.endsWith('k')) {
-        values[header] = '${numVal?.round() ?? raw}K';
-      } else {
-        values[header] = numVal ?? raw;
-      }
-    }
-    rows.add({'device': device, 'values': values});
+  if (devices.isEmpty) {
+    print('No devices found in HARDWARE_RESULTS.md');
+    return;
   }
 
-  // Build output.
-  final output = {
+  // For each device, parse its result file for full cross-library data.
+  final output = <String, Object?>{
     'generated': DateTime.now().toIso8601String(),
-    'devices': devices,
-    'sections': sections,
+    'devices': <Map<String, Object?>>[],
   };
+
+  for (final device in devices) {
+    final resultPath = 'benchmark/results/${device['resultFile']}';
+    final resultFile = File(resultPath);
+    if (!resultFile.existsSync()) {
+      print('  Warning: ${device['name']} references missing file: $resultPath');
+      continue;
+    }
+
+    final resultContent = resultFile.readAsStringSync();
+    final benchmarks = _parseResultFile(resultContent);
+
+    (output['devices'] as List).add({
+      'name': device['name'],
+      'cpu': device['cpu'],
+      'os': device['os'],
+      'dart': device['dart'],
+      'date': device['date'],
+      'by': device['by'],
+      'benchmarks': benchmarks,
+    });
+
+    print('  ${device['name']}: ${benchmarks.length} benchmark sections parsed');
+  }
 
   outFile.writeAsStringSync(
     const JsonEncoder.withIndent('  ').convert(output),
   );
 
-  print('Parsed ${devices.length} device(s), ${sections.length} sections.');
-  print('Wrote ${outFile.path}');
+  final count = (output['devices'] as List).length;
+  print('Wrote ${outFile.path} ($count device(s))');
+}
+
+/// Parse the Devices table from HARDWARE_RESULTS.md.
+List<Map<String, String>> _parseDeviceRegistry(String content) {
+  final devices = <Map<String, String>>[];
+  final lines = content.split('\n');
+  var inDevices = false;
+
+  for (final line in lines) {
+    if (line.startsWith('## Devices')) {
+      inDevices = true;
+      continue;
+    }
+    if (line.startsWith('## ') && inDevices) break;
+
+    if (!inDevices || !line.startsWith('|')) continue;
+    if (line.contains('---') || line.contains('Device')) continue;
+
+    final cells =
+        line.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    if (cells.length >= 7) {
+      devices.add({
+        'name': cells[0],
+        'cpu': cells[1],
+        'os': cells[2],
+        'dart': cells[3],
+        'date': cells[4],
+        'by': cells[5],
+        'resultFile': cells[6],
+      });
+    }
+  }
+
+  return devices;
+}
+
+/// Parse a full benchmark result .md file into structured cross-library data.
+///
+/// Returns a list of benchmark sections, each with a title and data for
+/// all three libraries.
+List<Map<String, Object?>> _parseResultFile(String content) {
+  final sections = <Map<String, Object?>>[];
+  final lines = content.split('\n');
+
+  String? currentSection;
+  String? currentSubsection;
+
+  for (final line in lines) {
+    if (line.startsWith('## ')) {
+      currentSection = line.substring(3).trim();
+      currentSubsection = null;
+      // Skip non-benchmark sections.
+      if (currentSection.startsWith('Comparison') ||
+          currentSection.startsWith('Repeat') ||
+          currentSection.startsWith('resqlite Benchmark')) {
+        currentSection = null;
+      }
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      currentSubsection = line.substring(4).trim();
+      continue;
+    }
+
+    if (currentSection == null) continue;
+
+    // Parse table data rows (start with |, not separator rows).
+    if (!line.startsWith('|') || line.contains('---')) continue;
+
+    final cells =
+        line.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    if (cells.length < 2) continue;
+
+    // Skip header rows.
+    final firstCell = cells[0].toLowerCase();
+    if (firstCell == 'library' || firstCell == 'rows' ||
+        firstCell == 'concurrency' || firstCell == 'n') continue;
+
+    final sectionKey = currentSubsection != null
+        ? '$currentSection / $currentSubsection'
+        : currentSection;
+
+    // Find or create section.
+    var section = sections.firstWhere(
+      (s) => s['key'] == sectionKey,
+      orElse: () {
+        final s = <String, Object?>{
+          'key': sectionKey,
+          'title': currentSection,
+          'subtitle': currentSubsection,
+          'entries': <Map<String, Object?>>[],
+        };
+        sections.add(s);
+        return s;
+      },
+    );
+
+    final entries = section['entries'] as List<Map<String, Object?>>;
+    final library = cells[0];
+
+    // Parse numeric values from remaining cells.
+    final values = <double?>[];
+    for (var i = 1; i < cells.length; i++) {
+      values.add(double.tryParse(cells[i]));
+    }
+
+    entries.add({
+      'library': library,
+      'values': values,
+    });
+  }
+
+  return sections;
 }

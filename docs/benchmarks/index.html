@@ -617,6 +617,8 @@ tableData.forEach(([name, r, s, a]) => {
 });
 
 // ──────────────────── DEVICE BENCHMARKS ────────────────────
+const deviceCharts = [];
+
 (async function loadDevices() {
   let devData;
   try {
@@ -629,86 +631,199 @@ tableData.forEach(([name, r, s, a]) => {
   }
 
   const devices = devData.devices;
-  const sections = devData.sections;
-  const deviceNames = Object.keys(devices);
-
-  if (!deviceNames.length) {
+  if (!devices.length) {
     document.getElementById('deviceSection').innerHTML =
       '<p style="color:var(--muted)">No device data available yet.</p>';
     return;
   }
 
-  // Populate dropdown.
   const select = document.getElementById('deviceSelect');
-  select.innerHTML = deviceNames.map(name =>
-    `<option value="${name}">${name}</option>`
+  select.innerHTML = devices.map((d, i) =>
+    `<option value="${i}">${d.name}</option>`
   ).join('');
 
-  function renderDevice(deviceName) {
-    const meta = devices[deviceName];
+  function renderDevice(idx) {
+    const dev = devices[idx];
     document.getElementById('deviceMeta').textContent =
-      `${meta.cpu} · ${meta.os} · Dart ${meta.dart} · ${meta.date} · ${meta.by}`;
+      `${dev.cpu} · ${dev.os} · Dart ${dev.dart} · ${dev.date} · ${dev.by}`;
 
-    let html = '';
-    for (const section of sections) {
-      const deviceRows = section.rows.filter(r => r.device === deviceName);
-      if (!deviceRows.length) continue;
+    // Destroy old charts.
+    deviceCharts.forEach(c => c.destroy());
+    deviceCharts.length = 0;
 
-      // Get the value columns (skip "Timing" if present).
-      const valueCols = section.columns.filter(c => c !== 'Timing');
-      const hasTiming = section.columns.includes('Timing');
+    // Group sections into chart-friendly categories.
+    const groups = groupSections(dev.benchmarks);
+    let html = '<div class="grid">';
 
-      html += `<div class="hw-block">`;
-      html += `<div class="hw-title">${esc(section.title)}</div>`;
-      html += `<div class="hw-desc">${esc(section.description || '')}</div>`;
-      html += `<table class="hw-table">`;
-
-      if (hasTiming) {
-        // Multi-row (wall/main/worker) format.
-        html += `<tr><th>Timing</th>${valueCols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-        for (const row of deviceRows) {
-          const timing = row.values['Timing'];
-          html += `<tr><td>${esc(String(timing))}</td>`;
-          html += valueCols.map(c => {
-            const v = row.values[c];
-            return `<td>${typeof v === 'number' ? v.toFixed(2) : esc(String(v ?? '—'))}</td>`;
-          }).join('');
-          html += `</tr>`;
-        }
-      } else {
-        // Single-row format.
-        html += `<tr>${valueCols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-        for (const row of deviceRows) {
-          html += `<tr>`;
-          html += valueCols.map(c => {
-            const v = row.values[c];
-            return `<td>${typeof v === 'number' ? v.toFixed(2) : esc(String(v ?? '—'))}</td>`;
-          }).join('');
-          html += `</tr>`;
-        }
-      }
-
-      html += `</table></div>`;
+    for (const group of groups) {
+      const canvasId = 'devChart_' + group.id;
+      html += `<div class="card"><h2>${group.title}</h2>`;
+      html += `<p class="desc">${group.desc}</p>`;
+      html += `<div class="chart-wrap short"><canvas id="${canvasId}"></canvas></div></div>`;
     }
 
+    html += '</div>';
     html += `<div class="contribute-note">`;
-    html += `Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3 --hardware-summary</code> `;
+    html += `Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3</code> `;
     html += `and <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md">submit a PR</a> `;
     html += `to add your device.`;
     html += `</div>`;
 
     document.getElementById('deviceSection').innerHTML = html;
+
+    // Build charts after DOM is ready.
+    for (const group of groups) {
+      const canvas = document.getElementById('devChart_' + group.id);
+      if (!canvas) continue;
+      deviceCharts.push(new Chart(canvas, group.chartConfig));
+    }
   }
 
-  select.addEventListener('change', () => renderDevice(select.value));
-  renderDevice(deviceNames[0]);
-
-  function esc(s) {
-    const el = document.createElement('span');
-    el.textContent = s;
-    return el.innerHTML;
-  }
+  select.addEventListener('change', () => renderDevice(+select.value));
+  renderDevice(0);
 })();
+
+function groupSections(benchmarks) {
+  const groups = [];
+  const LIB_COLORS = { resqlite: '#58a6ff', sqlite3: '#f0883e', sqlite_async: '#a371f7' };
+
+  function libColor(name) {
+    const lower = name.toLowerCase();
+    if (lower.includes('resqlite')) return LIB_COLORS.resqlite;
+    if (lower.includes('sqlite3') || lower.includes('sqlite3')) return LIB_COLORS.sqlite3;
+    if (lower.includes('async')) return LIB_COLORS.sqlite_async;
+    return '#8b949e';
+  }
+
+  function libShort(name) {
+    if (name.includes('resqlite')) return 'resqlite';
+    if (name.includes('sqlite_async') || name.includes('async')) return 'sqlite_async';
+    if (name.includes('sqlite3')) return 'sqlite3';
+    return name;
+  }
+
+  // Select Maps — group 10/100/1K/10K into one bar chart.
+  const selectMaps = benchmarks.filter(s => s.title === 'Select \u2192 Maps' && s.subtitle);
+  if (selectMaps.length) {
+    const labels = selectMaps.map(s => s.subtitle);
+    const libs = {};
+    for (const sec of selectMaps) {
+      for (const entry of sec.entries) {
+        const name = libShort(entry.library);
+        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+        libs[name].data.push(entry.values[0]); // wall med
+      }
+    }
+    groups.push({
+      id: 'selectMaps', title: 'Select \u2192 Maps', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        options: barOpts('Wall time (ms)'),
+      },
+    });
+  }
+
+  // Select Bytes.
+  const selectBytes = benchmarks.filter(s => s.title === 'Select \u2192 JSON Bytes' && s.subtitle);
+  if (selectBytes.length) {
+    const labels = selectBytes.map(s => s.subtitle);
+    const libs = {};
+    for (const sec of selectBytes) {
+      for (const entry of sec.entries) {
+        const name = libShort(entry.library);
+        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+        libs[name].data.push(entry.values[0]);
+      }
+    }
+    groups.push({
+      id: 'selectBytes', title: 'Select \u2192 JSON Bytes', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        options: barOpts('Wall time (ms)'),
+      },
+    });
+  }
+
+  // Schema Shapes.
+  const schemas = benchmarks.filter(s => s.title?.includes('Schema Shapes') && s.subtitle);
+  if (schemas.length) {
+    const labels = schemas.map(s => s.subtitle?.split('(')[0]?.trim());
+    const libs = {};
+    for (const sec of schemas) {
+      for (const entry of sec.entries) {
+        const name = libShort(entry.library);
+        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+        libs[name].data.push(entry.values[0]);
+      }
+    }
+    groups.push({
+      id: 'schemas', title: 'Schema Shapes (1K rows)', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        options: barOpts('Wall time (ms)'),
+      },
+    });
+  }
+
+  // Writes — single inserts.
+  const singleInserts = benchmarks.find(s => s.key?.includes('Single Inserts'));
+  if (singleInserts) {
+    const labels = singleInserts.entries.map(e => libShort(e.library));
+    const data = singleInserts.entries.map(e => e.values[0]);
+    const colors = singleInserts.entries.map(e => libColor(e.library));
+    groups.push({
+      id: 'singleInserts', title: 'Single Inserts (100 seq)', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
+        options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
+      },
+    });
+  }
+
+  // Batch inserts.
+  const batchInserts = benchmarks.filter(s => s.key?.includes('Batch Insert') && s.subtitle);
+  if (batchInserts.length) {
+    const labels = batchInserts.map(s => s.subtitle);
+    const libs = {};
+    for (const sec of batchInserts) {
+      for (const entry of sec.entries) {
+        const name = libShort(entry.library);
+        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+        libs[name].data.push(entry.values[0]);
+      }
+    }
+    groups.push({
+      id: 'batchInserts', title: 'Batch Inserts', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        options: barOpts('Wall time (ms)'),
+      },
+    });
+  }
+
+  // Parameterized.
+  const param = benchmarks.find(s => s.key?.includes('Parameterized'));
+  if (param) {
+    const labels = param.entries.map(e => libShort(e.library));
+    const data = param.entries.map(e => e.values[0]);
+    const colors = param.entries.map(e => libColor(e.library));
+    groups.push({
+      id: 'parameterized', title: 'Parameterized (100q \u00d7 500 rows)', desc: 'Wall time (ms) \u2014 lower is better',
+      chartConfig: {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
+        options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
+      },
+    });
+  }
+
+  return groups;
+}
 </script>
 </body>
 </html>
