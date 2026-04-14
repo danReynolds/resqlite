@@ -294,22 +294,22 @@
 
     <div class="chart-panel active" id="panelReads">
       <h2>Read Performance</h2>
-      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms)</div>
+      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms) — <strong>lower is better</strong></div>
       <div class="chart-canvas-wrap"><canvas id="chartReads"></canvas></div>
     </div>
     <div class="chart-panel" id="panelWrites">
       <h2>Write Performance</h2>
-      <div class="desc">Single inserts (100 sequential) and batch inserts (1K rows), wall time (ms)</div>
+      <div class="desc">Single inserts (100 sequential) and batch inserts (1K rows), wall time (ms) — <strong>lower is better</strong></div>
       <div class="chart-canvas-wrap"><canvas id="chartWrites"></canvas></div>
     </div>
     <div class="chart-panel" id="panelConcurrency">
       <h2>Concurrency &amp; Parameterized</h2>
-      <div class="desc">4x concurrent reads and 100-query parameterized workload, wall time (ms)</div>
+      <div class="desc">4x concurrent reads and 100-query parameterized workload, wall time (ms) — <strong>lower is better</strong></div>
       <div class="chart-canvas-wrap"><canvas id="chartConcurrency"></canvas></div>
     </div>
     <div class="chart-panel" id="panelStreaming">
       <h2>Streaming &amp; Throughput</h2>
-      <div class="desc">Invalidation latency (ms, left axis) and point query throughput (qps, right axis)</div>
+      <div class="desc">Invalidation latency (ms, left — <strong>lower is better</strong>) and point query throughput (qps, right — <strong>higher is better</strong>)</div>
       <div class="chart-canvas-wrap"><canvas id="chartStreaming"></canvas></div>
     </div>
   </div>
@@ -392,6 +392,7 @@ async function init() {
     document.getElementById('expList').innerHTML = '<div class="loading">Failed to load history.json</div>';
     return;
   }
+  buildExpRunMappings();
   buildCharts();
   renderExpList();
 }
@@ -470,29 +471,71 @@ function buildCharts() {
   }
 }
 
-// ── Find the chart run index closest to an experiment ──
-// Experiments only have a date (YYYY-MM-DD), so many share the same date.
-// We find the first run on that date as a reasonable anchor point.
-function findRunIndexForExp(exp) {
-  if (!exp.date || !DATA) return -1;
+// ── Precomputed experiment ↔ run index mappings ──
+// Spreads experiments across runs on the same date so hovering between
+// experiments on the same day still moves the chart highlight.
+const expToRunIndex = {};  // exp.id → run index
+const runToExpId = {};     // run index → exp.id (first match)
+
+function buildExpRunMappings() {
   const runs = DATA.runs;
-  // Find the first run whose date matches the experiment date.
-  for (let i = 0; i < runs.length; i++) {
-    if (runs[i].date === exp.date) return i;
+  const exps = DATA.experiments;
+
+  // Group experiments by date.
+  const byDate = {};
+  for (const exp of exps) {
+    if (!exp.date) continue;
+    (byDate[exp.date] ??= []).push(exp);
   }
-  // Fallback: closest by timestamp within 3 days.
-  const expTs = new Date(exp.date).getTime();
-  let bestIdx = -1;
-  let bestDist = Infinity;
+
+  // Group run indices by date.
+  const runsByDate = {};
   for (let i = 0; i < runs.length; i++) {
-    const dist = Math.abs(new Date(runs[i].timestamp).getTime() - expTs);
-    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    (runsByDate[runs[i].date] ??= []).push(i);
   }
-  return bestDist < 3 * 86400000 ? bestIdx : -1;
+
+  // Distribute experiments across runs on the same date.
+  for (const [date, dateExps] of Object.entries(byDate)) {
+    const dateRuns = runsByDate[date];
+    if (!dateRuns || !dateRuns.length) {
+      // No runs on this date — find closest date's runs.
+      let bestDate = null;
+      let bestDist = Infinity;
+      for (const rd of Object.keys(runsByDate)) {
+        const dist = Math.abs(new Date(rd).getTime() - new Date(date).getTime());
+        if (dist < bestDist) { bestDist = dist; bestDate = rd; }
+      }
+      if (bestDate && bestDist < 3 * 86400000) {
+        const fallbackRuns = runsByDate[bestDate];
+        for (let j = 0; j < dateExps.length; j++) {
+          expToRunIndex[dateExps[j].id] = fallbackRuns[Math.min(j, fallbackRuns.length - 1)];
+        }
+      }
+      continue;
+    }
+
+    // Spread: assign each experiment to a proportionally spaced run index.
+    for (let j = 0; j < dateExps.length; j++) {
+      const runIdx = dateRuns[Math.min(Math.floor(j * dateRuns.length / dateExps.length), dateRuns.length - 1)];
+      expToRunIndex[dateExps[j].id] = runIdx;
+    }
+  }
+
+  // Reverse mapping: each run index → first experiment that maps to it.
+  for (const [expId, runIdx] of Object.entries(expToRunIndex)) {
+    if (!(runIdx in runToExpId)) runToExpId[runIdx] = expId;
+  }
 }
 
-// ── Find the closest experiment to a benchmark run ──
+function findRunIndexForExp(exp) {
+  return expToRunIndex[exp.id] ?? -1;
+}
+
 function findExpForRun(run) {
+  const idx = DATA.runs.indexOf(run);
+  const expId = runToExpId[idx];
+  if (expId) return DATA.experiments.find(e => e.id === expId);
+  // Fallback: closest experiment by date.
   const runTs = new Date(run.timestamp).getTime();
   let best = null;
   let bestDist = Infinity;
