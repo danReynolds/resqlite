@@ -1,5 +1,8 @@
 # resqlite
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)]()
+
 High-performance, reactive SQLite for Dart and Flutter.
 
 Write plain SQL. Stream anything. No main isolate jank. No ORM. No codegen.
