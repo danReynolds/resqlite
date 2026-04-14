@@ -143,9 +143,11 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         .replaceAll('|', '')
         .trim();
 
-    // Try to read the individual experiment file for date and commit.
+    // Read the individual experiment file for date, commit, and content.
     String? date;
     String? commit;
+    String? problem;
+    String? hypothesis;
     final expFile = File('${experimentsDir.path}/$filename');
     if (expFile.existsSync()) {
       final content = expFile.readAsStringSync();
@@ -153,6 +155,8 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       date = dateMatch?.group(1);
       final commitMatch = RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
       commit = commitMatch?.group(1);
+      problem = _extractSection(content, 'Problem');
+      hypothesis = _extractSection(content, 'Hypothesis');
     }
 
     experiments.add({
@@ -162,6 +166,8 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       'status': currentStatus,
       'summary': impact,
       'commit': commit,
+      'problem': problem,
+      'hypothesis': hypothesis,
     });
   }
 
@@ -179,4 +185,29 @@ List<Map<String, Object?>> _parseExperimentsReadme(
   });
 
   return experiments;
+}
+
+/// Extract the first paragraph of a `## Section` from markdown content.
+/// Returns null if the section is not found.
+String? _extractSection(String content, String sectionName) {
+  final pattern = RegExp(
+    '^## $sectionName\n+',
+    multiLine: true,
+  );
+  final match = pattern.firstMatch(content);
+  if (match == null) return null;
+
+  final afterHeader = content.substring(match.end);
+  // Take lines until the next heading or blank-line gap.
+  final lines = <String>[];
+  for (final line in afterHeader.split('\n')) {
+    if (line.startsWith('## ') || (lines.isNotEmpty && line.trim().isEmpty)) {
+      break;
+    }
+    if (line.trim().isNotEmpty) lines.add(line.trim());
+  }
+  if (lines.isEmpty) return null;
+  final text = lines.join(' ');
+  // Truncate long sections to keep JSON reasonable.
+  return text.length > 500 ? '${text.substring(0, 497)}...' : text;
 }

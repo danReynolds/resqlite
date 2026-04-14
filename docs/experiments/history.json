@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-14T12:34:06.668971",
+  "generated": "2026-04-14T13:43:57.841869",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -2479,6 +2479,219 @@
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.06,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.06
       }
+    },
+    {
+      "id": "worker-port-identity-guard",
+      "date": "2026-04-14",
+      "timestamp": "2026-04-14T12:49:11",
+      "label": "worker-port-identity-guard",
+      "metrics": {
+        "Select → Maps / 10 rows / resqlite select()": 0.01,
+        "Select → Maps / 10 rows / resqlite select() [main]": 0.0,
+        "Select → Maps / 100 rows / resqlite select()": 0.05,
+        "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+        "Select → Maps / 1000 rows / resqlite select()": 0.38,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.1,
+        "Select → Maps / 10000 rows / resqlite select()": 5.33,
+        "Select → Maps / 10000 rows / resqlite select() [main]": 0.98,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.01,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.06,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.49,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 5.39,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.0,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.12,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 1.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.39,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.58,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.33,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.14,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.33,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.14,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 1x": 0.29,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 2x": 0.32,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": 0.44,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 8x": 0.81,
+        "Point Query Throughput / resqlite qps": 141764.0,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": 14.46,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select() [main]": 14.46,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 1.52,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 1.52,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.06,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.42,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.36,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.68,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.68,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.44,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.44,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 5.48,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 5.48,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.1,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.1,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.19,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.19,
+        "Streaming / Initial Emission / resqlite stream()": 0.03,
+        "Streaming / Initial Emission / resqlite stream() [main]": 0.03,
+        "Streaming / Invalidation Latency / resqlite": 0.04,
+        "Streaming / Invalidation Latency / resqlite [main]": 0.04,
+        "Streaming / Fan-out (10 streams) / resqlite": 0.18,
+        "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
+        "Streaming / Stream Churn (100 cycles) / resqlite": 4.43,
+        "Streaming / Stream Churn (100 cycles) / resqlite [main]": 4.43
+      }
+    },
+    {
+      "id": "stream-rerun",
+      "date": "2026-04-14",
+      "timestamp": "2026-04-14T12:58:56",
+      "label": "stream-rerun",
+      "metrics": {
+        "Select → Maps / 10 rows / resqlite select()": 0.01,
+        "Select → Maps / 10 rows / resqlite select() [main]": 0.0,
+        "Select → Maps / 100 rows / resqlite select()": 0.05,
+        "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+        "Select → Maps / 1000 rows / resqlite select()": 0.4,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.1,
+        "Select → Maps / 10000 rows / resqlite select()": 5.23,
+        "Select → Maps / 10000 rows / resqlite select() [main]": 0.98,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.01,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.06,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.48,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 5.5,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.0,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.11,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 0.98,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.38,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.57,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.34,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.33,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.14,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 1x": 0.28,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 2x": 0.29,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": 0.35,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 8x": 0.66,
+        "Point Query Throughput / resqlite qps": 148987.0,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": 13.9,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select() [main]": 13.9,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 1.45,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 1.45,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.06,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.43,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.08,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.58,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.58,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.43,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.43,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 5.53,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 5.53,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.1,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.1,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.18,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.18,
+        "Streaming / Initial Emission / resqlite stream()": 0.03,
+        "Streaming / Initial Emission / resqlite stream() [main]": 0.03,
+        "Streaming / Invalidation Latency / resqlite": 0.04,
+        "Streaming / Invalidation Latency / resqlite [main]": 0.04,
+        "Streaming / Fan-out (10 streams) / resqlite": 0.14,
+        "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
+        "Streaming / Stream Churn (100 cycles) / resqlite": 1.99,
+        "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.99
+      }
+    },
+    {
+      "id": "churn-order-fix",
+      "date": "2026-04-14",
+      "timestamp": "2026-04-14T13:08:51",
+      "label": "churn-order-fix",
+      "metrics": {
+        "Select → Maps / 10 rows / resqlite select()": 0.01,
+        "Select → Maps / 10 rows / resqlite select() [main]": 0.0,
+        "Select → Maps / 100 rows / resqlite select()": 0.05,
+        "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+        "Select → Maps / 1000 rows / resqlite select()": 0.39,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.1,
+        "Select → Maps / 10000 rows / resqlite select()": 5.21,
+        "Select → Maps / 10000 rows / resqlite select() [main]": 0.98,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.01,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.06,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.47,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 5.65,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.0,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.12,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 0.99,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.38,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.64,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.33,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.14,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.33,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.14,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 1x": 0.29,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 2x": 0.34,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": 0.41,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 8x": 0.75,
+        "Point Query Throughput / resqlite qps": 106090.0,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": 14.25,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select() [main]": 14.25,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 2.15,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 2.15,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.06,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.45,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.38,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.09,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.09,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.98,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.98,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.56,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.56,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 6.15,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 6.15,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.11,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.11,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.18,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.18,
+        "Streaming / Initial Emission / resqlite stream()": 0.03,
+        "Streaming / Initial Emission / resqlite stream() [main]": 0.03,
+        "Streaming / Invalidation Latency / resqlite": 0.04,
+        "Streaming / Invalidation Latency / resqlite [main]": 0.04,
+        "Streaming / Fan-out (10 streams) / resqlite": 0.15,
+        "Streaming / Fan-out (10 streams) / resqlite [main]": 0.15,
+        "Streaming / Stream Churn (100 cycles) / resqlite": 1.79,
+        "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.79
+      }
     }
   ],
   "experiments": [
@@ -2488,7 +2701,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "3.5x faster bytes path",
-      "commit": "4acfb57"
+      "commit": "4acfb57",
+      "problem": "Building an HTTP response from a SQLite query requires: query → Dart maps → jsonEncode → utf8.encode → shelf. At 5,000 rows, jsonEncode + utf8.encode alone costs ~8.6ms on the main isolate. The data passes through three intermediate representations (maps, JSON string, UTF-8 bytes) before reaching the socket.",
+      "hypothesis": "If we write a C function that reads SQLite column values and writes JSON directly into a malloc'd buffer, we can skip all Dart object allocation for the result data. The Uint8List containing the JSON would transfer to the main isolate via Isolate.exit at effectively zero cost (one object to validate)."
     },
     {
       "id": "002",
@@ -2496,7 +2711,9 @@
       "date": "2026-04-06",
       "status": "rejected",
       "summary": "Double-pass overhead (C encode + Dart decode) negated FFI savings",
-      "commit": null
+      "commit": null,
+      "problem": "The sqlite3 Dart package crosses the FFI boundary per-column per-row when reading results. For 5,000 rows × 6 columns, that's 30,000+ FFI calls. Each call has ~10-20ns overhead. Could a C function that bulk-reads all rows into a binary buffer and returns it in one FFI call be faster?",
+      "hypothesis": "One FFI call replacing 30,000 should save ~0.3-0.6ms from reduced FFI boundary crossing overhead. The binary buffer would then be decoded to maps in Dart."
     },
     {
       "id": "003",
@@ -2504,7 +2721,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "~0.7ms saved per query",
-      "commit": "4acfb57"
+      "commit": "4acfb57",
+      "problem": "Each `Isolate.run()` call opened a fresh SQLite connection — `sqlite3_open_v2` + PRAGMA setup (WAL, busy_timeout, synchronous). This cost ~0.5-1ms per query. Additionally, prepared statements were created and finalized per query with no caching.",
+      "hypothesis": "Moving the `sqlite3*` connection handle and a prepared statement LRU cache into a C struct that persists across Dart isolate lifetimes would eliminate the per-query connection overhead. Since native memory is process-global, any Dart isolate can call into the same C connection via its pointer address."
     },
     {
       "id": "004",
@@ -2512,7 +2731,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "Eliminated 60k mutex ops at 20k rows",
-      "commit": "4acfb57"
+      "commit": "4acfb57",
+      "problem": "SQLite's default `SQLITE_OPEN_FULLMUTEX` wraps every API call in a mutex lock/unlock. For a 20,000-row query with 6 columns, that's ~60,000 lock/unlock operations (step + type + value per cell). Each mutex operation costs ~20ns, totaling ~1.2ms of pure mutex overhead.",
+      "hypothesis": "Switching to `SQLITE_OPEN_NOMUTEX` and adding our own `pthread_mutex` locked once per query (in `stmt_acquire`, unlocked in `stmt_release`) would reduce 60,000 mutex operations to 2, saving ~1ms at large result sizes."
     },
     {
       "id": "005",
@@ -2520,7 +2741,9 @@
       "date": "2026-04-06",
       "status": "rejected",
       "summary": "5-7x slower than VM's native SendPort.send serializer",
-      "commit": null
+      "commit": null,
+      "problem": "`Isolate.exit()` transfers maps zero-copy but kills the isolate. `SendPort.send()` keeps workers alive but deep-copies maps. Could we encode maps into a `Uint8List` on the worker, send via `TransferableTypedData` (zero-copy over `SendPort.send()`), and decode on main? This would give us both persistent workers AND zero-copy transfer.",
+      "hypothesis": "A Dart-side binary codec (encode maps → bytes → TransferableTypedData → decode maps) would be faster than `SendPort.send()`'s deep copy for large results, while keeping workers alive."
     },
     {
       "id": "006",
@@ -2528,7 +2751,9 @@
       "date": "2026-04-06",
       "status": "rejected",
       "summary": "Hash lookup cost exceeded dedup savings on mostly-unique data",
-      "commit": null
+      "commit": null,
+      "problem": "The `Isolate.exit()` MessageValidator walks every object in the transfer graph. For 20,000 rows with 4 text columns, that's ~80,000 String objects. Columns like `category` have only 10 unique values repeated 2,000 times each. Could we deduplicate these to reduce the object count?",
+      "hypothesis": "Interning repeated string values (`intern.putIfAbsent(decoded, () => decoded)`) would reduce the number of unique String objects in the graph. The MessageValidator might skip already-visited objects, reducing the validation walk time. Even if it doesn't skip, fewer objects means less memory allocation."
     },
     {
       "id": "007",
@@ -2536,7 +2761,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "4.4x faster concurrent reads",
-      "commit": "3a08838"
+      "commit": "3a08838",
+      "problem": "resqlite used a single C connection with a `pthread_mutex`. Concurrent reads serialized — query 2 waited for query 1 to finish. sqlite_async's Dart-side connection pool (multiple worker isolates, each with its own connection) allowed true parallel reads and was 3.8x faster at 8x concurrency.",
+      "hypothesis": "A C-level connection pool with multiple read-only `sqlite3*` handles would enable true parallel reads while keeping the coordination overhead in C (nanosecond mutex/condvar) instead of Dart (microsecond isolate message passing)."
     },
     {
       "id": "008",
@@ -2544,7 +2771,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "The breakthrough — 10x fewer objects, beat sqlite3",
-      "commit": "a18492c"
+      "commit": "a18492c",
+      "problem": "At 20,000 rows, the `Isolate.exit()` validation walk cost 8.44ms — 38% of total `select()` time. Investigation revealed the Dart VM's `MessageValidator` walks every heap object in the transfer graph. A `LinkedHashMap` with 6 entries creates ~8-10 internal objects (hash table buckets, linked list entries, key-value nodes). For 20,000 rows: 160,000-200,000 internal objects to validate.",
+      "hypothesis": "Query result rows are immutable, fixed-schema, and read-only. They don't need `LinkedHashMap`'s hash table or insertion-order linked list. Replacing them with a simpler structure would reduce the object count in the `Isolate.exit` graph, cutting validation time."
     },
     {
       "id": "008b",
@@ -2552,7 +2781,9 @@
       "date": "2026-04-06",
       "status": "rejected",
       "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
-      "commit": null
+      "commit": null,
+      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
+      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps."
     },
     {
       "id": "009",
@@ -2560,7 +2791,9 @@
       "date": "2026-04-06",
       "status": "accepted",
       "summary": "9-21% improvement across all benchmarks",
-      "commit": "4c18bb4"
+      "commit": "4c18bb4",
+      "problem": "The `select()` hot loop makes ~16 FFI calls per row: 1 `sqlite3_step` + 6 `sqlite3_column_type` + 6 `sqlite3_column_xxx` (value read) + ~3 `sqlite3_column_bytes` (text lengths). For 5,000 rows, that's ~80,000 FFI calls. Each FFI boundary crossing costs ~10-20ns.",
+      "hypothesis": "A C function that steps one row and fills a pre-allocated native struct array with all column types and values in one call would reduce FFI crossings from ~16/row to 1/row. Dart reads values from native memory via `ByteData` (no FFI call). Estimated savings: ~1ms at 5,000 rows."
     },
     {
       "id": "010",
@@ -2568,7 +2801,9 @@
       "date": "2026-04-06",
       "status": "rejected",
       "summary": "Marginal gain for ASCII, strictly worse for non-ASCII",
-      "commit": null
+      "commit": null,
+      "problem": "`utf8.decode` is called for every text column value. Most database strings are ASCII. Could an ASCII fast-path (`String.fromCharCodes` for all-ASCII bytes) avoid the UTF-8 validation overhead?",
+      "hypothesis": "For ASCII-only strings (all bytes < 128), `String.fromCharCodes` would be faster than `utf8.decode` because it skips UTF-8 validation. A byte scan to check for non-ASCII bytes would be cheap for short strings."
     },
     {
       "id": "011",
@@ -2576,7 +2811,9 @@
       "date": "2026-04-07",
       "status": "rejected",
       "summary": "Equivalent to one-off isolates; pool overhead cancels messaging savings",
-      "commit": null
+      "commit": null,
+      "problem": "Every `select()` call spawns a one-off isolate via `Isolate.spawn` + `Isolate.exit`. The spawn cost (~0.07-0.09ms) is paid per query. For high-frequency small queries (single-row lookups, pagination), this overhead is a significant fraction of total query time.",
+      "hypothesis": null
     },
     {
       "id": "012",
@@ -2584,7 +2821,9 @@
       "date": "2026-04-07",
       "status": "rejected",
       "summary": "Confirmed one-off isolates are optimal; persistent pools not faster",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": null
     },
     {
       "id": "013",
@@ -2592,7 +2831,9 @@
       "date": "2026-04-07",
       "status": "accepted",
       "summary": "12-19% on small results, 5-9% across the board",
-      "commit": "af2cfd0"
+      "commit": "af2cfd0",
+      "problem": null,
+      "hypothesis": "Adding `isLeaf: true` to all `@ffi.Native` bindings will reduce per-call overhead by eliminating safepoint checks and thread state transitions on every Dart-to-C call."
     },
     {
       "id": "014",
@@ -2600,7 +2841,9 @@
       "date": "2026-04-07",
       "status": "accepted",
       "summary": "Correct but within noise (write I/O dominated)",
-      "commit": "4c368a6"
+      "commit": "4c368a6",
+      "problem": null,
+      "hypothesis": "Three write-path optimizations could reduce per-write overhead: 1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations 2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path 3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound"
     },
     {
       "id": "014",
@@ -2608,7 +2851,9 @@
       "date": "2026-04-07",
       "status": "rejected",
       "summary": "Blocks all readers — incompatible with concurrent reader pool",
-      "commit": "4c368a6"
+      "commit": "4c368a6",
+      "problem": null,
+      "hypothesis": "Three write-path optimizations could reduce per-write overhead: 1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations 2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path 3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound"
     },
     {
       "id": "015",
@@ -2616,7 +2861,9 @@
       "date": "2026-04-07",
       "status": "accepted",
       "summary": "Simplicity win, performance neutral",
-      "commit": "52f1e4b"
+      "commit": "52f1e4b",
+      "problem": null,
+      "hypothesis": "Shrinking `resqlite_cell` from 48 bytes to 16 bytes using a C union would improve cache locality for the per-row cell buffer, especially for wide schemas and large result sets."
     },
     {
       "id": "016",
@@ -2624,7 +2871,9 @@
       "date": "2026-04-07",
       "status": "accepted",
       "summary": "Correctness wins, performance within noise",
-      "commit": "b9c6b6d"
+      "commit": "b9c6b6d",
+      "problem": null,
+      "hypothesis": null
     },
     {
       "id": "017",
@@ -2632,7 +2881,9 @@
       "date": "2026-04-07",
       "status": "rejected",
       "summary": "2-5x slower — serialize/deserialize costs more than validation walk",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "`Dart_PostCObject` uses a completely different code path (`dart_api_message.cc`) that bypasses the `Isolate.exit` validation walk. By building query results as `Dart_CObject` structs in C and posting them directly to a Dart `ReceivePort`, we could eliminate the ~470μs validation walk at 10k rows."
     },
     {
       "id": "018",
@@ -2640,7 +2891,9 @@
       "date": "2026-04-07",
       "status": "rejected",
       "summary": "String copy overhead exceeds FFI crossing savings",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "Stepping 64 rows per FFI call instead of 1 would reduce FFI crossing overhead from 5000 calls to ~78 calls at 5000 rows. At ~50ns saved per call (with isLeaf), that's ~245μs saved."
     },
     {
       "id": "019",
@@ -2648,7 +2901,9 @@
       "date": "2026-04-08",
       "status": "accepted",
       "summary": "64-83% faster small reads, 45k qps point queries",
-      "commit": "e07d95b"
+      "commit": "e07d95b",
+      "problem": null,
+      "hypothesis": "A persistent reader pool eliminates the ~80μs isolate spawn overhead per query. For small results, SendPort.send (copy) is cheaper than the spawn cost saved. For large results, the worker sacrifices itself via Isolate.exit (zero-copy) and the pool auto-respawns a replacement."
     },
     {
       "id": "025",
@@ -2656,7 +2911,9 @@
       "date": "2026-04-08",
       "status": "rejected",
       "summary": "Right idea in principle, but no compelling or reliable benchmark win in the current suite",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "SQLite recommends `PRAGMA optimize` to refresh planner statistics and opportunistically run lightweight analysis. If planner quality is holding back app-shaped reads, running `PRAGMA optimize=0x10002` after schema + seed setup should improve joins, parameterized queries, or medium/large reads."
     },
     {
       "id": "026",
@@ -2664,7 +2921,9 @@
       "date": "2026-04-08",
       "status": "rejected",
       "summary": "Near-perfect cache hit rates and zero spill mean a page-cache experiment is not justified",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "Before attempting a process-global page cache or more aggressive memory tuning, we should check whether sqlite is actually under page-cache or lookaside pressure in resqlite's hot paths."
     },
     {
       "id": "027",
@@ -2672,7 +2931,9 @@
       "date": "2026-04-08",
       "status": "rejected",
       "summary": "Did not move the target interactive transaction metric enough to justify merging",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "`tx.select()` inside interactive transactions still prepares statements on the writer connection each time. Reusing the writer-side statement cache for those transaction reads should reduce interactive transaction overhead and improve the mixed read/write path."
     },
     {
       "id": "028",
@@ -2680,7 +2941,9 @@
       "date": "2026-04-08",
       "status": "accepted",
       "summary": "Improves targeted small-read and parameterized-query workloads",
-      "commit": "8822bd2"
+      "commit": "8822bd2",
+      "problem": null,
+      "hypothesis": "The current bind path allocates native memory for text/blob params in Dart, then asks SQLite to copy those same bytes again via `SQLITE_TRANSIENT`. If we keep the param buffers alive until the statement is reset/released, SQLite can bind against them as `SQLITE_STATIC` and avoid the second copy."
     },
     {
       "id": "029",
@@ -2688,7 +2951,9 @@
       "date": "2026-04-08",
       "status": "accepted",
       "summary": "Much lower burst write p95/p99/max via writer-side scheduling",
-      "commit": "8822bd2"
+      "commit": "8822bd2",
+      "problem": null,
+      "hypothesis": "The current writer policy uses:"
     },
     {
       "id": "030",
@@ -2696,7 +2961,9 @@
       "date": "2026-04-08",
       "status": "accepted",
       "summary": "Removes per-query C pool mutex overhead and closes the point-query gap",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "Each Dart pool worker is assigned a fixed C reader index at spawn time. The worker passes this index directly to new `resqlite_stmt_acquire_on()` and `resqlite_query_bytes()` variants that skip the C pool mutex entirely. Since the Dart pool's busy tracking already guarantees one-worker-per-reader, the C mutex is redundant overhead."
     },
     {
       "id": "031",
@@ -2704,7 +2971,9 @@
       "date": "2026-04-08",
       "status": "rejected",
       "summary": "Mixed and workload-specific; only compelling when the payload is already serialized as JSON",
-      "commit": null
+      "commit": null,
+      "problem": null,
+      "hypothesis": "SQLite's JSON1 extension can trade many bound parameters for one JSON payload. That could help `resqlite` in two places where host-side overhead still matters:"
     },
     {
       "id": "032",
@@ -2712,7 +2981,9 @@
       "date": "",
       "status": "accepted",
       "summary": "Keeps the fast transport shape intact while materially improving main-isolate `Map` operations",
-      "commit": null
+      "commit": null,
+      "problem": "`resqlite`'s transport/result shape is strong: one shared `RowSchema`, one flat values list, and lazy `Row` wrappers. But `Row` itself uses `MapMixin`, and many of the default `MapBase` operations are intentionally skeletal rather than optimal.",
+      "hypothesis": "Keep the transport shape exactly as-is, but override the hot `Map` members on `Row` so they operate directly on the flat values list instead of going through generic `MapMixin` behavior."
     },
     {
       "id": "040",
@@ -2720,7 +2991,9 @@
       "date": "2026-04-14",
       "status": "accepted",
       "summary": "Simpler reader-worker protocol with a measured point-query and large-read win",
-      "commit": null
+      "commit": null,
+      "problem": "The reader pool had accumulated protocol complexity that no longer matched the real invariants of the system.",
+      "hypothesis": "Collapse the protocol down to the real invariants:"
     }
   ],
   "tracked": [
