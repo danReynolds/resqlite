@@ -1,0 +1,207 @@
+{
+  "generated": "2026-04-14T16:24:04.464234",
+  "devices": {
+    "MacBook Pro 14\"": {
+      "cpu": "M1 Pro 10c",
+      "os": "macOS 26.2",
+      "dart": "3.11",
+      "date": "2026-04-13",
+      "by": "@danReynolds"
+    }
+  },
+  "sections": [
+    {
+      "title": "Select → Maps (ms)",
+      "description": "Read throughput — building Dart `Map` objects from query results.",
+      "columns": [
+        "Timing",
+        "10 rows",
+        "100 rows",
+        "1K rows",
+        "10K rows"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "wall",
+            "10 rows": 0.01,
+            "100 rows": 0.06,
+            "1K rows": 0.38,
+            "10K rows": 4.89
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "main",
+            "10 rows": 0.0,
+            "100 rows": 0.02,
+            "1K rows": 0.1,
+            "10K rows": 0.99
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "worker",
+            "10 rows": 0.01,
+            "100 rows": 0.04,
+            "1K rows": 0.28,
+            "10K rows": 3.9
+          }
+        }
+      ]
+    },
+    {
+      "title": "Select → JSON Bytes (ms)",
+      "description": "C-native JSON serialization — entire result as a `Uint8List`, zero Dart-side allocation.",
+      "columns": [
+        "Timing",
+        "10 rows",
+        "100 rows",
+        "1K rows",
+        "10K rows"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "wall",
+            "10 rows": 0.01,
+            "100 rows": 0.06,
+            "1K rows": 0.5,
+            "10K rows": 5.57
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "main",
+            "10 rows": 0.0,
+            "100 rows": 0.0,
+            "1K rows": 0.0,
+            "10K rows": 0.0
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "worker",
+            "10 rows": 0.01,
+            "100 rows": 0.06,
+            "1K rows": 0.5,
+            "10K rows": 5.57
+          }
+        }
+      ]
+    },
+    {
+      "title": "Point Query Throughput",
+      "description": "Single-row lookups by primary key — measures the async dispatch latency floor.",
+      "columns": [
+        "qps"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "qps": "105K"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Batch Insert (ms)",
+      "description": "`executeBatch()` — all rows in one transaction via a single isolate round-trip.",
+      "columns": [
+        "Timing",
+        "100 rows",
+        "1K rows",
+        "10K rows"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "wall",
+            "100 rows": 0.06,
+            "1K rows": 0.45,
+            "10K rows": 4.6
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "main",
+            "100 rows": 0.0,
+            "1K rows": 0.0,
+            "10K rows": 0.0
+          }
+        },
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "Timing": "worker",
+            "100 rows": 0.06,
+            "1K rows": 0.45,
+            "10K rows": 4.6
+          }
+        }
+      ]
+    },
+    {
+      "title": "Concurrent Reads — 1K rows per query (ms wall)",
+      "description": "Parallel `select()` calls via `Future.wait` — shows reader pool scaling.",
+      "columns": [
+        "1×",
+        "2×",
+        "4×",
+        "8×"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "1×": 0.29,
+            "2×": 0.32,
+            "4×": 0.37,
+            "8×": 0.72
+          }
+        }
+      ]
+    },
+    {
+      "title": "Transaction (ms)",
+      "description": "Interactive transaction — insert + select + conditional delete in one `transaction()` block.",
+      "columns": [
+        "mixed"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "mixed": 0.06
+          }
+        }
+      ]
+    },
+    {
+      "title": "Stream Reactivity (ms)",
+      "description": "Time from write commit to stream re-emission.",
+      "columns": [
+        "invalidation",
+        "fan-out 10×"
+      ],
+      "rows": [
+        {
+          "device": "MacBook Pro 14\"",
+          "values": {
+            "invalidation": 0.04,
+            "fan-out 10×": 0.2
+          }
+        }
+      ]
+    }
+  ]
+}

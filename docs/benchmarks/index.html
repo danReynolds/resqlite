@@ -75,6 +75,55 @@
     position: absolute; left: 0; top: 2px; bottom: 2px; border-radius: 3px; opacity: 0.18;
   }
 
+  /* Device selector */
+  .device-bar {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .device-bar label { font-size: 0.85rem; color: var(--muted); }
+  .device-bar select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .device-bar .device-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .device-section .hw-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    margin-bottom: 0.75rem;
+  }
+  .device-section .hw-table th,
+  .device-section .hw-table td {
+    padding: 0.45rem 0.75rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+  }
+  .device-section .hw-table th { color: var(--muted); font-weight: 600; }
+  .device-section .hw-table th:first-child,
+  .device-section .hw-table td:first-child { text-align: left; }
+  .device-section .hw-desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
+  .device-section .hw-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .device-section .hw-block { margin-bottom: 1.5rem; }
+  .device-section .contribute-note {
+    font-size: 0.8rem; color: var(--muted); margin-top: 1rem;
+    padding: 0.75rem 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border);
+  }
+  .device-section .contribute-note a { color: var(--accent); }
+
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .callouts { grid-template-columns: 1fr 1fr; }
@@ -110,6 +159,19 @@
     <div class="big">107K</div>
     <div class="label">point queries/sec<br>9.3 us/query</div>
   </div>
+</div>
+
+<!-- ───── 0. DEVICE BENCHMARKS ───── -->
+<h3 class="section-title">Device Benchmarks</h3>
+
+<div class="device-bar">
+  <label for="deviceSelect">Device:</label>
+  <select id="deviceSelect"><option>Loading...</option></select>
+  <span class="device-meta" id="deviceMeta"></span>
+</div>
+
+<div class="device-section" id="deviceSection">
+  <p style="color:var(--muted);font-size:0.85rem;">Loading device data...</p>
 </div>
 
 <!-- ───── 1. SCALING CURVES ───── -->
@@ -553,6 +615,100 @@ tableData.forEach(([name, r, s, a]) => {
     + `<td>${speedup && speedup > 1.01 ? speedup.toFixed(1) + 'x' : speedup ? '~1x' : '—'}</td>`;
   tbody.appendChild(tr);
 });
+
+// ──────────────────── DEVICE BENCHMARKS ────────────────────
+(async function loadDevices() {
+  let devData;
+  try {
+    const resp = await fetch('./devices.json');
+    devData = await resp.json();
+  } catch (e) {
+    document.getElementById('deviceSection').innerHTML =
+      '<p style="color:var(--muted)">Could not load devices.json</p>';
+    return;
+  }
+
+  const devices = devData.devices;
+  const sections = devData.sections;
+  const deviceNames = Object.keys(devices);
+
+  if (!deviceNames.length) {
+    document.getElementById('deviceSection').innerHTML =
+      '<p style="color:var(--muted)">No device data available yet.</p>';
+    return;
+  }
+
+  // Populate dropdown.
+  const select = document.getElementById('deviceSelect');
+  select.innerHTML = deviceNames.map(name =>
+    `<option value="${name}">${name}</option>`
+  ).join('');
+
+  function renderDevice(deviceName) {
+    const meta = devices[deviceName];
+    document.getElementById('deviceMeta').textContent =
+      `${meta.cpu} · ${meta.os} · Dart ${meta.dart} · ${meta.date} · ${meta.by}`;
+
+    let html = '';
+    for (const section of sections) {
+      const deviceRows = section.rows.filter(r => r.device === deviceName);
+      if (!deviceRows.length) continue;
+
+      // Get the value columns (skip "Timing" if present).
+      const valueCols = section.columns.filter(c => c !== 'Timing');
+      const hasTiming = section.columns.includes('Timing');
+
+      html += `<div class="hw-block">`;
+      html += `<div class="hw-title">${esc(section.title)}</div>`;
+      html += `<div class="hw-desc">${esc(section.description || '')}</div>`;
+      html += `<table class="hw-table">`;
+
+      if (hasTiming) {
+        // Multi-row (wall/main/worker) format.
+        html += `<tr><th>Timing</th>${valueCols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+        for (const row of deviceRows) {
+          const timing = row.values['Timing'];
+          html += `<tr><td>${esc(String(timing))}</td>`;
+          html += valueCols.map(c => {
+            const v = row.values[c];
+            return `<td>${typeof v === 'number' ? v.toFixed(2) : esc(String(v ?? '—'))}</td>`;
+          }).join('');
+          html += `</tr>`;
+        }
+      } else {
+        // Single-row format.
+        html += `<tr>${valueCols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+        for (const row of deviceRows) {
+          html += `<tr>`;
+          html += valueCols.map(c => {
+            const v = row.values[c];
+            return `<td>${typeof v === 'number' ? v.toFixed(2) : esc(String(v ?? '—'))}</td>`;
+          }).join('');
+          html += `</tr>`;
+        }
+      }
+
+      html += `</table></div>`;
+    }
+
+    html += `<div class="contribute-note">`;
+    html += `Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3 --hardware-summary</code> `;
+    html += `and <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md">submit a PR</a> `;
+    html += `to add your device.`;
+    html += `</div>`;
+
+    document.getElementById('deviceSection').innerHTML = html;
+  }
+
+  select.addEventListener('change', () => renderDevice(select.value));
+  renderDevice(deviceNames[0]);
+
+  function esc(s) {
+    const el = document.createElement('span');
+    el.textContent = s;
+    return el.innerHTML;
+  }
+})();
 </script>
 </body>
 </html>

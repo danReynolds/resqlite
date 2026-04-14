@@ -1,4 +1,4 @@
-name: Update Experiments Page
+name: Update Docs Data
 
 on:
   push:
@@ -6,12 +6,14 @@ on:
     paths:
       - 'experiments/*.md'
       - 'benchmark/results/*.md'
+      - 'benchmark/HARDWARE_RESULTS.md'
       - 'benchmark/shared/parse_results.dart'
       - 'benchmark/generate_history.dart'
+      - 'benchmark/generate_devices.dart'
 
 jobs:
   regenerate:
-    name: Regenerate history JSON
+    name: Regenerate docs JSON
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,16 +28,19 @@ jobs:
       - name: Generate history JSON
         run: dart run benchmark/generate_history.dart
 
+      - name: Generate devices JSON
+        run: dart run benchmark/generate_devices.dart
+
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet docs/experiments/history.json && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --quiet docs/ && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
         if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/experiments/history.json
-          git commit -m "Auto-update experiments history JSON"
+          git add docs/experiments/history.json docs/benchmarks/devices.json
+          git commit -m "Auto-update docs data (experiments + devices)"
           git push
