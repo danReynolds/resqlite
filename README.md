@@ -2,6 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)]()
+[![API Docs](https://img.shields.io/badge/docs-API%20Reference-blue.svg)](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html)
+[![Benchmarks](https://img.shields.io/badge/benchmarks-Interactive%20Dashboard-brightgreen.svg)](https://danreynolds.github.io/resqlite/benchmarks/)
 
 High-performance, reactive SQLite for Dart and Flutter.
 
@@ -52,7 +54,7 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 
 Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware.
 
-Run the benchmarks on your machine and [add your results](./benchmark/HARDWARE_RESULTS.md) — let's see how resqlite performs across different devices.
+See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](./benchmark/HARDWARE_RESULTS.md).
 
 ## Reactive Queries
 
