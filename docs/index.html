@@ -1,257 +1,444 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite — High-performance, reactive SQLite for Dart &amp; Flutter</title>
-<style>
-  :root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>resqlite — High-performance, reactive SQLite for Dart &amp; Flutter</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+    }
 
-  .hero {
-    text-align: center;
-    padding: 5rem 2rem 3rem;
-    max-width: 720px;
-  }
-  .hero h1 {
-    font-size: 3rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    margin-bottom: 0.5rem;
-  }
-  .hero h1 span { color: var(--accent); }
-  .hero .tagline {
-    font-size: 1.2rem;
-    color: var(--muted);
-    margin-bottom: 2rem;
-  }
-  .badges { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 2.5rem; flex-wrap: wrap; }
-  .badge {
-    display: inline-block;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.3rem 0.75rem;
-    font-size: 0.78rem;
-    color: var(--muted);
-  }
-  .badge strong { color: var(--text); }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  .cards {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.25rem;
-    max-width: 720px;
-    width: 100%;
-    padding: 0 2rem;
-    margin-bottom: 3rem;
-  }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 2rem;
-    text-decoration: none;
-    color: var(--text);
-    transition: border-color 0.15s, transform 0.15s;
-  }
-  .card:hover {
-    border-color: var(--accent);
-    transform: translateY(-2px);
-  }
-  .card .icon {
-    font-size: 2rem;
-    margin-bottom: 0.75rem;
-    display: block;
-  }
-  .card h2 {
-    font-size: 1.15rem;
-    margin-bottom: 0.4rem;
-  }
-  .card p {
-    font-size: 0.88rem;
-    color: var(--muted);
-    line-height: 1.5;
-  }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-  .code-block {
-    max-width: 720px;
-    width: 100%;
-    padding: 0 2rem;
-    margin-bottom: 3rem;
-  }
-  .code-block h3 {
-    font-size: 0.85rem;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.75rem;
-  }
-  pre {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.25rem 1.5rem;
-    overflow-x: auto;
-    font-size: 0.85rem;
-    line-height: 1.6;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  }
-  .kw { color: #ff7b72; }
-  .str { color: #a5d6ff; }
-  .fn { color: #d2a8ff; }
-  .cm { color: #8b949e; }
-  .ty { color: #79c0ff; }
+    .hero {
+      text-align: center;
+      padding: 5rem 2rem 3rem;
+      max-width: 720px;
+    }
 
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-    max-width: 720px;
-    width: 100%;
-    padding: 0 2rem;
-    margin-bottom: 3rem;
-  }
-  .stat {
-    text-align: center;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.25rem 0.75rem;
-  }
-  .stat .num {
-    font-size: 1.6rem;
-    font-weight: 700;
-    color: var(--green);
-  }
-  .stat .label {
-    font-size: 0.75rem;
-    color: var(--muted);
-    margin-top: 0.25rem;
-  }
+    .hero h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.5rem;
+    }
 
-  footer {
-    text-align: center;
-    padding: 2rem;
-    color: var(--muted);
-    font-size: 0.8rem;
-    border-top: 1px solid var(--border);
-    width: 100%;
-    max-width: 720px;
-    margin-top: auto;
-  }
-  footer a { color: var(--accent); text-decoration: none; }
-  footer a:hover { text-decoration: underline; }
+    .hero h1 span {
+      color: var(--accent);
+    }
 
-  @media (max-width: 600px) {
-    .cards { grid-template-columns: 1fr; }
-    .stats { grid-template-columns: 1fr 1fr; }
-    .hero h1 { font-size: 2rem; }
-  }
-</style>
+    .hero .tagline {
+      font-size: 1.2rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+
+    .badges {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      margin-bottom: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-block;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.3rem 0.75rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .badge strong {
+      color: var(--text);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      max-width: 720px;
+      width: 100%;
+      padding: 0 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.15s, transform 0.15s;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+
+    .card .icon {
+      font-size: 2rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+
+    .card h2 {
+      font-size: 1.15rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .card p {
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .code-block {
+      max-width: 720px;
+      width: 100%;
+      padding: 0 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .code-block h3 {
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.75rem;
+    }
+
+    .code-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .code-tab {
+      padding: 0.5rem 1rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-family: inherit;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .code-tab:hover {
+      color: var(--text);
+    }
+
+    .code-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .code-panel {
+      display: none;
+    }
+
+    .code-panel.active {
+      display: block;
+    }
+
+    .code-panel pre {
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      margin-top: 0;
+    }
+
+    pre {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+
+    .kw {
+      color: #ff7b72;
+    }
+
+    .str {
+      color: #a5d6ff;
+    }
+
+    .fn {
+      color: #d2a8ff;
+    }
+
+    .cm {
+      color: #8b949e;
+    }
+
+    .ty {
+      color: #79c0ff;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      max-width: 720px;
+      width: 100%;
+      padding: 0 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .stat {
+      text-align: center;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 0.75rem;
+    }
+
+    .stat .num {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--green);
+    }
+
+    .stat .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      border-top: 1px solid var(--border);
+      width: 100%;
+      max-width: 720px;
+      margin-top: auto;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 600px) {
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .stats {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .hero h1 {
+        font-size: 2rem;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<div class="hero">
-  <h1><span>resqlite</span></h1>
-  <p class="tagline">High-performance, reactive SQLite for Dart &amp; Flutter.<br>
-  Plain SQL. Stream anything. Zero main-isolate jank.</p>
+  <div class="hero">
+    <h1><span>resqlite</span></h1>
+    <p class="tagline">High-performance, reactive SQLite for Dart &amp; Flutter.<br>
+      Plain SQL. Stream anything. Zero main-isolate jank.</p>
 
-  <div class="badges">
-    <span class="badge"><strong>MIT</strong> License</span>
-    <span class="badge">iOS &middot; Android &middot; macOS &middot; Linux &middot; Windows</span>
-    <span class="badge">Dart 3.10+</span>
-    <span class="badge">No ORM &middot; No codegen</span>
+    <div class="badges">
+      <span class="badge"><strong>MIT</strong> License</span>
+      <span class="badge">iOS &middot; Android &middot; macOS &middot; Linux &middot; Windows</span>
+      <span class="badge">Dart 3.10+</span>
+      <span class="badge">No ORM &middot; No codegen</span>
+    </div>
   </div>
-</div>
 
-<div class="stats">
-  <div class="stat">
-    <div class="num">5.5x</div>
-    <div class="label">faster reads<br>(bytes, 10K rows)</div>
+  <div class="stats">
+    <div class="stat">
+      <div class="num">5.5x</div>
+      <div class="label">faster reads<br>(bytes, 10K rows)</div>
+    </div>
+    <div class="stat">
+      <div class="num">2.4x</div>
+      <div class="label">faster writes<br>(single inserts)</div>
+    </div>
+    <div class="stat">
+      <div class="num">0 ms</div>
+      <div class="label">main-thread cost<br>(selectBytes)</div>
+    </div>
+    <div class="stat">
+      <div class="num">107K</div>
+      <div class="label">point queries<br>per second</div>
+    </div>
   </div>
-  <div class="stat">
-    <div class="num">2.4x</div>
-    <div class="label">faster writes<br>(single inserts)</div>
+  <p style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Compared against other Dart
+    SQLite libraries. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
+
+  <div class="cards">
+    <a class="card" href="api/resqlite/resqlite-library.html">
+      <span class="icon">&#128214;</span>
+      <h2>API Reference</h2>
+      <p>Full dartdoc-generated documentation for every public class, method, and property.</p>
+    </a>
+    <a class="card" href="benchmarks/">
+      <span class="icon">&#9889;</span>
+      <h2>Benchmarks</h2>
+      <p>Interactive charts comparing resqlite, sqlite3, and sqlite_async across reads, writes, streaming, and more.</p>
+    </a>
+    <a class="card" href="experiments/">
+      <span class="icon">&#128300;</span>
+      <h2>Experiments</h2>
+      <p>40 optimization experiments with performance-over-time charts. Click any data point to see what changed.</p>
+    </a>
+    <a class="card" href="https://github.com/danReynolds/resqlite">
+      <span class="icon">&#128736;</span>
+      <h2>Source &amp; Getting Started</h2>
+      <p>Browse the repo, get installation instructions, and see usage examples.</p>
+    </a>
   </div>
-  <div class="stat">
-    <div class="num">0 ms</div>
-    <div class="label">main-thread cost<br>(selectBytes)</div>
-  </div>
-  <div class="stat">
-    <div class="num">107K</div>
-    <div class="label">point queries<br>per second</div>
-  </div>
-</div>
-<p style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Compared against peer Dart SQLite libraries. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
 
-<div class="cards">
-  <a class="card" href="api/resqlite/resqlite-library.html">
-    <span class="icon">&#128214;</span>
-    <h2>API Reference</h2>
-    <p>Full dartdoc-generated documentation for every public class, method, and property.</p>
-  </a>
-  <a class="card" href="benchmarks/">
-    <span class="icon">&#9889;</span>
-    <h2>Benchmarks</h2>
-    <p>Interactive charts comparing resqlite, sqlite3, and sqlite_async across reads, writes, streaming, and more.</p>
-  </a>
-  <a class="card" href="experiments/">
-    <span class="icon">&#128300;</span>
-    <h2>Experiments</h2>
-    <p>40 optimization experiments with performance-over-time charts. Click any data point to see what changed.</p>
-  </a>
-  <a class="card" href="https://github.com/danReynolds/resqlite">
-    <span class="icon">&#128736;</span>
-    <h2>Source &amp; Getting Started</h2>
-    <p>Browse the repo, get installation instructions, and see usage examples.</p>
-  </a>
-</div>
+  <div class="code-block">
+    <h3>Quick look</h3>
+    <div class="code-tabs">
+      <button class="code-tab active" data-tab="reads">Reading</button>
+      <button class="code-tab" data-tab="writes">Writing</button>
+      <button class="code-tab" data-tab="streams">Streaming</button>
+      <button class="code-tab" data-tab="transactions">Transactions</button>
+      <button class="code-tab" data-tab="bytes">Bytes</button>
+    </div>
 
-<div class="code-block">
-  <h3>Quick look</h3>
-  <pre><span class="kw">final</span> db = <span class="kw">await</span> <span class="ty">Database</span>.<span class="fn">open</span>(<span class="str">'app.db'</span>);
+    <div class="code-panel active" id="tab-reads">
+      <pre><span class="kw">final</span> db = <span class="kw">await</span> <span class="ty">Database</span>.<span class="fn">open</span>(<span class="str">'app.db'</span>);
 
-<span class="cm">// Reads and writes stay off your UI thread.</span>
-<span class="kw">final</span> users = <span class="kw">await</span> db.<span class="fn">select</span>(<span class="str">'SELECT * FROM users WHERE active = ?'</span>, [<span class="str">1</span>]);
-<span class="kw">await</span> db.<span class="fn">execute</span>(<span class="str">'INSERT INTO users(name) VALUES (?)'</span>, [<span class="str">'Ada'</span>]);
+<span class="cm">// Queries run on background isolates — zero UI jank.</span>
+<span class="kw">final</span> users = <span class="kw">await</span> db.<span class="fn">select</span>(
+  <span class="str">'SELECT * FROM users WHERE active = ?'</span>,
+  [<span class="str">1</span>],
+);
 
-<span class="cm">// Reactive queries — auto table-dependency tracking.</span>
-db.<span class="fn">stream</span>(<span class="str">'SELECT * FROM users WHERE active = ?'</span>, [<span class="str">1</span>]).<span class="fn">listen</span>((users) {
+<span class="cm">// Row objects are lazy views — only accessed rows get materialized.</span>
+<span class="kw">for</span> (<span class="kw">final</span> user <span class="kw">in</span> users) {
+  <span class="fn">print</span>(<span class="str">'</span>${user[<span class="str">'name'</span>]}: ${user[<span class="str">'email'</span>]}<span class="str">'</span>);
+}</pre>
+    </div>
+
+    <div class="code-panel" id="tab-writes">
+      <pre><span class="cm">// Single write — runs on a dedicated writer isolate.</span>
+<span class="kw">final</span> result = <span class="kw">await</span> db.<span class="fn">execute</span>(
+  <span class="str">'INSERT INTO users(name, email) VALUES (?, ?)'</span>,
+  [<span class="str">'Ada'</span>, <span class="str">'ada@example.com'</span>],
+);
+<span class="fn">print</span>(<span class="str">'Inserted row </span>${result.lastInsertId}<span class="str">'</span>);
+
+<span class="cm">// Batch write — one prepare, one commit, no per-row overhead.</span>
+<span class="kw">await</span> db.<span class="fn">executeBatch</span>(
+  <span class="str">'INSERT INTO users(name) VALUES (?)'</span>,
+  [[<span class="str">'Ada'</span>], [<span class="str">'Grace'</span>], [<span class="str">'Sonja'</span>]],
+);</pre>
+    </div>
+
+    <div class="code-panel" id="tab-streams">
+      <pre><span class="cm">// Turn any query into a live stream.</span>
+<span class="cm">// Table dependencies detected automatically — works with</span>
+<span class="cm">// JOINs, subqueries, views, and CTEs.</span>
+db.<span class="fn">stream</span>(
+  <span class="str">'SELECT * FROM users WHERE active = ?'</span>,
+  [<span class="str">1</span>],
+).<span class="fn">listen</span>((users) {
   <span class="fn">setState</span>(() => <span class="kw">this</span>.users = users);
 });
 
-<span class="cm">// Transactions — reads see uncommitted writes.</span>
-<span class="kw">await</span> db.<span class="fn">transaction</span>((tx) <span class="kw">async</span> {
-  <span class="kw">await</span> tx.<span class="fn">execute</span>(<span class="str">'INSERT INTO users(name) VALUES (?)'</span>, [<span class="str">'Sonja'</span>]);
-  <span class="kw">final</span> rows = <span class="kw">await</span> tx.<span class="fn">select</span>(<span class="str">'SELECT COUNT(*) as c FROM users'</span>);
-});</pre>
-</div>
+<span class="cm">// Identical queries are deduplicated.</span>
+<span class="cm">// Unchanged results are suppressed.</span>
+<span class="cm">// Re-queries fire on write commit — sub-millisecond.</span></pre>
+    </div>
 
-<footer>
-  <a href="https://github.com/danReynolds/resqlite">GitHub</a> &middot;
-  <a href="api/resqlite/resqlite-library.html">API Docs</a> &middot;
-  <a href="benchmarks/">Benchmarks</a> &middot;
-  <a href="experiments/">Experiments</a>
-</footer>
+    <div class="code-panel" id="tab-transactions">
+      <pre><span class="cm">// Atomic transactions — reads see uncommitted writes.</span>
+<span class="kw">final</span> count = <span class="kw">await</span> db.<span class="fn">transaction</span>((tx) <span class="kw">async</span> {
+  <span class="kw">await</span> tx.<span class="fn">execute</span>(
+    <span class="str">'INSERT INTO users(name) VALUES (?)'</span>,
+    [<span class="str">'Sonja'</span>],
+  );
+  <span class="kw">final</span> rows = <span class="kw">await</span> tx.<span class="fn">select</span>(
+    <span class="str">'SELECT COUNT(*) as c FROM users'</span>,
+  );
+  <span class="kw">return</span> rows.first[<span class="str">'c'</span>];
+});
+
+<span class="cm">// Nested transactions use SQLite SAVEPOINTs.</span></pre>
+    </div>
+
+    <div class="code-panel" id="tab-bytes">
+      <pre><span class="cm">// JSON serialized entirely in C — zero Dart object allocation.</span>
+<span class="cm">// Perfect for HTTP server responses.</span>
+<span class="kw">final</span> bytes = <span class="kw">await</span> db.<span class="fn">selectBytes</span>(
+  <span class="str">'SELECT id, name, price FROM products WHERE active = ?'</span>,
+  [<span class="str">1</span>],
+);
+
+<span class="cm">// bytes is a Uint8List of JSON — ready to write to a socket.</span>
+<span class="kw">return</span> <span class="ty">Response</span>.<span class="fn">ok</span>(
+  bytes,
+  headers: {<span class="str">'content-type'</span>: <span class="str">'application/json'</span>},
+);</pre>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.code-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      });
+    });
+  </script>
+
+  <footer>
+    <a href="https://github.com/danReynolds/resqlite">GitHub</a> &middot;
+    <a href="api/resqlite/resqlite-library.html">API Docs</a> &middot;
+    <a href="benchmarks/">Benchmarks</a> &middot;
+    <a href="experiments/">Experiments</a>
+  </footer>
 
 </body>
+
 </html>
