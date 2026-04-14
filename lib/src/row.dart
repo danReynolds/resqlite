@@ -9,9 +9,11 @@ final class RowSchema {
     for (var i = 0; i < names.length; i++) names[i]: i,
   };
 
+  /// Column names in query order, matching the SELECT clause.
   final List<String> names;
   final Map<String, int> _indexByName;
 
+  /// The number of columns in this schema.
   int get columnCount => names.length;
 
   /// Returns the column index for [name], or -1 if not found.

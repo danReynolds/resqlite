@@ -25,7 +25,10 @@ final class StreamEngine {
   /// query to detect writes that landed during the setup window.
   int _writeGeneration = 0;
 
-  /// Number of active stream entries. Exposed for testing cleanup behavior.
+  /// Number of active stream entries.
+  ///
+  /// Increments when [stream] registers a new query, decrements when all
+  /// listeners for that query cancel. Useful for verifying cleanup in tests.
   int get length => _entries.length;
 
   /// Create a reactive stream that emits query results and re-emits
@@ -83,7 +86,10 @@ final class StreamEngine {
     }
   }
 
-  /// Close all streams and clear state.
+  /// Closes all active streams and clears internal state.
+  ///
+  /// Called by [Database.close]. After this, existing subscriber streams
+  /// receive a done event and no new streams can be created.
   void close() {
     for (final entry in _entries.values) {
       for (final sub in entry.subscribers) {

@@ -106,10 +106,15 @@ const int _writeResultSize = 16;
 const int _writeResultOffAffected = 0;
 const int _writeResultOffLastId = 8;
 
-/// Result of a write operation.
+/// Result of a write operation returned by [Database.execute] and
+/// [Transaction.execute].
 final class WriteResult {
   const WriteResult(this.affectedRows, this.lastInsertId);
+
+  /// The number of rows inserted, updated, or deleted by the statement.
   final int affectedRows;
+
+  /// The ROWID of the last successful INSERT, or 0 for non-INSERT statements.
   final int lastInsertId;
 }
 

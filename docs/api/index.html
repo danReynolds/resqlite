@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, user-scalable=no">
+  <meta name="description" content="resqlite API docs, for the Dart programming language.">
+  <title>resqlite - Dart API docs</title>
+
+
+  
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  
+  <link rel="stylesheet" href="static-assets/github.css?v1">
+  <link rel="stylesheet" href="static-assets/styles.css?v1">
+  <link rel="icon" href="static-assets/favicon.png?v1">
+  
+</head>
+
+<body data-base-href="" data-using-base-href="false" class="light-theme">
+<div id="overlay-under-drawer"></div>
+<header id="title">
+  <span id="sidenav-left-toggle" class="material-symbols-outlined" role="button" tabindex="0">menu</span>
+  <ol class="breadcrumbs gt-separated dark hidden-xs">
+    <li class="self-crumb">resqlite package</li>
+  </ol>
+  <div class="self-name">resqlite</div>
+  <form class="search navbar-right" role="search">
+    <input type="text" id="search-box" autocomplete="off" disabled class="form-control typeahead" placeholder="Loading search...">
+  </form>
+  <button class="toggle" id="theme-button" title="Toggle between light and dark mode" aria-label="Light and dark mode toggle">
+    <span id="dark-theme-button" class="material-symbols-outlined" aria-hidden="true">
+      dark_mode
+    </span>
+    <span id="light-theme-button" class="material-symbols-outlined" aria-hidden="true">
+      light_mode
+    </span>
+  </button>
+</header>
+<main>
+  <div id="dartdoc-main-content" class="main-content">
+      
+<section class="desc markdown">
+  <h1 id="resqlite">resqlite</h1>
+<p><a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+<a href=""><img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg" alt="Platforms"></a></p>
+<p>High-performance, reactive SQLite for Dart and Flutter.</p>
+<p>Write plain SQL. Stream anything. No main isolate jank. No ORM. No codegen.</p>
+<pre class="language-dart"><code class="language-dart">final db = await Database.open('app.db');
+
+// Reads and writes stay off your UI thread.
+final users = await db.select('SELECT * FROM users WHERE active = ?', [1]);
+await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+
+// Reactive queries — automatic table dependency detection using SQLite's
+// authorizer hook and the pre-update hook for invalidation.
+db.stream('SELECT * FROM users WHERE active = ?', [1]).listen((users) {
+  setState(() =&gt; this.users = users);
+});
+
+// Transactions — reads inside see uncommitted writes.
+await db.transaction((tx) async {
+  await tx.execute('INSERT INTO users(name) VALUES (?)', ['Sonja']);
+  final rows = await tx.select('SELECT COUNT(*) as c FROM users');
+  print('total: ${rows.first['c']}');
+});
+</code></pre>
+<h2 id="features">Features</h2>
+<ul>
+<li><strong>🚀 Zero main-isolate jank.</strong> Reads, writes, and reactive re-queries all run on persistent worker isolates. A 5,000-row query uses sub-millisecond main-isolate time.</li>
+<li><strong>⚡ Reactive SQL.</strong> <a href="./lib/src/database.dart"><code>db.stream(sql)</code></a> turns any query into a live stream. Table dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.</li>
+<li><strong>🔁 Smart invalidation.</strong> Identical queries are deduplicated. Unchanged results are suppressed. Re-queries fire immediately on write commit — sub-millisecond, no polling.</li>
+<li><strong>📦 Just SQL.</strong> <a href="./lib/src/database.dart"><code>select</code></a>, <a href="./lib/src/database.dart"><code>execute</code></a>, <a href="./lib/src/database.dart"><code>executeBatch</code></a>, <a href="./lib/src/database.dart"><code>transaction</code></a>, <a href="./lib/src/database.dart"><code>stream</code></a>. No ORM, no query builder, no code generation.</li>
+<li><strong>🔒 Encryption.</strong> Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.</li>
+</ul>
+<h2 id="performance">Performance</h2>
+<p>resqlite is designed to work in the background and keep apps running smooth. Reads, writes, and stream queries all run on background worker isolates. The main isolate only receives finished results.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">Wall time</th>
+<th align="right">Main isolate time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Point query (1 row)</td>
+<td align="right">0.010ms</td>
+<td align="right">0.010ms</td>
+</tr>
+<tr>
+<td>1,000-row read</td>
+<td align="right">0.38ms</td>
+<td align="right">0.10ms</td>
+</tr>
+<tr>
+<td>10,000-row read</td>
+<td align="right">4.9ms</td>
+<td align="right">1.0ms</td>
+</tr>
+<tr>
+<td>Batch insert (1,000 rows)</td>
+<td align="right">0.45ms</td>
+<td align="right">0.00ms</td>
+</tr>
+<tr>
+<td>Stream invalidation</td>
+<td align="right">0.04ms</td>
+<td align="right">0.04ms</td>
+</tr>
+</tbody>
+</table>
+<p>~105K point queries/sec. Sub-millisecond stream invalidation.</p>
+<p>Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware.</p>
+<p>Run the benchmarks on your machine and <a href="./benchmark/HARDWARE_RESULTS.md">add your results</a> — let's see how resqlite performs across different devices.</p>
+<h2 id="reactive-queries">Reactive Queries</h2>
+<pre class="language-dart"><code class="language-dart">db.stream('SELECT * FROM users WHERE active = ?', [1]).listen((users) {
+  setState(() =&gt; this.users = users);
+});
+</code></pre>
+<p>That's the entire reactive API. Under the hood:</p>
+<ul>
+<li><strong>Automatic dependency tracking</strong> via SQLite's <a href="https://www.sqlite.org/c3ref/set_authorizer.html">authorizer hook</a> — no manual table lists</li>
+<li><strong>Deduplication</strong> — 100 widgets watching the same query = 1 actual SQLite query per write</li>
+<li><strong>Unchanged suppression</strong> — writes that don't change your query's results are silently filtered</li>
+<li><strong>Immediate</strong> — re-queries fire on write commit, not on a timer</li>
+</ul>
+<h2 id="api">API</h2>
+<pre class="language-dart"><code class="language-dart">final db = await Database.open('app.db');
+
+// Reads
+final rows = await db.select('SELECT * FROM users WHERE id = ?', [42]);
+final json = await db.selectBytes('SELECT * FROM users'); // Optimized for byte response use cases like HTTP servers.
+
+// Writes
+final result = await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+await db.executeBatch('INSERT INTO users(name) VALUES (?)', [['Ada'], ['Grace']]); // Optimized for bulk inserts and atomic batch updates.
+
+// Transactions
+await db.transaction((tx) async {
+  await tx.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
+  final rows = await tx.select('SELECT COUNT(*) as c FROM users');
+  return rows.first['c'];
+});
+
+// Reactive streams
+db.stream('SELECT * FROM users ORDER BY id').listen((rows) { ... });
+
+// Out of the box encryption support.
+final db = await Database.open('secure.db', encryptionKey: '0123...abcdef');
+
+await db.close();
+</code></pre>
+<h2 id="in-practice">In Practice</h2>
+<h3 id="large-reads-without-jank">Large reads without jank</h3>
+<p>Your UI renders at 60fps — 16ms per frame. A 5,000-row <a href="./lib/src/database.dart"><code>select</code></a> takes 2.5ms total, but only <strong>0.65ms on the main isolate:</strong></p>
+<pre class="language-dart"><code class="language-dart">final items = await db.select(
+  'SELECT id, name, price FROM products ORDER BY name',
+);
+
+// Row objects are created lazily — only the rows you access get materialized.
+for (final item in items) {
+  print('${item['name']}: \$${item['price']}');
+}
+</code></pre>
+<p>The expensive work — SQLite stepping, string decoding, result building — runs on a persistent background worker. The main isolate receives an optimized array and wraps it in lightweight <a href="./lib/src/row.dart"><code>Row</code></a> views on access.</p>
+<h3 id="live-updating-ui">Live-updating UI</h3>
+<p>Create a reactive <a href="./lib/src/database.dart"><code>stream</code></a> and use it with the standard <a href="https://api.flutter.dev/flutter/widgets/StreamBuilder-class.html"><code>StreamBuilder</code></a>. The library handles invalidation, deduplication, and change detection:</p>
+<pre class="language-dart"><code class="language-dart">class TaskDashboard extends StatefulWidget { ... }
+
+class _TaskDashboardState extends State&lt;TaskDashboard&gt; {
+  // Create streams once — not on every build.
+  late final _pendingCount = db.stream(
+    'SELECT COUNT(*) as c FROM tasks WHERE done = 0',
+  );
+  late final _myTasks = db.stream(
+    'SELECT * FROM tasks WHERE assigned_to = ? ORDER BY due',
+    [userId],
+  );
+
+  @override
+  Widget build(BuildContext context) =&gt; Column(children: [
+    StreamBuilder(
+      stream: _pendingCount,
+      builder: (context, snap) =&gt; Text('${snap.data?.first['c']} remaining'),
+    ),
+    StreamBuilder(
+      stream: _myTasks,
+      builder: (context, snap) =&gt; TaskList(tasks: snap.data ?? []),
+    ),
+  ]);
+}
+</code></pre>
+<p>When a write hits the <code>tasks</code> table:</p>
+<ol>
+<li>resqlite looks up affected streams via an inverted index — no scanning.</li>
+<li>Only those streams re-query. Streams on other tables don't wake up.</li>
+<li>The worker hashes the new result. If the data hasn't changed, nothing is sent back and no work is done on the main isolate.</li>
+<li>If it changed, the <a href="https://api.flutter.dev/flutter/widgets/StreamBuilder-class.html"><code>StreamBuilder</code></a> receives the new data and rebuilds.</li>
+</ol>
+<h3 id="json-bytes-for-http-responses">JSON bytes for HTTP responses</h3>
+<p><a href="./lib/src/database.dart"><code>selectBytes</code></a> produces JSON directly in C — no Dart object allocation for the result data:</p>
+<pre class="language-dart"><code class="language-dart">Future&lt;Response&gt; handleProducts(Request request) async {
+  final bytes = await db.selectBytes(
+    'SELECT id, name, price FROM products WHERE active = ?',
+    [1],
+  );
+  return Response.ok(bytes, headers: {'content-type': 'application/json'});
+}
+</code></pre>
+<p>String escaping, number formatting, and JSON structure are handled in native code. The result crosses to Dart as a single <a href="https://api.dart.dev/dart-typed_data/Uint8List-class.html"><code>Uint8List</code></a>. At 1,000 rows this is <strong>5× faster</strong> than building Dart maps and calling <a href="https://api.dart.dev/dart-convert/jsonEncode.html"><code>jsonEncode</code></a>, and uses <strong>0ms of main-isolate time.</strong></p>
+<h3 id="bulk-sync">Bulk sync</h3>
+<p><a href="./lib/src/database.dart"><code>executeBatch</code></a> runs one prepared statement across many parameter sets in a single transaction — one prepare, one commit, no per-row overhead:</p>
+<pre class="language-dart"><code class="language-dart">await db.executeBatch(
+  'INSERT OR REPLACE INTO products(id, name, price) VALUES (?, ?, ?)',
+  serverRows.map((r) =&gt; [r['id'], r['name'], r['price']]).toList(),
+);
+</code></pre>
+<p>1,000 rows in <strong>0.8ms</strong>. All-or-nothing atomicity — a crash mid-import leaves zero partial rows. Streams watching the table fire once on commit, not per row.</p>
+<h2 id="architecture-tldr">Architecture TLDR</h2>
+<ul>
+<li>
+<p><strong>Reads</strong> go through a <a href="./lib/src/reader_pool.dart">persistent reader pool</a> (2-4 workers with dedicated C connections)</p>
+</li>
+<li>
+<p><strong>Writes</strong> go through a single <a href="./lib/src/write_worker.dart">persistent writer isolate</a></p>
+</li>
+<li>
+<p><strong>Streams</strong> use SQLite's <a href="https://www.sqlite.org/c3ref/set_authorizer.html">authorizer hook</a> for <a href="./lib/src/stream_engine.dart">dependency tracking</a> and <a href="https://www.sqlite.org/c3ref/preupdate_count.html">preupdate hook</a> for write invalidation</p>
+</li>
+<li>
+<p><strong>Large results</strong> use hybrid transmission — <a href="https://api.dart.dev/dart-isolate/SendPort-class.html"><code>SendPort</code></a> for small, zero-copy <a href="https://api.dart.dev/dart-isolate/Isolate/exit.html"><code>Isolate.exit</code></a> for large</p>
+</li>
+<li>
+<p><a href="./docs/arch/architecture.md">Full Breakdown</a> — how the reader pool, writer isolate, and stream engine fit together</p>
+</li>
+</ul>
+<h2 id="getting-started">Getting Started</h2>
+<p>Currently source-only (<code>publish_to: none</code>):</p>
+<pre class="language-yaml"><code class="language-yaml">dependencies:
+  resqlite:
+    path: ../resqlite
+</code></pre>
+<p>Requires native Dart/Flutter builds (not web). The C code compiles automatically via Dart's native asset hooks.</p>
+<p>resqlite does not include a migration framework — schema management is done with plain SQL:</p>
+<pre class="language-dart"><code class="language-dart">await db.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT)');
+</code></pre>
+<p>For versioned migrations, track a schema version in a <code>PRAGMA user_version</code> or a metadata table and run your DDL accordingly. This is a deliberate choice — resqlite stays close to raw SQL and leaves schema tooling to your application.</p>
+<h2 id="learn-more">Learn More</h2>
+<ul>
+<li><a href="./docs/arch/architecture.md">Architecture overview</a> — how the reader pool, writer isolate, and stream engine fit together</li>
+<li><a href="./experiments/README.md">Experiment log</a> — 41 documented experiments with benchmarks and reasoning behind every design decision</li>
+<li><a href="./benchmark/README.md">Benchmark suite</a> — run the full suite yourself, or <a href="./benchmark/HARDWARE_RESULTS.md">see community results across hardware</a></li>
+</ul>
+</section>
+
+
+      <section class="summary">
+          <h2>Libraries</h2>
+        <dl>
+          <dt id="resqlite">
+  <span class="name"><a href="resqlite/">resqlite</a></span> 
+
+</dt>
+<dd>
+</dd>
+
+        </dl>
+      </section>
+  </div> <!-- /.main-content -->
+  <div id="dartdoc-sidebar-left" class="sidebar sidebar-offcanvas-left">
+    <!-- The search input and breadcrumbs below are only responsively visible at low resolutions. -->
+<header id="header-search-sidebar" class="hidden-l">
+  <form class="search-sidebar" role="search">
+    <input type="text" id="search-sidebar" autocomplete="off" disabled class="form-control typeahead" placeholder="Loading search...">
+  </form>
+</header>
+<ol class="breadcrumbs gt-separated dark hidden-l" id="sidebar-nav">
+    <li class="self-crumb">resqlite package</li>
+</ol>
+
+    <h5 class="hidden-xs"><span class="package-name">resqlite</span> <span class="package-kind">package</span></h5>
+    <ol>
+      <li class="section-title">Libraries</li>
+      <li><a href="resqlite/">resqlite</a></li>
+</ol>
+
+  </div>
+  <div id="dartdoc-sidebar-right" class="sidebar sidebar-offcanvas-right">
+  </div>
+</main>
+<footer>
+  <span class="no-break">
+    resqlite
+      0.1.0
+  </span>
+  
+</footer>
+
+
+<script src="static-assets/highlight.pack.js?v1"></script>
+<script src="static-assets/docs.dart.js"></script>
+
+</body>
+</html>
+
