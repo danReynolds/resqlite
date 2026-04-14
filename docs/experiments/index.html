@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>resqlite Experiments — Performance Over Time</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #f0883e;
+    --purple: #a371f7;
+    --cyan: #39d2c0;
+    --pink: #f778ba;
+    --yellow: #e3b341;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .header { margin-bottom: 2rem; }
+  .header h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+  .header .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .header nav { margin-top: 0.75rem; font-size: 0.85rem; }
+  .header nav a { margin-right: 1.5rem; }
+
+  .section-title {
+    font-size: 1.3rem; margin: 2.5rem 0 0.75rem;
+    padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+  }
+  .section-desc { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem;
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 0.25rem; }
+  .card .desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
+  .chart-wrap { position: relative; height: 320px; }
+
+  /* Experiment cards */
+  .experiments-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .exp-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: 3.5rem 1fr auto;
+    gap: 0 1rem;
+    align-items: start;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .exp-card.highlighted {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(88,166,255,0.15);
+  }
+  .exp-card .num {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--muted);
+    line-height: 1.2;
+  }
+  .exp-card.accepted .num { color: var(--green); }
+  .exp-card.rejected .num { color: var(--muted); }
+  .exp-card .body h3 { font-size: 0.95rem; margin-bottom: 0.2rem; }
+  .exp-card .body .summary { font-size: 0.82rem; color: var(--muted); }
+  .exp-card .meta {
+    text-align: right; font-size: 0.75rem; color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.accepted { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.rejected { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  .loading { text-align: center; padding: 3rem; color: var(--muted); }
+
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Experiments &amp; Performance Over Time</h1>
+  <p class="subtitle">40 experiments, 47 benchmark runs — the full optimization journey from April 6-14, 2026.</p>
+  <nav>
+    <a href="../">&larr; Home</a>
+    <a href="../benchmarks/">Benchmarks</a>
+    <a href="../api/resqlite/resqlite-library.html">API Docs</a>
+    <a href="https://github.com/danReynolds/resqlite">GitHub</a>
+  </nav>
+</div>
+
+<!-- Charts -->
+<h3 class="section-title">Performance Trends</h3>
+<p class="section-desc">Click any data point to jump to its experiment below. Filled markers = linked experiment, hollow = standalone benchmark run.</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Read Performance</h2>
+    <div class="desc">select() maps, selectBytes(), and schema wide — 1K rows, wall time</div>
+    <div class="chart-wrap"><canvas id="chartReads"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Write Performance</h2>
+    <div class="desc">Single inserts (100 seq.) and batch inserts (1K rows), wall time</div>
+    <div class="chart-wrap"><canvas id="chartWrites"></canvas></div>
+  </div>
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>Concurrency &amp; Parameterized</h2>
+    <div class="desc">4x concurrent reads and 100-query parameterized workload</div>
+    <div class="chart-wrap"><canvas id="chartConcurrency"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Streaming &amp; Throughput</h2>
+    <div class="desc">Invalidation latency (ms, left) and point query QPS (right)</div>
+    <div class="chart-wrap"><canvas id="chartStreaming"></canvas></div>
+  </div>
+</div>
+
+<!-- Experiment timeline -->
+<h3 class="section-title">Experiment Log</h3>
+<p class="section-desc">All experiments in chronological order. <span style="color:var(--green)">Green</span> = accepted, <span style="color:var(--muted)">gray</span> = rejected.</p>
+<div id="experiments-container" class="experiments-list">
+  <div class="loading">Loading experiments...</div>
+</div>
+
+<script>
+const COLORS = ['#58a6ff','#f0883e','#a371f7','#39d2c0','#f778ba','#e3b341','#3fb950','#f85149','#8b949e'];
+
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#30363d';
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+
+let DATA = null;
+const charts = {};
+
+// Short display names for tracked metrics.
+const DISPLAY = {
+  'Select \u2192 Maps / 1000 rows / resqlite select()': 'select() 1K rows',
+  'Select \u2192 JSON Bytes / 1000 rows / resqlite selectBytes()': 'selectBytes() 1K rows',
+  'Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite': 'schema wide 20 cols',
+  'Write Performance / Single Inserts (100 sequential) / resqlite execute()': 'single inserts (100)',
+  'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()': 'batch insert 1K',
+  'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()': 'parameterized 100q',
+  'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x': 'concurrent 4x',
+  'Streaming / Invalidation Latency / resqlite': 'invalidation latency',
+  'Point Query Throughput / resqlite qps': 'point query qps',
+};
+
+// Chart groupings: which tracked metrics go into which chart.
+const CHART_GROUPS = {
+  chartReads: [
+    'Select \u2192 Maps / 1000 rows / resqlite select()',
+    'Select \u2192 JSON Bytes / 1000 rows / resqlite selectBytes()',
+    'Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite',
+  ],
+  chartWrites: [
+    'Write Performance / Single Inserts (100 sequential) / resqlite execute()',
+    'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()',
+  ],
+  chartConcurrency: [
+    'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x',
+    'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()',
+  ],
+  chartStreaming: [
+    'Streaming / Invalidation Latency / resqlite',
+    'Point Query Throughput / resqlite qps',
+  ],
+};
+
+async function init() {
+  try {
+    const resp = await fetch('./history.json');
+    DATA = await resp.json();
+  } catch (e) {
+    document.getElementById('experiments-container').innerHTML =
+      '<div class="loading">Failed to load history.json</div>';
+    return;
+  }
+  renderCharts();
+  renderExperiments();
+}
+
+function renderCharts() {
+  const runs = DATA.runs;
+  const labels = runs.map((r, i) => r.date);
+
+  for (const [chartId, metricKeys] of Object.entries(CHART_GROUPS)) {
+    const canvas = document.getElementById(chartId);
+    const isStreaming = chartId === 'chartStreaming';
+    const hasQps = isStreaming && metricKeys.some(k => k.includes('qps'));
+
+    const datasets = metricKeys.map((key, ki) => {
+      const isQps = key.includes('qps');
+      const data = runs.map(r => {
+        const v = r.metrics[key];
+        return v !== undefined ? v : null;
+      });
+
+      return {
+        label: DISPLAY[key] || key,
+        data,
+        borderColor: COLORS[ki % COLORS.length],
+        backgroundColor: COLORS[ki % COLORS.length] + '33',
+        tension: 0.3,
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        spanGaps: true,
+        yAxisID: isQps ? 'yQps' : 'y',
+      };
+    });
+
+    const scales = {
+      x: {
+        grid: { color: '#21262d' },
+        ticks: { maxTicksLimit: 12, maxRotation: 45 },
+      },
+      y: {
+        title: { display: true, text: 'Wall time (ms)' },
+        grid: { color: '#21262d' },
+        beginAtZero: true,
+      },
+    };
+
+    if (hasQps) {
+      scales.yQps = {
+        position: 'right',
+        title: { display: true, text: 'Queries/sec' },
+        grid: { drawOnChartArea: false },
+        beginAtZero: true,
+      };
+    }
+
+    charts[chartId] = new Chart(canvas, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              title(items) {
+                const idx = items[0].dataIndex;
+                const run = runs[idx];
+                return `${run.label} (${run.date})`;
+              },
+              label(item) {
+                const key = metricKeys[item.datasetIndex];
+                const isQps = key.includes('qps');
+                const v = item.raw;
+                if (v === null) return null;
+                return `${item.dataset.label}: ${isQps ? Math.round(v).toLocaleString() + ' qps' : v.toFixed(2) + ' ms'}`;
+              },
+            },
+          },
+        },
+        scales,
+        onClick(evt, elements) {
+          if (!elements.length) return;
+          const idx = elements[0].index;
+          const run = runs[idx];
+          scrollToRun(run);
+        },
+      },
+    });
+  }
+}
+
+function scrollToRun(run) {
+  // Try to find the closest experiment by date.
+  const exps = DATA.experiments;
+  let best = null;
+  let bestDist = Infinity;
+  const runTs = new Date(run.timestamp).getTime();
+
+  for (const exp of exps) {
+    if (!exp.date) continue;
+    const expTs = new Date(exp.date).getTime();
+    const dist = Math.abs(runTs - expTs);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = exp;
+    }
+  }
+
+  // Only link if within 2 days.
+  if (best && bestDist < 2 * 86400000) {
+    const el = document.getElementById('exp-' + best.id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlighted');
+      setTimeout(() => el.classList.remove('highlighted'), 2500);
+      return;
+    }
+  }
+
+  // Fallback: scroll to experiment list.
+  document.getElementById('experiments-container').scrollIntoView({ behavior: 'smooth' });
+}
+
+function renderExperiments() {
+  const container = document.getElementById('experiments-container');
+  const exps = DATA.experiments;
+  if (!exps.length) {
+    container.innerHTML = '<div class="loading">No experiments found.</div>';
+    return;
+  }
+
+  container.innerHTML = exps.map(exp => `
+    <div class="exp-card ${exp.status}" id="exp-${exp.id}">
+      <div class="num">#${exp.id}</div>
+      <div class="body">
+        <h3>${exp.title}</h3>
+        <div class="summary">${exp.summary}</div>
+      </div>
+      <div class="meta">
+        <span class="badge ${exp.status}">${exp.status}</span><br>
+        ${exp.date || ''}
+        ${exp.commit ? `<br><a href="https://github.com/danReynolds/resqlite/commit/${exp.commit}" style="font-size:0.72rem">${exp.commit.slice(0, 7)}</a>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+init();
+</script>
+</body>
+</html>

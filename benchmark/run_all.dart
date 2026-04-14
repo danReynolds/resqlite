@@ -2,6 +2,7 @@
 import 'dart:io' show Directory, File, exit;
 import 'dart:math' as math;
 
+import 'shared/parse_results.dart';
 import 'suites/concurrent_reads.dart';
 import 'suites/parameterized.dart';
 import 'suites/point_query.dart';
@@ -38,7 +39,7 @@ Future<void> main(List<String> args) async {
     }
     final markdown = await _runSuiteOnce();
     runMarkdowns.add(markdown);
-    runMetrics.add(_extractResqliteMedians(markdown));
+    runMetrics.add(extractResqliteMedians(markdown));
   }
 
   final representativeMarkdown = runMarkdowns.last;
@@ -322,71 +323,7 @@ File? _findPreviousResults(Directory dir) {
   return files.isNotEmpty ? files.first : null;
 }
 
-/// Extract resqlite median wall times from markdown content.
-/// Returns a map of benchmark label → median ms value.
-Map<String, double> _extractResqliteMedians(String content) {
-  final results = <String, double>{};
-  final lines = content.split('\n');
-
-  String? currentSection;
-  String? currentSubsection;
-
-  for (final line in lines) {
-    if (line.startsWith('## ')) {
-      currentSection = line.substring(3).trim();
-      currentSubsection = null;
-    } else if (line.startsWith('### ')) {
-      currentSubsection = line.substring(4).trim();
-    } else if (line.startsWith('| resqlite')) {
-      final parts = line
-          .split('|')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (parts.length >= 2) {
-        final label = parts[0];
-        final wallMed = double.tryParse(parts[1]);
-        if (wallMed != null) {
-          final key = currentSubsection != null
-              ? '$currentSection / $currentSubsection / $label'
-              : '$currentSection / $label';
-          results[key] = wallMed;
-        }
-        // Also extract main isolate median (column index 3).
-        if (parts.length >= 4) {
-          final mainMed = double.tryParse(parts[3]);
-          if (mainMed != null) {
-            final key = currentSubsection != null
-                ? '$currentSection / $currentSubsection / $label [main]'
-                : '$currentSection / $label [main]';
-            results[key] = mainMed;
-          }
-        }
-      }
-    } else if (currentSection != null &&
-        currentSection.contains('Concurrent Reads') &&
-        line.startsWith('| ') &&
-        !line.startsWith('|---') &&
-        !line.startsWith('| Concurrency')) {
-      // Concurrent reads: rows like "| 4 | 0.88 | 0.22 | 1.83 | 0.46 |"
-      final parts = line
-          .split('|')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (parts.length >= 2) {
-        final concurrency = int.tryParse(parts[0]);
-        final wallTime = double.tryParse(parts[1]);
-        if (concurrency != null && wallTime != null) {
-          results['$currentSection / resqlite concurrent ${concurrency}x'] =
-              wallTime;
-        }
-      }
-    }
-  }
-
-  return results;
-}
+// extractResqliteMedians() is imported from shared/parse_results.dart.
 
 Map<String, _AggregateStats> _aggregateRunMetrics(
   List<Map<String, double>> runMetrics,
@@ -475,7 +412,7 @@ String _generateComparison(
   String previousContent,
   String previousFileName,
 ) {
-  final previous = _extractResqliteMedians(previousContent);
+  final previous = extractResqliteMedians(previousContent);
 
   if (current.isEmpty || previous.isEmpty) {
     return '## Comparison\n\nCould not parse results for comparison.\n';
