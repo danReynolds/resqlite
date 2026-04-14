@@ -1,6 +1,6 @@
 # How We Built the Fastest SQLite Library for Dart
 
-Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something that beats every existing library on every benchmark that matters. Here's the story of how we got there — including the dead ends.
+Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.
 
 **The bottom line:** resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.
 
@@ -368,7 +368,9 @@ Two more experiments closed the gap between "fast" and "fastest."
 | Stream invalidation | 0.05ms | 0.05ms |
 | Concurrent 8× reads | 0.74ms | — |
 
-1.8x faster reads, 2.1x faster writes, and sub-millisecond main-isolate time at 1K rows — using the same APIs (`select`, `execute`) that every library shares.
+1.8x faster wall-clock reads, 2.1x faster writes, and sub-millisecond main-isolate time at 1K rows — using the same APIs (`select`, `execute`) that every library shares. Batch inserts at 10K rows are essentially tied with sqlite3 (4.47ms vs 4.46ms) — the C-level batch runner doesn't have an advantage over sqlite3's already-efficient synchronous path at that scale.
+
+**A note on peer libraries:** The sqlite3 package is excellent for what it does — synchronous, simple, minimal overhead. If you're writing a CLI tool or a server where you control the thread model, it's a great choice. sqlite_async (PowerSync) brings production-tested streaming with smart defaults like 30ms write throttling for battery life. resqlite is optimized for a specific use case: Flutter apps where main-isolate time is the critical constraint. Different libraries, different strengths.
 
 The full experiment log — every accepted optimization and every rejected dead end — is available on the [experiments page](https://danreynolds.github.io/resqlite/experiments/), with interactive charts showing how each metric evolved over time.
 

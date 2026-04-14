@@ -85,7 +85,7 @@
   <article class="post">
     <span class="post-category">Engineering Story</span>
     <h1>How We Built the Fastest SQLite Library for Dart</h1>
-<p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something that beats every existing library on every benchmark that matters. Here's the story of how we got there — including the dead ends.</p>
+<p>Every SQLite library in the Dart ecosystem has the same bottleneck: getting data from SQLite's C engine to your Dart code without blocking the UI. We spent a day trying to solve this and ended up building something optimized for the metric that matters most in Flutter: main-isolate time. Here's the story of how we got there — including the dead ends.</p>
 <p><strong>The bottom line:</strong> resqlite reads 1,000 rows in 0.40ms (1.8x faster than the next best library), writes in 1.78ms (2.1x faster), and keeps main-isolate time under 1ms for 10,000-row queries. Point query throughput is 107K queries/sec. Every optimization is documented — including the ones that failed.</p>
 <h2>The Problem We Were Trying to Solve</h2>
 <p>We were building an HTTP endpoint backed by <a href="https://sqlite.org/">SQLite</a> — the embedded database that runs on basically everything. SQLite is written in C and runs in-process, so there's no network overhead. The bottleneck isn't the database — it's getting the results into Dart.</p>
@@ -631,7 +631,8 @@ return Response(200, body: bytes, headers: {'Content-Type': 'application/json'})
 </tr>
 </tbody></table></div>
 
-<p>1.8x faster reads, 2.1x faster writes, and sub-millisecond main-isolate time at 1K rows — using the same APIs (<code>select</code>, <code>execute</code>) that every library shares.</p>
+<p>1.8x faster wall-clock reads, 2.1x faster writes, and sub-millisecond main-isolate time at 1K rows — using the same APIs (<code>select</code>, <code>execute</code>) that every library shares. Batch inserts at 10K rows are essentially tied with sqlite3 (4.47ms vs 4.46ms) — the C-level batch runner doesn't have an advantage over sqlite3's already-efficient synchronous path at that scale.</p>
+<p><strong>A note on peer libraries:</strong> The sqlite3 package is excellent for what it does — synchronous, simple, minimal overhead. If you're writing a CLI tool or a server where you control the thread model, it's a great choice. sqlite_async (PowerSync) brings production-tested streaming with smart defaults like 30ms write throttling for battery life. resqlite is optimized for a specific use case: Flutter apps where main-isolate time is the critical constraint. Different libraries, different strengths.</p>
 <p>The full experiment log — every accepted optimization and every rejected dead end — is available on the <a href="https://danreynolds.github.io/resqlite/experiments/">experiments page</a>, with interactive charts showing how each metric evolved over time.</p>
 <h2>What We'd Tell Our Past Selves</h2>
 <p><strong>Measure main-isolate time separately from wall time.</strong> A library can look fast on wall time while putting all the work on the thread that renders your UI. These are different metrics and you need to optimize for both, but main-isolate time is what your users actually feel.</p>

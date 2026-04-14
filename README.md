@@ -50,9 +50,9 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 | Batch insert (1,000 rows) | 0.43ms | 0.00ms |
 | Stream invalidation | 0.05ms | 0.05ms |
 
-~107K point queries/sec. 1.8x faster reads and 2.1x faster writes than peer libraries using the same APIs. Sub-millisecond stream invalidation.
+~107K point queries/sec. 1.8x faster wall-clock reads and 7.9x less main-isolate time at 1K rows compared to synchronous alternatives. Sub-millisecond stream invalidation.
 
-Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware.
+Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Batch inserts at scale are comparable to sqlite3. Results will vary by hardware. The [sqlite3](https://pub.dev/packages/sqlite3) package is a great choice for synchronous workloads; [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync) offers production-tested streaming with built-in throttling. resqlite is optimized for Flutter apps where main-isolate time is the critical constraint.
 
 See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](./benchmark/HARDWARE_RESULTS.md).
 

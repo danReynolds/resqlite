@@ -296,10 +296,12 @@
   </table>
 </div>
 
-<p style="color:var(--muted);margin-top:2rem;font-size:0.8rem;">
-  All times are wall-clock medians in ms (lower is better) from repeat 3/3. Point query is queries/sec (higher is better).
-  Comparison baseline: 2026-04-13. Dart 3.11.0 stable, macOS ARM64.
-</p>
+<h3 class="section-title">Notes on Methodology</h3>
+<div class="card" style="font-size:0.85rem;color:var(--muted);line-height:1.7;">
+  <p>All times are wall-clock medians in ms (lower is better) from 3-repeat runs. Point query is queries/sec (higher is better). Dart 3.11.0 stable, macOS ARM64.</p>
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Benchmark conditions:</strong> All libraries use the same SQL queries, same data, and WAL mode. sqlite_async's write throttle is disabled (Duration.zero) for fair latency comparison. sqlite3 runs synchronously on the calling thread — this is by design, not a misconfiguration.</p>
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">What these benchmarks don't measure:</strong> Memory footprint (resqlite's persistent isolate pool uses more memory than sqlite3's single-connection model), battery impact under sustained streaming, or cold-start time. resqlite is optimized for Flutter apps where main-isolate time is the primary constraint. For synchronous workloads or simpler architectures, <a href="https://pub.dev/packages/sqlite3">sqlite3</a> and <a href="https://pub.dev/packages/sqlite_async">sqlite_async</a> may be better fits.</p>
+</div>
 
 <script>
 // ──────────────────── DATA ────────────────────
