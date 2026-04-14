@@ -398,9 +398,24 @@ async function init() {
 }
 
 // ── Charts ──
+// Each run gets a unique numeric label so Chart.js treats every data
+// point as a distinct x position. We show dates only where they change.
 function buildCharts() {
   const runs = DATA.runs;
-  const labels = runs.map(r => r.date);
+
+  // Unique sequential labels — prevents Chart.js from collapsing
+  // duplicate date strings into shared x positions.
+  const labels = runs.map((_, i) => String(i));
+
+  // Build date tick labels: show the date only on the first run of each day.
+  const dateTicks = {};
+  let prevDate = '';
+  for (let i = 0; i < runs.length; i++) {
+    if (runs[i].date !== prevDate) {
+      dateTicks[i] = runs[i].date;
+      prevDate = runs[i].date;
+    }
+  }
 
   for (const [chartId, metricKeys] of Object.entries(CHART_GROUPS)) {
     const canvas = document.getElementById(chartId);
@@ -422,7 +437,16 @@ function buildCharts() {
     });
 
     const scales = {
-      x: { grid: { color: '#21262d' }, ticks: { maxTicksLimit: 10, maxRotation: 45, font: { size: 10 } } },
+      x: {
+        grid: { color: '#21262d' },
+        ticks: {
+          maxRotation: 45,
+          font: { size: 10 },
+          callback(value, index) {
+            return dateTicks[index] || '';
+          },
+        },
+      },
       y: { title: { display: true, text: 'ms' }, grid: { color: '#21262d' }, beginAtZero: true },
     };
     if (hasQps) {
@@ -434,7 +458,7 @@ function buildCharts() {
       data: { labels, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
+        interaction: { mode: 'nearest', intersect: true },
         plugins: {
           legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 10 } } },
           tooltip: {
@@ -455,7 +479,8 @@ function buildCharts() {
         scales,
         onClick(evt, elements) {
           if (!elements.length) return;
-          const exp = findExpForRunIndex(elements[0].index);
+          const idx = elements[0].index;
+          const exp = findExpForRunIndex(idx);
           if (exp) {
             if (selectedExpId === exp.id) {
               closeDetail();
