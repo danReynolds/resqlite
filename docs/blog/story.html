@@ -95,8 +95,7 @@
 <ol>
 <li><strong>No reactivity.</strong> We wanted live-updating UI — when a write modifies the database, every widget showing that data should update automatically. sqlite3 gives you one-shot queries. We were manually invalidating, polling, and managing state ourselves.</li>
 </ol>
-<p>We looked at <a href="https://pub.dev/packages/sqlite_async">sqlite_async</a> (PowerSync), which solves both — it has an async worker pool and a <code>watch()</code> API for reactive queries. But profiling showed that even with async libraries, the data transfer path from SQLite to Dart still put significant work on the main isolate. At 5,000 rows, we measured 0.87ms of main-isolate time with sqlite_async. Not terrible, but not invisible either — especially in screens with multiple concurrent queries.</p>
-<p>We decided to see how far we could push it. Could we get main-isolate time close to zero?</p>
+<p>We decided to build something from scratch. Could we make a SQLite library with zero main-isolate jank and built-in reactive queries?</p>
 <p>If you're not familiar with Dart: your application runs on the &quot;main isolate&quot; — a single thread that handles UI rendering, user input, and your application logic. Think of it like JavaScript's main thread, but stricter. <a href="https://dart.dev/language/isolates">Isolates</a> are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages (no shared memory, no locks). <a href="https://dart.dev/interop/c-interop">FFI</a> (Foreign Function Interface) is how Dart calls C code — each call has a small overhead. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.</p>
 <p>The data path with the sqlite3 package looked like this:</p>
 <pre><code class="lang-">

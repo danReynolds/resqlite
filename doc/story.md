@@ -12,9 +12,7 @@ We were building a Flutter app backed by [SQLite](https://sqlite.org/) — the e
 
 2. **No reactivity.** We wanted live-updating UI — when a write modifies the database, every widget showing that data should update automatically. sqlite3 gives you one-shot queries. We were manually invalidating, polling, and managing state ourselves.
 
-We looked at [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync), which solves both — it has an async worker pool and a `watch()` API for reactive queries. But profiling showed that even with async libraries, the data transfer path from SQLite to Dart still put significant work on the main isolate. At 5,000 rows, we measured 0.87ms of main-isolate time with sqlite_async. Not terrible, but not invisible either — especially in screens with multiple concurrent queries.
-
-We decided to see how far we could push it. Could we get main-isolate time close to zero?
+We decided to build something from scratch. Could we make a SQLite library with zero main-isolate jank and built-in reactive queries?
 
 If you're not familiar with Dart: your application runs on the "main isolate" — a single thread that handles UI rendering, user input, and your application logic. Think of it like JavaScript's main thread, but stricter. [Isolates](https://dart.dev/language/isolates) are Dart's concurrency primitive: independent threads with their own memory that communicate by passing messages (no shared memory, no locks). [FFI](https://dart.dev/interop/c-interop) (Foreign Function Interface) is how Dart calls C code — each call has a small overhead. Most SQLite libraries use a background isolate to run queries, then send results back to the main isolate.
 
