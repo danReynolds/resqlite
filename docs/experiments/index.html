@@ -139,9 +139,42 @@
     margin-bottom: 0.25rem;
   }
   .exp-detail .detail-section p {
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     color: var(--text);
     line-height: 1.6;
+    margin-bottom: 0.4rem;
+  }
+  .exp-detail .detail-section ul,
+  .exp-detail .detail-section ol {
+    font-size: 0.85rem;
+    padding-left: 1.25rem;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+  .exp-detail .detail-section li {
+    margin-bottom: 0.2rem;
+    line-height: 1.5;
+  }
+  .exp-detail .detail-section table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+  .exp-detail .detail-section table td {
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .exp-detail .detail-section table tr:first-child td {
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .exp-detail .detail-section code {
+    background: rgba(88,166,255,0.08);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
   }
   .exp-detail .close-btn {
     float: right;
@@ -459,10 +492,19 @@ function selectExp(id) {
   html += `<div class="detail-section"><h4>Impact</h4><p>${esc(exp.summary)}</p></div>`;
 
   if (exp.problem) {
-    html += `<div class="detail-section"><h4>Problem</h4><p>${esc(exp.problem)}</p></div>`;
+    html += `<div class="detail-section"><h4>Problem</h4>${renderMd(exp.problem)}</div>`;
   }
   if (exp.hypothesis) {
-    html += `<div class="detail-section"><h4>Hypothesis</h4><p>${esc(exp.hypothesis)}</p></div>`;
+    html += `<div class="detail-section"><h4>Hypothesis</h4>${renderMd(exp.hypothesis)}</div>`;
+  }
+  if (exp.approach) {
+    html += `<div class="detail-section"><h4>Approach</h4>${renderMd(exp.approach)}</div>`;
+  }
+  if (exp.results) {
+    html += `<div class="detail-section"><h4>Results</h4>${renderMd(exp.results)}</div>`;
+  }
+  if (exp.reasoning) {
+    html += `<div class="detail-section"><h4>${exp.status === 'accepted' ? 'Why Accepted' : 'Why Rejected'}</h4>${renderMd(exp.reasoning)}</div>`;
   }
 
   detail.innerHTML = html;
@@ -502,6 +544,59 @@ function esc(s) {
   const el = document.createElement('span');
   el.textContent = s;
   return el.innerHTML;
+}
+
+// Lightweight markdown → HTML for experiment content.
+function renderMd(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  let html = '';
+  let inList = false;
+  let inTable = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Table rows
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      if (trimmed.match(/^\|[\s\-:|]+\|$/)) continue; // separator row
+      const cells = trimmed.split('|').filter(c => c.trim()).map(c => `<td>${esc(c.trim())}</td>`);
+      if (!inTable) { html += '<table>'; inTable = true; }
+      html += `<tr>${cells.join('')}</tr>`;
+      continue;
+    }
+    if (inTable) { html += '</table>'; inTable = false; }
+
+    // List items
+    if (trimmed.match(/^[-*]\s/)) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${escInline(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
+      continue;
+    }
+    // Numbered list
+    if (trimmed.match(/^\d+\.\s/)) {
+      if (!inList) { html += '<ol>'; inList = true; }
+      html += `<li>${escInline(trimmed.replace(/^\d+\.\s+/, ''))}</li>`;
+      continue;
+    }
+    if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = false; }
+
+    // Blank line
+    if (!trimmed) continue;
+
+    // Paragraph
+    html += `<p>${escInline(trimmed)}</p>`;
+  }
+  if (inList) html += '</ul>';
+  if (inTable) html += '</table>';
+  return html;
+}
+
+// Inline formatting: bold, code, links.
+function escInline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
 init();

@@ -157,18 +157,38 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       commit = commitMatch?.group(1);
       problem = _extractSection(content, 'Problem');
       hypothesis = _extractSection(content, 'Hypothesis');
-    }
+      // Try multiple heading variants for the implementation section.
+      final built = _extractSection(content, 'What We Built') ??
+          _extractSection(content, 'What We Tested') ??
+          _extractSection(content, 'Design') ??
+          _extractSection(content, 'Changes');
+      final results = _extractSection(content, 'Results');
+      final whyAccepted = _extractSection(content, 'Why Accepted');
+      final whyRejected = _extractSection(content, 'Why Rejected');
 
-    experiments.add({
-      'id': id,
-      'title': title,
-      'date': date ?? '',
-      'status': currentStatus,
-      'summary': impact,
-      'commit': commit,
-      'problem': problem,
-      'hypothesis': hypothesis,
-    });
+      experiments.add({
+        'id': id,
+        'title': title,
+        'date': date ?? '',
+        'status': currentStatus,
+        'summary': impact,
+        'commit': commit,
+        'problem': problem,
+        'hypothesis': hypothesis,
+        'approach': built,
+        'results': results,
+        'reasoning': whyAccepted ?? whyRejected,
+      });
+    } else {
+      experiments.add({
+        'id': id,
+        'title': title,
+        'date': date ?? '',
+        'status': currentStatus,
+        'summary': impact,
+        'commit': commit,
+      });
+    }
   }
 
   // Sort by experiment number.
@@ -187,27 +207,28 @@ List<Map<String, Object?>> _parseExperimentsReadme(
   return experiments;
 }
 
-/// Extract the first paragraph of a `## Section` from markdown content.
-/// Returns null if the section is not found.
+/// Extract the full content of a `## Section` from markdown content,
+/// up to the next `##` heading. Returns null if the section is not found.
 String? _extractSection(String content, String sectionName) {
   final pattern = RegExp(
-    '^## $sectionName\n+',
+    '^## $sectionName\\s*\n+',
     multiLine: true,
   );
   final match = pattern.firstMatch(content);
   if (match == null) return null;
 
   final afterHeader = content.substring(match.end);
-  // Take lines until the next heading or blank-line gap.
+  // Take all lines until the next ## heading.
   final lines = <String>[];
   for (final line in afterHeader.split('\n')) {
-    if (line.startsWith('## ') || (lines.isNotEmpty && line.trim().isEmpty)) {
-      break;
-    }
-    if (line.trim().isNotEmpty) lines.add(line.trim());
+    if (line.startsWith('## ')) break;
+    lines.add(line);
   }
-  if (lines.isEmpty) return null;
-  final text = lines.join(' ');
-  // Truncate long sections to keep JSON reasonable.
-  return text.length > 500 ? '${text.substring(0, 497)}...' : text;
+
+  // Join and trim trailing whitespace.
+  final text = lines.join('\n').trim();
+  if (text.isEmpty) return null;
+
+  // Truncate very long sections to keep JSON manageable.
+  return text.length > 800 ? '${text.substring(0, 797)}...' : text;
 }
