@@ -39,16 +39,14 @@ Either way, the main isolate was doing real work — either running the query di
 
 We set ourselves a principle: **minimize main-isolate work above all else.** In Flutter, the main isolate runs your UI at 60fps — that's a 16ms budget per frame. Every millisecond spent on database work there is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. Total wall time matters, but main-isolate time is what users feel.
 
-## Attempt 1: Move the JSON Encoding Off Main
+## Attempt 1: Move the Query Off Main
 
-We built `db.compute()` — spawn a one-off isolate, JSON-encode there, return bytes. Dart's `Isolate.run()` uses `Isolate.exit()` under the hood, which transfers the return value to the receiving isolate **without copying**. This is different from `SendPort.send()`, which deep-copies everything. The trade-off: `Isolate.exit()` kills the sending isolate, so it only works for one-off workers.
-
-For a `Uint8List` (Dart's byte array type, backed by a contiguous block of memory), this transfer is essentially O(1) — one object, instant ownership reassignment.
+The first idea was simple: run the query on a background isolate and send the result back. Dart's `Isolate.run()` uses `Isolate.exit()` under the hood, which transfers the return value to the receiving isolate **without copying**. This is different from `SendPort.send()`, which deep-copies everything. The trade-off: `Isolate.exit()` kills the sending isolate, so it only works for one-off workers.
 
 ```dart
-final bytes = await db.compute((db) {
-  final rows = db.select('SELECT * FROM items');
-  return utf8.encode(jsonEncode(rows)) as Uint8List;
+final rows = await Isolate.run(() {
+  final db = sqlite3.open('app.db');
+  return db.select('SELECT * FROM items');
 });
 ```
 
@@ -56,40 +54,25 @@ We measured wall time and main-isolate time separately:
 
 | Path (5,000 rows) | Wall | Main |
 |---|---|---|
-| Worker pool + jsonEncode on main | 15.30 ms | **8.64 ms** |
-| `compute()` → `Uint8List` bytes | 16.03 ms | **0.00 ms** |
-| `compute()` → `List<Map>` | 15.15 ms | **7.84 ms** |
+| Synchronous on main | 15.30 ms | **8.64 ms** |
+| `Isolate.run()` → `List<Map>` | 15.15 ms | **7.84 ms** |
+| `Isolate.run()` → `Uint8List` (bytes) | 16.03 ms | **0.00 ms** |
 
-Returning bytes: 0.00ms on main. Returning maps: still ~8ms on main. The maps arrived via `Isolate.exit()` without copying, but `jsonEncode` still ran on main after they arrived.
+Returning maps: still ~8ms on main. The maps arrived via `Isolate.exit()` without copying, but the Dart VM still needed to walk and validate every object in the graph before accepting it. 5,000 rows × 6 columns = ~200,000 Dart objects (maps, strings, keys). Validating them all took nearly as long as building them.
 
-**Lesson:** Moving work off main only helps if the result arrives in a form the main isolate doesn't need to process further.
+But returning raw bytes (`Uint8List`) — a single contiguous block of memory — cost 0.00ms on main. One object, instant validation.
 
-The bytes result was interesting — 0ms on main. If we could get the data into `Uint8List` form without touching Dart objects at all, the transfer would be essentially free. That wouldn't help for the common Flutter case (you need Dart maps to build widgets), but it planted a seed: the fewer Dart objects in the result, the cheaper the transfer.
+**Lesson:** The cost of `Isolate.exit()` isn't the transfer — it's the validation walk. The fewer Dart objects in the result, the cheaper it is. This insight drove everything that followed.
 
-## Attempt 2: A New Library, Raw FFI, C-Native JSON
+## Attempt 2: A New Library, Built on Raw FFI
 
-We started resqlite from scratch. No dependency on the existing `sqlite3` Dart package. Raw [FFI](https://dart.dev/interop/c-interop) (Foreign Function Interface) bindings to SQLite's C API — Dart can call C functions directly with ~100ns overhead per call. We bundled the SQLite amalgamation (the entire database engine as a single C file) and compiled it as part of our build.
+We started resqlite from scratch. No dependency on the existing `sqlite3` Dart package. Raw FFI bindings to SQLite's C API — Dart can call C functions directly with ~100ns overhead per call. We bundled the SQLite amalgamation (the entire database engine as a single C file) and compiled it as part of our build.
 
-We wrote a C function that reads SQLite columns and writes JSON directly into a `malloc`'d buffer — zero Dart objects involved:
+The goal was to control the entire data path from SQLite's C engine to Dart objects, looking for places to reduce the object count.
 
-```c
-int resqlite_query_to_bytes(sqlite3_stmt* stmt, unsigned char** out_buf, int* out_len) {
-    // Steps through rows in C, reads column values, writes JSON.
-    // Handles string escaping, number formatting, null literals.
-    // One tight loop, no FFI boundary crossings for result data.
-}
-```
+Our first C function packed results into a compact binary buffer, then decoded it to maps in Dart. This was only ~7% faster than the `sqlite3` package's per-cell FFI approach. Disappointing. The Dart object allocation cost (creating `Map`, `String`, etc.) was the floor that everyone hits regardless of how they read the data. We needed to rethink the data structure, not just the transport.
 
-At 5,000 rows:
-
-| Path | Wall |
-|---|---|
-| resqlite `selectBytes()` | **4.35 ms** |
-| sqlite3 + jsonEncode | 15.02 ms |
-
-**3.5x faster.** The C function did everything in one pass — read columns, escape strings, format numbers. Zero Dart objects for the result data. The `Uint8List` containing the JSON transferred to the main isolate via `Isolate.exit()` at effectively zero cost.
-
-For maps though, the story was different. We also wrote a C function that packed results into a compact binary buffer, then decoded it to maps in Dart. This was only ~7% faster than the `sqlite3` package's per-cell FFI approach. The Dart object allocation cost (creating `Map`, `String`, etc.) was the floor that everyone hits regardless of how they read the data.
+While exploring the C layer, we also wrote a function that serializes query results directly to JSON bytes in C — zero Dart objects involved. At 5,000 rows, this was 3.5x faster than Dart-side `jsonEncode`. Not useful for building Flutter widgets (you need Dart maps for that), but we shipped it as `selectBytes()` for HTTP server use cases where you want raw JSON. The real lesson was confirming: object count is what matters, not the serialization format.
 
 ## Attempt 3: C-Level Connection That Outlives Isolates
 

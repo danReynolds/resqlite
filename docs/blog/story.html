@@ -114,13 +114,12 @@ Main isolate:
 </code></pre>
 <p>Either way, the main isolate was doing real work — either running the query directly, or receiving and validating thousands of Dart objects transferred from a worker.</p>
 <p>We set ourselves a principle: <strong>minimize main-isolate work above all else.</strong> In Flutter, the main isolate runs your UI at 60fps — that's a 16ms budget per frame. Every millisecond spent on database work there is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. Total wall time matters, but main-isolate time is what users feel.</p>
-<h2>Attempt 1: Move the JSON Encoding Off Main</h2>
-<p>We built <code>db.compute()</code> — spawn a one-off isolate, JSON-encode there, return bytes. Dart's <code>Isolate.run()</code> uses <code>Isolate.exit()</code> under the hood, which transfers the return value to the receiving isolate <strong>without copying</strong>. This is different from <code>SendPort.send()</code>, which deep-copies everything. The trade-off: <code>Isolate.exit()</code> kills the sending isolate, so it only works for one-off workers.</p>
-<p>For a <code>Uint8List</code> (Dart's byte array type, backed by a contiguous block of memory), this transfer is essentially O(1) — one object, instant ownership reassignment.</p>
+<h2>Attempt 1: Move the Query Off Main</h2>
+<p>The first idea was simple: run the query on a background isolate and send the result back. Dart's <code>Isolate.run()</code> uses <code>Isolate.exit()</code> under the hood, which transfers the return value to the receiving isolate <strong>without copying</strong>. This is different from <code>SendPort.send()</code>, which deep-copies everything. The trade-off: <code>Isolate.exit()</code> kills the sending isolate, so it only works for one-off workers.</p>
 <pre><code class="lang-dart">
-final bytes = await db.compute((db) {
-  final rows = db.select('SELECT * FROM items');
-  return utf8.encode(jsonEncode(rows)) as Uint8List;
+final rows = await Isolate.run(() {
+  final db = sqlite3.open('app.db');
+  return db.select('SELECT * FROM items');
 });
 </code></pre>
 <p>We measured wall time and main-isolate time separately:</p>
@@ -132,54 +131,30 @@ final bytes = await db.compute((db) {
 </tr></thead>
 <tbody>
 <tr>
-<td>Worker pool + jsonEncode on main</td>
+<td>Synchronous on main</td>
 <td>15.30 ms</td>
 <td><strong>8.64 ms</strong></td>
 </tr>
 <tr>
-<td><code>compute()</code> → <code>Uint8List</code> bytes</td>
-<td>16.03 ms</td>
-<td><strong>0.00 ms</strong></td>
-</tr>
-<tr>
-<td><code>compute()</code> → <code>List&lt;Map&gt;</code></td>
+<td><code>Isolate.run()</code> → <code>List&lt;Map&gt;</code></td>
 <td>15.15 ms</td>
 <td><strong>7.84 ms</strong></td>
 </tr>
-</tbody></table></div>
-
-<p>Returning bytes: 0.00ms on main. Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but <code>jsonEncode</code> still ran on main after they arrived.</p>
-<p><strong>Lesson:</strong> Moving work off main only helps if the result arrives in a form the main isolate doesn't need to process further.</p>
-<p>The bytes result was interesting — 0ms on main. If we could get the data into <code>Uint8List</code> form without touching Dart objects at all, the transfer would be essentially free. That wouldn't help for the common Flutter case (you need Dart maps to build widgets), but it planted a seed: the fewer Dart objects in the result, the cheaper the transfer.</p>
-<h2>Attempt 2: A New Library, Raw FFI, C-Native JSON</h2>
-<p>We started resqlite from scratch. No dependency on the existing <code>sqlite3</code> Dart package. Raw <a href="https://dart.dev/interop/c-interop">FFI</a> (Foreign Function Interface) bindings to SQLite's C API — Dart can call C functions directly with ~100ns overhead per call. We bundled the SQLite amalgamation (the entire database engine as a single C file) and compiled it as part of our build.</p>
-<p>We wrote a C function that reads SQLite columns and writes JSON directly into a <code>malloc</code>'d buffer — zero Dart objects involved:</p>
-<pre><code class="lang-c">
-int resqlite_query_to_bytes(sqlite3_stmt* stmt, unsigned char** out_buf, int* out_len) {
-    // Steps through rows in C, reads column values, writes JSON.
-    // Handles string escaping, number formatting, null literals.
-    // One tight loop, no FFI boundary crossings for result data.
-}
-</code></pre>
-<p>At 5,000 rows:</p>
-<div class="table-wrap"><table class="bench-table">
-<thead><tr>
-<th>Path</th>
-<th>Wall</th>
-</tr></thead>
-<tbody>
 <tr>
-<td>resqlite <code>selectBytes()</code></td>
-<td><strong>4.35 ms</strong></td>
-</tr>
-<tr>
-<td>sqlite3 + jsonEncode</td>
-<td>15.02 ms</td>
+<td><code>Isolate.run()</code> → <code>Uint8List</code> (bytes)</td>
+<td>16.03 ms</td>
+<td><strong>0.00 ms</strong></td>
 </tr>
 </tbody></table></div>
 
-<p><strong>3.5x faster.</strong> The C function did everything in one pass — read columns, escape strings, format numbers. Zero Dart objects for the result data. The <code>Uint8List</code> containing the JSON transferred to the main isolate via <code>Isolate.exit()</code> at effectively zero cost.</p>
-<p>For maps though, the story was different. We also wrote a C function that packed results into a compact binary buffer, then decoded it to maps in Dart. This was only ~7% faster than the <code>sqlite3</code> package's per-cell FFI approach. The Dart object allocation cost (creating <code>Map</code>, <code>String</code>, etc.) was the floor that everyone hits regardless of how they read the data.</p>
+<p>Returning maps: still ~8ms on main. The maps arrived via <code>Isolate.exit()</code> without copying, but the Dart VM still needed to walk and validate every object in the graph before accepting it. 5,000 rows × 6 columns = ~200,000 Dart objects (maps, strings, keys). Validating them all took nearly as long as building them.</p>
+<p>But returning raw bytes (<code>Uint8List</code>) — a single contiguous block of memory — cost 0.00ms on main. One object, instant validation.</p>
+<p><strong>Lesson:</strong> The cost of <code>Isolate.exit()</code> isn't the transfer — it's the validation walk. The fewer Dart objects in the result, the cheaper it is. This insight drove everything that followed.</p>
+<h2>Attempt 2: A New Library, Built on Raw FFI</h2>
+<p>We started resqlite from scratch. No dependency on the existing <code>sqlite3</code> Dart package. Raw FFI bindings to SQLite's C API — Dart can call C functions directly with ~100ns overhead per call. We bundled the SQLite amalgamation (the entire database engine as a single C file) and compiled it as part of our build.</p>
+<p>The goal was to control the entire data path from SQLite's C engine to Dart objects, looking for places to reduce the object count.</p>
+<p>Our first C function packed results into a compact binary buffer, then decoded it to maps in Dart. This was only ~7% faster than the <code>sqlite3</code> package's per-cell FFI approach. Disappointing. The Dart object allocation cost (creating <code>Map</code>, <code>String</code>, etc.) was the floor that everyone hits regardless of how they read the data. We needed to rethink the data structure, not just the transport.</p>
+<p>While exploring the C layer, we also wrote a function that serializes query results directly to JSON bytes in C — zero Dart objects involved. At 5,000 rows, this was 3.5x faster than Dart-side <code>jsonEncode</code>. Not useful for building Flutter widgets (you need Dart maps for that), but we shipped it as <code>selectBytes()</code> for HTTP server use cases where you want raw JSON. The real lesson was confirming: object count is what matters, not the serialization format.</p>
 <h2>Attempt 3: C-Level Connection That Outlives Isolates</h2>
 <p>Each <code>Isolate.run()</code> call spawned a fresh isolate and opened a new database connection. The connection setup (open file, configure WAL mode, set pragmas) cost ~0.5-1ms per query.</p>
 <p>We moved the <code>sqlite3*</code> connection handle and a prepared statement LRU cache into a C struct. Dart isolates call into C using the pointer address — since native memory is process-global (not isolate-scoped), the same C connection is accessible from any isolate. The connection and its cached statements outlive any individual Dart isolate.</p>
