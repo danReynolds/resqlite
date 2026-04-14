@@ -452,17 +452,32 @@ function buildCharts() {
         onClick(evt, elements) {
           if (!elements.length) return;
           const run = runs[elements[0].index];
-          selectExpByRun(run);
+          const exp = findExpForRun(run);
+          if (exp) {
+            // Toggle: if already selected, deselect.
+            if (selectedExpId === exp.id) {
+              closeDetail();
+            } else {
+              selectExp(exp.id);
+            }
+          }
         },
       },
     });
   }
 }
 
-// ── Find the chart run index closest to an experiment date ──
+// ── Find the chart run index closest to an experiment ──
+// Experiments only have a date (YYYY-MM-DD), so many share the same date.
+// We find the first run on that date as a reasonable anchor point.
 function findRunIndexForExp(exp) {
   if (!exp.date || !DATA) return -1;
   const runs = DATA.runs;
+  // Find the first run whose date matches the experiment date.
+  for (let i = 0; i < runs.length; i++) {
+    if (runs[i].date === exp.date) return i;
+  }
+  // Fallback: closest by timestamp within 3 days.
   const expTs = new Date(exp.date).getTime();
   let bestIdx = -1;
   let bestDist = Infinity;
@@ -470,7 +485,20 @@ function findRunIndexForExp(exp) {
     const dist = Math.abs(new Date(runs[i].timestamp).getTime() - expTs);
     if (dist < bestDist) { bestDist = dist; bestIdx = i; }
   }
-  return bestDist < 2 * 86400000 ? bestIdx : -1;
+  return bestDist < 3 * 86400000 ? bestIdx : -1;
+}
+
+// ── Find the closest experiment to a benchmark run ──
+function findExpForRun(run) {
+  const runTs = new Date(run.timestamp).getTime();
+  let best = null;
+  let bestDist = Infinity;
+  for (const exp of DATA.experiments) {
+    if (!exp.date) continue;
+    const dist = Math.abs(new Date(exp.date).getTime() - runTs);
+    if (dist < bestDist) { bestDist = dist; best = exp; }
+  }
+  return best && bestDist < 2 * 86400000 ? best : null;
 }
 
 // ── Highlight a data point on all charts with vertical line + dim ──
@@ -514,14 +542,18 @@ Chart.register(verticalLinePlugin);
 function highlightChartIndex(runIndex) {
   highlightedRunIndex = runIndex;
   for (const chart of Object.values(chartInstances)) {
-    // Dim all datasets when a point is highlighted, restore when cleared.
     chart.data.datasets.forEach(ds => {
-      if (!ds._origBorderColor) ds._origBorderColor = ds.borderColor;
-      if (!ds._origBgColor) ds._origBgColor = ds.backgroundColor;
+      // Store originals once at init, never overwrite.
+      if (ds._origBorderColor === undefined) {
+        ds._origBorderColor = ds.borderColor;
+        ds._origBgColor = ds.backgroundColor;
+      }
       if (runIndex >= 0) {
+        // Dim: set to 25% opacity version of original color.
         ds.borderColor = ds._origBorderColor + '40';
-        ds.backgroundColor = ds._origBgColor.replace(/33$/, '10');
+        ds.backgroundColor = ds._origBgColor.slice(0, 7) + '10';
       } else {
+        // Restore originals.
         ds.borderColor = ds._origBorderColor;
         ds.backgroundColor = ds._origBgColor;
       }
@@ -552,7 +584,14 @@ function renderExpList() {
   // Event delegation on the list container for reliable hover + click.
   container.addEventListener('click', (e) => {
     const item = e.target.closest('.exp-item');
-    if (item) selectExp(item.dataset.id);
+    if (!item) return;
+    const id = item.dataset.id;
+    // Toggle: re-clicking the selected experiment closes it.
+    if (selectedExpId === id) {
+      closeDetail();
+    } else {
+      selectExp(id);
+    }
   });
   container.addEventListener('mouseover', (e) => {
     const item = e.target.closest('.exp-item');
@@ -624,33 +663,7 @@ function closeDetail() {
   highlightChartIndex(-1);
 }
 
-// When mouse leaves an individual item but stays in the list, clear hover highlight
-// (unless an experiment is selected in detail view).
-document.getElementById('expList')?.addEventListener('mouseout', (e) => {
-  const item = e.target.closest('.exp-item');
-  const related = e.relatedTarget?.closest?.('.exp-item');
-  if (item && !related && !selectedExpId) {
-    highlightChartIndex(-1);
-  }
-});
 
-// ── Chart click → find nearest experiment ──
-function selectExpByRun(run) {
-  const exps = DATA.experiments;
-  let best = null;
-  let bestDist = Infinity;
-  const runTs = new Date(run.timestamp).getTime();
-
-  for (const exp of exps) {
-    if (!exp.date) continue;
-    const dist = Math.abs(new Date(exp.date).getTime() - runTs);
-    if (dist < bestDist) { bestDist = dist; best = exp; }
-  }
-
-  if (best && bestDist < 2 * 86400000) {
-    selectExp(best.id);
-  }
-}
 
 function esc(s) {
   if (!s) return '';
