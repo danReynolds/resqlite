@@ -291,24 +291,23 @@
 
   <div class="stats">
     <div class="stat">
-      <div class="num">5.5x</div>
-      <div class="label">faster reads<br>(bytes, 10K rows)</div>
+      <div class="num">1.8x</div>
+      <div class="label">faster select()<br>(1K rows)</div>
     </div>
     <div class="stat">
-      <div class="num">2.4x</div>
+      <div class="num">2.1x</div>
       <div class="label">faster writes<br>(single inserts)</div>
     </div>
     <div class="stat">
-      <div class="num">0 ms</div>
-      <div class="label">main-thread cost<br>(selectBytes)</div>
+      <div class="num">1 ms</div>
+      <div class="label">main-thread cost<br>(10K row read)</div>
     </div>
     <div class="stat">
       <div class="num">107K</div>
       <div class="label">point queries<br>per second</div>
     </div>
   </div>
-  <p style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Compared against other Dart
-    SQLite libraries. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
+  <p style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Using the same APIs (select, execute) across all libraries. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
 
   <div class="cards">
     <a class="card" href="api/resqlite/resqlite-library.html">

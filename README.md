@@ -45,12 +45,12 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 | Metric | Wall time | Main isolate time |
 |---|---:|---:|
 | Point query (1 row) | 0.010ms | 0.010ms |
-| 1,000-row read | 0.38ms | 0.10ms |
-| 10,000-row read | 4.9ms | 1.0ms |
-| Batch insert (1,000 rows) | 0.45ms | 0.00ms |
-| Stream invalidation | 0.04ms | 0.04ms |
+| 1,000-row select() | 0.40ms | 0.10ms |
+| 10,000-row select() | 5.60ms | 1.01ms |
+| Batch insert (1,000 rows) | 0.43ms | 0.00ms |
+| Stream invalidation | 0.05ms | 0.05ms |
 
-~105K point queries/sec. Sub-millisecond stream invalidation.
+~107K point queries/sec. 1.8x faster reads and 2.1x faster writes than peer libraries using the same APIs. Sub-millisecond stream invalidation.
 
 Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware.
 
