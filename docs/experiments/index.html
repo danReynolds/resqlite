@@ -429,8 +429,8 @@ function buildCharts() {
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,
-        pointRadius: 3,
-        pointHoverRadius: 6,
+        pointRadius: 4,
+        pointHoverRadius: 7,
         spanGaps: true,
         yAxisID: isQps ? 'yQps' : 'y',
       };
@@ -458,7 +458,7 @@ function buildCharts() {
       data: { labels, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'nearest', intersect: true },
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 10 } } },
           tooltip: {
