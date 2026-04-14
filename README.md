@@ -1,7 +1,7 @@
 # resqlite
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)]()
+[![Docs](https://img.shields.io/badge/docs-Homepage-58a6ff.svg)](https://danreynolds.github.io/resqlite/)
 [![API Docs](https://img.shields.io/badge/docs-API%20Reference-blue.svg)](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-Interactive%20Dashboard-brightgreen.svg)](https://danreynolds.github.io/resqlite/benchmarks/)
 
