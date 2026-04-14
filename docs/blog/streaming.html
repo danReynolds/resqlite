@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streaming: stream() — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="./">&larr; All Posts</a>
+    <a href="../">Home</a>
+    <a href="../benchmarks/">Benchmarks</a>
+    <a href="../experiments/">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Deep Dive</span>
+    <h1>Streaming: stream()</h1>
+<h2>Overview</h2>
+<pre><code class="lang-dart">
+final stream = db.stream('SELECT * FROM users WHERE active = ?', [1]);
+stream.listen((rows) {
+  // Fires immediately with current results.
+  // Re-fires whenever the users table changes.
+  setState(() =&gt; users = rows);
+});
+</code></pre>
+<p><code>stream()</code> returns a reactive query that emits results and re-emits whenever the underlying data changes. It combines three mechanisms:</p>
+<ol>
+<li><strong>Authorizer hook</strong> on readers — captures which tables a query reads</li>
+<li><strong>Preupdate hook</strong> on writer — captures which tables a write modifies</li>
+<li><strong>StreamEngine</strong> on main — matches dirty tables against stream dependencies, manages lifecycle</li>
+</ol>
+<h2>How Dependencies Are Captured</h2>
+<p>SQLite's <a href="https://www.sqlite.org/c3ref/set_authorizer.html">authorizer callback</a> fires during query preparation and execution. For action code <code>SQLITE_READ</code> (20), it receives the table name being read. We install this on every reader connection:</p>
+<pre><code class="lang-c">
+// In resqlite_open(), for each reader:
+sqlite3_set_authorizer(rdb, authorizer_callback, &amp;reader-&gt;read_tables);
+</code></pre>
+<p>The callback appends table names to a per-reader <code>resqlite_read_set</code> (deduplicated). After a query completes, Dart reads the set via <code>resqlite_get_read_tables()</code> and clears it.</p>
+<h3>Why the authorizer instead of SQL parsing</h3>
+<p>The authorizer handles cases that SQL parsing cannot:</p>
+<ul>
+<li><strong>JOINs:</strong> <code>SELECT * FROM users JOIN posts ON ...</code> → reads both <code>users</code> and <code>posts</code></li>
+<li><strong>Subqueries:</strong> <code>SELECT * FROM users WHERE id IN (SELECT user_id FROM posts)</code> → reads both</li>
+<li><strong>Views:</strong> <code>SELECT * FROM active_users</code> where <code>active_users</code> is a view on <code>users</code> → reads <code>users</code></li>
+<li><strong>CTEs:</strong> Common table expressions that reference multiple tables</li>
+<li><strong>Triggers:</strong> If a read triggers a trigger that reads another table</li>
+<li><strong>Attached databases:</strong> Tables from attached database files</li>
+</ul>
+<p>SQLite itself tells us what it's reading. No parsing heuristics needed.</p>
+<h3>Performance impact</h3>
+<p>The authorizer fires per-table-access during query planning/execution — typically 1-5 calls per query. Each call is a C function that does a <code>strcmp</code> for deduplication and a <code>strdup</code> for new entries. Benchmarks showed <strong>no measurable performance regression</strong> from having the authorizer installed on all readers (see <code>benchmark/results/2026-04-06T22-40-34-after-authorizer-hooks.md</code>).</p>
+<h2>How Dirty Tables Are Tracked</h2>
+<p>The writer connection has a <code>sqlite3_preupdate_hook</code> installed (see <a href="./writing.md">Writing</a>). It fires per-row during INSERT/UPDATE/DELETE, recording the affected table name. The dirty table set is returned with every write response to main.</p>
+<p>For transactions, dirty tables accumulate until commit. Rolled-back transactions clear the set without notifying.</p>
+<h2>StreamEngine</h2>
+<p>The <code>StreamEngine</code> (in <code>stream_engine.dart</code>) owns the full reactive query lifecycle. It receives a reference to the reader pool and manages all active streams.</p>
+<p>Internally it maintains:</p>
+<ul>
+<li><code>_entries</code> — <code>Map&lt;int, StreamEntry&gt;</code> keyed by <code>Object.hash(sql, Object.hashAll(params))</code></li>
+<li><code>_tableToKeys</code> — inverted index from table name to stream keys, for O(dirtyTables) invalidation</li>
+<li><code>_writeGeneration</code> — monotonic counter to detect writes during initial query setup</li>
+</ul>
+<p>Each <code>StreamEntry</code> holds:</p>
+<ul>
+<li><code>sql</code> and <code>params</code> — for re-querying</li>
+<li><code>readTables</code> — <code>Set&lt;String&gt;</code> of tables this query depends on</li>
+<li><code>lastResult</code> — cached most recent result for late joiners</li>
+<li><code>lastResultHash</code> — hash for result-change detection (suppresses no-op re-emissions)</li>
+<li><code>reQueryGeneration</code> — per-entry counter to discard stale out-of-order re-query results</li>
+<li><code>subscribers</code> — list of per-subscriber buffered <code>StreamController</code>s</li>
+</ul>
+<h3>Per-subscriber buffered controllers</h3>
+<p>Each subscriber gets its own non-broadcast <code>StreamController</code> that buffers events. This eliminates the race condition where broadcast controllers silently drop events when no listener is attached during async gaps (e.g., between <code>yield</code> and <code>listen</code>).</p>
+<p>When a new subscriber joins an existing stream, it receives the cached <code>lastResult</code> immediately:</p>
+<pre><code class="lang-dart">
+Stream&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt; _subscribe(StreamEntry entry) {
+  final controller = StreamController&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt;();
+  entry.subscribers.add(controller);
+  // Seed with cached result.
+  if (entry.lastResult != null) controller.add(entry.lastResult!);
+  // Clean up entry when last subscriber cancels.
+  controller.onCancel = () { ... };
+  return controller.stream;
+}
+</code></pre>
+<h3>Deduplication</h3>
+<p>Multiple calls to <code>db.stream()</code> with the same SQL and params share a single <code>StreamEntry</code>. This means 100 widgets listening to the same query produce 1 SQLite query per invalidation, not 100.</p>
+<h3>Invalidation</h3>
+<p>When a write completes and returns dirty tables, <code>database.dart</code> calls <code>streamEngine.handleDirtyTables()</code>:</p>
+<pre><code class="lang-dart">
+void handleDirtyTables(List&lt;String&gt; dirtyTables) {
+  _writeGeneration++;
+  // Look up affected stream keys via inverted index.
+  final affected = &lt;int&gt;{};
+  for (final table in dirtyTables) {
+    final keys = _tableToKeys[table];
+    if (keys != null) affected.addAll(keys);
+  }
+  // Dispatch re-queries, bumping per-entry generation to discard stale results.
+  for (final key in affected) {
+    final entry = _entries[key];
+    entry.reQueryGeneration++;
+    unawaited(_reQuery(entry, entry.reQueryGeneration));
+  }
+}
+</code></pre>
+<p><code>_reQuery()</code> runs the query on the reader pool. When the result arrives, it checks the entry's <code>reQueryGeneration</code> — if a newer re-query was dispatched while this one was in-flight, the result is stale and discarded. This prevents out-of-order delivery when rapid writes fire multiple concurrent re-queries.</p>
+<p>Result-change detection via <code>_hashResult()</code> suppresses duplicate emissions when a write dirtied a table but didn't change the query's actual results (e.g., <code>UPDATE items SET value = value</code>).</p>
+<h3>Error handling</h3>
+<p>If the initial query fails (bad SQL, connection error), the error is propagated to all subscribers via <code>controller.addError()</code> and the entry is cleaned up. Subscribers receive the error instead of hanging forever.</p>
+<h2>Lifecycle</h2>
+<pre><code class="lang-">
+db.stream(sql, params)
+  │
+  ├─ Hash key = Object.hash(sql, Object.hashAll(params))
+  │
+  ├─ StreamEngine has existing entry?
+  │   ├─ Yes: return new subscriber seeded with cached result
+  │   └─ No: create new stream ↓
+  │
+  ├─ pool.selectWithDeps(sql, params)
+  │   ├─ Executes query on a reader pool worker
+  │   └─ Also reads authorizer-captured read tables
+  │
+  ├─ Register in StreamEngine with read tables
+  │
+  ├─ Push initial results to all subscribers
+  │
+  ├─ If _writeGeneration changed during query → immediate re-query
+  │
+  └─ Stream stays active until last subscriber cancels
+      └─ On cancel: remove from engine if no subscribers remain
+</code></pre>
+<h2>Design Decisions</h2>
+<h3>Why not poll?</h3>
+<p>Polling (<code>Timer.periodic</code> + re-query) adds latency (up to the poll interval) and wastes CPU when nothing changed. Our approach re-queries immediately on write completion — sub-millisecond latency.</p>
+<h3>Why not a separate watcher isolate?</h3>
+<p>We initially considered a persistent &quot;watcher&quot; isolate that would listen for commits and notify main. But since every write already goes through the writer isolate and returns dirty tables in the response, the notification is free — it piggybacks on the write result. No extra isolate needed.</p>
+<h3>Why re-query through the reader pool instead of the writer?</h3>
+<p>Stream re-queries are reads. They use the reader pool for parallelism and the same hybrid SendPort/Isolate.exit transfer as <code>select()</code>. Routing them through the writer would serialize them and block writes.</p>
+<h3>Why per-entry re-query generation?</h3>
+<p>Rapid writes to the same table fire multiple concurrent re-queries for the same stream. Each runs on a different pool worker and sees a different WAL snapshot. Without generation tracking, an older snapshot's result could arrive after a newer one, causing the stream to emit stale data. The per-entry generation counter ensures only the latest result is accepted.</p>
+<h3>Throttling</h3>
+<p>resqlite currently re-queries immediately on every write. sqlite_async uses a 30ms default throttle to batch rapid writes. For resqlite, throttling is left as a future enhancement — the unthrottled approach gives the lowest possible latency. Apps that need throttling can debounce on the stream consumer side.</p>
+<h2>Performance Characteristics</h2>
+<p>| Metric | resqlite | sqlite_async |</p>
+<p>|---|---|---|</p>
+<p>| Initial emission | <strong>0.01 ms</strong> | 0.64 ms |</p>
+<p>| Invalidation latency | <strong>0.36 ms</strong> | 32.61 ms* |</p>
+<p>*sqlite_async has a 30ms default throttle. The comparison shows raw latency, not typical throttled behavior.</p>
+<h2>Key Files</h2>
+<ul>
+<li><code>lib/src/database.dart</code> — <code>stream()</code> (delegates to StreamEngine)</li>
+<li><code>lib/src/stream_engine.dart</code> — <code>StreamEngine</code>, <code>StreamEntry</code>, lifecycle, invalidation, re-query</li>
+<li><code>lib/src/reader_pool.dart</code> — <code>selectWithDeps()</code> (initial query with dependency capture)</li>
+<li><code>lib/src/native/resqlite_bindings.dart</code> — <code>getReadTables()</code>, <code>resqliteGetReadTables()</code></li>
+<li><code>native/resqlite.c</code> — <code>authorizer_callback()</code>, <code>resqlite_get_read_tables()</code></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>

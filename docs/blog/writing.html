@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Writing: execute(), executeBatch(), transaction() — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="./">&larr; All Posts</a>
+    <a href="../">Home</a>
+    <a href="../benchmarks/">Benchmarks</a>
+    <a href="../experiments/">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Deep Dive</span>
+    <h1>Writing: execute(), executeBatch(), transaction()</h1>
+<h2>Overview</h2>
+<p>All writes go through a <strong>persistent writer isolate</strong> — a single long-lived Dart isolate that owns the writer connection and processes messages sequentially. This mirrors SQLite's own model: one writer at a time.</p>
+<p>Three write APIs:</p>
+<ul>
+<li><strong><code>execute(sql, params)</code></strong> → <code>Future&lt;WriteResult&gt;</code> — single write, returns affected rows + last insert ID</li>
+<li><strong><code>executeBatch(sql, paramSets)</code></strong> → <code>Future&lt;void&gt;</code> — one SQL with many param sets in a transaction</li>
+<li><strong><code>transaction(callback)</code></strong> → <code>Future&lt;T&gt;</code> — interactive multi-statement transaction with reads</li>
+</ul>
+<h2>Why a Persistent Writer Isolate?</h2>
+<p>We considered three approaches:</p>
+<ol>
+<li><strong>One-off <code>Isolate.run</code> per write</strong> (like reads) — would give us <code>Isolate.exit</code> zero-copy, but writes are typically small (affected rows, last insert ID), so the copy savings are negligible. And transactions can't span multiple one-off isolates.</li>
+</ol>
+<ol>
+<li><strong>Run writes on main</strong> — simplest, but any write that triggers index updates or cascading deletes would jank the UI.</li>
+</ol>
+<ol>
+<li><strong>Persistent writer isolate</strong> — processes messages sequentially (matching SQLite's single-writer model), holds transaction state across messages, and keeps all write work off main.</li>
+</ol>
+<p>We chose option 3. The persistent isolate spawns non-blocking during <code>Database.open()</code>. The first write awaits it being ready. If the app never writes, the isolate still spawns but sits idle.</p>
+<h2>Writer Isolate Message Protocol</h2>
+<p>Six message types, each a sealed class in <code>write_worker.dart</code>:</p>
+<p>| Message | Purpose | Response |</p>
+<p>|---|---|---|</p>
+<p>| <code>ExecuteRequest</code> | Single parameterized write | <code>ExecuteResponse(WriteResult, dirtyTables)</code> |</p>
+<p>| <code>QueryRequest</code> | Read within a transaction | <code>QueryResponse(rows, dirtyTables)</code> |</p>
+<p>| <code>BatchRequest</code> | Batch write | <code>BatchResponse(dirtyTables)</code> |</p>
+<p>| <code>BeginRequest</code> | Start transaction | <code>true</code> |</p>
+<p>| <code>CommitRequest</code> | Commit transaction | <code>BatchResponse(dirtyTables)</code> |</p>
+<p>| <code>RollbackRequest</code> | Rollback transaction | <code>true</code> |</p>
+<p>Each request carries a <code>SendPort replyPort</code> for the response. The writer isolate pattern-matches on the message type and dispatches to the appropriate C function.</p>
+<h3>Transaction state</h3>
+<p>The writer isolate tracks <code>inTransaction</code> as a boolean. When true:</p>
+<ul>
+<li>Individual <code>ExecuteRequest</code> responses include empty dirty tables (accumulated until commit)</li>
+<li><code>CommitRequest</code> reads and returns the full dirty table set</li>
+<li><code>RollbackRequest</code> clears dirty tables without returning them (rolled-back changes don't count)</li>
+</ul>
+<h2>execute()</h2>
+<pre><code class="lang-dart">
+final result = await db.execute('INSERT INTO users(name) VALUES (?)', ['alice']);
+print(result.affectedRows);  // 1
+print(result.lastInsertId);  // 42
+</code></pre>
+<p>The C function <code>resqlite_execute()</code> prepares (or retrieves from cache), binds, steps, and reads <code>sqlite3_changes()</code> + <code>sqlite3_last_insert_rowid()</code>. The result struct is 16 bytes (int + long long), read via <code>ByteData</code> on the writer isolate.</p>
+<p>For DDL and non-parameterized writes (e.g., <code>CREATE TABLE</code>), we use the simpler <code>resqlite_exec()</code> which calls <code>sqlite3_exec()</code> directly.</p>
+<h2>executeBatch()</h2>
+<pre><code class="lang-dart">
+await db.executeBatch(
+  'INSERT INTO items(name, value) VALUES (?, ?)',
+  [['alice', 1], ['bob', 2], ['charlie', 3]],
+);
+</code></pre>
+<p>The C function <code>resqlite_run_batch()</code> handles the entire batch in one FFI call:</p>
+<ol>
+<li>Lock writer mutex</li>
+<li><code>BEGIN</code> transaction</li>
+<li>Prepare statement once (or retrieve from cache)</li>
+<li>Loop: bind params → step → reset (for each param set)</li>
+<li><code>COMMIT</code></li>
+<li>Unlock</li>
+</ol>
+<p>The statement is prepared once and reused with <code>sqlite3_reset()</code> + <code>sqlite3_clear_bindings()</code> between iterations. This is significantly faster than the Dart-loop approach because all bind/step/reset cycles happen in C with no FFI boundary crossings between rows.</p>
+<p>On error, the batch <code>ROLLBACK</code>s automatically. The Dart side receives a <code>StateError</code>.</p>
+<h3>Parameter serialization</h3>
+<p>Parameters are serialized into a flat native array of <code>resqlite_param</code> structs (24 bytes each). For a batch of 1000 rows × 2 params, that's one contiguous 48KB allocation. The C function indexes into this array: <code>param_sets[i * param_count + j]</code>.</p>
+<h2>transaction()</h2>
+<pre><code class="lang-dart">
+final result = await db.transaction((tx) async {
+  await tx.execute('INSERT INTO users(name) VALUES (?)', ['alice']);
+  final rows = await tx.select('SELECT COUNT(*) as cnt FROM users');
+  if (rows[0]['cnt'] as int &gt; 100) {
+    await tx.execute('DELETE FROM users WHERE old = 1');
+  }
+  return rows[0]['cnt'];
+});
+</code></pre>
+<h3>Design: async on main, not a closure on the worker</h3>
+<p>We deliberately chose an async API where the callback runs on main and sends messages to the writer isolate. The alternative — running a synchronous closure on the worker via <code>Isolate.run</code> — would require the closure to only capture sendable values. This is a non-obvious constraint that causes confusing runtime errors when the closure captures a <code>StreamController</code>, a <code>Database</code> reference, or any other non-sendable object.</p>
+<p>With the async approach, the callback is a normal Dart function on main. <code>tx.execute()</code> and <code>tx.select()</code> send messages to the writer isolate and await responses. No closure sendability constraints.</p>
+<h3>Reads within transactions</h3>
+<p><code>tx.select()</code> sends a <code>QueryRequest</code> to the writer isolate, which executes the query on the <strong>writer connection</strong> (not the reader pool). This is necessary because SQLite's uncommitted writes are only visible on the connection that made them. The reader pool's connections wouldn't see data inserted earlier in the same transaction.</p>
+<p>The query result is built on the writer isolate (same per-cell FFI approach as the reader path) and sent back via <code>SendPort.send()</code> (deep copy). This is the one place where we don't get <code>Isolate.exit</code> zero-copy transfer. But transaction reads are typically small (checking a count, reading an ID, verifying a constraint), so the copy cost is negligible.</p>
+<h3>Error handling</h3>
+<p>If any operation within the callback throws, <code>Database.transaction()</code> catches the error, sends a <code>RollbackRequest</code>, and rethrows. The writer isolate rolls back and clears dirty tables. The caller sees the original error.</p>
+<h2>Dirty Table Tracking</h2>
+<p>Every write response includes the set of tables modified by the operation. This is captured by the <code>sqlite3_preupdate_hook</code> installed on the writer connection in C.</p>
+<p>The preupdate hook fires per-row during INSERT/UPDATE/DELETE and records the table name in a deduplicated set (<code>resqlite_dirty_set</code>). After the write completes, Dart reads the set via <code>resqlite_get_dirty_tables()</code> and clears it.</p>
+<p>For transactions: dirty tables accumulate across all writes within the transaction. Individual <code>ExecuteRequest</code> responses return empty dirty tables. The <code>CommitRequest</code> response returns the accumulated set. This ensures stream invalidation happens once on commit, not per-statement.</p>
+<p>For rolled-back transactions: dirty tables are cleared without returning them. Rolled-back writes don't trigger stream invalidation.</p>
+<h2>Performance Characteristics</h2>
+<p>Single inserts (100 sequential):</p>
+<p>| Library | Wall time |</p>
+<p>|---|---|</p>
+<p>| resqlite | <strong>1.73 ms</strong> |</p>
+<p>| sqlite3 | 5.19 ms |</p>
+<p>| sqlite_async | 4.10 ms |</p>
+<p>Batch insert (1,000 rows):</p>
+<p>| Library | Wall time |</p>
+<p>|---|---|</p>
+<p>| resqlite | <strong>0.48 ms</strong> |</p>
+<p>| sqlite3 (manual) | 0.57 ms |</p>
+<p>| sqlite_async | 0.63 ms |</p>
+<p>Interactive transaction (insert + select + conditional delete):</p>
+<p>| Library | Wall time |</p>
+<p>|---|---|</p>
+<p>| resqlite | <strong>0.06 ms</strong> |</p>
+<p>| sqlite_async | 0.12 ms |</p>
+<h2>Key Files</h2>
+<ul>
+<li><code>lib/src/database.dart</code> — <code>execute()</code>, <code>executeBatch()</code>, <code>transaction()</code>, <code>Transaction</code> class</li>
+<li><code>lib/src/write_worker.dart</code> — Writer worker entrypoint, message handling, FFI bindings</li>
+<li><code>lib/src/native/resqlite_bindings.dart</code> — <code>executeWrite()</code>, <code>executeBatchWrite()</code>, <code>getDirtyTables()</code></li>
+<li><code>native/resqlite.c</code> — <code>resqlite_execute()</code>, <code>resqlite_run_batch()</code>, <code>resqlite_get_dirty_tables()</code>, preupdate hook</li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>

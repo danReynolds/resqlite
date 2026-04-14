@@ -10,10 +10,12 @@ on:
       - 'benchmark/shared/parse_results.dart'
       - 'benchmark/generate_history.dart'
       - 'benchmark/generate_devices.dart'
+      - 'benchmark/generate_blog.dart'
+      - 'doc/**/*.md'
 
 jobs:
   regenerate:
-    name: Regenerate docs JSON
+    name: Regenerate docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +33,9 @@ jobs:
       - name: Generate devices JSON
         run: dart run benchmark/generate_devices.dart
 
+      - name: Generate blog pages
+        run: dart run benchmark/generate_blog.dart
+
       - name: Check for changes
         id: diff
         run: |
@@ -41,6 +46,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/experiments/history.json docs/benchmarks/devices.json
-          git commit -m "Auto-update docs data (experiments + devices)"
+          git add docs/
+          git commit -m "Auto-update docs (experiments + devices + blog)"
           git push

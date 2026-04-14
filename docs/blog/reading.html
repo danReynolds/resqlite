@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reading: select() and selectBytes() — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="./">&larr; All Posts</a>
+    <a href="../">Home</a>
+    <a href="../benchmarks/">Benchmarks</a>
+    <a href="../experiments/">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Deep Dive</span>
+    <h1>Reading: select() and selectBytes()</h1>
+<h2>Overview</h2>
+<p>Reads are resqlite's core strength. Two APIs serve different use cases:</p>
+<ul>
+<li><strong><code>select(sql, params)</code></strong> → <code>Future&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt;</code> — standard row access</li>
+<li><strong><code>selectBytes(sql, params)</code></strong> → <code>Future&lt;Uint8List&gt;</code> — JSON bytes for HTTP responses</li>
+</ul>
+<p>Both use the same architecture: a <strong>persistent reader pool</strong> of worker isolates that dispatch queries to the C connection pool. Small results return via SendPort (fast round-trip). Large results trigger Isolate.exit for zero-copy transfer — the pool auto-respawns the worker.</p>
+<h2>Architecture</h2>
+<pre><code class="lang-">
+select()/selectBytes()
+  └─ ReaderPool._dispatch() → find available worker
+      └─ Worker Isolate (persistent)
+          ├─ resqlite_stmt_acquire() → acquires idle reader from C pool
+          ├─ Query execution (different for select vs selectBytes)
+          ├─ resqlite_stmt_release() → returns reader to pool
+          └─ SendPort.send or Isolate.exit (based on result size)
+</code></pre>
+<h2>Reader Pool</h2>
+<p>The reader pool (in <code>reader_pool.dart</code>) manages a fleet of persistent worker isolates. Each worker handles one query at a time.</p>
+<p><strong>Dispatch:</strong> Round-robin with busy tracking. A worker is &quot;available&quot; if it's alive, has a SendPort, and isn't currently processing a query. If all workers are busy, callers wait on a shared <code>Completer</code> that fires when any worker becomes free.</p>
+<p><strong>Hybrid transmission:</strong> After executing a query, the worker decides based on result size:</p>
+<ul>
+<li>Below threshold (6000 cells): <code>SendPort.send</code> — copies the result but worker stays alive for the next query</li>
+<li>Above threshold: <code>Isolate.exit</code> — zero-copy transfer but worker dies. Pool detects the death and spawns a replacement.</li>
+</ul>
+<p>The sacrifice threshold was tuned empirically (see Experiment 019). At 1000 rows × 6 cols, pool and one-off are tied. Above that, zero-copy wins.</p>
+<p><strong>Sacrifice safety:</strong> The worker wraps every reply as <code>[result, sacrificed]</code>. The pool checks this flag — if the worker sacrificed, the slot stays unavailable until the replacement finishes spawning. This prevents a race where callers claim a slot between the replyPort handler (which fires first) and the exitPort handler (which fires later).</p>
+<p><strong>Error handling:</strong> If a query throws (bad SQL, connection error), the worker catches the exception and sends it back via a 3-element error envelope <code>[message, false, true]</code>. The pool completes the caller's future with an error. The worker stays alive for the next query.</p>
+<p><strong>Parallel spawn:</strong> Workers are spawned concurrently via <code>Future.wait</code> during <code>Database.open</code>, reducing startup time from N × spawn_time to max(spawn_time).</p>
+<h2>select(): The Maps Path</h2>
+<h3>The flat list + lazy ResultSet</h3>
+<p>This was the most impactful design choice. See <a href="../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a>.</p>
+<p>Instead of building <code>LinkedHashMap</code> per row (~8-10 internal objects each), we store all values in a single flat <code>List&lt;Object?&gt;</code>:</p>
+<pre><code class="lang-">
+values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
+</code></pre>
+<p><code>ResultSet</code> creates lightweight <code>Row</code> objects <strong>lazily on main</strong> when <code>result[i]</code> is accessed. Each <code>Row</code> implements <code>Map&lt;String, Object?&gt;</code> via <code>MapMixin</code>, looking up column indices from a shared <code>RowSchema</code>.</p>
+<p>Why this matters: <code>Isolate.exit()</code> validates every Dart heap object in the transfer graph. With <code>LinkedHashMap</code>, 20,000 rows created ~200,000 internal objects. With our flat list approach, the structural objects drop to ~3 (ResultSet + RowSchema + the values List). The actual value objects (strings, ints, doubles) are the same either way, but eliminating the map internals cut the validation time dramatically.</p>
+<p><code>Row</code> creation on main is trivial: 3 field assignments (list ref, schema ref, offset int). No decoding, no FFI, no <code>utf8.decode</code> — the values are already fully-materialized Dart objects sitting in the flat list.</p>
+<h3>Batch FFI: resqlite_step_row</h3>
+<p>See <a href="../../experiments/009-batch-ffi-step-row.md">Experiment 009</a>.</p>
+<p>Instead of ~16 individual FFI calls per row (step + column_type × N + column_value × N + column_bytes × N), we make one C call per row:</p>
+<pre><code class="lang-c">
+int resqlite_step_row(sqlite3_stmt* stmt, int col_count, resqlite_cell* cells);
+</code></pre>
+<p>C steps the row and fills a pre-allocated native struct array with all column types and values. Dart reads from this buffer via <code>ByteData</code> — no FFI call per cell.</p>
+<p>The cells buffer is allocated once (native memory) and reused across all rows. Dart reads integers and doubles directly via <code>ByteData.getInt64/getFloat64</code>. Text values require <code>utf8.decode</code> from a native pointer, which is the unavoidable cost for creating Dart <code>String</code> objects.</p>
+<h3>Connection pool</h3>
+<p>The C layer maintains N read-only <code>sqlite3*</code> connections (default matching Dart pool size), each with its own prepared statement LRU cache. <code>resqlite_stmt_acquire()</code> finds an idle reader (spin-wait via <code>sqlite3_sleep</code> if all busy), and <code>resqlite_stmt_release()</code> returns it.</p>
+<p>This enables true parallel reads — multiple pool workers execute simultaneously on different reader connections. SQLite's WAL mode supports concurrent readers natively.</p>
+<h3>NOMUTEX</h3>
+<p>All connections are opened with <code>SQLITE_OPEN_NOMUTEX</code>. See <a href="../../experiments/004-nomutex-per-query-locking.md">Experiment 004</a>.</p>
+<p>SQLite's default <code>FULLMUTEX</code> wraps every API call in a mutex — ~60,000 lock/unlock operations for a 20,000-row query. Our per-query mutex (lock in <code>stmt_acquire</code>, unlock in <code>stmt_release</code>) replaces this with 2 operations per query.</p>
+<h2>selectBytes(): The C JSON Path</h2>
+<p>See <a href="../../experiments/001-c-native-json-serialization.md">Experiment 001</a>.</p>
+<p><code>selectBytes()</code> takes a completely different path. Instead of building Dart objects, a C function reads SQLite columns and writes JSON directly into a <code>malloc</code>'d buffer:</p>
+<pre><code class="lang-c">
+int resqlite_query_bytes(resqlite_db* db, const char* sql, ...);
+</code></pre>
+<p>The C function handles: string escaping (scan-then-flush for unescaped spans), integer formatting (hand-rolled <code>fast_i64_to_str</code> — avoids <code>snprintf</code> format parsing), double formatting, null literals, and array/object structure. The resulting <code>Uint8List</code> transfers to main — one object, O(1) validation.</p>
+<p>This bypasses all Dart object creation for result data. No <code>Map</code>, no <code>String</code>, no <code>Row</code>. The bytes are ready to hand to shelf/dart_frog.</p>
+<h3>When to use which</h3>
+<ul>
+<li><strong><code>select()</code></strong> when you need to access row data in Dart (UI binding, data processing)</li>
+<li><strong><code>selectBytes()</code></strong> when the end consumer wants JSON (HTTP responses, file export, inter-service communication)</li>
+</ul>
+<h2>Performance Characteristics</h2>
+<p>At 5,000 rows (6 columns, mixed types):</p>
+<p>| Metric | select() | selectBytes() | sqlite3 | sqlite_async |</p>
+<p>|---|---|---|---|---|</p>
+<p>| Wall time | 2.25 ms | 3.14 ms | 4.20 ms | 4.10 ms |</p>
+<p>| Main-isolate time | 0.49 ms | 0.00 ms | 4.20 ms | 0.83 ms |</p>
+<h2>Key Files</h2>
+<ul>
+<li><code>lib/src/database.dart</code> — <code>select()</code>, <code>selectBytes()</code> (delegates to reader pool)</li>
+<li><code>lib/src/reader_pool.dart</code> — <code>ReaderPool</code>, <code>_WorkerSlot</code>, dispatch, lifecycle</li>
+<li><code>lib/src/read_worker.dart</code> — worker entrypoint, <code>executeQuery</code>, <code>executeQueryBytes</code>, FFI bindings</li>
+<li><code>lib/src/row.dart</code> — <code>Row</code>, <code>RowSchema</code>, <code>ResultSet</code></li>
+<li><code>lib/src/native/resqlite_bindings.dart</code> — FFI bindings, parameter allocation</li>
+<li><code>native/resqlite.c</code> — <code>resqlite_stmt_acquire/release</code>, <code>resqlite_step_row</code>, <code>resqlite_query_bytes</code></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>
