@@ -49,7 +49,40 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 ## Conventions
 
 - **Experiment number:** Monotonically increasing, never reused
-- **Date:** When the experiment was run
+- **Date:** When the experiment was run (full timestamp preferred: `2026-04-14T12:30:00`)
 - **Status:** `Accepted` (merged into codebase), `In Review` (promising but not merged), or `Rejected` (abandoned, with explanation)
 - **Commit:** Git hash of the implementing commit (added to header of each accepted experiment)
-- Each file includes: Problem, Hypothesis, What We Built/Tested, Results with benchmarks, Why Accepted/Rejected
+
+### Standard Template
+
+Use these exact headings so the experiments page can extract content automatically:
+
+```markdown
+# Experiment NNN: Title
+
+**Date:** 2026-04-14
+**Status:** Accepted / Rejected
+**Commit:** [`abc1234`](https://github.com/danReynolds/resqlite/commit/abc1234)
+
+## Problem
+
+What performance issue or opportunity was identified.
+
+## Hypothesis
+
+The proposed optimization and why it should work.
+
+## Approach
+
+What was built or changed. Implementation details.
+
+## Results
+
+Benchmark measurements. Use markdown tables for comparisons.
+
+## Decision
+
+Why accepted or rejected. Trade-offs considered.
+```
+
+Older experiments use varied headings (`What We Built`, `Changes`, `Benchmark`, `Why Accepted`, etc.) — those still work, but new experiments should follow this template.
