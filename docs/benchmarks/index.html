@@ -316,6 +316,21 @@ Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
 Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
+// Global tooltip: append units to all values.
+Chart.defaults.plugins.tooltip.callbacks.label = function(ctx) {
+  const label = ctx.dataset.label || '';
+  const v = ctx.parsed.y;
+  if (v == null) return null;
+  // Detect unit from axis or chart title.
+  const yAxis = ctx.chart.options.scales?.y;
+  const unit = yAxis?.title?.text || 'ms';
+  const isQps = unit.toLowerCase().includes('qps') || label.toLowerCase().includes('qps') || label.toLowerCase().includes('faster');
+  if (isQps || unit === 'Speedup (x faster)') {
+    return `${label}: ${v.toFixed(1)}x`;
+  }
+  return `${label}: ${v.toFixed(2)} ms`;
+};
+
 // Plugin: draw winner labels on bar charts.
 // For each x-index group, finds the smallest bar (lower is better),
 // draws the library color dot + "N.Nx" above it.
@@ -353,16 +368,15 @@ Chart.register({
       const speedup = runnerUp.val / winner.val;
       if (speedup < 1.05) continue; // Skip if negligible difference.
 
-      // Draw label above the winner bar.
+      // Draw trophy above the winner bar.
       const x = winner.bar.x;
-      const y = winner.bar.y - 8;
+      const y = winner.bar.y - 4;
 
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
-      ctx.fillStyle = winner.color || '#3fb950';
-      ctx.fillText(`${speedup.toFixed(1)}x`, x, y);
+      ctx.font = '14px serif';
+      ctx.fillText('\u{1F3C6}', x, y);
       ctx.restore();
     }
   },
