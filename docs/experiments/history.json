@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-14T13:48:29.144133",
+  "generated": "2026-04-14T21:08:10.706302",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -2847,7 +2847,7 @@
       "commit": null,
       "problem": "Every `select()` call spawns a one-off isolate via `Isolate.spawn` + `Isolate.exit`. The spawn cost (~0.07-0.09ms) is paid per query. For high-frequency small queries (single-row lookups, pagination), this overhead is a significant fraction of total query time.",
       "hypothesis": null,
-      "approach": null,
+      "approach": "### Approach A: All results via SendPort.send (persistent workers)\n\nWorkers stay alive, all results go through `SendPort.send()` deep copy.\n\n**Results at 5000 rows:**\n\n| Metric | One-off isolates | Persistent pool (SendPort) | Change |\n|---|---|---|---|\n| select_5k_wall | 3008 μs | 5961 μs | **+98% worse** |\n| param_100q_wall | 27130 μs | 51943 μs | **+91% worse** |\n\n**Why it failed:** `SendPort.send()` must serialize the entire object graph (maps with strings), copy to the receiver's heap, and deserialize. This serialization far exceeds `Isolate.exit()`'s validation walk. At 5000 rows, the copy cost is ~3ms — double the total query time with `Isolate.exit()`.\n\n### Approach B: Hybrid — SendPort for small, Isolate.exit for large (sacrificial workers)\n\nWorkers use `SendPort.send()` for sm...",
       "results": null,
       "reasoning": "Three approaches tried, all worse than or equal to one-off isolates:\n- Pure SendPort: 98% slower at 5k rows\n- Hybrid sacrificial: equivalent at large sizes, inconclusive at small\n- Optimized hybrid: 22% slower on rapid-fire single-row lookups\n\nThe one-off `Isolate.spawn` + `Isolate.exit` architecture is optimal for resqlite's read path across all result sizes.\n\n**Key lesson:** Dart's `Isolate.exit()` ownership transfer is fundamentally cheaper than `SendPort.send()` serialization for complex object graphs. The `Isolate.spawn` cost (~70μs) is a fixed overhead that is always less than the `SendPort.send()` copy cost for any result with strings. Persistent worker pools only make sense when results are trivial primitives (ints, bools) that serialize cheaply."
     },
@@ -2861,8 +2861,8 @@
       "problem": null,
       "hypothesis": null,
       "approach": null,
-      "results": null,
-      "reasoning": null
+      "results": "### 1. sqlite_async Architecture Analysis\n\nsqlite_async (v0.14.0-wip.0) uses a persistent `IsolateWorker` pool. The read path for `getAll()` is:\n\n```\ngetAll(sql, params)\n  -> readLock()\n    -> _useConnection(writer: false)\n      -> pool.reader()             // lease a connection from native pool\n      -> _takeIsolateWorker()      // get an IsolateWorker from queue\n      -> _LeasedContext(inner, worker)\n        -> execute(sql, params)\n          -> _runOnWorker(closure)\n            -> inner.unsafeAccess(conn => {\n                 ptr = conn.unsafePointer.address   // extract raw pointer\n                 worker.run(closure_capturing_ptr)  // send to worker isolate\n               })\n```\n\n**Key design choices:**\n\n- **IsolateWorker sends closures, not data messages:** Instead of sending SQL +...",
+      "reasoning": "**Keep the one-off `Isolate.spawn` + `Isolate.exit` architecture for reads.** Reasons:\n\n1. **Performance is equivalent to sqlite_async's persistent pool** — confirmed by direct benchmark comparison.\n\n2. **Simplicity** — no worker lifecycle management, no respawning, no message protocol, no request serialization.\n\n3. **Natural concurrency** — each query gets its own OS thread, enabling true parallelism on multi-core. Pool workers are single-threaded and process queries sequentially.\n\n4. **Zero-copy for any result size** — `Isolate.exit` transfers ownership of arbitrarily large object graphs with O(n) validation walk but no copying. `SendPort.send` must deep-copy everything, and the cost grows linearly with string content.\n\n5. **The spawn overhead is constant** — ~50us regardless of resul..."
     },
     {
       "id": "013",
@@ -2871,11 +2871,11 @@
       "status": "accepted",
       "summary": "12-19% on small results, 5-9% across the board",
       "commit": "af2cfd0",
-      "problem": null,
+      "problem": "Dart FFI calls without `isLeaf` perform a full thread state transition on every call:\n1. Transition from Dart mutator to native thread state\n2. Safepoint check (can the GC run?)\n3. Execute the C function\n4. Transition back to Dart mutator state\n\nWith `isLeaf: true`, steps 1-2 and 4 are eliminated. The requirement is that the C function doesn't call back into Dart and doesn't block for extended time. All of resqlite's C functions qualify — they're pure computation against in-process SQLite memory.",
       "hypothesis": "Adding `isLeaf: true` to all `@ffi.Native` bindings will reduce per-call overhead by eliminating safepoint checks and thread state transitions on every Dart-to-C call.",
       "approach": "Added `isLeaf: true` to all 33 `@ffi.Native` annotations across three files:\n- `database.dart` — 6 bindings (sqlite3_column_count, sqlite3_column_name, resqlite_stmt_acquire, resqlite_stmt_release, resqlite_step_row, strlen)\n- `resqlite_bindings.dart` — 11 bindings (resqlite_open, resqlite_close, resqlite_exec, resqlite_execute, resqlite_run_batch, resqlite_get_dirty_tables, resqlite_get_read_tables, resqlite_writer_handle, resqlite_free, and helpers)\n- `writer_isolate.dart` — 16 bindings (sqlite3_prepare_v2, sqlite3_bind_*, sqlite3_step, sqlite3_reset, sqlite3_finalize, sqlite3_column_*, sqlite3_changes)",
       "results": "Compared against previous run (after-cleanup baseline):\n\n| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Select Maps 100 rows | 0.32ms | 0.26ms | **-19%** |\n| Schema Narrow (2 cols) | 0.17ms | 0.15ms | **-12%** |\n| Schema Wide (20 cols) | 1.11ms | 1.01ms | -9% |\n| Parameterized (100 × 500 rows) | 19.34ms | 17.77ms | -8% |\n| Select Maps 5000 rows | 2.39ms | 2.21ms | -8% |\n| Batch Insert 10k rows | 4.83ms | 4.52ms | -6% |\n| Select Bytes 1000 rows | 0.78ms | 0.74ms | -5% |\n| Schema Text-heavy | 0.63ms | 0.60ms | -5% |\n\n**0 regressions.** Improvements strongest on small results where FFI overhead is a larger fraction of total time.",
-      "reasoning": null
+      "reasoning": "**Accepted.** Zero complexity cost, zero risk, consistent improvement across all benchmarks."
     },
     {
       "id": "014",
@@ -2888,7 +2888,7 @@
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
       "approach": null,
       "results": "### locking_mode=EXCLUSIVE — REJECTED\n\nSetting `PRAGMA locking_mode=EXCLUSIVE` on the writer causes `SQLITE_BUSY` (error 5) on all reader connections. Despite research suggesting WAL mode allows concurrent readers with an exclusive writer, the reality is that EXCLUSIVE locking mode holds the file lock permanently, blocking all other connections.\n\n**This is incompatible with our reader pool architecture.** Reverted immediately.\n\n### BEGIN IMMEDIATE — ACCEPTED\n\nChanged `BEGIN` to `BEGIN IMMEDIATE` in both `resqlite_run_batch` (C) and the writer isolate's pre-allocated transaction strings (Dart). Acquires the write lock upfront instead of deferring to the first write statement. Since our writer is the only connection that writes, the lock is always available.\n\nTheoretically avoids the lock...",
-      "reasoning": null
+      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside"
     },
     {
       "id": "014",
@@ -2901,7 +2901,7 @@
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
       "approach": null,
       "results": "### locking_mode=EXCLUSIVE — REJECTED\n\nSetting `PRAGMA locking_mode=EXCLUSIVE` on the writer causes `SQLITE_BUSY` (error 5) on all reader connections. Despite research suggesting WAL mode allows concurrent readers with an exclusive writer, the reality is that EXCLUSIVE locking mode holds the file lock permanently, blocking all other connections.\n\n**This is incompatible with our reader pool architecture.** Reverted immediately.\n\n### BEGIN IMMEDIATE — ACCEPTED\n\nChanged `BEGIN` to `BEGIN IMMEDIATE` in both `resqlite_run_batch` (C) and the writer isolate's pre-allocated transaction strings (Dart). Acquires the write lock upfront instead of deferring to the first write statement. Since our writer is the only connection that writes, the lock is always available.\n\nTheoretically avoids the lock...",
-      "reasoning": null
+      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside"
     },
     {
       "id": "015",
@@ -2914,7 +2914,7 @@
       "hypothesis": "Shrinking `resqlite_cell` from 48 bytes to 16 bytes using a C union would improve cache locality for the per-row cell buffer, especially for wide schemas and large result sets.",
       "approach": "Previous layout (48 bytes):\n```c\ntypedef struct {\n    int type;              // 4 bytes + 4 padding\n    long long int_val;     // 8 bytes\n    double double_val;     // 8 bytes\n    const char* text_ptr;  // 8 bytes\n    int text_len;          // 4 bytes + 4 padding\n    const void* blob_ptr;  // 8 bytes\n} resqlite_cell;\n```\n\nNew layout (16 bytes):\n```c\ntypedef struct {\n    int type;        // 4 bytes\n    int len;         // 4 bytes (text/blob length)\n    union {\n        long long i; // 8 bytes\n        double d;    // 8 bytes\n        const void* p; // 8 bytes (text/blob pointer)\n    };\n} resqlite_cell;\n```\n\nThe Dart side was also simplified — 3 offset constants instead of 7, and all value types read from the same union offset.",
       "results": "Compared against writer-tuning baseline: **0 meaningful wins, 0 meaningful regressions.** All benchmarks within noise.\n\nThe buffer size reduction doesn't show up because even with the old 48-byte layout, a 10-column × 1-row buffer is only 480 bytes — well within L1 cache. The benefit would appear at much larger working sets (50k+ rows × 20+ columns).",
-      "reasoning": null
+      "reasoning": "**Accepted** — not for performance (neutral), but for code quality:\n- Simpler C struct (union makes the mutual exclusivity explicit)\n- Fewer Dart offset constants (3 instead of 7)\n- All value types at the same offset (simpler reading loop)\n- 3x less memory allocation per query (nice-to-have)"
     },
     {
       "id": "016",
@@ -2927,7 +2927,7 @@
       "hypothesis": null,
       "approach": "### New compile-time flags (hook/build.dart)\n- `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1` — readers automatically get `synchronous=NORMAL` in WAL mode. Removed the explicit PRAGMA call from `open_connection`.\n- `SQLITE_OMIT_AUTOINIT` — removes the `sqlite3_initialize()` check from every API entry point. Added explicit `sqlite3_initialize()` call in `resqlite_open`.\n- `SQLITE_OMIT_UTF16` — removes dead UTF-16 code paths. We only use UTF-8 via FFI.\n- `SQLITE_LIKE_DOESNT_MATCH_BLOBS` — enables the LIKE optimization fast path.\n\n### sqlite3_prepare_v3 with SQLITE_PREPARE_PERSISTENT\nAll statement preparations in the C layer now use `sqlite3_prepare_v3` with `SQLITE_PREPARE_PERSISTENT`. This tells SQLite to allocate the statement's internal memory from the system allocator instead of the connection's ...",
       "results": "Benchmark comparison: 1 win (transaction -17%), 2 regressions (both noise — parameterized queries affected by system load, all libraries slower; batch 100 rows is 10μs).\n\nThese optimizations target per-API-call overhead that's below the measurement resolution of our benchmark suite. They're correct by construction — less work per call, no behavioral change.",
-      "reasoning": null
+      "reasoning": "**Accepted** — correct improvements with no downside. The per-call savings stack with `isLeaf: true` (experiment 013) but are individually too small to measure."
     },
     {
       "id": "017",
@@ -2940,7 +2940,7 @@
       "hypothesis": "`Dart_PostCObject` uses a completely different code path (`dart_api_message.cc`) that bypasses the `Isolate.exit` validation walk. By building query results as `Dart_CObject` structs in C and posting them directly to a Dart `ReceivePort`, we could eliminate the ~470μs validation walk at 10k rows.",
       "approach": "New C function `resqlite_select_post` that:\n1. Acquires reader from pool\n2. Prepares/caches statement, binds params\n3. Steps rows, building a `Dart_CObject` tree (kInt64/kDouble/kString/kNull per cell)\n4. Posts via `Dart_PostCObject_DL` to a Dart `ReceivePort`\n5. Frees all C-side allocations\n\nVendored Dart SDK headers (`dart_api_dl.h/c`), updated build system, added FFI bindings and `Database.selectPost()` method.",
       "results": "| Rows | Isolate.exit | PostCObject | Delta |\n|---:|---:|---:|:---|\n| 100 | 0.15ms | 0.25ms | **66% slower** |\n| 1000 | 0.41ms | 2.32ms | **459% slower** |\n| 5000 | 1.84ms | 7.31ms | **297% slower** |\n| 10000 | 5.24ms | 17.61ms | **236% slower** |\n\nPostCObject is 2-5x slower at every size.",
-      "reasoning": null
+      "reasoning": "**Rejected.** Isolate.exit's validation walk (~10ns per object) is dramatically cheaper than Dart_PostCObject's serialize/deserialize cycle. The shared-heap ownership transfer model is the optimal path for Dart-to-Dart data transfer.\n\nThis confirms that our Isolate.exit + flat list + lazy ResultSet architecture (experiments 008-009) is at the practical performance ceiling for Dart isolate-based data transfer."
     },
     {
       "id": "018",
@@ -2953,7 +2953,7 @@
       "hypothesis": "Stepping 64 rows per FFI call instead of 1 would reduce FFI crossing overhead from 5000 calls to ~78 calls at 5000 rows. At ~50ns saved per call (with isLeaf), that's ~245μs saved.",
       "approach": "New C function `resqlite_step_rows` that:\n1. Steps up to N rows per call (batch size = 64)\n2. Copies text/blob data into a side buffer (since `sqlite3_column_text` pointers are invalidated by the next `sqlite3_step`)\n3. Returns actual row count and a status code (SQLITE_ROW, SQLITE_DONE, or RESQLITE_BUFFER_FULL)\n\nUpdated Dart `_selectOnWorker` and `_selectWithDepsOnWorker` to call `_resqliteStepRows` in a loop, processing all rows in each batch before the next FFI call.",
       "results": "| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Select Maps 100 rows | 0.34ms | 0.28ms | -18% (noise) |\n| Select Maps 5000 rows | 2.40ms | 2.52ms | +5% |\n| Schema Text-heavy | 0.62ms | 0.77ms | **+24% regression** |\n| Schema Nullable | 0.40ms | 0.50ms | **+25% regression** |\n| Parameterized 100×500 | 23.83ms | 19.49ms | -18% (noise — recovering from bad prior run) |\n\nThe text-heavy and nullable regressions are real — the memcpy overhead for string data exceeds the FFI crossing savings.",
-      "reasoning": null
+      "reasoning": "**Rejected.** Single-row stepping with direct SQLite pointer access is faster than multi-row stepping with string copies. The FFI crossing cost (~50ns per call with isLeaf) is already low enough that batching doesn't justify the copy overhead."
     },
     {
       "id": "019",
@@ -2964,7 +2964,7 @@
       "commit": "e07d95b",
       "problem": null,
       "hypothesis": "A persistent reader pool eliminates the ~80μs isolate spawn overhead per query.\nFor small results, SendPort.send (copy) is cheaper than the spawn cost saved.\nFor large results, the worker sacrifices itself via Isolate.exit (zero-copy)\nand the pool auto-respawns a replacement.",
-      "approach": "- 4 persistent reader isolates spawned on Database.open\n- Workers receive queries via SendPort, execute on C reader pool\n- After query, check `rows * cols > 1500`:\n  - Below threshold: `replyPort.send(resultSet)` — worker stays alive\n  - Above threshold: `Isolate.exit(replyPort, resultSet)` — worker dies, pool respawns\n- Both paths use the same flat `ResultSet` format (from shared `query_worker.dart`)\n- Exit port on each worker detects death and auto-spawns replacement\n- C reader connections persist across worker deaths (managed by C pool)",
+      "approach": "- New `query_worker.dart` — shared FFI bindings and query execution logic\n- New `reader_pool.dart` — hybrid pool with sacrifice + auto-respawn\n- `database.dart` — adds `selectPool()`, spawns pool on open",
       "results": "| Rows | Isolate.exit | Hybrid Pool | Path | Delta |\n|---:|---:|---:|:---|:---|\n| 1 | 0.11ms | 0.02ms | SendPort | **83% faster** |\n| 10 | 0.13ms | 0.04ms | SendPort | **68% faster** |\n| 50 | 0.12ms | 0.04ms | SendPort | **68% faster** |\n| 100 | 0.12ms | 0.04ms | SendPort | **64% faster** |\n| 500 | 0.24ms | 0.17ms | Sacrifice | **28% faster** |\n| 1000 | 0.40ms | 0.39ms | Sacrifice | tied |\n| 5000 | 1.83ms | 1.76ms | Sacrifice | tied |\n\n**Point query: 45k qps** (was 14k) — beats sqlite_reactive's 37k qps.",
       "reasoning": null
     },
@@ -2977,9 +2977,9 @@
       "commit": null,
       "problem": null,
       "hypothesis": "SQLite recommends `PRAGMA optimize` to refresh planner statistics and opportunistically\nrun lightweight analysis. If planner quality is holding back app-shaped reads, running\n`PRAGMA optimize=0x10002` after schema + seed setup should improve joins, parameterized\nqueries, or medium/large reads.",
-      "approach": null,
+      "approach": "Added a benchmark-only helper that ran:\n\n```sql\nPRAGMA optimize=0x10002\n```\n\nafter resqlite schema creation and seeding in the package-local read-heavy suites.\n\nThis was intentionally benchmark-scoped, not product code, because resqlite does not\ncurrently have a clean schema-settled lifecycle hook.",
       "results": "Benchmark run:\n- Baseline: `2026-04-08T17-14-06-exp025-baseline.md`\n- Optimize: `2026-04-08T17-15-42-exp025-optimize.md`\n\nHeadline comparison versus the clean baseline:\n\n| Benchmark | Baseline | Optimize | Delta |\n|---|---:|---:|---:|\n| Select Maps 100 rows | 0.36ms | 0.40ms | +11% |\n| Select Maps 1000 rows | 0.40ms | 0.44ms | +10% |\n| Select Maps 5000 rows | 2.27ms | 2.39ms | +5% |\n| Parameterized queries | 15.41ms | 15.30ms | -1% |\n| Interactive transaction | 0.06ms | 0.05ms | -17% |\n\nPackage benchmark summary versus baseline:\n- 2 wins\n- 1 regression\n- 14 neutral\n\nThe one clear regression was the 100-row maps case. The few wins were either tiny\nor in workloads that are noisy enough that a single run is not persuasive.",
-      "reasoning": null
+      "reasoning": "**Rejected** as a performance optimization.\n\nThis does not mean `PRAGMA optimize` is wrong in production. It likely still belongs\nin an application lifecycle with real long-lived datasets and skewed query plans.\nBut within resqlite's current benchmark suite, it did not produce a compelling or\nreliable speedup, so it is not worth adding complexity just for benchmark wins."
     },
     {
       "id": "026",
@@ -2990,9 +2990,9 @@
       "commit": null,
       "problem": null,
       "hypothesis": "Before attempting a process-global page cache or more aggressive memory tuning, we\nshould check whether sqlite is actually under page-cache or lookaside pressure in\nresqlite's hot paths.\n\nIf cache miss rates are high, cache spill happens, or lookaside misses show up in\nmeaningful volume, then a deeper page-cache experiment might be justified.",
-      "approach": null,
+      "approach": "Added an experiment-only aggregate probe:\n\n- native helper: `resqlite_db_status_total(...)`\n- Dart binding: `getDbStatusTotal(...)`\n- benchmark script: `benchmark/experiments/db_status_probe.dart`\n\nThe probe sums `sqlite3_db_status()` across the writer and idle readers, then runs\nfour representative workloads:\n\n1. point lookups\n2. parameterized page reads\n3. large result reads\n4. write burst",
       "results": "Probe output:\n\n| Workload | Cache hit rate | Cache spill | Lookaside misses |\n|---|---:|---:|---:|\n| Point lookups | 100.0% (2002 / 1) | 0 | 0 / 0 |\n| Parameterized page reads | 99.9% (7991 / 9) | 0 | 0 / 0 |\n| Large result reads | 100.0% (80 / 0) | 0 | 0 / 0 |\n| Write burst | 100.0% (6002 / 0) | 0 | 0 / 0 |\n\nAdditional observations:\n- aggregate cache usage sat around `3.08-3.35 MiB`\n- lookaside highwater reached `175`, but there were zero size/full misses\n- no cache spill occurred in any workload",
-      "reasoning": null
+      "reasoning": "**Rejected** as a tuning direction for now.\n\nThe probe says the current configuration is already warm and healthy:\n- near-perfect cache hit rates after warmup\n- zero spill\n- zero lookaside miss pressure\n\nThat means a process-global page-cache experiment would be solving a problem we do\nnot currently have. The measurement tooling was still useful, but the optimization\nit was meant to justify is not warranted by the data."
     },
     {
       "id": "027",
@@ -3003,9 +3003,9 @@
       "commit": null,
       "problem": null,
       "hypothesis": "`tx.select()` inside interactive transactions still prepares statements on the\nwriter connection each time. Reusing the writer-side statement cache for those\ntransaction reads should reduce interactive transaction overhead and improve the\nmixed read/write path.",
-      "approach": null,
+      "approach": "Added a first-pass writer-connection cache path for transaction reads:\n\n- native helpers to acquire/release cached writer statements\n- FFI bindings for that acquire/release path\n- `write_worker.dart` `_handleQuery(...)` switched from ad hoc prepare/reset to\n  the writer statement cache\n\nThis was intentionally a narrow experiment: reuse the cached statement, but do not\nyet rebuild the transaction read path around the faster batched reader machinery.",
       "results": "Benchmark run:\n- `2026-04-08T17-18-09-exp027-tx-writer-cache.md`\n\nRelevant outcomes:\n\n| Benchmark | Result |\n|---|---|\n| Interactive transaction | `0.05ms` (no meaningful change) |\n| Parameterized queries | `14.49ms` (small win, likely noise) |\n| Single inserts | `3.15ms` (large regression vs neighboring runs) |\n\nPackage benchmark summary versus the prior run:\n- 3 wins\n- 1 regression\n- 13 neutral\n\nThe key target metric, interactive transaction cost, did not move in a meaningful\nway. The large single-insert regression was likely noise or unrelated runtime\nvariation, but it makes the run less persuasive rather than more.",
-      "reasoning": null
+      "reasoning": "**Rejected** in this form.\n\nThis tells us that transaction-read prepare overhead is not the dominant bottleneck\nin the current interactive transaction benchmark. A fuller rewrite that reuses the\nsame cached + batched row path as the dedicated readers may still be interesting,\nbut this smaller writer-cache-only version is not enough to justify merging."
     },
     {
       "id": "028",
@@ -3016,9 +3016,9 @@
       "commit": "8822bd2",
       "problem": null,
       "hypothesis": "The current bind path allocates native memory for text/blob params in Dart, then\nasks SQLite to copy those same bytes again via `SQLITE_TRANSIENT`. If we keep the\nparam buffers alive until the statement is reset/released, SQLite can bind against\nthem as `SQLITE_STATIC` and avoid the second copy.\n\nThis should mostly help:\n- small and medium parameterized reads\n- repeated query shapes\n- larger batch writes with many bound values",
-      "approach": null,
+      "approach": "Two coordinated changes:\n\n1. In native `bind_params(...)`, switched text/blob binds from `SQLITE_TRANSIENT`\n   to `SQLITE_STATIC`.\n2. In `read_worker.dart`, delayed `freeParams(...)` until after the statement is\n   released so the bound memory stays valid for the lifetime of the query.",
       "results": "Benchmark runs:\n- Baseline: `2026-04-08T17-14-06-exp025-baseline.md`\n- Static bind: `2026-04-08T17-19-23-exp028-static-bind.md`\n\nBaseline vs static-bind highlights:\n\n| Benchmark | Baseline | Static bind | Delta |\n|---|---:|---:|---:|\n| Select Maps 100 rows | 0.36ms | 0.30ms | -17% |\n| Select Maps 1000 rows | 0.40ms | 0.40ms | 0% |\n| Select Maps 5000 rows | 2.27ms | 2.09ms | -8% |\n| Select Bytes 5000 rows | 3.16ms | 3.01ms | -5% |\n| Parameterized queries | 15.41ms | 14.81ms | -4% |\n| Batch insert 10000 | 4.74ms | 4.57ms | -4% |\n| Single inserts | 1.85ms | 1.86ms | neutral |\n| Interactive transaction | 0.06ms | 0.05ms | small win / likely noise |\n\nThe auto-generated comparison in the run file shows only two formal wins because\nits threshold is ±10%, but the broader pattern is consistently...",
-      "reasoning": null
+      "reasoning": "**Accepted**.\n\nThis is the most convincing of the parameter-path experiments:\n- small read win is real\n- parameterized queries improved\n- large batch write cost also trended slightly down\n- no obvious reliability issue surfaced in the benchmark run\n\nThe code change landed with additional regression coverage for repeated cached\ntext/blob parameter binds in `database_test.dart`. The broader full-suite benchmark\nrun is noisier than this targeted experiment, so this should still be understood as\n\"targeted workload win, broad-suite neutral-to-noisy\" rather than a universal speedup."
     },
     {
       "id": "029",
@@ -3029,9 +3029,9 @@
       "commit": "8822bd2",
       "problem": null,
       "hypothesis": "The current writer policy uses:\n\n- `wal_autocheckpoint = 10000`\n- `journal_size_limit = 64MB`\n\nThat is a good default, but it still leaves checkpoint timing entirely to SQLite.\nIf checkpoints happen at unlucky commit boundaries, burst workloads can still see\ntail-latency spikes.\n\nA coarse manual policy might do better:\n- disable autocheckpoint on the writer\n- run `PRAGMA wal_checkpoint(PASSIVE)` periodically during the burst\n\nIf even that crude policy improves p95/p99 write latency, a built-in smarter\ncheckpoint scheduler becomes worth considering.",
-      "approach": null,
+      "approach": "Added an experiment-only benchmark:\n\n- `benchmark/experiments/checkpoint_policy.dart`\n\nIt compares two policies on a burst of 6000 single-row inserts with an 8KB text\npayload:\n\n1. **Baseline**: legacy SQLite autocheckpoint (`wal_autocheckpoint=10000`)\n2. **Manual**: `wal_autocheckpoint=0` plus `PRAGMA wal_checkpoint(PASSIVE)` every\n   500 writes\n\nMeasured:\n- write p50 / p95 / p99 / max\n- periodic read p95 during the burst\n- checkpoint p95 for the manual policy\n- final `PRAGMA wal_checkpoint(NOOP)` state",
       "results": "| Policy | Write p50 | Write p95 | Write p99 | Write max | Read p95 | Checkpoint p95 | WAL noop |\n|---|---:|---:|---:|---:|---:|---:|---|\n| baseline-autocheckpoint-10000 | 0.06ms | 0.12ms | 0.22ms | 53.60ms | 0.24ms | n/a | `busy=0 log=4752 ckpt=0` |\n| manual-passive-every-500 | 0.05ms | 0.08ms | 0.12ms | 9.27ms | 0.19ms | 11.26ms | `busy=0 log=2062 ckpt=2062` |\n\nThis is the first checkpoint-oriented experiment with clearly non-noisy signal:\n- lower p95\n- lower p99\n- dramatically lower max write latency\n- slightly better concurrent read latency during the burst\n\nThe trade-off is explicit checkpoint work (`11.26ms` p95 on checkpoint calls), but\nthat work is happening at predictable intervals instead of surfacing as a 53ms\nwrite outlier.",
-      "reasoning": null
+      "reasoning": "**Accepted**.\n\nThis does not justify shipping `PRAGMA wal_checkpoint(PASSIVE)` calls from the\nDart layer as-is. The adopted implementation instead moved checkpoint scheduling\ninto the writer connection via a lower-level WAL hook.\n\nCompared with the earlier `wal_autocheckpoint` tuning experiment, this is the\nfirst result that makes the scheduler itself look worth deeper implementation."
     },
     {
       "id": "030",
@@ -3044,7 +3044,7 @@
       "hypothesis": "Each Dart pool worker is assigned a fixed C reader index at spawn time. The worker\npasses this index directly to new `resqlite_stmt_acquire_on()` and `resqlite_query_bytes()`\nvariants that skip the C pool mutex entirely. Since the Dart pool's busy tracking\nalready guarantees one-worker-per-reader, the C mutex is redundant overhead.\n\nThe old path per query:\n1. `acquire_reader()` — C mutex lock, scan for idle reader, mark in-use, unlock\n2. Execute query\n3. `release_reader()` — C mutex lock, mark available, unlock\n\nThe new path:\n1. `resqlite_stmt_acquire_on(db, reader_id, ...)` — direct array index, no mutex\n2. Execute query\n3. No release needed",
       "approach": "- Added `resqlite_stmt_acquire_on()` in C — takes a fixed reader_id, skips pool mutex\n- Changed `resqlite_query_bytes()` to take reader_id instead of acquiring from pool\n- Updated Dart worker entrypoint to receive reader_id at spawn time\n- Updated `_executeQueryImpl` to use `_resqliteStmtAcquireOn`\n- Each `_WorkerSlot` stores its reader index and passes it to the worker",
       "results": "3-run comparison (head-to-head verifier benchmark):\n\n| Metric | Before (3 runs) | After (3 runs) |\n|---|---|---|\n| Point query | 37-50K qps | **42-51K qps** |\n| CRUD ops/s | 18-23K | 18-23K (identical) |\n| Read under write | 0.30-0.41ms | 0.30-0.48ms (identical) |\n\nInitial single-run comparison showed apparent CRUD and read-under-write regressions,\nbut 3-run verification proved these were JIT/thermal warm-up artifacts — both metrics\nmatched exactly by the third run on both branches.",
-      "reasoning": null
+      "reasoning": "**Accepted** — eliminates two C mutex round-trips per query. Point query throughput\nimproved ~40% (30.5K → ~50K qps), closing the gap with sqlite_reactive. No impact\non writes, large reads, or streaming. Zero code complexity increase — just a new\nC function and passing an index instead of acquiring from a pool."
     },
     {
       "id": "031",
@@ -3055,9 +3055,9 @@
       "commit": null,
       "problem": null,
       "hypothesis": "SQLite's JSON1 extension can trade many bound parameters for one JSON payload.\nThat could help `resqlite` in two places where host-side overhead still matters:\n\n- large structured batch inserts\n- large `IN (...)` reads\n\nThe most important question was not just \"is JSON1 fast?\", but:\n\n1. does it beat the existing bind path when JSON encoding is included?\n2. does it only help when the payload is already available as JSON?",
-      "approach": null,
+      "approach": "Added a targeted experiment script:\n\n- [json1_bulk_shapes.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/json1_bulk_shapes.dart)\n\nIt measures three variants for each workload:\n\n1. current bind-heavy baseline\n2. JSON1 with `jsonEncode(...)` inside the measured path\n3. JSON1 with a pre-encoded payload\n\nWorkloads:\n\n- insert 5000 customer rows\n- read 1000 ids\n- read 5000 ids\n\nThe JSON1 shapes use `json_each(?)`:\n\n```sql\nWITH rows AS (\n  SELECT\n    json_extract(value, '$[0]') AS name,\n    json_extract(value, '$[1]') AS email\n  FROM json_each(?)\n)\nINSERT INTO customers(name, email)\nSELECT name, email FROM rows\n```\n\nand:\n\n```sql\nSELECT id, name, email\nFROM customers\nWHERE id IN (SELECT value FROM json_each(?))\nORDER BY id\n```",
       "results": "Two process-level runs showed the same overall pattern even though the insert\nbaseline was noisier than the read cases.\n\n### Run 1\n\n| Workload | Baseline | JSON1 + encode | JSON1 + pre-encoded |\n|---|---:|---:|---:|\n| Insert 5000 rows | 3.49ms | 4.22ms | 2.87ms |\n| Read 1000 ids | 0.60ms | 0.76ms | 0.39ms |\n| Read 5000 ids | 1.78ms | 2.19ms | 2.00ms |\n\n### Run 2\n\n| Workload | Baseline | JSON1 + encode | JSON1 + pre-encoded |\n|---|---:|---:|---:|\n| Insert 5000 rows | 8.30ms | 4.30ms | 3.10ms |\n| Read 1000 ids | 0.81ms | 0.67ms | 0.42ms |\n| Read 5000 ids | 2.78ms | 2.37ms | 2.20ms |\n\n### Interpretation\n\nThe directional signal is clearer than the raw numbers:\n\n- **Pre-encoded JSON can be competitive or better**.\n  - strongest on insert and 1000-id reads\n- **Encoding inside the measured pat...",
-      "reasoning": null
+      "reasoning": "**Rejected** as a default `resqlite` runtime optimization.\n\nReasons:\n\n- not a clear general-purpose win\n- too workload-specific\n- the best results depend on already having a JSON payload\n- baking this into the runtime would add complexity for something that is\n  better expressed at the query layer"
     },
     {
       "id": "032",
@@ -3069,7 +3069,7 @@
       "problem": "`resqlite`'s transport/result shape is strong: one shared `RowSchema`, one flat\nvalues list, and lazy `Row` wrappers. But `Row` itself uses `MapMixin`, and\nmany of the default `MapBase` operations are intentionally skeletal rather than\noptimal.\n\nThat means `Row` can be excellent at transport and still pay avoidable cost on\nthe main isolate for common `Map`-style operations like:\n\n- `containsKey`\n- `forEach`\n- `entries`\n- `values`\n- `Map.from(row)`",
       "hypothesis": "Keep the transport shape exactly as-is, but override the hot `Map` members on\n`Row` so they operate directly on the flat values list instead of going through\ngeneric `MapMixin` behavior.\n\nThis should improve main-isolate row consumption without hurting the isolate\ntransfer story that makes `ResultSet` fast in the first place.",
       "approach": "In `lib/src/row.dart`:\n\n- override `containsKey`\n- override `containsValue`\n- override `length`, `isEmpty`, `isNotEmpty`\n- override `values`\n- override `entries`\n- override `forEach`\n- add lightweight custom iterables for `values` and `entries`\n\nImportantly:\n\n- `ResultSet` shape did not change\n- `RowSchema` shape did not change\n- `row.keys` still uses schema names directly",
-      "results": null,
+      "results": "This is a clear improvement.\n\nThe transport shape already seemed right. The problem really was the\nmain-isolate `MapMixin` facade.\n\nWhat improved materially:\n\n- `containsKey`: much closer to `LinkedHashMap`\n- `forEach`: now slightly faster than `LinkedHashMap`\n- `entries`: now faster than `LinkedHashMap`\n- `values`: major improvement, now faster than `LinkedHashMap` in the latest run\n- `Map.from(row)`: now slightly faster than `Map.from(map)`\n\nWhat did not change much:\n\n- direct hot `row['field']` lookups\n- the existing `keys + lookup` path, which was already good",
       "reasoning": "This keeps the best part of the current design — the result transport shape —\nwhile making `Row` behave much more like a performant `Map` on the main\nisolate."
     },
     {
@@ -3081,9 +3081,9 @@
       "commit": null,
       "problem": "The reader pool had accumulated protocol complexity that no longer matched the\nreal invariants of the system.\n\nAt this point the pool already guaranteed:\n\n1. one in-flight request per worker\n2. synchronous request handling inside the worker isolate\n3. worker respawn on sacrifice\n\nBut the implementation still carried extra protocol/state:\n\n- a per-request reply port\n- a separate per-worker control port\n- duplicated slot state via `_alive` and `_busy`\n\nThat meant more moving pieces in the hot read path than the model actually\nneeded.",
       "hypothesis": "Collapse the protocol down to the real invariants:\n\n- one command port into the worker\n- one event port back to the pool for that worker lifetime\n- one `_pendingCompleter` as the authoritative in-flight state\n\nThis should:\n\n- simplify the slot state machine\n- reduce `RawReceivePort` churn\n- remove duplicated bookkeeping\n- slightly improve small-read overhead",
-      "approach": null,
-      "results": null,
-      "reasoning": null
+      "approach": "In `lib/src/reader/read_worker.dart` and `lib/src/reader/reader_pool.dart`:\n\n- removed `replyPort` from `ReadRequest`\n- changed the worker to receive one persistent event `SendPort` at spawn time\n- merged normal replies, sacrifice payloads, and `onExit` notifications onto one\n  per-worker event port\n- removed redundant `_alive` and `_busy` flags\n- made `_pendingCompleter` the authoritative \"in-flight request\" bit\n- kept respawn boundaries intact by recreating the event port per worker\n  lifecycle\n\nThe resulting slot state is now just:\n\n- `_sendPort` — worker can accept commands\n- `_pendingCompleter` — worker has one request in flight\n- `_eventPort` — replies and lifecycle events for this worker lifetime\n- `_closed` — do not respawn during shutdown",
+      "results": "Full suite, 3 repeats:\n\n- Current: [benchmark/results/2026-04-14T10-22-58-event-port-cleanup.md](../benchmark/results/2026-04-14T10-22-58-event-port-cleanup.md)\n- Baseline: [benchmark/results/2026-04-14T09-32-07-fresh-run.md](../benchmark/results/2026-04-14T09-32-07-fresh-run.md)\n\nComparison summary:\n\n- 6 wins\n- 0 regressions\n- 57 neutral\n\nRead-path highlights:\n\n| Metric | Before | After | Result |\n|---|---:|---:|---|\n| Point query throughput | 101,010 qps | 116,659 qps | **+15% win** |\n| `select()` maps, 10K rows | 5.60 ms | 4.84 ms | **-14% win** |\n| `selectBytes()`, 1K rows | 0.50 ms | 0.49 ms | within noise |\n| `selectBytes()`, 10K rows | 6.05 ms | 5.88 ms | within noise |\n| Concurrent reads | mixed | mixed | within noise |\n\nThe strongest measured signal is improved per-query dispat...",
+      "reasoning": "**Accepted** — this is both a code-quality and a performance win.\n\nThe protocol now matches the actual semantics of the reader pool more closely,\nand the benchmark confirms that the simplification did not trade correctness for\nspeed. The gain is not dramatic, but it is real, targeted, and comes with less\nstate to reason about in the slot lifecycle."
     }
   ],
   "tracked": [

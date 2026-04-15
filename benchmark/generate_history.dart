@@ -155,16 +155,32 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       date = dateMatch?.group(1);
       final commitMatch = RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
       commit = commitMatch?.group(1);
-      problem = _extractSection(content, 'Problem');
+      problem = _extractSection(content, 'Problem') ??
+          _extractSection(content, 'Background') ??
+          _extractSection(content, 'Analysis');
       hypothesis = _extractSection(content, 'Hypothesis');
-      // Try multiple heading variants for the implementation section.
+      // Try all known heading variants for implementation.
       final built = _extractSection(content, 'What We Built') ??
           _extractSection(content, 'What We Tested') ??
+          _extractSection(content, 'What Changed') ??
+          _extractSection(content, 'Change') ??
+          _extractSection(content, 'Changes') ??
+          _extractSection(content, 'Code Changes') ??
           _extractSection(content, 'Design') ??
-          _extractSection(content, 'Changes');
-      final results = _extractSection(content, 'Results');
-      final whyAccepted = _extractSection(content, 'Why Accepted');
-      final whyRejected = _extractSection(content, 'Why Rejected');
+          _extractSection(content, 'Approaches Tested');
+      // Try all known heading variants for results.
+      final results = _extractSection(content, 'Results') ??
+          _extractSection(content, 'Result') ??
+          _extractSection(content, 'Benchmark') ??
+          _extractSection(content, 'Detailed Findings');
+      // Try all known heading variants for reasoning.
+      final whyAccepted = _extractSection(content, 'Decision') ??
+          _extractSection(content, 'Why Accepted') ??
+          _extractSection(content, 'Recommendation') ??
+          _extractSection(content, 'Why It Works');
+      final whyRejected = _extractSection(content, 'Why Rejected') ??
+          _extractSection(content, 'Why It Failed') ??
+          _extractSection(content, 'Takeaway');
 
       experiments.add({
         'id': id,
