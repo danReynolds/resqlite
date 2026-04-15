@@ -189,19 +189,6 @@
   </div>
 </div>
 
-<!-- Speedup factor charts -->
-<div class="grid">
-  <div class="card">
-    <h2>Speedup Factor &mdash; Maps</h2>
-    <p class="desc">How many times faster resqlite is at each row count.</p>
-    <div class="chart-wrap short"><canvas id="speedupMaps"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Speedup Factor &mdash; Bytes</h2>
-    <p class="desc">How many times faster resqlite is at each row count.</p>
-    <div class="chart-wrap short"><canvas id="speedupBytes"></canvas></div>
-  </div>
-</div>
 
 <!-- ───── 2. MAIN-ISOLATE COST ───── -->
 <h3 class="section-title">2. Main-Isolate Cost</h3>
@@ -443,44 +430,6 @@ new Chart(document.getElementById('scaleBytes'), {
     ],
   },
   options: lineOpts('Wall time (ms)', true),
-});
-
-// Speedup factors
-function speedups(r, competitors) {
-  return r.map((v, i) => {
-    const best = Math.min(...competitors.map(c => c[i]));
-    return +(best / v).toFixed(2);
-  });
-}
-
-new Chart(document.getElementById('speedupMaps'), {
-  type: 'bar',
-  data: {
-    labels: scaleRows.map(String),
-    datasets: [
-      { label: 'vs sqlite3', data: scaleMapsR.map((v,i) => +(scaleMapsS[i]/v).toFixed(2)), backgroundColor: C.sqlite3+'99' },
-      { label: 'vs sqlite_async', data: scaleMapsR.map((v,i) => +(scaleMapsA[i]/v).toFixed(2)), backgroundColor: C.async+'99' },
-    ],
-  },
-  options: {
-    ...barOpts('Speedup (x faster)'),
-    plugins: {
-      legend: { display: true, position: 'top', labels: { boxWidth: 12 } },
-      annotation: { annotations: { line1: { type: 'line', yMin: 1, yMax: 1, borderColor: '#8b949e', borderDash: [4,4] } } },
-    },
-  },
-});
-
-new Chart(document.getElementById('speedupBytes'), {
-  type: 'bar',
-  data: {
-    labels: scaleRows.map(String),
-    datasets: [
-      { label: 'vs sqlite3 + jsonEncode', data: scaleBytesR.map((v,i) => +(scaleBytesS[i]/v).toFixed(2)), backgroundColor: C.sqlite3+'99' },
-      { label: 'vs sqlite_async + jsonEncode', data: scaleBytesR.map((v,i) => +(scaleBytesA[i]/v).toFixed(2)), backgroundColor: C.async+'99' },
-    ],
-  },
-  options: barOpts('Speedup (x faster)'),
 });
 
 // 2. Main-isolate cost
