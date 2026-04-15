@@ -331,46 +331,45 @@ Chart.defaults.plugins.tooltip.callbacks.label = function(ctx) {
   return `${label}: ${v.toFixed(2)} ms`;
 };
 
-// Plugin: draw winner labels on bar charts.
-// For each x-index group, finds the smallest bar (lower is better),
-// draws the library color dot + "N.Nx" above it.
+// Plugin: draw trophy on the winner at each x-index for bar and line charts.
 Chart.register({
   id: 'winnerLabels',
   afterDraw(chart) {
-    if (chart.config.type !== 'bar') return;
+    const type = chart.config.type;
+    if (type !== 'bar' && type !== 'line') return;
     const datasets = chart.data.datasets;
     if (datasets.length < 2) return;
 
     const ctx = chart.ctx;
     const labelCount = chart.data.labels.length;
 
-    for (let i = 0; i < labelCount; i++) {
-      // Gather values and metadata for this x-index across all datasets.
+    // For line charts with many points, only show trophies at the last point
+    // to avoid clutter.
+    const indices = type === 'line'
+      ? [labelCount - 1]
+      : Array.from({ length: labelCount }, (_, i) => i);
+
+    for (const i of indices) {
       const entries = [];
       for (let di = 0; di < datasets.length; di++) {
         const val = datasets[di].data[i];
         if (val == null || val === 0) continue;
         const meta = chart.getDatasetMeta(di);
         if (meta.hidden) continue;
-        const bar = meta.data[i];
-        if (!bar) continue;
-        const color = Array.isArray(datasets[di].backgroundColor)
-          ? datasets[di].backgroundColor[i]
-          : datasets[di].backgroundColor;
-        entries.push({ val, bar, color, di });
+        const pt = meta.data[i];
+        if (!pt) continue;
+        entries.push({ val, pt, di });
       }
       if (entries.length < 2) continue;
 
-      // Find winner (lowest value) and runner-up.
       entries.sort((a, b) => a.val - b.val);
       const winner = entries[0];
       const runnerUp = entries[1];
       const speedup = runnerUp.val / winner.val;
-      if (speedup < 1.05) continue; // Skip if negligible difference.
+      if (speedup < 1.05) continue;
 
-      // Draw trophy above the winner bar.
-      const x = winner.bar.x;
-      const y = winner.bar.y - 4;
+      const x = winner.pt.x;
+      const y = winner.pt.y - (type === 'line' ? 12 : 4);
 
       ctx.save();
       ctx.textAlign = 'center';
