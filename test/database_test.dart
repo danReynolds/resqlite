@@ -133,6 +133,29 @@ void main() {
       );
     });
 
+    test('execute rejects too few parameters on cached statements', () async {
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      );
+
+      await db.execute('INSERT INTO t(name) VALUES (?)', ['first']);
+
+      await expectLater(
+        () => db.execute('INSERT INTO t(name) VALUES (?)'),
+        throwsA(
+          isA<ResqliteQueryException>().having(
+            (e) => e.sqliteCode,
+            'sqliteCode',
+            25,
+          ),
+        ),
+      );
+
+      final rows = await db.select('SELECT id, name FROM t ORDER BY id');
+      expect(rows, hasLength(1));
+      expect(rows[0]['name'], 'first');
+    });
+
     // ----- Select -----
 
     test('execute + select', () async {
@@ -218,6 +241,19 @@ void main() {
       expect(rows, hasLength(2));
       expect(rows[0]['name'], 'alice');
       expect(rows[1]['name'], 'charlie');
+    });
+
+    test('select rejects too few parameters on cached statements', () async {
+      const sql = 'SELECT ? AS value';
+
+      final first = await db.select(sql, ['first']);
+      expect(first, hasLength(1));
+      expect(first[0]['value'], 'first');
+
+      await expectLater(
+        () => db.select(sql),
+        throwsA(isA<ResqliteQueryException>()),
+      );
     });
 
     test('repeated cached selects preserve text and blob parameters', () async {

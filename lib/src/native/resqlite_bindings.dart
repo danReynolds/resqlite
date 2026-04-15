@@ -105,6 +105,23 @@ external int resqliteGetDirtyTables(
 const int _writeResultSize = 16;
 const int _writeResultOffAffected = 0;
 const int _writeResultOffLastId = 8;
+const int _sqliteRange = 25;
+
+String _queryErrorMessage(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int sqliteCode,
+  int parameterCount,
+) {
+  if (sqliteCode == _sqliteRange) {
+    return 'Incorrect number of parameters for SQL statement '
+        '(received $parameterCount).';
+  }
+  try {
+    return resqliteErrmsg(dbHandle).toDartString();
+  } catch (_) {
+    return 'unknown error';
+  }
+}
 
 /// Result of a write operation returned by [Database.execute] and
 /// [Transaction.execute].
@@ -143,16 +160,8 @@ WriteResult executeWrite(
           resultBuf,
         );
         if (rc != 0) {
-          // Read the error message carefully — if the connection is in a
-          // bad state the pointer may be invalid.
-          String errMsg;
-          try {
-            errMsg = resqliteErrmsg(dbHandle).toDartString();
-          } catch (_) {
-            errMsg = 'unknown error';
-          }
           throw ResqliteQueryException(
-            errMsg,
+            _queryErrorMessage(dbHandle, rc, params.length),
             sql: sql,
             parameters: params,
             sqliteCode: rc,
@@ -231,7 +240,7 @@ void executeBatchWrite(
       );
       if (rc != 0) {
         throw ResqliteQueryException(
-          resqliteErrmsg(dbHandle).toDartString(),
+          _queryErrorMessage(dbHandle, rc, paramCount),
           sql: sql,
           sqliteCode: rc,
         );
@@ -273,7 +282,7 @@ void executeNestedBatchWrite(
       );
       if (rc != 0) {
         throw ResqliteQueryException(
-          resqliteErrmsg(dbHandle).toDartString(),
+          _queryErrorMessage(dbHandle, rc, paramCount),
           sql: sql,
           sqliteCode: rc,
         );

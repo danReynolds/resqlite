@@ -247,7 +247,13 @@ Uint8List executeQueryBytes(
       paramsNative,
       parameters.length,
     );
-    if (stmt == ffi.nullptr) throw StateError('Failed to acquire statement');
+    if (stmt == ffi.nullptr) {
+      throw ResqliteQueryException(
+        resqliteErrmsg(dbHandle).toDartString(),
+        sql: sql,
+        parameters: parameters,
+      );
+    }
   } finally {
     calloc.free(sqlNative);
   }

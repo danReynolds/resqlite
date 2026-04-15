@@ -922,6 +922,19 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
 
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count) {
+    // Cached statements keep prior bindings until explicitly cleared. Without
+    // this, reusing a statement with fewer params than the previous call can
+    // step with stale freed TEXT/BLOB pointers from an earlier bind.
+    sqlite3_clear_bindings(stmt);
+
+    int expected = sqlite3_bind_parameter_count(stmt);
+    if (expected != param_count) {
+        // Force SQLite to populate the connection error state with the same
+        // bind-range error it would use for an out-of-range parameter index.
+        (void)sqlite3_bind_null(stmt, expected + 1);
+        return SQLITE_RANGE;
+    }
+
     for (int i = 0; i < param_count; i++) {
         int idx = i + 1;
         int rc;
