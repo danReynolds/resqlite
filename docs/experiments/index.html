@@ -308,8 +308,10 @@
     <div class="chart-tabs">
       <button class="chart-tab active" data-panel="panelReads">Reads</button>
       <button class="chart-tab" data-panel="panelWrites">Writes</button>
+      <button class="chart-tab" data-panel="panelTransactions">Transactions</button>
       <button class="chart-tab" data-panel="panelConcurrency">Concurrency</button>
       <button class="chart-tab" data-panel="panelStreaming">Streaming</button>
+      <button class="chart-tab" data-panel="panelThroughput">Throughput</button>
     </div>
 
     <div class="chart-panel active" id="panelReads">
@@ -324,6 +326,12 @@
       <div class="chart-improvements" id="improvWrites"></div>
       <div class="chart-canvas-wrap"><canvas id="chartWrites"></canvas></div>
     </div>
+    <div class="chart-panel" id="panelTransactions">
+      <h2>Transactions <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">Interactive transaction and transaction reads/writes, wall time (ms)</div>
+      <div class="chart-improvements" id="improvTransactions"></div>
+      <div class="chart-canvas-wrap"><canvas id="chartTransactions"></canvas></div>
+    </div>
     <div class="chart-panel" id="panelConcurrency">
       <h2>Concurrency &amp; Parameterized <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
       <div class="desc">4x concurrent reads and 100-query parameterized workload, wall time (ms)</div>
@@ -331,17 +339,23 @@
       <div class="chart-canvas-wrap"><canvas id="chartConcurrency"></canvas></div>
     </div>
     <div class="chart-panel" id="panelStreaming">
-      <h2>Streaming &amp; Throughput</h2>
-      <div class="desc">Invalidation latency (ms, left — lower is better) and point query throughput (qps, right — higher is better)</div>
+      <h2>Streaming <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">Invalidation latency, fan-out, and stream churn, wall time (ms)</div>
       <div class="chart-improvements" id="improvStreaming"></div>
       <div class="chart-canvas-wrap"><canvas id="chartStreaming"></canvas></div>
+    </div>
+    <div class="chart-panel" id="panelThroughput">
+      <h2>Point Query Throughput <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— higher is better</span></h2>
+      <div class="desc">Single-row lookups per second, measuring dispatch latency floor</div>
+      <div class="chart-improvements" id="improvThroughput"></div>
+      <div class="chart-canvas-wrap"><canvas id="chartThroughput"></canvas></div>
     </div>
   </div>
 
   <!-- RIGHT: Experiment list OR full detail -->
   <div class="right-col" id="rightCol">
     <div class="right-col-header">
-      30 experiments — hover to highlight on chart, click for details
+      42 experiments — hover to highlight on chart, click for details
     </div>
 
     <div class="exp-list" id="expList">
@@ -369,9 +383,14 @@ const DISPLAY = {
   'Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite': 'schema wide 20 cols',
   'Write Performance / Single Inserts (100 sequential) / resqlite execute()': 'single inserts (100)',
   'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()': 'batch insert 1K',
+  'Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()': 'interactive tx',
+  'Write Performance / Transaction Read (1000 rows) / resqlite tx.select()': 'tx read 1K rows',
+  'Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()': 'tx batch 1K rows',
   'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()': 'parameterized 100q',
   'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x': 'concurrent 4x',
   'Streaming / Invalidation Latency / resqlite': 'invalidation latency',
+  'Streaming / Fan-out (10 streams) / resqlite': 'fan-out 10 streams',
+  'Streaming / Stream Churn (100 cycles) / resqlite': 'stream churn 100 cycles',
   'Point Query Throughput / resqlite qps': 'point query qps',
 };
 
@@ -385,12 +404,21 @@ const CHART_GROUPS = {
     'Write Performance / Single Inserts (100 sequential) / resqlite execute()',
     'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()',
   ],
+  chartTransactions: [
+    'Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()',
+    'Write Performance / Transaction Read (1000 rows) / resqlite tx.select()',
+    'Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()',
+  ],
   chartConcurrency: [
     'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x',
     'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()',
   ],
   chartStreaming: [
     'Streaming / Invalidation Latency / resqlite',
+    'Streaming / Fan-out (10 streams) / resqlite',
+    'Streaming / Stream Churn (100 cycles) / resqlite',
+  ],
+  chartThroughput: [
     'Point Query Throughput / resqlite qps',
   ],
 };
@@ -467,15 +495,23 @@ function buildCharts() {
       };
     });
 
+    const allQps = metricKeys.every(k => k.includes('qps'));
     const scales = {
       x: {
         grid: { color: '#21262d' },
         ticks: { maxRotation: 45, font: { size: 10 } },
       },
-      y: { title: { display: true, text: 'ms' }, grid: { color: '#21262d' }, beginAtZero: true },
     };
-    if (hasQps) {
-      scales.yQps = { position: 'right', title: { display: true, text: 'qps' }, grid: { drawOnChartArea: false }, beginAtZero: true };
+    if (allQps) {
+      // All metrics are QPS — use the primary y axis for qps.
+      scales.y = { title: { display: true, text: 'queries/sec' }, grid: { color: '#21262d' }, beginAtZero: true };
+      // Override yAxisID to 'y' for all datasets.
+      datasets.forEach(ds => ds.yAxisID = 'y');
+    } else {
+      scales.y = { title: { display: true, text: 'ms' }, grid: { color: '#21262d' }, beginAtZero: true };
+      if (hasQps) {
+        scales.yQps = { position: 'right', title: { display: true, text: 'qps' }, grid: { drawOnChartArea: false }, beginAtZero: true };
+      }
     }
 
     chartInstances[chartId] = new Chart(canvas, {
