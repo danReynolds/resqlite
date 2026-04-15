@@ -21,8 +21,20 @@ Experiments that proved their value and were merged into the codebase.
 | [019](019-hybrid-reader-pool.md) | Hybrid reader pool (SendPort + sacrifice) | 64-83% faster small reads, 45k qps point queries | [`e07d95b`](https://github.com/danReynolds/dune/commit/e07d95b) |
 | [028](028-static-bind-params.md) | Static bind for text/blob params | Improves targeted small-read and parameterized-query workloads | [`8822bd2`](https://github.com/danReynolds/dune/commit/8822bd2) |
 | [029](029-periodic-passive-checkpointing.md) | Periodic PASSIVE checkpointing | Much lower burst write p95/p99/max via writer-side scheduling | [`8822bd2`](https://github.com/danReynolds/dune/commit/8822bd2) |
+| [020](020-lookaside-allocator.md) | SQLITE_DEFAULT_LOOKASIDE tuning | Zero-cost compile flag improvement |  |
+| [021](021-pcache-initsz.md) | SQLITE_DEFAULT_PCACHE_INITSZ=128 | Slight positive trend on larger result sets |  |
+| [022](022-wal-autocheckpoint.md) | WAL autocheckpoint tuning | Correctness and reliability improvement |  |
+| [023](023-fast-itoa.md) | Fast int64-to-string for JSON | Measurable win on the selectBytes hot path |  |
+| [024](024-json-buffer-16k.md) | JSON buffer initial size 16KB | Sensible default, no measurable impact |  |
 | [030](030-dedicated-reader-assignment.md) | Dedicated reader assignment | Removes per-query C pool mutex overhead and closes the point-query gap |  |
 | [032](032-row-map-facade.md) | Row `Map` facade overrides | Keeps the fast transport shape intact while materially improving main-isolate `Map` operations |  |
+| [033](033-fnv1a-hash.md) | FNV-1a hash for result change detection | Shared module for consistent stream result hashing |  |
+| [034](034-schema-cache.md) | Per-worker schema cache | Eliminates FFI calls + string allocations for repeated queries |  |
+| [035](035-cell-buffer-reuse.md) | Reuse cell buffer across queries | Eliminates per-query buffer allocations |  |
+| [036](036-compiler-hints.md) | Compiler hints (Dart + C) | Zero-risk annotations, no behavioral changes |  |
+| [037](037-persistent-json-buffer.md) | Persistent JSON buffer per reader | Eliminates syscall-class operations on the hot path |  |
+| [038](038-stack-alloc-col-names.md) | Stack allocation for column name arrays | Eliminates unnecessary heap allocations |  |
+| [039](039-byte-size-sacrifice-threshold.md) | Byte-size sacrifice threshold | Better proxy for SendPort copy cost than cell count |  |
 | [040](040-reader-slot-event-port-cleanup.md) | Reader slot event-port cleanup | Simpler reader-worker protocol with a measured point-query and large-read win |  |
 
 ## Rejected
