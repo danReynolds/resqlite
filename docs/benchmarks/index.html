@@ -770,6 +770,27 @@ function groupSections(benchmarks) {
     return name;
   }
 
+  // When multiple entries map to the same short name, keep only the best
+  // (lowest value for latency). This handles sqlite3 (no cache) vs (cached).
+  function dedupeLibs(libs) {
+    const deduped = {};
+    for (const [name, d] of Object.entries(libs)) {
+      if (!deduped[name]) {
+        deduped[name] = d;
+      } else {
+        // Keep the entry with the lower last value (better performance).
+        const existing = deduped[name].data;
+        const candidate = d.data;
+        const lastExisting = existing[existing.length - 1] ?? Infinity;
+        const lastCandidate = candidate[candidate.length - 1] ?? Infinity;
+        if (lastCandidate < lastExisting) {
+          deduped[name] = d;
+        }
+      }
+    }
+    return deduped;
+  }
+
   // Select Maps — group 10/100/1K/10K into one bar chart.
   const selectMaps = benchmarks.filter(s => s.title === 'Select \u2192 Maps' && s.subtitle);
   if (selectMaps.length) {
@@ -786,7 +807,7 @@ function groupSections(benchmarks) {
       id: 'selectMaps', title: 'Select \u2192 Maps', desc: 'Wall time (ms) \u2014 lower is better',
       chartConfig: {
         type: 'bar',
-        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
         options: barOpts('Wall time (ms)'),
       },
     });
@@ -808,7 +829,7 @@ function groupSections(benchmarks) {
       id: 'selectBytes', title: 'Select \u2192 JSON Bytes', desc: 'Wall time (ms) \u2014 lower is better',
       chartConfig: {
         type: 'bar',
-        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
         options: barOpts('Wall time (ms)'),
       },
     });
@@ -830,7 +851,7 @@ function groupSections(benchmarks) {
       id: 'schemas', title: 'Schema Shapes (1K rows)', desc: 'Wall time (ms) \u2014 lower is better',
       chartConfig: {
         type: 'bar',
-        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
         options: barOpts('Wall time (ms)'),
       },
     });
@@ -868,7 +889,7 @@ function groupSections(benchmarks) {
       id: 'batchInserts', title: 'Batch Inserts', desc: 'Wall time (ms) \u2014 lower is better',
       chartConfig: {
         type: 'bar',
-        data: { labels, datasets: Object.entries(libs).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
+        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
         options: barOpts('Wall time (ms)'),
       },
     });
@@ -877,9 +898,18 @@ function groupSections(benchmarks) {
   // Parameterized.
   const param = benchmarks.find(s => s.key?.includes('Parameterized'));
   if (param) {
-    const labels = param.entries.map(e => libShort(e.library));
-    const data = param.entries.map(e => e.values[0]);
-    const colors = param.entries.map(e => libColor(e.library));
+    // Dedupe sqlite3 variants — keep the best (lowest) value.
+    const paramDeduped = {};
+    for (const e of param.entries) {
+      const name = libShort(e.library);
+      if (!paramDeduped[name] || e.values[0] < paramDeduped[name].values[0]) {
+        paramDeduped[name] = e;
+      }
+    }
+    const paramEntries = Object.values(paramDeduped);
+    const labels = paramEntries.map(e => libShort(e.library));
+    const data = paramEntries.map(e => e.values[0]);
+    const colors = paramEntries.map(e => libColor(e.library));
     groups.push({
       id: 'parameterized', title: 'Parameterized (100q \u00d7 500 rows)', desc: 'Wall time (ms) \u2014 lower is better',
       chartConfig: {
