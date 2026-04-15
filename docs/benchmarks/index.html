@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Benchmark Dashboard — 2026-04-14</title>
+<title>resqlite Benchmark Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -16,21 +16,20 @@
     --sqlite3: #f0883e;
     --async: #a371f7;
     --win: #3fb950;
-    --neutral: #8b949e;
     --accent: #58a6ff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    padding: 2rem;
-    line-height: 1.5;
+    padding: 2rem; line-height: 1.5;
   }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
   h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
   .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
   .legend-bar {
-    display: flex; gap: 1.5rem; margin-bottom: 2rem; flex-wrap: wrap;
+    display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;
     padding: 0.75rem 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border);
   }
   .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
@@ -38,92 +37,45 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
   .grid.full { grid-template-columns: 1fr; }
   .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.25rem;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem;
   }
   .card h2 { font-size: 1rem; margin-bottom: 0.25rem; }
   .card .desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
   .chart-wrap { position: relative; width: 100%; }
   .chart-wrap.tall { height: 350px; }
   .chart-wrap.short { height: 280px; }
-
   .section-title {
     font-size: 1.3rem; margin: 2.5rem 0 0.5rem;
     padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
   }
-
-  /* Speedup callout cards */
-  .callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-  .callout {
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1rem; text-align: center;
+  .device-bar {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    margin-bottom: 1.5rem; padding: 0.75rem 1rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   }
+  .device-bar label { font-size: 0.85rem; color: var(--muted); }
+  .device-bar select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.35rem 0.75rem; font-size: 0.85rem; font-family: inherit; cursor: pointer;
+  }
+  .device-bar .device-meta { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  .callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+  .callout { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; text-align: center; }
   .callout .big { font-size: 2rem; font-weight: 700; color: var(--win); }
   .callout .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
-
-  /* Table */
   table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
   th, td { padding: 0.5rem 0.75rem; text-align: right; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; }
   td:first-child, th:first-child { text-align: left; }
   tr:hover td { background: rgba(88,166,255,0.04); }
   .winner { color: var(--win); font-weight: 600; }
-  .bar-cell { position: relative; }
-  .bar-fill {
-    position: absolute; left: 0; top: 2px; bottom: 2px; border-radius: 3px; opacity: 0.18;
-  }
-
-  /* Device selector */
-  .device-bar {
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-    margin-bottom: 1.5rem;
-    padding: 0.75rem 1rem;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-  .device-bar label { font-size: 0.85rem; color: var(--muted); }
-  .device-bar select {
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.35rem 0.75rem;
-    font-size: 0.85rem;
-    font-family: inherit;
-    cursor: pointer;
-  }
-  .device-bar .device-meta {
-    font-size: 0.78rem;
-    color: var(--muted);
-    margin-left: auto;
-  }
-  .device-section .hw-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-    margin-bottom: 0.75rem;
-  }
-  .device-section .hw-table th,
-  .device-section .hw-table td {
-    padding: 0.45rem 0.75rem;
-    text-align: right;
-    border-bottom: 1px solid var(--border);
-  }
-  .device-section .hw-table th { color: var(--muted); font-weight: 600; }
-  .device-section .hw-table th:first-child,
-  .device-section .hw-table td:first-child { text-align: left; }
-  .device-section .hw-desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
-  .device-section .hw-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
-  .device-section .hw-block { margin-bottom: 1.5rem; }
-  .device-section .contribute-note {
+  .loading { text-align: center; padding: 3rem; color: var(--muted); }
+  .contribute-note {
     font-size: 0.8rem; color: var(--muted); margin-top: 1rem;
     padding: 0.75rem 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border);
   }
-  .device-section .contribute-note a { color: var(--accent); }
-
+  .contribute-note a { color: var(--accent); }
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .callouts { grid-template-columns: 1fr 1fr; }
@@ -133,36 +85,7 @@
 <body>
 
 <h1>resqlite Benchmark Dashboard</h1>
-<p class="subtitle">Fresh 3-repeat run &mdash; April 14, 2026 &mdash; Dart 3.11.0, macOS ARM64</p>
-
-<div class="legend-bar">
-  <div class="legend-item"><div class="legend-dot" style="background:var(--resqlite)"></div> resqlite</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--sqlite3)"></div> sqlite3 (raw FFI)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--async)"></div> sqlite_async (PowerSync)</div>
-</div>
-
-<!-- ───── TOP-LINE CALLOUTS ───── -->
-<div class="callouts">
-  <div class="callout">
-    <div class="big">5.5x</div>
-    <div class="label">faster selectBytes()<br>10K rows vs sqlite3</div>
-  </div>
-  <div class="callout">
-    <div class="big">2.4x</div>
-    <div class="label">faster single inserts<br>vs sqlite3</div>
-  </div>
-  <div class="callout">
-    <div class="big">1.9x</div>
-    <div class="label">faster select() maps<br>20K rows vs sqlite3</div>
-  </div>
-  <div class="callout">
-    <div class="big">107K</div>
-    <div class="label">point queries/sec<br>9.3 us/query</div>
-  </div>
-</div>
-
-<!-- ───── 0. DEVICE BENCHMARKS ───── -->
-<h3 class="section-title">Device Benchmarks</h3>
+<p class="subtitle" id="subtitleText">Loading benchmarks...</p>
 
 <div class="device-bar">
   <label for="deviceSelect">Device:</label>
@@ -170,155 +93,49 @@
   <span class="device-meta" id="deviceMeta"></span>
 </div>
 
-<div class="device-section" id="deviceSection">
-  <p style="color:var(--muted);font-size:0.85rem;">Loading device data...</p>
+<div class="legend-bar">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--resqlite)"></div> resqlite</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--sqlite3)"></div> sqlite3 (raw FFI)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--async)"></div> sqlite_async (PowerSync)</div>
 </div>
 
-<!-- ───── 1. SCALING CURVES ───── -->
-<h3 class="section-title">1. Scaling Curves</h3>
-<div class="grid">
-  <div class="card">
-    <h2>Select &rarr; Maps (wall time)</h2>
-    <p class="desc">How wall time grows with row count. Lower is better.</p>
-    <div class="chart-wrap tall"><canvas id="scaleMaps"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Select &rarr; JSON Bytes (wall time)</h2>
-    <p class="desc">C-side JSON serialization vs Dart jsonEncode. Lower is better.</p>
-    <div class="chart-wrap tall"><canvas id="scaleBytes"></canvas></div>
-  </div>
-</div>
+<div id="callouts" class="callouts"></div>
 
-
-<!-- ───── 2. MAIN-ISOLATE COST ───── -->
-<h3 class="section-title">2. Main-Isolate Cost</h3>
-<div class="grid">
-  <div class="card">
-    <h2>Main-Isolate Time &mdash; Maps (10K rows)</h2>
-    <p class="desc">Time spent on the main (UI) thread. sqlite3 blocks it entirely.</p>
-    <div class="chart-wrap short"><canvas id="mainIsolate"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Main-Isolate Time &mdash; Bytes (10K rows)</h2>
-    <p class="desc">resqlite: zero-copy Isolate.exit &rarr; 0.00 ms on main thread.</p>
-    <div class="chart-wrap short"><canvas id="mainIsolateBytes"></canvas></div>
-  </div>
-</div>
-
-<!-- ───── 3. SCHEMA SHAPES ───── -->
-<h3 class="section-title">3. Schema Shapes (1000 rows)</h3>
-<div class="grid full">
-  <div class="card">
-    <h2>Wall Time by Schema Shape</h2>
-    <p class="desc">Performance across narrow, wide, text-heavy, numeric, and nullable schemas.</p>
-    <div class="chart-wrap tall"><canvas id="schemaShapes"></canvas></div>
-  </div>
-</div>
-
-<!-- ───── 4. WRITES ───── -->
-<h3 class="section-title">4. Write Performance</h3>
-<div class="grid">
-  <div class="card">
-    <h2>Single Inserts (100 sequential)</h2>
-    <p class="desc">Individual INSERT statements, each with its own transaction.</p>
-    <div class="chart-wrap short"><canvas id="singleInserts"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Batch Inserts (wall time)</h2>
-    <p class="desc">Batched writes at 100 / 1K / 10K rows.</p>
-    <div class="chart-wrap short"><canvas id="batchInserts"></canvas></div>
-  </div>
-</div>
-<div class="grid">
-  <div class="card">
-    <h2>Transaction Writes (inside tx)</h2>
-    <p class="desc">executeBatch() vs execute()-loop inside a write transaction.</p>
-    <div class="chart-wrap short"><canvas id="txWrites"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Transaction Reads</h2>
-    <p class="desc">Reading rows inside an open write transaction.</p>
-    <div class="chart-wrap short"><canvas id="txReads"></canvas></div>
-  </div>
-</div>
-
-<!-- ───── 5. CONCURRENT & PARAMETERIZED ───── -->
-<h3 class="section-title">5. Concurrent Reads &amp; Parameterized Queries</h3>
-<div class="grid">
-  <div class="card">
-    <h2>Concurrent Reads (1K rows each)</h2>
-    <p class="desc">Total wall time for N parallel queries. Lower is better.</p>
-    <div class="chart-wrap short"><canvas id="concurrent"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Parameterized (100 queries &times; ~500 rows)</h2>
-    <p class="desc">Reusing prepared statements with different bind values.</p>
-    <div class="chart-wrap short"><canvas id="parameterized"></canvas></div>
-  </div>
-</div>
-
-<!-- ───── 6. STREAMING ───── -->
-<h3 class="section-title">6. Streaming &amp; Reactivity</h3>
-<div class="grid">
-  <div class="card">
-    <h2>Stream Lifecycle</h2>
-    <p class="desc">Initial emission, invalidation latency, fan-out, and churn.</p>
-    <div class="chart-wrap short"><canvas id="streaming"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>Comparison vs Previous Run</h2>
-    <p class="desc">63 benchmarks compared. All within noise.</p>
-    <div class="chart-wrap short"><canvas id="comparison"></canvas></div>
-  </div>
-</div>
-
-<!-- ───── 7. FULL DATA TABLE ───── -->
-<h3 class="section-title">7. Full Results Table</h3>
-<div class="card" style="overflow-x:auto">
-  <table id="fullTable">
-    <thead>
-      <tr><th>Benchmark</th><th>resqlite</th><th>sqlite3</th><th>sqlite_async</th><th>resqlite speedup vs best competitor</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+<div id="chartsContainer">
+  <div class="loading">Loading benchmark data...</div>
 </div>
 
 <h3 class="section-title">Notes on Methodology</h3>
 <div class="card" style="font-size:0.85rem;color:var(--muted);line-height:1.7;">
-  <p>All times are wall-clock medians in ms (lower is better) from 3-repeat runs. Point query is queries/sec (higher is better). Dart 3.11.0 stable, macOS ARM64.</p>
+  <p>All times are wall-clock medians in ms (lower is better) from 3-repeat runs. Point query is queries/sec (higher is better).</p>
   <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Benchmark conditions:</strong> All libraries use the same SQL queries, same data, and WAL mode. sqlite_async's write throttle is disabled (Duration.zero) for fair latency comparison. sqlite3 runs synchronously on the calling thread — this is by design, not a misconfiguration.</p>
   <p style="margin-top:0.75rem;"><strong style="color:var(--text)">What these benchmarks don't measure:</strong> Memory footprint (resqlite's persistent isolate pool uses more memory than sqlite3's single-connection model), battery impact under sustained streaming, or cold-start time. resqlite is optimized for Flutter apps where main-isolate time is the primary constraint. For synchronous workloads or simpler architectures, <a href="https://pub.dev/packages/sqlite3">sqlite3</a> and <a href="https://pub.dev/packages/sqlite_async">sqlite_async</a> may be better fits.</p>
 </div>
 
+<div class="contribute-note" style="margin-top:1.5rem;">
+  Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3</code>
+  and <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md">submit a PR</a>
+  to add your device.
+</div>
+
 <script>
-// ──────────────────── DATA ────────────────────
-const C = {
-  resqlite: '#58a6ff',
-  sqlite3: '#f0883e',
-  async: '#a371f7',
-  win: '#3fb950',
-};
+const C = { resqlite: '#58a6ff', sqlite3: '#f0883e', async: '#a371f7' };
 
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
 Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
-// Global tooltip: append units to all values.
+// Global tooltip with units.
 Chart.defaults.plugins.tooltip.callbacks.label = function(ctx) {
   const label = ctx.dataset.label || '';
   const v = ctx.parsed.y;
   if (v == null) return null;
-  // Detect unit from axis or chart title.
-  const yAxis = ctx.chart.options.scales?.y;
-  const unit = yAxis?.title?.text || 'ms';
-  const isQps = unit.toLowerCase().includes('qps') || label.toLowerCase().includes('qps') || label.toLowerCase().includes('faster');
-  if (isQps || unit === 'Speedup (x faster)') {
-    return `${label}: ${v.toFixed(1)}x`;
-  }
+  const yTitle = (ctx.chart.options.scales?.y?.title?.text || '').toLowerCase();
+  if (yTitle.includes('qps') || label.toLowerCase().includes('faster')) return `${label}: ${v.toFixed(1)}x`;
   return `${label}: ${v.toFixed(2)} ms`;
 };
 
-// Plugin: draw trophy on the winner at each x-index for bar and line charts.
+// Trophy plugin for bar and line charts.
 Chart.register({
   id: 'winnerLabels',
   afterDraw(chart) {
@@ -326,16 +143,9 @@ Chart.register({
     if (type !== 'bar' && type !== 'line') return;
     const datasets = chart.data.datasets;
     if (datasets.length < 2) return;
-
     const ctx = chart.ctx;
-    const labelCount = chart.data.labels.length;
-
-    // For line charts with many points, only show trophies at the last point
-    // to avoid clutter.
-    const indices = type === 'line'
-      ? [labelCount - 1]
-      : Array.from({ length: labelCount }, (_, i) => i);
-
+    const n = chart.data.labels.length;
+    const indices = type === 'line' ? [n - 1] : Array.from({length: n}, (_, i) => i);
     for (const i of indices) {
       const entries = [];
       for (let di = 0; di < datasets.length; di++) {
@@ -345,52 +155,35 @@ Chart.register({
         if (meta.hidden) continue;
         const pt = meta.data[i];
         if (!pt) continue;
-        entries.push({ val, pt, di });
+        entries.push({val, pt});
       }
       if (entries.length < 2) continue;
-
       entries.sort((a, b) => a.val - b.val);
-      const winner = entries[0];
-      const runnerUp = entries[1];
-      const speedup = runnerUp.val / winner.val;
-      if (speedup < 1.05) continue;
-
-      const x = winner.pt.x;
-      const y = winner.pt.y - (type === 'line' ? 12 : 4);
-
+      if (entries[1].val / entries[0].val < 1.05) continue;
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.font = '14px serif';
-      ctx.fillText('\u{1F3C6}', x, y);
+      ctx.fillText('\u{1F3C6}', entries[0].pt.x, entries[0].pt.y - (type === 'line' ? 12 : 4));
       ctx.restore();
     }
   },
 });
 
-const scaleRows = [10, 50, 100, 500, 1000, 2000, 5000, 10000, 20000];
-const scaleMapsR = [0.02, 0.04, 0.05, 0.22, 0.41, 0.88, 2.48, 5.24, 12.89];
-const scaleMapsS = [0.01, 0.04, 0.08, 0.39, 0.81, 1.58, 3.99, 8.14, 24.62];
-const scaleMapsA = [0.03, 0.06, 0.09, 0.37, 0.77, 1.58, 3.94, 8.56, 29.77];
+// ── Helpers ──
+function libColor(name) {
+  const n = name.toLowerCase();
+  if (n.includes('resqlite')) return C.resqlite;
+  if (n.includes('async')) return C.async;
+  if (n.includes('sqlite3')) return C.sqlite3;
+  return '#8b949e';
+}
 
-const scaleBytesR = [0.01, 0.03, 0.07, 0.26, 0.52, 1.16, 2.73, 5.54, 11.53];
-const scaleBytesS = [0.03, 0.14, 0.27, 1.39, 2.78, 6.41, 16.18, 31.27, 65.02];
-const scaleBytesA = [0.06, 0.15, 0.30, 1.41, 2.73, 6.31, 16.55, 33.34, 71.80];
-
-function lineOpts(yLabel, logScale) {
-  return {
-    responsive: true, maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
-    plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12 } } },
-    scales: {
-      x: { title: { display: true, text: 'Rows' }, grid: { color: '#21262d' } },
-      y: {
-        title: { display: true, text: yLabel },
-        type: logScale ? 'logarithmic' : 'linear',
-        grid: { color: '#21262d' },
-      },
-    },
-  };
+function libShort(name) {
+  if (name.includes('resqlite')) return 'resqlite';
+  if (name.includes('sqlite_async') || name.includes('async')) return 'sqlite_async';
+  if (name.includes('sqlite3')) return 'sqlite3';
+  return name;
 }
 
 function barOpts(yLabel) {
@@ -404,472 +197,293 @@ function barOpts(yLabel) {
   };
 }
 
-// 1. Scaling — Maps
-new Chart(document.getElementById('scaleMaps'), {
-  type: 'line',
-  data: {
-    labels: scaleRows.map(String),
-    datasets: [
-      { label: 'resqlite', data: scaleMapsR, borderColor: C.resqlite, backgroundColor: C.resqlite+'33', tension: 0.3, pointRadius: 4 },
-      { label: 'sqlite3', data: scaleMapsS, borderColor: C.sqlite3, backgroundColor: C.sqlite3+'33', tension: 0.3, pointRadius: 4 },
-      { label: 'sqlite_async', data: scaleMapsA, borderColor: C.async, backgroundColor: C.async+'33', tension: 0.3, pointRadius: 4 },
-    ],
-  },
-  options: lineOpts('Wall time (ms)', true),
-});
-
-// 1. Scaling — Bytes
-new Chart(document.getElementById('scaleBytes'), {
-  type: 'line',
-  data: {
-    labels: scaleRows.map(String),
-    datasets: [
-      { label: 'resqlite', data: scaleBytesR, borderColor: C.resqlite, backgroundColor: C.resqlite+'33', tension: 0.3, pointRadius: 4 },
-      { label: 'sqlite3 + jsonEncode', data: scaleBytesS, borderColor: C.sqlite3, backgroundColor: C.sqlite3+'33', tension: 0.3, pointRadius: 4 },
-      { label: 'sqlite_async + jsonEncode', data: scaleBytesA, borderColor: C.async, backgroundColor: C.async+'33', tension: 0.3, pointRadius: 4 },
-    ],
-  },
-  options: lineOpts('Wall time (ms)', true),
-});
-
-// 2. Main-isolate cost
-new Chart(document.getElementById('mainIsolate'), {
-  type: 'bar',
-  data: {
-    labels: ['10 rows', '100 rows', '1K rows', '10K rows'],
-    datasets: [
-      { label: 'resqlite', data: [0.00, 0.01, 0.10, 1.01], backgroundColor: C.resqlite },
-      { label: 'sqlite3', data: [0.01, 0.08, 0.79, 7.82], backgroundColor: C.sqlite3 },
-      { label: 'sqlite_async', data: [0.00, 0.02, 0.17, 1.89], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Main-isolate time (ms)'),
-});
-
-new Chart(document.getElementById('mainIsolateBytes'), {
-  type: 'bar',
-  data: {
-    labels: ['10 rows', '100 rows', '1K rows', '10K rows'],
-    datasets: [
-      { label: 'resqlite', data: [0.00, 0.00, 0.00, 0.00], backgroundColor: C.resqlite },
-      { label: 'sqlite3 + jsonEncode', data: [0.03, 0.27, 2.77, 31.39], backgroundColor: C.sqlite3 },
-      { label: 'sqlite_async + jsonEncode', data: [0.02, 0.20, 2.08, 23.13], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Main-isolate time (ms)'),
-});
-
-// 3. Schema shapes
-new Chart(document.getElementById('schemaShapes'), {
-  type: 'bar',
-  data: {
-    labels: ['Narrow\n(2 cols)', 'Wide\n(20 cols)', 'Text-heavy\n(4 TEXT)', 'Numeric\n(5 num)', 'Nullable\n(50% NULL)'],
-    datasets: [
-      { label: 'resqlite', data: [0.12, 1.04, 0.62, 0.34, 0.34], backgroundColor: C.resqlite },
-      { label: 'sqlite3', data: [0.22, 2.00, 1.07, 0.62, 0.59], backgroundColor: C.sqlite3 },
-      { label: 'sqlite_async', data: [0.27, 1.66, 1.10, 0.56, 0.58], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Wall time (ms)'),
-});
-
-// 4. Writes — single inserts
-new Chart(document.getElementById('singleInserts'), {
-  type: 'bar',
-  data: {
-    labels: ['resqlite', 'sqlite3', 'sqlite_async'],
-    datasets: [{
-      label: '100 sequential INSERTs',
-      data: [1.78, 4.20, 3.78],
-      backgroundColor: [C.resqlite, C.sqlite3, C.async],
-    }],
-  },
-  options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
-});
-
-// 4. Writes — batch
-new Chart(document.getElementById('batchInserts'), {
-  type: 'bar',
-  data: {
-    labels: ['100 rows', '1K rows', '10K rows'],
-    datasets: [
-      { label: 'resqlite', data: [0.06, 0.43, 4.47], backgroundColor: C.resqlite },
-      { label: 'sqlite3', data: [0.10, 0.54, 4.46], backgroundColor: C.sqlite3 },
-      { label: 'sqlite_async', data: [0.11, 0.56, 5.01], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Wall time (ms)'),
-});
-
-// 4. Transaction writes
-new Chart(document.getElementById('txWrites'), {
-  type: 'bar',
-  data: {
-    labels: ['executeBatch\n100 rows', 'execute loop\n100 rows', 'executeBatch\n1K rows', 'execute loop\n1K rows'],
-    datasets: [
-      { label: 'resqlite', data: [0.08, 0.65, 0.46, 6.07], backgroundColor: C.resqlite },
-      { label: 'sqlite_async', data: [null, 1.08, null, 9.71], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Wall time (ms)'),
-});
-
-// 4. Transaction reads
-new Chart(document.getElementById('txReads'), {
-  type: 'bar',
-  data: {
-    labels: ['500 rows', '1000 rows'],
-    datasets: [
-      { label: 'resqlite tx.select()', data: [0.10, 0.20], backgroundColor: C.resqlite },
-      { label: 'sqlite_async tx.getAll()', data: [0.22, 0.38], backgroundColor: C.async },
-    ],
-  },
-  options: barOpts('Wall time (ms)'),
-});
-
-// 5. Concurrent reads
-new Chart(document.getElementById('concurrent'), {
-  type: 'line',
-  data: {
-    labels: ['1', '2', '4', '8'],
-    datasets: [
-      { label: 'resqlite', data: [0.29, 0.33, 0.40, 0.74], borderColor: C.resqlite, backgroundColor: C.resqlite+'33', tension: 0.3, pointRadius: 5, fill: true },
-      { label: 'sqlite_async', data: [0.54, 0.66, 0.71, 1.27], borderColor: C.async, backgroundColor: C.async+'33', tension: 0.3, pointRadius: 5, fill: true },
-    ],
-  },
-  options: { ...lineOpts('Total wall time (ms)', false), scales: { ...lineOpts('',false).scales, x: { title: { display: true, text: 'Concurrent queries' }, grid: { color: '#21262d' } } } },
-});
-
-// 5. Parameterized
-new Chart(document.getElementById('parameterized'), {
-  type: 'bar',
-  data: {
-    labels: ['resqlite', 'sqlite3\n(no cache)', 'sqlite3\n(cached stmt)', 'sqlite_async'],
-    datasets: [{
-      label: '100 queries x ~500 rows',
-      data: [14.68, 23.46, 23.55, 24.72],
-      backgroundColor: [C.resqlite, C.sqlite3, C.sqlite3, C.async],
-    }],
-  },
-  options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
-});
-
-// 6. Streaming
-new Chart(document.getElementById('streaming'), {
-  type: 'bar',
-  data: {
-    labels: ['Initial Emission', 'Invalidation\nLatency', 'Fan-out\n(10 streams)', 'Stream Churn\n(100 cycles)'],
-    datasets: [{
-      label: 'resqlite',
-      data: [0.04, 0.07, 0.20, 2.71],
-      backgroundColor: C.resqlite,
-    }],
-  },
-  options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
-});
-
-// 6. Comparison donut
-new Chart(document.getElementById('comparison'), {
-  type: 'doughnut',
-  data: {
-    labels: ['Within noise', 'Wins', 'Regressions'],
-    datasets: [{ data: [63, 0, 0], backgroundColor: ['#8b949e', '#3fb950', '#f85149'] }],
-  },
-  options: {
+function lineOpts(yLabel) {
+  return {
     responsive: true, maintainAspectRatio: false,
-    plugins: {
-      legend: { display: true, position: 'bottom' },
-      title: { display: true, text: '63/63 benchmarks within noise vs previous run', color: '#e6edf3' },
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12 } } },
+    scales: {
+      x: { title: { display: true, text: 'Rows' }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: yLabel }, type: 'logarithmic', grid: { color: '#21262d' } },
     },
-  },
-});
+  };
+}
 
-// 7. Full data table
-const tableData = [
-  ['Select Maps 10 rows', 0.02, 0.01, 0.03],
-  ['Select Maps 100 rows', 0.05, 0.08, 0.09],
-  ['Select Maps 1K rows', 0.40, 0.79, 0.74],
-  ['Select Maps 10K rows', 5.60, 7.82, 8.75],
-  ['Select Bytes 10 rows', 0.01, 0.03, 0.05],
-  ['Select Bytes 100 rows', 0.06, 0.27, 0.28],
-  ['Select Bytes 1K rows', 0.50, 2.77, 2.70],
-  ['Select Bytes 10K rows', 6.05, 31.39, 33.67],
-  ['Schema: Narrow', 0.12, 0.22, 0.27],
-  ['Schema: Wide', 1.04, 2.00, 1.66],
-  ['Schema: Text-heavy', 0.62, 1.07, 1.10],
-  ['Schema: Numeric', 0.34, 0.62, 0.56],
-  ['Schema: Nullable', 0.34, 0.59, 0.58],
-  ['Single Inserts (100)', 1.78, 4.20, 3.78],
-  ['Batch Insert 100', 0.06, 0.10, 0.11],
-  ['Batch Insert 1K', 0.43, 0.54, 0.56],
-  ['Batch Insert 10K', 4.47, 4.46, 5.01],
-  ['Interactive Tx', 0.08, '—', 0.08],
-  ['Tx Batch Write 100', 0.08, '—', '—'],
-  ['Tx Batch Write 1K', 0.46, '—', '—'],
-  ['Tx Read 500', 0.10, '—', 0.22],
-  ['Tx Read 1K', 0.20, '—', 0.38],
-  ['Concurrent 1x', 0.29, '—', 0.54],
-  ['Concurrent 8x', 0.74, '—', 1.27],
-  ['Parameterized', 14.68, 23.46, 24.72],
-];
+// Dedupe libs (e.g. sqlite3 cached vs no-cache) — keep the best.
+function dedupeLibs(libs) {
+  const out = {};
+  for (const [name, d] of Object.entries(libs)) {
+    if (!out[name]) { out[name] = d; continue; }
+    const a = out[name].data, b = d.data;
+    if ((b[b.length-1] ?? Infinity) < (a[a.length-1] ?? Infinity)) out[name] = d;
+  }
+  return out;
+}
 
-const tbody = document.querySelector('#fullTable tbody');
-tableData.forEach(([name, r, s, a]) => {
-  const competitors = [s, a].filter(v => typeof v === 'number');
-  const best = Math.min(r, ...competitors);
-  const worstComp = competitors.length ? Math.max(...competitors) : r;
-  const speedup = worstComp > 0 && typeof r === 'number' ? (worstComp / r) : null;
+// ── Load and render ──
+let allCharts = [];
 
-  const tr = document.createElement('tr');
-  const fmt = v => typeof v === 'number' ? v.toFixed(2) : v;
-  const cls = v => v === best ? ' class="winner"' : '';
-
-  tr.innerHTML = `<td>${name}</td>`
-    + `<td${cls(r)}>${fmt(r)}</td>`
-    + `<td${typeof s === 'number' ? cls(s) : ''}>${fmt(s)}</td>`
-    + `<td${typeof a === 'number' ? cls(a) : ''}>${fmt(a)}</td>`
-    + `<td>${speedup && speedup > 1.01 ? speedup.toFixed(1) + 'x' : speedup ? '~1x' : '—'}</td>`;
-  tbody.appendChild(tr);
-});
-
-// ──────────────────── DEVICE BENCHMARKS ────────────────────
-const deviceCharts = [];
-
-(async function loadDevices() {
-  let devData;
+async function init() {
+  let data;
   try {
     const resp = await fetch('./devices.json');
-    devData = await resp.json();
+    data = await resp.json();
   } catch (e) {
-    document.getElementById('deviceSection').innerHTML =
-      '<p style="color:var(--muted)">Could not load devices.json</p>';
+    document.getElementById('chartsContainer').innerHTML = '<div class="loading">Could not load devices.json</div>';
     return;
   }
 
-  const devices = devData.devices;
+  const devices = data.devices;
   if (!devices.length) {
-    document.getElementById('deviceSection').innerHTML =
-      '<p style="color:var(--muted)">No device data available yet.</p>';
+    document.getElementById('chartsContainer').innerHTML = '<div class="loading">No device data available.</div>';
     return;
   }
 
   const select = document.getElementById('deviceSelect');
-  select.innerHTML = devices.map((d, i) =>
-    `<option value="${i}">${d.name}</option>`
-  ).join('');
-
-  function renderDevice(idx) {
-    const dev = devices[idx];
-    document.getElementById('deviceMeta').textContent =
-      `${dev.cpu} · ${dev.os} · Dart ${dev.dart} · ${dev.date} · ${dev.by}`;
-
-    // Destroy old charts.
-    deviceCharts.forEach(c => c.destroy());
-    deviceCharts.length = 0;
-
-    // Group sections into chart-friendly categories.
-    const groups = groupSections(dev.benchmarks);
-    let html = '<div class="grid">';
-
-    for (const group of groups) {
-      const canvasId = 'devChart_' + group.id;
-      html += `<div class="card"><h2>${group.title}</h2>`;
-      html += `<p class="desc">${group.desc}</p>`;
-      html += `<div class="chart-wrap short"><canvas id="${canvasId}"></canvas></div></div>`;
-    }
-
-    html += '</div>';
-    html += `<div class="contribute-note">`;
-    html += `Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3</code> `;
-    html += `and <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md">submit a PR</a> `;
-    html += `to add your device.`;
-    html += `</div>`;
-
-    document.getElementById('deviceSection').innerHTML = html;
-
-    // Build charts after DOM is ready.
-    for (const group of groups) {
-      const canvas = document.getElementById('devChart_' + group.id);
-      if (!canvas) continue;
-      deviceCharts.push(new Chart(canvas, group.chartConfig));
-    }
-  }
-
-  select.addEventListener('change', () => renderDevice(+select.value));
-  renderDevice(0);
-})();
-
-function groupSections(benchmarks) {
-  const groups = [];
-  const LIB_COLORS = { resqlite: '#58a6ff', sqlite3: '#f0883e', sqlite_async: '#a371f7' };
-
-  function libColor(name) {
-    const lower = name.toLowerCase();
-    if (lower.includes('resqlite')) return LIB_COLORS.resqlite;
-    if (lower.includes('sqlite3') || lower.includes('sqlite3')) return LIB_COLORS.sqlite3;
-    if (lower.includes('async')) return LIB_COLORS.sqlite_async;
-    return '#8b949e';
-  }
-
-  function libShort(name) {
-    if (name.includes('resqlite')) return 'resqlite';
-    if (name.includes('sqlite_async') || name.includes('async')) return 'sqlite_async';
-    if (name.includes('sqlite3')) return 'sqlite3';
-    return name;
-  }
-
-  // When multiple entries map to the same short name, keep only the best
-  // (lowest value for latency). This handles sqlite3 (no cache) vs (cached).
-  function dedupeLibs(libs) {
-    const deduped = {};
-    for (const [name, d] of Object.entries(libs)) {
-      if (!deduped[name]) {
-        deduped[name] = d;
-      } else {
-        // Keep the entry with the lower last value (better performance).
-        const existing = deduped[name].data;
-        const candidate = d.data;
-        const lastExisting = existing[existing.length - 1] ?? Infinity;
-        const lastCandidate = candidate[candidate.length - 1] ?? Infinity;
-        if (lastCandidate < lastExisting) {
-          deduped[name] = d;
-        }
-      }
-    }
-    return deduped;
-  }
-
-  // Select Maps — group 10/100/1K/10K into one bar chart.
-  const selectMaps = benchmarks.filter(s => s.title === 'Select \u2192 Maps' && s.subtitle);
-  if (selectMaps.length) {
-    const labels = selectMaps.map(s => s.subtitle);
-    const libs = {};
-    for (const sec of selectMaps) {
-      for (const entry of sec.entries) {
-        const name = libShort(entry.library);
-        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-        libs[name].data.push(entry.values[0]); // wall med
-      }
-    }
-    groups.push({
-      id: 'selectMaps', title: 'Select \u2192 Maps', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
-        options: barOpts('Wall time (ms)'),
-      },
-    });
-  }
-
-  // Select Bytes.
-  const selectBytes = benchmarks.filter(s => s.title === 'Select \u2192 JSON Bytes' && s.subtitle);
-  if (selectBytes.length) {
-    const labels = selectBytes.map(s => s.subtitle);
-    const libs = {};
-    for (const sec of selectBytes) {
-      for (const entry of sec.entries) {
-        const name = libShort(entry.library);
-        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-        libs[name].data.push(entry.values[0]);
-      }
-    }
-    groups.push({
-      id: 'selectBytes', title: 'Select \u2192 JSON Bytes', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
-        options: barOpts('Wall time (ms)'),
-      },
-    });
-  }
-
-  // Schema Shapes.
-  const schemas = benchmarks.filter(s => s.title?.includes('Schema Shapes') && s.subtitle);
-  if (schemas.length) {
-    const labels = schemas.map(s => s.subtitle?.split('(')[0]?.trim());
-    const libs = {};
-    for (const sec of schemas) {
-      for (const entry of sec.entries) {
-        const name = libShort(entry.library);
-        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-        libs[name].data.push(entry.values[0]);
-      }
-    }
-    groups.push({
-      id: 'schemas', title: 'Schema Shapes (1K rows)', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
-        options: barOpts('Wall time (ms)'),
-      },
-    });
-  }
-
-  // Writes — single inserts.
-  const singleInserts = benchmarks.find(s => s.key?.includes('Single Inserts'));
-  if (singleInserts) {
-    const labels = singleInserts.entries.map(e => libShort(e.library));
-    const data = singleInserts.entries.map(e => e.values[0]);
-    const colors = singleInserts.entries.map(e => libColor(e.library));
-    groups.push({
-      id: 'singleInserts', title: 'Single Inserts (100 seq)', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
-        options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
-      },
-    });
-  }
-
-  // Batch inserts.
-  const batchInserts = benchmarks.filter(s => s.key?.includes('Batch Insert') && s.subtitle);
-  if (batchInserts.length) {
-    const labels = batchInserts.map(s => s.subtitle);
-    const libs = {};
-    for (const sec of batchInserts) {
-      for (const entry of sec.entries) {
-        const name = libShort(entry.library);
-        if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-        libs[name].data.push(entry.values[0]);
-      }
-    }
-    groups.push({
-      id: 'batchInserts', title: 'Batch Inserts', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: Object.entries(dedupeLibs(libs)).map(([name, d]) => ({ label: name, data: d.data, backgroundColor: d.color })) },
-        options: barOpts('Wall time (ms)'),
-      },
-    });
-  }
-
-  // Parameterized.
-  const param = benchmarks.find(s => s.key?.includes('Parameterized'));
-  if (param) {
-    // Dedupe sqlite3 variants — keep the best (lowest) value.
-    const paramDeduped = {};
-    for (const e of param.entries) {
-      const name = libShort(e.library);
-      if (!paramDeduped[name] || e.values[0] < paramDeduped[name].values[0]) {
-        paramDeduped[name] = e;
-      }
-    }
-    const paramEntries = Object.values(paramDeduped);
-    const labels = paramEntries.map(e => libShort(e.library));
-    const data = paramEntries.map(e => e.values[0]);
-    const colors = paramEntries.map(e => libColor(e.library));
-    groups.push({
-      id: 'parameterized', title: 'Parameterized (100q \u00d7 500 rows)', desc: 'Wall time (ms) \u2014 lower is better',
-      chartConfig: {
-        type: 'bar',
-        data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
-        options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
-      },
-    });
-  }
-
-  return groups;
+  select.innerHTML = devices.map((d, i) => `<option value="${i}">${d.name}</option>`).join('');
+  select.addEventListener('change', () => renderDevice(devices[+select.value]));
+  renderDevice(devices[0]);
 }
+
+function renderDevice(dev) {
+  // Update header.
+  document.getElementById('subtitleText').textContent =
+    `${dev.name} — ${dev.cpu}, ${dev.os}, Dart ${dev.dart}`;
+  document.getElementById('deviceMeta').textContent =
+    `${dev.cpu} · ${dev.os} · Dart ${dev.dart} · ${dev.date} · ${dev.by}`;
+
+  // Destroy old charts.
+  allCharts.forEach(c => c.destroy());
+  allCharts = [];
+
+  const B = dev.benchmarks;
+
+  // ── Compute callouts ──
+  const callouts = document.getElementById('callouts');
+  const selectMaps1k = B.find(s => s.key?.includes('Select') && s.key?.includes('Maps') && s.key?.includes('1000'));
+  const singleInserts = B.find(s => s.key?.includes('Single Inserts'));
+  const pointQuery = B.find(s => s.key?.includes('Point Query'));
+
+  let readSpeedup = '', writeSpeedup = '', mainCost = '', pqps = '';
+  if (selectMaps1k) {
+    const r = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[0];
+    const best = Math.min(...selectMaps1k.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
+    if (r && best) readSpeedup = (best / r).toFixed(1);
+    const mainMs = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[2];
+    if (mainMs != null) mainCost = mainMs.toFixed(2);
+  }
+  if (singleInserts) {
+    const r = singleInserts.entries.find(e => e.library.includes('resqlite'))?.values[0];
+    const best = Math.min(...singleInserts.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
+    if (r && best) writeSpeedup = (best / r).toFixed(1);
+  }
+  if (pointQuery) {
+    const qpsEntry = pointQuery.entries.find(e => e.library.includes('qps'));
+    if (qpsEntry) {
+      const raw = qpsEntry.values[0];
+      pqps = typeof raw === 'string' ? raw : Math.round(raw / 1000) + 'K';
+    }
+  }
+
+  callouts.innerHTML = `
+    <div class="callout"><div class="big">${readSpeedup || '—'}x</div><div class="label">faster select()<br>(1K rows)</div></div>
+    <div class="callout"><div class="big">${writeSpeedup || '—'}x</div><div class="label">faster writes<br>(single inserts)</div></div>
+    <div class="callout"><div class="big">${mainCost || '—'} ms</div><div class="label">main-thread cost<br>(1K row read)</div></div>
+    <div class="callout"><div class="big">${pqps || '—'}</div><div class="label">point queries<br>per second</div></div>
+  `;
+
+  // ── Build all chart sections ──
+  const container = document.getElementById('chartsContainer');
+  let html = '';
+
+  // 1. Scaling curves (line charts).
+  html += '<h3 class="section-title">Scaling Curves</h3><div class="grid">';
+  html += '<div class="card"><h2>Select &rarr; Maps (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cScaleMaps"></canvas></div></div>';
+  html += '<div class="card"><h2>Select &rarr; JSON Bytes (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cScaleBytes"></canvas></div></div>';
+  html += '</div>';
+
+  // 2. Main-isolate cost.
+  html += '<h3 class="section-title">Main-Isolate Cost</h3><div class="grid">';
+  html += '<div class="card"><h2>Main-Isolate Time &mdash; Maps</h2><p class="desc">Time on the UI thread. Lower is better.</p><div class="chart-wrap short"><canvas id="cMainMaps"></canvas></div></div>';
+  html += '<div class="card"><h2>Main-Isolate Time &mdash; Bytes</h2><p class="desc">resqlite: zero-copy via Isolate.exit.</p><div class="chart-wrap short"><canvas id="cMainBytes"></canvas></div></div>';
+  html += '</div>';
+
+  // 3. Schema shapes.
+  html += '<h3 class="section-title">Schema Shapes (1K rows)</h3><div class="grid full">';
+  html += '<div class="card"><h2>Wall Time by Schema Shape</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cSchemas"></canvas></div></div>';
+  html += '</div>';
+
+  // 4. Writes.
+  html += '<h3 class="section-title">Write Performance</h3><div class="grid">';
+  html += '<div class="card"><h2>Single Inserts (100 sequential)</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cSingleInserts"></canvas></div></div>';
+  html += '<div class="card"><h2>Batch Inserts (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cBatchInserts"></canvas></div></div>';
+  html += '</div><div class="grid">';
+  html += '<div class="card"><h2>Transaction Writes</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cTxWrites"></canvas></div></div>';
+  html += '<div class="card"><h2>Transaction Reads</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cTxReads"></canvas></div></div>';
+  html += '</div>';
+
+  // 5. Concurrent & parameterized.
+  html += '<h3 class="section-title">Concurrent Reads &amp; Parameterized Queries</h3><div class="grid">';
+  html += '<div class="card"><h2>Concurrent Reads (1K rows each)</h2><p class="desc">Total wall time. Lower is better.</p><div class="chart-wrap short"><canvas id="cConcurrent"></canvas></div></div>';
+  html += '<div class="card"><h2>Parameterized Queries</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cParam"></canvas></div></div>';
+  html += '</div>';
+
+  // 6. Streaming.
+  html += '<h3 class="section-title">Streaming &amp; Reactivity</h3><div class="grid">';
+  html += '<div class="card"><h2>Stream Lifecycle</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cStreaming"></canvas></div></div>';
+  html += '</div>';
+
+  container.innerHTML = html;
+
+  // ── Populate charts ──
+  buildScaling(B, 'Select \u2192 Maps', 'cScaleMaps');
+  buildScaling(B, 'Select \u2192 JSON Bytes', 'cScaleBytes');
+  buildMainIsolate(B, 'Select \u2192 Maps', 'cMainMaps');
+  buildMainIsolate(B, 'Select \u2192 JSON Bytes', 'cMainBytes');
+  buildGroupedBar(B, 'Schema Shapes', 'cSchemas');
+  buildSingleBar(B, 'Single Inserts', 'cSingleInserts');
+  buildGroupedBar(B, 'Batch Insert', 'cBatchInserts');
+  buildGroupedBar(B, 'Batched Write Inside Transaction', 'cTxWrites');
+  buildGroupedBar(B, 'Transaction Read', 'cTxReads');
+  buildConcurrent(B, 'cConcurrent');
+  buildSingleBar(B, 'Parameterized', 'cParam');
+  buildStreaming(B, 'cStreaming');
+}
+
+// ── Chart builders ──
+
+// Line chart from per-row-count sections (Select Maps 10/100/1K/10K).
+function buildScaling(B, titleMatch, canvasId) {
+  const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
+  if (!sections.length) return;
+  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+  const libs = {};
+  for (const sec of sections) {
+    for (const entry of sec.entries) {
+      const name = libShort(entry.library);
+      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+      libs[name].data.push(entry.values[0]);
+    }
+  }
+  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+    label: name, data: d.data, borderColor: d.color, backgroundColor: d.color + '33',
+    tension: 0.3, pointRadius: 4,
+  }));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'line', data: { labels, datasets }, options: lineOpts('Wall time (ms)'),
+  }));
+}
+
+// Bar chart showing main-isolate time across row counts.
+function buildMainIsolate(B, titleMatch, canvasId) {
+  const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
+  if (!sections.length) return;
+  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+  const libs = {};
+  for (const sec of sections) {
+    for (const entry of sec.entries) {
+      const name = libShort(entry.library);
+      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+      libs[name].data.push(entry.values[2] ?? 0); // main med is index 2
+    }
+  }
+  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+    label: name, data: d.data, backgroundColor: d.color,
+  }));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar', data: { labels, datasets }, options: barOpts('Main-isolate time (ms)'),
+  }));
+}
+
+// Grouped bar from sections sharing a title prefix (schemas, batch inserts).
+function buildGroupedBar(B, titleMatch, canvasId) {
+  const sections = B.filter(s => s.key?.includes(titleMatch) && s.subtitle);
+  if (!sections.length) return;
+  const labels = sections.map(s => s.subtitle?.split('(')[0]?.trim() || s.subtitle);
+  const libs = {};
+  for (const sec of sections) {
+    for (const entry of sec.entries) {
+      const name = libShort(entry.library);
+      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+      libs[name].data.push(entry.values[0]);
+    }
+  }
+  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+    label: name, data: d.data, backgroundColor: d.color,
+  }));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)'),
+  }));
+}
+
+// Single-section bar (single inserts, parameterized).
+function buildSingleBar(B, titleMatch, canvasId) {
+  const sec = B.find(s => s.key?.includes(titleMatch));
+  if (!sec) return;
+  const deduped = {};
+  for (const e of sec.entries) {
+    const name = libShort(e.library);
+    if (!deduped[name] || e.values[0] < deduped[name].values[0]) deduped[name] = e;
+  }
+  const entries = Object.entries(deduped);
+  const labels = entries.map(([name]) => name);
+  const data = entries.map(([, e]) => e.values[0]);
+  const colors = entries.map(([, e]) => libColor(e.library));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
+    options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
+  }));
+}
+
+// Concurrent reads — special format with concurrency as labels.
+function buildConcurrent(B, canvasId) {
+  const sec = B.find(s => s.key?.includes('Concurrent Reads'));
+  if (!sec) return;
+  // Entries have library="1","2","4","8" with values=[resqlite_wall, resqlite_per, async_wall, async_per]
+  const labels = sec.entries.map(e => e.library + '\u00d7');
+  const resqliteData = sec.entries.map(e => e.values[0]);
+  const asyncData = sec.entries.map(e => e.values[2]);
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'resqlite', data: resqliteData, borderColor: C.resqlite, backgroundColor: C.resqlite + '33', tension: 0.3, pointRadius: 5, fill: true },
+      { label: 'sqlite_async', data: asyncData, borderColor: C.async, backgroundColor: C.async + '33', tension: 0.3, pointRadius: 5, fill: true },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12 } } },
+      scales: {
+        x: { title: { display: true, text: 'Concurrent queries' }, grid: { color: '#21262d' } },
+        y: { title: { display: true, text: 'Wall time (ms)' }, grid: { color: '#21262d' }, beginAtZero: true },
+      },
+    },
+  }));
+}
+
+// Streaming — multiple sub-sections.
+function buildStreaming(B, canvasId) {
+  const sections = B.filter(s => s.title === 'Streaming' && s.subtitle);
+  if (!sections.length) return;
+  const labels = sections.map(s => s.subtitle);
+  const libs = {};
+  for (const sec of sections) {
+    for (const entry of sec.entries) {
+      const name = libShort(entry.library);
+      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
+      libs[name].data.push(entry.values[0]);
+    }
+  }
+  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+    label: name, data: d.data, backgroundColor: d.color,
+  }));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)'),
+  }));
+}
+
+init();
 </script>
 </body>
 </html>
