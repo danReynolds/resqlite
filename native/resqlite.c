@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
@@ -301,6 +302,12 @@ static void dirty_set_free(resqlite_dirty_set* s) {
 // ---------------------------------------------------------------------------
 
 struct resqlite_db {
+    // Set atomically before freeing any resources in resqlite_close().
+    // All public entry points check this flag and return SQLITE_MISUSE
+    // without touching any other fields when it is set, preventing
+    // use-after-free races during shutdown.
+    atomic_int closed;
+
     // Write connection (used for exec, DDL, DML).
     sqlite3* writer;
     resqlite_stmt_cache writer_cache;
@@ -488,6 +495,7 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     if (!writer) return NULL;
 
     resqlite_db* db = (resqlite_db*)calloc(1, sizeof(resqlite_db));
+    atomic_init(&db->closed, 0);
     db->writer = writer;
     db->path = strdup(path);
     stmt_cache_init(&db->writer_cache);
@@ -530,6 +538,11 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
 void resqlite_close(resqlite_db* db) {
     if (!db) return;
 
+    // Mark closed BEFORE touching any resources. Any concurrent call to a
+    // public entry point will see this flag and return SQLITE_MISUSE
+    // instead of dereferencing freed memory.
+    atomic_store_explicit(&db->closed, 1, memory_order_release);
+
     // Close all readers.
     for (int i = 0; i < db->reader_count; i++) {
         stmt_cache_clear(&db->readers[i].cache);
@@ -552,15 +565,21 @@ void resqlite_close(resqlite_db* db) {
 }
 
 const char* resqlite_errmsg(resqlite_db* db) {
-    if (!db || !db->writer) return "database not open";
+    if (!db || !db->writer || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return "database not open";
+    }
     return sqlite3_errmsg(db->writer);
 }
 
 sqlite3* resqlite_writer_handle(resqlite_db* db) {
-    return db ? db->writer : NULL;
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return NULL;
+    return db->writer;
 }
 
 int resqlite_exec(resqlite_db* db, const char* sql) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
     sqlite3_mutex_enter(db->writer_mutex);
     int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
     sqlite3_mutex_leave(db->writer_mutex);
@@ -605,6 +624,9 @@ int resqlite_execute(
     int param_count,
     resqlite_write_result* out_result
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
     sqlite3_mutex_enter(db->writer_mutex);
 
     int rc;
@@ -711,6 +733,9 @@ int resqlite_run_batch(
     int param_count,
     int set_count
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
     sqlite3_mutex_enter(db->writer_mutex);
 
     // BEGIN IMMEDIATE acquires the write lock upfront, avoiding the
@@ -739,6 +764,9 @@ int resqlite_run_batch_nested(
     int param_count,
     int set_count
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
     // Caller owns the enclosing transaction (BEGIN IMMEDIATE or SAVEPOINT),
     // so we do not start/commit/rollback here. On error we return the code
     // and the Dart-level caller decides whether to ROLLBACK (top-level tx)
@@ -754,6 +782,7 @@ int resqlite_get_dirty_tables(
     const char** out_tables,
     int max_tables
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
     int count = db->dirty_tables.count;
     if (count > max_tables) count = max_tables;
 
@@ -775,6 +804,7 @@ int resqlite_get_read_tables(
     const char** out_tables,
     int max_tables
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
     if (reader_id < 0 || reader_id >= db->reader_count) return 0;
 
     resqlite_read_set* rs = &db->readers[reader_id].read_tables;
@@ -798,7 +828,10 @@ int resqlite_db_status_total(
     int* out_current,
     int* out_highwater
 ) {
-    if (!db || !out_current || !out_highwater) return SQLITE_MISUSE;
+    if (!db || !out_current || !out_highwater
+        || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
 
     int total_current = 0;
     int total_highwater = 0;
@@ -980,6 +1013,10 @@ sqlite3_stmt* resqlite_stmt_acquire(
     int param_count,
     int* out_reader
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        *out_reader = -1;
+        return NULL;
+    }
     int reader_idx = acquire_reader(db);
     if (reader_idx < 0) {
         *out_reader = -1;
@@ -1008,6 +1045,7 @@ sqlite3_stmt* resqlite_stmt_acquire(
 }
 
 void resqlite_stmt_release(resqlite_db* db, int reader_id) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return;
     if (reader_id >= 0 && reader_id < db->reader_count) {
         release_reader(db, reader_id);
     }
@@ -1022,6 +1060,7 @@ sqlite3_stmt* resqlite_stmt_acquire_on(
     const resqlite_param* params,
     int param_count
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return NULL;
     if (reader_id < 0 || reader_id >= db->reader_count) return NULL;
     resqlite_reader* reader = &db->readers[reader_id];
 
@@ -1046,6 +1085,7 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
     const resqlite_param* params,
     int param_count
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return NULL;
     int rc;
     const char* tail;
     sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
@@ -1288,6 +1328,11 @@ int resqlite_query_bytes(
     unsigned char** out_buf,
     int* out_len
 ) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        *out_buf = NULL;
+        *out_len = 0;
+        return SQLITE_MISUSE;
+    }
     if (reader_id < 0 || reader_id >= db->reader_count) {
         *out_buf = NULL;
         *out_len = 0;
