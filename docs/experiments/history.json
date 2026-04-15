@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-14T21:34:39.113899",
+  "generated": "2026-04-14T21:38:11.760330",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -3127,7 +3127,7 @@
     {
       "id": "032",
       "title": "Row `Map` facade overrides",
-      "date": "",
+      "date": "2026-04-09",
       "status": "accepted",
       "summary": "Keeps the fast transport shape intact while materially improving main-isolate `Map` operations",
       "commit": null,
@@ -3218,7 +3218,7 @@
     {
       "id": "039",
       "title": "Byte-size sacrifice threshold",
-      "date": "",
+      "date": "2026-04-10",
       "status": "accepted",
       "summary": "Better proxy for SendPort copy cost than cell count",
       "commit": null,

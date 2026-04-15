@@ -1,6 +1,7 @@
-# 039 — Byte-size sacrifice threshold
+# Experiment 039: Byte-size sacrifice threshold
 
-**Status:** Adopted
+**Date:** 2026-04-10
+**Status:** Accepted
 
 ## Hypothesis
 

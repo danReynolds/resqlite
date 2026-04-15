@@ -1,7 +1,7 @@
-# 032: Row Map Facade Overrides
+# Experiment 032: Row Map Facade Overrides
 
-- Date: 2026-04-08
-- Status: Accepted
+**Date:** 2026-04-09
+**Status:** Accepted
 
 ## Problem
 
