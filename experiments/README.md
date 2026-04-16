@@ -36,7 +36,6 @@ Experiments that proved their value and were merged into the codebase.
 | [038](038-stack-alloc-col-names.md) | Stack allocation for column name arrays | Eliminates unnecessary heap allocations |  |
 | [039](039-byte-size-sacrifice-threshold.md) | Byte-size sacrifice threshold | Better proxy for SendPort copy cost than cell count |  |
 | [040](040-reader-slot-event-port-cleanup.md) | Reader slot event-port cleanup | Simpler reader-worker protocol with a measured point-query and large-read win |  |
-| [041](041-ryu-double-to-string.md) | Ryu double-to-string for JSON | Replaces snprintf with Ryu algorithm for float formatting in selectBytes path |  |
 | [043](043-swar-escape-lookup-table.md) | SWAR escape scanning + lookup table | 8-byte-at-a-time escape detection + lookup table eliminates branch chains in JSON strings |  |
 | [044](044-batch-atomic-write.md) | `SQLITE_ENABLE_BATCH_ATOMIC_WRITE` | Zero-risk compile flag enabling 2-3x write speedup on Android F2FS |  |
 | [045](045-microtask-invalidation-coalescing.md) | Microtask invalidation coalescing | Batches rapid sequential writes into a single invalidation pass per microtask |  |
@@ -62,6 +61,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [014](014-writer-tuning.md) | locking_mode=EXCLUSIVE *(partial)* | Blocks all readers — incompatible with concurrent reader pool |
 | [017](017-dart-postcobject.md) | Dart_PostCObject for reads | 2-5x slower — serialize/deserialize costs more than validation walk |
 | [018](018-multi-row-step.md) | Multi-row step (64 rows/FFI call) | String copy overhead exceeds FFI crossing savings |
+| [041](041-ryu-double-to-string.md) | Ryu double-to-string for JSON | Initially accepted but reverted after re-analysis: only -10% on one benchmark (text-heavy 1k rows) was actually attributable to 041; the claimed selectBytes wins were from 043. Not worth ~1500 lines of vendored third-party code + ~85-line format-compatibility wrapper |
 | [042](042-lto-build-flag.md) | LTO build flag (`-flto`) | Four rounds tested (full, noinline, stacked, thin). Every config net negative — icache pressure from cross-unit inlining into the 250k-line SQLite amalgamation |
 | [051](051-lock-free-reader-pool.md) | Lock-free reader pool with atomics | Mutex path is dead code since experiment 030 assigned dedicated readers; optimization target doesn't exist in the live path |
 | [052](052-column-level-dependencies.md) | Column-level dependency tracking | Sound architecture (skip re-queries on writes to non-watched columns), but current streaming benchmarks have 0% disjoint-column rate — benchmark-invisible |
