@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include "ryu/ryu.h"
 
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
@@ -1270,9 +1271,9 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
                     break;
                 }
                 case SQLITE_FLOAT: {
-                    char num[32];
-                    int num_len = snprintf(num, sizeof(num), "%.17g",
-                                           sqlite3_column_double(stmt, i));
+                    char num[25]; // Ryu needs at most 24 chars + NUL
+                    int num_len = d2s_buffered_n(
+                        sqlite3_column_double(stmt, i), num);
                     JSON_CHECK(buf_write_str(b, num, num_len));
                     break;
                 }

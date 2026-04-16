@@ -76,10 +76,13 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         // overhead when no encryption key is set.
         p.join(packageRoot, 'third_party', 'sqlite3mc', 'sqlite3mc_amalgamation.c'),
         p.join(packageRoot, 'native', 'resqlite.c'),
+        // Ryu: fast double-to-string algorithm (experiment 041).
+        p.join(packageRoot, 'third_party', 'ryu', 'd2s.c'),
       ],
       includes: [
         p.join(packageRoot, 'third_party', 'sqlite3mc'),
         p.join(packageRoot, 'native'),
+        p.join(packageRoot, 'third_party'),
       ],
       defines: {
         // -----------------------------------------------------------------
