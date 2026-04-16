@@ -120,6 +120,7 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         'SQLITE_THREADSAFE': '2',
 
         // Features we use.
+        'SQLITE_ENABLE_BATCH_ATOMIC_WRITE': null, // F2FS (Android 9+): eliminates journal I/O for 2-3x write speedup
         'SQLITE_ENABLE_FTS5': null,
         'SQLITE_ENABLE_MATH_FUNCTIONS': null,
         'SQLITE_ENABLE_PREUPDATE_HOOK': null,
