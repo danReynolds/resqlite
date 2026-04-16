@@ -162,6 +162,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     // Read the individual experiment file for date, commit, and content.
     String? date;
     String? commit;
+    String? archive;
     String? problem;
     String? hypothesis;
     final expFile = File('${experimentsDir.path}/$filename');
@@ -171,6 +172,13 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       date = dateMatch?.group(1);
       final commitMatch = RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
       commit = commitMatch?.group(1);
+      // Archive tag — added for rejected experiments whose code was
+      // preserved via `git tag archive/exp-NNN` before branch deletion.
+      // See the resqlite-experiment skill doc for the workflow.
+      final archiveMatch = RegExp(
+        r'\*\*Archive:\*\*\s*\[`?(archive/[^`\]]+)`?\]',
+      ).firstMatch(content);
+      archive = archiveMatch?.group(1);
       problem = _extractSection(content, 'Problem') ??
           _extractSection(content, 'Background') ??
           _extractSection(content, 'Analysis');
@@ -205,6 +213,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         'status': currentStatus,
         'summary': impact,
         'commit': commit,
+        if (archive != null) 'archive': archive,
         'problem': problem,
         'hypothesis': hypothesis,
         'approach': built,
