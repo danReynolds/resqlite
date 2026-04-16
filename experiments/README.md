@@ -40,6 +40,7 @@ Experiments that proved their value and were merged into the codebase.
 | [043](043-swar-escape-lookup-table.md) | SWAR escape scanning + lookup table | 8-byte-at-a-time escape detection + lookup table eliminates branch chains in JSON strings |  |
 | [044](044-batch-atomic-write.md) | `SQLITE_ENABLE_BATCH_ATOMIC_WRITE` | Zero-risk compile flag enabling 2-3x write speedup on Android F2FS |  |
 | [045](045-microtask-invalidation-coalescing.md) | Microtask invalidation coalescing | Batches rapid sequential writes into a single invalidation pass per microtask |  |
+| [064](064-drop-clear-bindings.md) | Drop redundant `sqlite3_clear_bindings` | Provably-redundant call removed; simpler bind path with documented invariants |  |
 
 ## Rejected
 
@@ -56,14 +57,27 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [006](006-string-interning.md) | String interning | Hash lookup cost exceeded dedup savings on mostly-unique data |
 | [008b](008b-byte-backed-lazy-maps.md) | Byte-backed lazy maps | Moved decode work (utf8.decode) to main isolate — wrong trade-off |
 | [010](010-ascii-fast-path-string-decode.md) | ASCII fast-path string decode | Marginal gain for ASCII, strictly worse for non-ASCII |
-| [046](046-sync-stream-controller.md) | Synchronous StreamController | Reentrancy crash: sync delivery causes concurrent modification of subscriber list during iteration |
-| [042](042-lto-build-flag.md) | LTO build flag (`-flto`) | Four rounds tested (full, noinline, stacked, thin). Every config net negative — icache pressure from cross-unit inlining into the 250k-line SQLite amalgamation |
-| [047](047-authorizer-opt-out.md) | Authorizer opt-out for non-stream queries | Shared statement cache conflict: non-stream queries that prepare first store empty dependency sets, breaking stream invalidation |
 | [011](011-persistent-reader-pool.md) | Persistent reader pool | Equivalent to one-off isolates; pool overhead cancels messaging savings |
 | [012](012-sendport-vs-spawn-deep-dive.md) | SendPort vs Isolate.spawn deep dive | Confirmed one-off isolates are optimal; persistent pools not faster |
 | [014](014-writer-tuning.md) | locking_mode=EXCLUSIVE *(partial)* | Blocks all readers — incompatible with concurrent reader pool |
 | [017](017-dart-postcobject.md) | Dart_PostCObject for reads | 2-5x slower — serialize/deserialize costs more than validation walk |
 | [018](018-multi-row-step.md) | Multi-row step (64 rows/FFI call) | String copy overhead exceeds FFI crossing savings |
+| [042](042-lto-build-flag.md) | LTO build flag (`-flto`) | Four rounds tested (full, noinline, stacked, thin). Every config net negative — icache pressure from cross-unit inlining into the 250k-line SQLite amalgamation |
+| [051](051-lock-free-reader-pool.md) | Lock-free reader pool with atomics | Mutex path is dead code since experiment 030 assigned dedicated readers; optimization target doesn't exist in the live path |
+| [052](052-column-level-dependencies.md) | Column-level dependency tracking | Sound architecture (skip re-queries on writes to non-watched columns), but current streaming benchmarks have 0% disjoint-column rate — benchmark-invisible |
+| [046](046-sync-stream-controller.md) | Synchronous StreamController | Reentrancy crash: sync delivery causes concurrent modification of subscriber list during iteration |
+| [047](047-authorizer-opt-out.md) | Authorizer opt-out for non-stream queries | Shared statement cache stores empty dependency sets when tracking is off, breaking stream invalidation |
+| [053](053-page-size-8192.md) | Page size 8192 | -16% select at 10k rows on new DBs but breaks existing DBs (requires VACUUM); should be exposed as `Database.open` option, not default |
+| [054](054-pgo.md) | Profile-Guided Optimization | macOS dylib profraw flush doesn't fire from Dart VM host process; needs CI pipeline with standalone C binary |
+| [055](055-columnar-typed-arrays.md) | Columnar typed arrays | Memory win confirmed (75% for numerics, 10000x fewer GC objects) but below time-based benchmark floor; requires memory profiling harness |
+| [057](057-preupdate-batching.md) | Preupdate hook batching for batch inserts | Savings (~2ms in 50ms batch) below noise floor |
+| [058](058-short-string-cache.md) | Short-string value cache | +134-256% regression. Dart's `String.fromCharCodes` is uncatchable with any Dart-level cache |
+| [059](059-row-count-hint.md) | Row count hint in schema cache | Marginal wins (2/0/61) on repeated queries but below noise on primary paths |
+| [060](060-combined-single-row-ffi.md) | Combined single-row FFI call | Text pointers invalidated by `sqlite3_reset` — required the inline-copy approach explored later |
+| [063](063-select-one-fast-path.md) | SelectOne fast path API | +28-48% point query win measured but rejected to preserve lean API surface |
+| [065](065-json1-reevaluation.md) | JSON1 re-evaluation (post-041/043) | Our custom path now ≥ JSON1 everywhere; confirms 031 with larger margin |
+| [066](066-transparent-fast-path.md) | Transparent single-row fast path in `select()` | Insufficient headroom — most of 063's win came from return-type change (`Map` vs `List<Map>`) which can't be captured transparently |
+| [067](067-shrink-initial-allocation.md) | Shrink initial values allocation (256→4) | Caused +40-44% regressions; Dart VM has a fast path for `List.filled` that shrinking bypasses |
 
 ## Conventions
 

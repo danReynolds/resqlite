@@ -956,11 +956,6 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
 
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count) {
-    // Cached statements keep prior bindings until explicitly cleared. Without
-    // this, reusing a statement with fewer params than the previous call can
-    // step with stale freed TEXT/BLOB pointers from an earlier bind.
-    sqlite3_clear_bindings(stmt);
-
     int expected = sqlite3_bind_parameter_count(stmt);
     if (expected != param_count) {
         // Force SQLite to populate the connection error state with the same
@@ -968,6 +963,13 @@ static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
         (void)sqlite3_bind_null(stmt, expected + 1);
         return SQLITE_RANGE;
     }
+
+    // No sqlite3_clear_bindings needed (experiment 064). We verify param_count
+    // above, so every slot is rebound by the loop below. TEXT/BLOB bindings
+    // use SQLITE_STATIC (no owned copy to free), and each new bind overwrites
+    // its predecessor. Cached statements are always reset before this function
+    // is entered (via get_or_prepare_reader), so SQLite never reads stale
+    // bindings between our overwrites.
 
     for (int i = 0; i < param_count; i++) {
         int idx = i + 1;
