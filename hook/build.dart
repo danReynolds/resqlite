@@ -220,6 +220,7 @@ const _exportedSymbols = [
   'resqlite_run_batch',
   'resqlite_run_batch_nested',
   'resqlite_get_dirty_tables',
+  'resqlite_schema_changed',
   'resqlite_get_read_tables',
   'resqlite_db_status_total',
   'resqlite_writer_handle',

@@ -74,9 +74,13 @@ final class CloseRequest extends WriterRequest {
 
 /// Response to [ExecuteRequest]. Includes dirty tables for stream invalidation.
 final class ExecuteResponse {
-  const ExecuteResponse(this.result, this.dirtyTables);
+  const ExecuteResponse(this.result, this.dirtyTables, this.schemaChanged);
   final WriteResult result;
   final List<String> dirtyTables;
+  // True when the DDL/schema_version watchdog (experiment 068) detected a
+  // schema change during this write. Signals a broadcast invalidation of
+  // all active streams.
+  final bool schemaChanged;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -88,8 +92,9 @@ final class QueryResponse {
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.dirtyTables);
+  const BatchResponse(this.dirtyTables, [this.schemaChanged = false]);
   final List<String> dirtyTables;
+  final bool schemaChanged;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,10 +216,14 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
-  // outermost transaction completes.
+  // outermost transaction completes. Schema change detection runs outside
+  // transactions too — DDL inside a tx is reported on tx commit.
+  final outsideTx = state.txDepth == 0;
   final dirty =
-      state.txDepth > 0 ? const <String>[] : getDirtyTables(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, dirty));
+      outsideTx ? getDirtyTables(state.dbHandle) : const <String>[];
+  final schemaChanged =
+      outsideTx && resqliteSchemaChanged(state.dbHandle) == 1;
+  msg.replyPort.send(ExecuteResponse(result, dirty, schemaChanged));
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
@@ -225,7 +234,9 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     msg.replyPort.send(const BatchResponse(<String>[]));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
+    final dirty = getDirtyTables(state.dbHandle);
+    final schemaChanged = resqliteSchemaChanged(state.dbHandle) == 1;
+    msg.replyPort.send(BatchResponse(dirty, schemaChanged));
   }
 }
 
@@ -324,7 +335,9 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
+    final dirty = getDirtyTables(state.dbHandle);
+    final schemaChanged = resqliteSchemaChanged(state.dbHandle) == 1;
+    msg.replyPort.send(BatchResponse(dirty, schemaChanged));
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
     final rc = resqliteExec(state.dbHandle, sp);

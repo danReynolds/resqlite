@@ -101,6 +101,14 @@ external int resqliteGetDirtyTables(
   int maxTables,
 );
 
+/// Check whether the DB schema changed since the last call (experiment 068).
+/// Returns 1 on change, 0 if unchanged, -1 on error.
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_schema_changed',
+  isLeaf: true,
+)
+external int resqliteSchemaChanged(ffi.Pointer<ffi.Void> db);
+
 // resqlite_write_result struct: {int affected_rows (4), pad (4), long long last_insert_id (8)} = 16 bytes
 const int _writeResultSize = 16;
 const int _writeResultOffAffected = 0;
@@ -295,19 +303,23 @@ void executeNestedBatchWrite(
   }
 }
 
+/// Per-worker persistent buffer for dirty-table pointer marshalling.
+/// Allocated once; reused across calls. Eliminates a ~512-byte calloc/free
+/// pair on every write (experiment 070).
+final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf = calloc<ffi.Pointer<Utf8>>(64);
+
 /// Read and clear the dirty tables set from the C connection.
+///
+/// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
+/// the List<String> allocation and return a shared const empty list.
 List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
-  final outTables = calloc<ffi.Pointer<Utf8>>(64);
-  try {
-    final count = resqliteGetDirtyTables(dbHandle, outTables, 64);
-    final tables = <String>[];
-    for (var i = 0; i < count; i++) {
-      tables.add(outTables[i].toDartString());
-    }
-    return tables;
-  } finally {
-    calloc.free(outTables);
+  final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  if (count == 0) return const <String>[];
+  final tables = List<String>.filled(count, '', growable: false);
+  for (var i = 0; i < count; i++) {
+    tables[i] = _dirtyTablesBuf[i].toDartString();
   }
+  return tables;
 }
 
 // ---------------------------------------------------------------------------

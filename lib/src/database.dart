@@ -329,6 +329,9 @@ final class Database {
     final writer = await _writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
+    if (response.schemaChanged) {
+      _streamEngine.handleSchemaChange();
+    }
     _streamEngine.handleDirtyTables(response.dirtyTables);
 
     return response.result;
@@ -365,8 +368,11 @@ final class Database {
     final reponse =
         await writer.locked(() => writer.executeBatch(sql, paramSets));
 
-    if (reponse?.dirtyTables case List<String> dirtyTables) {
-      _streamEngine.handleDirtyTables(dirtyTables);
+    if (reponse != null) {
+      if (reponse.schemaChanged) {
+        _streamEngine.handleSchemaChange();
+      }
+      _streamEngine.handleDirtyTables(reponse.dirtyTables);
     }
   }
 

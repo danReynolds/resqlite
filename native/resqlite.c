@@ -317,6 +317,14 @@ struct resqlite_db {
     resqlite_dirty_set dirty_tables;
     int writer_checkpoint_running;
 
+    // Schema version watchdog (experiment 068). SQLite bumps this whenever
+    // a DDL statement changes the schema (CREATE/DROP/ALTER TABLE, etc.).
+    // We check it after every write commit; if it moves, Dart broadcasts
+    // invalidation to every active stream so they re-discover their
+    // dependencies and re-emit with fresh data.
+    sqlite3_stmt* schema_version_stmt;
+    int last_schema_version;
+
     // Reader pool.
     resqlite_reader readers[MAX_READERS];
     int reader_count;
@@ -507,6 +515,20 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     sqlite3_preupdate_hook(writer, preupdate_hook, db);
     sqlite3_wal_hook(writer, writer_wal_hook, db);
 
+    // Prepare cached "PRAGMA schema_version" for the watchdog (exp 068).
+    // If prepare fails (encrypted DB not yet unlocked, etc.) we leave it
+    // NULL and skip the watchdog — degrades gracefully.
+    const char* schema_ver_sql = "PRAGMA schema_version";
+    sqlite3_prepare_v3(writer, schema_ver_sql, -1,
+                       SQLITE_PREPARE_PERSISTENT,
+                       &db->schema_version_stmt, NULL);
+    if (db->schema_version_stmt) {
+        if (sqlite3_step(db->schema_version_stmt) == SQLITE_ROW) {
+            db->last_schema_version = sqlite3_column_int(db->schema_version_stmt, 0);
+        }
+        sqlite3_reset(db->schema_version_stmt);
+    }
+
     // Open reader connections with authorizer hooks for dependency tracking.
     // Use reader_count as the insertion index so successful readers are
     // packed contiguously — no gaps if an earlier open/init fails.
@@ -555,6 +577,10 @@ void resqlite_close(resqlite_db* db) {
     sqlite3_mutex_enter(db->writer_mutex);
     stmt_cache_clear(&db->writer_cache);
     dirty_set_free(&db->dirty_tables);
+    if (db->schema_version_stmt) {
+        sqlite3_finalize(db->schema_version_stmt);
+        db->schema_version_stmt = NULL;
+    }
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
 
@@ -775,6 +801,27 @@ int resqlite_run_batch_nested(
     int rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
+}
+
+// Check whether the schema has changed since the last call (experiment 068).
+// Returns 1 on change, 0 if unchanged, -1 on error. Updates the stored
+// version before returning. Callers broadcast-invalidate all active streams
+// and clear schema caches when this returns 1.
+int resqlite_schema_changed(resqlite_db* db) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return -1;
+    if (!db->schema_version_stmt) return 0; // Watchdog unavailable — skip
+    int changed = 0;
+    sqlite3_mutex_enter(db->writer_mutex);
+    if (sqlite3_step(db->schema_version_stmt) == SQLITE_ROW) {
+        int current = sqlite3_column_int(db->schema_version_stmt, 0);
+        if (current != db->last_schema_version) {
+            db->last_schema_version = current;
+            changed = 1;
+        }
+    }
+    sqlite3_reset(db->schema_version_stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return changed;
 }
 
 int resqlite_get_dirty_tables(

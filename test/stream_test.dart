@@ -675,5 +675,60 @@ void main() {
 
       await sub.cancel();
     });
+
+    test('ALTER TABLE ADD COLUMN re-emits with new schema (experiment 068)', () async {
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['ada', 1]);
+
+      final emissions = <List<Map<String, Object?>>>[];
+      final sub = db.stream('SELECT * FROM items').listen((rows) {
+        emissions.add(rows.map((r) => Map<String, Object?>.from(r)).toList());
+      });
+
+      // Wait for initial emission
+      await Future.delayed(const Duration(milliseconds: 100));
+      expect(emissions.length, 1);
+      expect(emissions.last.first.containsKey('created_at'), isFalse);
+
+      // ALTER TABLE should trigger broadcast invalidation
+      await db.execute('ALTER TABLE items ADD COLUMN created_at TEXT');
+      await Future.delayed(const Duration(milliseconds: 100));
+      expect(emissions.length, 2);
+      expect(emissions.last.first.containsKey('created_at'), isTrue);
+      expect(emissions.last.first['created_at'], isNull);
+
+      // Subsequent INSERT on the new column should be picked up — verifies
+      // that dependencies were re-discovered against the new schema
+      await db.execute('INSERT INTO items(name, value, created_at) VALUES (?, ?, ?)',
+          ['grace', 2, '2026-04-16']);
+      await Future.delayed(const Duration(milliseconds: 100));
+      expect(emissions.length, 3);
+      expect(emissions.last.length, 2);
+      expect(emissions.last.last['created_at'], '2026-04-16');
+
+      await sub.cancel();
+    });
+
+    test('DROP TABLE propagates error to active stream (experiment 068)', () async {
+      await db.execute('CREATE TABLE temp_tbl(id INTEGER PRIMARY KEY, v TEXT)');
+      await db.execute('INSERT INTO temp_tbl(v) VALUES (?)', ['hello']);
+
+      final emissions = <List<Map<String, Object?>>>[];
+      final errors = <Object>[];
+      final sub = db.stream('SELECT * FROM temp_tbl').listen(
+        (rows) => emissions.add(rows.map((r) => Map<String, Object?>.from(r)).toList()),
+        onError: errors.add,
+      );
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      expect(emissions.length, 1);
+
+      // DROP TABLE should trigger re-discover; the stream's SQL no longer
+      // has a valid target so it propagates an error to the listener.
+      await db.execute('DROP TABLE temp_tbl');
+      await Future.delayed(const Duration(milliseconds: 200));
+      expect(errors.length, greaterThanOrEqualTo(1));
+
+      await sub.cancel();
+    });
   });
 }

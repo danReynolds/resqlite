@@ -40,6 +40,8 @@ Experiments that proved their value and were merged into the codebase.
 | [044](044-batch-atomic-write.md) | `SQLITE_ENABLE_BATCH_ATOMIC_WRITE` | Zero-risk compile flag enabling 2-3x write speedup on Android F2FS |  |
 | [045](045-microtask-invalidation-coalescing.md) | Microtask invalidation coalescing | Batches rapid sequential writes into a single invalidation pass per microtask |  |
 | [064](064-drop-clear-bindings.md) | Drop redundant `sqlite3_clear_bindings` | Provably-redundant call removed; simpler bind path with documented invariants |  |
+| [068](068-ddl-schema-watchdog.md) | DDL schema_version watchdog | Correctness fix: streams now re-emit correctly on `ALTER TABLE`/`CREATE TABLE`/`DROP TABLE`. Adds two regression tests |  |
+| [070](070-zero-row-change-shortcircuit.md) | Zero-row-change short-circuit + persistent dirty buffer | Removes per-write calloc/free pair and short-circuits empty dirty set to a const empty list |  |
 
 ## Rejected
 
@@ -78,6 +80,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [065](065-json1-reevaluation.md) | JSON1 re-evaluation (post-041/043) | Our custom path now ≥ JSON1 everywhere; confirms 031 with larger margin |
 | [066](066-transparent-fast-path.md) | Transparent single-row fast path in `select()` | Insufficient headroom — most of 063's win came from return-type change (`Map` vs `List<Map>`) which can't be captured transparently |
 | [067](067-shrink-initial-allocation.md) | Shrink initial values allocation (256→4) | Caused +40-44% regressions; Dart VM has a fast path for `List.filled` that shrinking bypasses |
+| [069](069-sql-fingerprint.md) | SQL fingerprint in stmt cache | Deferred: proper normalization needs a ~300+-line SQL rewriter; `sqlite3_normalized_sql` takes a prepared stmt as input, not raw SQL |
 
 ## Conventions
 

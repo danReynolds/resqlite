@@ -107,6 +107,13 @@ int resqlite_get_dirty_tables(
     int max_tables
 );
 
+// Check whether the DB schema has changed since the last call (experiment 068).
+// Returns 1 on change, 0 if unchanged, -1 on error. Reading the schema version
+// is a single cached PRAGMA step, cost ~1μs. Callers broadcast-invalidate all
+// streams when this returns 1, so they re-discover their dependencies against
+// the new schema.
+int resqlite_schema_changed(resqlite_db* db);
+
 // ---------------------------------------------------------------------------
 // Read dependency tracking (authorizer hook on readers)
 // ---------------------------------------------------------------------------
