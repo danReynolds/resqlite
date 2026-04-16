@@ -158,9 +158,6 @@ final class Writer {
     );
 
     if (Transaction.current == null) {
-      if (response.schemaChanged) {
-        _streamEngine.handleSchemaChange();
-      }
       _streamEngine.handleDirtyTables(response.dirtyTables);
     }
 

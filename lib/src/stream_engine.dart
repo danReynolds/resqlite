@@ -90,61 +90,6 @@ final class StreamEngine {
     }
   }
 
-  /// Called after a write when SQLite reports a schema change (experiment 068).
-  /// Invalidates every active stream so they re-discover their dependencies
-  /// and re-emit against the new schema.
-  ///
-  /// DDL (CREATE/DROP/ALTER TABLE) can change column lists, drop tables
-  /// streams depend on, or add columns returned by SELECT *. Previous read
-  /// dependencies may be stale — e.g., RENAME TABLE drops the old mapping.
-  /// We dispatch a re-discover pass that re-runs the initial-query path
-  /// (with dependency capture) so streams find their read set against the
-  /// new schema. Existing read-table mappings are preserved during dispatch
-  /// so writes landing concurrently still route to the right streams; the
-  /// re-discover replaces them on success.
-  void handleSchemaChange() {
-    if (_entries.isEmpty) return;
-    _writeGeneration++;
-
-    for (final entry in _entries.values) {
-      entry.reQueryGeneration++;
-      unawaited(_reDiscover(entry, entry.reQueryGeneration));
-    }
-  }
-
-  /// Re-run the initial-query path to re-discover read dependencies after a
-  /// schema change. Parallels the initial registration flow in _createStream.
-  ///
-  /// On success, swaps the stream's read tables. Re-emits only if the result
-  /// actually changed (matches the semantics of normal re-queries via
-  /// selectIfChanged) so benign DDL — e.g. a column rename that doesn't
-  /// affect this stream's projection — is transparent. On failure,
-  /// propagates the error to subscribers (generation-checked so a stale
-  /// re-discover doesn't drown out a newer valid emission).
-  Future<void> _reDiscover(StreamEntry entry, int generation) async {
-    try {
-      final pool = await _pool();
-      final (rows, readTables) =
-          await pool.selectWithDeps(entry.sql, entry.params);
-      if (entry.reQueryGeneration != generation) return;
-      _updateReadTables(entry.key, readTables);
-      final newHash = _hashResult(rows);
-      final changed = newHash != entry.lastResultHash;
-      entry.lastResult = rows;
-      entry.lastResultHash = newHash;
-      if (changed) {
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.add(rows);
-        }
-      }
-    } catch (e) {
-      if (entry.reQueryGeneration != generation) return;
-      for (final sub in entry.subscribers) {
-        if (!sub.isClosed) sub.addError(e);
-      }
-    }
-  }
-
   /// Flush accumulated dirty tables and dispatch re-queries.
   void _flushDirtyTables() {
     _flushScheduled = false;

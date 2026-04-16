@@ -150,26 +150,18 @@ final class RawQueryResult {
 /// The statement must already be acquired and bound (via
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
-RowSchema _buildSchema(ffi.Pointer<ffi.Void> stmt, int colCount) {
-  return RowSchema(List<String>.generate(colCount, (i) {
-    final namePtr = sqlite3ColumnName(stmt, i);
-    final nameLen = cStrlen(namePtr.cast());
-    return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
-  }, growable: false));
-}
-
 RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final colCount = sqlite3ColumnCount(stmt);
   var schema = schemaCache.remove(sql);
-  // Validate the cached schema against the current statement. Column count
-  // can change after DDL — SQLite auto-reprepares, but our Dart-side
-  // schemaCache doesn't know the SQL was re-compiled. If counts mismatch,
-  // rebuild the schema from sqlite3_column_name (experiment 068 fix).
-  if (schema != null && schema.names.length == colCount) {
+  if (schema != null) {
     // LRU promotion: re-insert so this entry moves to the end (most recent).
     schemaCache[sql] = schema;
   } else {
-    schema = _buildSchema(stmt, colCount);
+    schema = RowSchema(List<String>.generate(colCount, (i) {
+      final namePtr = sqlite3ColumnName(stmt, i);
+      final nameLen = cStrlen(namePtr.cast());
+      return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
+    }, growable: false));
     schemaCache[sql] = schema;
     // Evict oldest entry if cache is full.
     if (schemaCache.length > _schemaCacheMax) {

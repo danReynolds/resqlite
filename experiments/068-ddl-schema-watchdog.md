@@ -1,115 +1,114 @@
 # Experiment 068: DDL schema_version watchdog
 
-**Date:** 2026-04-16
-**Status:** Accepted (correctness fix)
+**Date:** 2026-04-16 (shipped), 2026-04-16 (reverted same day)
+**Status:** Deferred (correctness idea valid, implementation hit a stmt-cache race that needs more design work)
 
 ## Problem
 
-Active streams cached their read tables at registration time via the authorizer
-hook. When DDL changed the schema — `CREATE TABLE`, `DROP TABLE`,
-`ALTER TABLE` — the cached dependencies became stale:
+Active streams cache their read tables at registration time via the authorizer
+hook. When DDL changes the schema — `CREATE TABLE`, `DROP TABLE`,
+`ALTER TABLE` — the cached dependencies can go stale:
 
-- `ALTER TABLE ADD COLUMN`: `SELECT * FROM t` streams returned old column
-  lists until the first unrelated write re-queried them.
-- `DROP TABLE`: streams whose SQL referenced the dropped table returned
-  their last cached result forever (or errored unpredictably on the next
+- `ALTER TABLE ADD COLUMN`: `SELECT * FROM t` streams return old column
+  lists until the first unrelated write re-queries them.
+- `DROP TABLE`: streams whose SQL references the dropped table return
+  their last cached result forever (or error unpredictably on the next
   invalidation).
-- `ALTER TABLE RENAME`: stream read-tables still pointed at the old name.
+- `ALTER TABLE RENAME`: stream read-table mappings still point at the old
+  name.
 
-DDL doesn't fire the preupdate hook (which is what our dirty-table tracking
-relies on), so these changes went unnoticed by the stream engine.
-
-## Hypothesis
-
-SQLite bumps the `schema_version` PRAGMA on every DDL statement that changes
-the schema. Reading it after each write commit is O(1) — a single page cookie
-fetch — and lets us detect schema changes at the point they land.
-
-When the watchdog fires, broadcast-invalidate every active stream: re-run
-the initial-query path (`selectWithDeps`) so they re-discover their
-dependencies against the new schema, and re-emit if the result actually
-changed.
+DDL doesn't fire the preupdate hook, so these changes go unnoticed by the
+existing dirty-table tracking.
 
 ## Approach
 
+Cache `PRAGMA schema_version` on the writer. Read it after each write
+commit; if it moved, broadcast-invalidate every active stream and force
+`_reDiscover` to rebuild dependencies against the new schema.
+
 ### C side
 
-- Added `sqlite3_stmt* schema_version_stmt` (cached `PRAGMA schema_version`)
-  and `int last_schema_version` to the `resqlite_db` struct.
-- Initialize on open; step once to capture the baseline.
-- New FFI: `int resqlite_schema_changed(resqlite_db*)` — returns `1` if
-  the version moved since last call, `0` if unchanged, `-1` on error.
-  Protected by the writer mutex; total cost is a single cached stmt step
-  (~1μs).
-- Finalize the cached stmt in `resqlite_close`.
+- Added `schema_version_stmt` (cached PRAGMA) and `last_schema_version`
+  to `resqlite_db`.
+- New FFI `resqlite_schema_changed(db)` returning 1/0/-1.
 
-### Writer isolate
+### Dart side
 
-- Each of the three commit sites (`_handleExecute`, `_handleBatch` outside-tx
-  branch, `_handleCommit` outermost-tx commit) reads dirty tables *and*
-  calls `resqliteSchemaChanged`, packing both into a single response.
-- Skip the check inside open transactions — the schema change is reported
-  on the outermost commit via `_handleCommit`.
+- Writer responses carry a `schemaChanged` flag.
+- `StreamEngine.handleSchemaChange()` bumps every active entry's
+  generation and dispatches `_reDiscover` — a re-run of the
+  initial-query path (`selectWithDeps`) to recapture dependencies.
+- `Database.execute` / `executeBatch` / commit path all check the flag.
 
-### Stream engine
+Two correctness tests were added (`ALTER TABLE ADD COLUMN`, `DROP TABLE`)
+and passed locally.
 
-- New `handleSchemaChange()` method on `StreamEngine`. When triggered,
-  bumps `reQueryGeneration` on every active entry and dispatches a new
-  `_reDiscover` pass.
-- `_reDiscover` calls `pool.selectWithDeps()` to re-capture read tables
-  against the new schema. Re-emits only if the result hash changed
-  (benign DDL like RENAME COLUMN that doesn't affect a stream's projection
-  stays invisible). On failure, propagates the error to subscribers.
+## Why Reverted
 
-### Call-site wiring
+**CI revealed two failures** that didn't reproduce on the dev machine:
 
-`Database.execute`, `Database.executeBatch`, and `Writer.<tx-commit>` each
-check `response.schemaChanged` and call `_streamEngine.handleSchemaChange()`
-before `handleDirtyTables()`.
+1. **A pre-existing test** (`re-query failure after initial success
+   propagates error and recovers`) timed out. The existing test manually
+   triggers `handleDirtyTables` after a column rename to simulate a
+   data write landing on a DDL-affected table. With the watchdog in
+   place, both `handleSchemaChange` (my code) and `handleDirtyTables`
+   (the test) dispatch racing re-queries. The generation-check discards
+   the older one; on CI's slower scheduling, the surviving path didn't
+   complete within the 5-second test timeout.
 
-## Results
+2. **A new `ALTER TABLE ADD COLUMN` test** returned stale data — the
+   second row after the new column was added showed `null` instead of
+   the inserted value.
 
-### Correctness tests (new)
+The root cause for #2 traces to an interaction between our C-level stmt
+cache and SQLite's auto-reprepare:
 
-Two new test cases added to `test/stream_test.dart`:
+- `decodeQuery` calls `sqlite3_column_count(stmt)` *before* the first
+  `sqlite3_step`.
+- SQLite auto-reprepares stale cached statements *inside*
+  `sqlite3_step`, not before it.
+- After DDL, a cached stmt still reports the old column count on
+  `sqlite3_column_count` until it's been stepped once.
+- We cache the stale count, decode N cells per row, and silently miss
+  columns.
 
-- `ALTER TABLE ADD COLUMN re-emits with new schema (experiment 068)` —
-  verifies the stream re-emits with the new column present, and that a
-  subsequent INSERT on the new column is picked up by the refreshed
-  dependencies.
-- `DROP TABLE propagates error to active stream (experiment 068)` —
-  verifies `onError` receives a `ResqliteQueryException` when the stream's
-  underlying table is dropped.
+A partial fix (validate `schemaCache.names.length == colCount` and
+rebuild the Dart-side schema on mismatch) helped locally but wasn't
+enough — the C-level cached stmt itself was still the stale one, and
+the column_count read happens before any step can trigger reprepare.
 
-Both pass. All 126 pre-existing tests also pass unchanged — total 128.
+## Proper Fix (Future Work)
 
-### Performance
+The clean implementation needs to invalidate the C-level stmt cache
+when the schema version changes, not just the Dart-side schema cache.
+Options investigated but not implemented in-session:
 
-**0 wins, 0 regressions on the 63-benchmark suite** (5 repeats vs baseline).
+1. **Per-reader schema-version tracking.** Each reader records its
+   last-seen schema_version. At the top of every query, compare against
+   the writer's current version; if different, clear the reader's own
+   stmt cache so the next prepare picks up the new schema cleanly.
+2. **Explicit cache invalidation via a broadcast message.** Writer
+   sends a "clear caches" request to every reader isolate on DDL. Needs
+   careful coordination with in-flight queries.
+3. **Use `sqlite3_stmt_busy` + defensive re-prepare.** Mark cached
+   stmts stale on DDL, re-prepare lazily on next acquire.
 
-The per-write cost of the watchdog is a single cached-statement step
-(~1μs), which is below the noise floor of the benchmark suite. Writes that
-fired DDL (rare) pay an extra invalidation pass, but that path was broken
-before — there's no "before" baseline to compare against for correctness.
+All three need a deliberate design pass that the "quick win" framing
+didn't support. Reverted to keep the rest of the round shippable and
+CI green.
+
+## Related
+
+- Experiment 003 (C-level statement cache) — the caching design we
+  need to extend
+- Experiment 034 (per-worker schema cache) — the Dart-side cache that
+  had its own validation gap
+- Team proposal idea #1 (column-level invalidation) and #6 (row-level
+  filter invalidation) — both benefit from the same infrastructure
+  (reliable DDL invalidation + a stream-granularity benchmark)
 
 ## Decision
 
-**Accepted as a correctness fix.** Stream invalidation on DDL is expected
-behavior for a reactive query engine; this closes the gap. The performance
-cost is negligible and offset by the new `getDirtyTables` persistent-buffer
-optimization shipped in experiment 070.
-
-## Edge cases handled
-
-- **Rolled-back DDL**: SQLite reverts the schema version cookie on rollback,
-  so the watchdog correctly reports no change after a failed DDL transaction.
-- **Encrypted DB with pending key**: `prepare_v3` for the cached stmt may
-  fail at open time if the key isn't set yet. `resqlite_schema_changed`
-  returns 0 when `schema_version_stmt` is NULL — watchdog degrades
-  gracefully to "disabled" rather than blocking open.
-- **Benign DDL** (e.g., `ALTER TABLE RENAME COLUMN` for a column not
-  selected by a stream): `_reDiscover` hashes the new result and only
-  emits if it changed. Silent re-discover, no spurious emission.
-- **Write during DDL**: the schema-change handler runs before dirty-table
-  handling, so streams re-discover dependencies first, then normal
-  invalidation routes to the refreshed mappings.
+**Deferred.** The idea is sound and the need is real. Landing it
+properly requires fixing the stmt-cache/auto-reprepare interaction,
+which is a focused correctness effort rather than a quick win.

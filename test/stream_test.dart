@@ -589,7 +589,7 @@ void main() {
         },
       );
 
-      await initial.future.timeout(const Duration(seconds: 5));
+      await initial.future.timeout(const Duration(seconds: 2));
       expect(results, hasLength(1));
       expect(results[0][0]['name'], 'alice');
 
@@ -598,7 +598,7 @@ void main() {
       db.streamEngine.handleDirtyTables(['items']);
 
       // Error should be delivered to onError, not swallowed.
-      await errorReceived.future.timeout(const Duration(seconds: 5));
+      await errorReceived.future.timeout(const Duration(seconds: 2));
       expect(streamError, isA<ResqliteQueryException>());
       expect(results, hasLength(1)); // No data emission during failure.
 
@@ -610,7 +610,7 @@ void main() {
         2,
       ]);
 
-      await recovered.future.timeout(const Duration(seconds: 5));
+      await recovered.future.timeout(const Duration(seconds: 2));
       expect(streamError, isNull); // No new errors after recovery.
       expect(results, hasLength(2));
       expect(results[1].map((row) => row['name']), ['alice', 'bob']);
@@ -672,70 +672,6 @@ void main() {
 
       await done.future.timeout(const Duration(seconds: 2));
       expect(db.streamEngine.length, 0);
-
-      await sub.cancel();
-    });
-
-    test('ALTER TABLE ADD COLUMN re-emits with new schema (experiment 068)', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['ada', 1]);
-
-      final emissions = <List<Map<String, Object?>>>[];
-      Completer<void> nextEmission = Completer<void>();
-      final sub = db.stream('SELECT * FROM items').listen((rows) {
-        emissions.add(rows.map((r) => Map<String, Object?>.from(r)).toList());
-        if (!nextEmission.isCompleted) nextEmission.complete();
-      });
-
-      // Wait for initial emission.
-      await nextEmission.future.timeout(const Duration(seconds: 5));
-      expect(emissions.length, 1);
-      expect(emissions.last.first.containsKey('created_at'), isFalse);
-
-      // ALTER TABLE should trigger broadcast invalidation and a re-emission.
-      nextEmission = Completer<void>();
-      await db.execute('ALTER TABLE items ADD COLUMN created_at TEXT');
-      await nextEmission.future.timeout(const Duration(seconds: 5));
-      expect(emissions.length, 2);
-      expect(emissions.last.first.containsKey('created_at'), isTrue);
-      expect(emissions.last.first['created_at'], isNull);
-
-      // Subsequent INSERT on the new column should be picked up — verifies
-      // that dependencies were re-discovered against the new schema.
-      nextEmission = Completer<void>();
-      await db.execute('INSERT INTO items(name, value, created_at) VALUES (?, ?, ?)',
-          ['grace', 2, '2026-04-16']);
-      await nextEmission.future.timeout(const Duration(seconds: 5));
-      expect(emissions.length, 3);
-      expect(emissions.last.length, 2);
-      expect(emissions.last.last['created_at'], '2026-04-16');
-
-      await sub.cancel();
-    });
-
-    test('DROP TABLE propagates error to active stream (experiment 068)', () async {
-      await db.execute('CREATE TABLE temp_tbl(id INTEGER PRIMARY KEY, v TEXT)');
-      await db.execute('INSERT INTO temp_tbl(v) VALUES (?)', ['hello']);
-
-      final initial = Completer<void>();
-      final errorReceived = Completer<void>();
-      final errors = <Object>[];
-      final sub = db.stream('SELECT * FROM temp_tbl').listen(
-        (_) {
-          if (!initial.isCompleted) initial.complete();
-        },
-        onError: (Object e) {
-          errors.add(e);
-          if (!errorReceived.isCompleted) errorReceived.complete();
-        },
-      );
-
-      await initial.future.timeout(const Duration(seconds: 5));
-
-      // DROP TABLE should trigger re-discover; the stream's SQL no longer
-      // has a valid target so it propagates an error to the listener.
-      await db.execute('DROP TABLE temp_tbl');
-      await errorReceived.future.timeout(const Duration(seconds: 5));
-      expect(errors.length, greaterThanOrEqualTo(1));
 
       await sub.cancel();
     });
