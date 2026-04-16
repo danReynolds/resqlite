@@ -153,9 +153,8 @@ _QpsResult _summarize(List<int> iterationTimingsUs) {
   final ci = bootstrapMedianCI(qpsSamples, seed: _bootstrapSeed);
   return _QpsResult(
     medianQps: stats.median.round(),
-    perQueryMs: stats.median > 0
-        ? (_queryCount * 1000.0 / stats.median) / _queryCount
-        : 0,
+    // ms/query = 1000 / (queries/second)
+    perQueryMs: stats.median > 0 ? 1000.0 / stats.median : 0,
     ciLow: ci.low,
     ciHigh: ci.high,
     mdeCiPct: minimumDetectableEffectPct(qpsSamples),

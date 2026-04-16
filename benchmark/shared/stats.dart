@@ -1,4 +1,4 @@
-import 'dart:math';
+import 'dart:math' as math;
 
 /// Aggregate statistics across repeated runs of a metric.
 ///
@@ -38,7 +38,7 @@ final class AggregateStats {
   }
 
   double get comparisonThresholdPct =>
-      max_(minimumComparisonThresholdPct, madPct * 3.0);
+      math.max(minimumComparisonThresholdPct, madPct * 3.0);
 }
 
 /// Median of a pre-sorted list. Returns 0 for an empty list.
@@ -48,8 +48,6 @@ double medianOfSorted(List<double> sortedValues) {
   if (sortedValues.length.isOdd) return sortedValues[mid];
   return (sortedValues[mid - 1] + sortedValues[mid]) / 2;
 }
-
-double max_(double a, double b) => a > b ? a : b;
 
 /// Percentile bootstrap CI on the median.
 ///
@@ -68,7 +66,7 @@ double max_(double a, double b) => a > b ? a : b;
   if (samples.isEmpty) return (low: 0, high: 0);
   if (samples.length == 1) return (low: samples.first, high: samples.first);
 
-  final rng = seed != null ? Random(seed) : Random();
+  final rng = seed != null ? math.Random(seed) : math.Random();
   final n = samples.length;
   final medians = List<double>.filled(resamples, 0);
   final buffer = List<double>.filled(n, 0);
@@ -160,7 +158,7 @@ void printComparisonTable(String title, List<BenchmarkTiming> timings) {
   print('-' * title.length);
   print('');
 
-  final labelWidth = timings.map((t) => t.label.length).reduce(max) + 2;
+  final labelWidth = timings.map((t) => t.label.length).reduce(math.max) + 2;
 
   print(
     '${'Library'.padRight(labelWidth)}'
