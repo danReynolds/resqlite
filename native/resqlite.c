@@ -964,13 +964,6 @@ static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
         return SQLITE_RANGE;
     }
 
-    // No sqlite3_clear_bindings needed (experiment 064). We verify param_count
-    // above, so every slot is rebound by the loop below. TEXT/BLOB bindings
-    // use SQLITE_STATIC (no owned copy to free), and each new bind overwrites
-    // its predecessor. Cached statements are always reset before this function
-    // is entered (via get_or_prepare_reader), so SQLite never reads stale
-    // bindings between our overwrites.
-
     for (int i = 0; i < param_count; i++) {
         int idx = i + 1;
         int rc;
