@@ -955,11 +955,6 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
 
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count) {
-    // Cached statements keep prior bindings until explicitly cleared. Without
-    // this, reusing a statement with fewer params than the previous call can
-    // step with stale freed TEXT/BLOB pointers from an earlier bind.
-    sqlite3_clear_bindings(stmt);
-
     int expected = sqlite3_bind_parameter_count(stmt);
     if (expected != param_count) {
         // Force SQLite to populate the connection error state with the same
@@ -1177,38 +1172,95 @@ __attribute__((hot)) static int json_write_base64(resqlite_buf* __restrict b,
     return buf_write_char(b, '"');
 }
 
+// Lookup table: maps each byte to its JSON escape string length (0 = safe).
+// Entries: 2 = two-char escape (\", \\, \b, \f, \n, \r, \t), 6 = \uXXXX.
+static const unsigned char json_esc_len[256] = {
+    // 0x00-0x1F: control chars
+    6,6,6,6,6,6,6,6, 2,2,2,6,2,2,6,6, // \b=08, \t=09, \n=0A, \f=0C, \r=0D
+    6,6,6,6,6,6,6,6, 6,6,6,6,6,6,6,6,
+    // 0x20-0x7F
+    0,0,2,0,0,0,0,0, 0,0,0,0,0,0,0,0, // '"'=0x22 -> 2
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,2,0,0,0, // '\\'=0x5C -> 2
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    // 0x80-0xFF: all safe (UTF-8 continuation/lead bytes)
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+};
+
+// Lookup table: maps escapable byte to its 2-char escape suffix.
+static const char json_esc_char[256] = {
+    ['"']  = '"',
+    ['\\'] = '\\',
+    ['\b'] = 'b',
+    ['\f'] = 'f',
+    ['\n'] = 'n',
+    ['\r'] = 'r',
+    ['\t'] = 't',
+};
+
 __attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
     if (buf_write_char(b, '"') != 0) return -1;
 
-    // Scan-then-flush: write spans of safe characters in one memcpy,
-    // only stopping for characters that need escaping.
     int start = 0;
-    for (int i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        const char* esc = NULL;
-        int esc_len = 0;
-        char esc_buf[7];
+    int i = 0;
 
-        if (c == '"')       { esc = "\\\""; esc_len = 2; }
-        else if (c == '\\') { esc = "\\\\"; esc_len = 2; }
-        else if (c == '\b') { esc = "\\b";  esc_len = 2; }
-        else if (c == '\f') { esc = "\\f";  esc_len = 2; }
-        else if (c == '\n') { esc = "\\n";  esc_len = 2; }
-        else if (c == '\r') { esc = "\\r";  esc_len = 2; }
-        else if (c == '\t') { esc = "\\t";  esc_len = 2; }
-        else if (c < 0x20)  {
-            snprintf(esc_buf, sizeof(esc_buf), "\\u%04x", c);
-            esc = esc_buf;
-            esc_len = 6;
-        }
+    // SWAR: scan 8 bytes at a time for the common case (no escapes needed).
+    // Check if any byte < 0x20, == '"' (0x22), or == '\\' (0x5C).
+    // Uses the standard "has zero byte" SWAR trick: for each target, XOR the
+    // word with the repeated target byte, then detect zero bytes via
+    // (v - 0x01..01) & ~v & 0x80..80. Pure portable C, no SIMD intrinsics.
+    while (i + 8 <= len) {
+        uint64_t word;
+        memcpy(&word, s + i, 8);
 
-        if (esc) {
-            // Flush unescaped span.
-            if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
-            if (buf_write(b, esc, esc_len) != 0) return -1;
-            start = i + 1;
+        // Bytes < 0x20: subtract 0x20 from each byte, check for underflow.
+        uint64_t below_space = (word - 0x2020202020202020ULL) & ~word & 0x8080808080808080ULL;
+        // Bytes == '"' (0x22):
+        uint64_t xor_quote = word ^ 0x2222222222222222ULL;
+        uint64_t has_quote = (xor_quote - 0x0101010101010101ULL) & ~xor_quote & 0x8080808080808080ULL;
+        // Bytes == '\\' (0x5C):
+        uint64_t xor_bslash = word ^ 0x5C5C5C5C5C5C5C5CULL;
+        uint64_t has_bslash = (xor_bslash - 0x0101010101010101ULL) & ~xor_bslash & 0x8080808080808080ULL;
+
+        if ((below_space | has_quote | has_bslash) == 0) {
+            i += 8; // All 8 bytes safe — skip.
+            continue;
         }
+        break; // Found something to escape — fall through to byte-by-byte.
     }
+
+    // Byte-by-byte with lookup table for remaining bytes or after SWAR hit.
+    for (; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        unsigned char elen = json_esc_len[c];
+
+        if (__builtin_expect(elen == 0, 1)) continue; // Common case: safe byte.
+
+        // Flush unescaped span before this character.
+        if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
+
+        if (elen == 2) {
+            // Named two-char escape: \X
+            char pair[2] = { '\\', json_esc_char[c] };
+            if (buf_write(b, pair, 2) != 0) return -1;
+        } else {
+            // \uXXXX for control chars without named escapes.
+            char ubuf[7];
+            snprintf(ubuf, sizeof(ubuf), "\\u%04x", c);
+            if (buf_write(b, ubuf, 6) != 0) return -1;
+        }
+        start = i + 1;
+    }
+
     // Flush remaining unescaped span.
     if (start < len && buf_write(b, s + start, len - start) != 0) return -1;
 

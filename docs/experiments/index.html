@@ -95,13 +95,46 @@
     overflow: hidden;
   }
   .right-col-header {
-    padding: 0.75rem 1.25rem;
+    padding: 0.6rem 1.25rem;
     border-bottom: 1px solid var(--border);
     background: var(--card);
     flex-shrink: 0;
     font-size: 0.82rem;
     color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
   }
+  .filter-bar {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .filter-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    font-family: inherit;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+    transition: background 0.1s, color 0.1s;
+  }
+  .filter-btn:last-child { border-right: none; }
+  .filter-btn:hover { color: var(--text); background: rgba(88,166,255,0.05); }
+  .filter-btn.active {
+    color: var(--accent);
+    background: rgba(88,166,255,0.1);
+  }
+  .filter-btn .count {
+    font-size: 0.68rem;
+    opacity: 0.7;
+    margin-left: 0.25rem;
+  }
+  .header-text { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Experiment list */
   .exp-list {
@@ -355,7 +388,12 @@
   <!-- RIGHT: Experiment list OR full detail -->
   <div class="right-col" id="rightCol">
     <div class="right-col-header">
-      42 experiments — hover to highlight on chart, click for details
+      <span class="header-text" id="headerText">Loading…</span>
+      <div class="filter-bar" id="filterBar">
+        <button class="filter-btn active" data-filter="all">All<span class="count" id="countAll"></span></button>
+        <button class="filter-btn" data-filter="accepted">Accepted<span class="count" id="countAccepted"></span></button>
+        <button class="filter-btn" data-filter="rejected">Rejected<span class="count" id="countRejected"></span></button>
+      </div>
     </div>
 
     <div class="exp-list" id="expList">
@@ -376,6 +414,13 @@ Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Hel
 let DATA = null;
 const chartInstances = {};
 let selectedExpId = null;
+let currentFilter = 'all'; // 'all' | 'accepted' | 'rejected'
+
+function filteredExperiments() {
+  if (!DATA) return [];
+  if (currentFilter === 'all') return DATA.experiments;
+  return DATA.experiments.filter(e => e.status === currentFilter);
+}
 
 const DISPLAY = {
   'Select \u2192 Maps / 1000 rows / resqlite select()': 'select() 1K rows',
@@ -445,8 +490,47 @@ async function init() {
     return;
   }
   buildExpRunMappings();
+  updateHeaderCounts();
   buildCharts();
   renderExpList();
+  updateHeaderText();
+  attachListListeners();
+  attachFilterListeners();
+}
+
+function attachFilterListeners() {
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const filter = btn.dataset.filter;
+      if (filter === currentFilter) return;
+      currentFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+      // Close any open detail view — it may not be in the new filter.
+      if (selectedExpId) {
+        const exp = DATA.experiments.find(e => e.id === selectedExpId);
+        if (exp && currentFilter !== 'all' && exp.status !== currentFilter) {
+          closeDetail();
+        }
+      }
+      buildCharts();
+      renderExpList();
+      updateHeaderText();
+    });
+  });
+}
+
+function updateHeaderCounts() {
+  const exps = DATA.experiments;
+  document.getElementById('countAll').textContent = `(${exps.length})`;
+  document.getElementById('countAccepted').textContent = `(${exps.filter(e => e.status === 'accepted').length})`;
+  document.getElementById('countRejected').textContent = `(${exps.filter(e => e.status === 'rejected').length})`;
+}
+
+function updateHeaderText() {
+  const n = filteredExperiments().length;
+  const label = currentFilter === 'all' ? 'experiments' : `${currentFilter} experiments`;
+  document.getElementById('headerText').textContent =
+    `${n} ${label} — hover to highlight, click for details`;
 }
 
 // ── Charts ──
@@ -457,7 +541,13 @@ let chartRunIndices = []; // which run index each chart point uses
 
 function buildCharts() {
   const runs = DATA.runs;
-  const exps = DATA.experiments;
+  const exps = filteredExperiments();
+
+  // Destroy existing chart instances if rebuilding (filter change).
+  for (const [id, chart] of Object.entries(chartInstances)) {
+    chart.destroy();
+    delete chartInstances[id];
+  }
 
   // Build chart data: one point per experiment, using the mapped run's metrics.
   chartExpOrder = [];
@@ -753,7 +843,12 @@ function highlightChartIndex(runIndex) {
 // ── Experiment list ──
 function renderExpList() {
   const container = document.getElementById('expList');
-  const exps = DATA.experiments;
+  const exps = filteredExperiments();
+
+  if (exps.length === 0) {
+    container.innerHTML = '<div class="loading">No experiments match this filter.</div>';
+    return;
+  }
 
   container.innerHTML = exps.map(exp => `
     <div class="exp-item ${exp.status}" data-id="${exp.id}">
@@ -768,13 +863,16 @@ function renderExpList() {
       </div>
     </div>
   `).join('');
+}
 
-  // Event delegation on the list container for reliable hover + click.
+// Event delegation on the list container — attached once at init so filter
+// re-renders don't stack listeners.
+function attachListListeners() {
+  const container = document.getElementById('expList');
   container.addEventListener('click', (e) => {
     const item = e.target.closest('.exp-item');
     if (!item) return;
     const id = item.dataset.id;
-    // Toggle: re-clicking the selected experiment closes it.
     if (selectedExpId === id) {
       closeDetail();
     } else {
