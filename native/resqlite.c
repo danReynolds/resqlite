@@ -1137,6 +1137,88 @@ __attribute__((hot)) static int fast_i64_to_str(long long val, char* buf) {
 }
 
 // ---------------------------------------------------------------------------
+// Ryu wrapper: convert always-scientific output to %.17g-style formatting
+// ---------------------------------------------------------------------------
+//
+// Ryu's d2s_buffered_n always emits scientific notation (e.g., "100" → "1E2",
+// "0" → "0E0", "3.14" → "3.14E0"). For JSON output we want the more familiar
+// formatting that snprintf("%.17g") produced: plain decimal for values whose
+// decimal exponent falls in [-4, 16], scientific otherwise. This keeps
+// downstream JSON consumers happy without giving up Ryu's speed or
+// shortest-round-trippable correctness.
+//
+// Output buffer must hold at least 32 bytes (safely fits Ryu's 24-char max
+// output plus any reformatting). Returns the length written.
+__attribute__((hot)) static int d2s_g_format(double v, char* buf) {
+    int n = d2s_buffered_n(v, buf);
+
+    // Locate the 'E' separator.
+    int e_pos = -1;
+    for (int i = 0; i < n; i++) {
+        if (buf[i] == 'E') { e_pos = i; break; }
+    }
+    if (e_pos < 0) return n; // Defensive: Ryu should always emit 'E'.
+
+    // Parse the signed decimal exponent after 'E'.
+    int exp = 0;
+    int exp_neg = 0;
+    int i = e_pos + 1;
+    if (i < n && buf[i] == '-') { exp_neg = 1; i++; }
+    for (; i < n; i++) exp = exp * 10 + (buf[i] - '0');
+    if (exp_neg) exp = -exp;
+
+    // Matches the %.17g cutoff: scientific for very small/very large values,
+    // plain decimal otherwise. Keep Ryu's scientific notation as-is when we
+    // pick the scientific branch.
+    if (exp < -4 || exp > 16) return n;
+
+    // Rewrite to plain decimal. Extract mantissa digits (skip sign and dot).
+    int sign_len = (buf[0] == '-') ? 1 : 0;
+    char digits[32];
+    int n_digits = 0;
+    int digits_after_dot = 0;
+    int dot_seen = 0;
+    for (int j = sign_len; j < e_pos; j++) {
+        char c = buf[j];
+        if (c == '.') { dot_seen = 1; continue; }
+        digits[n_digits++] = c;
+        if (dot_seen) digits_after_dot++;
+    }
+
+    // The implicit shift that reproduces the value: digits × 10^shift.
+    int shift = exp - digits_after_dot;
+
+    // Build the plain-decimal form in a temp buffer, then copy back to buf.
+    char out[40];
+    int o = 0;
+    if (sign_len) out[o++] = '-';
+
+    if (shift >= 0) {
+        // Append digits + |shift| trailing zeros. No decimal point.
+        for (int j = 0; j < n_digits; j++) out[o++] = digits[j];
+        for (int j = 0; j < shift; j++) out[o++] = '0';
+    } else {
+        int abs_shift = -shift;
+        if (abs_shift < n_digits) {
+            // Dot goes inside the digits.
+            int split = n_digits - abs_shift;
+            for (int j = 0; j < split; j++) out[o++] = digits[j];
+            out[o++] = '.';
+            for (int j = split; j < n_digits; j++) out[o++] = digits[j];
+        } else {
+            // Value is < 1.0; prepend "0." and leading zeros before digits.
+            out[o++] = '0';
+            out[o++] = '.';
+            for (int j = 0; j < abs_shift - n_digits; j++) out[o++] = '0';
+            for (int j = 0; j < n_digits; j++) out[o++] = digits[j];
+        }
+    }
+
+    memcpy(buf, out, o);
+    return o;
+}
+
+// ---------------------------------------------------------------------------
 // JSON output
 // ---------------------------------------------------------------------------
 
@@ -1330,8 +1412,10 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
                     break;
                 }
                 case SQLITE_FLOAT: {
-                    char num[25]; // Ryu needs at most 24 chars + NUL
-                    int num_len = d2s_buffered_n(
+                    // Buffer sized for worst case: %.17g-style plain decimal
+                    // (up to 17 digits + "." + leading zeros + sign).
+                    char num[40];
+                    int num_len = d2s_g_format(
                         sqlite3_column_double(stmt, i), num);
                     JSON_CHECK(buf_write_str(b, num, num_len));
                     break;
