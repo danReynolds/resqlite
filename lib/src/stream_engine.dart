@@ -25,6 +25,12 @@ final class StreamEngine {
   /// query to detect writes that landed during the setup window.
   int _writeGeneration = 0;
 
+  /// Accumulated dirty tables for microtask coalescing.
+  /// Multiple handleDirtyTables calls within the same microtask are batched
+  /// into a single invalidation pass, reducing redundant re-queries.
+  Set<String>? _pendingDirtyTables;
+  bool _flushScheduled = false;
+
   /// Number of active stream entries.
   ///
   /// Increments when [stream] registers a new query, decrements when all
@@ -69,9 +75,31 @@ final class StreamEngine {
     if (dirtyTables.isEmpty) return;
     _writeGeneration++;
 
-    // Inline invalidation — find affected stream keys via inverted index.
+    // Accumulate dirty tables for microtask coalescing.
+    // Multiple writes within the same synchronous work batch are combined
+    // into a single invalidation pass, reducing redundant re-queries.
+    if (_pendingDirtyTables == null) {
+      _pendingDirtyTables = Set<String>.from(dirtyTables);
+    } else {
+      _pendingDirtyTables!.addAll(dirtyTables);
+    }
+
+    if (!_flushScheduled) {
+      _flushScheduled = true;
+      scheduleMicrotask(_flushDirtyTables);
+    }
+  }
+
+  /// Flush accumulated dirty tables and dispatch re-queries.
+  void _flushDirtyTables() {
+    _flushScheduled = false;
+    final tables = _pendingDirtyTables;
+    _pendingDirtyTables = null;
+    if (tables == null || tables.isEmpty) return;
+
+    // Find affected stream keys via inverted index.
     final affected = <int>{};
-    for (final table in dirtyTables) {
+    for (final table in tables) {
       final keys = _tableToKeys[table];
       if (keys != null) affected.addAll(keys);
     }
