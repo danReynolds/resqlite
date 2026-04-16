@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'reader/reader_pool.dart';
-import 'result_hash.dart';
 
 /// Stream engine — reactive query lifecycle.
 ///
@@ -167,13 +166,16 @@ final class StreamEngine {
           return; // cancelled before query finished
         }
 
-        final initialRows = result.$1;
-        final readTables = result.$2;
+        final (initialRows, readTables, initialHash) = result;
 
         // Set real read tables so future writes trigger invalidation.
         _updateReadTables(key, readTables);
         entry.lastResult = initialRows;
-        entry.lastResultHash = _hashResult(initialRows);
+        // Hash comes from the worker, computed in C by resqlite_query_hash
+        // (experiment 075). It lives in the same domain as every future
+        // re-query hash, so selectIfChanged can compare directly without
+        // any Dart-side rehash.
+        entry.lastResultHash = initialHash;
 
         // Push initial result to all subscribers.
         for (final sub in entry.subscribers) {
@@ -349,20 +351,4 @@ final class StreamEntry {
 /// Compute a stable hash key for a stream query.
 int _streamKey(String sql, List<Object?> params) {
   return Object.hash(sql, Object.hashAll(params));
-}
-
-/// Hash a query result for change detection using shared FNV-1a.
-///
-/// Uses [stableValueHash] instead of `Object.hashCode` so that
-/// `Uint8List` values are hashed by content, not by identity.
-int _hashResult(List<Map<String, Object?>> rows) {
-  if (rows.isEmpty) return 0;
-  var hash = fnvOffsetBasis;
-  hash = fnvCombine(hash, rows.length);
-  for (final row in rows) {
-    for (final value in row.values) {
-      hash = fnvCombine(hash, stableValueHash(value));
-    }
-  }
-  return hash;
 }

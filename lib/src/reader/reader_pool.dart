@@ -68,14 +68,18 @@ final class ReaderPool {
   }
 
   /// Execute a query and capture read dependencies (table names).
-  Future<(List<Map<String, Object?>>, List<String>)> selectWithDeps(
+  ///
+  /// Also returns the C-computed hash of the initial result (exp 075) so
+  /// later [selectIfChanged] calls have a baseline in the same hash
+  /// domain to compare against.
+  Future<(List<Map<String, Object?>>, List<String>, int)> selectWithDeps(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
     final result = await _dispatch(
       SelectWithDepsRequest(sql, parameters),
     );
-    return result as (List<Map<String, Object?>>, List<String>);
+    return result as (List<Map<String, Object?>>, List<String>, int);
   }
 
   /// Execute a query returning JSON-encoded bytes.
@@ -88,7 +92,7 @@ final class ReaderPool {
   }
 
   /// Execute a re-query with worker-side hash comparison.
-  /// Returns `(rows, newHash)` if changed, or `(null, lastHash)` if unchanged.
+  /// Returns `(rows, newHash)` if changed, or `(null, newHash)` if unchanged.
   Future<(List<Map<String, Object?>>?, int)> selectIfChanged(
     String sql,
     List<Object?> parameters,
@@ -97,8 +101,7 @@ final class ReaderPool {
     final result = await _dispatch(
       SelectIfChangedRequest(sql, parameters, lastResultHash),
     );
-    final (hash, rows) = result as (int, List<Map<String, Object?>>?);
-    return (rows, hash);
+    return result as (List<Map<String, Object?>>?, int);
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {
