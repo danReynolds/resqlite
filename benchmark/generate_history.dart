@@ -35,12 +35,28 @@ Future<void> main() async {
       continue;
     }
 
+    // Memory metrics come from a separate section of the markdown and
+    // are optional (older results have no `## Memory` block). Captured
+    // under a distinct namespace so chart code can treat them separately.
+    final memory = extractMemoryMedians(content);
+    final memoryJson = {
+      for (final entry in memory.entries)
+        entry.key: {
+          'rssDeltaMedMB': entry.value.rssDeltaMedMB,
+          'rssDeltaP90MB': entry.value.rssDeltaP90MB,
+          'ciLowMB': entry.value.ciLowMB,
+          'ciHighMB': entry.value.ciHighMB,
+          'mdeMB': entry.value.mdeMB,
+        },
+    };
+
     runs.add({
       'id': meta.label,
       'date': meta.date,
       'timestamp': meta.timestamp,
       'label': meta.label,
       'metrics': metrics,
+      if (memoryJson.isNotEmpty) 'memoryMetrics': memoryJson,
     });
   }
 
