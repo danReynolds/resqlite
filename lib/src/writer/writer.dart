@@ -159,9 +159,13 @@ final class Writer {
 
     if (Transaction.current == null) {
       if (response.schemaChanged) {
+        // DDL: broadcast-invalidate all streams. handleSchemaChange's
+        // _reDiscover pass subsumes the normal dirty-table invalidation
+        // for this commit.
         _streamEngine.handleSchemaChange();
+      } else {
+        _streamEngine.handleDirtyTables(response.dirtyTables);
       }
-      _streamEngine.handleDirtyTables(response.dirtyTables);
     }
 
     return result;

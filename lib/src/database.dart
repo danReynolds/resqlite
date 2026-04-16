@@ -330,9 +330,13 @@ final class Database {
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
     if (response.schemaChanged) {
+      // DDL: broadcast-invalidate all streams. handleSchemaChange's
+      // _reDiscover pass subsumes the normal dirty-table invalidation for
+      // this write — every stream is already being re-queried.
       _streamEngine.handleSchemaChange();
+    } else {
+      _streamEngine.handleDirtyTables(response.dirtyTables);
     }
-    _streamEngine.handleDirtyTables(response.dirtyTables);
 
     return response.result;
   }
@@ -371,8 +375,9 @@ final class Database {
     if (reponse != null) {
       if (reponse.schemaChanged) {
         _streamEngine.handleSchemaChange();
+      } else {
+        _streamEngine.handleDirtyTables(reponse.dirtyTables);
       }
-      _streamEngine.handleDirtyTables(reponse.dirtyTables);
     }
   }
 
