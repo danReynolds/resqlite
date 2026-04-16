@@ -119,7 +119,8 @@ final class StreamEngine {
   /// actually changed (matches the semantics of normal re-queries via
   /// selectIfChanged) so benign DDL — e.g. a column rename that doesn't
   /// affect this stream's projection — is transparent. On failure,
-  /// propagates the error to subscribers.
+  /// propagates the error to subscribers (generation-checked so a stale
+  /// re-discover doesn't drown out a newer valid emission).
   Future<void> _reDiscover(StreamEntry entry, int generation) async {
     try {
       final pool = await _pool();
