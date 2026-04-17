@@ -129,10 +129,9 @@ final class StreamEngine {
   /// Without coalescing, a tight write burst against a table watched by N
   /// streams queues O(writes × N) re-queries in the reader pool. For a
   /// workload with 100 streams and 200 writes, that's up to 20,000
-  /// dispatches — each one a full pool round-trip, even though most
-  /// short-circuit via the worker-side hash (experiments 031/033/075).
+  /// dispatches — each one a full pool round-trip.
   ///
-  /// With coalescing: at most ONE re-query is in flight per stream entry
+  /// With coalescing, at most ONE re-query is in flight per stream entry
   /// at a time. If another invalidation arrives while one is running, we
   /// just flag `needsRecheckAfter` on the entry. When the in-flight
   /// re-query completes, it re-reads the current state (which has
