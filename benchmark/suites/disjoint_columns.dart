@@ -26,11 +26,12 @@ import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 ///   overlap ≈ several hundred (coalescing is lighter). Ratio ≈ 1.0 =
 ///   table-level.
 ///
-/// We add two microtask yields per write to defeat coalescing where we
-/// can, but deeper coalescing (writer-worker batching) is library-
-/// internal and intentional. The ratio isolates what we care about:
-/// does the library *distinguish* columns a subscriber reads from
-/// columns it doesn't?
+/// We add two event-queue yields per write (`Future.delayed(Duration.zero)`
+/// schedules via Timer.run, draining both microtasks and the timer queue)
+/// to defeat coalescing where we can. Deeper coalescing (writer-worker
+/// batching) is library-internal and intentional. The ratio isolates what
+/// we care about: does the library *distinguish* columns a subscriber
+/// reads from columns it doesn't?
 ///
 /// sqlite3 is excluded (no stream/watch API). sqlite_async uses
 /// `throttle: Duration.zero` so throttling doesn't mask the invalidation
@@ -221,9 +222,12 @@ Future<_StreamResult> _measureResqlite({
   final sw = Stopwatch()..start();
   for (var i = 0; i < writeCount; i++) {
     await db.execute(updateSql, [newValueFor(i), i]);
-    // Two microtask yields: defeats resqlite's per-microtask invalidation
-    // coalescing (experiment 045). Without this the 500 writes collapse
-    // to ~10 emissions and the granularity signal is lost.
+    // Two event-queue yields. `Future.delayed(Duration.zero)` schedules
+    // via `Timer.run`, which drains the microtask queue first and then
+    // fires on the next event-loop turn — so this defeats resqlite's
+    // per-microtask invalidation coalescing (experiment 045). Without
+    // this, 500 sequential writes collapse to ~10 emissions and the
+    // granularity signal is lost.
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
   }

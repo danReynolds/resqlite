@@ -637,19 +637,38 @@ String _generateStreamingColumnComparison(
     final curr = current[key]!.reemits;
     final delta = curr - prev;
 
-    // For disjoint-column workloads, fewer re-emits is better (more
-    // precise invalidation). For overlapping, the count should stay
-    // stable. We report delta and flag outsized moves either way.
+    // The direction of "win" depends on the workload:
+    //
+    //   * Disjoint subsection: fewer re-emits = tighter column tracking =
+    //     win; more re-emits = tracking regression.
+    //   * Overlapping subsection (control): writes should ALWAYS
+    //     invalidate. Fewer re-emits = invalidation is being silently
+    //     elided = correctness regression, NOT a win. The only good move
+    //     on the overlapping path is no material change.
+    //
+    // Subsection is encoded in the metric key as the middle segment
+    // (e.g. "Streaming (Column Granularity) / Disjoint column writes
+    // (SET c = ?) / resqlite"). Classify from the key.
+    final isOverlapping = key.toLowerCase().contains('overlapping');
     String status;
-    if (delta < -reemitThreshold) {
-      status = '🟢 Fewer re-emits ($delta)';
-      wins++;
-    } else if (delta > reemitThreshold) {
-      status = '🔴 More re-emits (+$delta)';
-      regressions++;
-    } else {
+    if (delta.abs() <= reemitThreshold) {
       status = '⚪ Within noise';
       neutral++;
+    } else if (isOverlapping) {
+      // Any material change on the control workload is a regression.
+      status = delta < 0
+          ? '🔴 Invalidation elided ($delta) — writes not firing'
+          : '🔴 More re-emits (+$delta)';
+      regressions++;
+    } else {
+      // Disjoint: fewer is better, more is a tracking regression.
+      if (delta < 0) {
+        status = '🟢 Fewer re-emits ($delta)';
+        wins++;
+      } else {
+        status = '🔴 More re-emits (+$delta)';
+        regressions++;
+      }
     }
 
     final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;

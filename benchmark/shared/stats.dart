@@ -97,10 +97,17 @@ double medianOfSorted(List<double> sortedValues) {
 ///
 /// Falls back to `rangePct` when n < 5 (bootstrap CIs are unreliable on
 /// very small samples).
+///
+/// Pass [seed] to get stable MDE values across repeated invocations on
+/// the same data — matches the determinism contract of [bootstrapMedianCI].
+/// Callers that print "deterministic, seed=..." in their output headers
+/// must thread their seed through here, otherwise the printed MDE will
+/// drift across re-runs even with identical samples.
 double minimumDetectableEffectPct(
   List<double> samples, {
   double confidence = 0.95,
   int resamples = 2000,
+  int? seed,
 }) {
   if (samples.isEmpty) return 0;
   final stats = AggregateStats(samples);
@@ -108,7 +115,7 @@ double minimumDetectableEffectPct(
   final median = stats.median;
   if (median == 0) return 0;
   final ci = bootstrapMedianCI(samples,
-      confidence: confidence, resamples: resamples);
+      confidence: confidence, resamples: resamples, seed: seed);
   final halfWidth = (ci.high - ci.low) / 2;
   return (halfWidth / median) * 100;
 }

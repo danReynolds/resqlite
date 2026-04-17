@@ -157,7 +157,7 @@ _QpsResult _summarize(List<int> iterationTimingsUs) {
     perQueryMs: stats.median > 0 ? 1000.0 / stats.median : 0,
     ciLow: ci.low,
     ciHigh: ci.high,
-    mdeCiPct: minimumDetectableEffectPct(qpsSamples),
+    mdeCiPct: minimumDetectableEffectPct(qpsSamples, seed: _bootstrapSeed),
     mdeMadPct: madBasedDetectableEffectPct(qpsSamples),
   );
 }
