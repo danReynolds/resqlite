@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-16T21:40:26.195866",
+  "generated": "2026-04-16T22:47:36.631280",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -4629,6 +4629,310 @@
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.56,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.56
       }
+    },
+    {
+      "id": "057-baseline-5x",
+      "date": "2026-04-16",
+      "timestamp": "2026-04-16T22:38:04",
+      "label": "057-baseline-5x",
+      "metrics": {
+        "Select → Maps / 10 rows / resqlite select()": 0.01,
+        "Select → Maps / 10 rows / resqlite select() [main]": 0.0,
+        "Select → Maps / 100 rows / resqlite select()": 0.05,
+        "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+        "Select → Maps / 1000 rows / resqlite select()": 0.39,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.1,
+        "Select → Maps / 10000 rows / resqlite select()": 4.67,
+        "Select → Maps / 10000 rows / resqlite select() [main]": 0.98,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.01,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.04,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.36,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 4.82,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.0,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.12,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 1.04,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.39,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.63,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.35,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.36,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.15,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 1x": 0.3,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 2x": 0.33,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": 0.36,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 8x": 0.68,
+        "Point Query Throughput / resqlite qps": 99246.0,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": 14.84,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select() [main]": 14.84,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 2.0,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 2.0,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.06,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.48,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.63,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.07,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.65,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.65,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.49,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.49,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 8.5,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 8.5,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.12,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.12,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.2,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.2,
+        "Streaming / Initial Emission / resqlite stream()": 0.04,
+        "Streaming / Initial Emission / resqlite stream() [main]": 0.04,
+        "Streaming / Invalidation Latency / resqlite": 0.05,
+        "Streaming / Invalidation Latency / resqlite [main]": 0.05,
+        "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite": 0.28,
+        "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite [main]": 0.28,
+        "Streaming / Fan-out (10 streams) / resqlite": 0.23,
+        "Streaming / Fan-out (10 streams) / resqlite [main]": 0.23,
+        "Streaming / Stream Churn (100 cycles) / resqlite": 2.54,
+        "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.54
+      },
+      "memoryMetrics": {
+        "Memory / Select 10k rows → Maps / resqlite select()": {
+          "rssDeltaMedMB": 1.81,
+          "rssDeltaP90MB": 9.89,
+          "ciLowMB": 0.0,
+          "ciHighMB": 4.31,
+          "mdeMB": 2.16
+        },
+        "Memory / Select 10k rows → Maps / sqlite3 select()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → Maps / sqlite_async getAll()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → JSON Bytes / resqlite selectBytes()": {
+          "rssDeltaMedMB": 2.0,
+          "rssDeltaP90MB": 3.38,
+          "ciLowMB": 2.0,
+          "ciHighMB": 2.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → JSON Bytes / sqlite3 + jsonEncode": {
+          "rssDeltaMedMB": 4.06,
+          "rssDeltaP90MB": 44.27,
+          "ciLowMB": 0.0,
+          "ciHighMB": 4.56,
+          "mdeMB": 2.28
+        },
+        "Memory / Select 10k rows → JSON Bytes / sqlite_async + jsonEncode": {
+          "rssDeltaMedMB": 0.03,
+          "rssDeltaP90MB": 22.7,
+          "ciLowMB": 0.0,
+          "ciHighMB": 5.06,
+          "mdeMB": 2.53
+        },
+        "Memory / Batch insert 10k rows / resqlite executeBatch()": {
+          "rssDeltaMedMB": 0.69,
+          "rssDeltaP90MB": 8.06,
+          "ciLowMB": 0.0,
+          "ciHighMB": 1.77,
+          "mdeMB": 0.88
+        },
+        "Memory / Batch insert 10k rows / sqlite3 prepared stmt": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Batch insert 10k rows / sqlite_async executeBatch()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Streaming fan-out (10 streams × 100 writes) / resqlite stream()": {
+          "rssDeltaMedMB": 0.05,
+          "rssDeltaP90MB": 0.47,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.06,
+          "mdeMB": 0.03
+        },
+        "Memory / Streaming fan-out (10 streams × 100 writes) / sqlite_async watch()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.5,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.02,
+          "mdeMB": 0.01
+        }
+      }
+    },
+    {
+      "id": "exp057-5x",
+      "date": "2026-04-16",
+      "timestamp": "2026-04-16T22:44:20",
+      "label": "exp057-5x",
+      "metrics": {
+        "Select → Maps / 10 rows / resqlite select()": 0.01,
+        "Select → Maps / 10 rows / resqlite select() [main]": 0.0,
+        "Select → Maps / 100 rows / resqlite select()": 0.05,
+        "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+        "Select → Maps / 1000 rows / resqlite select()": 0.39,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.1,
+        "Select → Maps / 10000 rows / resqlite select()": 5.0,
+        "Select → Maps / 10000 rows / resqlite select() [main]": 0.99,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.01,
+        "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.05,
+        "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.37,
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 4.37,
+        "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.0,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.12,
+        "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.05,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 1.04,
+        "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.39,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.6,
+        "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.35,
+        "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.15,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.34,
+        "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.14,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 1x": 0.33,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 2x": 0.34,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": 0.38,
+        "Concurrent Reads (1000 rows per query) / resqlite concurrent 8x": 0.75,
+        "Point Query Throughput / resqlite qps": 108909.0,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": 14.82,
+        "Parameterized Queries / 100 queries × ~500 rows each / resqlite select() [main]": 14.82,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 2.15,
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 2.15,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.06,
+        "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.47,
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.38,
+        "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 0.0,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
+        "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.09,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.09,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.85,
+        "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.85,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.51,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.51,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 7.85,
+        "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 7.85,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.11,
+        "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.11,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.19,
+        "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.19,
+        "Streaming / Initial Emission / resqlite stream()": 0.04,
+        "Streaming / Initial Emission / resqlite stream() [main]": 0.04,
+        "Streaming / Invalidation Latency / resqlite": 0.05,
+        "Streaming / Invalidation Latency / resqlite [main]": 0.05,
+        "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite": 0.25,
+        "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite [main]": 0.25,
+        "Streaming / Fan-out (10 streams) / resqlite": 0.23,
+        "Streaming / Fan-out (10 streams) / resqlite [main]": 0.23,
+        "Streaming / Stream Churn (100 cycles) / resqlite": 1.9,
+        "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.9
+      },
+      "memoryMetrics": {
+        "Memory / Select 10k rows → Maps / resqlite select()": {
+          "rssDeltaMedMB": 0.42,
+          "rssDeltaP90MB": 7.91,
+          "ciLowMB": 0.0,
+          "ciHighMB": 3.75,
+          "mdeMB": 1.88
+        },
+        "Memory / Select 10k rows → Maps / sqlite3 select()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → Maps / sqlite_async getAll()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → JSON Bytes / resqlite selectBytes()": {
+          "rssDeltaMedMB": 2.0,
+          "rssDeltaP90MB": 2.0,
+          "ciLowMB": 2.0,
+          "ciHighMB": 2.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Select 10k rows → JSON Bytes / sqlite3 + jsonEncode": {
+          "rssDeltaMedMB": 4.31,
+          "rssDeltaP90MB": 44.38,
+          "ciLowMB": 0.5,
+          "ciHighMB": 4.56,
+          "mdeMB": 2.03
+        },
+        "Memory / Select 10k rows → JSON Bytes / sqlite_async + jsonEncode": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 37.31,
+          "ciLowMB": 0.0,
+          "ciHighMB": 4.56,
+          "mdeMB": 2.28
+        },
+        "Memory / Batch insert 10k rows / resqlite executeBatch()": {
+          "rssDeltaMedMB": 1.44,
+          "rssDeltaP90MB": 8.08,
+          "ciLowMB": 0.0,
+          "ciHighMB": 5.22,
+          "mdeMB": 2.61
+        },
+        "Memory / Batch insert 10k rows / sqlite3 prepared stmt": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.0,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.0,
+          "mdeMB": 0.0
+        },
+        "Memory / Batch insert 10k rows / sqlite_async executeBatch()": {
+          "rssDeltaMedMB": 0.02,
+          "rssDeltaP90MB": 0.08,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.02,
+          "mdeMB": 0.01
+        },
+        "Memory / Streaming fan-out (10 streams × 100 writes) / resqlite stream()": {
+          "rssDeltaMedMB": 0.06,
+          "rssDeltaP90MB": 0.55,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.13,
+          "mdeMB": 0.06
+        },
+        "Memory / Streaming fan-out (10 streams × 100 writes) / sqlite_async watch()": {
+          "rssDeltaMedMB": 0.0,
+          "rssDeltaP90MB": 0.5,
+          "ciLowMB": 0.0,
+          "ciHighMB": 0.06,
+          "mdeMB": 0.03
+        }
+      }
     }
   ],
   "experiments": [
@@ -5341,6 +5645,7 @@
       "status": "rejected",
       "summary": "Savings (~2ms in 50ms batch) below noise floor",
       "commit": null,
+      "archive": "archive/exp-057",
       "problem": "The preupdate hook fires per-row during batch inserts. For `executeBatch` with 10,000 rows into one table, that's 10,000 calls to `dirty_set_add`, each doing a linear dedup scan over the set contents — all resolving to the same table name. This is wasted work.",
       "hypothesis": "Add a `batch_suppress_hook` flag to the `resqlite_db` struct. When set, the preupdate hook skips `dirty_set_add` after the first capture. Set the flag before `run_batch_locked`, clear it after. The table name is captured on the first row and not redundantly re-added 9,999 times.",
       "approach": null,
