@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="docs/logo.png" alt="resqlite logo" width="360">
-</p>
-
-# resqlite
+<h1 align="center">
+  <img src="docs/logo.png" alt="" width="220"><br>
+  resqlite
+</h1>
 
 [![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)]()
 [![Docs](https://img.shields.io/badge/docs-Homepage-58a6ff.svg)](https://danreynolds.github.io/resqlite/)
