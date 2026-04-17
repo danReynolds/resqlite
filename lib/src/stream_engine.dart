@@ -143,36 +143,6 @@ final class StreamEngine {
   ///      in-flight read may predate the intervening write) and dispatch
   ///      exactly one follow-up, which captures the now-current gen and
   ///      reads current state (reflecting every intermediate write).
-  ///
-  /// No update is lost. No unnecessary pool trips happen. State management
-  /// is "capture a baseline at dispatch, compare to current at completion"
-  /// — monotonic counter, no explicit reset step.
-  ///
-  /// ## Invariant (must be upheld by every caller)
-  ///
-  /// **All invalidation dispatches must route through `_scheduleReQuery`.**
-  /// Never call `_reQuery` directly. The counter bump and dedupe guard are
-  /// both here; bypassing them risks either double-dispatch or missed
-  /// invalidations.
-  ///
-  /// ## Worked example
-  ///
-  /// Consider re-query A dispatched for invalidation W1, followed by
-  /// invalidation W2 arriving mid-flight:
-  ///
-  ///   - `W1: invalidationGen: 0→1. No in-flight. _startReQuery captures
-  ///      gen=1, dispatches A.`
-  ///   - `A awaits pool.`
-  ///   - `W2: invalidationGen: 1→2. In-flight → return without dispatch.`
-  ///   - `A completes body: checks invalidationGen (2) != gen (1) → skip
-  ///      emit. Conservative: A's read may or may not reflect W2.`
-  ///   - `A's whenComplete: inFlight cleared. invalidationGen (2) !=
-  ///      gen (1) → dispatch follow-up B capturing gen=2.`
-  ///   - `B runs, reads current state (W1 + W2 both visible),
-  ///      invalidationGen (2) == gen (2) → emit.`
-  ///
-  /// Steady-state cap: at most N in-flight re-queries (one per active
-  /// stream) regardless of write rate.
   void _scheduleReQuery(StreamEntry entry) {
     entry.invalidationGen++;
     if (entry.inFlightReQuery != null) return;
@@ -186,17 +156,9 @@ final class StreamEngine {
     final gen = entry.invalidationGen;
     entry.inFlightReQuery = _reQuery(entry, gen).whenComplete(() {
       entry.inFlightReQuery = null;
-      // If invalidations arrived while the re-query was running, dispatch
-      // exactly one follow-up. It captures the now-current gen as its
-      // baseline; additional invalidations during the follow-up will chain
-      // further follow-ups through the same path. No manual reset step —
-      // each dispatch captures a fresh baseline.
-      if (entry.invalidationGen != gen) {
-        // If the entry was removed by a cancel while we were running,
-        // skip — no subscribers remain.
-        if (_entries[entry.key] != null) {
-          _startReQuery(entry);
-        }
+      // If the stream was invalidated while running, re-query it again.
+      if (_entries[entry.key] != null && entry.invalidationGen != gen) {
+        _startReQuery(entry);
       }
     });
   }
