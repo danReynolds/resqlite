@@ -240,10 +240,17 @@ async function init() {
   }
 
   const select = document.getElementById('deviceSelect');
-  select.innerHTML = devices.map((d, i) => {
+  // Build <option> elements via DOM APIs rather than innerHTML so that
+  // device names/dates (sourced from a contributor-editable markdown table)
+  // can't inject markup into the dashboard.
+  select.replaceChildren();
+  devices.forEach((d, i) => {
     const label = d.date ? `${d.name} — ${d.date}` : d.name;
-    return `<option value="${i}">${label}</option>`;
-  }).join('');
+    const option = document.createElement('option');
+    option.value = String(i);
+    option.textContent = label;
+    select.appendChild(option);
+  });
   select.addEventListener('change', () => renderDevice(devices[+select.value]));
   renderDevice(devices[0]);
 }
