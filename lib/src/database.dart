@@ -440,23 +440,16 @@ final class Database {
     _ensureOpen();
 
     // Read the three SQLite counters. Each call returns the aggregate
-    // across writer + idle readers; if any reader was busy, the call
-    // returns SQLITE_BUSY but still fills in the aggregate for the idle
-    // subset. We treat BUSY as "best effort" — surface the partial
-    // numbers with a flag.
+    // across writer + idle readers; if any reader was busy, the C
+    // layer has still populated the idle-subset aggregate into the
+    // out pointers. `getDbStatusTotalAllowBusy` surfaces those partial
+    // numbers with a `partial: true` flag instead of discarding them.
     var readersBusy = false;
 
     int readCounter(int op) {
-      try {
-        return getDbStatusTotal(_handle, op).current;
-      } on ResqliteQueryException catch (e) {
-        // sqliteCode 5 == SQLITE_BUSY — reader was mid-query.
-        if (e.sqliteCode == 5) {
-          readersBusy = true;
-          return 0;
-        }
-        rethrow;
-      }
+      final r = getDbStatusTotalAllowBusy(_handle, op);
+      if (r.partial) readersBusy = true;
+      return r.current;
     }
 
     final pageCache = readCounter(SqliteDbStatusOp.cacheUsed);

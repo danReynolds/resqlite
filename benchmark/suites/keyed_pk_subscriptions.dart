@@ -2,23 +2,24 @@
 
 /// A11 — Keyed PK Subscriptions (v1).
 ///
-/// 100 reactive streams each watch exactly one primary key via
-/// `SELECT * FROM items WHERE id = ?`. A loop of 1000 writes targets
-/// random PKs across a 10,000-row table. Most writes miss the 100
-/// watched PKs entirely (~1% hit rate), so the optimal library fires
-/// only on hits.
+/// 50 reactive streams each watch exactly one primary key via
+/// `SELECT * FROM items WHERE id = ?`. A loop of 200 writes targets
+/// random PKs across a 10,000-row table. Most writes miss the 50
+/// watched PKs entirely, so the optimal library fires only on hits.
 ///
-/// A library with table-level invalidation over-fires: 1000 writes ×
-/// 100 streams = 100,000 re-queries even though ~99% miss. A library
-/// with hash-based unchanged suppression (as resqlite has via exp 031
-/// / 033 today) skips most emissions but still pays the re-query cost.
-/// A library with keyed-PK invalidation (Track D's planned
-/// `watchRow()` API) skips the re-query entirely when the write's PK
-/// is not watched.
+/// A library with table-level invalidation over-fires: 200 writes ×
+/// 50 streams = 10,000 re-queries even though most writes miss. A
+/// library with hash-based unchanged suppression (as resqlite has via
+/// exp 031 / 033 today) skips most emissions but still pays the
+/// re-query cost. A library with keyed-PK invalidation (Track D's
+/// planned `watchRow()` API) skips the re-query entirely when the
+/// write's PK is not watched.
 ///
 /// This benchmark motivates Track D's `watchRow(table, pk)` API — the
 /// Flutter-idiomatic precision observer that matches how detail-screen
-/// widgets actually consume reactive data.
+/// widgets actually consume reactive data. At v1 we sized to 50/200
+/// so the full bench completes under ~60s on M1 Pro; a v2 version bump
+/// can raise counts if a bigger-scale story becomes necessary.
 ///
 /// Peers: resqlite, sqlite_async. sqlite3.dart is excluded (no streams).
 library;
@@ -109,9 +110,10 @@ final class _Reading {
   final String label;
   final BenchmarkTiming timing;
 
-  /// Median of per-iteration `sum(post-baseline emissions across all 100
-  /// streams)`. Optimal = number of writes that hit a watched PK (~10
-  /// with our seed + counts). Larger = over-fire.
+  /// Median of per-iteration `sum(post-baseline emissions across all 50
+  /// streams)`. Optimal = number of writes that hit a watched PK (~1
+  /// by chance with these counts; exact value depends on the seeded
+  /// sequence). Larger = over-fire.
   final int medianTotalEmissions;
 
   /// Median of per-iteration count of writes whose PK matched one of the
@@ -133,9 +135,14 @@ Future<_Reading> _measure(BenchmarkPeer peer) async {
   for (var i = 0; i < _warmup + _iterations; i++) {
     final r = await _singleIteration(peer, watchedIds);
     if (i >= _warmup) {
+      // Main-isolate time for this workload is the time spent inside
+      // the stream listener callback — that's where emission delivery
+      // work lands on the UI thread. Wall time covers dispatch +
+      // await + drain. Setting main == wall would overstate the UI
+      // thread cost for async peers (most of wall is awaiting).
       timing.record(
         wallMicroseconds: r.wallMicroseconds,
-        mainMicroseconds: r.wallMicroseconds,
+        mainMicroseconds: r.listenerMicroseconds,
       );
       totalEmissionsByIter.add(r.totalEmissions);
       observedHitsByIter.add(r.observedHits);
@@ -153,10 +160,15 @@ Future<_Reading> _measure(BenchmarkPeer peer) async {
 final class _IterationResult {
   _IterationResult({
     required this.wallMicroseconds,
+    required this.listenerMicroseconds,
     required this.totalEmissions,
     required this.observedHits,
   });
   final int wallMicroseconds;
+  /// Aggregate time spent inside the emission listener callback across
+  /// all streams in this iteration. Represents main-isolate CPU work;
+  /// differs from wall which includes dispatch + await + drain.
+  final int listenerMicroseconds;
   final int totalEmissions;
   final int observedHits;
 }
@@ -169,15 +181,23 @@ Future<_IterationResult> _singleIteration(
   // peer sees the same write pattern in the same order.
   final prng = math.Random(_prngSeed);
 
-  // Subscribe to all watched PKs.
+  // Subscribe to all watched PKs. Each listener times itself so the
+  // total time spent on the main isolate delivering emissions is
+  // measurable separately from wall time.
   final emitCounts = List<int>.filled(_streamCount, 0);
+  var listenerMicroseconds = 0;
   final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
   for (var i = 0; i < _streamCount; i++) {
     final idx = i; // Capture for closure.
     final sub = peer.watch(
       'SELECT id, body, updated_at FROM items WHERE id = ?',
       [watchedIds[i]],
-    ).listen((_) => emitCounts[idx]++);
+    ).listen((_) {
+      final sw = Stopwatch()..start();
+      emitCounts[idx]++;
+      sw.stop();
+      listenerMicroseconds += sw.elapsedMicroseconds;
+    });
     subs.add(sub);
   }
 
@@ -193,6 +213,7 @@ Future<_IterationResult> _singleIteration(
 
     // Baseline snapshot. Post-baseline emissions are the "real" count.
     final baseline = [...emitCounts];
+    final baselineListenerUs = listenerMicroseconds;
 
     final watchedSet = watchedIds.toSet();
     var observedHits = 0;
@@ -230,6 +251,7 @@ Future<_IterationResult> _singleIteration(
 
     return _IterationResult(
       wallMicroseconds: sw.elapsedMicroseconds,
+      listenerMicroseconds: listenerMicroseconds - baselineListenerUs,
       totalEmissions: totalPostBaseline,
       observedHits: observedHits,
     );
@@ -240,9 +262,9 @@ Future<_IterationResult> _singleIteration(
   }
 }
 
-/// Pick the 100 watched PKs evenly across the 10K-row table so the hit
-/// distribution is uniform. Fixed, deterministic choice — same IDs
-/// across peers, same IDs across runs.
+/// Pick the $_streamCount watched PKs evenly across the 10K-row table
+/// so the hit distribution is uniform. Fixed, deterministic choice —
+/// same IDs across peers, same IDs across runs.
 List<int> _pickWatchedIds() {
   final step = _tableRowCount ~/ _streamCount;
   return [for (var i = 0; i < _streamCount; i++) (i * step) + 1];

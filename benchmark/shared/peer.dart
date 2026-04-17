@@ -34,9 +34,14 @@ abstract class BenchmarkPeer {
   /// filters. Must match one of: `resqlite`, `sqlite3`, `sqlite_async`.
   String get name;
 
-  /// Human-readable label for markdown result tables. Includes the method
-  /// name in parentheses to match the existing suite's convention
-  /// (e.g., `resqlite select()`, `sqlite3 select()`, `sqlite_async getAll()`).
+  /// Human-readable label for markdown result tables — the peer /
+  /// library name only (`resqlite`, `sqlite3`, `sqlite_async`), with no
+  /// operation or method suffix. Workloads that want to include the
+  /// method in the label (to match older suites like `select_maps.dart`
+  /// which emit `resqlite select()`) can concatenate `peer.label` with
+  /// a workload-specific suffix; scenario workloads with per-op-type
+  /// subsections typically use `peer.label` directly because the
+  /// subsection heading already carries the op context.
   String get label;
 
   /// True if this library is purely synchronous under the hood. Used by
