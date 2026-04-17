@@ -163,7 +163,7 @@ final class Stats {
   }
 }
 
-String fmtMs(double ms) => ms.toStringAsFixed(2).padLeft(8);
+String fmtMs(double ms) => ms.toStringAsFixed(3).padLeft(9);
 
 /// Print a comparison table for a set of timings at a given row count.
 void printComparisonTable(String title, List<BenchmarkTiming> timings) {
@@ -211,10 +211,10 @@ String markdownTable(String title, List<BenchmarkTiming> timings) {
   for (final t in timings) {
     buf.writeln(
       '| ${t.label} '
-      '| ${t.wall.medianMs.toStringAsFixed(2)} '
-      '| ${t.wall.p90Ms.toStringAsFixed(2)} '
-      '| ${t.main.medianMs.toStringAsFixed(2)} '
-      '| ${t.main.p90Ms.toStringAsFixed(2)} |',
+      '| ${t.wall.medianMs.toStringAsFixed(3)} '
+      '| ${t.wall.p90Ms.toStringAsFixed(3)} '
+      '| ${t.main.medianMs.toStringAsFixed(3)} '
+      '| ${t.main.p90Ms.toStringAsFixed(3)} |',
     );
   }
   buf.writeln('');

@@ -55,11 +55,26 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   }
   .device-bar label { font-size: 0.85rem; color: var(--muted); }
-  .device-bar select {
+  .device-bar select, .device-bar input[type=number] {
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 0.35rem 0.75rem; font-size: 0.85rem; font-family: inherit; cursor: pointer;
   }
+  .device-bar input[type=number] { width: 4rem; cursor: text; }
   .device-bar .device-meta { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  .mode-tabs { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .mode-tabs button {
+    background: transparent; color: var(--muted); border: 0;
+    padding: 0.4rem 0.85rem; font-size: 0.82rem; font-family: inherit; cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+  .mode-tabs button:last-child { border-right: 0; }
+  .mode-tabs button.active { background: var(--accent); color: #fff; }
+  .mode-tabs button:disabled { color: #586069; cursor: not-allowed; }
+  .mode-note {
+    font-size: 0.78rem; color: var(--muted); background: rgba(88,166,255,0.08);
+    border: 1px solid rgba(88,166,255,0.2); border-radius: 6px;
+    padding: 0.5rem 0.85rem; margin-bottom: 1rem;
+  }
   .callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
   .callout { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; text-align: center; }
   .callout .big { font-size: 2rem; font-weight: 700; color: var(--win); }
@@ -90,8 +105,14 @@
 <div class="device-bar">
   <label for="deviceSelect">Device:</label>
   <select id="deviceSelect"><option>Loading...</option></select>
+  <div class="mode-tabs" id="modeTabs">
+    <button data-mode="peer" class="active">Peer comparison</button>
+    <button data-mode="runs">Last <input type="number" id="runsCount" min="2" max="10" value="3" onclick="event.stopPropagation()"> runs</button>
+    <button data-mode="devices">Cross-device</button>
+  </div>
   <span class="device-meta" id="deviceMeta"></span>
 </div>
+<div id="modeNote" class="mode-note" style="display:none;"></div>
 
 <div class="legend-bar">
   <div class="legend-item"><div class="legend-dot" style="background:var(--resqlite)"></div> resqlite</div>
@@ -132,15 +153,17 @@ Chart.defaults.plugins.tooltip.callbacks.label = function(ctx) {
   if (v == null) return null;
   const yTitle = (ctx.chart.options.scales?.y?.title?.text || '').toLowerCase();
   if (yTitle.includes('qps') || label.toLowerCase().includes('faster')) return `${label}: ${v.toFixed(1)}x`;
-  return `${label}: ${v.toFixed(2)} ms`;
+  return `${label}: ${v < 0.01 ? v.toFixed(3) : v.toFixed(2)} ms`;
 };
 
-// Trophy plugin for bar and line charts.
+// Trophy plugin for bar and line charts. Includes zero-valued entries so a
+// library that genuinely measures ~0 (e.g. resqlite zero-copy) still wins.
 Chart.register({
   id: 'winnerLabels',
   afterDraw(chart) {
     const type = chart.config.type;
     if (type !== 'bar' && type !== 'line') return;
+    if (chart.options.plugins?.winnerLabels === false) return;
     const datasets = chart.data.datasets;
     if (datasets.length < 2) return;
     const ctx = chart.ctx;
@@ -150,7 +173,7 @@ Chart.register({
       const entries = [];
       for (let di = 0; di < datasets.length; di++) {
         const val = datasets[di].data[i];
-        if (val == null || val === 0) continue;
+        if (val == null) continue;
         const meta = chart.getDatasetMeta(di);
         if (meta.hidden) continue;
         const pt = meta.data[i];
@@ -159,7 +182,9 @@ Chart.register({
       }
       if (entries.length < 2) continue;
       entries.sort((a, b) => a.val - b.val);
-      if (entries[1].val / entries[0].val < 1.05) continue;
+      // Treat sub-microsecond differences as ties.
+      if (entries[1].val - entries[0].val < 0.002) continue;
+      if (entries[0].val > 0 && entries[1].val / entries[0].val < 1.05) continue;
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -170,7 +195,65 @@ Chart.register({
   },
 });
 
+// Bar value-label plugin: writes the numeric value above every bar. Opt-in via
+// `options.plugins.barValueLabels = true`. Lets sub-millisecond bars be
+// readable even when the axis scale makes them visually flat. Resolves
+// collisions by drawing the smallest (winner) value first and skipping
+// overlapping labels — so near-zero bars stay annotated while larger peers
+// fall back to bar-height reading.
+Chart.register({
+  id: 'barValueLabels',
+  afterDatasetsDraw(chart) {
+    if (chart.config.type !== 'bar') return;
+    if (chart.options.plugins?.barValueLabels !== true) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#c9d1d9';
+    const drawn = [];
+    const labelH = 12;
+    const datasets = chart.data.datasets;
+    const nGroups = chart.data.labels.length;
+    // For each x-group, sort bars by value ascending so the smallest (winner) wins collision ties.
+    for (let i = 0; i < nGroups; i++) {
+      const candidates = [];
+      for (let di = 0; di < datasets.length; di++) {
+        const meta = chart.getDatasetMeta(di);
+        if (meta.hidden) continue;
+        const val = datasets[di].data[i];
+        if (val == null) continue;
+        const pt = meta.data[i];
+        if (!pt) continue;
+        candidates.push({ val, pt });
+      }
+      candidates.sort((a, b) => a.val - b.val);
+      // Priority: min first (winner/zero-cost), then max (scale anchor), then middles.
+      const priorities = [];
+      if (candidates.length) priorities.push(candidates[0]);
+      if (candidates.length > 1) priorities.push(candidates[candidates.length - 1]);
+      for (let k = 1; k < candidates.length - 1; k++) priorities.push(candidates[k]);
+      for (const { val, pt } of priorities) {
+        const text = val < 0.01 ? val.toFixed(3) : val.toFixed(2);
+        const w = ctx.measureText(text).width + 4;
+        const cx = pt.x;
+        const cy = pt.y - 2;
+        const collides = drawn.some(b =>
+          Math.abs(b.cx - cx) < (w + b.w) / 2 && Math.abs(b.cy - cy) < labelH);
+        if (collides) continue;
+        ctx.fillText(text, cx, cy);
+        drawn.push({ cx, cy, w });
+      }
+    }
+    ctx.restore();
+  },
+});
+
 // ── Helpers ──
+// Fallback palette used when series aren't peer libraries (e.g. run labels, device names).
+const SERIES_PALETTE = ['#58a6ff', '#3fb950', '#f0883e', '#a371f7', '#d29922', '#db61a2', '#7ee787', '#ff7b72'];
+
 function libColor(name) {
   const n = name.toLowerCase();
   if (n.includes('resqlite')) return C.resqlite;
@@ -186,10 +269,27 @@ function libShort(name) {
   return name;
 }
 
-function barOpts(yLabel) {
+// Returns a {color, short} pair depending on the current view mode. Peer mode
+// uses the library palette (blue/orange/purple); runs and devices modes cycle
+// through a generic palette keyed off the series registry.
+const seriesRegistry = new Map();
+function seriesMeta(name, mode) {
+  if (mode === 'peer') return { color: libColor(name), short: libShort(name) };
+  if (!seriesRegistry.has(name)) {
+    const idx = seriesRegistry.size;
+    seriesRegistry.set(name, { color: SERIES_PALETTE[idx % SERIES_PALETTE.length], short: name });
+  }
+  return seriesRegistry.get(name);
+}
+
+function barOpts(yLabel, { valueLabels = false } = {}) {
   return {
     responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12 } } },
+    layout: { padding: { top: valueLabels ? 16 : 0 } },
+    plugins: {
+      legend: { display: true, position: 'top', labels: { boxWidth: 12 } },
+      barValueLabels: valueLabels,
+    },
     scales: {
       x: { grid: { display: false } },
       y: { title: { display: true, text: yLabel }, grid: { color: '#21262d' }, beginAtZero: true },
@@ -222,18 +322,22 @@ function dedupeLibs(libs) {
 
 // ── Load and render ──
 let allCharts = [];
+let devicesData = null;
+let historyData = null; // lazy-loaded when runs mode is first used
+let currentMode = 'peer';
+let currentDeviceIdx = 0;
+let runsCount = 3;
 
 async function init() {
-  let data;
   try {
-    const resp = await fetch('./devices.json');
-    data = await resp.json();
+    const resp = await fetch('./devices.json', { cache: 'no-store' });
+    devicesData = await resp.json();
   } catch (e) {
     document.getElementById('chartsContainer').innerHTML = '<div class="loading">Could not load devices.json</div>';
     return;
   }
 
-  const devices = data.devices;
+  const devices = devicesData.devices;
   if (!devices.length) {
     document.getElementById('chartsContainer').innerHTML = '<div class="loading">No device data available.</div>';
     return;
@@ -251,14 +355,167 @@ async function init() {
     option.textContent = label;
     select.appendChild(option);
   });
-  select.addEventListener('change', () => renderDevice(devices[+select.value]));
-  renderDevice(devices[0]);
+  select.addEventListener('change', () => { currentDeviceIdx = +select.value; render(); });
+
+  document.querySelectorAll('#modeTabs button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mode = btn.dataset.mode;
+      if (mode === currentMode) return;
+      if (mode === 'runs' && !historyData) {
+        btn.textContent = 'Loading…';
+        try {
+          const r = await fetch('../experiments/history.json', { cache: 'no-store' });
+          historyData = await r.json();
+        } catch (e) {
+          historyData = { runs: [] };
+        }
+        btn.replaceChildren();
+        btn.appendChild(document.createTextNode('Last '));
+        const input = document.createElement('input');
+        input.type = 'number'; input.id = 'runsCount';
+        input.min = '2'; input.max = '10'; input.value = String(runsCount);
+        input.addEventListener('click', (ev) => ev.stopPropagation());
+        btn.appendChild(input);
+        btn.appendChild(document.createTextNode(' runs'));
+        wireRunsInput();
+      }
+      currentMode = mode;
+      document.querySelectorAll('#modeTabs button').forEach(b => b.classList.toggle('active', b === btn));
+      render();
+    });
+  });
+  wireRunsInput();
+
+  render();
 }
 
-function renderDevice(dev) {
-  // Update header.
-  document.getElementById('subtitleText').textContent =
-    `${dev.name} — ${dev.cpu}, ${dev.os}, Dart ${dev.dart}`;
+function wireRunsInput() {
+  const input = document.getElementById('runsCount');
+  if (!input || input.dataset.wired) return;
+  input.dataset.wired = '1';
+  input.addEventListener('change', () => {
+    const v = Math.max(2, Math.min(10, parseInt(input.value || '3', 10) || 3));
+    input.value = v;
+    runsCount = v;
+    if (currentMode === 'runs') render();
+  });
+}
+
+function render() {
+  const dev = devicesData.devices[currentDeviceIdx];
+  const note = document.getElementById('modeNote');
+  seriesRegistry.clear();
+  // Library legend belongs only to peer mode.
+  document.querySelector('.legend-bar').style.display = currentMode === 'peer' ? '' : 'none';
+  let view;
+  if (currentMode === 'peer') {
+    view = { benchmarks: dev.benchmarks, subtitle: `${dev.name} — ${dev.cpu}, ${dev.os}, Dart ${dev.dart}` };
+    note.style.display = 'none';
+  } else if (currentMode === 'devices') {
+    view = buildDevicesView(devicesData.devices);
+    if (devicesData.devices.length < 2) {
+      note.style.display = 'block';
+      note.textContent = 'Only one device currently registered. Submit a PR to add your hardware (see link below).';
+    } else {
+      note.style.display = 'none';
+    }
+  } else {
+    view = buildRunsView(historyData, runsCount, dev.benchmarks);
+    const missing = view.missingKeys;
+    note.style.display = 'block';
+    note.textContent = missing
+      ? `Showing last ${view.runCount} resqlite runs from the experiments history. ${missing} chart categories have no historical data and will be empty in this view.`
+      : `Showing last ${view.runCount} resqlite runs from the experiments history.`;
+  }
+  renderView(dev, view);
+}
+
+// Build a synthetic benchmarks array where each series is a device's resqlite result.
+function buildDevicesView(devices) {
+  const base = devices[0].benchmarks;
+  const benchmarks = base.map(sec => {
+    const entries = [];
+    for (const dev of devices) {
+      const match = dev.benchmarks.find(s => s.key === sec.key);
+      if (!match) continue;
+      const res = match.entries.find(e => e.library.toLowerCase().includes('resqlite'));
+      if (!res) continue;
+      const label = dev.date ? `${dev.name} — ${dev.date}` : dev.name;
+      entries.push({ library: label, values: res.values });
+    }
+    return { key: sec.key, title: sec.title, subtitle: sec.subtitle, entries };
+  });
+  return { benchmarks, subtitle: `Cross-device (resqlite only, ${devices.length} device${devices.length === 1 ? '' : 's'})` };
+}
+
+// Build a synthetic benchmarks array where each series is one of the last N resqlite runs.
+// history.json has flat metric keys of the form "<section> / <subtitle> / <library>[ [main]]".
+// We stitch wall/main values back into 4-tuples the chart builders expect.
+function buildRunsView(history, n, peerBenchmarks) {
+  const runs = (history?.runs ?? []).slice().sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')).slice(0, n);
+  const sections = new Map(); // key -> { key, title, subtitle, entries: [{library, values}] }
+  let withData = 0;
+
+  for (const run of runs) {
+    const label = runLabel(run);
+    for (const [metric, value] of Object.entries(run.metrics || {})) {
+      const m = parseMetricKey(metric);
+      if (!m) continue;
+      const key = m.subtitle ? `${m.section} / ${m.subtitle}` : m.section;
+      let sec = sections.get(key);
+      if (!sec) {
+        sec = { key, title: m.section, subtitle: m.subtitle, entries: [], _byLabel: new Map() };
+        sections.set(key, sec);
+      }
+      let entry = sec._byLabel.get(label);
+      if (!entry) {
+        entry = { library: label, values: [null, null, null, null] };
+        sec._byLabel.set(label, entry);
+        sec.entries.push(entry);
+      }
+      entry.values[m.main ? 2 : 0] = value;
+    }
+  }
+  // Count how many peer sections have no matching historical section.
+  let missing = 0;
+  for (const p of peerBenchmarks) {
+    if (!sections.has(p.key)) missing++;
+  }
+  // Remove the scratch _byLabel helper.
+  for (const sec of sections.values()) delete sec._byLabel;
+  return {
+    benchmarks: [...sections.values()],
+    subtitle: `Last ${runs.length} resqlite runs`,
+    runCount: runs.length,
+    missingKeys: missing,
+  };
+}
+
+function runLabel(run) {
+  const label = run.label || run.id || run.timestamp || 'run';
+  const date = run.date ? run.date.slice(5) : '';
+  return date ? `${date} ${label}` : label;
+}
+
+// "Select → Maps / 100 rows / resqlite select() [main]" → {section, subtitle, library, main}
+function parseMetricKey(key) {
+  const main = key.endsWith(' [main]');
+  const k = main ? key.slice(0, -' [main]'.length) : key;
+  const parts = k.split(' / ');
+  if (parts.length < 2) return null;
+  const library = parts[parts.length - 1];
+  // Section vs section/subtitle depends on format; we reconstruct using devices.json's key pattern: "Title / Subtitle".
+  // Heuristic: if exactly 2 parts, it's section/library (no subtitle). 3 parts = section/subtitle/library.
+  if (parts.length === 2) {
+    return { section: parts[0], subtitle: null, library, main };
+  }
+  const section = parts[0];
+  const subtitle = parts.slice(1, -1).join(' / ');
+  return { section, subtitle, library, main };
+}
+
+function renderView(dev, view) {
+  document.getElementById('subtitleText').textContent = view.subtitle;
   document.getElementById('deviceMeta').textContent =
     `${dev.cpu} · ${dev.os} · Dart ${dev.dart} · ${dev.date} · ${dev.by}`;
 
@@ -266,41 +523,45 @@ function renderDevice(dev) {
   allCharts.forEach(c => c.destroy());
   allCharts = [];
 
-  const B = dev.benchmarks;
+  const B = view.benchmarks;
 
-  // ── Compute callouts ──
+  // Callouts are peer-mode only (they compare resqlite vs peers).
   const callouts = document.getElementById('callouts');
-  const selectMaps1k = B.find(s => s.key?.includes('Select') && s.key?.includes('Maps') && s.key?.includes('1000'));
-  const singleInserts = B.find(s => s.key?.includes('Single Inserts'));
-  const pointQuery = B.find(s => s.key?.includes('Point Query'));
+  if (currentMode === 'peer') {
+    const selectMaps1k = B.find(s => s.key?.includes('Select') && s.key?.includes('Maps') && s.key?.includes('1000'));
+    const singleInserts = B.find(s => s.key?.includes('Single Inserts'));
+    const pointQuery = B.find(s => s.key?.includes('Point Query'));
 
-  let readSpeedup = '', writeSpeedup = '', mainCost = '', pqps = '';
-  if (selectMaps1k) {
-    const r = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[0];
-    const best = Math.min(...selectMaps1k.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
-    if (r && best) readSpeedup = (best / r).toFixed(1);
-    const mainMs = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[2];
-    if (mainMs != null) mainCost = mainMs.toFixed(2);
-  }
-  if (singleInserts) {
-    const r = singleInserts.entries.find(e => e.library.includes('resqlite'))?.values[0];
-    const best = Math.min(...singleInserts.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
-    if (r && best) writeSpeedup = (best / r).toFixed(1);
-  }
-  if (pointQuery) {
-    const qpsEntry = pointQuery.entries.find(e => e.library.includes('qps'));
-    if (qpsEntry) {
-      const raw = qpsEntry.values[0];
-      pqps = typeof raw === 'string' ? raw : Math.round(raw / 1000) + 'K';
+    let readSpeedup = '', writeSpeedup = '', mainCost = '', pqps = '';
+    if (selectMaps1k) {
+      const r = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[0];
+      const best = Math.min(...selectMaps1k.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
+      if (r && best) readSpeedup = (best / r).toFixed(1);
+      const mainMs = selectMaps1k.entries.find(e => e.library.includes('resqlite'))?.values[2];
+      if (mainMs != null) mainCost = mainMs < 0.01 ? mainMs.toFixed(3) : mainMs.toFixed(2);
     }
+    if (singleInserts) {
+      const r = singleInserts.entries.find(e => e.library.includes('resqlite'))?.values[0];
+      const best = Math.min(...singleInserts.entries.filter(e => !e.library.includes('resqlite')).map(e => e.values[0]).filter(v => v > 0));
+      if (r && best) writeSpeedup = (best / r).toFixed(1);
+    }
+    if (pointQuery) {
+      const qpsEntry = pointQuery.entries.find(e => e.library.includes('qps'));
+      if (qpsEntry) {
+        const raw = qpsEntry.values[0];
+        pqps = typeof raw === 'string' ? raw : Math.round(raw / 1000) + 'K';
+      }
+    }
+    callouts.style.display = '';
+    callouts.innerHTML = `
+      <div class="callout"><div class="big">${readSpeedup || '—'}x</div><div class="label">faster select()<br>(1K rows)</div></div>
+      <div class="callout"><div class="big">${writeSpeedup || '—'}x</div><div class="label">faster writes<br>(single inserts)</div></div>
+      <div class="callout"><div class="big">${mainCost || '—'} ms</div><div class="label">main-thread cost<br>(1K row read)</div></div>
+      <div class="callout"><div class="big">${pqps || '—'}</div><div class="label">point queries<br>per second</div></div>
+    `;
+  } else {
+    callouts.style.display = 'none';
   }
-
-  callouts.innerHTML = `
-    <div class="callout"><div class="big">${readSpeedup || '—'}x</div><div class="label">faster select()<br>(1K rows)</div></div>
-    <div class="callout"><div class="big">${writeSpeedup || '—'}x</div><div class="label">faster writes<br>(single inserts)</div></div>
-    <div class="callout"><div class="big">${mainCost || '—'} ms</div><div class="label">main-thread cost<br>(1K row read)</div></div>
-    <div class="callout"><div class="big">${pqps || '—'}</div><div class="label">point queries<br>per second</div></div>
-  `;
 
   // ── Build all chart sections ──
   const container = document.getElementById('chartsContainer');
@@ -362,22 +623,45 @@ function renderDevice(dev) {
 
 // ── Chart builders ──
 
-// Line chart from per-row-count sections (Select Maps 10/100/1K/10K).
-function buildScaling(B, titleMatch, canvasId) {
-  const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
-  if (!sections.length) return;
-  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+// Paint a "No data for this view" label in the center of a canvas that would
+// otherwise render empty (e.g. a peer-only chart in runs mode).
+function renderEmptyCanvas(canvasId) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const { width, height } = c.getBoundingClientRect();
+  c.width = width; c.height = height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('No data for this view', width / 2, height / 2);
+}
+
+// Collect one dataset per series from sections, using seriesMeta for the active mode.
+function collectSeries(sections, valueIndex) {
   const libs = {};
   for (const sec of sections) {
     for (const entry of sec.entries) {
-      const name = libShort(entry.library);
-      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-      libs[name].data.push(entry.values[0]);
+      const meta = seriesMeta(entry.library, currentMode);
+      const name = meta.short;
+      if (!libs[name]) libs[name] = { data: [], color: meta.color };
+      libs[name].data.push(entry.values[valueIndex] ?? null);
     }
   }
-  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+  return currentMode === 'peer' ? dedupeLibs(libs) : libs;
+}
+
+// Line chart from per-row-count sections (Select Maps 10/100/1K/10K).
+function buildScaling(B, titleMatch, canvasId) {
+  const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
+  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+  const libs = collectSeries(sections, 0);
+  const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, borderColor: d.color, backgroundColor: d.color + '33',
-    tension: 0.3, pointRadius: 4,
+    tension: 0.3, pointRadius: 4, spanGaps: true,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'line', data: { labels, datasets }, options: lineOpts('Wall time (ms)'),
@@ -387,38 +671,25 @@ function buildScaling(B, titleMatch, canvasId) {
 // Bar chart showing main-isolate time across row counts.
 function buildMainIsolate(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
-  if (!sections.length) return;
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
-  const libs = {};
-  for (const sec of sections) {
-    for (const entry of sec.entries) {
-      const name = libShort(entry.library);
-      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-      libs[name].data.push(entry.values[2] ?? 0); // main med is index 2
-    }
-  }
-  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
-    label: name, data: d.data, backgroundColor: d.color,
+  const libs = collectSeries(sections, 2);
+  const datasets = Object.entries(libs).map(([name, d]) => ({
+    label: name, data: d.data.map(v => v ?? 0), backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
-    type: 'bar', data: { labels, datasets }, options: barOpts('Main-isolate time (ms)'),
+    type: 'bar', data: { labels, datasets },
+    options: barOpts('Main-isolate time (ms)', { valueLabels: true }),
   }));
 }
 
 // Grouped bar from sections sharing a title prefix (schemas, batch inserts).
 function buildGroupedBar(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.key?.includes(titleMatch) && s.subtitle);
-  if (!sections.length) return;
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => s.subtitle?.split('(')[0]?.trim() || s.subtitle);
-  const libs = {};
-  for (const sec of sections) {
-    for (const entry of sec.entries) {
-      const name = libShort(entry.library);
-      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-      libs[name].data.push(entry.values[0]);
-    }
-  }
-  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+  const libs = collectSeries(sections, 0);
+  const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
@@ -429,16 +700,19 @@ function buildGroupedBar(B, titleMatch, canvasId) {
 // Single-section bar (single inserts, parameterized).
 function buildSingleBar(B, titleMatch, canvasId) {
   const sec = B.find(s => s.key?.includes(titleMatch));
-  if (!sec) return;
+  if (!sec) { renderEmptyCanvas(canvasId); return; }
   const deduped = {};
   for (const e of sec.entries) {
-    const name = libShort(e.library);
-    if (!deduped[name] || e.values[0] < deduped[name].values[0]) deduped[name] = e;
+    const meta = seriesMeta(e.library, currentMode);
+    const name = meta.short;
+    const v = e.values[0];
+    if (v == null) continue;
+    if (!deduped[name] || v < deduped[name].v) deduped[name] = { v, color: meta.color };
   }
   const entries = Object.entries(deduped);
   const labels = entries.map(([name]) => name);
-  const data = entries.map(([, e]) => e.values[0]);
-  const colors = entries.map(([, e]) => libColor(e.library));
+  const data = entries.map(([, d]) => d.v);
+  const colors = entries.map(([, d]) => d.color);
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
@@ -447,9 +721,12 @@ function buildSingleBar(B, titleMatch, canvasId) {
 }
 
 // Concurrent reads — special format with concurrency as labels.
+// Only meaningful in peer mode because its data schema is unique (numeric concurrency
+// levels as "library", paired resqlite/async columns).
 function buildConcurrent(B, canvasId) {
+  if (currentMode !== 'peer') { renderEmptyCanvas(canvasId); return; }
   const sec = B.find(s => s.key?.includes('Concurrent Reads'));
-  if (!sec) return;
+  if (!sec) { renderEmptyCanvas(canvasId); return; }
   // Entries have library="1","2","4","8" with values=[resqlite_wall, resqlite_per, async_wall, async_per]
   const labels = sec.entries.map(e => e.library + '\u00d7');
   const resqliteData = sec.entries.map(e => e.values[0]);
@@ -475,17 +752,10 @@ function buildConcurrent(B, canvasId) {
 // Streaming — multiple sub-sections.
 function buildStreaming(B, canvasId) {
   const sections = B.filter(s => s.title === 'Streaming' && s.subtitle);
-  if (!sections.length) return;
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => s.subtitle);
-  const libs = {};
-  for (const sec of sections) {
-    for (const entry of sec.entries) {
-      const name = libShort(entry.library);
-      if (!libs[name]) libs[name] = { data: [], color: libColor(entry.library) };
-      libs[name].data.push(entry.values[0]);
-    }
-  }
-  const datasets = Object.entries(dedupeLibs(libs)).map(([name, d]) => ({
+  const libs = collectSeries(sections, 0);
+  const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
