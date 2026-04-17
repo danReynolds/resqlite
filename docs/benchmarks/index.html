@@ -126,11 +126,69 @@
   <div class="loading">Loading benchmark data...</div>
 </div>
 
-<h3 class="section-title">Notes on Methodology</h3>
+<h3 class="section-title">Scope &amp; Methodology</h3>
 <div class="card" style="font-size:0.85rem;color:var(--muted);line-height:1.7;">
-  <p>All times are wall-clock medians in ms (lower is better) from 3-repeat runs. Point query is queries/sec (higher is better).</p>
-  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Benchmark conditions:</strong> All libraries use the same SQL queries, same data, and WAL mode. sqlite_async's write throttle is disabled (Duration.zero) for fair latency comparison. sqlite3 runs synchronously on the calling thread — this is by design, not a misconfiguration.</p>
-  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">What these benchmarks don't measure:</strong> Memory footprint (resqlite's persistent isolate pool uses more memory than sqlite3's single-connection model), battery impact under sustained streaming, or cold-start time. resqlite is optimized for Flutter apps where main-isolate time is the primary constraint. For synchronous workloads or simpler architectures, <a href="https://pub.dev/packages/sqlite3">sqlite3</a> and <a href="https://pub.dev/packages/sqlite_async">sqlite_async</a> may be better fits.</p>
+  <p><strong style="color:var(--text)">Peers tested:</strong>
+    resqlite (this repo, current commit),
+    <a href="https://pub.dev/packages/sqlite3">sqlite3.dart <code>3.3.0</code></a> (synchronous FFI baseline),
+    <a href="https://pub.dev/packages/sqlite_async">sqlite_async <code>0.14.0-wip.0</code></a> (PowerSync, async + reactive).
+    Hardware is shown in the device selector above; each device has its own full run.
+    See <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/SCOPE.md">SCOPE.md</a> for the full peer list, versioning policy, and upgrade process.</p>
+
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Numbers reported:</strong>
+    Wall-clock medians in ms (lower is better) from multi-repeat runs, plus p90 for tail-latency.
+    Point-query throughput is queries/sec (higher is better).
+    Main-isolate times show the time actually spent on the calling/UI thread — the critical
+    budget in Flutter. Sync libraries (sqlite3) report main == wall by construction.</p>
+
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Fair comparison rules:</strong>
+    identical SQL queries, identical seed data, WAL mode everywhere. sqlite_async's
+    <code>watch()</code> throttle is set to <code>Duration.zero</code> so we're comparing
+    invalidation engines rather than throttling policies. Each peer uses its idiomatic API
+    (<code>db.select()</code> / <code>db.getAll()</code> / prepared <code>Statement</code>);
+    no crippled versions. Methodology details live in
+    <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/METHODOLOGY.md">METHODOLOGY.md</a>.</p>
+</div>
+
+<h3 class="section-title">Known Gaps</h3>
+<div class="card" style="font-size:0.85rem;color:var(--muted);line-height:1.7;">
+  <p>Honesty about what these numbers do <em>not</em> tell you. The suite is designed to expose
+    the behaviors Flutter app authors care about, but it's not exhaustive.</p>
+
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Peers not included:</strong></p>
+  <ul style="margin-top:0.25rem;">
+    <li><a href="https://pub.dev/packages/drift">drift</a> — the most-used reactive Dart SQL
+      library. Excluded because it's codegen-backed and adding a build step to the benchmark
+      harness is out of scope for the current round. Real gap.</li>
+    <li><a href="https://pub.dev/packages/sqflite">sqflite</a> — the Flutter-default SQLite
+      library. Excluded because it's platform-channel-only (Flutter, not plain Dart). Will
+      be included when mobile CI lands.</li>
+    <li><a href="https://pub.dev/packages/libsql_dart">libsql_dart</a> — still maturing as of
+      this writing. Revisit when stable.</li>
+  </ul>
+
+  <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Workloads not included:</strong></p>
+  <ul style="margin-top:0.25rem;">
+    <li><strong>Mobile device results</strong> — all published numbers come from a desktop
+      Apple Silicon machine. Android / iOS performance differs (LPDDR4 vs LPDDR5,
+      F2FS vs APFS fsync, Dart FFI first-call overhead on iOS). If you deploy on mobile,
+      our numbers describe a different environment.</li>
+    <li><strong>Encryption (AES-256 via SQLite3 Multiple Ciphers)</strong> — shipped feature,
+      not yet benchmarked. Encryption is never free; we don't quantify the cost here.</li>
+    <li><strong>Sustained write-heavy workloads</strong> — our bulk insert (A7) is a burst,
+      not sustained traffic. Long-lived "100 writes/sec for 10 minutes" patterns (logging,
+      telemetry) aren't covered.</li>
+    <li><strong>Transaction contention</strong> — we test single-writer transactions. Many
+      concurrent callers racing for the writer isolate are out of scope.</li>
+    <li><strong>Cold-start time</strong> — how long from <code>Database.open()</code> to
+      first query? Unmeasured. Matters for CLI tools and add-to-app patterns.</li>
+    <li><strong>Battery &amp; memory footprint</strong> — requires device-level instrumentation
+      that this suite doesn't attempt.</li>
+  </ul>
+
+  <p style="margin-top:0.75rem;">The
+    <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/SCOPE.md#known-gaps">SCOPE.md Known Gaps section</a>
+    is the canonical list; this summary is kept in sync with it.</p>
 </div>
 
 <div class="contribute-note" style="margin-top:1.5rem;">
