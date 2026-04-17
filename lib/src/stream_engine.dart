@@ -120,8 +120,65 @@ final class StreamEngine {
       if (entry == null) continue;
 
       entry.reQueryGeneration++;
-      unawaited(_reQuery(entry, entry.reQueryGeneration));
+      _scheduleReQuery(entry);
     }
+  }
+
+  /// Dispatch a re-query for [entry], coalescing against any in-flight one.
+  ///
+  /// Without coalescing, a tight write burst against a table watched by N
+  /// streams queues O(writes × N) re-queries in the reader pool. For a
+  /// workload with 100 streams and 200 writes, that's up to 20,000
+  /// dispatches — each one a full pool round-trip, even though most
+  /// short-circuit via the worker-side hash (experiments 031/033/075).
+  ///
+  /// With coalescing: at most ONE re-query is in flight per stream entry
+  /// at a time. If another invalidation arrives while one is running, we
+  /// just flag `needsRecheckAfter` on the entry. When the in-flight
+  /// re-query completes, it re-reads the current state (which has
+  /// absorbed every intermediate write) — so no update is lost. If the
+  /// flag is set on completion, exactly one follow-up is dispatched.
+  ///
+  /// Correctness argument: every write bumps
+  /// [StreamEntry.reQueryGeneration] via the caller. The follow-up
+  /// re-query runs against the latest DB state, which reflects all
+  /// writes up to that moment. The existing `entry.reQueryGeneration !=
+  /// generation` check in [_reQuery] still discards stale results from
+  /// earlier dispatches.
+  ///
+  /// Steady-state cap: at most N in-flight re-queries (one per active
+  /// stream) regardless of write rate.
+  void _scheduleReQuery(StreamEntry entry) {
+    if (entry.inFlightReQuery != null) {
+      // An in-flight re-query will pick up the bumped generation when it
+      // completes. Flag so the completion hook dispatches a follow-up.
+      entry.needsRecheckAfter = true;
+      return;
+    }
+    _startReQuery(entry);
+  }
+
+  /// Actually dispatches the re-query and manages the in-flight slot.
+  /// Only called via [_scheduleReQuery], which enforces the single-
+  /// in-flight invariant.
+  void _startReQuery(StreamEntry entry) {
+    final generation = entry.reQueryGeneration;
+    entry.inFlightReQuery = _reQuery(entry, generation).whenComplete(() {
+      entry.inFlightReQuery = null;
+      // Drain any invalidation that arrived while the previous
+      // re-query was running. Exactly one follow-up is sufficient:
+      // the follow-up reads the current state, which reflects every
+      // write that has completed so far. Additional writes arriving
+      // during the follow-up will re-set the flag and chain once more.
+      if (entry.needsRecheckAfter) {
+        entry.needsRecheckAfter = false;
+        // If the entry was removed by a cancel while we were running,
+        // skip — no subscribers remain.
+        if (_entries[entry.key] != null) {
+          _startReQuery(entry);
+        }
+      }
+    });
   }
 
   /// Closes all active streams and clears internal state.
@@ -195,10 +252,12 @@ final class StreamEngine {
 
         // If a write happened while the initial query was in-flight,
         // the data may be stale. Re-query to catch up. The hash check
-        // in _emitResult suppresses the emission if data is unchanged.
+        // in _reQuery suppresses the emission if data is unchanged.
+        // Goes through the same coalescing path as normal invalidation
+        // so the in-flight cap is honored even at setup.
         if (_writeGeneration != generationBefore) {
           entry.reQueryGeneration++;
-          unawaited(_reQuery(entry, entry.reQueryGeneration));
+          _scheduleReQuery(entry);
         }
       },
       onError: (Object error) {
@@ -361,10 +420,26 @@ final class StreamEntry {
   /// knows the fresh row count diverges.
   int lastRowCount = -1;
 
-  /// Per-entry re-query generation. Bumped each time a re-query is dispatched.
-  /// When the result arrives, it's discarded if the generation has moved on
-  /// (a newer re-query was dispatched), preventing stale out-of-order results.
+  /// Per-entry re-query generation. Bumped each time an invalidation
+  /// arrives (NOT each time a re-query dispatches — see
+  /// [StreamEngine._scheduleReQuery] for the distinction). When a
+  /// re-query completes, it discards its result if the generation has
+  /// moved on while it was running, preventing stale out-of-order
+  /// emissions.
   int reQueryGeneration = 0;
+
+  /// Tracks the currently-executing re-query for this entry, if any.
+  /// `null` means no re-query is in flight; a non-null value means
+  /// additional invalidations should coalesce via [needsRecheckAfter]
+  /// rather than dispatching fresh pool work. See
+  /// [StreamEngine._scheduleReQuery] for the full rationale.
+  Future<void>? inFlightReQuery;
+
+  /// Set when an invalidation arrives while a re-query is already in
+  /// flight ([inFlightReQuery] != null). On completion of the
+  /// in-flight re-query, the engine dispatches exactly one follow-up
+  /// so updates accumulated during the prior run are not missed.
+  bool needsRecheckAfter = false;
 }
 
 /// Compute a stable hash key for a stream query.
