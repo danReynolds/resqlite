@@ -57,6 +57,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [014](014-writer-tuning.md) | locking_mode=EXCLUSIVE *(partial)* | Blocks all readers — incompatible with concurrent reader pool |
 | [017](017-dart-postcobject.md) | Dart_PostCObject for reads | 2-5x slower — serialize/deserialize costs more than validation walk |
 | [018](018-multi-row-step.md) | Multi-row step (64 rows/FFI call) | String copy overhead exceeds FFI crossing savings |
+| [078](078-object-count-threshold.md) | Object-count-aware `Isolate.exit` threshold | Neutral: Dart SMIs aren't heap objects, so MessageValidator walk doesn't scale with cell count independently of bytes; byte threshold already covers workloads where validator cost matters |
 
 ## Conventions
 

@@ -60,6 +60,28 @@ final class SelectIfChangedRequest extends ReadRequest {
 /// selectBytes results (exact byte length of the JSON buffer).
 const int sacrificeByteThreshold = 256 * 1024; // 256 KB
 
+/// Cell-count threshold for sacrifice (experiment 078).
+///
+/// SendPort.send runs the VM's MessageValidator, which walks the object graph
+/// of the payload before copying. For `List<Object?>` result values, each
+/// non-SMI element (double, String, Uint8List) is a heap object the validator
+/// must visit. At high cell counts this walk can dominate the copy cost even
+/// when total byte size is under the byte threshold.
+///
+/// 8192 cells = 1024 rows × 8 cols ≈ 64 KB of ints or ~160 KB of mixed values,
+/// both well under the 256 KB byte threshold. This gives us a separate
+/// signal for wide-but-small-valued result shapes.
+const int sacrificeCellThreshold = 8192;
+
+/// Returns true if [raw] should be delivered via Isolate.exit instead of
+/// SendPort.send. Fires on either the byte threshold (memcpy-dominated) or
+/// the cell threshold (MessageValidator-dominated).
+@pragma('vm:prefer-inline')
+bool _shouldSacrificeRaw(RawQueryResult raw) {
+  return raw.estimatedBytes > sacrificeByteThreshold ||
+      raw.values.length > sacrificeCellThreshold;
+}
+
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
 // ---------------------------------------------------------------------------
@@ -89,7 +111,7 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrificeRaw(raw);
           result = ResultSet(raw.values, raw.schema, raw.rowCount);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
@@ -99,7 +121,7 @@ void readerEntrypoint(List<Object> args) {
             sql,
             parameters,
           );
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrificeRaw(raw);
           result = (
             ResultSet(raw.values, raw.schema, raw.rowCount)
                 as List<Map<String, Object?>>,
@@ -127,7 +149,7 @@ void readerEntrypoint(List<Object> args) {
             result = (newHash, null);
             sacrifice = false;
           } else {
-            sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+            sacrifice = _shouldSacrificeRaw(raw);
             result = (
               newHash,
               ResultSet(raw.values, raw.schema, raw.rowCount)
