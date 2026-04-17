@@ -5,37 +5,61 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 
-/// Disjoint-column streaming benchmark.
+/// Cross-column streaming invalidation precision.
+///
+/// Measures how effectively a library avoids re-emitting to subscribers
+/// when a write touches columns the subscriber's SELECT doesn't project.
 ///
 /// Two workloads run against a wide (20-column) table with 10 concurrent
-/// streams that read `id, a, b`:
+/// streams that read `SELECT id, a, b`:
 ///
-/// - **Disjoint:** writer updates column `c` (never read) 500 times.
-/// - **Overlapping (control):** writer updates column `a` (read by
-///   every stream) 500 times.
+/// - **Disjoint:** writer updates column `c` (not in the projection)
+///   500 times.
+/// - **Overlapping (control):** writer updates column `a` (in the
+///   projection) 500 times.
 ///
-/// **The ratio `disjoint / overlapping` is the primary metric**, NOT the
-/// absolute re-emit count. Absolute counts are coalescing-dependent and
-/// vary by library:
+/// **The ratio `disjoint / overlapping` is the primary metric.** A low
+/// ratio means the library suppresses re-emission on writes that don't
+/// affect the query's result. A high ratio means every write to the
+/// table re-emits regardless of projection. Absolute counts are
+/// coalescing-dependent and not directly comparable across libraries.
 ///
-/// - resqlite (with experiment 045) coalesces sequential writes into one
-///   invalidation per subscriber per microtask. Expected: disjoint ≈ 0,
-///   overlap ≈ 10 (one invalidation × 10 streams). Ratio 0.0 = column
-///   tracking is live.
-/// - sqlite_async uses table-level tracking. Expected: disjoint ≈
-///   overlap ≈ several hundred (coalescing is lighter). Ratio ≈ 1.0 =
-///   table-level.
+/// ## Important: what this measures, and what it doesn't
 ///
-/// We add two event-queue yields per write (`Future.delayed(Duration.zero)`
-/// schedules via Timer.run, draining both microtasks and the timer queue)
-/// to defeat coalescing where we can. Deeper coalescing (writer-worker
-/// batching) is library-internal and intentional. The ratio isolates what
-/// we care about: does the library *distinguish* columns a subscriber
-/// reads from columns it doesn't?
+/// On resqlite's main branch, a low ratio is produced by **experiment
+/// 075** (`resqlite_query_hash` in native/resqlite.c) — the re-query
+/// dispatches normally, the native code hashes the projected result
+/// bytes, and emission is skipped when the hash is unchanged. Since
+/// column `c` isn't projected, the result bytes don't change, and the
+/// hash matches.
+///
+/// This is NOT the same as writer-side column-level dependency tracking
+/// (design in exp 052, never implemented). That design would skip the
+/// *dispatch* entirely on the writer side — a different optimization
+/// target. On this benchmark the two mechanisms are indistinguishable
+/// because any write to a projection-disjoint column produces identical
+/// result bytes, triggering 075's short-circuit in either world.
+/// Measuring 052 specifically would require a many-streams writer
+/// throughput benchmark where the dispatch-elision win dominates. That
+/// benchmark doesn't exist yet.
+///
+/// sqlite_async has neither mechanism; its ratio is expected to be
+/// ≈1.0 (table-level invalidation, every write re-emits on every
+/// stream).
+///
+/// ## Implementation notes
+///
+/// resqlite coalesces multiple writes within one microtask into a
+/// single invalidation per subscriber (exp 045). A tight `for` loop of
+/// 500 writes therefore collapses to ~10 emissions on the overlap
+/// workload, not 5000. We add two event-queue yields per write
+/// (`Future.delayed(Duration.zero)` schedules via `Timer.run`, draining
+/// microtasks AND the timer queue) to defeat *that* coalescing — deeper
+/// writer-worker batching is library-internal and intentional. The
+/// ratio metric is robust to these per-library differences.
 ///
 /// sqlite3 is excluded (no stream/watch API). sqlite_async uses
-/// `throttle: Duration.zero` so throttling doesn't mask the invalidation
-/// granularity.
+/// `throttle: Duration.zero` so throttling doesn't mask precision.
 Future<String> runDisjointColumnsBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Streaming (Column Granularity)');
@@ -43,11 +67,16 @@ Future<String> runDisjointColumnsBenchmark() async {
   markdown.writeln(
     '10 concurrent streams read `SELECT id, a, b FROM wide ...`. The '
     'writer issues 500 updates — first against a **disjoint** column '
-    '(`c`), then against an **overlapping** column (`a`). '
-    '**`Re-emit ratio` = `disjoint / overlapping` is the primary metric.** '
-    'Absolute counts depend on each library\'s write coalescing and are '
-    'not directly comparable across libraries. Column-level dependency '
-    'tracking drives the ratio toward 0; table-level tracking toward 1.0.',
+    '(`c`, not in the projection), then against an **overlapping** '
+    'column (`a`, in the projection). '
+    '**`Re-emit ratio` = `disjoint / overlapping` is the primary metric**: '
+    'it shows how effectively the library suppresses re-emission on writes '
+    'that don\'t affect the query\'s result. Absolute counts are '
+    'coalescing-dependent and not directly comparable across libraries. '
+    'On resqlite\'s main branch this ratio is driven toward 0 by '
+    'experiment 075 (C-side result-hash short-circuit), not by '
+    'writer-side column-tracking (exp 052 is not implemented). The two '
+    'mechanisms are indistinguishable on this read-side benchmark.',
   );
   markdown.writeln('');
 
