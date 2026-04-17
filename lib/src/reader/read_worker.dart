@@ -46,8 +46,18 @@ final class SelectBytesRequest extends ReadRequest {
 
 /// Stream re-query with worker-side hash comparison.
 final class SelectIfChangedRequest extends ReadRequest {
-  SelectIfChangedRequest(super.sql, super.parameters, this.lastResultHash);
+  SelectIfChangedRequest(
+    super.sql,
+    super.parameters,
+    this.lastResultHash,
+    this.lastRowCount,
+  );
   final int lastResultHash;
+
+  /// Previously-emitted row count, or `-1` if unknown. Passed into
+  /// `resqlite_query_hash` to enable the exp 077 short-circuit when
+  /// the fresh row count already diverges.
+  final int lastRowCount;
 }
 
 /// Byte-size threshold for sacrifice. If the estimated transfer size of
@@ -92,13 +102,15 @@ void readerEntrypoint(List<Object> args) {
           result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
-          // Experiment 075: initial stream query also produces a C-domain
-          // hash baseline so selectIfChanged re-queries can short-circuit.
-          final (raw, readTables, initialHash) = executeQueryWithDeps(
+          // Initial stream query produces hash + row-count baselines
+          // (exp 075 + 077) so future selectIfChanged calls can
+          // short-circuit on unchanged state.
+          final (raw, readTables, initialHash, initialRowCount) =
+              executeQueryWithDeps(
             dbHandleAddr, readerId, sql, parameters,
           );
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = (_toRows(raw), readTables, initialHash);
+          result = (_toRows(raw), readTables, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes =
@@ -110,16 +122,26 @@ void readerEntrypoint(List<Object> args) {
           :final sql,
           :final parameters,
           :final lastResultHash,
+          :final lastRowCount,
         ):
-          // Experiment 075: two-pass selectIfChanged. Pass 1 hashes in C;
-          // on match we return a null-rows sentinel without any Dart
-          // decode. Pass 2 runs only on mismatch.
-          final (newHash, raw) = executeQueryIfChanged(
-            dbHandleAddr, readerId, sql, parameters, lastResultHash,
+          // Two-pass selectIfChanged (exp 075). Row-count short-circuit
+          // (exp 077) stops the hash walk early if count-differ is already
+          // evident, so the changed case pays less pass-1 work.
+          final (newHash, newRowCount, raw) = executeQueryIfChanged(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+            lastResultHash,
+            lastRowCount,
           );
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
-          result = (raw == null ? null : _toRows(raw), newHash);
+          result = (
+            raw == null ? null : _toRows(raw),
+            newHash,
+            newRowCount,
+          );
       }
 
       if (sacrifice) {
@@ -244,12 +266,10 @@ Uint8List executeQueryBytes(
 
 /// Execute a stream's initial query.
 ///
-/// Returns the rows, the authorizer-captured read tables (for invalidation
-/// tracking), and the C-computed baseline hash (experiment 075). The hash
-/// is produced by a second `sqlite3_step` pass through the same read-only
-/// query via `resqliteQueryHash` — once per stream subscribe, amortized
-/// across every subsequent re-query.
-(RawQueryResult, List<String>, int) executeQueryWithDeps(
+/// Returns the rows, the authorizer-captured read tables, the C-computed
+/// baseline hash (exp 075), and the row count (exp 077 — cached so
+/// subsequent selectIfChanged calls can short-circuit on count mismatch).
+(RawQueryResult, List<String>, int, int) executeQueryWithDeps(
   int handleAddr,
   int readerId,
   String sql,
@@ -257,30 +277,36 @@ Uint8List executeQueryBytes(
 ) =>
     _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
       final raw = decodeQuery(stmt, sql);
-      final hash = resqliteQueryHash(stmt);
+      // Pass -1 to opt out of the row-count short-circuit: on the
+      // initial query we don't have a baseline count to compare against.
+      final (hash, rowCount) = callQueryHash(stmt, -1);
       final readTables = getReadTables(dbHandle, readerId);
-      return (raw, readTables, hash);
+      return (raw, readTables, hash, rowCount);
     });
 
-/// Two-pass selectIfChanged (experiment 075).
+/// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
 ///
 /// Pass 1: `resqliteQueryHash` steps + hashes the bound stmt in C. If
-/// the hash matches the stream's last-emitted value, return `(hash,
-/// null)` — the subscriber is up to date, no Dart decode needed.
+/// the fresh hash matches the stream's last-emitted value AND the row
+/// count matches the cached one, return `(hash, rowCount, null)` — the
+/// subscriber is up to date, no Dart decode needed.
 ///
 /// Pass 2 (on mismatch): re-step the same stmt through `decodeQuery`.
 /// `resqliteQueryHash` resets the stmt on exit, and bindings survive
-/// reset, so no re-acquire is required. The new-hash we already have
-/// from pass 1 is reused as the new baseline.
-(int, RawQueryResult?) executeQueryIfChanged(
+/// reset, so no re-acquire is required. The pass-1 hash is reused as
+/// the new baseline.
+(int, int, RawQueryResult?) executeQueryIfChanged(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
   int lastResultHash,
+  int lastRowCount,
 ) =>
     _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-      final newHash = resqliteQueryHash(stmt);
-      if (newHash == lastResultHash) return (newHash, null);
-      return (newHash, decodeQuery(stmt, sql));
+      final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
+      if (newHash == lastResultHash && newRowCount == lastRowCount) {
+        return (newHash, newRowCount, null);
+      }
+      return (newHash, newRowCount, decodeQuery(stmt, sql));
     });

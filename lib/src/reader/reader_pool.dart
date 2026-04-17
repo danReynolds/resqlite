@@ -69,17 +69,17 @@ final class ReaderPool {
 
   /// Execute a query and capture read dependencies (table names).
   ///
-  /// Also returns the C-computed hash of the initial result (exp 075) so
-  /// later [selectIfChanged] calls have a baseline in the same hash
-  /// domain to compare against.
-  Future<(List<Map<String, Object?>>, List<String>, int)> selectWithDeps(
+  /// Also returns the C-computed hash (exp 075) and row count (exp 077)
+  /// of the initial result so later [selectIfChanged] calls have both
+  /// baselines to short-circuit against.
+  Future<(List<Map<String, Object?>>, List<String>, int, int)> selectWithDeps(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
     final result = await _dispatch(
       SelectWithDepsRequest(sql, parameters),
     );
-    return result as (List<Map<String, Object?>>, List<String>, int);
+    return result as (List<Map<String, Object?>>, List<String>, int, int);
   }
 
   /// Execute a query returning JSON-encoded bytes.
@@ -92,16 +92,18 @@ final class ReaderPool {
   }
 
   /// Execute a re-query with worker-side hash comparison.
-  /// Returns `(rows, newHash)` if changed, or `(null, newHash)` if unchanged.
-  Future<(List<Map<String, Object?>>?, int)> selectIfChanged(
+  /// Returns `(rows, newHash, newRowCount)` — `rows` is null when the
+  /// result is unchanged (hash AND row count match).
+  Future<(List<Map<String, Object?>>?, int, int)> selectIfChanged(
     String sql,
     List<Object?> parameters,
     int lastResultHash,
+    int lastRowCount,
   ) async {
     final result = await _dispatch(
-      SelectIfChangedRequest(sql, parameters, lastResultHash),
+      SelectIfChangedRequest(sql, parameters, lastResultHash, lastRowCount),
     );
-    return result as (List<Map<String, Object?>>?, int);
+    return result as (List<Map<String, Object?>>?, int, int);
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {

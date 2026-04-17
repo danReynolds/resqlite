@@ -43,17 +43,31 @@ external int resqliteStepRow(
   ffi.Pointer<ffi.Uint8> cells,
 );
 
-// Hash-only pass (experiment 075): steps the bound stmt to DONE,
-// hashes every cell's raw bytes in C, resets at both ends, returns
-// the hash. Self-contained — Dart never touches a hash byte.
+// Hash-only pass (experiment 075, extended in exp 077).
 //
-// Safe to call on a freshly-bound stmt (first pass of selectIfChanged)
+// Steps the bound stmt to DONE, hashes every cell's raw bytes in C,
+// resets at both ends, returns the hash.
+//
+// `lastRowCount` is -1 on the initial-query path (no prior count
+// cached), or the previous emission's row count. When set, exp 077
+// short-circuits: if the fresh step count exceeds the cached value,
+// stop folding cell bytes — the hashes can't match anyway. The function
+// still drains the remaining rows to report the fresh count via
+// `outRowCount`.
+//
+// Safe to call on a freshly-bound stmt (selectIfChanged first pass)
 // or on one that decodeQuery just drained (initial-query baseline).
-@ffi.Native<ffi.Int64 Function(ffi.Pointer<ffi.Void>)>(
-  symbol: 'resqlite_query_hash',
-  isLeaf: true,
-)
-external int resqliteQueryHash(ffi.Pointer<ffi.Void> stmt);
+@ffi.Native<
+    ffi.Int64 Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<ffi.Int>,
+    )>(symbol: 'resqlite_query_hash', isLeaf: true)
+external int resqliteQueryHash(
+  ffi.Pointer<ffi.Void> stmt,
+  int lastRowCount,
+  ffi.Pointer<ffi.Int> outRowCount,
+);
 
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'strlen',
@@ -100,6 +114,18 @@ ffi.Pointer<ffi.Uint8> ensureCellBuffer(int colCount) {
   cellsBuf = calloc<ffi.Uint8>(cellSize * colCount);
   cellsBufColCount = colCount;
   return cellsBuf;
+}
+
+/// Per-worker scratch slot for the `outRowCount` out-parameter of
+/// [resqliteQueryHash]. Allocated once per isolate, reused across every
+/// stream re-query. Stays alive until the isolate dies.
+final ffi.Pointer<ffi.Int> rowCountSlot = calloc<ffi.Int>(1);
+
+/// Invoke [resqliteQueryHash] and return `(hash, rowCount)` as a record.
+/// Small wrapper that hides the out-parameter pointer.
+(int, int) callQueryHash(ffi.Pointer<ffi.Void> stmt, int lastRowCount) {
+  final hash = resqliteQueryHash(stmt, lastRowCount, rowCountSlot);
+  return (hash, rowCountSlot.value);
 }
 
 /// Per-worker schema cache with LRU eviction. Column names for the same SQL

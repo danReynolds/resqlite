@@ -6,7 +6,7 @@
 
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
-                       int param_count);
+                       int param_count, int expected);
 
 // ---------------------------------------------------------------------------
 // Growable buffer
@@ -91,6 +91,11 @@ typedef struct {
     char* sql;
     int sql_len;
     sqlite3_stmt* stmt;
+    // Cached sqlite3_bind_parameter_count(stmt) — a property of the
+    // prepared SQL that never changes across re-executions (experiment
+    // 077). Stored here so bind_params can skip the FFI-internal call
+    // on every query.
+    int param_count;
     char* read_tables[RESQLITE_MAX_READ_TABLES];
     int read_table_count;
 } resqlite_cached_stmt;
@@ -150,6 +155,7 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
     c->entries[c->count].sql = sql_copy;
     c->entries[c->count].sql_len = sql_len;
     c->entries[c->count].stmt = stmt;
+    c->entries[c->count].param_count = sqlite3_bind_parameter_count(stmt);
     c->entries[c->count].read_table_count = 0;
     memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
     c->count++;
@@ -586,19 +592,26 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
     return rc;
 }
 
-static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
-                                            int sql_len, int* out_rc,
-                                            const char** out_tail) {
-    sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, sql_len);
-    if (stmt) {
-        sqlite3_reset(stmt);
+// Returns the cached entry (which carries both the stmt pointer and
+// the pre-computed param_count). Callers that only need the stmt read
+// `entry->stmt`; bind_params callers pass `entry->param_count` as the
+// expected count (experiment 077).
+static resqlite_cached_stmt* get_or_prepare_writer(
+    resqlite_db* db, const char* sql, int sql_len, int* out_rc,
+    const char** out_tail
+) {
+    resqlite_cached_stmt* entry =
+        stmt_cache_lookup_entry(&db->writer_cache, sql, sql_len);
+    if (entry) {
+        sqlite3_reset(entry->stmt);
         *out_rc = SQLITE_OK;
         // Cached statements are always single-statement (multi-statement SQL
         // is never prepared via this function), so signal "no trailing SQL".
         *out_tail = sql + sql_len;
-        return stmt;
+        return entry;
     }
 
+    sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT,
                                 &stmt, out_tail);
     if (rc != SQLITE_OK) {
@@ -606,7 +619,8 @@ static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
         return NULL;
     }
 
-    if (!stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt)) {
+    entry = stmt_cache_insert(&db->writer_cache, sql, sql_len, stmt);
+    if (!entry) {
         // OOM — can't cache, and nobody else holds a reference to finalize
         // this stmt later. Finalize and fail the query.
         sqlite3_finalize(stmt);
@@ -614,7 +628,7 @@ static sqlite3_stmt* get_or_prepare_writer(resqlite_db* db, const char* sql,
         return NULL;
     }
     *out_rc = SQLITE_OK;
-    return stmt;
+    return entry;
 }
 
 int resqlite_execute(
@@ -631,12 +645,13 @@ int resqlite_execute(
 
     int rc;
     const char* tail = NULL;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
-                                               &tail);
-    if (!stmt) {
+    resqlite_cached_stmt* entry =
+        get_or_prepare_writer(db, sql, (int)strlen(sql), &rc, &tail);
+    if (!entry) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
     }
+    sqlite3_stmt* stmt = entry->stmt;
 
     // Detect multi-statement SQL via pzTail. Skip whitespace and bare
     // semicolons — only real SQL text beyond the first statement counts.
@@ -663,7 +678,7 @@ int resqlite_execute(
 
     // Single statement (or multi-statement with params — existing
     // behavior: only the first statement executes via prepare).
-    rc = bind_params(stmt, params, param_count);
+    rc = bind_params(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         sqlite3_mutex_leave(db->writer_mutex);
@@ -693,23 +708,30 @@ static int run_batch_locked(
     int param_count,
     int set_count
 ) {
-    sqlite3_stmt* stmt = stmt_cache_lookup(&db->writer_cache, sql, (int)strlen(sql));
-    if (stmt) {
+    resqlite_cached_stmt* entry = stmt_cache_lookup_entry(
+        &db->writer_cache, sql, (int)strlen(sql));
+    sqlite3_stmt* stmt;
+    if (entry) {
+        stmt = entry->stmt;
         sqlite3_reset(stmt);
     } else {
         int rc = sqlite3_prepare_v3(
             db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
         if (rc != SQLITE_OK) return rc;
-        if (!stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt)) {
+        entry =
+            stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        if (!entry) {
             sqlite3_finalize(stmt);
             return SQLITE_NOMEM;
         }
     }
+    const int expected = entry->param_count;
 
     for (int i = 0; i < set_count; i++) {
         sqlite3_reset(stmt);
 
-        int rc = bind_params(stmt, &param_sets[i * param_count], param_count);
+        int rc = bind_params(
+            stmt, &param_sets[i * param_count], param_count, expected);
         if (rc != SQLITE_OK) {
             sqlite3_reset(stmt);
             return rc;
@@ -915,16 +937,19 @@ static void release_reader(resqlite_db* db, int idx) {
 // Internal: get or prepare on a specific reader
 // ---------------------------------------------------------------------------
 
-static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
-                                            const char* sql, int sql_len,
-                                            int* out_rc) {
+// Returns the cached entry (stmt + param_count + read-tables).
+// Callers that only need the stmt read `entry->stmt`; bind_params
+// callers pass `entry->param_count` as the expected count (exp 077).
+static resqlite_cached_stmt* get_or_prepare_reader(
+    resqlite_reader* reader, const char* sql, int sql_len, int* out_rc
+) {
     resqlite_cached_stmt* entry =
         stmt_cache_lookup_entry(&reader->cache, sql, sql_len);
     if (entry) {
         sqlite3_reset(entry->stmt);
         read_set_load_from_cache_entry(&reader->read_tables, entry);
         *out_rc = SQLITE_OK;
-        return entry->stmt;
+        return entry;
     }
 
     // The authorizer populates per-reader read tables during prepare.
@@ -946,16 +971,18 @@ static sqlite3_stmt* get_or_prepare_reader(resqlite_reader* reader,
     }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
     *out_rc = SQLITE_OK;
-    return stmt;
+    return entry;
 }
 
 // ---------------------------------------------------------------------------
 // Internal: bind parameters
 // ---------------------------------------------------------------------------
 
+// Caller provides `expected` — it's a property of the prepared SQL and
+// the cache tracks it alongside the stmt (experiment 077). Saves one
+// sqlite3_bind_parameter_count FFI-internal call per query.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
-                       int param_count) {
-    int expected = sqlite3_bind_parameter_count(stmt);
+                       int param_count, int expected) {
     if (expected != param_count) {
         // Force SQLite to populate the connection error state with the same
         // bind-range error it would use for an out-of-range parameter index.
@@ -1020,14 +1047,16 @@ sqlite3_stmt* resqlite_stmt_acquire(
     resqlite_reader* reader = &db->readers[reader_idx];
 
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
-    if (!stmt) {
+    resqlite_cached_stmt* entry =
+        get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!entry) {
         release_reader(db, reader_idx);
         *out_reader = -1;
         return NULL;
     }
+    sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count);
+    rc = bind_params(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         release_reader(db, reader_idx);
@@ -1060,10 +1089,12 @@ sqlite3_stmt* resqlite_stmt_acquire_on(
     resqlite_reader* reader = &db->readers[reader_id];
 
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
-    if (!stmt) return NULL;
+    resqlite_cached_stmt* entry =
+        get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!entry) return NULL;
+    sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count);
+    rc = bind_params(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         return NULL;
@@ -1083,11 +1114,12 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return NULL;
     int rc;
     const char* tail;
-    sqlite3_stmt* stmt = get_or_prepare_writer(db, sql, (int)strlen(sql), &rc,
-                                               &tail);
-    if (!stmt) return NULL;
+    resqlite_cached_stmt* entry =
+        get_or_prepare_writer(db, sql, (int)strlen(sql), &rc, &tail);
+    if (!entry) return NULL;
+    sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count);
+    rc = bind_params(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         return NULL;
@@ -1393,14 +1425,16 @@ int resqlite_query_bytes(
     resqlite_reader* reader = &db->readers[reader_id];
 
     int rc;
-    sqlite3_stmt* stmt = get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
-    if (!stmt) {
+    resqlite_cached_stmt* entry =
+        get_or_prepare_reader(reader, sql, (int)strlen(sql), &rc);
+    if (!entry) {
         *out_buf = NULL;
         *out_len = 0;
         return rc;
     }
+    sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count);
+    rc = bind_params(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         *out_buf = NULL;
@@ -1500,14 +1534,26 @@ static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
 // Step-to-completion + hash every cell. Does NOT populate a Dart-visible
 // cell buffer — hashing is the entire job. Resets the statement at both
 // ends so the caller can invoke this whether the stmt was just bound
-// (initial step) or had already been stepped through by decodeQuery
-// (hashing after a decode).
+// (initial step) or had already been stepped through by decodeQuery.
 //
-// Returns the final hash. `row_count` is folded in LAST; empty result
-// hashes to 0 by convention. On step error, returns a sentinel that
-// cannot collide with any valid hash so the caller falls through to the
-// decode path which will surface the real error.
-long long resqlite_query_hash(sqlite3_stmt* stmt) {
+// `last_row_count` is the caller's cached row count from the previous
+// emission, or -1 if unknown (initial-query path; or when row_count is
+// not being tracked). When set, experiment 077 short-circuits: if we
+// step past `last_row_count` rows, the hashes CANNOT match regardless
+// of content, so we stop hashing cell bytes and just count remaining
+// rows to report the final size. `out_row_count` is written in all
+// success paths so the caller can update its cached value.
+//
+// Returns the final hash (or -1 error sentinel). `row_count` is always
+// folded LAST into the accumulator before return. On the fast-reject
+// path the accumulator already holds per-cell fold work for the first
+// `last_row_count` rows (everything seen before skip_hash flipped) —
+// we still fold the fresh `row_count` on top, which by itself
+// differentiates from the previous hash whenever the counts differ.
+// Zero-row results return 0 directly (no row_count fold).
+long long resqlite_query_hash(
+    sqlite3_stmt* stmt, int last_row_count, int* out_row_count
+) {
     // Start from a known state so callers don't have to coordinate:
     // - After stmt_acquire_on: reset is a no-op.
     // - After decodeQuery drained the stmt to SQLITE_DONE: real reset.
@@ -1519,9 +1565,17 @@ long long resqlite_query_hash(sqlite3_stmt* stmt) {
     int col_count = sqlite3_column_count(stmt);
     int row_count = 0;
     int rc;
+    int skip_hash = 0;  // flips to 1 once we know count-differ is guaranteed
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         row_count++;
+        // Experiment 077: once row_count exceeds last_row_count, the
+        // final hash cannot possibly match (row_count is folded in at
+        // the end). Stop hashing cell bytes; just drain rows for count.
+        if (!skip_hash && last_row_count >= 0 && row_count > last_row_count) {
+            skip_hash = 1;
+        }
+        if (skip_hash) continue;
         for (int i = 0; i < col_count; i++) {
             int type = sqlite3_column_type(stmt, i);
             h = fnv_combine_u64(h, (uint64_t)type);
@@ -1558,6 +1612,7 @@ long long resqlite_query_hash(sqlite3_stmt* stmt) {
     }
 
     sqlite3_reset(stmt);
+    *out_row_count = row_count;
 
     if (rc != SQLITE_DONE) {
         // Error sentinel. Chosen negative so it lives outside the 63-bit
@@ -1567,6 +1622,16 @@ long long resqlite_query_hash(sqlite3_stmt* stmt) {
         // and swallow the error silently.
         return -1;
     }
+    // Fold row_count into the accumulator before returning. This keeps
+    // results with identical per-row content but different row counts
+    // from colliding, covering both the fast-reject path (more rows
+    // than last time — `h` contains fold work for just the first
+    // `last_row_count` rows) and the under-count case (fewer rows
+    // than last time — `h` contains fold work for every row we saw).
+    // In both cases the differing `row_count` fold at the tail pushes
+    // the hash away from the previous emission's value, so the
+    // caller's `hash != last_hash` check fires and the decode path
+    // runs. Zero-row result is the special case: returns 0 directly.
     if (row_count == 0) return 0;
     h = fnv_combine_u64(h, (uint64_t)row_count);
     return (long long)h;

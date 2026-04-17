@@ -349,20 +349,26 @@ external int resqliteDbStatusTotal(
   ffi.Pointer<ffi.Int> outHighwater,
 );
 
+/// Per-worker persistent buffer for read-table pointer marshalling.
+/// Allocated once; reused across calls. Eliminates a ~512-byte
+/// calloc/free pair per stream subscription (experiment 077).
+/// Mirrors the `_dirtyTablesBuf` pattern introduced in exp 070.
+final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf =
+    calloc<ffi.Pointer<Utf8>>(64);
+
 /// Get the set of tables read by the last query on the given reader.
 /// Clears after reading.
+///
+/// Zero-table short-circuit: if the count is 0, skip the `List<String>`
+/// allocation and return a shared `const <String>[]`.
 List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
-  final outTables = calloc<ffi.Pointer<Utf8>>(64);
-  try {
-    final count = resqliteGetReadTables(dbHandle, readerId, outTables, 64);
-    final tables = <String>[];
-    for (var i = 0; i < count; i++) {
-      tables.add(outTables[i].toDartString());
-    }
-    return tables;
-  } finally {
-    calloc.free(outTables);
+  final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
+  if (count == 0) return const <String>[];
+  final tables = List<String>.filled(count, '', growable: false);
+  for (var i = 0; i < count; i++) {
+    tables[i] = _readTablesBuf[i].toDartString();
   }
+  return tables;
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle readers.
