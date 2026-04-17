@@ -317,6 +317,20 @@ struct resqlite_db {
     resqlite_dirty_set dirty_tables;
     int writer_checkpoint_running;
 
+    // Experiment 057: batch-insert preupdate short-circuit.
+    // Every row of a single-SQL batch writes the same table, so after
+    // the first row's table is captured we can skip the strcmp scan
+    // for all subsequent rows.
+    //
+    // `batch_suppress_hook` gates the optimization. `batch_base_count`
+    // remembers how many entries the dirty set had at batch entry —
+    // the hook short-circuits only once count has grown past the base,
+    // so the batch's *own* first row still gets captured even if
+    // previous writes left entries behind. Cleared on batch exit.
+    // Single-threaded via writer_mutex, no atomics.
+    int batch_suppress_hook;
+    int batch_base_count;
+
     // Reader pool.
     resqlite_reader readers[MAX_READERS];
     int reader_count;
@@ -365,6 +379,17 @@ static void preupdate_hook(
 ) {
     (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
+
+    // Experiment 057: during a batch insert every row targets the same
+    // table. After the batch's first row is captured, we can skip the
+    // strcmp scan for all remaining rows. The `> batch_base_count`
+    // check ensures we still capture the batch's own first row even
+    // when earlier writes already left entries in the dirty set.
+    if (sdb->batch_suppress_hook &&
+        sdb->dirty_tables.count > sdb->batch_base_count) {
+        return;
+    }
+
     dirty_set_add(&sdb->dirty_tables, table_name);
 }
 
@@ -746,7 +771,18 @@ int resqlite_run_batch(
         return rc;
     }
 
+    // Experiment 057: every row of this batch writes the same single
+    // table, so after the first preupdate capture we don't need to
+    // scan the dirty set again. Snapshot the current dirty-set count
+    // as a baseline so the batch's first row still gets captured even
+    // if earlier writes left entries in the set. Flag is cleared
+    // unconditionally on exit so errors don't leave the hook in an
+    // unusual mode for later non-batch writes.
+    db->batch_base_count = db->dirty_tables.count;
+    db->batch_suppress_hook = 1;
     rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
+    db->batch_suppress_hook = 0;
+
     if (rc != SQLITE_OK) {
         sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
     } else {
@@ -772,7 +808,13 @@ int resqlite_run_batch_nested(
     // and the Dart-level caller decides whether to ROLLBACK (top-level tx)
     // or ROLLBACK TO a savepoint.
     sqlite3_mutex_enter(db->writer_mutex);
+
+    // Experiment 057: same short-circuit as resqlite_run_batch.
+    db->batch_base_count = db->dirty_tables.count;
+    db->batch_suppress_hook = 1;
     int rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
+    db->batch_suppress_hook = 0;
+
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
 }
