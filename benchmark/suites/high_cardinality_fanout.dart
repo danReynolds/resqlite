@@ -16,25 +16,27 @@
 ///
 /// Peers: resqlite, sqlite_async. sqlite3.dart excluded (no streams).
 ///
-/// ## Not registered in the default `run_all.dart` suite
+/// ## History
 ///
-/// Empirical measurements expose a non-linear cost in resqlite's
-/// initial-emission drain: 100 fresh subscriptions take ~40 seconds
-/// to all emit their first result, while sqlite_async drains in ~1.5s.
-/// The root cause appears to be pool-fanout scheduling when many
-/// `_createStream` calls race on a 4-worker reader pool — each
-/// dispatch wakes every pending waiter, producing O(N²) microtask
-/// churn. 200+ streams time out on a 2-minute budget.
+/// An earlier draft of this workload exposed a real pathology: 100
+/// fresh subscriptions took ~40 seconds to all emit their initial
+/// result on resqlite, because every write during the benchmark's
+/// write-burst phase left a backlog of ~20,000 unawaited re-query
+/// dispatches in the reader pool. Subsequent iterations' fresh
+/// subscriptions queued behind that backlog. The write burst itself
+/// took ~2 seconds, and iteration-2+ drains took 30+ seconds.
 ///
-/// Including A11b in the default suite would add 2-3 minutes to every
-/// benchmark run until this pool issue is addressed. Instead the
-/// workload is opt-in — run manually:
+/// The root cause was `unawaited(_reQuery(...))` fan-out with no
+/// per-entry coalescing — every write dispatched one pool round-trip
+/// per active stream. PR #17 added `StreamEntry.writeGen`-based
+/// coalescing: at most one re-query in flight per stream, follow-up
+/// dispatched on completion if more invalidations arrived. See
+/// `stream_engine.dart` `_scheduleReQuery` docstring for the full
+/// coalescing design.
 ///
-///     dart run benchmark/suites/high_cardinality_fanout.dart
-///
-/// When `--include-slow` lands (Phase 3 of Track A) this workload
-/// will be wired up behind that flag. A v2 version bump can raise the
-/// stream count once pool-fanout is improved.
+/// Post-fix: 100 streams drain in ~13ms, write burst in ~230ms, full
+/// workload wall in ~245ms. This benchmark is what exposed the bug —
+/// its existence motivates its registration in the default suite.
 library;
 
 import 'dart:async';
@@ -52,11 +54,10 @@ const WorkloadMeta highCardinalityFanoutMeta = WorkloadMeta(
   description: '100 reactive streams each watching one of 100 owner '
       'partitions of a 10K-item table. 200 random-item writes target '
       'random items. Models Flutter list views with many simultaneous '
-      'row watchers (detail screens, reactive timelines). Scaled to '
-      '100 rather than the originally-planned 500 because pool fanout '
-      'of fresh subscriptions scales non-linearly — 200+ streams time '
-      'out on initial-emission drain. Full bench stays under ~90s at '
-      'this scale.',
+      'row watchers (detail screens, reactive timelines). Originally '
+      'exposed a write-burst pool-saturation pathology; that was fixed '
+      'in PR #17 by adding per-stream re-query coalescing in the stream '
+      'engine. This benchmark remains as its regression guard.',
 );
 
 const int _itemCount = 10000;
