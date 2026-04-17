@@ -126,6 +126,8 @@ const _trackedPatterns = [
   // the worker-side hash short-circuit path.
   'Unchanged Fanout Throughput',
   'resqlite qps',
+  // Scenario-level trajectories (Track A Phase 1+).
+  'Keyed PK Subscriptions',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.
