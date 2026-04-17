@@ -139,12 +139,32 @@ final class StreamEngine {
   /// absorbed every intermediate write) — so no update is lost. If the
   /// flag is set on completion, exactly one follow-up is dispatched.
   ///
-  /// Correctness argument: every write bumps
-  /// [StreamEntry.reQueryGeneration] via the caller. The follow-up
-  /// re-query runs against the latest DB state, which reflects all
-  /// writes up to that moment. The existing `entry.reQueryGeneration !=
-  /// generation` check in [_reQuery] still discards stale results from
-  /// earlier dispatches.
+  /// ## Invariant (must be upheld by every caller)
+  ///
+  /// **Callers must bump `entry.reQueryGeneration` BEFORE invoking
+  /// `_scheduleReQuery`.** This guarantees the interplay with the
+  /// generation-based stale-result check in [_reQuery] stays correct.
+  ///
+  /// Concretely: consider a re-query A dispatched for invalidation W1,
+  /// followed by invalidation W2 arriving mid-flight. The sequence is:
+  ///
+  ///  - `W1: entry.reQueryGeneration++ → 1; _scheduleReQuery dispatches A`
+  ///  - `A captures generation=1, awaits pool`
+  ///  - `W2: entry.reQueryGeneration++ → 2; _scheduleReQuery sees
+  ///     inFlight != null, sets needsRecheckAfter = true`
+  ///  - `A completes, checks entry.reQueryGeneration (2) != generation
+  ///     (1) → discards result (conservative: A's data may or may not
+  ///     reflect W2; discarding is safer than maybe-emit)`
+  ///  - `whenComplete: needsRecheckAfter → dispatches follow-up B
+  ///     capturing generation=2`
+  ///  - `B completes, generation matches → emits current data (which
+  ///     reflects both W1 and W2)`
+  ///
+  /// Without the bump-before-schedule ordering, the "A's generation
+  /// matches" check could pass incorrectly after an in-flight
+  /// invalidation, emitting stale data instead of waiting for the
+  /// follow-up. All current callers (`_flushDirtyTables` and the
+  /// initial-query catchup in `_createStream`) preserve this.
   ///
   /// Steady-state cap: at most N in-flight re-queries (one per active
   /// stream) regardless of write rate.
