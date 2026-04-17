@@ -55,6 +55,14 @@ void main() {
     print('  ${device['name']}: ${benchmarks.length} benchmark sections parsed');
   }
 
+  // Sort devices most-recent-first so the dashboard defaults to the
+  // latest run and history appears in reverse chronological order.
+  (output['devices'] as List).sort((a, b) {
+    final aDate = (a as Map)['date']?.toString() ?? '';
+    final bDate = (b as Map)['date']?.toString() ?? '';
+    return bDate.compareTo(aDate);
+  });
+
   outFile.writeAsStringSync(
     const JsonEncoder.withIndent('  ').convert(output),
   );

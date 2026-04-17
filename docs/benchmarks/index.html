@@ -240,7 +240,10 @@ async function init() {
   }
 
   const select = document.getElementById('deviceSelect');
-  select.innerHTML = devices.map((d, i) => `<option value="${i}">${d.name}</option>`).join('');
+  select.innerHTML = devices.map((d, i) => {
+    const label = d.date ? `${d.name} — ${d.date}` : d.name;
+    return `<option value="${i}">${label}</option>`;
+  }).join('');
   select.addEventListener('change', () => renderDevice(devices[+select.value]));
   renderDevice(devices[0]);
 }
