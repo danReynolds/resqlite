@@ -131,53 +131,51 @@ final class StreamEngine {
   /// dispatches — each one a full pool round-trip.
   ///
   /// With coalescing, at most ONE re-query is in flight per stream entry
-  /// at a time. If another invalidation arrives while one is running, we
-  /// flag `needsRecheckAfter = true` on the entry; otherwise the flag
-  /// stays false and the in-flight re-query emits normally on completion
-  /// with no follow-up work.
+  /// at a time. Each invalidation bumps [StreamEntry.invalidationGen]; if
+  /// a re-query is already in flight, we return without dispatching. The
+  /// in-flight re-query captured the pre-bump value of `invalidationGen`
+  /// when it was dispatched, so on completion it can compare:
   ///
-  /// When the flag is set — meaning a write affecting this entry landed
-  /// during the in-flight re-query — completion skips the emit (the
-  /// in-flight's DB snapshot predates the write, so its data may be
-  /// stale) and dispatches exactly one follow-up that re-reads the
-  /// current state (which has absorbed every intermediate write) and
-  /// emits. No update is lost and no unnecessary pool trips happen.
+  ///   - `entry.invalidationGen == gen` → no invalidations arrived during
+  ///      the in-flight run; its result is current, emit normally, done.
+  ///   - `entry.invalidationGen != gen` → at least one invalidation landed
+  ///      during the in-flight run. Skip the emit (the DB snapshot the
+  ///      in-flight read may predate the intervening write) and dispatch
+  ///      exactly one follow-up, which captures the now-current gen and
+  ///      reads current state (reflecting every intermediate write).
+  ///
+  /// No update is lost. No unnecessary pool trips happen. State management
+  /// is "capture a baseline at dispatch, compare to current at completion"
+  /// — monotonic counter, no explicit reset step.
   ///
   /// ## Invariant (must be upheld by every caller)
   ///
   /// **All invalidation dispatches must route through `_scheduleReQuery`.**
-  /// Never call `_reQuery` directly. The coalescing and stale-check
-  /// machinery both hang off `entry.needsRecheckAfter`, which
-  /// `_scheduleReQuery` is responsible for setting when an invalidation
-  /// arrives mid-flight.
+  /// Never call `_reQuery` directly. The counter bump and dedupe guard are
+  /// both here; bypassing them risks either double-dispatch or missed
+  /// invalidations.
   ///
   /// ## Worked example
   ///
   /// Consider re-query A dispatched for invalidation W1, followed by
   /// invalidation W2 arriving mid-flight:
   ///
-  ///   - `W1: _scheduleReQuery → inFlight == null → dispatch A,
-  ///      inFlightReQuery = A.future, needsRecheckAfter = false`
-  ///   - `A awaits pool`
-  ///   - `W2: _scheduleReQuery → inFlight != null → needsRecheckAfter = true`
-  ///   - `A completes body: sees needsRecheckAfter → returns early
-  ///      (skips emit). Conservative: A's read may or may not reflect
-  ///      W2; skipping lets the follow-up deliver current state.`
-  ///   - `A's whenComplete: inFlightReQuery = null. needsRecheckAfter
-  ///      still true → clear it, dispatch follow-up B.`
+  ///   - `W1: invalidationGen: 0→1. No in-flight. _startReQuery captures
+  ///      gen=1, dispatches A.`
+  ///   - `A awaits pool.`
+  ///   - `W2: invalidationGen: 1→2. In-flight → return without dispatch.`
+  ///   - `A completes body: checks invalidationGen (2) != gen (1) → skip
+  ///      emit. Conservative: A's read may or may not reflect W2.`
+  ///   - `A's whenComplete: inFlight cleared. invalidationGen (2) !=
+  ///      gen (1) → dispatch follow-up B capturing gen=2.`
   ///   - `B runs, reads current state (W1 + W2 both visible),
-  ///      needsRecheckAfter = false → emits current data.`
+  ///      invalidationGen (2) == gen (2) → emit.`
   ///
   /// Steady-state cap: at most N in-flight re-queries (one per active
-  /// stream) regardless of write rate. Additional invalidations during
-  /// the follow-up re-set `needsRecheckAfter` and chain further
-  /// follow-ups, so sustained writes see one emission per settled round
-  /// rather than one per write.
+  /// stream) regardless of write rate.
   void _scheduleReQuery(StreamEntry entry) {
-    if (entry.inFlightReQuery != null) {
-      entry.needsRecheckAfter = true;
-      return;
-    }
+    entry.invalidationGen++;
+    if (entry.inFlightReQuery != null) return;
     _startReQuery(entry);
   }
 
@@ -185,13 +183,15 @@ final class StreamEngine {
   /// Only called via [_scheduleReQuery], which enforces the single-
   /// in-flight invariant.
   void _startReQuery(StreamEntry entry) {
-    entry.inFlightReQuery = _reQuery(entry).whenComplete(() {
+    final gen = entry.invalidationGen;
+    entry.inFlightReQuery = _reQuery(entry, gen).whenComplete(() {
       entry.inFlightReQuery = null;
-      // Drain any invalidation that arrived while the re-query was
-      // running. Exactly one follow-up is sufficient: it reads current
-      // state, which reflects every write committed so far.
-      if (entry.needsRecheckAfter) {
-        entry.needsRecheckAfter = false;
+      // If invalidations arrived while the re-query was running, dispatch
+      // exactly one follow-up. It captures the now-current gen as its
+      // baseline; additional invalidations during the follow-up will chain
+      // further follow-ups through the same path. No manual reset step —
+      // each dispatch captures a fresh baseline.
+      if (entry.invalidationGen != gen) {
         // If the entry was removed by a cancel while we were running,
         // skip — no subscribers remain.
         if (_entries[entry.key] != null) {
@@ -293,13 +293,13 @@ final class StreamEngine {
 
   /// Re-query a single stream on the reader pool.
   ///
-  /// If an invalidation arrived while we were awaiting pool work, the
-  /// entry's `needsRecheckAfter` flag is set by [_scheduleReQuery]. In
-  /// that case this result is potentially stale (the DB snapshot may
-  /// predate the write that triggered the invalidation), so we return
-  /// without emitting — [_startReQuery]'s `whenComplete` hook will
-  /// dispatch a follow-up that reads current state.
-  Future<void> _reQuery(StreamEntry entry) async {
+  /// [gen] is [StreamEntry.invalidationGen] captured at dispatch time by
+  /// [_startReQuery]. If `entry.invalidationGen` differs at completion,
+  /// at least one invalidation landed during our flight — the result is
+  /// potentially stale (DB snapshot may predate the intervening write),
+  /// so we return without emitting. The follow-up dispatched by
+  /// [_startReQuery]'s `whenComplete` hook reads current state.
+  Future<void> _reQuery(StreamEntry entry, int gen) async {
     try {
       final pool = await _pool();
       final (rows, newHash, newRowCount) = await pool.selectIfChanged(
@@ -308,10 +308,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      // Stale: an invalidation arrived while we were running. Skip the
-      // emit; the follow-up dispatched by `whenComplete` will surface
-      // current state.
-      if (entry.needsRecheckAfter) return;
+      if (entry.invalidationGen != gen) return;  // stale
       if (rows == null) return; // Unchanged — worker-side hash matched.
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
@@ -324,7 +321,7 @@ final class StreamEngine {
       // Stale: skip surfacing the error too; the follow-up may succeed
       // (e.g. schema re-created, connection recovered) or may fail in
       // the same way, at which point its own error handling fires.
-      if (entry.needsRecheckAfter) return;
+      if (entry.invalidationGen != gen) return;
       // Propagate error to subscribers so they can handle it (e.g., table
       // dropped, schema changed). Silent failure would leave the stream
       // stuck with stale data and no signal to the listener.
@@ -448,16 +445,21 @@ final class StreamEntry {
 
   /// Tracks the currently-executing re-query for this entry, if any.
   /// `null` means no re-query is in flight; a non-null value means
-  /// additional invalidations should coalesce via [needsRecheckAfter]
+  /// additional invalidations should be absorbed into [invalidationGen]
   /// rather than dispatching fresh pool work. See
   /// [StreamEngine._scheduleReQuery] for the full rationale.
   Future<void>? inFlightReQuery;
 
-  /// Set when an invalidation arrives while a re-query is already in
-  /// flight ([inFlightReQuery] != null). On completion of the
-  /// in-flight re-query, the engine dispatches exactly one follow-up
-  /// so updates accumulated during the prior run are not missed.
-  bool needsRecheckAfter = false;
+  /// Monotonic counter bumped by [StreamEngine._scheduleReQuery] on
+  /// every qualifying invalidation (writes that touch this entry's
+  /// watched tables, plus the initial-query race catchup). Never decreases.
+  ///
+  /// [StreamEngine._startReQuery] captures this value at dispatch time;
+  /// on completion, if the captured value and the current value differ,
+  /// invalidations arrived during the in-flight run and the result is
+  /// skipped in favor of a fresh follow-up (which captures the now-current
+  /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
+  int invalidationGen = 0;
 }
 
 /// Compute a stable hash key for a stream query.
