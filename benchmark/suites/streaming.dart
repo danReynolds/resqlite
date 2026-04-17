@@ -34,6 +34,10 @@ Future<String> runStreamingBenchmark() async {
     const createSql =
         'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER NOT NULL)';
     const seedSql = 'INSERT INTO items(name, value) VALUES (?, ?)';
+    // 100 seed rows — matches main's pre-existing benchmarks so their
+    // numbers remain historically comparable. The unchanged-fanout
+    // benchmark below inserts an additional 900 rows *locally* so its
+    // result size is big enough for the decode-skip win to clear noise.
     final seedParams = [for (var i = 0; i < 100; i++) ['item_$i', i]];
 
     await resqliteDb.execute(createSql);
@@ -139,6 +143,163 @@ Future<String> runStreamingBenchmark() async {
       }
 
       markdown.write(markdownTable('Invalidation Latency', [sqTiming, asyncTiming]));
+    }
+
+    // -----------------------------------------------------------------
+    // 2b. Unchanged-fanout throughput — experiment 075 target
+    //
+    // fanoutCount distinct unchanged streams + 1 canary. Each unchanged
+    // stream has a unique literal sid column so the stream registry
+    // doesn't dedupe them — every INSERT dispatches N+1 independent
+    // re-queries through the reader pool.
+    //
+    // Writes INSERT rows with new ids > 1000. The canary's COUNT(*)
+    // changes and emits; the unchanged streams' WHERE id <= 1000
+    // result-sets are identical across iterations and should NOT emit.
+    //
+    // With a 3-4 reader pool and 10 unchanged streams the pool backs
+    // up: every write dispatches 11 re-queries over ~3 waves. Baseline
+    // decodes ~1000 rows of each unchanged stream on every wave.
+    // Experiment 075 hash-onlys them in C, skipping Dart decode
+    // entirely when the hash matches.
+    //
+    // Total wall time is dominated by the re-query fanout (writes are
+    // cheap, ~30 µs; fanout is where unchanged-stream work lives). A
+    // working 075 drops end-to-end latency proportionally.
+    // -----------------------------------------------------------------
+    {
+      const fanoutCount = 10;
+      // Writes that are safely outside the WHERE id <= 1000 predicate.
+      var counter = 100000;
+
+      // Top up to 1000 rows for both databases so the unchanged-stream
+      // result size is big enough for 075's hash-skip win to clear
+      // noise. Earlier benchmarks in this suite run against the 100-row
+      // seed (pre-existing baseline) — the extra rows land after they
+      // finish, so their historical numbers are unchanged.
+      final topupParams = [
+        for (var i = 100; i < 1000; i++) ['item_$i', i],
+      ];
+      await resqliteDb.executeBatch(seedSql, topupParams);
+      await asyncDb.executeBatch(seedSql, topupParams);
+
+      // resqlite
+      final sqTiming = BenchmarkTiming('resqlite');
+      {
+        final canaryStream = resqliteDb.stream(
+          'SELECT COUNT(*) as cnt FROM items',
+        );
+        final canaryReady = Completer<void>();
+        Completer<void>? waitCanary;
+        final canarySub = canaryStream.listen((_) {
+          if (!canaryReady.isCompleted) {
+            canaryReady.complete();
+          } else if (waitCanary != null && !waitCanary.isCompleted) {
+            waitCanary.complete();
+          }
+        });
+
+        final unchangedSubs = <StreamSubscription>[];
+        final unchangedEmissions = List<int>.filled(fanoutCount, 0);
+        final unchangedReady = <Completer<void>>[
+          for (var i = 0; i < fanoutCount; i++) Completer<void>(),
+        ];
+        for (var s = 0; s < fanoutCount; s++) {
+          final sub = resqliteDb
+              .stream(
+            'SELECT id, name, value, $s as sid FROM items '
+            'WHERE id <= 1000 ORDER BY id',
+          )
+              .listen((_) {
+            unchangedEmissions[s]++;
+            if (!unchangedReady[s].isCompleted) unchangedReady[s].complete();
+          });
+          unchangedSubs.add(sub);
+        }
+
+        await canaryReady.future;
+        await Future.wait(unchangedReady.map((c) => c.future));
+
+        for (var i = 0; i < defaultIterations; i++) {
+          waitCanary = Completer<void>();
+          final before = List<int>.from(unchangedEmissions);
+
+          final sw = Stopwatch()..start();
+          await resqliteDb.execute(seedSql, ['unread_${counter++}', i]);
+          await waitCanary.future.timeout(const Duration(seconds: 2));
+          sw.stop();
+          sqTiming.wallUs.add(sw.elapsedMicroseconds);
+          sqTiming.mainUs.add(sw.elapsedMicroseconds);
+
+          for (var s = 0; s < fanoutCount; s++) {
+            if (unchangedEmissions[s] != before[s]) {
+              throw StateError(
+                  'Unchanged stream $s emitted for an unchanged result!');
+            }
+          }
+        }
+        await canarySub.cancel();
+        for (final sub in unchangedSubs) {
+          await sub.cancel();
+        }
+      }
+
+      // sqlite_async: no worker-side hash, always emits duplicates.
+      final asyncTiming = BenchmarkTiming('sqlite_async');
+      {
+        final canaryStream = asyncDb.watch(
+          'SELECT COUNT(*) as cnt FROM items',
+          throttle: Duration.zero,
+        );
+        final canaryReady = Completer<void>();
+        Completer<void>? waitCanary;
+        final canarySub = canaryStream.listen((_) {
+          if (!canaryReady.isCompleted) {
+            canaryReady.complete();
+          } else if (waitCanary != null && !waitCanary.isCompleted) {
+            waitCanary.complete();
+          }
+        });
+
+        final unchangedSubs = <StreamSubscription>[];
+        final unchangedReady = <Completer<void>>[
+          for (var i = 0; i < fanoutCount; i++) Completer<void>(),
+        ];
+        for (var s = 0; s < fanoutCount; s++) {
+          final sub = asyncDb
+              .watch(
+                'SELECT id, name, value, $s as sid FROM items '
+                'WHERE id <= 1000 ORDER BY id',
+                throttle: Duration.zero,
+              )
+              .listen((_) {
+            if (!unchangedReady[s].isCompleted) unchangedReady[s].complete();
+          });
+          unchangedSubs.add(sub);
+        }
+
+        await canaryReady.future;
+        await Future.wait(unchangedReady.map((c) => c.future));
+
+        for (var i = 0; i < defaultIterations; i++) {
+          waitCanary = Completer<void>();
+          final sw = Stopwatch()..start();
+          await asyncDb.execute(seedSql, ['unread_${counter++}', i]);
+          await waitCanary.future.timeout(const Duration(seconds: 2));
+          sw.stop();
+          asyncTiming.wallUs.add(sw.elapsedMicroseconds);
+          asyncTiming.mainUs.add(sw.elapsedMicroseconds);
+        }
+        await canarySub.cancel();
+        for (final sub in unchangedSubs) {
+          await sub.cancel();
+        }
+      }
+
+      markdown.write(markdownTable(
+        'Unchanged Fanout Throughput (1 canary + 10 unchanged streams)',
+        [sqTiming, asyncTiming],
+      ));
     }
 
     // -----------------------------------------------------------------

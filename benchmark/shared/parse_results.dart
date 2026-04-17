@@ -15,13 +15,24 @@ Map<String, double> extractResqliteMedians(String content) {
   String? currentSection;
   String? currentSubsection;
 
+  // Sections whose tables contain `| resqlite ... |` rows but do NOT
+  // represent wall-clock timings. These are parsed by their own dedicated
+  // extractors (extractMemoryMedians, extractStreamingColumnMedians) and
+  // must be excluded here so their MB / re-emit / ratio values don't get
+  // mixed into the timing `metrics` map.
+  const nonTimingSections = {
+    'Memory',
+    'Streaming (Column Granularity)',
+  };
+
   for (final line in lines) {
     if (line.startsWith('## ')) {
       currentSection = line.substring(3).trim();
       currentSubsection = null;
     } else if (line.startsWith('### ')) {
       currentSubsection = line.substring(4).trim();
-    } else if (line.startsWith('| resqlite')) {
+    } else if (line.startsWith('| resqlite') &&
+        !nonTimingSections.contains(currentSection)) {
       final parts = line
           .split('|')
           .map((s) => s.trim())
@@ -30,14 +41,23 @@ Map<String, double> extractResqliteMedians(String content) {
       if (parts.length >= 2) {
         final label = parts[0];
         final wallMed = double.tryParse(parts[1]);
-        if (wallMed != null) {
+        // Standard timing rows have 4 numeric columns after the label
+        // (wall med, wall p90, main med, main p90). Non-timing rows
+        // under `### QPS + MDE` have a dotted CI string at column 2
+        // (e.g. "120482..127194"), which fails the numeric check. That
+        // gate stops the parser from polluting `metrics` with QPS
+        // values misread as ms. Single-cell rows like `| resqlite qps |
+        // N |` (parts.length == 2) remain fully supported.
+        final isTimingRow = parts.length < 3 ||
+            double.tryParse(parts[2]) != null;
+        if (wallMed != null && isTimingRow) {
           final key = currentSubsection != null
               ? '$currentSection / $currentSubsection / $label'
               : '$currentSection / $label';
           results[key] = wallMed;
         }
         // Also extract main isolate median (column index 3).
-        if (parts.length >= 4) {
+        if (parts.length >= 4 && isTimingRow) {
           final mainMed = double.tryParse(parts[3]);
           if (mainMed != null) {
             final key = currentSubsection != null
@@ -66,6 +86,165 @@ Map<String, double> extractResqliteMedians(String content) {
               wallTime;
         }
       }
+    }
+  }
+
+  return results;
+}
+
+/// Memory suite metrics parsed from a benchmark results markdown file.
+///
+/// Emitted by `suites/memory.dart` in the `## Memory` section. Columns:
+/// `| Library | RSS delta med (MB) | RSS delta p90 (MB) | 95% CI (MB) | MDE (MB) |`.
+///
+/// The MDE (minimum detectable effect) is expressed in absolute MB
+/// rather than percent — memory deltas are often 0 MB, which makes a
+/// percentage formulation nonsensical. `mdeMB` is the half-width of the
+/// 95% bootstrap CI around the median and represents the smallest
+/// reduction (in MB) that could be distinguished from current noise.
+class MemoryMetric {
+  MemoryMetric({
+    required this.rssDeltaMedMB,
+    required this.rssDeltaP90MB,
+    required this.ciLowMB,
+    required this.ciHighMB,
+    required this.mdeMB,
+  });
+
+  final double rssDeltaMedMB;
+  final double rssDeltaP90MB;
+  final double ciLowMB;
+  final double ciHighMB;
+  final double mdeMB;
+}
+
+/// Extract memory suite medians from markdown content.
+///
+/// Returns a map of `Memory / subsection / library` → [MemoryMetric].
+/// Scans only the `## Memory` section; stops at the next `## ` header
+/// to avoid cross-section bleed.
+Map<String, MemoryMetric> extractMemoryMedians(String content) {
+  final results = <String, MemoryMetric>{};
+  final lines = content.split('\n');
+
+  var inMemory = false;
+  String? subsection;
+
+  for (final line in lines) {
+    if (line.startsWith('## ')) {
+      inMemory = line.substring(3).trim() == 'Memory';
+      subsection = null;
+      continue;
+    }
+    if (!inMemory) continue;
+    if (line.startsWith('### ')) {
+      subsection = line.substring(4).trim();
+      continue;
+    }
+    if (line.startsWith('|') &&
+        !line.startsWith('|---') &&
+        !line.startsWith('| Library')) {
+      final parts = line
+          .split('|')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.length < 5) continue;
+      final label = parts[0];
+      final med = double.tryParse(parts[1]);
+      final p90 = double.tryParse(parts[2]);
+      final ciParts = parts[3].split('..');
+      if (ciParts.length != 2) continue;
+      final ciLow = double.tryParse(ciParts[0].trim());
+      final ciHigh = double.tryParse(ciParts[1].trim());
+      // MDE column rendered as "±N.NN"; strip the leading ±.
+      final mdeStr = parts[4].replaceFirst('±', '').trim();
+      final mde = double.tryParse(mdeStr);
+      if (med == null || p90 == null || ciLow == null || ciHigh == null ||
+          mde == null) {
+        continue;
+      }
+      final key = subsection != null
+          ? 'Memory / $subsection / $label'
+          : 'Memory / $label';
+      results[key] = MemoryMetric(
+        rssDeltaMedMB: med,
+        rssDeltaP90MB: p90,
+        ciLowMB: ciLow,
+        ciHighMB: ciHigh,
+        mdeMB: mde,
+      );
+    }
+  }
+
+  return results;
+}
+
+/// Streaming column-granularity metrics parsed from a results markdown.
+///
+/// Emitted by `suites/disjoint_columns.dart` in the
+/// `## Streaming (Column Granularity)` section. Columns:
+/// `| Library | Re-emits (total) | Wall drain (ms) | Re-emit ratio |`.
+class StreamingColumnMetric {
+  StreamingColumnMetric({
+    required this.reemits,
+    required this.drainMs,
+    required this.ratio,
+  });
+
+  final int reemits;
+  final double drainMs;
+  final double ratio;
+}
+
+/// Extract streaming column-granularity metrics from markdown content.
+///
+/// Returns a map of `Streaming (Column Granularity) / subsection / library`
+/// → [StreamingColumnMetric]. Scans only the owning `## Streaming
+/// (Column Granularity)` section and stops at the next `## ` header.
+Map<String, StreamingColumnMetric> extractStreamingColumnMedians(
+  String content,
+) {
+  final results = <String, StreamingColumnMetric>{};
+  final lines = content.split('\n');
+
+  var inSection = false;
+  String? subsection;
+
+  for (final line in lines) {
+    if (line.startsWith('## ')) {
+      inSection =
+          line.substring(3).trim() == 'Streaming (Column Granularity)';
+      subsection = null;
+      continue;
+    }
+    if (!inSection) continue;
+    if (line.startsWith('### ')) {
+      subsection = line.substring(4).trim();
+      continue;
+    }
+    if (line.startsWith('|') &&
+        !line.startsWith('|---') &&
+        !line.startsWith('| Library')) {
+      final parts = line
+          .split('|')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.length < 4) continue;
+      final label = parts[0];
+      final reemits = int.tryParse(parts[1]);
+      final drain = double.tryParse(parts[2]);
+      final ratio = double.tryParse(parts[3]);
+      if (reemits == null || drain == null || ratio == null) continue;
+      final key = subsection != null
+          ? 'Streaming (Column Granularity) / $subsection / $label'
+          : 'Streaming (Column Granularity) / $label';
+      results[key] = StreamingColumnMetric(
+        reemits: reemits,
+        drainMs: drain,
+        ratio: ratio,
+      );
     }
   }
 

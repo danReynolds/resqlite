@@ -3,7 +3,10 @@ import 'dart:io' show Directory, File, exit;
 import 'dart:math' as math;
 
 import 'shared/parse_results.dart';
+import 'shared/stats.dart' show AggregateStats;
 import 'suites/concurrent_reads.dart';
+import 'suites/disjoint_columns.dart';
+import 'suites/memory.dart';
 import 'suites/parameterized.dart';
 import 'suites/point_query.dart';
 import 'suites/scaling.dart';
@@ -69,13 +72,33 @@ Future<void> main(List<String> args) async {
   }
 
   if (compareFile != null) {
+    final prevContent = compareFile.readAsStringSync();
+    final prevName = compareFile.path.split('/').last;
     final comparison = _generateComparison(
       currentAggregates,
-      compareFile.readAsStringSync(),
-      compareFile.path.split('/').last,
+      prevContent,
+      prevName,
     );
     markdown.writeln(comparison);
     print(comparison);
+
+    final memComparison = _generateMemoryComparison(
+      representativeMarkdown,
+      prevContent,
+    );
+    if (memComparison.isNotEmpty) {
+      markdown.writeln(memComparison);
+      print(memComparison);
+    }
+
+    final streamColComparison = _generateStreamingColumnComparison(
+      representativeMarkdown,
+      prevContent,
+    );
+    if (streamColComparison.isNotEmpty) {
+      markdown.writeln(streamColComparison);
+      print(streamColComparison);
+    }
   } else {
     markdown.writeln('## Comparison');
     markdown.writeln();
@@ -100,7 +123,7 @@ Future<void> main(List<String> args) async {
 }
 
 void _printHardwareSummary(
-  Map<String, _AggregateStats> metrics,
+  Map<String, AggregateStats> metrics,
   String label,
 ) {
   // Use section-specific prefixes to avoid ambiguity
@@ -211,32 +234,38 @@ void _printHardwareSummary(
 Future<String> _runSuiteOnce() async {
   final markdown = StringBuffer();
 
-  print('[1/9] Select → Maps...');
+  print('[1/11] Select → Maps...');
   markdown.write(await runSelectMapsBenchmark());
 
-  print('[2/9] Select → Bytes...');
+  print('[2/11] Select → Bytes...');
   markdown.write(await runSelectBytesBenchmark());
 
-  print('[3/9] Schema Shapes...');
+  print('[3/11] Schema Shapes...');
   markdown.write(await runSchemaShapesBenchmark());
 
-  print('[4/9] Scaling...');
+  print('[4/11] Scaling...');
   markdown.write(await runScalingBenchmark());
 
-  print('[5/9] Concurrent Reads...');
+  print('[5/11] Concurrent Reads...');
   markdown.write(await runConcurrentReadsBenchmark());
 
-  print('[6/9] Point Query...');
+  print('[6/11] Point Query...');
   markdown.write(await runPointQueryBenchmark());
 
-  print('[7/9] Parameterized Queries...');
+  print('[7/11] Parameterized Queries...');
   markdown.write(await runParameterizedBenchmark());
 
-  print('[8/9] Writes...');
+  print('[8/11] Writes...');
   markdown.write(await runWritesBenchmark());
 
-  print('[9/9] Streaming...');
+  print('[9/11] Streaming...');
   markdown.write(await runStreamingBenchmark());
+
+  print('[10/11] Streaming (Column Granularity)...');
+  markdown.write(await runDisjointColumnsBenchmark());
+
+  print('[11/11] Memory...');
+  markdown.write(await runMemoryBenchmark());
 
   return markdown.toString();
 }
@@ -325,7 +354,7 @@ File? _findPreviousResults(Directory dir) {
 
 // extractResqliteMedians() is imported from shared/parse_results.dart.
 
-Map<String, _AggregateStats> _aggregateRunMetrics(
+Map<String, AggregateStats> _aggregateRunMetrics(
   List<Map<String, double>> runMetrics,
 ) {
   final buckets = <String, List<double>>{};
@@ -335,50 +364,11 @@ Map<String, _AggregateStats> _aggregateRunMetrics(
     }
   }
   return {
-    for (final entry in buckets.entries) entry.key: _AggregateStats(entry.value),
+    for (final entry in buckets.entries) entry.key: AggregateStats(entry.value),
   };
 }
 
-final class _AggregateStats {
-  static const double minimumComparisonThresholdPct = 10.0;
-  static const double minimumComparisonThresholdMs = 0.02;
-
-  _AggregateStats(List<double> values)
-      : runs = List<double>.from(values)..sort();
-
-  final List<double> runs;
-
-  double get median => _median(runs);
-  double get min => runs.first;
-  double get max => runs.last;
-  double get rangePct => median == 0 ? 0 : ((max - min) / median) * 100;
-  double get madPct {
-    if (runs.length == 1 || median == 0) return 0;
-    final deviations = [
-      for (final value in runs) (value - median).abs(),
-    ]..sort();
-    return (_median(deviations) / median) * 100;
-  }
-
-  String get stability {
-    if (runs.length == 1) return 'single run';
-    if (madPct <= 3) return 'stable';
-    if (madPct <= 8) return 'moderate';
-    return 'noisy';
-  }
-
-  double get comparisonThresholdPct =>
-      math.max(minimumComparisonThresholdPct, madPct * 3.0);
-}
-
-double _median(List<double> sortedValues) {
-  if (sortedValues.isEmpty) return 0;
-  final mid = sortedValues.length ~/ 2;
-  if (sortedValues.length.isOdd) return sortedValues[mid];
-  return (sortedValues[mid - 1] + sortedValues[mid]) / 2;
-}
-
-String _renderRepeatStability(Map<String, _AggregateStats> aggregates) {
+String _renderRepeatStability(Map<String, AggregateStats> aggregates) {
   final buf = StringBuffer();
   buf.writeln('## Repeat Stability');
   buf.writeln();
@@ -408,7 +398,7 @@ String _renderRepeatStability(Map<String, _AggregateStats> aggregates) {
 
 /// Generate a comparison summary between current and previous results.
 String _generateComparison(
-  Map<String, _AggregateStats> current,
+  Map<String, AggregateStats> current,
   String previousContent,
   String previousFileName,
 ) {
@@ -443,7 +433,7 @@ String _generateComparison(
     final pct = prev > 0 ? (delta / prev * 100) : 0.0;
     final thresholdPct = stats.comparisonThresholdPct;
     final thresholdMs = math.max(
-      _AggregateStats.minimumComparisonThresholdMs,
+      AggregateStats.minimumComparisonThresholdMs,
       math.max(prev, curr) * (thresholdPct / 100),
     );
 
@@ -498,6 +488,211 @@ String _generateComparison(
   } else {
     buf.writeln('✅ **No changes beyond noise.**');
   }
+  buf.writeln();
+
+  return buf.toString();
+}
+
+/// Render a memory comparison table. Returns empty if neither the current
+/// nor the previous markdown contains a `## Memory` section.
+///
+/// Threshold: per-benchmark MDE (minimum detectable effect) from the
+/// current run, with a minimum floor of ±0.5 MB. When the current MDE
+/// is absent or unreasonably small, the floor applies. This is the
+/// payoff of Phase 1's bootstrap CI — changes smaller than the actual
+/// per-benchmark noise floor no longer trigger false regressions.
+String _generateMemoryComparison(
+  String currentMarkdown,
+  String previousContent,
+) {
+  final current = extractMemoryMedians(currentMarkdown);
+  final previous = extractMemoryMedians(previousContent);
+
+  if (current.isEmpty && previous.isEmpty) return '';
+
+  final buf = StringBuffer();
+  buf.writeln('## Memory Comparison vs Previous Run');
+  buf.writeln();
+
+  if (current.isEmpty) {
+    buf.writeln('Current run has no `## Memory` section.');
+    buf.writeln();
+    return buf.toString();
+  }
+  if (previous.isEmpty) {
+    buf.writeln(
+      'Previous run has no `## Memory` section — baseline unavailable. '
+      'Current values recorded for next-run comparison.',
+    );
+    buf.writeln();
+    return buf.toString();
+  }
+
+  buf.writeln(
+    '| Benchmark | Prev (MB) | Curr (MB) | Delta | MDE | Status |',
+  );
+  buf.writeln('|---|---|---|---|---|---|');
+
+  const minThresholdMB = 0.5;
+
+  var wins = 0;
+  var regressions = 0;
+  var neutral = 0;
+
+  final keys = current.keys.where(previous.containsKey).toList()..sort();
+  for (final key in keys) {
+    final prev = previous[key]!.rssDeltaMedMB;
+    final currM = current[key]!;
+    final curr = currM.rssDeltaMedMB;
+    final delta = curr - prev;
+    final threshold = math.max(minThresholdMB, currM.mdeMB);
+
+    String status;
+    if (delta < -threshold) {
+      status = '🟢 Win (${delta.toStringAsFixed(2)} MB)';
+      wins++;
+    } else if (delta > threshold) {
+      status = '🔴 Regression (+${delta.toStringAsFixed(2)} MB)';
+      regressions++;
+    } else {
+      status = '⚪ Within MDE';
+      neutral++;
+    }
+
+    final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;
+    buf.writeln(
+      '| $shortKey '
+      '| ${prev.toStringAsFixed(2)} '
+      '| ${curr.toStringAsFixed(2)} '
+      '| ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} MB '
+      '| ±${threshold.toStringAsFixed(2)} MB '
+      '| $status |',
+    );
+  }
+
+  buf.writeln();
+  buf.writeln(
+    '**Memory summary:** $wins wins, $regressions regressions, $neutral neutral',
+  );
+  buf.writeln();
+  buf.writeln(
+    'Threshold uses per-benchmark MDE (95% bootstrap CI half-width on '
+    'the median), with a `±0.5 MB` floor. RSS deltas are still a **lower '
+    'bound** on real allocation change — the VM retains heap pages after '
+    'GC, so sub-MDE wins may be real but invisible here.',
+  );
+  buf.writeln();
+
+  return buf.toString();
+}
+
+/// Render a streaming column-granularity comparison table. Returns empty
+/// if neither run has the section.
+///
+/// Uses absolute re-emit count delta rather than a percentage because
+/// 0 → 5000 is not meaningfully expressed as a ratio. Threshold: ±100
+/// re-emits (catches any material change in invalidation granularity).
+String _generateStreamingColumnComparison(
+  String currentMarkdown,
+  String previousContent,
+) {
+  final current = extractStreamingColumnMedians(currentMarkdown);
+  final previous = extractStreamingColumnMedians(previousContent);
+
+  if (current.isEmpty && previous.isEmpty) return '';
+
+  final buf = StringBuffer();
+  buf.writeln('## Streaming (Column Granularity) Comparison');
+  buf.writeln();
+
+  if (current.isEmpty) {
+    buf.writeln('Current run has no `## Streaming (Column Granularity)` section.');
+    buf.writeln();
+    return buf.toString();
+  }
+  if (previous.isEmpty) {
+    buf.writeln(
+      'Previous run has no `## Streaming (Column Granularity)` section — '
+      'baseline unavailable. Current values recorded for next-run '
+      'comparison.',
+    );
+    buf.writeln();
+    return buf.toString();
+  }
+
+  buf.writeln(
+    '| Benchmark | Prev re-emits | Curr re-emits | Delta | Threshold | Status |',
+  );
+  buf.writeln('|---|---|---|---|---|---|');
+
+  const reemitThreshold = 100;
+
+  var wins = 0;
+  var regressions = 0;
+  var neutral = 0;
+
+  final keys = current.keys.where(previous.containsKey).toList()..sort();
+  for (final key in keys) {
+    final prev = previous[key]!.reemits;
+    final curr = current[key]!.reemits;
+    final delta = curr - prev;
+
+    // The direction of "win" depends on the workload:
+    //
+    //   * Disjoint subsection: fewer re-emits = tighter column tracking =
+    //     win; more re-emits = tracking regression.
+    //   * Overlapping subsection (control): writes should ALWAYS
+    //     invalidate. Fewer re-emits = invalidation is being silently
+    //     elided = correctness regression, NOT a win. The only good move
+    //     on the overlapping path is no material change.
+    //
+    // Subsection is encoded in the metric key as the middle segment
+    // (e.g. "Streaming (Column Granularity) / Disjoint column writes
+    // (SET c = ?) / resqlite"). Classify from the key.
+    final isOverlapping = key.toLowerCase().contains('overlapping');
+    String status;
+    if (delta.abs() <= reemitThreshold) {
+      status = '⚪ Within noise';
+      neutral++;
+    } else if (isOverlapping) {
+      // Any material change on the control workload is a regression.
+      status = delta < 0
+          ? '🔴 Invalidation elided ($delta) — writes not firing'
+          : '🔴 More re-emits (+$delta)';
+      regressions++;
+    } else {
+      // Disjoint: fewer is better, more is a tracking regression.
+      if (delta < 0) {
+        status = '🟢 Fewer re-emits ($delta)';
+        wins++;
+      } else {
+        status = '🔴 More re-emits (+$delta)';
+        regressions++;
+      }
+    }
+
+    final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;
+    buf.writeln(
+      '| $shortKey '
+      '| $prev '
+      '| $curr '
+      '| ${delta >= 0 ? '+' : ''}$delta '
+      '| ±$reemitThreshold '
+      '| $status |',
+    );
+  }
+
+  buf.writeln();
+  buf.writeln(
+    '**Granularity summary:** $wins fewer-re-emit, $regressions more-re-emit, $neutral neutral',
+  );
+  buf.writeln();
+  buf.writeln(
+    'For **disjoint** workloads, fewer re-emits means tighter dependency '
+    'tracking — a library with column-level tracking approaches zero. '
+    'For **overlapping** workloads, the count should stay stable across '
+    'runs; a drop there means writes are being silently elided.',
+  );
   buf.writeln();
 
   return buf.toString();

@@ -436,6 +436,7 @@ const DISPLAY = {
   'Streaming / Invalidation Latency / resqlite': 'invalidation latency',
   'Streaming / Fan-out (10 streams) / resqlite': 'fan-out 10 streams',
   'Streaming / Stream Churn (100 cycles) / resqlite': 'stream churn 100 cycles',
+  'Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite': 'unchanged fanout',
   'Point Query Throughput / resqlite qps': 'point query qps',
 };
 
@@ -462,6 +463,7 @@ const CHART_GROUPS = {
     'Streaming / Invalidation Latency / resqlite',
     'Streaming / Fan-out (10 streams) / resqlite',
     'Streaming / Stream Churn (100 cycles) / resqlite',
+    'Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite',
   ],
   chartThroughput: [
     'Point Query Throughput / resqlite qps',
@@ -919,6 +921,7 @@ function selectExp(id) {
   html += `<span class="badge ${exp.status}">${exp.status}</span>`;
   if (exp.date) html += `<span>${exp.date}</span>`;
   if (exp.commit) html += `<a href="https://github.com/danReynolds/resqlite/commit/${exp.commit}">${exp.commit.slice(0,7)}</a>`;
+  if (exp.archive) html += `<a href="https://github.com/danReynolds/resqlite/compare/main...${encodeURIComponent(exp.archive)}" title="Archived implementation — preserved rejected code, restorable via git cherry-pick">${esc(exp.archive)}</a>`;
   html += `</div>`;
 
   html += `<div class="detail-section"><h4>Impact</h4><p>${esc(exp.summary)}</p></div>`;

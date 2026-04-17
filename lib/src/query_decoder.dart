@@ -43,6 +43,18 @@ external int resqliteStepRow(
   ffi.Pointer<ffi.Uint8> cells,
 );
 
+// Hash-only pass (experiment 075): steps the bound stmt to DONE,
+// hashes every cell's raw bytes in C, resets at both ends, returns
+// the hash. Self-contained — Dart never touches a hash byte.
+//
+// Safe to call on a freshly-bound stmt (first pass of selectIfChanged)
+// or on one that decodeQuery just drained (initial-query baseline).
+@ffi.Native<ffi.Int64 Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_query_hash',
+  isLeaf: true,
+)
+external int resqliteQueryHash(ffi.Pointer<ffi.Void> stmt);
+
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'strlen',
   isLeaf: true,
