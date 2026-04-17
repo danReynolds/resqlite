@@ -7,9 +7,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --border: #30363d;
+    --bg: #0b0d1f;
+    --card: #141829;
+    --border: #262b45;
     --text: #e6edf3;
     --muted: #8b949e;
     --accent: #58a6ff;
@@ -408,7 +408,7 @@
 const COLORS = ['#58a6ff','#f0883e','#a371f7','#39d2c0','#f778ba','#e3b341','#3fb950','#f85149','#8b949e'];
 
 Chart.defaults.color = '#8b949e';
-Chart.defaults.borderColor = '#30363d';
+Chart.defaults.borderColor = '#262b45';
 Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
 
 let DATA = null;
@@ -811,7 +811,7 @@ const verticalLinePlugin = {
       ctx.fillStyle = color;
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = '#0d1117';
+      ctx.strokeStyle = '#0b0d1f';
       ctx.stroke();
     }
     ctx.restore();
