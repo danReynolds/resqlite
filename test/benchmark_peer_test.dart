@@ -93,6 +93,26 @@ void main() {
               equals([10, 20, 30]));
         });
 
+        test('executeBatch rolls back on malformed SQL without leaking '
+            'an open transaction', () async {
+          await peer.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, '
+              'value INTEGER NOT NULL)');
+          // Malformed SQL — prepare() throws on this.
+          await expectLater(
+            peer.executeBatch('INSERT garbage INTO t VALUES (?)', [
+              [1],
+            ]),
+            throwsA(anything),
+          );
+          // Adapter must not be stuck inside an open transaction; a
+          // subsequent write should succeed. Before the fix, sqlite3
+          // raised "cannot start a transaction within a transaction"
+          // here because the failing prepare() skipped the ROLLBACK.
+          await peer.execute('INSERT INTO t(value) VALUES (?)', [42]);
+          final rows = await peer.select('SELECT value FROM t');
+          expect(rows.single['value'], equals(42));
+        });
+
         test('parameterized select handles nulls, ints, doubles, strings',
             () async {
           await peer.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, '

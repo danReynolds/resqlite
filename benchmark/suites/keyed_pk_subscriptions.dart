@@ -37,11 +37,12 @@ const WorkloadMeta keyedPkMeta = WorkloadMeta(
   version: 1,
   title: 'Keyed PK Subscriptions',
   description: '50 reactive streams each watch one PK. 200 random-PK '
-      'writes across a 10K-row table. With keyed invalidation, a library '
-      'fires only when a watched PK is hit (~1 emission expected by '
-      'chance). With table-level invalidation, all 50 streams re-query '
-      'on every write (10K re-queries, most suppressed by hash but '
-      'still costly).',
+      'writes across a 10K-row table. The committed PRNG seed produces '
+      '3 hits on watched PKs, so both miss-path and hit-path are '
+      'exercised each run. With keyed invalidation, a library fires '
+      'only on those hits. With table-level invalidation, every write '
+      'triggers a re-query on all 50 streams (10K re-queries, most '
+      'suppressed by hash but still costly).',
 );
 
 const int _tableRowCount = 10000;
@@ -58,7 +59,14 @@ const int _warmup = 1;
 
 /// Fixed seed so the random PK sequence is stable across iterations
 /// and peers — fair comparison requires identical writes.
-const int _prngSeed = 0x5EED;
+///
+/// This specific seed, combined with the 50-streams × 200-writes
+/// configuration, produces a small number of deliberate hits (~3 in
+/// the committed v1 settings) so both miss-path (most writes) and
+/// hit-path (a few writes whose PK is watched) are exercised by the
+/// same run. Verified via a tiny Dart script — see the commit that
+/// picked this seed.
+const int _prngSeed = 0xBEEF;
 
 Future<String> runKeyedPkSubscriptionsBenchmark() async {
   final markdown = StringBuffer()
@@ -111,9 +119,10 @@ final class _Reading {
   final BenchmarkTiming timing;
 
   /// Median of per-iteration `sum(post-baseline emissions across all 50
-  /// streams)`. Optimal = number of writes that hit a watched PK (~1
-  /// by chance with these counts; exact value depends on the seeded
-  /// sequence). Larger = over-fire.
+  /// streams)`. Optimal = number of writes that hit a watched PK (3
+  /// with the committed seed + v1 counts; see [_prngSeed]). Larger =
+  /// over-fire. Smaller = hash suppression elided emissions for hits
+  /// whose row value did not materially change.
   final int medianTotalEmissions;
 
   /// Median of per-iteration count of writes whose PK matched one of the

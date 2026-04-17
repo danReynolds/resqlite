@@ -207,8 +207,13 @@ final class Sqlite3Peer implements BenchmarkPeer {
       String sql, List<List<Object?>> paramSets) async {
     final db = _requireDb;
     db.execute('BEGIN');
-    final stmt = db.prepare(sql);
+    // Prepare is INSIDE the rollback-catch block — if the SQL is
+    // malformed, prepare() throws while BEGIN is still open. Without
+    // this guard, the transaction leaks and every subsequent op on
+    // this peer sees "cannot start a transaction within a transaction".
+    sqlite3.PreparedStatement? stmt;
     try {
+      stmt = db.prepare(sql);
       for (final params in paramSets) {
         stmt.execute(params);
       }
@@ -217,7 +222,7 @@ final class Sqlite3Peer implements BenchmarkPeer {
       db.execute('ROLLBACK');
       rethrow;
     } finally {
-      stmt.close();
+      stmt?.close();
     }
   }
 
