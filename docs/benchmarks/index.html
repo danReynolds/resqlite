@@ -182,7 +182,7 @@ Chart.register({
       }
       if (entries.length < 2) continue;
       entries.sort((a, b) => a.val - b.val);
-      // Treat sub-microsecond differences as ties.
+      // Treat differences under 0.002 ms (2 microseconds) as ties.
       if (entries[1].val - entries[0].val < 0.002) continue;
       if (entries[0].val > 0 && entries[1].val / entries[0].val < 1.05) continue;
       ctx.save();
@@ -431,9 +431,18 @@ function render() {
 }
 
 // Build a synthetic benchmarks array where each series is a device's resqlite result.
+// Section list is the union of keys across all devices so a partial submission from
+// any device doesn't silently drop a chart category.
 function buildDevicesView(devices) {
-  const base = devices[0].benchmarks;
-  const benchmarks = base.map(sec => {
+  const sectionsByKey = new Map();
+  for (const dev of devices) {
+    for (const sec of dev.benchmarks) {
+      if (!sectionsByKey.has(sec.key)) {
+        sectionsByKey.set(sec.key, { key: sec.key, title: sec.title, subtitle: sec.subtitle });
+      }
+    }
+  }
+  const benchmarks = Array.from(sectionsByKey.values()).map(sec => {
     const entries = [];
     for (const dev of devices) {
       const match = dev.benchmarks.find(s => s.key === sec.key);
@@ -443,7 +452,7 @@ function buildDevicesView(devices) {
       const label = dev.date ? `${dev.name} — ${dev.date}` : dev.name;
       entries.push({ library: label, values: res.values });
     }
-    return { key: sec.key, title: sec.title, subtitle: sec.subtitle, entries };
+    return { ...sec, entries };
   });
   return { benchmarks, subtitle: `Cross-device (resqlite only, ${devices.length} device${devices.length === 1 ? '' : 's'})` };
 }
@@ -454,7 +463,6 @@ function buildDevicesView(devices) {
 function buildRunsView(history, n, peerBenchmarks) {
   const runs = (history?.runs ?? []).slice().sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')).slice(0, n);
   const sections = new Map(); // key -> { key, title, subtitle, entries: [{library, values}] }
-  let withData = 0;
 
   for (const run of runs) {
     const label = runLabel(run);
@@ -640,14 +648,24 @@ function renderEmptyCanvas(canvasId) {
 }
 
 // Collect one dataset per series from sections, using seriesMeta for the active mode.
+// Emits a null placeholder when a series is missing from a section so every dataset
+// stays aligned with the section-indexed x-axis labels.
 function collectSeries(sections, valueIndex) {
   const libs = {};
   for (const sec of sections) {
     for (const entry of sec.entries) {
       const meta = seriesMeta(entry.library, currentMode);
-      const name = meta.short;
-      if (!libs[name]) libs[name] = { data: [], color: meta.color };
-      libs[name].data.push(entry.values[valueIndex] ?? null);
+      if (!libs[meta.short]) libs[meta.short] = { data: [], color: meta.color };
+    }
+  }
+  for (let i = 0; i < sections.length; i++) {
+    const byName = {};
+    for (const entry of sections[i].entries) {
+      const name = seriesMeta(entry.library, currentMode).short;
+      byName[name] = entry.values[valueIndex] ?? null;
+    }
+    for (const name of Object.keys(libs)) {
+      libs[name].data.push(byName[name] ?? null);
     }
   }
   return currentMode === 'peer' ? dedupeLibs(libs) : libs;
@@ -674,8 +692,10 @@ function buildMainIsolate(B, titleMatch, canvasId) {
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
   const libs = collectSeries(sections, 2);
+  // Leave missing values as null (not 0) so Chart.js skips the bar and the
+  // winner/value-label plugins don't treat "missing" as a genuine zero.
   const datasets = Object.entries(libs).map(([name, d]) => ({
-    label: name, data: d.data.map(v => v ?? 0), backgroundColor: d.color,
+    label: name, data: d.data, backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar', data: { labels, datasets },
