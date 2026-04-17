@@ -41,6 +41,7 @@ Experiments that proved their value and were merged into the codebase.
 | [045](045-microtask-invalidation-coalescing.md) | Microtask invalidation coalescing | Batches rapid sequential writes into a single invalidation pass per microtask |  |
 | [064](064-drop-clear-bindings.md) | Drop redundant `sqlite3_clear_bindings` | Provably-redundant call removed; simpler bind path with documented invariants |  |
 | [070](070-zero-row-change-shortcircuit.md) | Zero-row-change short-circuit + persistent dirty buffer | Removes per-write calloc/free pair and short-circuits empty dirty set to a const empty list |  |
+| [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 
 ## Rejected
 
@@ -81,6 +82,11 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [067](067-shrink-initial-allocation.md) | Shrink initial values allocation (256→4) | Caused +40-44% regressions; Dart VM has a fast path for `List.filled` that shrinking bypasses |
 | [068](068-ddl-schema-watchdog.md) | DDL schema_version watchdog | Deferred: initial implementation shipped + reverted after CI flakiness. Root cause is a C-level stmt cache race with SQLite's auto-reprepare — needs its own design pass to invalidate cached stmts on schema version bump |
 | [069](069-sql-fingerprint.md) | SQL fingerprint in stmt cache | Deferred: proper normalization needs a ~300+-line SQL rewriter; `sqlite3_normalized_sql` takes a prepared stmt as input, not raw SQL |
+| [071](071-stmt-cache-mru-scan.md) | MRU-first stmt cache scan + SQL hash filter | Structurally sound but unmeasurable: benchmark suite uses ≤ 10 distinct SQLs so the cache never stresses the scan path |
+| [072](072-xxhash-for-fnv.md) | xxhash64 replacing FNV-1a for result change detection | +75 % regression on stream invalidation: xxhash mergeRound is ~2× more ops than FNV's xor+mul, and our inputs are pre-hashed 64-bit values rather than byte streams (where xxhash wins) |
+| [073](073-schema-cache-fast-path.md) | Single-slot schema-cache fast-path | Within noise: Dart's cached `String.hashCode` already makes map lookups fast enough that a one-slot bypass is below the measurement floor for the current suite |
+| [074](074-bulk-step-many.md) | Bulk `step_many` batched FFI for read path | Same wall as exp 018: memcpy-in-C cost exceeds FFI-crossing savings. Text-heavy workloads regressed +38 %. Dart already reads directly from SQLite's text buffer; adding a C-side copy before Dart decode is strictly worse |
+| [076](076-prebound-stmt-cache-analysis.md) | Pre-bound statement cache | Rejected in pre-implementation analysis: bind is ~0.3 % of re-query wall time (~50 ns per call). No measurable headroom even for a perfect implementation |
 
 ## Conventions
 

@@ -105,6 +105,10 @@ const _trackedPatterns = [
   'Parameterized',
   'concurrent 4x',
   'Invalidation Latency',
+  // Experiment 075 target: reactive streams where every re-query's
+  // result is unchanged. First benchmark that specifically exercises
+  // the worker-side hash short-circuit path.
+  'Unchanged Fanout Throughput',
   'resqlite qps',
 ];
 
