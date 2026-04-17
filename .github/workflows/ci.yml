@@ -23,9 +23,12 @@ jobs:
         run: dart test --timeout 60s
 
   benchmark:
-    name: Benchmarks
+    name: Benchmarks (main)
     runs-on: macos-latest
     needs: test
+    # Trend-tracking artifact upload. Only runs on pushes to main — PRs
+    # use benchmark-regression-gate below, which actually compares deltas.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
@@ -74,3 +77,76 @@ jobs:
             benchmark/results/*.md
             /tmp/h2h.json
           retention-days: 90
+
+  benchmark-regression-gate:
+    name: Benchmark regression gate (PR)
+    runs-on: macos-latest
+    needs: test
+    # Runs main and the PR head on the SAME runner in the same job, then
+    # diffs deltas. Shared-runner noise mostly cancels when both sides are
+    # measured on the same VM, kernel, and thermal state — so the comparison
+    # is meaningful even though absolute numbers aren't reliable enough for
+    # the public dashboard. Fails the job only on regressions flagged as
+    # `stable` by run_all.dart's noise-aware threshold; `moderate`/`noisy`
+    # rows are ignored.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Run benchmarks on main
+        run: |
+          set -e
+          git fetch origin main --depth=1
+          git checkout origin/main
+          dart pub get
+          dart run benchmark/run_all.dart "ci-baseline" --repeat=3
+          BASELINE=$(ls -t benchmark/results/*.md | head -1)
+          cp "$BASELINE" /tmp/ci-baseline.md
+          echo "Baseline saved from $BASELINE"
+
+      - name: Run benchmarks on PR and compare
+        run: |
+          set -e
+          git checkout "$GITHUB_SHA"
+          dart pub get
+          dart run benchmark/run_all.dart "ci-pr" --repeat=3 --compare-to=/tmp/ci-baseline.md
+          PR_RESULT=$(ls -t benchmark/results/*.md | head -1)
+          echo "PR_RESULT=$PR_RESULT" >> "$GITHUB_ENV"
+
+      - name: Check for regressions on stable benchmarks
+        run: |
+          set -e
+          {
+            echo "## Benchmark comparison"
+            echo ""
+            sed -n '/## Comparison vs Previous Run/,/^Comparison threshold uses/p' "$PR_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -qE '\| stable +\| +🔴 Regression' "$PR_RESULT"; then
+            {
+              echo ""
+              echo "### ❌ Stable benchmarks regressed"
+              echo ""
+              grep -E '\| stable +\| +🔴 Regression' "$PR_RESULT"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::One or more stable-category benchmarks regressed vs main"
+            grep -E '\| stable +\| +🔴 Regression' "$PR_RESULT"
+            exit 1
+          fi
+
+          echo "### ✅ No stable-category regressions" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload comparison artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-pr-comparison
+          path: |
+            /tmp/ci-baseline.md
+            ${{ env.PR_RESULT }}
+          retention-days: 30
