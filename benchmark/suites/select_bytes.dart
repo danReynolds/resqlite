@@ -54,10 +54,14 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     await resqliteDb.selectBytes(sql);
   }
   for (var i = 0; i < defaultIterations; i++) {
+    final swMain = Stopwatch();
     final swWall = Stopwatch()..start();
-    final bytes = await resqliteDb.selectBytes(sql);
-    final swMain = Stopwatch()..start();
-    bytes.length; // force reference
+    swMain.start();
+    final future = resqliteDb.selectBytes(sql); // sync dispatch on main
+    swMain.stop();
+    final bytes = await future; // isolate work; main is idle
+    swMain.start();
+    bytes.length; // post-await resume
     swMain.stop();
     swWall.stop();
     tResqlite.record(
@@ -95,9 +99,13 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     ));
   }
   for (var i = 0; i < defaultIterations; i++) {
+    final swMain = Stopwatch();
     final swWall = Stopwatch()..start();
-    final r = await asyncDb.getAll(sql);
-    final swMain = Stopwatch()..start();
+    swMain.start();
+    final future = asyncDb.getAll(sql);
+    swMain.stop();
+    final r = await future;
+    swMain.start();
     utf8.encode(jsonEncode(
       r.map((row) => Map<String, Object?>.from(row)).toList(),
     ));

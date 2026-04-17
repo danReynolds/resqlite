@@ -56,9 +56,13 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     _consumeRows(r);
   }
   for (var i = 0; i < defaultIterations; i++) {
+    final swMain = Stopwatch();
     final swWall = Stopwatch()..start();
-    final r = await resqliteDb.select(sql);
-    final swMain = Stopwatch()..start();
+    swMain.start();
+    final future = resqliteDb.select(sql);
+    swMain.stop();
+    final r = await future;
+    swMain.start();
     _consumeRows(r);
     swMain.stop();
     swWall.stop();
@@ -91,9 +95,13 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
     _consumeSqlite3Rows(r);
   }
   for (var i = 0; i < defaultIterations; i++) {
+    final swMain = Stopwatch();
     final swWall = Stopwatch()..start();
-    final r = await asyncDb.getAll(sql);
-    final swMain = Stopwatch()..start();
+    swMain.start();
+    final future = asyncDb.getAll(sql);
+    swMain.stop();
+    final r = await future;
+    swMain.start();
     _consumeSqlite3Rows(r);
     swMain.stop();
     swWall.stop();
