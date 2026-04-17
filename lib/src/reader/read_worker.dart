@@ -15,7 +15,6 @@ import 'package:ffi/ffi.dart';
 import '../exceptions.dart';
 import '../native/resqlite_bindings.dart';
 import '../query_decoder.dart';
-import '../result_hash.dart';
 import '../row.dart';
 
 // ---------------------------------------------------------------------------
@@ -90,50 +89,37 @@ void readerEntrypoint(List<Object> args) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = ResultSet(raw.values, raw.schema, raw.rowCount);
+          result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
-          final (raw, readTables) = executeQueryWithDeps(
-            dbHandleAddr,
-            readerId,
-            sql,
-            parameters,
+          // Experiment 075: initial stream query also produces a C-domain
+          // hash baseline so selectIfChanged re-queries can short-circuit.
+          final (raw, readTables, initialHash) = executeQueryWithDeps(
+            dbHandleAddr, readerId, sql, parameters,
           );
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = (
-            ResultSet(raw.values, raw.schema, raw.rowCount)
-                as List<Map<String, Object?>>,
-            readTables,
-          );
+          result = (_toRows(raw), readTables, initialHash);
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes = executeQueryBytes(
-            dbHandleAddr,
-            readerId,
-            sql,
-            parameters,
-          );
-          result = bytes;
+          final bytes =
+              executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           sacrifice = bytes.length > sacrificeByteThreshold;
+          result = bytes;
 
         case SelectIfChangedRequest(
           :final sql,
           :final parameters,
           :final lastResultHash,
         ):
-          final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          final newHash = hashRawResult(raw);
-          if (newHash == lastResultHash) {
-            result = (newHash, null);
-            sacrifice = false;
-          } else {
-            sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-            result = (
-              newHash,
-              ResultSet(raw.values, raw.schema, raw.rowCount)
-                  as List<Map<String, Object?>>,
-            );
-          }
+          // Experiment 075: two-pass selectIfChanged. Pass 1 hashes in C;
+          // on match we return a null-rows sentinel without any Dart
+          // decode. Pass 2 runs only on mismatch.
+          final (newHash, raw) = executeQueryIfChanged(
+            dbHandleAddr, readerId, sql, parameters, lastResultHash,
+          );
+          sacrifice =
+              raw != null && raw.estimatedBytes > sacrificeByteThreshold;
+          result = (raw == null ? null : _toRows(raw), newHash);
       }
 
       if (sacrifice) {
@@ -184,18 +170,64 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
 // Query execution
 // ---------------------------------------------------------------------------
 
+/// Wrap a decoded result in a lazy `ResultSet` view and up-cast to the
+/// `List<Map<String, Object?>>` shape the pool / stream engine consumes.
+/// The cast is a type-system formality — `ResultSet implements List<Row>`
+/// and `Row implements Map<String, Object?>`, so it's always safe.
+List<Map<String, Object?>> _toRows(RawQueryResult raw) =>
+    ResultSet(raw.values, raw.schema, raw.rowCount)
+        as List<Map<String, Object?>>;
+
+/// Acquire the stmt on the dedicated reader, run `body`, and release
+/// native params + SQL buffer. All `executeQuery*` helpers below share
+/// this setup/cleanup — the only piece that differs between them is
+/// what they do with the bound stmt.
+T _withAcquiredStmt<T>(
+  int handleAddr,
+  int readerId,
+  String sql,
+  List<Object?> parameters,
+  T Function(ffi.Pointer<ffi.Void> dbHandle, ffi.Pointer<ffi.Void> stmt) body,
+) {
+  final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
+  final sqlNative = sql.toNativeUtf8();
+  final paramsNative = allocateParams(parameters);
+  try {
+    final stmt = _resqliteStmtAcquireOn(
+      dbHandle,
+      readerId,
+      sqlNative.cast(),
+      paramsNative,
+      parameters.length,
+    );
+    if (stmt == ffi.nullptr) {
+      throw ResqliteQueryException(
+        resqliteErrmsg(dbHandle).toDartString(),
+        sql: sql,
+        parameters: parameters,
+      );
+    }
+    return body(dbHandle, stmt);
+  } finally {
+    freeParams(paramsNative, parameters);
+    calloc.free(sqlNative);
+  }
+}
+
 /// Execute a SELECT query on a dedicated reader (no pool mutex).
 RawQueryResult executeQuery(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
-) {
-  return _executeQueryImpl(handleAddr, readerId, sql, parameters).$1;
-}
-
-/// Hash a raw query result using the shared FNV-1a implementation.
-int hashRawResult(RawQueryResult raw) => hashValues(raw.rowCount, raw.values);
+) =>
+    _withAcquiredStmt(
+      handleAddr,
+      readerId,
+      sql,
+      parameters,
+      (_, stmt) => decodeQuery(stmt, sql),
+    );
 
 /// Execute a query returning JSON-encoded bytes on a dedicated reader.
 Uint8List executeQueryBytes(
@@ -210,63 +242,45 @@ Uint8List executeQueryBytes(
   return Uint8List.fromList(result.ptr.asTypedList(result.length));
 }
 
-/// Execute a query on a dedicated reader and capture read dependencies.
-(RawQueryResult, List<String>) executeQueryWithDeps(
+/// Execute a stream's initial query.
+///
+/// Returns the rows, the authorizer-captured read tables (for invalidation
+/// tracking), and the C-computed baseline hash (experiment 075). The hash
+/// is produced by a second `sqlite3_step` pass through the same read-only
+/// query via `resqliteQueryHash` — once per stream subscribe, amortized
+/// across every subsequent re-query.
+(RawQueryResult, List<String>, int) executeQueryWithDeps(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
-) {
-  final (raw, tables) = _executeQueryImpl(
-    handleAddr,
-    readerId,
-    sql,
-    parameters,
-    captureReadTables: true,
-  );
-  return (raw, tables!);
-}
+) =>
+    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
+      final raw = decodeQuery(stmt, sql);
+      final hash = resqliteQueryHash(stmt);
+      final readTables = getReadTables(dbHandle, readerId);
+      return (raw, readTables, hash);
+    });
 
-/// Shared implementation for [executeQuery] and [executeQueryWithDeps].
-(RawQueryResult, List<String>?) _executeQueryImpl(
+/// Two-pass selectIfChanged (experiment 075).
+///
+/// Pass 1: `resqliteQueryHash` steps + hashes the bound stmt in C. If
+/// the hash matches the stream's last-emitted value, return `(hash,
+/// null)` — the subscriber is up to date, no Dart decode needed.
+///
+/// Pass 2 (on mismatch): re-step the same stmt through `decodeQuery`.
+/// `resqliteQueryHash` resets the stmt on exit, and bindings survive
+/// reset, so no re-acquire is required. The new-hash we already have
+/// from pass 1 is reused as the new baseline.
+(int, RawQueryResult?) executeQueryIfChanged(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters, {
-  bool captureReadTables = false,
-}) {
-  final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
-  final sqlNative = sql.toNativeUtf8();
-  final paramsNative = allocateParams(parameters);
-  ffi.Pointer<ffi.Void> stmt;
-  try {
-    stmt = _resqliteStmtAcquireOn(
-      dbHandle,
-      readerId,
-      sqlNative.cast(),
-      paramsNative,
-      parameters.length,
-    );
-    if (stmt == ffi.nullptr) {
-      throw ResqliteQueryException(
-        resqliteErrmsg(dbHandle).toDartString(),
-        sql: sql,
-        parameters: parameters,
-      );
-    }
-  } finally {
-    calloc.free(sqlNative);
-  }
-
-  try {
-    final raw = decodeQuery(stmt, sql);
-
-    final readTables = captureReadTables
-        ? getReadTables(dbHandle, readerId)
-        : null;
-
-    return (raw, readTables);
-  } finally {
-    freeParams(paramsNative, parameters);
-  }
-}
+  List<Object?> parameters,
+  int lastResultHash,
+) =>
+    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+      final newHash = resqliteQueryHash(stmt);
+      if (newHash == lastResultHash) return (newHash, null);
+      return (newHash, decodeQuery(stmt, sql));
+    });

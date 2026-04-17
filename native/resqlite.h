@@ -194,4 +194,16 @@ int resqlite_step_row(
     resqlite_cell* cells
 );
 
+// Step-to-completion + hash all cells. Resets the statement at both
+// ends, so the caller can invoke this on a freshly-bound stmt OR on one
+// that was just drained by decodeQuery — either way works.
+//
+// Used for:
+//   - selectIfChanged's fast-path pre-check (hash-only, compare to
+//     baseline, bail without Dart decode if matched).
+//   - the initial stream query's baseline hash (called after
+//     decodeQuery has already produced the rows for the subscriber;
+//     SQLite replays the read-only query to compute the hash).
+long long resqlite_query_hash(sqlite3_stmt* stmt);
+
 #endif // RESQLITE_H

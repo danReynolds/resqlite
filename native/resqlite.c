@@ -1464,6 +1464,114 @@ __attribute__((hot)) int resqlite_step_row(
     return SQLITE_ROW;
 }
 
+// ---------------------------------------------------------------------------
+// Stream-hash helpers (experiment 075, was 053 on worktree)
+//
+// Hashing raw cell bytes in C using FNV-1a (63-bit masked) lets reactive
+// streams short-circuit the "unchanged re-query" case without paying any
+// Dart-side decode or allocation cost. Dart stores the hash as a plain
+// int; on re-query, we hash-only, compare, and bail if matched.
+//
+// The hash lives entirely in C. Dart never touches a byte of the
+// accumulator — it only gets the final int64 back through the return
+// value. That's the contract.
+// ---------------------------------------------------------------------------
+
+#define RESQLITE_FNV_OFFSET_BASIS 0x4bf29ce484222325ULL  // 0xcbf29ce484222325 & 0x7FFF...
+#define RESQLITE_FNV_MASK         0x7FFFFFFFFFFFFFFFULL
+#define RESQLITE_FNV_PRIME        0x100000001B3ULL
+
+static inline uint64_t fnv_combine_u64(uint64_t h, uint64_t v) {
+    h ^= v;
+    h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
+    return h;
+}
+
+// Fold a byte buffer into the running hash.
+static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
+    const unsigned char* b = (const unsigned char*)p;
+    for (int i = 0; i < len; i++) {
+        h ^= (uint64_t)b[i];
+        h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
+    }
+    return h;
+}
+
+// Step-to-completion + hash every cell. Does NOT populate a Dart-visible
+// cell buffer — hashing is the entire job. Resets the statement at both
+// ends so the caller can invoke this whether the stmt was just bound
+// (initial step) or had already been stepped through by decodeQuery
+// (hashing after a decode).
+//
+// Returns the final hash. `row_count` is folded in LAST; empty result
+// hashes to 0 by convention. On step error, returns a sentinel that
+// cannot collide with any valid hash so the caller falls through to the
+// decode path which will surface the real error.
+long long resqlite_query_hash(sqlite3_stmt* stmt) {
+    // Start from a known state so callers don't have to coordinate:
+    // - After stmt_acquire_on: reset is a no-op.
+    // - After decodeQuery drained the stmt to SQLITE_DONE: real reset.
+    // - After a prior call to this function (which also resets at end):
+    //   no-op. Safe either way.
+    sqlite3_reset(stmt);
+
+    uint64_t h = RESQLITE_FNV_OFFSET_BASIS;
+    int col_count = sqlite3_column_count(stmt);
+    int row_count = 0;
+    int rc;
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        row_count++;
+        for (int i = 0; i < col_count; i++) {
+            int type = sqlite3_column_type(stmt, i);
+            h = fnv_combine_u64(h, (uint64_t)type);
+            switch (type) {
+                case SQLITE_INTEGER:
+                    h = fnv_combine_u64(h, (uint64_t)sqlite3_column_int64(stmt, i));
+                    break;
+                case SQLITE_FLOAT: {
+                    double d = sqlite3_column_double(stmt, i);
+                    uint64_t bits; memcpy(&bits, &d, 8);
+                    h = fnv_combine_u64(h, bits);
+                    break;
+                }
+                case SQLITE_TEXT: {
+                    const unsigned char* p = sqlite3_column_text(stmt, i);
+                    int len = sqlite3_column_bytes(stmt, i);
+                    h = fnv_combine_u64(h, (uint64_t)len);
+                    h = fnv_combine_bytes(h, p, len);
+                    break;
+                }
+                case SQLITE_BLOB: {
+                    // sqlite3_column_blob returns const void*. Pass it
+                    // through as-is — fnv_combine_bytes reinterprets
+                    // internally; avoiding the const-qualified pointer
+                    // cast keeps this clean under strict compiler flags.
+                    const void* p = sqlite3_column_blob(stmt, i);
+                    int len = sqlite3_column_bytes(stmt, i);
+                    h = fnv_combine_u64(h, (uint64_t)len);
+                    h = fnv_combine_bytes(h, p, len);
+                    break;
+                }
+            }
+        }
+    }
+
+    sqlite3_reset(stmt);
+
+    if (rc != SQLITE_DONE) {
+        // Error sentinel. Chosen negative so it lives outside the 63-bit
+        // non-negative domain of real hashes — guaranteed not to collide
+        // with any `lastResultHash` a caller might store, which would
+        // otherwise (vanishingly-rarely) take the "unchanged" fast-path
+        // and swallow the error silently.
+        return -1;
+    }
+    if (row_count == 0) return 0;
+    h = fnv_combine_u64(h, (uint64_t)row_count);
+    return (long long)h;
+}
+
 void resqlite_free(void* ptr) {
     free(ptr);
 }
