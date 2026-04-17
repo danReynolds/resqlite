@@ -105,6 +105,7 @@ Use these exact headings so the experiments page can extract content automatical
 **Date:** 2026-04-14
 **Status:** Accepted / Rejected
 **Commit:** [`abc1234`](https://github.com/danReynolds/resqlite/commit/abc1234)
+**Archive:** [`archive/exp-NNN`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-NNN)
 
 ## Problem
 
@@ -126,5 +127,18 @@ Benchmark measurements. Use markdown tables for comparisons.
 
 Why accepted or rejected. Trade-offs considered.
 ```
+
+Header fields:
+
+- **Commit** — required for Accepted experiments; points at the merged
+  implementation commit on main.
+- **Archive** — added for Rejected experiments *whose implementation is
+  worth preserving for future re-evaluation* (the common case when the
+  rejection reason is "below noise floor, not worth the complexity").
+  Points at a git tag (`archive/exp-NNN`) that pins the last commit of
+  the experiment branch before it was deleted. See the
+  `resqlite-experiment` skill for the tagging workflow. Skip this field
+  for rejections of the form "implementation was broken" — there's
+  nothing worth preserving.
 
 Older experiments use varied headings (`What We Built`, `Changes`, `Benchmark`, `Why Accepted`, etc.) — those still work, but new experiments should follow this template.

@@ -89,6 +89,42 @@ If you edited `generate_history.dart` itself, also test that
 `dart run benchmark/generate_blog.dart` still runs clean — it's triggered
 by the same workflow.
 
+## Rejected experiments — preserve the implementation
+
+A rejected experiment's writeup lives on; its code usually doesn't. If the
+branch is deleted without any other ref pointing at it, git garbage-collects
+the commit and the implementation is gone. That's expensive when (a) the
+benchmark floor later shifts, (b) the codebase evolves in a way that changes
+the calculus, or (c) a seemingly-rejected idea turns out to be the right
+starting point for a follow-up.
+
+**Tag rejected experiments before cleaning up the branch.** Tags are
+~100 bytes of ref metadata, live forever, and keep the commit reachable:
+
+```
+git tag archive/exp-NNN <last-commit-on-branch>
+git push origin archive/exp-NNN
+git branch -D <experiment-branch>
+```
+
+Then add an **Archive** line to the experiment writeup so readers can jump
+to the code:
+
+```markdown
+**Archive:** [`archive/exp-NNN`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-NNN)
+```
+
+The `generate_history.dart` parser reads this field and the experiments
+page renders an "Archived code" link. That means future re-evaluations
+become trivial: `git cherry-pick archive/exp-NNN` gives you the original
+implementation to rebase onto current main.
+
+Skip this only when the rejection reason is "the implementation itself
+was broken" (correctness bugs, crashes) — in which case the writeup is the
+full artifact and preserving the broken code adds nothing. For any
+rejection of the form "measured, below noise floor, not worth the
+complexity," tag it.
+
 ## Post-merge
 
 After the experiment branch merges to main, the Update Docs Data workflow

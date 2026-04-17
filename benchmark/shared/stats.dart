@@ -1,4 +1,132 @@
-import 'dart:math';
+import 'dart:math' as math;
+
+/// Aggregate statistics across repeated runs of a metric.
+///
+/// Moved from `run_all.dart` to support new suites that need noise-aware
+/// thresholds (memory, disjoint-column streaming, point-query stability).
+/// Behavior matches the prior private `_AggregateStats` exactly.
+final class AggregateStats {
+  static const double minimumComparisonThresholdPct = 10.0;
+  static const double minimumComparisonThresholdMs = 0.02;
+
+  AggregateStats(List<double> values)
+      : runs = List<double>.from(values)..sort();
+
+  factory AggregateStats.from(List<double> samples) =>
+      AggregateStats(samples);
+
+  final List<double> runs;
+
+  double get median => medianOfSorted(runs);
+  double get min => runs.first;
+  double get max => runs.last;
+  double get rangePct => median == 0 ? 0 : ((max - min) / median) * 100;
+
+  double get madPct {
+    if (runs.length == 1 || median == 0) return 0;
+    final deviations = [
+      for (final value in runs) (value - median).abs(),
+    ]..sort();
+    return (medianOfSorted(deviations) / median) * 100;
+  }
+
+  String get stability {
+    if (runs.length == 1) return 'single run';
+    if (madPct <= 3) return 'stable';
+    if (madPct <= 8) return 'moderate';
+    return 'noisy';
+  }
+
+  double get comparisonThresholdPct =>
+      math.max(minimumComparisonThresholdPct, madPct * 3.0);
+}
+
+/// Median of a pre-sorted list. Returns 0 for an empty list.
+double medianOfSorted(List<double> sortedValues) {
+  if (sortedValues.isEmpty) return 0;
+  final mid = sortedValues.length ~/ 2;
+  if (sortedValues.length.isOdd) return sortedValues[mid];
+  return (sortedValues[mid - 1] + sortedValues[mid]) / 2;
+}
+
+/// Percentile bootstrap CI on the median.
+///
+/// Resamples [samples] with replacement [resamples] times, computes the
+/// median of each resample, and returns the (low, high) percentiles
+/// corresponding to [confidence].
+///
+/// Deterministic when [seed] is provided — useful for tests and for
+/// stable CI values across runs of the same data.
+({double low, double high}) bootstrapMedianCI(
+  List<double> samples, {
+  double confidence = 0.95,
+  int resamples = 2000,
+  int? seed,
+}) {
+  if (samples.isEmpty) return (low: 0, high: 0);
+  if (samples.length == 1) return (low: samples.first, high: samples.first);
+
+  final rng = seed != null ? math.Random(seed) : math.Random();
+  final n = samples.length;
+  final medians = List<double>.filled(resamples, 0);
+  final buffer = List<double>.filled(n, 0);
+
+  for (var r = 0; r < resamples; r++) {
+    for (var i = 0; i < n; i++) {
+      buffer[i] = samples[rng.nextInt(n)];
+    }
+    buffer.sort();
+    medians[r] = medianOfSorted(buffer);
+  }
+
+  medians.sort();
+  final tail = (1 - confidence) / 2;
+  // Percentile indices for a 0-indexed sorted array: for (1-tail)=0.975
+  // and n=2000, we want the value at rank 1950 (1-indexed), i.e. index
+  // 1949 (0-indexed). Using `ceil - 1` on the high end makes the
+  // resulting interval width match the stated confidence exactly when
+  // `tail * resamples` is integer, and stays within 1/resamples
+  // otherwise. Copilot flagged the prior formulation as off-by-one.
+  final lowIdx = (tail * resamples).floor().clamp(0, resamples - 1);
+  final highIdx =
+      (((1 - tail) * resamples).ceil() - 1).clamp(0, resamples - 1);
+  return (low: medians[lowIdx], high: medians[highIdx]);
+}
+
+/// Minimum detectable effect (%) using CI half-width relative to the median.
+///
+/// Falls back to `rangePct` when n < 5 (bootstrap CIs are unreliable on
+/// very small samples).
+///
+/// Pass [seed] to get stable MDE values across repeated invocations on
+/// the same data — matches the determinism contract of [bootstrapMedianCI].
+/// Callers that print "deterministic, seed=..." in their output headers
+/// must thread their seed through here, otherwise the printed MDE will
+/// drift across re-runs even with identical samples.
+double minimumDetectableEffectPct(
+  List<double> samples, {
+  double confidence = 0.95,
+  int resamples = 2000,
+  int? seed,
+}) {
+  if (samples.isEmpty) return 0;
+  final stats = AggregateStats(samples);
+  if (samples.length < 5) return stats.rangePct;
+  final median = stats.median;
+  if (median == 0) return 0;
+  final ci = bootstrapMedianCI(samples,
+      confidence: confidence, resamples: resamples, seed: seed);
+  final halfWidth = (ci.high - ci.low) / 2;
+  return (halfWidth / median) * 100;
+}
+
+/// MAD-based detectable effect (%) — matches the existing comparison
+/// threshold (`3 × MAD%`). Useful to print alongside CI-based MDE so the
+/// value lines up with the acceptance heuristic already in `run_all.dart`.
+double madBasedDetectableEffectPct(List<double> samples) {
+  if (samples.isEmpty) return 0;
+  return AggregateStats(samples).madPct * 3.0;
+}
 
 final class BenchmarkTiming {
   BenchmarkTiming(this.label);
@@ -44,7 +172,7 @@ void printComparisonTable(String title, List<BenchmarkTiming> timings) {
   print('-' * title.length);
   print('');
 
-  final labelWidth = timings.map((t) => t.label.length).reduce(max) + 2;
+  final labelWidth = timings.map((t) => t.label.length).reduce(math.max) + 2;
 
   print(
     '${'Library'.padRight(labelWidth)}'

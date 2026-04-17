@@ -35,12 +35,28 @@ Future<void> main() async {
       continue;
     }
 
+    // Memory metrics come from a separate section of the markdown and
+    // are optional (older results have no `## Memory` block). Captured
+    // under a distinct namespace so chart code can treat them separately.
+    final memory = extractMemoryMedians(content);
+    final memoryJson = {
+      for (final entry in memory.entries)
+        entry.key: {
+          'rssDeltaMedMB': entry.value.rssDeltaMedMB,
+          'rssDeltaP90MB': entry.value.rssDeltaP90MB,
+          'ciLowMB': entry.value.ciLowMB,
+          'ciHighMB': entry.value.ciHighMB,
+          'mdeMB': entry.value.mdeMB,
+        },
+    };
+
     runs.add({
       'id': meta.label,
       'date': meta.date,
       'timestamp': meta.timestamp,
       'label': meta.label,
       'metrics': metrics,
+      if (memoryJson.isNotEmpty) 'memoryMetrics': memoryJson,
     });
   }
 
@@ -150,6 +166,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     // Read the individual experiment file for date, commit, and content.
     String? date;
     String? commit;
+    String? archive;
     String? problem;
     String? hypothesis;
     final expFile = File('${experimentsDir.path}/$filename');
@@ -159,6 +176,13 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       date = dateMatch?.group(1);
       final commitMatch = RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
       commit = commitMatch?.group(1);
+      // Archive tag — added for rejected experiments whose code was
+      // preserved via `git tag archive/exp-NNN` before branch deletion.
+      // See the resqlite-experiment skill doc for the workflow.
+      final archiveMatch = RegExp(
+        r'\*\*Archive:\*\*\s*\[`?(archive/[^`\]]+)`?\]',
+      ).firstMatch(content);
+      archive = archiveMatch?.group(1);
       problem = _extractSection(content, 'Problem') ??
           _extractSection(content, 'Background') ??
           _extractSection(content, 'Analysis');
@@ -193,6 +217,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         'status': currentStatus,
         'summary': impact,
         'commit': commit,
+        if (archive != null) 'archive': archive,
         'problem': problem,
         'hypothesis': hypothesis,
         'approach': built,
