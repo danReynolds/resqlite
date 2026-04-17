@@ -132,10 +132,16 @@ final class StreamEngine {
   ///
   /// With coalescing, at most ONE re-query is in flight per stream entry
   /// at a time. If another invalidation arrives while one is running, we
-  /// just flag `needsRecheckAfter` on the entry. When the in-flight
-  /// re-query completes, it re-reads the current state (which has
-  /// absorbed every intermediate write) — so no update is lost. If the
-  /// flag is set on completion, exactly one follow-up is dispatched.
+  /// flag `needsRecheckAfter = true` on the entry; otherwise the flag
+  /// stays false and the in-flight re-query emits normally on completion
+  /// with no follow-up work.
+  ///
+  /// When the flag is set — meaning a write affecting this entry landed
+  /// during the in-flight re-query — completion skips the emit (the
+  /// in-flight's DB snapshot predates the write, so its data may be
+  /// stale) and dispatches exactly one follow-up that re-reads the
+  /// current state (which has absorbed every intermediate write) and
+  /// emits. No update is lost and no unnecessary pool trips happen.
   ///
   /// ## Invariant (must be upheld by every caller)
   ///
