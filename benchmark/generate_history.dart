@@ -128,6 +128,11 @@ const _trackedPatterns = [
   'resqlite qps',
   // Scenario-level trajectories (Track A Phase 1+).
   'Keyed PK Subscriptions',
+  // Chat Sim emits 4 op-type subsections; pattern matches "Chat Sim"
+  // generically — the generator picks up the first match, which will
+  // be the 'Insert message' op. For the full per-op picture, readers
+  // consult the dashboard scenarios tab.
+  'Chat Sim',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.

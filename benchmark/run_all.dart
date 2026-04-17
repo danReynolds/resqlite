@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'shared/parse_results.dart';
 import 'shared/stats.dart' show AggregateStats;
+import 'suites/chat_sim.dart';
 import 'suites/concurrent_reads.dart';
 import 'suites/disjoint_columns.dart';
 import 'suites/keyed_pk_subscriptions.dart';
@@ -235,40 +236,43 @@ void _printHardwareSummary(
 Future<String> _runSuiteOnce() async {
   final markdown = StringBuffer();
 
-  print('[1/12] Select → Maps...');
+  print('[1/13] Select → Maps...');
   markdown.write(await runSelectMapsBenchmark());
 
-  print('[2/12] Select → Bytes...');
+  print('[2/13] Select → Bytes...');
   markdown.write(await runSelectBytesBenchmark());
 
-  print('[3/12] Schema Shapes...');
+  print('[3/13] Schema Shapes...');
   markdown.write(await runSchemaShapesBenchmark());
 
-  print('[4/12] Scaling...');
+  print('[4/13] Scaling...');
   markdown.write(await runScalingBenchmark());
 
-  print('[5/12] Concurrent Reads...');
+  print('[5/13] Concurrent Reads...');
   markdown.write(await runConcurrentReadsBenchmark());
 
-  print('[6/12] Point Query...');
+  print('[6/13] Point Query...');
   markdown.write(await runPointQueryBenchmark());
 
-  print('[7/12] Parameterized Queries...');
+  print('[7/13] Parameterized Queries...');
   markdown.write(await runParameterizedBenchmark());
 
-  print('[8/12] Writes...');
+  print('[8/13] Writes...');
   markdown.write(await runWritesBenchmark());
 
-  print('[9/12] Streaming...');
+  print('[9/13] Streaming...');
   markdown.write(await runStreamingBenchmark());
 
-  print('[10/12] Streaming (Column Granularity)...');
+  print('[10/13] Streaming (Column Granularity)...');
   markdown.write(await runDisjointColumnsBenchmark());
 
-  print('[11/12] Keyed PK Subscriptions (A11)...');
+  print('[11/13] Keyed PK Subscriptions (A11)...');
   markdown.write(await runKeyedPkSubscriptionsBenchmark());
 
-  print('[12/12] Memory...');
+  print('[12/13] Chat Sim (A5)...');
+  markdown.write(await runChatSimBenchmark());
+
+  print('[13/13] Memory...');
   markdown.write(await runMemoryBenchmark());
 
   return markdown.toString();
