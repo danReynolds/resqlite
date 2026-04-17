@@ -93,7 +93,7 @@ typedef struct {
     sqlite3_stmt* stmt;
     // Cached sqlite3_bind_parameter_count(stmt) — a property of the
     // prepared SQL that never changes across re-executions (experiment
-    // 079). Stored here so bind_params can skip the FFI-internal call
+    // 077). Stored here so bind_params can skip the FFI-internal call
     // on every query.
     int param_count;
     char* read_tables[RESQLITE_MAX_READ_TABLES];
@@ -1544,10 +1544,13 @@ static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
 // rows to report the final size. `out_row_count` is written in all
 // success paths so the caller can update its cached value.
 //
-// Returns the final hash (or -1 error sentinel). `row_count` is folded
-// LAST on the normal path; the fast-reject path returns the
-// FNV_OFFSET_BASIS unchanged so a caller-side "hash != last_hash" check
-// still fires.
+// Returns the final hash (or -1 error sentinel). `row_count` is always
+// folded LAST into the accumulator before return. On the fast-reject
+// path the accumulator already holds per-cell fold work for the first
+// `last_row_count` rows (everything seen before skip_hash flipped) —
+// we still fold the fresh `row_count` on top, which by itself
+// differentiates from the previous hash whenever the counts differ.
+// Zero-row results return 0 directly (no row_count fold).
 long long resqlite_query_hash(
     sqlite3_stmt* stmt, int last_row_count, int* out_row_count
 ) {
@@ -1619,14 +1622,16 @@ long long resqlite_query_hash(
         // and swallow the error silently.
         return -1;
     }
-    // If row_count differs from last_row_count, the final hash cannot
-    // match by construction — return the unfolded accumulator directly.
-    // The caller's `hash != last_hash` check will fire, decode path
-    // runs, and the new (hash, row_count) will be cached for next time.
-    // For the under-count case (rows deleted) we detect at loop end
-    // here — we never entered skip_hash mode, so h contains fold work
-    // for all the rows we did see, which may or may not happen to
-    // match last_hash; folding row_count LAST still differentiates.
+    // Fold row_count into the accumulator before returning. This keeps
+    // results with identical per-row content but different row counts
+    // from colliding, covering both the fast-reject path (more rows
+    // than last time — `h` contains fold work for just the first
+    // `last_row_count` rows) and the under-count case (fewer rows
+    // than last time — `h` contains fold work for every row we saw).
+    // In both cases the differing `row_count` fold at the tail pushes
+    // the hash away from the previous emission's value, so the
+    // caller's `hash != last_hash` check fires and the decode path
+    // runs. Zero-row result is the special case: returns 0 directly.
     if (row_count == 0) return 0;
     h = fnv_combine_u64(h, (uint64_t)row_count);
     return (long long)h;

@@ -103,7 +103,7 @@ void readerEntrypoint(List<Object> args) {
 
         case SelectWithDepsRequest(:final sql, :final parameters):
           // Initial stream query produces hash + row-count baselines
-          // (exp 075 + 078) so future selectIfChanged calls can
+          // (exp 075 + 077) so future selectIfChanged calls can
           // short-circuit on unchanged state.
           final (raw, readTables, initialHash, initialRowCount) =
               executeQueryWithDeps(
@@ -284,7 +284,7 @@ Uint8List executeQueryBytes(
       return (raw, readTables, hash, rowCount);
     });
 
-/// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 078).
+/// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
 ///
 /// Pass 1: `resqliteQueryHash` steps + hashes the bound stmt in C. If
 /// the fresh hash matches the stream's last-emitted value AND the row

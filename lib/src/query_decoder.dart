@@ -61,12 +61,12 @@ external int resqliteStepRow(
     ffi.Int64 Function(
       ffi.Pointer<ffi.Void>,
       ffi.Int,
-      ffi.Pointer<ffi.Int32>,
+      ffi.Pointer<ffi.Int>,
     )>(symbol: 'resqlite_query_hash', isLeaf: true)
 external int resqliteQueryHash(
   ffi.Pointer<ffi.Void> stmt,
   int lastRowCount,
-  ffi.Pointer<ffi.Int32> outRowCount,
+  ffi.Pointer<ffi.Int> outRowCount,
 );
 
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
@@ -119,7 +119,7 @@ ffi.Pointer<ffi.Uint8> ensureCellBuffer(int colCount) {
 /// Per-worker scratch slot for the `outRowCount` out-parameter of
 /// [resqliteQueryHash]. Allocated once per isolate, reused across every
 /// stream re-query. Stays alive until the isolate dies.
-final ffi.Pointer<ffi.Int32> rowCountSlot = calloc<ffi.Int32>(1);
+final ffi.Pointer<ffi.Int> rowCountSlot = calloc<ffi.Int>(1);
 
 /// Invoke [resqliteQueryHash] and return `(hash, rowCount)` as a record.
 /// Small wrapper that hides the out-parameter pointer.
