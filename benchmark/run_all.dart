@@ -10,6 +10,7 @@ import 'suites/disjoint_columns.dart';
 import 'suites/feed_paging.dart';
 import 'suites/high_cardinality_fanout.dart';
 import 'suites/keyed_pk_subscriptions.dart';
+import 'suites/large_working_set.dart';
 import 'suites/memory.dart';
 import 'suites/parameterized.dart';
 import 'suites/point_query.dart';
@@ -288,8 +289,11 @@ Future<String> _runSuiteOnce({required bool includeSlow}) async {
   // multiple minutes each. Register here so they append to the
   // standard suite output when enabled.
   if (includeSlow) {
-    print('[slow 1/?] Sync Burst (A7)...');
+    print('[slow 1/2] Sync Burst (A7)...');
     markdown.write(await runSyncBurstBenchmark());
+
+    print('[slow 2/2] Large Working Set (A9)...');
+    markdown.write(await runLargeWorkingSetBenchmark());
   }
 
   return markdown.toString();

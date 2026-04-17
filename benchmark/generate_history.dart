@@ -142,6 +142,9 @@ const _trackedPatterns = [
   // A7 bulk insert (opt-in via --include-slow); pattern matches the
   // bulk-insert subsection specifically.
   'Sync Burst',
+  // A9 (opt-in via --include-slow); pattern matches the warm-cache
+  // subsection (the first reported variant).
+  'Large Working Set',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.
