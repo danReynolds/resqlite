@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/logo.png" alt="" width="220"><br>
+  <img src="docs/logo.png" alt="" width="180"><br>
   resqlite
 </h1>
 
