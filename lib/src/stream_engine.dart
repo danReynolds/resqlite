@@ -74,6 +74,17 @@ final class StreamEngine {
     if (dirtyTables.isEmpty) return;
     _writeGeneration++;
 
+    // Experiment 077: fast-reject when no stream has yet registered any
+    // table dependencies. `_tableToKeys` is populated by
+    // [_updateReadTables], which only fires after a stream's initial
+    // query returns. If it's empty, either (a) there are no streams at
+    // all, or (b) every active stream is still waiting for its initial
+    // query to return — in which case those streams rely on the
+    // `_writeGeneration != generationBefore` race-detection path in
+    // [_createStream], not on the dirty-tables pipeline. Either way,
+    // the accumulate + microtask below would be pure waste.
+    if (_tableToKeys.isEmpty) return;
+
     // Accumulate dirty tables for microtask coalescing.
     // Multiple writes within the same synchronous work batch are combined
     // into a single invalidation pass, reducing redundant re-queries.
@@ -166,16 +177,16 @@ final class StreamEngine {
           return; // cancelled before query finished
         }
 
-        final (initialRows, readTables, initialHash) = result;
+        final (initialRows, readTables, initialHash, initialRowCount) = result;
 
         // Set real read tables so future writes trigger invalidation.
         _updateReadTables(key, readTables);
         entry.lastResult = initialRows;
-        // Hash comes from the worker, computed in C by resqlite_query_hash
-        // (experiment 075). It lives in the same domain as every future
-        // re-query hash, so selectIfChanged can compare directly without
-        // any Dart-side rehash.
+        // Hash (exp 075) and row count (exp 077) both come from the
+        // worker. Together they form the baseline that selectIfChanged
+        // re-queries short-circuit against.
         entry.lastResultHash = initialHash;
+        entry.lastRowCount = initialRowCount;
 
         // Push initial result to all subscribers.
         for (final sub in entry.subscribers) {
@@ -210,16 +221,18 @@ final class StreamEngine {
   Future<void> _reQuery(StreamEntry entry, int generation) async {
     try {
       final pool = await _pool();
-      final (rows, newHash) = await pool.selectIfChanged(
+      final (rows, newHash, newRowCount) = await pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
+        entry.lastRowCount,
       );
       // Discard if a newer re-query was dispatched while we were running.
       if (entry.reQueryGeneration != generation) return;
       if (rows == null) return; // Unchanged — worker-side hash matched.
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
+      entry.lastRowCount = newRowCount;
       entry.lastResult = rows;
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.add(rows);
@@ -341,6 +354,12 @@ final class StreamEntry {
 
   /// Hash of the last emitted result, for change detection.
   int lastResultHash = 0;
+
+  /// Row count of the last emitted result (experiment 077). -1 means
+  /// "no baseline yet" — the initial query hasn't returned. Passed into
+  /// `selectIfChanged` so the worker can short-circuit hashing once it
+  /// knows the fresh row count diverges.
+  int lastRowCount = -1;
 
   /// Per-entry re-query generation. Bumped each time a re-query is dispatched.
   /// When the result arrives, it's discarded if the generation has moved on

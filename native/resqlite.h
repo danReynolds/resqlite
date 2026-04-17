@@ -195,8 +195,18 @@ int resqlite_step_row(
 );
 
 // Step-to-completion + hash all cells. Resets the statement at both
-// ends, so the caller can invoke this on a freshly-bound stmt OR on one
-// that was just drained by decodeQuery — either way works.
+// ends, so the caller can invoke this on a freshly-bound stmt OR on
+// one that was just drained by decodeQuery — either way works.
+//
+// `last_row_count` is the caller's cached row count from the last
+// emission (or -1 on the initial-query path). When set, experiment 077
+// short-circuits: if the fresh step count exceeds `last_row_count` the
+// final hash can't possibly match, so we stop folding cell bytes and
+// just drain the remaining rows to report the new count. `out_row_count`
+// always receives the fresh count on success, so the caller can update
+// its cache.
+//
+// Returns the final hash, or -1 on step error.
 //
 // Used for:
 //   - selectIfChanged's fast-path pre-check (hash-only, compare to
@@ -204,6 +214,7 @@ int resqlite_step_row(
 //   - the initial stream query's baseline hash (called after
 //     decodeQuery has already produced the rows for the subscriber;
 //     SQLite replays the read-only query to compute the hash).
-long long resqlite_query_hash(sqlite3_stmt* stmt);
+long long resqlite_query_hash(
+    sqlite3_stmt* stmt, int last_row_count, int* out_row_count);
 
 #endif // RESQLITE_H

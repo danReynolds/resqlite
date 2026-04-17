@@ -439,6 +439,207 @@ Future<String> runStreamingBenchmark() async {
       markdown.writeln('');
     }
 
+    // -----------------------------------------------------------------
+    // 5. No-Streams Write Throughput — experiment 077 target
+    //
+    // 200 sequential INSERTs while no stream has ever subscribed. The
+    // stream engine's `_tableToKeys` is empty for the whole run, so
+    // every handleDirtyTables call is pure overhead — allocating
+    // `_pendingDirtyTables`, scheduling a microtask, running _flushDirty-
+    // Tables to look up zero affected streams, returning.
+    //
+    // exp 077 adds `if (_tableToKeys.isEmpty) return;` after the write-
+    // generation bump, eliminating the Set allocation + microtask when
+    // nothing could possibly care. Win appears as reduced main-isolate
+    // time on a tight write loop with no streams.
+    // -----------------------------------------------------------------
+    {
+      final tmp = await Directory.systemTemp.createTemp('bench_nostream_');
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        await db.execute(createSql);
+        await db.execute(seedSql, ['seed', 0]);
+
+        const writes = 200;
+        // Warmup.
+        for (var i = 0; i < 20; i++) {
+          await db.execute(seedSql, ['warm_$i', i]);
+        }
+
+        final timing = BenchmarkTiming('resqlite');
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final sw = Stopwatch()..start();
+          for (var i = 0; i < writes; i++) {
+            await db.execute(seedSql, ['nostream_${iter}_$i', i]);
+          }
+          sw.stop();
+          timing.wallUs.add(sw.elapsedMicroseconds);
+          timing.mainUs.add(sw.elapsedMicroseconds);
+        }
+
+        await db.close();
+
+        // sqlite_async comparison (no reactive engine to worry about).
+        final async = sqlite_async.SqliteDatabase(path: '${tmp.path}/a.db');
+        await async.initialize();
+        await async.execute(createSql);
+        await async.execute(seedSql, ['seed', 0]);
+        for (var i = 0; i < 20; i++) {
+          await async.execute(seedSql, ['warm_$i', i]);
+        }
+        final asyncTiming = BenchmarkTiming('sqlite_async');
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final sw = Stopwatch()..start();
+          for (var i = 0; i < writes; i++) {
+            await async.execute(seedSql, ['nostream_${iter}_$i', i]);
+          }
+          sw.stop();
+          asyncTiming.wallUs.add(sw.elapsedMicroseconds);
+          asyncTiming.mainUs.add(sw.elapsedMicroseconds);
+        }
+        await async.close();
+
+        markdown.write(markdownTable(
+          'No-Streams Write Throughput (200 inserts, no active streams)',
+          [timing, asyncTiming],
+        ));
+        markdown.writeln('');
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // 6. Growing-Stream Invalidation — experiment 077 target
+    //
+    // Stream watches `SELECT id, name, value FROM items ORDER BY id`
+    // (all rows, full-result emission). Each iteration INSERTs 100 new
+    // rows in a batch. The stream re-queries after each batch.
+    //
+    // Baseline: `resqlite_query_hash` walks all current rows hashing
+    // every cell byte, then comparison fails (hash changed), decode
+    // pass runs. Work scales with current_row_count × col_count.
+    //
+    // exp 077: row-count short-circuit fires as soon as the stream
+    // passes the previous row count (N + 1). Remaining rows are
+    // counted but not hashed. For a +100-row insert on a 1000-row
+    // stream, ~100 × 4 cells × ~250 ns = 100 μs saved per re-query.
+    // -----------------------------------------------------------------
+    {
+      final tmp = await Directory.systemTemp.createTemp('bench_grow_');
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        await db.execute(createSql);
+        // Seed 500 rows so we start with a non-trivial baseline.
+        await db.executeBatch(seedSql, [
+          for (var i = 0; i < 500; i++) ['seed_$i', i],
+        ]);
+
+        final stream = db.stream(
+          'SELECT id, name, value FROM items ORDER BY id',
+        );
+        Completer<void>? waitNext;
+        final initial = Completer<void>();
+        final sub = stream.listen((_) {
+          if (!initial.isCompleted) {
+            initial.complete();
+          } else {
+            final w = waitNext;
+            if (w != null && !w.isCompleted) w.complete();
+          }
+        });
+        await initial.future.timeout(const Duration(seconds: 5));
+
+        const batch = 100;
+        var counter = 100000;
+
+        // Warmup.
+        for (var w = 0; w < 3; w++) {
+          final next = Completer<void>();
+          waitNext = next;
+          await db.executeBatch(seedSql, [
+            for (var i = 0; i < batch; i++) ['warm_${counter++}', i],
+          ]);
+          await next.future.timeout(const Duration(seconds: 5));
+        }
+
+        final timing = BenchmarkTiming('resqlite');
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final next = Completer<void>();
+          waitNext = next;
+          final sw = Stopwatch()..start();
+          await db.executeBatch(seedSql, [
+            for (var i = 0; i < batch; i++) ['grow_${counter++}', i],
+          ]);
+          await next.future.timeout(const Duration(seconds: 5));
+          sw.stop();
+          timing.wallUs.add(sw.elapsedMicroseconds);
+          timing.mainUs.add(sw.elapsedMicroseconds);
+        }
+
+        await sub.cancel();
+        await db.close();
+
+        markdown.write(markdownTable(
+          'Growing-Stream Invalidation (batch-insert 100 into watched stream)',
+          [timing],
+        ));
+        markdown.writeln('');
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // 7. Stream Subscription Rate — experiment 077 target
+    //
+    // 500 subscribe+cancel cycles in a tight loop. Each subscribe
+    // triggers an initial query → read-tables retrieval via
+    // `getReadTables`. Baseline: allocates + frees a 64-slot Utf8*
+    // buffer per call (a ~512 B calloc/free). exp 077: reuses a
+    // persistent buffer; zero-table short-circuits to `const <String>[]`.
+    //
+    // Win is small per cycle (~100-500 ns) but amplified by the cycle
+    // count. 500 cycles × ~300 ns ≈ 150 μs saved — measurable on a
+    // ~10 ms benchmark.
+    // -----------------------------------------------------------------
+    {
+      final tmp = await Directory.systemTemp.createTemp('bench_subrate_');
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        await db.execute(createSql);
+        await db.execute(seedSql, ['seed', 0]);
+
+        const cycles = 500;
+
+        // Warmup.
+        for (var i = 0; i < 10; i++) {
+          await db.stream('SELECT COUNT(*) as cnt FROM items').first;
+        }
+
+        final timing = BenchmarkTiming('resqlite');
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final sw = Stopwatch()..start();
+          for (var i = 0; i < cycles; i++) {
+            await db.stream('SELECT COUNT(*) as cnt FROM items').first;
+          }
+          sw.stop();
+          timing.wallUs.add(sw.elapsedMicroseconds);
+          timing.mainUs.add(sw.elapsedMicroseconds);
+        }
+
+        await db.close();
+
+        markdown.write(markdownTable(
+          'Stream Subscription Rate (500 subscribe+cancel cycles)',
+          [timing],
+        ));
+        markdown.writeln('');
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
     await resqliteDb.close();
     await asyncDb.close();
   } finally {
