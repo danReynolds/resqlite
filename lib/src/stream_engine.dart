@@ -131,20 +131,20 @@ final class StreamEngine {
   /// dispatches — each one a full pool round-trip.
   ///
   /// With coalescing, at most ONE re-query is in flight per stream entry
-  /// at a time. Each invalidation bumps [StreamEntry.invalidationGen]; if
+  /// at a time. Each invalidation bumps [StreamEntry.writeGen]; if
   /// a re-query is already in flight, we return without dispatching. The
-  /// in-flight re-query captured the pre-bump value of `invalidationGen`
+  /// in-flight re-query captured the pre-bump value of `writeGen`
   /// when it was dispatched, so on completion it can compare:
   ///
-  ///   - `entry.invalidationGen == gen` → no invalidations arrived during
+  ///   - `entry.writeGen == gen` → no invalidations arrived during
   ///      the in-flight run; its result is current, emit normally, done.
-  ///   - `entry.invalidationGen != gen` → at least one invalidation landed
+  ///   - `entry.writeGen != gen` → at least one invalidation landed
   ///      during the in-flight run. Skip the emit (the DB snapshot the
   ///      in-flight read may predate the intervening write) and dispatch
   ///      exactly one follow-up, which captures the now-current gen and
   ///      reads current state (reflecting every intermediate write).
   void _scheduleReQuery(StreamEntry entry) {
-    entry.invalidationGen++;
+    entry.writeGen++;
     if (entry.inFlightReQuery != null) return;
     _startReQuery(entry);
   }
@@ -153,11 +153,11 @@ final class StreamEngine {
   /// Only called via [_scheduleReQuery], which enforces the single-
   /// in-flight invariant.
   void _startReQuery(StreamEntry entry) {
-    final gen = entry.invalidationGen;
+    final gen = entry.writeGen;
     entry.inFlightReQuery = _reQuery(entry, gen).whenComplete(() {
       entry.inFlightReQuery = null;
       // If the stream was invalidated while running, re-query it again.
-      if (_entries[entry.key] != null && entry.invalidationGen != gen) {
+      if (_entries[entry.key] != null && entry.writeGen != gen) {
         _startReQuery(entry);
       }
     });
@@ -255,8 +255,8 @@ final class StreamEngine {
 
   /// Re-query a single stream on the reader pool.
   ///
-  /// [gen] is [StreamEntry.invalidationGen] captured at dispatch time by
-  /// [_startReQuery]. If `entry.invalidationGen` differs at completion,
+  /// [gen] is [StreamEntry.writeGen] captured at dispatch time by
+  /// [_startReQuery]. If `entry.writeGen` differs at completion,
   /// at least one invalidation landed during our flight — the result is
   /// potentially stale (DB snapshot may predate the intervening write),
   /// so we return without emitting. The follow-up dispatched by
@@ -270,7 +270,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (entry.invalidationGen != gen) return;  // stale
+      if (entry.writeGen != gen) return;  // stale
       if (rows == null) return; // Unchanged — worker-side hash matched.
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
@@ -283,7 +283,7 @@ final class StreamEngine {
       // Stale: skip surfacing the error too; the follow-up may succeed
       // (e.g. schema re-created, connection recovered) or may fail in
       // the same way, at which point its own error handling fires.
-      if (entry.invalidationGen != gen) return;
+      if (entry.writeGen != gen) return;
       // Propagate error to subscribers so they can handle it (e.g., table
       // dropped, schema changed). Silent failure would leave the stream
       // stuck with stale data and no signal to the listener.
@@ -407,7 +407,7 @@ final class StreamEntry {
 
   /// Tracks the currently-executing re-query for this entry, if any.
   /// `null` means no re-query is in flight; a non-null value means
-  /// additional invalidations should be absorbed into [invalidationGen]
+  /// additional invalidations should be absorbed into [writeGen]
   /// rather than dispatching fresh pool work. See
   /// [StreamEngine._scheduleReQuery] for the full rationale.
   Future<void>? inFlightReQuery;
@@ -421,7 +421,7 @@ final class StreamEntry {
   /// invalidations arrived during the in-flight run and the result is
   /// skipped in favor of a fresh follow-up (which captures the now-current
   /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
-  int invalidationGen = 0;
+  int writeGen = 0;
 }
 
 /// Compute a stable hash key for a stream query.
