@@ -139,6 +139,9 @@ const _trackedPatterns = [
   // A11b regression guard for the PR #17 coalescing fix. Matches the
   // wall-time column for resqlite at 100 streams × 200 writes.
   'High-Cardinality Stream Fan-out',
+  // A7 bulk insert (opt-in via --include-slow); pattern matches the
+  // bulk-insert subsection specifically.
+  'Sync Burst',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.

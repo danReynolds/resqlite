@@ -18,6 +18,7 @@ import 'suites/schema_shapes.dart';
 import 'suites/select_bytes.dart';
 import 'suites/select_maps.dart';
 import 'suites/streaming.dart';
+import 'suites/sync_burst.dart';
 import 'suites/writes.dart';
 
 Future<void> main(List<String> args) async {
@@ -44,7 +45,7 @@ Future<void> main(List<String> args) async {
     if (options.repeatCount > 1) {
       print('--- Repeat ${i + 1}/${options.repeatCount} ---');
     }
-    final markdown = await _runSuiteOnce();
+    final markdown = await _runSuiteOnce(includeSlow: options.includeSlow);
     runMarkdowns.add(markdown);
     runMetrics.add(extractResqliteMedians(markdown));
   }
@@ -235,7 +236,7 @@ void _printHardwareSummary(
       '| ${_ms("Fan-out (10 streams)")} |');
 }
 
-Future<String> _runSuiteOnce() async {
+Future<String> _runSuiteOnce({required bool includeSlow}) async {
   final markdown = StringBuffer();
 
   print('[1/15] Select → Maps...');
@@ -283,6 +284,14 @@ Future<String> _runSuiteOnce() async {
   print('[15/15] Memory...');
   markdown.write(await runMemoryBenchmark());
 
+  // Slow workloads — opt-in via --include-slow because they take
+  // multiple minutes each. Register here so they append to the
+  // standard suite output when enabled.
+  if (includeSlow) {
+    print('[slow 1/?] Sync Burst (A7)...');
+    markdown.write(await runSyncBurstBenchmark());
+  }
+
   return markdown.toString();
 }
 
@@ -292,12 +301,20 @@ final class _RunAllOptions {
     required this.repeatCount,
     required this.compareToPath,
     required this.hardwareSummary,
+    required this.includeSlow,
   });
 
   final String label;
   final int repeatCount;
   final String? compareToPath;
   final bool hardwareSummary;
+
+  /// When true, opt-in "slow" workloads (A7 sync burst, A9 1GB working
+  /// set) run as part of the suite. Default is false because those
+  /// workloads are minutes-scale individually and dominate the default
+  /// run time. Use `--include-slow` to enable them for a comprehensive
+  /// cross-device pass.
+  final bool includeSlow;
 }
 
 _RunAllOptions _parseOptions(List<String> args) {
@@ -305,6 +322,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   var repeatCount = 1;
   String? compareToPath;
   var hardwareSummary = false;
+  var includeSlow = false;
 
   for (final arg in args) {
     if (arg.startsWith('--repeat=')) {
@@ -313,6 +331,8 @@ _RunAllOptions _parseOptions(List<String> args) {
       compareToPath = arg.substring('--compare-to='.length);
     } else if (arg == '--hardware-summary') {
       hardwareSummary = true;
+    } else if (arg == '--include-slow') {
+      includeSlow = true;
     } else if (arg == '--help' || arg == '-h') {
       _printUsageAndExit();
     } else if (!arg.startsWith('--')) {
@@ -331,15 +351,19 @@ _RunAllOptions _parseOptions(List<String> args) {
     repeatCount: repeatCount,
     compareToPath: compareToPath,
     hardwareSummary: hardwareSummary,
+    includeSlow: includeSlow,
   );
 }
 
 void _printUsageAndExit() {
-  print('Usage: dart run benchmark/run_all.dart [label] [--repeat=N] [--compare-to=PATH] [--hardware-summary]');
+  print('Usage: dart run benchmark/run_all.dart [label] [--repeat=N] '
+      '[--compare-to=PATH] [--hardware-summary] [--include-slow]');
   print('');
   print('  --repeat=N           Run the suite N times (default: 1)');
   print('  --compare-to=PATH    Compare against a specific baseline results file');
   print('  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md');
+  print('  --include-slow       Also run multi-minute slow workloads');
+  print('                       (sync burst, 1GB working set)');
   exit(0);
 }
 
