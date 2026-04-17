@@ -81,8 +81,15 @@ double medianOfSorted(List<double> sortedValues) {
 
   medians.sort();
   final tail = (1 - confidence) / 2;
+  // Percentile indices for a 0-indexed sorted array: for (1-tail)=0.975
+  // and n=2000, we want the value at rank 1950 (1-indexed), i.e. index
+  // 1949 (0-indexed). Using `ceil - 1` on the high end makes the
+  // resulting interval width match the stated confidence exactly when
+  // `tail * resamples` is integer, and stays within 1/resamples
+  // otherwise. Copilot flagged the prior formulation as off-by-one.
   final lowIdx = (tail * resamples).floor().clamp(0, resamples - 1);
-  final highIdx = ((1 - tail) * resamples).ceil().clamp(0, resamples - 1);
+  final highIdx =
+      (((1 - tail) * resamples).ceil() - 1).clamp(0, resamples - 1);
   return (low: medians[lowIdx], high: medians[highIdx]);
 }
 

@@ -15,13 +15,24 @@ Map<String, double> extractResqliteMedians(String content) {
   String? currentSection;
   String? currentSubsection;
 
+  // Sections whose tables contain `| resqlite ... |` rows but do NOT
+  // represent wall-clock timings. These are parsed by their own dedicated
+  // extractors (extractMemoryMedians, extractStreamingColumnMedians) and
+  // must be excluded here so their MB / re-emit / ratio values don't get
+  // mixed into the timing `metrics` map.
+  const nonTimingSections = {
+    'Memory',
+    'Streaming (Column Granularity)',
+  };
+
   for (final line in lines) {
     if (line.startsWith('## ')) {
       currentSection = line.substring(3).trim();
       currentSubsection = null;
     } else if (line.startsWith('### ')) {
       currentSubsection = line.substring(4).trim();
-    } else if (line.startsWith('| resqlite')) {
+    } else if (line.startsWith('| resqlite') &&
+        !nonTimingSections.contains(currentSection)) {
       final parts = line
           .split('|')
           .map((s) => s.trim())

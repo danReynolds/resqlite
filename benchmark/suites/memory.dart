@@ -336,18 +336,27 @@ Future<void> _streamingFanoutResqlite(
 }) async {
   final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
   final counters = List<int>.filled(streams, 0);
+  final initials = <Completer<void>>[];
 
   for (var i = 0; i < streams; i++) {
     final idx = i;
+    final initialC = Completer<void>();
+    initials.add(initialC);
     subs.add(
       db.stream('SELECT COUNT(*) as cnt FROM items').listen((_) {
-        counters[idx]++;
+        if (!initialC.isCompleted) {
+          initialC.complete();
+        } else {
+          counters[idx]++;
+        }
       }),
     );
   }
 
-  // Let all streams emit their initial value before issuing writes.
-  await Future<void>.delayed(const Duration(milliseconds: 5));
+  // Deterministic barrier: wait until every stream has emitted its
+  // initial value before issuing writes. Fixed sleeps (previously 5 ms)
+  // race on loaded machines; completers don't.
+  await Future.wait(initials.map((c) => c.future));
 
   var counter = 10000;
   for (var i = 0; i < writes; i++) {
@@ -358,8 +367,12 @@ Future<void> _streamingFanoutResqlite(
     counter++;
   }
 
-  // Wait briefly for trailing re-emits, then cancel.
-  await Future<void>.delayed(const Duration(milliseconds: 10));
+  // Drain any trailing re-emits in flight. Yields until the emit counts
+  // stabilize across two consecutive checks, capped by a generous
+  // wall-clock budget. Preserves the "no fixed sleeps" property of the
+  // pre-write barrier above.
+  await _drainUntilIdle(() => counters.fold<int>(0, (a, b) => a + b));
+
   for (final sub in subs) {
     await sub.cancel();
   }
@@ -372,9 +385,12 @@ Future<void> _streamingFanoutAsync(
 }) async {
   final subs = <StreamSubscription<Object?>>[];
   final counters = List<int>.filled(streams, 0);
+  final initials = <Completer<void>>[];
 
   for (var i = 0; i < streams; i++) {
     final idx = i;
+    final initialC = Completer<void>();
+    initials.add(initialC);
     subs.add(
       db
           .watch(
@@ -382,12 +398,16 @@ Future<void> _streamingFanoutAsync(
             throttle: Duration.zero,
           )
           .listen((_) {
-        counters[idx]++;
+        if (!initialC.isCompleted) {
+          initialC.complete();
+        } else {
+          counters[idx]++;
+        }
       }),
     );
   }
 
-  await Future<void>.delayed(const Duration(milliseconds: 5));
+  await Future.wait(initials.map((c) => c.future));
 
   var counter = 10000;
   for (var i = 0; i < writes; i++) {
@@ -398,9 +418,40 @@ Future<void> _streamingFanoutAsync(
     counter++;
   }
 
-  await Future<void>.delayed(const Duration(milliseconds: 10));
+  await _drainUntilIdle(() => counters.fold<int>(0, (a, b) => a + b));
   for (final sub in subs) {
     await sub.cancel();
+  }
+}
+
+/// Wait until [probe]'s return value is unchanged across two consecutive
+/// microtask-ish yields, or until the wall-clock budget expires.
+///
+/// Used by the streaming fan-out workloads to drain trailing re-emits
+/// without relying on fixed-duration sleeps (which race on loaded
+/// machines). The budget is generous (200 ms) because the memory suite's
+/// outer-repeat loop tolerates occasional slow samples better than it
+/// tolerates dropped emits contaminating subsequent iterations.
+Future<void> _drainUntilIdle(
+  int Function() probe, {
+  Duration budget = const Duration(milliseconds: 200),
+}) async {
+  final deadline = DateTime.now().add(budget);
+  var lastCount = probe();
+  var stableCycles = 0;
+  while (DateTime.now().isBefore(deadline)) {
+    // Yield twice per cycle to let both the microtask queue and the
+    // event loop drain anything scheduled by the previous yield.
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    final currentCount = probe();
+    if (currentCount == lastCount) {
+      stableCycles++;
+      if (stableCycles >= 2) return;
+    } else {
+      stableCycles = 0;
+      lastCount = currentCount;
+    }
   }
 }
 
