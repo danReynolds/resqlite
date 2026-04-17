@@ -25,6 +25,17 @@ void main() {
     return;
   }
 
+  // Sort devices most-recent-first so the dashboard defaults to the latest
+  // run and history appears in reverse chronological order. Primary key is
+  // the `date` column (ISO YYYY-MM-DD, which sorts correctly as a string);
+  // the result filename (which starts with an ISO timestamp) acts as the
+  // tie-breaker so multiple runs on the same date have a stable order.
+  devices.sort((a, b) {
+    final dateCmp = (b['date'] ?? '').compareTo(a['date'] ?? '');
+    if (dateCmp != 0) return dateCmp;
+    return (b['resultFile'] ?? '').compareTo(a['resultFile'] ?? '');
+  });
+
   // For each device, parse its result file for full cross-library data.
   final output = <String, Object?>{
     'generated': DateTime.now().toIso8601String(),
