@@ -7,6 +7,7 @@ import 'shared/stats.dart' show AggregateStats;
 import 'suites/chat_sim.dart';
 import 'suites/concurrent_reads.dart';
 import 'suites/disjoint_columns.dart';
+import 'suites/feed_paging.dart';
 import 'suites/keyed_pk_subscriptions.dart';
 import 'suites/memory.dart';
 import 'suites/parameterized.dart';
@@ -236,43 +237,46 @@ void _printHardwareSummary(
 Future<String> _runSuiteOnce() async {
   final markdown = StringBuffer();
 
-  print('[1/13] Select → Maps...');
+  print('[1/14] Select → Maps...');
   markdown.write(await runSelectMapsBenchmark());
 
-  print('[2/13] Select → Bytes...');
+  print('[2/14] Select → Bytes...');
   markdown.write(await runSelectBytesBenchmark());
 
-  print('[3/13] Schema Shapes...');
+  print('[3/14] Schema Shapes...');
   markdown.write(await runSchemaShapesBenchmark());
 
-  print('[4/13] Scaling...');
+  print('[4/14] Scaling...');
   markdown.write(await runScalingBenchmark());
 
-  print('[5/13] Concurrent Reads...');
+  print('[5/14] Concurrent Reads...');
   markdown.write(await runConcurrentReadsBenchmark());
 
-  print('[6/13] Point Query...');
+  print('[6/14] Point Query...');
   markdown.write(await runPointQueryBenchmark());
 
-  print('[7/13] Parameterized Queries...');
+  print('[7/14] Parameterized Queries...');
   markdown.write(await runParameterizedBenchmark());
 
-  print('[8/13] Writes...');
+  print('[8/14] Writes...');
   markdown.write(await runWritesBenchmark());
 
-  print('[9/13] Streaming...');
+  print('[9/14] Streaming...');
   markdown.write(await runStreamingBenchmark());
 
-  print('[10/13] Streaming (Column Granularity)...');
+  print('[10/14] Streaming (Column Granularity)...');
   markdown.write(await runDisjointColumnsBenchmark());
 
-  print('[11/13] Keyed PK Subscriptions (A11)...');
+  print('[11/14] Keyed PK Subscriptions (A11)...');
   markdown.write(await runKeyedPkSubscriptionsBenchmark());
 
-  print('[12/13] Chat Sim (A5)...');
+  print('[12/14] Chat Sim (A5)...');
   markdown.write(await runChatSimBenchmark());
 
-  print('[13/13] Memory...');
+  print('[13/14] Feed Paging (A6)...');
+  markdown.write(await runFeedPagingBenchmark());
+
+  print('[14/14] Memory...');
   markdown.write(await runMemoryBenchmark());
 
   return markdown.toString();

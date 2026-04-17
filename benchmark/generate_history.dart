@@ -133,6 +133,9 @@ const _trackedPatterns = [
   // be the 'Insert message' op. For the full per-op picture, readers
   // consult the dashboard scenarios tab.
   'Chat Sim',
+  // Feed Paging emits 2 subsections; this matches the first one
+  // (Keyset pagination).
+  'Feed Paging',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.
