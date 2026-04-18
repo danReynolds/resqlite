@@ -25,3 +25,11 @@ dev_dependencies:
   test: ^1.26.3
   sqlite3: ^3.2.0
   sqlite_async: ^0.14.0-wip.0
+  # Drift is benchmarked as a peer (cross-library benchmark comparison).
+  # `drift` is the runtime dep; `drift_dev` + `build_runner` regenerate
+  # the `*_drift_db.g.dart` codegen files from the `@DriftDatabase`
+  # annotations under benchmark/drift/. These are dev-only — users of
+  # resqlite don't get them.
+  drift: ^2.21.0
+  drift_dev: ^2.21.0
+  build_runner: ^2.4.0

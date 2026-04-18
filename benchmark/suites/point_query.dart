@@ -1,10 +1,8 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
 
-import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
-
+import '../drift/micro_items_db.dart';
+import '../shared/peer.dart';
 import '../shared/seeder.dart';
 import '../shared/stats.dart';
 
@@ -31,26 +29,18 @@ Future<String> runPointQueryBenchmark() async {
   final tempDir = await Directory.systemTemp.createTemp('bench_point_');
   final libResults = <String, _QpsResult>{};
   try {
-    // ---- Seed identical datasets per library. ----
-    final resqliteDb = await resqlite.Database.open('${tempDir.path}/resqlite.db');
-    await seedResqlite(resqliteDb, 1000);
-
-    final sqlite3Db = sqlite3.sqlite3.open('${tempDir.path}/sqlite3.db');
-    sqlite3Db.execute('PRAGMA journal_mode = WAL');
-    seedSqlite3(sqlite3Db, 1000);
-
-    final asyncDb = sqlite_async.SqliteDatabase(path: '${tempDir.path}/async.db');
-    await asyncDb.initialize();
-    await seedSqliteAsync(asyncDb, 1000);
-
-    // ---- Measure each library. ----
-    libResults['resqlite'] = await _measureResqlite(resqliteDb);
-    libResults['sqlite3'] = _measureSqlite3(sqlite3Db);
-    libResults['sqlite_async'] = await _measureSqliteAsync(asyncDb);
-
-    await resqliteDb.close();
-    sqlite3Db.close();
-    await asyncDb.close();
+    final peers = await PeerSet.open(
+      tempDir.path,
+      driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+    );
+    try {
+      for (final peer in peers.all) {
+        await seedPeer(peer, 1000);
+        libResults[peer.name] = await _measure(peer);
+      }
+    } finally {
+      await peers.closeAll();
+    }
   } finally {
     await tempDir.delete(recursive: true);
   }
@@ -162,54 +152,23 @@ _QpsResult _summarize(List<int> iterationTimingsUs) {
   );
 }
 
-Future<_QpsResult> _measureResqlite(resqlite.Database db) async {
+/// Unified per-peer hot-loop measurement. The previous hand-rolled
+/// approach had three nearly-identical 15-line functions — one per
+/// peer — which diverged over time (sqlite_async used `.get()` while
+/// resqlite used `.select()`, so the measurement subtly differed).
+/// Going through [BenchmarkPeer.select] uniformly is fairer: every
+/// peer runs the exact same shape of call, returning the exact same
+/// shape of result.
+Future<_QpsResult> _measure(BenchmarkPeer peer) async {
   const sql = 'SELECT * FROM items WHERE id = ?';
   for (var i = 0; i < _warmupIterations * 10; i++) {
-    await db.select(sql, [i % 1000 + 1]);
+    await peer.select(sql, [i % 1000 + 1]);
   }
   final timings = <int>[];
   for (var iter = 0; iter < _iterations; iter++) {
     final sw = Stopwatch()..start();
     for (var i = 0; i < _queryCount; i++) {
-      await db.select(sql, [i % 1000 + 1]);
-    }
-    sw.stop();
-    timings.add(sw.elapsedMicroseconds);
-  }
-  return _summarize(timings);
-}
-
-_QpsResult _measureSqlite3(sqlite3.Database db) {
-  const sql = 'SELECT * FROM items WHERE id = ?';
-  final stmt = db.prepare(sql);
-  for (var i = 0; i < _warmupIterations * 10; i++) {
-    final rs = stmt.select([i % 1000 + 1]);
-    for (final _ in rs) {}
-  }
-  final timings = <int>[];
-  for (var iter = 0; iter < _iterations; iter++) {
-    final sw = Stopwatch()..start();
-    for (var i = 0; i < _queryCount; i++) {
-      final rs = stmt.select([i % 1000 + 1]);
-      for (final _ in rs) {}
-    }
-    sw.stop();
-    timings.add(sw.elapsedMicroseconds);
-  }
-  stmt.close();
-  return _summarize(timings);
-}
-
-Future<_QpsResult> _measureSqliteAsync(sqlite_async.SqliteDatabase db) async {
-  const sql = 'SELECT * FROM items WHERE id = ?';
-  for (var i = 0; i < _warmupIterations * 10; i++) {
-    await db.get(sql, [i % 1000 + 1]);
-  }
-  final timings = <int>[];
-  for (var iter = 0; iter < _iterations; iter++) {
-    final sw = Stopwatch()..start();
-    for (var i = 0; i < _queryCount; i++) {
-      await db.get(sql, [i % 1000 + 1]);
+      await peer.select(sql, [i % 1000 + 1]);
     }
     sw.stop();
     timings.add(sw.elapsedMicroseconds);

@@ -17,6 +17,13 @@ jobs:
           sdk: stable
       - name: Install dependencies
         run: dart pub get
+      - name: Generate drift codegen
+        # Drift databases under benchmark/drift/ use @DriftDatabase
+        # annotations that produce part-of `*.g.dart` files via
+        # build_runner. Gitignored, so CI must generate before analyze.
+        # (`run_all.dart` auto-regens on stale-ness for contributors
+        #  running benchmarks locally, but analyze/test don't trigger that.)
+        run: dart run build_runner build --delete-conflicting-outputs
       - name: Analyze
         run: dart analyze --fatal-infos
       - name: Run tests

@@ -14,42 +14,120 @@ The statistical and measurement rules that govern every test are in
 | **resqlite** | this repo (current commit) | Subject of benchmarks |
 | **sqlite3.dart** ([pub.dev](https://pub.dev/packages/sqlite3)) | `3.3.0` | Synchronous FFI baseline — the "raw sqlite" reference |
 | **sqlite_async** ([pub.dev](https://pub.dev/packages/sqlite_async)) | `0.14.0-wip.0` | Async, isolate-pool-backed, reactive peer |
+| **drift** ([pub.dev](https://pub.dev/packages/drift)) | `2.21.0` | Codegen-backed, isolate-backed, reactive. Most-used reactive Dart SQL library. |
 
 Pins live in `pubspec.yaml`. Upgrading a peer is a deliberate PR with
 before/after benchmark runs attached — see
 [METHODOLOGY.md § Peer versions and upgrade policy](./METHODOLOGY.md#peer-versions-and-upgrade-policy).
 
+### PRAGMA normalization across peers
+
+All four peers are configured to run in the same durability regime for
+fair cross-library writes:
+
+- **journal_mode = WAL**
+- **synchronous = NORMAL** (WAL-mode recommended default)
+
+How each peer gets there:
+
+| Peer | Journal mode | Synchronous | How |
+|---|---|---|---|
+| resqlite | WAL | NORMAL | Baked in via `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1` compile flag (see `native/resqlite.c`). Automatic for any WAL connection. |
+| sqlite_async | WAL | NORMAL | Default values on `SqliteOptions`. No per-benchmark tuning needed. |
+| sqlite3.dart | WAL | NORMAL | Explicit `PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL` in `Sqlite3Peer.open`. |
+| drift | WAL | NORMAL | Explicit `PRAGMA` calls in the drift-isolate `setup:` callback (`driftFactoryFor` in `benchmark/shared/peer.dart`). |
+
+Why this matters: without explicit normalization, sqlite3 and drift
+would run at `synchronous = FULL` (SQLite's out-of-the-box default,
+which fsyncs on every commit), while resqlite and sqlite_async would
+run at `NORMAL` (fsync only on WAL checkpoint). That would silently
+favor the latter two by roughly 2–3× on small-write workloads — a
+measurement of fsync policy rather than library overhead.
+
+Both `NORMAL` and `FULL` are durable + crash-safe in WAL mode (the
+SQLite team explicitly recommends `NORMAL` for WAL). Normalizing to
+`NORMAL` reflects what a sophisticated user would configure for any
+of these libraries.
+
+### Drift-specific setup
+
+Drift is codegen-backed, but we use it via `customSelect` + `customUpdate`
++ `customInsert` rather than the typed DSL. Both are idiomatic drift
+usage, and `customSelect` is typically the fast-path choice for drift
+users with perf-sensitive queries. The `@DriftDatabase` schema
+definitions still generate code — that's what drift's `StreamQueryStore`
+needs for invalidation to work correctly.
+
+- Drift schemas live in `benchmark/drift/<scenario>_db.dart`, one per
+  benchmark scenario, mirroring each scenario's SQL DDL 1:1 (tables +
+  indexes + constraints).
+- Generated `<scenario>_db.g.dart` files are **gitignored** — they
+  regenerate deterministically via `dart run build_runner build`.
+- `benchmark/run_all.dart` auto-regenerates on stale-ness before the
+  suite runs; contributors don't think about it.
+- Drift runs in an isolate via `NativeDatabase.createInBackground` —
+  same async-isolate model as resqlite. Fair comparison point.
+- Stream invalidation for `customSelect` requires explicit `readsFrom`
+  sets. The `DriftPeer` adapter auto-extracts modified table names from
+  write SQL via regex. A unit test suite (`test/benchmark_drift_peer_test.dart`)
+  verifies streams actually emit on INSERT/UPDATE/DELETE/batch/INSERT
+  OR REPLACE, so schema/SQL changes that break invalidation surface as
+  test failures, not as silently-fast benchmark numbers.
+
+### Coverage: which benchmarks include drift
+
+Drift participates in **all 7 scenario workloads** and **most
+microbenchmarks** (select, scaling, schema shapes, point query,
+parameterized queries, concurrent reads, single inserts, batch
+inserts, memory — select + batch insert subworkloads).
+
+Drift does **not** participate in:
+
+- **`streaming.dart`** — exercises resqlite's streaming engine
+  internals (authorizer hook-based table tracking, hash-suppressed
+  re-emission, worker-side result hashing, stream churn via
+  subscribe/cancel cycles). Drift's streaming is a different
+  architecture (callback-based `notifyUpdates`), and the same
+  benchmarks against drift would measure different internal properties
+  — not an apples-to-apples comparison. The cross-library streaming
+  story lives in the scenario benchmarks instead (Column-Disjoint,
+  Keyed PK, High-Card Fan-out, Reactive Feed).
+- **Memory / streaming fan-out subworkload** — same reason; streaming
+  memory is a resqlite-engine-specific measurement.
+- **Writes / Interactive Transaction + Batched Write Inside Transaction
+  + Transaction Read** — exercise interactive transaction APIs
+  (`tx.execute`/`tx.select`/`tx.executeBatch` nested inside
+  `db.transaction`) which `BenchmarkPeer` doesn't yet expose as a
+  uniform primitive. Extending the peer interface with a
+  `transaction()` shape is possible but requires reconciling
+  drift/sqlite_async/resqlite txn semantics — its own follow-up
+  change. Single Inserts and Batch Insert (the simple write paths)
+  include drift.
+- **Parameterized queries' `sqlite3 (no cache)` vs `(cached stmt)`
+  variants** — those two rows specifically illustrate the cost of
+  not caching prepared statements; drift and resqlite both cache
+  automatically, so their sqlite3 counterpart is only one row per
+  library. The two hand-rolled sqlite3 variants remain as they show
+  latent costs the higher-level peers hide.
+
 ## Peers we do NOT compare against
-
-### drift ([pub.dev](https://pub.dev/packages/drift))
-
-The most-used reactive Dart SQL library. Not included because:
-- Drift is codegen-backed; integrating it into our benchmark
-  harness requires a build step per workload, which conflicts with the
-  "simple dart run" ergonomic the existing suite has.
-- Drift's reactive stream heuristic is table-set based and covered
-  equivalently by `sqlite_async`'s `watch()` for our current comparison
-  purposes.
-- Adding drift would materially increase the surface area of the
-  benchmark package — we'd need to track drift's codegen output in source
-  control or generate it on each run.
-
-This is a real gap. When drift ships a measurable architectural change
-(e.g., column-level invalidation, IVM-style maintenance) and resqlite
-wants to claim a specific win against it, drift gets added.
 
 ### sqflite ([pub.dev](https://pub.dev/packages/sqflite))
 
-The Flutter-default SQLite library. Not included because:
-- sqflite is Flutter-only (uses platform channels). Our benchmarks run
-  under `dart` not `flutter`; adding sqflite would force a
-  `flutter test`-based harness for its portion, splitting the runner.
-- sqflite's synchronous-over-platform-channel model is fundamentally
-  slower than any in-process peer; including it wouldn't change our
-  narrative, only add noise.
+Excluded until mobile CI lands. The desktop-compatible variant
+(`sqflite_common_ffi`) uses sqlite3.dart under the hood and would not
+represent actual mobile sqflite performance:
 
-When mobile CI lands (not currently scoped), sqflite becomes comparable
-alongside the mobile-oriented workloads.
+- Platform channel serialization cost is absent under the ffi variant.
+- Mobile iOS/Android ship different SQLite versions with different
+  default PRAGMAs.
+- F2FS (Android) vs APFS (macOS) vs ext4 (Linux) fsync behavior differs
+  meaningfully, and the ffi variant reflects the dev-machine filesystem,
+  not the device's.
+
+Including `sqflite_common_ffi` with a caveat would be misleading;
+excluding and saying why is honest. Will be added when `flutter test
+integration_test/` on simulators/emulators is wired into CI.
 
 ### libsql_dart (Turso)
 
@@ -124,11 +202,11 @@ per workload live in the workload's source comments and in
 | # | Workload | Status | Story |
 |---|---|---|---|
 | A11 | Keyed PK subscriptions | **Shipped** (Phase 1) | Many watchers each on a single PK; baseline for `watchRow()` API |
-| A5 | Chat sim | Planned (Phase 2) | Mixed R/W with joins and Zipfian distribution |
-| A6 | Feed paging | Planned (Phase 2) | Keyset pagination + reactive stream under concurrent writes |
-| A11b | High-cardinality fan-out | Planned (Phase 2) | 500 streams on a 10K-row table |
-| A7 | Sync burst | Planned (Phase 3, `--include-slow`) | 50K-row bulk insert with active stream |
-| A9 | 1 GB working set | Planned (Phase 3, `--include-slow`) | mmap behavior and cache locality |
+| A5 | Chat sim | **Shipped** (Phase 2) | Mixed R/W with joins and Zipfian distribution |
+| A6 | Feed paging | **Shipped** (Phase 2) | Keyset pagination + reactive stream under concurrent writes |
+| A11b | High-cardinality fan-out | **Shipped** (Phase 2) | 100 streams on a 10K-row table |
+| A7 | Sync burst | **Shipped** (Phase 3, `--include-slow`) | 50K-row bulk insert with active stream |
+| A9 | 1 GB working set | **Shipped** (Phase 3, `--include-slow`) | mmap behavior and cache locality |
 
 Column-disjoint streaming, originally planned as A10, is superseded by
 the more comprehensive `Streaming (Column Granularity)` microbenchmark
@@ -178,7 +256,7 @@ These are real gaps that should be explicit rather than hidden:
 
 ### Compared-to gaps
 
-- **No drift, sqflite, libsql_dart** (see "Peers we do NOT compare against" above)
+- **No sqflite, libsql_dart** (see "Peers we do NOT compare against" above)
 - **No version-drift testing** on peers — we pin versions deliberately,
   but don't test resqlite against the latest nightly of each peer.
 

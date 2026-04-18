@@ -2,6 +2,8 @@ import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 
+import 'peer.dart';
+
 // ---------------------------------------------------------------------------
 // Standard schema (6 columns, mixed types)
 // ---------------------------------------------------------------------------
@@ -78,4 +80,39 @@ Future<void> seedSqliteAsync(
     for (var i = 0; i < rowCount; i++) builder(i),
   ];
   await db.executeBatch(insertSql, paramSets);
+}
+
+/// Peer-abstracted seed for microbenchmarks migrating onto the
+/// [BenchmarkPeer] interface. Uses `CREATE TABLE IF NOT EXISTS` and
+/// `executeBatch` so every peer (including drift, which auto-creates
+/// tables from its `@DriftDatabase` annotations at open) handles it
+/// idempotently. Seed-time cost is not the benchmark — it's fine for
+/// drift to use its `batch()` path here because that's what a drift
+/// user would write for bulk seed anyway.
+///
+/// [createSql] is used verbatim; callers that rely on drift auto-creating
+/// the schema can pass the standard SQL and it becomes a no-op (drift
+/// already has `items`; `CREATE TABLE IF NOT EXISTS items` is a no-op).
+/// [insertSql] / [rowBuilder] override the default for scenarios that
+/// seed a different shape.
+Future<void> seedPeer(
+  BenchmarkPeer peer,
+  int rowCount, {
+  String createSql = standardCreateSql,
+  String insertSql = standardInsertSql,
+  List<Object?> Function(int i)? rowBuilder,
+}) async {
+  // `CREATE TABLE IF NOT EXISTS` is essential here: drift peers open
+  // with the schema already materialized via `@DriftDatabase`; a bare
+  // `CREATE TABLE` would throw "table already exists" on those peers
+  // while succeeding on the others.
+  final idempotentCreate = createSql.contains('IF NOT EXISTS')
+      ? createSql
+      : createSql.replaceFirst('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS');
+  await peer.execute(idempotentCreate);
+  final builder = rowBuilder ?? standardRow;
+  final paramSets = [
+    for (var i = 0; i < rowCount; i++) builder(i),
+  ];
+  await peer.executeBatch(insertSql, paramSets);
 }

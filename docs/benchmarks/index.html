@@ -15,6 +15,7 @@
     --resqlite: #58a6ff;
     --sqlite3: #f0883e;
     --async: #a371f7;
+    --drift: #14b8a6;
     --win: #3fb950;
     --accent: #58a6ff;
   }
@@ -134,6 +135,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:var(--resqlite)"></div> resqlite</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--sqlite3)"></div> sqlite3 (raw FFI)</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--async)"></div> sqlite_async (PowerSync)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--drift)"></div> drift</div>
 </div>
 
 <div id="callouts" class="callouts"></div>
@@ -152,7 +154,8 @@
   <p><strong style="color:var(--text)">Peers tested:</strong>
     resqlite (this repo, current commit),
     <a href="https://pub.dev/packages/sqlite3">sqlite3.dart <code>3.3.0</code></a> (synchronous FFI baseline),
-    <a href="https://pub.dev/packages/sqlite_async">sqlite_async <code>0.14.0-wip.0</code></a> (PowerSync, async + reactive).
+    <a href="https://pub.dev/packages/sqlite_async">sqlite_async <code>0.14.0-wip.0</code></a> (PowerSync, async + reactive),
+    <a href="https://pub.dev/packages/drift">drift <code>2.21.0</code></a> (codegen-backed, isolate-backed, reactive).
     Hardware is shown in the device selector above; each device has its own full run.
     See <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/SCOPE.md">SCOPE.md</a> for the full peer list, versioning policy, and upgrade process.</p>
 
@@ -178,12 +181,13 @@
 
   <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Peers not included:</strong></p>
   <ul style="margin-top:0.25rem;">
-    <li><a href="https://pub.dev/packages/drift">drift</a> — the most-used reactive Dart SQL
-      library. Excluded because it's codegen-backed and adding a build step to the benchmark
-      harness is out of scope for the current round. Real gap.</li>
-    <li><a href="https://pub.dev/packages/sqflite">sqflite</a> — the Flutter-default SQLite
-      library. Excluded because it's platform-channel-only (Flutter, not plain Dart). Will
-      be included when mobile CI lands.</li>
+    <li><a href="https://pub.dev/packages/sqflite">sqflite</a> — excluded until mobile CI
+      lands. The desktop-compatible variant (<code>sqflite_common_ffi</code>) uses sqlite3.dart
+      under the hood and would not represent actual mobile sqflite performance (platform
+      channel serialization cost, native iOS/Android SQLite version differences, F2FS vs APFS
+      fsync behavior). Including it with a caveat would be misleading; excluding and saying
+      why is honest. Will be added when <code>flutter test integration_test/</code> on
+      simulators/emulators is wired into CI.</li>
     <li><a href="https://pub.dev/packages/libsql_dart">libsql_dart</a> — still maturing as of
       this writing. Revisit when stable.</li>
   </ul>
@@ -219,7 +223,7 @@
 </div>
 
 <script>
-const C = { resqlite: '#58a6ff', sqlite3: '#f0883e', async: '#a371f7' };
+const C = { resqlite: '#58a6ff', sqlite3: '#f0883e', async: '#a371f7', drift: '#14b8a6' };
 
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#262b45';
@@ -337,14 +341,20 @@ function libColor(name) {
   const n = name.toLowerCase();
   if (n.includes('resqlite')) return C.resqlite;
   if (n.includes('async')) return C.async;
+  // drift must be checked before sqlite3 because drift's codegen may
+  // surface names like "drift (sqlite3)" in some result labels; we want
+  // drift's own color to take precedence over the underlying engine.
+  if (n.includes('drift')) return C.drift;
   if (n.includes('sqlite3')) return C.sqlite3;
   return '#8b949e';
 }
 
 function libShort(name) {
-  if (name.includes('resqlite')) return 'resqlite';
-  if (name.includes('sqlite_async') || name.includes('async')) return 'sqlite_async';
-  if (name.includes('sqlite3')) return 'sqlite3';
+  const n = name.toLowerCase();
+  if (n.includes('resqlite')) return 'resqlite';
+  if (n.includes('sqlite_async') || n.includes('async')) return 'sqlite_async';
+  if (n.includes('drift')) return 'drift';
+  if (n.includes('sqlite3')) return 'sqlite3';
   return name;
 }
 
@@ -756,7 +766,7 @@ const SCENARIOS = [
       Schema: '<code>users</code> (500 rows), <code>conversations</code> (100 rows), <code>messages</code> (10,000 seed rows) with compound index <code>(conv_id, sent_at)</code>. Seeded deterministically (PRNG seed <code>0x5EED</code>).',
       Workload: '10,000 ops total + 500 unmeasured warmup. Zipfian skew <code>s=1.0</code> on conversation selection — hot threads get most traffic. Same op sequence replayed across all peers.',
       'Op mix': '5% INSERT message · 5% UPDATE conversation · 45% SELECT last-20 messages (JOIN users, ORDER BY sent_at DESC LIMIT 20) · 45% SELECT user by PK.',
-      Measurement: 'Each op type timed separately. Reads force row materialization so lazy Row views don\'t win unfairly. Peers: resqlite, sqlite3, sqlite_async.',
+      Measurement: 'Each op type timed separately. Reads force row materialization so lazy Row views don\'t win unfairly. Peers: resqlite, sqlite3, sqlite_async, drift.',
     },
     whatToLookAt: [
       '<strong>Insert message</strong> — pure write latency; punishes libraries with heavy per-call overhead.',
@@ -782,7 +792,7 @@ const SCENARIOS = [
       Schema: '<code>posts(id PK, author_id, created_at, body, like_count)</code> with compound index <code>(created_at DESC, id)</code>. Seed: 100,000 rows (PRNG seed <code>0xFEED</code>), 500 authors.',
       Pagination: 'Keyset walk backwards via <code>(created_at, id) &lt; (?, ?)</code>. 20 pages × 50 rows per iteration. 2 warmup + 5 measured iterations.',
       Reactive: 'One stream watching top-50 <code>ORDER BY created_at DESC, id DESC LIMIT 50</code>. 100 random <code>like_count++</code> writes per iteration against any of the 100K posts. Most writes miss the top-50 window. 2 warmup + 3 measured iterations.',
-      Measurement: 'Pagination: per-page wall/main. Reactive: settled-wall, main, post-baseline emission count. Settle window: 100 ms quiet, 20 s timeout. Peers: all three for pagination; resqlite + sqlite_async for reactive.',
+      Measurement: 'Pagination: per-page wall/main. Reactive: settled-wall, main, post-baseline emission count. Settle window: 100 ms quiet, 20 s timeout. Peers: resqlite, sqlite3, sqlite_async, drift for pagination; resqlite, sqlite_async, drift for reactive (sqlite3 has no streams).',
     },
     whatToLookAt: [
       '<strong>Keyset pagination</strong> — pure read cost, no reactivity. Measures the baseline query path.',
@@ -807,7 +817,7 @@ const SCENARIOS = [
       Schema: '<code>wide(id PK, a..t TEXT)</code> — 21 columns, seed 5,000 rows, each column filled with <code>v&lt;i&gt;</code>.',
       Streams: '10 concurrent streams, all watching <code>SELECT id, a, b FROM wide WHERE id &lt; 1000 ORDER BY id</code>. Only <code>a</code> and <code>b</code> are in the projection.',
       Phases: '<strong>Disjoint</strong> — 500 <code>UPDATE wide SET c = ?</code> writes (col <code>c</code> is not watched). <strong>Overlapping</strong> (control) — 500 <code>UPDATE wide SET a = ?</code> (col <code>a</code> is watched). Each write separated by 2× <code>Future.delayed(Duration.zero)</code> to defeat per-microtask coalescing.',
-      Measurement: 'Reports total re-emits (post-initial), drain ms, and primary metric <strong>re-emit ratio = disjoint / overlapping</strong>. sqlite_async uses <code>throttle: Duration.zero</code>. Peers: resqlite, sqlite_async (sqlite3 has no streams).',
+      Measurement: 'Reports total re-emits (post-initial), drain ms, and primary metric <strong>re-emit ratio = disjoint / overlapping</strong>. sqlite_async uses <code>throttle: Duration.zero</code>. Peers: resqlite, sqlite_async, drift (sqlite3 has no streams).',
     },
     whatToLookAt: [
       '<strong>Disjoint column writes</strong> — the interesting case. resqlite should ignore writes to columns no stream watches.',
@@ -831,7 +841,7 @@ const SCENARIOS = [
       Schema: '<code>items(id PK, body, updated_at)</code>, 10,000 seed rows.',
       Streams: '50 streams each watching <code>SELECT id, body, updated_at FROM items WHERE id = ?</code>. Watched IDs are evenly spaced across the 10K rows (step = 200).',
       Writes: '200 random-PK <code>UPDATE</code> writes per iteration. PRNG seed <code>0xBEEF</code> is chosen so ~3 of the 200 writes hit a watched PK. 1 warmup + 3 measured iterations.',
-      Measurement: 'Wall (first-write → settled), main (aggregate listener time), total emissions summed across all 50 streams, observed hits. Settle: 200 ms quiet window, 60 s deadline. Peers: resqlite, sqlite_async.',
+      Measurement: 'Wall (first-write → settled), main (aggregate listener time), total emissions summed across all 50 streams, observed hits. Settle: 200 ms quiet window, 60 s deadline. Peers: resqlite, sqlite_async, drift.',
     },
     whatToLookAt: [
       '<strong>Wall time</strong> — how long the burst takes under subscription load.',
@@ -856,7 +866,7 @@ const SCENARIOS = [
       Schema: '<code>items(id PK, owner_id, value)</code> with index <code>items_owner(owner_id)</code>. Seed: 10,000 items across 100 owners (100 each).',
       Streams: '100 streams — one per <code>owner_id</code> — each watching <code>SELECT id, value FROM items WHERE owner_id = ? ORDER BY id</code>.',
       Writes: '200 random-item <code>UPDATE items SET value = ?</code> writes per iteration. Every write potentially invalidates all 100 streams (the exact set depends on which owner the item belongs to). 1 warmup + 2 measured iterations.',
-      Measurement: 'Reports three medians — <strong>init drain ms</strong> (subscribe → last first-emission), <strong>write burst ms</strong> (first write → settled), and end-to-end wall. Settle: 200 ms quiet, 60 s deadline. Initial-drain timeout: 120 s. Peers: resqlite, sqlite_async.',
+      Measurement: 'Reports three medians — <strong>init drain ms</strong> (subscribe → last first-emission), <strong>write burst ms</strong> (first write → settled), and end-to-end wall. Settle: 200 ms quiet, 60 s deadline. Initial-drain timeout: 120 s. Peers: resqlite, sqlite_async, drift.',
     },
     whatToLookAt: [
       '<strong>Wall time</strong> — the total time for the burst to settle. Should be under a second on modern hardware (pre-fix: ~40s).',
@@ -882,7 +892,7 @@ const SCENARIOS = [
       'Bulk insert': '50,000 rows inserted as 100 chunks × 500-row <code>executeBatch</code> each. Primary measurement of batch throughput.',
       'Merge rounds': '10 rounds × 100 rows each via <code>INSERT OR REPLACE</code>. IDs overlap the bulk range to exercise conflict handling.',
       'Active stream': 'One <code>SELECT COUNT(*) FROM items</code> stream runs throughout both phases (reactive peers only). Initial emission drained before baseline reset.',
-      Measurement: '2 measured iterations, 0 warmup (too expensive). Separate wall/main for bulk vs merge. Emissions reported per peer. Settle: 200 ms quiet, 10 s deadline. Peers: all three for inserts; resqlite + sqlite_async for stream.',
+      Measurement: '2 measured iterations, 0 warmup (too expensive). Separate wall/main for bulk vs merge. Emissions reported per peer. Settle: 200 ms quiet, 10 s deadline. Peers: resqlite, sqlite3, sqlite_async, drift for inserts; resqlite, sqlite_async, drift for stream (sqlite3 has no streams).',
     },
     whatToLookAt: [
       '<strong>Bulk insert</strong> — raw write throughput at scale. Batch size matters more than per-call cost here.',
@@ -1156,23 +1166,55 @@ function buildSingleBar(B, titleMatch, canvasId) {
   }));
 }
 
-// Concurrent reads — special format with concurrency as labels.
-// Only meaningful in peer mode because its data schema is unique (numeric concurrency
-// levels as "library", paired resqlite/async columns).
+// Concurrent reads — new format (one subsection per concurrency level,
+// standard per-peer rows inside each). Builds a line chart across
+// concurrency levels with one series per peer.
+//
+// Prior implementation expected a single "Concurrent Reads" section
+// with entries keyed by numeric concurrency level and paired-peer
+// columns. That format didn't scale to a 4th peer (drift); the suite
+// now emits the standard per-subsection shape used by every other
+// scenario, so we read it like any other grouped-bar workload.
 function buildConcurrent(B, canvasId) {
   if (currentMode !== 'peer') { renderEmptyCanvas(canvasId); return; }
-  const sec = B.find(s => s.key?.includes('Concurrent Reads'));
-  if (!sec) { renderEmptyCanvas(canvasId); return; }
-  // Entries have library="1","2","4","8" with values=[resqlite_wall, resqlite_per, async_wall, async_per]
-  const labels = sec.entries.map(e => e.library + '\u00d7');
-  const resqliteData = sec.entries.map(e => e.values[0]);
-  const asyncData = sec.entries.map(e => e.values[2]);
+  const sections = B
+      .filter(s => s.title?.includes('Concurrent Reads') && s.subtitle)
+      // Subtitle shape: "Nx concurrency" (the literal x character). Parse
+      // the leading number so the x-axis is numerically ordered rather
+      // than alphabetically (1, 2, 4, 8 vs 1, 2, 4, 8 — same here but
+      // defensive if sizes change).
+      .map(s => ({ sec: s, concurrency: parseInt(s.subtitle, 10) }))
+      .filter(x => !isNaN(x.concurrency))
+      .sort((a, b) => a.concurrency - b.concurrency);
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
+  const labels = sections.map(x => x.concurrency + '\u00d7');
+
+  // Collect wall-time values per peer across all concurrency levels.
+  const libs = {};
+  for (const { sec } of sections) {
+    for (const entry of sec.entries) {
+      const meta = seriesMeta(entry.library, currentMode);
+      if (!libs[meta.short]) libs[meta.short] = { data: [], color: meta.color };
+    }
+  }
+  for (const { sec } of sections) {
+    const byName = {};
+    for (const entry of sec.entries) {
+      byName[seriesMeta(entry.library, currentMode).short] = entry.values[0];
+    }
+    for (const name of Object.keys(libs)) {
+      libs[name].data.push(byName[name] ?? null);
+    }
+  }
+
+  const datasets = Object.entries(libs).map(([name, d]) => ({
+    label: name, data: d.data,
+    borderColor: d.color, backgroundColor: d.color + '33',
+    tension: 0.3, pointRadius: 5, fill: true, spanGaps: true,
+  }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'line',
-    data: { labels, datasets: [
-      { label: 'resqlite', data: resqliteData, borderColor: C.resqlite, backgroundColor: C.resqlite + '33', tension: 0.3, pointRadius: 5, fill: true },
-      { label: 'sqlite_async', data: asyncData, borderColor: C.async, backgroundColor: C.async + '33', tension: 0.3, pointRadius: 5, fill: true },
-    ]},
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },

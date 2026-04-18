@@ -10,3 +10,7 @@ build/
 # Cached seed databases for Large Working Set (A9) — recreated on demand.
 # Binary, large, inherently device-specific. Never commit.
 benchmark/results/_cache/
+
+# Drift-generated code is reproducible from the .dart sources via
+# `dart run build_runner build`. Never commit.
+benchmark/drift/*.g.dart

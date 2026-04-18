@@ -29,9 +29,10 @@ void main() {
             'Main med (ms) | Main p90 (ms) | '
             'Total emits | Observed hits |'),
       );
-      // Must include both reactive peers.
+      // Must include all reactive peers: resqlite, sqlite_async, drift.
       expect(markdown, contains('resqlite'));
       expect(markdown, contains('sqlite_async'));
+      expect(markdown, contains('drift'));
       // sqlite3 has no streams; must NOT appear.
       expect(
         markdown,

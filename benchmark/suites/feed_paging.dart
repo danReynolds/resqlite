@@ -25,6 +25,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../drift/feed_paging_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -64,7 +65,10 @@ Future<String> runFeedPagingBenchmark() async {
 
   final tempDir = await Directory.systemTemp.createTemp('bench_feed_');
   try {
-    final peers = await PeerSet.open(tempDir.path);
+    final peers = await PeerSet.open(
+      tempDir.path,
+      driftFactory: driftFactoryFor((exec) => FeedPagingDriftDb(exec)),
+    );
     try {
       for (final peer in peers.all) {
         print('  running on ${peer.name}...');
@@ -91,8 +95,12 @@ Future<String> runFeedPagingBenchmark() async {
 // ---------------------------------------------------------------------------
 
 Future<void> _seed(BenchmarkPeer peer) async {
+  // IF NOT EXISTS because drift auto-creates the table + index from its
+  // @DriftDatabase schema at open; bare CREATE would throw "already
+  // exists" on the drift peer. Schema must match
+  // benchmark/drift/feed_paging_db.dart exactly.
   await peer.execute(
-    'CREATE TABLE posts('
+    'CREATE TABLE IF NOT EXISTS posts('
     'id INTEGER PRIMARY KEY, '
     'author_id INTEGER NOT NULL, '
     'created_at INTEGER NOT NULL, '
@@ -101,7 +109,7 @@ Future<void> _seed(BenchmarkPeer peer) async {
   );
   // Keyset pagination order: most-recent first, id as tie-breaker.
   await peer.execute(
-    'CREATE INDEX posts_created_at_id ON posts(created_at DESC, id)',
+    'CREATE INDEX IF NOT EXISTS posts_created_at_id ON posts(created_at DESC, id)',
   );
 
   final prng = math.Random(_prngSeed);
@@ -265,7 +273,8 @@ Future<_ReactiveIterResult> _singleReactiveIteration(
   final sub = peer.watch(
     'SELECT id, author_id, created_at, body, like_count FROM posts '
     'ORDER BY created_at DESC, id DESC LIMIT ?',
-    [_pageSize],
+    params: [_pageSize],
+    readsFrom: const {'posts'},
   ).listen((_) {
     final sw = Stopwatch()..start();
     emissions++;
