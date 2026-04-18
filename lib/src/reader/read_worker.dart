@@ -6,6 +6,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -91,6 +92,11 @@ void readerEntrypoint(List<Object> args) {
 
     final request = message as ReadRequest;
 
+    // Timeline marker scopes the reader-isolate's per-message work so
+    // external profilers can see the cross-isolate breakdown. Near-zero
+    // cost when timeline stream is off. See experiments/080-dispatch-
+    // budget.md for what this enables.
+    Timeline.startSync('reader.handle.${request.runtimeType}');
     try {
       final Object? result;
       final bool sacrifice;
@@ -146,6 +152,8 @@ void readerEntrypoint(List<Object> args) {
 
       if (sacrifice) {
         receivePort.close();
+        // Isolate.exit skips `finally`; close the timeline span manually.
+        Timeline.finishSync();
         Isolate.exit(eventPort, (result, true, null));
       }
       eventPort.send((result, false, null));
@@ -162,6 +170,8 @@ void readerEntrypoint(List<Object> args) {
               parameters: request.parameters,
             );
       eventPort.send((null, false, error));
+    } finally {
+      Timeline.finishSync();
     }
   };
 }

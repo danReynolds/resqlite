@@ -7,6 +7,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
 
@@ -166,6 +167,13 @@ void writerEntrypoint(List<Object> args) {
   receivePort.handler = (Object? message) {
     if (message is! WriterRequest) return;
 
+    // Timeline markers scope the writer-isolate's per-message work so
+    // external profilers (DevTools, `dart --observe`) can show the
+    // cross-isolate breakdown without any custom protocol changes.
+    // Near-zero cost when the timeline stream isn't active (a single
+    // atomic load + branch per marker). See experiments/080-dispatch-
+    // budget.md for the analysis these markers enable.
+    Timeline.startSync('writer.handle.${message.runtimeType}');
     try {
       switch (message) {
         case ExecuteRequest():
@@ -199,6 +207,8 @@ void writerEntrypoint(List<Object> args) {
       message.replyPort.send(
         ResqliteException('Internal error in writer isolate: $e\n$st'),
       );
+    } finally {
+      Timeline.finishSync();
     }
   };
 }
