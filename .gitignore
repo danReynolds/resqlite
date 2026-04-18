@@ -6,3 +6,7 @@ build/
 *.so
 *.dll
 .claude/worktrees/
+
+# Cached seed databases for Large Working Set (A9) — recreated on demand.
+# Binary, large, inherently device-specific. Never commit.
+benchmark/results/_cache/

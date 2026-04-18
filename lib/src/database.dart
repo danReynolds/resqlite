@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
+import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'native/resqlite_bindings.dart';
 import 'reader/reader_pool.dart';
@@ -35,7 +36,7 @@ import 'stream_engine.dart';
 /// - [Transaction], for multi-statement atomic writes with read visibility
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
-  Database._(this._handle, int readerCount) {
+  Database._(this._handle, this._path, int readerCount) {
     // Spawn the single writer isolate.
     _writer = Writer.spawn(_streamEngine, _handle);
 
@@ -47,6 +48,13 @@ final class Database {
   late final Future<ReaderPool> _readerPool;
 
   final ffi.Pointer<ffi.Void> _handle;
+
+  /// The filesystem path the database was opened with. Retained so
+  /// [diagnostics] can read the `-wal` sidecar size. `:memory:` or
+  /// other non-file paths are stored verbatim; [diagnostics] detects
+  /// and handles them.
+  final String _path;
+
   Completer<void>? _closedCompleter = null;
 
   // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
@@ -122,7 +130,7 @@ final class Database {
         );
       }
 
-      return Database._(handle, readerCount);
+      return Database._(handle, path, readerCount);
     } finally {
       calloc.free(pathNative);
       if (encryptionKey != null) calloc.free(keyNative);
@@ -402,5 +410,71 @@ final class Database {
 
     final writer = await _writer;
     return writer.locked(() => writer.transaction(body));
+  }
+
+  // -------------------------------------------------------------------------
+  // Diagnostics
+  // -------------------------------------------------------------------------
+
+  /// Captures a per-connection diagnostic snapshot.
+  ///
+  /// Aggregates SQLite's `sqlite3_db_status` counters across the writer
+  /// and any idle reader connections, plus a filesystem-level read of
+  /// the `-wal` sidecar. Intended primarily for benchmark instrumentation
+  /// and mobile memory reporting.
+  ///
+  /// ```dart
+  /// final d = await db.diagnostics();
+  /// print('page cache: ${d.sqlitePageCacheBytes} bytes');
+  /// print('WAL size:   ${d.walBytes} bytes');
+  /// ```
+  ///
+  /// If one or more reader connections are busy at snapshot time, their
+  /// byte counters are excluded from the totals and
+  /// [Diagnostics.readersBusyAtSnapshot] is set to `true`. Taking
+  /// snapshots between operations (when no concurrent work is in flight)
+  /// produces clean totals.
+  ///
+  /// See [Diagnostics] for field-level semantics.
+  Future<Diagnostics> diagnostics() async {
+    _ensureOpen();
+
+    // Read the three SQLite counters. Each call returns the aggregate
+    // across writer + idle readers; if any reader was busy, the C
+    // layer has still populated the idle-subset aggregate into the
+    // out pointers. `getDbStatusTotalAllowBusy` surfaces those partial
+    // numbers with a `partial: true` flag instead of discarding them.
+    var readersBusy = false;
+
+    int readCounter(int op) {
+      final r = getDbStatusTotalAllowBusy(_handle, op);
+      if (r.partial) readersBusy = true;
+      return r.current;
+    }
+
+    final pageCache = readCounter(SqliteDbStatusOp.cacheUsed);
+    final schema = readCounter(SqliteDbStatusOp.schemaUsed);
+    final stmt = readCounter(SqliteDbStatusOp.stmtUsed);
+
+    // WAL sidecar — only meaningful for on-disk databases.
+    var walBytes = 0;
+    if (_path != ':memory:' && !_path.startsWith('file::memory:')) {
+      try {
+        walBytes = await File('$_path-wal').length();
+      } on Object {
+        // File may not exist yet (no writes since open, or fresh DB) or
+        // path may be unreadable for some reason. Treat as zero; the
+        // only caller is diagnostics, not a correctness path.
+        walBytes = 0;
+      }
+    }
+
+    return Diagnostics(
+      sqlitePageCacheBytes: pageCache,
+      sqliteSchemaBytes: schema,
+      sqliteStmtBytes: stmt,
+      walBytes: walBytes,
+      readersBusyAtSnapshot: readersBusy,
+    );
   }
 }

@@ -126,6 +126,25 @@ const _trackedPatterns = [
   // the worker-side hash short-circuit path.
   'Unchanged Fanout Throughput',
   'resqlite qps',
+  // Scenario-level trajectories (Track A Phase 1+).
+  'Keyed PK Subscriptions',
+  // Chat Sim emits 4 op-type subsections; pattern matches "Chat Sim"
+  // generically — the generator picks up the first match, which will
+  // be the 'Insert message' op. For the full per-op picture, readers
+  // consult the dashboard scenarios tab.
+  'Chat Sim',
+  // Feed Paging emits 2 subsections; this matches the first one
+  // (Keyset pagination).
+  'Feed Paging',
+  // A11b regression guard for the PR #17 coalescing fix. Matches the
+  // wall-time column for resqlite at 100 streams × 200 writes.
+  'High-Cardinality Stream Fan-out',
+  // A7 bulk insert (opt-in via --include-slow); pattern matches the
+  // bulk-insert subsection specifically.
+  'Sync Burst',
+  // A9 (opt-in via --include-slow); pattern matches the warm-cache
+  // subsection (the first reported variant).
+  'Large Working Set',
 ];
 
 /// Parse experiment entries from the README.md table rows and individual files.

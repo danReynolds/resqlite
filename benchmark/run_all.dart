@@ -4,8 +4,13 @@ import 'dart:math' as math;
 
 import 'shared/parse_results.dart';
 import 'shared/stats.dart' show AggregateStats;
+import 'suites/chat_sim.dart';
 import 'suites/concurrent_reads.dart';
 import 'suites/disjoint_columns.dart';
+import 'suites/feed_paging.dart';
+import 'suites/high_cardinality_fanout.dart';
+import 'suites/keyed_pk_subscriptions.dart';
+import 'suites/large_working_set.dart';
 import 'suites/memory.dart';
 import 'suites/parameterized.dart';
 import 'suites/point_query.dart';
@@ -14,6 +19,7 @@ import 'suites/schema_shapes.dart';
 import 'suites/select_bytes.dart';
 import 'suites/select_maps.dart';
 import 'suites/streaming.dart';
+import 'suites/sync_burst.dart';
 import 'suites/writes.dart';
 
 Future<void> main(List<String> args) async {
@@ -40,7 +46,7 @@ Future<void> main(List<String> args) async {
     if (options.repeatCount > 1) {
       print('--- Repeat ${i + 1}/${options.repeatCount} ---');
     }
-    final markdown = await _runSuiteOnce();
+    final markdown = await _runSuiteOnce(includeSlow: options.includeSlow);
     runMarkdowns.add(markdown);
     runMetrics.add(extractResqliteMedians(markdown));
   }
@@ -231,41 +237,64 @@ void _printHardwareSummary(
       '| ${_ms("Fan-out (10 streams)")} |');
 }
 
-Future<String> _runSuiteOnce() async {
+Future<String> _runSuiteOnce({required bool includeSlow}) async {
   final markdown = StringBuffer();
 
-  print('[1/11] Select → Maps...');
+  print('[1/15] Select → Maps...');
   markdown.write(await runSelectMapsBenchmark());
 
-  print('[2/11] Select → Bytes...');
+  print('[2/15] Select → Bytes...');
   markdown.write(await runSelectBytesBenchmark());
 
-  print('[3/11] Schema Shapes...');
+  print('[3/15] Schema Shapes...');
   markdown.write(await runSchemaShapesBenchmark());
 
-  print('[4/11] Scaling...');
+  print('[4/15] Scaling...');
   markdown.write(await runScalingBenchmark());
 
-  print('[5/11] Concurrent Reads...');
+  print('[5/15] Concurrent Reads...');
   markdown.write(await runConcurrentReadsBenchmark());
 
-  print('[6/11] Point Query...');
+  print('[6/15] Point Query...');
   markdown.write(await runPointQueryBenchmark());
 
-  print('[7/11] Parameterized Queries...');
+  print('[7/15] Parameterized Queries...');
   markdown.write(await runParameterizedBenchmark());
 
-  print('[8/11] Writes...');
+  print('[8/15] Writes...');
   markdown.write(await runWritesBenchmark());
 
-  print('[9/11] Streaming...');
+  print('[9/15] Streaming...');
   markdown.write(await runStreamingBenchmark());
 
-  print('[10/11] Streaming (Column Granularity)...');
+  print('[10/15] Streaming (Column Granularity)...');
   markdown.write(await runDisjointColumnsBenchmark());
 
-  print('[11/11] Memory...');
+  print('[11/15] Keyed PK Subscriptions (A11)...');
+  markdown.write(await runKeyedPkSubscriptionsBenchmark());
+
+  print('[12/15] Chat Sim (A5)...');
+  markdown.write(await runChatSimBenchmark());
+
+  print('[13/15] Feed Paging (A6)...');
+  markdown.write(await runFeedPagingBenchmark());
+
+  print('[14/15] High-Cardinality Stream Fan-out (A11b)...');
+  markdown.write(await runHighCardinalityFanoutBenchmark());
+
+  print('[15/15] Memory...');
   markdown.write(await runMemoryBenchmark());
+
+  // Slow workloads — opt-in via --include-slow because they take
+  // multiple minutes each. Register here so they append to the
+  // standard suite output when enabled.
+  if (includeSlow) {
+    print('[slow 1/2] Sync Burst (A7)...');
+    markdown.write(await runSyncBurstBenchmark());
+
+    print('[slow 2/2] Large Working Set (A9)...');
+    markdown.write(await runLargeWorkingSetBenchmark());
+  }
 
   return markdown.toString();
 }
@@ -276,12 +305,20 @@ final class _RunAllOptions {
     required this.repeatCount,
     required this.compareToPath,
     required this.hardwareSummary,
+    required this.includeSlow,
   });
 
   final String label;
   final int repeatCount;
   final String? compareToPath;
   final bool hardwareSummary;
+
+  /// When true, opt-in "slow" workloads (A7 sync burst, A9 1GB working
+  /// set) run as part of the suite. Default is false because those
+  /// workloads are minutes-scale individually and dominate the default
+  /// run time. Use `--include-slow` to enable them for a comprehensive
+  /// cross-device pass.
+  final bool includeSlow;
 }
 
 _RunAllOptions _parseOptions(List<String> args) {
@@ -289,6 +326,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   var repeatCount = 1;
   String? compareToPath;
   var hardwareSummary = false;
+  var includeSlow = false;
 
   for (final arg in args) {
     if (arg.startsWith('--repeat=')) {
@@ -297,6 +335,8 @@ _RunAllOptions _parseOptions(List<String> args) {
       compareToPath = arg.substring('--compare-to='.length);
     } else if (arg == '--hardware-summary') {
       hardwareSummary = true;
+    } else if (arg == '--include-slow') {
+      includeSlow = true;
     } else if (arg == '--help' || arg == '-h') {
       _printUsageAndExit();
     } else if (!arg.startsWith('--')) {
@@ -315,15 +355,19 @@ _RunAllOptions _parseOptions(List<String> args) {
     repeatCount: repeatCount,
     compareToPath: compareToPath,
     hardwareSummary: hardwareSummary,
+    includeSlow: includeSlow,
   );
 }
 
 void _printUsageAndExit() {
-  print('Usage: dart run benchmark/run_all.dart [label] [--repeat=N] [--compare-to=PATH] [--hardware-summary]');
+  print('Usage: dart run benchmark/run_all.dart [label] [--repeat=N] '
+      '[--compare-to=PATH] [--hardware-summary] [--include-slow]');
   print('');
   print('  --repeat=N           Run the suite N times (default: 1)');
   print('  --compare-to=PATH    Compare against a specific baseline results file');
   print('  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md');
+  print('  --include-slow       Also run multi-minute slow workloads');
+  print('                       (sync burst, 1GB working set)');
   exit(0);
 }
 

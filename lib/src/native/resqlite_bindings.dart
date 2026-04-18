@@ -371,7 +371,59 @@ List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
   return tables;
 }
 
+/// Read a sqlite3_db_status aggregate across the writer and any idle
+/// readers, treating SQLITE_BUSY (reader mid-query) as a partial
+/// snapshot rather than an error.
+///
+/// Returns `(current, highwater, partial)` where `partial` is true when
+/// one or more readers were busy. The C layer populates the aggregate
+/// for the idle subset even when it reports BUSY, so the partial
+/// numbers are meaningful — just under-reported relative to the full
+/// pool. Diagnostic callers should treat `partial == true` as a signal
+/// to take snapshots between operations for clean numbers.
+({int current, int highwater, bool partial}) getDbStatusTotalAllowBusy(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int op, {
+  bool reset = false,
+}) {
+  final outCurrent = calloc<ffi.Int>();
+  final outHighwater = calloc<ffi.Int>();
+  try {
+    final rc = resqliteDbStatusTotal(
+      dbHandle,
+      op,
+      reset ? 1 : 0,
+      outCurrent,
+      outHighwater,
+    );
+    // SQLITE_BUSY (5) is expected when a reader is mid-query. The C
+    // helper has already aggregated the idle-subset totals into the
+    // out pointers; we surface them with a partial flag instead of
+    // dropping them.
+    if (rc != 0 && rc != 5) {
+      throw ResqliteQueryException(
+        'db_status failed: ${resqliteErrmsg(dbHandle).toDartString()} '
+        '(code $rc)',
+        sql: 'sqlite3_db_status($op)',
+        sqliteCode: rc,
+      );
+    }
+    return (
+      current: outCurrent.value,
+      highwater: outHighwater.value,
+      partial: rc == 5,
+    );
+  } finally {
+    calloc.free(outCurrent);
+    calloc.free(outHighwater);
+  }
+}
+
 /// Read a sqlite3_db_status aggregate across the writer and any idle readers.
+///
+/// Throws on any non-SUCCESS return code including SQLITE_BUSY. Callers
+/// that want BUSY-tolerant partial-snapshot semantics should use
+/// [getDbStatusTotalAllowBusy].
 ({int current, int highwater}) getDbStatusTotal(
   ffi.Pointer<ffi.Void> dbHandle,
   int op, {

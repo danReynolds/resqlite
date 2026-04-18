@@ -7,6 +7,13 @@ This folder has two distinct purposes:
 
 The second path is the canonical comparison flow.
 
+## Documentation
+
+- [`METHODOLOGY.md`](./METHODOLOGY.md) — measurement rules, statistical approach, fairness protocol, peer version policy, Definition of Done for new workloads
+- [`SCOPE.md`](./SCOPE.md) — exact peer versions, hardware tested, known gaps, what we test and what we don't
+- [`AUDIT.md`](./AUDIT.md) — how benchmark results propagate from Dart code to the public dashboard (parsers, generators, chart builders)
+- [`HARDWARE_RESULTS.md`](./HARDWARE_RESULTS.md) — device registry pointing at canonical result files per device
+
 ## Local resqlite Suite
 
 From [`packages/resqlite`](/Users/dan/Coding/dune_gemini/packages/resqlite):
