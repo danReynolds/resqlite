@@ -2,13 +2,32 @@
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 
+import '../drift/writes_db.dart';
 import '../shared/config.dart';
+import '../shared/peer.dart';
 import '../shared/stats.dart';
 
 /// Write performance benchmarks: single writes, batch, transactions.
+///
+/// Organized in five sections:
+///   1. Single Inserts — [PeerSet]-based, 4 peers
+///   2. Batch Insert (3 sizes) — [PeerSet]-based, 4 peers
+///   3. Interactive Transaction — hand-rolled, resqlite + sqlite_async
+///   4. Batched Write Inside Transaction — hand-rolled, resqlite
+///      variants + sqlite_async. Guards the [`resqlite_run_batch_nested`]
+///      C entry point.
+///   5. Transaction Read — hand-rolled, resqlite + sqlite_async
+///
+/// Sections 3–5 aren't on [PeerSet] because they exercise interactive
+/// transaction APIs (`tx.execute` / `tx.select` / `tx.executeBatch`
+/// nested inside `db.transaction`) which [BenchmarkPeer] doesn't yet
+/// expose. Extending the peer interface with a `transaction()`
+/// primitive is possible but intentionally out of scope here — would
+/// require each peer to thread the transaction handle through a
+/// uniform shape, and drift/sqlite_async/resqlite semantics diverge
+/// enough that it's its own PR.
 Future<String> runWritesBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Write Performance');
@@ -17,169 +36,111 @@ Future<String> runWritesBenchmark() async {
   final tempDir = await Directory.systemTemp.createTemp('bench_writes_');
   try {
     // -----------------------------------------------------------------
-    // Single inserts
+    // Single inserts — 4 peers via PeerSet
     // -----------------------------------------------------------------
     {
-      final resqliteDb = await resqlite.Database.open('${tempDir.path}/resqlite_single.db');
-      final sqlite3Db = sqlite3.sqlite3.open('${tempDir.path}/sqlite3_single.db');
-      sqlite3Db.execute('PRAGMA journal_mode = WAL');
-      final asyncDb = sqlite_async.SqliteDatabase(path: '${tempDir.path}/async_single.db');
-      await asyncDb.initialize();
-
-      const createSql = 'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
-      const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
-
-      await resqliteDb.execute(createSql);
-      sqlite3Db.execute(createSql);
-      await asyncDb.execute(createSql);
-
-      // Warmup.
-      for (var i = 0; i < defaultWarmup; i++) {
-        await resqliteDb.execute(insertSql, ['warmup', 0.0]);
-        sqlite3Db.execute(insertSql, ['warmup', 0.0]);
-        await asyncDb.execute(insertSql, ['warmup', 0.0]);
-      }
-      await resqliteDb.execute('DELETE FROM t');
-      sqlite3Db.execute('DELETE FROM t');
-      await asyncDb.execute('DELETE FROM t');
-
-      // Benchmark: 100 individual inserts.
-      const insertCount = 100;
-
-      final tResqlite = BenchmarkTiming('resqlite execute()');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
-        for (var i = 0; i < insertCount; i++) {
-          await resqliteDb.execute(insertSql, ['item_$i', i * 1.5]);
-        }
-        sw.stop();
-        tResqlite.recordWallOnly(sw.elapsedMicroseconds);
-        await resqliteDb.execute('DELETE FROM t');
-      }
-
-      final tSqlite3 = BenchmarkTiming('sqlite3 execute()');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
-        for (var i = 0; i < insertCount; i++) {
-          sqlite3Db.execute(insertSql, ['item_$i', i * 1.5]);
-        }
-        sw.stop();
-        tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
-        sqlite3Db.execute('DELETE FROM t');
-      }
-
-      final tAsync = BenchmarkTiming('sqlite_async execute()');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
-        for (var i = 0; i < insertCount; i++) {
-          await asyncDb.execute(insertSql, ['item_$i', i * 1.5]);
-        }
-        sw.stop();
-        tAsync.recordWallOnly(sw.elapsedMicroseconds);
-        await asyncDb.execute('DELETE FROM t');
-      }
-
-      printComparisonTable(
-        '=== Single Inserts ($insertCount sequential) ===',
-        [tResqlite, tSqlite3, tAsync],
+      final subdir = await Directory('${tempDir.path}/single').create();
+      final peers = await PeerSet.open(
+        subdir.path,
+        driftFactory: driftFactoryFor((exec) => WritesDriftDb(exec)),
       );
-      markdown.write(markdownTable(
-        'Single Inserts ($insertCount sequential)',
-        [tResqlite, tSqlite3, tAsync],
-      ));
+      final timings = <BenchmarkTiming>[];
+      try {
+        const createSql =
+            'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
+        const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
+        for (final peer in peers.all) {
+          await peer.execute(createSql);
+        }
 
-      await resqliteDb.close();
-      sqlite3Db.close();
-      await asyncDb.close();
+        const insertCount = 100;
+        for (final peer in peers.all) {
+          // Warmup + clear.
+          for (var i = 0; i < defaultWarmup; i++) {
+            await peer.execute(insertSql, ['warmup', 0.0]);
+          }
+          await peer.execute('DELETE FROM t');
+
+          final t = BenchmarkTiming('${peer.label} execute()');
+          for (var iter = 0; iter < defaultIterations; iter++) {
+            final sw = Stopwatch()..start();
+            for (var i = 0; i < insertCount; i++) {
+              await peer.execute(insertSql, ['item_$i', i * 1.5]);
+            }
+            sw.stop();
+            t.recordWallOnly(sw.elapsedMicroseconds);
+            await peer.execute('DELETE FROM t');
+          }
+          timings.add(t);
+        }
+
+        printComparisonTable(
+          '=== Single Inserts ($insertCount sequential) ===',
+          timings,
+        );
+        markdown.write(markdownTable(
+          'Single Inserts ($insertCount sequential)',
+          timings,
+        ));
+      } finally {
+        await peers.closeAll();
+      }
     }
 
     // -----------------------------------------------------------------
-    // Batch inserts
+    // Batch inserts — 4 peers via PeerSet, 3 batch sizes
     // -----------------------------------------------------------------
     for (final batchSize in [100, 1000, 10000]) {
-      final resqliteDb = await resqlite.Database.open('${tempDir.path}/resqlite_batch_$batchSize.db');
-      final sqlite3Db = sqlite3.sqlite3.open('${tempDir.path}/sqlite3_batch_$batchSize.db');
-      sqlite3Db.execute('PRAGMA journal_mode = WAL');
-      final asyncDb = sqlite_async.SqliteDatabase(path: '${tempDir.path}/async_batch_$batchSize.db');
-      await asyncDb.initialize();
-
-      const createSql = 'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
-      const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
-
-      await resqliteDb.execute(createSql);
-      sqlite3Db.execute(createSql);
-      await asyncDb.execute(createSql);
-
-      final paramSets = [
-        for (var i = 0; i < batchSize; i++) ['item_$i', i * 1.5],
-      ];
-
-      // Warmup.
-      for (var i = 0; i < defaultWarmup; i++) {
-        await resqliteDb.executeBatch(insertSql, paramSets);
-        sqlite3Db.execute('BEGIN');
-        final stmtW = sqlite3Db.prepare(insertSql);
-        for (final ps in paramSets) {
-          stmtW.execute(ps);
-        }
-        stmtW.close();
-        sqlite3Db.execute('COMMIT');
-        await asyncDb.executeBatch(insertSql, paramSets);
-      }
-      await resqliteDb.execute('DELETE FROM t');
-      sqlite3Db.execute('DELETE FROM t');
-      await asyncDb.execute('DELETE FROM t');
-
-      final tResqlite = BenchmarkTiming('resqlite executeBatch()');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final swWall = Stopwatch()..start();
-        await resqliteDb.executeBatch(insertSql, paramSets);
-        final swMain = Stopwatch()..start();
-        swMain.stop();
-        swWall.stop();
-        tResqlite.record(
-          wallMicroseconds: swWall.elapsedMicroseconds,
-          mainMicroseconds: swMain.elapsedMicroseconds,
-        );
-        await resqliteDb.execute('DELETE FROM t');
-      }
-
-      final tSqlite3 = BenchmarkTiming('sqlite3 (manual tx + stmt)');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
-        sqlite3Db.execute('BEGIN');
-        final stmt = sqlite3Db.prepare(insertSql);
-        for (final ps in paramSets) {
-          stmt.execute(ps);
-        }
-        stmt.close();
-        sqlite3Db.execute('COMMIT');
-        sw.stop();
-        tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
-        sqlite3Db.execute('DELETE FROM t');
-      }
-
-      final tAsync = BenchmarkTiming('sqlite_async executeBatch()');
-      for (var iter = 0; iter < defaultIterations; iter++) {
-        final sw = Stopwatch()..start();
-        await asyncDb.executeBatch(insertSql, paramSets);
-        sw.stop();
-        tAsync.recordWallOnly(sw.elapsedMicroseconds);
-        await asyncDb.execute('DELETE FROM t');
-      }
-
-      printComparisonTable(
-        '=== Batch Insert ($batchSize rows) ===',
-        [tResqlite, tSqlite3, tAsync],
+      final subdir =
+          await Directory('${tempDir.path}/batch_$batchSize').create();
+      final peers = await PeerSet.open(
+        subdir.path,
+        driftFactory: driftFactoryFor((exec) => WritesDriftDb(exec)),
       );
-      markdown.write(markdownTable(
-        'Batch Insert ($batchSize rows)',
-        [tResqlite, tSqlite3, tAsync],
-      ));
+      final timings = <BenchmarkTiming>[];
+      try {
+        const createSql =
+            'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
+        const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
+        for (final peer in peers.all) {
+          await peer.execute(createSql);
+        }
+        final paramSets = [
+          for (var i = 0; i < batchSize; i++) ['item_$i', i * 1.5],
+        ];
 
-      await resqliteDb.close();
-      sqlite3Db.close();
-      await asyncDb.close();
+        for (final peer in peers.all) {
+          // Warmup + clear.
+          for (var i = 0; i < defaultWarmup; i++) {
+            await peer.executeBatch(insertSql, paramSets);
+          }
+          await peer.execute('DELETE FROM t');
+
+          final t = BenchmarkTiming('${peer.label} executeBatch()');
+          for (var iter = 0; iter < defaultIterations; iter++) {
+            final swWall = Stopwatch()..start();
+            await peer.executeBatch(insertSql, paramSets);
+            swWall.stop();
+            // Main-isolate time for batch is near-zero on async peers
+            // (dispatch-only); identical to wall on the sync peer. We
+            // record wall-only — finer split isn't meaningful here.
+            t.recordWallOnly(swWall.elapsedMicroseconds);
+            await peer.execute('DELETE FROM t');
+          }
+          timings.add(t);
+        }
+
+        printComparisonTable(
+          '=== Batch Insert ($batchSize rows) ===',
+          timings,
+        );
+        markdown.write(markdownTable(
+          'Batch Insert ($batchSize rows)',
+          timings,
+        ));
+      } finally {
+        await peers.closeAll();
+      }
     }
 
     // -----------------------------------------------------------------

@@ -20,6 +20,35 @@ Pins live in `pubspec.yaml`. Upgrading a peer is a deliberate PR with
 before/after benchmark runs attached — see
 [METHODOLOGY.md § Peer versions and upgrade policy](./METHODOLOGY.md#peer-versions-and-upgrade-policy).
 
+### PRAGMA normalization across peers
+
+All four peers are configured to run in the same durability regime for
+fair cross-library writes:
+
+- **journal_mode = WAL**
+- **synchronous = NORMAL** (WAL-mode recommended default)
+
+How each peer gets there:
+
+| Peer | Journal mode | Synchronous | How |
+|---|---|---|---|
+| resqlite | WAL | NORMAL | Baked in via `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1` compile flag (see `native/resqlite.c`). Automatic for any WAL connection. |
+| sqlite_async | WAL | NORMAL | Default values on `SqliteOptions`. No per-benchmark tuning needed. |
+| sqlite3.dart | WAL | NORMAL | Explicit `PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL` in `Sqlite3Peer.open`. |
+| drift | WAL | NORMAL | Explicit `PRAGMA` calls in the drift-isolate `setup:` callback (`driftFactoryFor` in `benchmark/shared/peer.dart`). |
+
+Why this matters: without explicit normalization, sqlite3 and drift
+would run at `synchronous = FULL` (SQLite's out-of-the-box default,
+which fsyncs on every commit), while resqlite and sqlite_async would
+run at `NORMAL` (fsync only on WAL checkpoint). That would silently
+favor the latter two by roughly 2–3× on small-write workloads — a
+measurement of fsync policy rather than library overhead.
+
+Both `NORMAL` and `FULL` are durable + crash-safe in WAL mode (the
+SQLite team explicitly recommends `NORMAL` for WAL). Normalizing to
+`NORMAL` reflects what a sophisticated user would configure for any
+of these libraries.
+
 ### Drift-specific setup
 
 Drift is codegen-backed, but we use it via `customSelect` + `customUpdate`
@@ -44,6 +73,42 @@ needs for invalidation to work correctly.
   verifies streams actually emit on INSERT/UPDATE/DELETE/batch/INSERT
   OR REPLACE, so schema/SQL changes that break invalidation surface as
   test failures, not as silently-fast benchmark numbers.
+
+### Coverage: which benchmarks include drift
+
+Drift participates in **all 7 scenario workloads** and **most
+microbenchmarks** (select, scaling, schema shapes, point query,
+parameterized queries, concurrent reads, single inserts, batch
+inserts, memory — select + batch insert subworkloads).
+
+Drift does **not** participate in:
+
+- **`streaming.dart`** — exercises resqlite's streaming engine
+  internals (authorizer hook-based table tracking, hash-suppressed
+  re-emission, worker-side result hashing, stream churn via
+  subscribe/cancel cycles). Drift's streaming is a different
+  architecture (callback-based `notifyUpdates`), and the same
+  benchmarks against drift would measure different internal properties
+  — not an apples-to-apples comparison. The cross-library streaming
+  story lives in the scenario benchmarks instead (Column-Disjoint,
+  Keyed PK, High-Card Fan-out, Reactive Feed).
+- **Memory / streaming fan-out subworkload** — same reason; streaming
+  memory is a resqlite-engine-specific measurement.
+- **Writes / Interactive Transaction + Batched Write Inside Transaction
+  + Transaction Read** — exercise interactive transaction APIs
+  (`tx.execute`/`tx.select`/`tx.executeBatch` nested inside
+  `db.transaction`) which `BenchmarkPeer` doesn't yet expose as a
+  uniform primitive. Extending the peer interface with a
+  `transaction()` shape is possible but requires reconciling
+  drift/sqlite_async/resqlite txn semantics — its own follow-up
+  change. Single Inserts and Batch Insert (the simple write paths)
+  include drift.
+- **Parameterized queries' `sqlite3 (no cache)` vs `(cached stmt)`
+  variants** — those two rows specifically illustrate the cost of
+  not caching prepared statements; drift and resqlite both cache
+  automatically, so their sqlite3 counterpart is only one row per
+  library. The two hand-rolled sqlite3 variants remain as they show
+  latent costs the higher-level peers hide.
 
 ## Peers we do NOT compare against
 

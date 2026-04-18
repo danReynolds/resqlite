@@ -5,9 +5,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 
+import '../drift/micro_items_db.dart';
+import '../shared/peer.dart';
 import '../shared/seeder.dart';
 import '../shared/stats.dart';
 
@@ -140,38 +141,24 @@ const _largeRowCount = 10000;
 Future<void> _workloadMapsSelect(StringBuffer md) async {
   final dir = await Directory.systemTemp.createTemp('bench_mem_maps_');
   try {
-    final resqliteDb = await resqlite.Database.open('${dir.path}/resqlite.db');
-    await seedResqlite(resqliteDb, _largeRowCount);
-    final sqlite3Db = sqlite3.sqlite3.open('${dir.path}/sqlite3.db');
-    sqlite3Db.execute('PRAGMA journal_mode = WAL');
-    seedSqlite3(sqlite3Db, _largeRowCount);
-    final asyncDb = sqlite_async.SqliteDatabase(path: '${dir.path}/async.db');
-    await asyncDb.initialize();
-    await seedSqliteAsync(asyncDb, _largeRowCount);
-
+    final peers = await PeerSet.open(
+      dir.path,
+      driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+    );
     final byLib = <String, _MemStats>{};
-
-    byLib['resqlite select()'] = await _repeatedMeasure(() async {
-      final r = await resqliteDb.select(standardSelectSql);
-      _touchRows(r);
-    });
-
-    byLib['sqlite3 select()'] = await _repeatedMeasure(() async {
-      final stmt = sqlite3Db.prepare(standardSelectSql);
-      final rows = stmt.select();
-      _touchSqlite3Rows(rows);
-      stmt.close();
-    });
-
-    byLib['sqlite_async getAll()'] = await _repeatedMeasure(() async {
-      final r = await asyncDb.getAll(standardSelectSql);
-      _touchSqlite3Rows(r);
-    });
-
-    await resqliteDb.close();
-    sqlite3Db.close();
-    await asyncDb.close();
-
+    try {
+      for (final peer in peers.all) {
+        await seedPeer(peer, _largeRowCount);
+      }
+      for (final peer in peers.all) {
+        byLib['${peer.label} select()'] = await _repeatedMeasure(() async {
+          final r = await peer.select(standardSelectSql);
+          _touchRows(r);
+        });
+      }
+    } finally {
+      await peers.closeAll();
+    }
     _writeSubsection(md, 'Select 10k rows → Maps', byLib);
   } finally {
     await dir.delete(recursive: true);
@@ -181,39 +168,48 @@ Future<void> _workloadMapsSelect(StringBuffer md) async {
 Future<void> _workloadBytesSelect(StringBuffer md) async {
   final dir = await Directory.systemTemp.createTemp('bench_mem_bytes_');
   try {
-    final resqliteDb = await resqlite.Database.open('${dir.path}/resqlite.db');
-    await seedResqlite(resqliteDb, _largeRowCount);
-    final sqlite3Db = sqlite3.sqlite3.open('${dir.path}/sqlite3.db');
-    sqlite3Db.execute('PRAGMA journal_mode = WAL');
-    seedSqlite3(sqlite3Db, _largeRowCount);
-    final asyncDb = sqlite_async.SqliteDatabase(path: '${dir.path}/async.db');
-    await asyncDb.initialize();
-    await seedSqliteAsync(asyncDb, _largeRowCount);
-
     final byLib = <String, _MemStats>{};
 
-    byLib['resqlite selectBytes()'] = await _repeatedMeasure(() async {
-      final b = await resqliteDb.selectBytes(standardSelectSql);
-      _touchBytes(b);
-    });
+    // resqlite native selectBytes() path (the feature being showcased).
+    // Kept separate from the PeerSet loop because no other peer offers
+    // an equivalent — they all go through the select + jsonEncode path
+    // below, including resqlite (reported as "resqlite + jsonEncode").
+    final resqliteDb = await resqlite.Database.open(
+      '${dir.path}/resqlite_native.db',
+    );
+    try {
+      await seedResqlite(resqliteDb, _largeRowCount);
+      byLib['resqlite selectBytes()'] = await _repeatedMeasure(() async {
+        final b = await resqliteDb.selectBytes(standardSelectSql);
+        _touchBytes(b);
+      });
+    } finally {
+      await resqliteDb.close();
+    }
 
-    byLib['sqlite3 + jsonEncode'] = await _repeatedMeasure(() async {
-      final stmt = sqlite3Db.prepare(standardSelectSql);
-      final rows = stmt.select();
-      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(rows)));
-      _touchBytes(bytes);
-      stmt.close();
-    });
-
-    byLib['sqlite_async + jsonEncode'] = await _repeatedMeasure(() async {
-      final r = await asyncDb.getAll(standardSelectSql);
-      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(r)));
-      _touchBytes(bytes);
-    });
-
-    await resqliteDb.close();
-    sqlite3Db.close();
-    await asyncDb.close();
+    // Peer path: select() + utf8.encode(jsonEncode(...)). Every peer
+    // (including drift) goes through this, so readers see the full
+    // cross-library picture for the path everyone has to run.
+    final peersSubdir = await Directory('${dir.path}/peers').create();
+    final peers = await PeerSet.open(
+      peersSubdir.path,
+      driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+    );
+    try {
+      for (final peer in peers.all) {
+        await seedPeer(peer, _largeRowCount);
+      }
+      for (final peer in peers.all) {
+        byLib['${peer.label} + jsonEncode'] =
+            await _repeatedMeasure(() async {
+          final r = await peer.select(standardSelectSql);
+          final bytes = Uint8List.fromList(utf8.encode(jsonEncode(r)));
+          _touchBytes(bytes);
+        });
+      }
+    } finally {
+      await peers.closeAll();
+    }
 
     _writeSubsection(md, 'Select 10k rows → JSON Bytes', byLib);
   } finally {
@@ -222,65 +218,102 @@ Future<void> _workloadBytesSelect(StringBuffer md) async {
 }
 
 Future<void> _workloadBatchInsert(StringBuffer md) async {
+  final dir =
+      await Directory.systemTemp.createTemp('bench_mem_batch_insert_');
   final byLib = <String, _MemStats>{};
-
-  {
-    final dir = await Directory.systemTemp.createTemp('bench_mem_ins_r_');
-    try {
-      byLib['resqlite executeBatch()'] = await _repeatedMeasure(() async {
-        final db =
-            await resqlite.Database.open('${dir.path}/resqlite_${_uid()}.db');
-        await db.execute(standardCreateSql);
-        await db.executeBatch(standardInsertSql, [
-          for (var i = 0; i < _largeRowCount; i++) standardRow(i),
-        ]);
-        await db.close();
-      });
-    } finally {
-      await dir.delete(recursive: true);
-    }
-  }
-
-  {
-    final dir = await Directory.systemTemp.createTemp('bench_mem_ins_s3_');
-    try {
-      byLib['sqlite3 prepared stmt'] = await _repeatedMeasure(() async {
-        final db = sqlite3.sqlite3.open('${dir.path}/sqlite3_${_uid()}.db');
-        db.execute('PRAGMA journal_mode = WAL');
-        db.execute(standardCreateSql);
-        final stmt = db.prepare(standardInsertSql);
-        db.execute('BEGIN');
-        for (var i = 0; i < _largeRowCount; i++) {
-          stmt.execute(standardRow(i));
+  try {
+    // The RSS measurement opens a fresh DB per iteration so we observe
+    // per-burst allocation churn, not steady-state. Using the peer
+    // set's fixed db files would reuse the same file across all
+    // iterations, collapsing the measurement. Instead, we open a new
+    // peer set per outer iteration with a unique subdir.
+    //
+    // The per-peer label matches the prior "executeBatch()" naming
+    // convention so history-comparison aligns; sqlite3 keeps its
+    // "prepared stmt" label because its peer path doesn't go through
+    // executeBatch on the BenchmarkPeer interface.
+    Future<_MemStats> measurePeer(String label,
+        Future<void> Function(String path) body) async {
+      return _repeatedMeasure(() async {
+        final iterDir =
+            await Directory('${dir.path}/${_uid()}').create(recursive: true);
+        try {
+          await body(iterDir.path);
+        } finally {
+          await iterDir.delete(recursive: true);
         }
-        db.execute('COMMIT');
-        stmt.close();
-        db.close();
       });
-    } finally {
-      await dir.delete(recursive: true);
     }
-  }
 
-  {
-    final dir = await Directory.systemTemp.createTemp('bench_mem_ins_a_');
-    try {
-      byLib['sqlite_async executeBatch()'] = await _repeatedMeasure(() async {
-        final db = sqlite_async.SqliteDatabase(
-          path: '${dir.path}/async_${_uid()}.db',
+    byLib['resqlite executeBatch()'] = await measurePeer(
+      'resqlite executeBatch()',
+      (path) async {
+        final peers = await PeerSet.open(
+          path,
+          driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+          require: (p) => p.name == 'resqlite',
         );
-        await db.initialize();
-        await db.execute(standardCreateSql);
-        await db.executeBatch(standardInsertSql, [
-          for (var i = 0; i < _largeRowCount; i++) standardRow(i),
-        ]);
-        await db.close();
-      });
-    } finally {
-      await dir.delete(recursive: true);
-    }
+        try {
+          for (final peer in peers.all) {
+            await seedPeer(peer, _largeRowCount);
+          }
+        } finally {
+          await peers.closeAll();
+        }
+      },
+    );
+    byLib['sqlite3 executeBatch()'] = await measurePeer(
+      'sqlite3 executeBatch()',
+      (path) async {
+        final peers = await PeerSet.open(
+          path,
+          require: (p) => p.name == 'sqlite3',
+        );
+        try {
+          for (final peer in peers.all) {
+            await seedPeer(peer, _largeRowCount);
+          }
+        } finally {
+          await peers.closeAll();
+        }
+      },
+    );
+    byLib['sqlite_async executeBatch()'] = await measurePeer(
+      'sqlite_async executeBatch()',
+      (path) async {
+        final peers = await PeerSet.open(
+          path,
+          require: (p) => p.name == 'sqlite_async',
+        );
+        try {
+          for (final peer in peers.all) {
+            await seedPeer(peer, _largeRowCount);
+          }
+        } finally {
+          await peers.closeAll();
+        }
+      },
+    );
+    byLib['drift batch()'] = await measurePeer(
+      'drift batch()',
+      (path) async {
+        final peers = await PeerSet.open(
+          path,
+          driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+          require: (p) => p.name == 'drift',
+        );
+        try {
+          for (final peer in peers.all) {
+            await seedPeer(peer, _largeRowCount);
+          }
+        } finally {
+          await peers.closeAll();
+        }
+      },
+    );
+  } finally {
+    await dir.delete(recursive: true);
   }
-
   _writeSubsection(md, 'Batch insert 10k rows', byLib);
 }
 
@@ -456,14 +489,6 @@ Future<void> _drainUntilIdle(
 }
 
 void _touchRows(List<Map<String, Object?>> rows) {
-  for (final row in rows) {
-    for (final key in row.keys) {
-      row[key];
-    }
-  }
-}
-
-void _touchSqlite3Rows(Iterable<Map<String, dynamic>> rows) {
   for (final row in rows) {
     for (final key in row.keys) {
       row[key];

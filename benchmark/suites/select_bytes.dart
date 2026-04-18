@@ -3,19 +3,42 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 
+import '../drift/micro_items_db.dart';
 import '../shared/config.dart';
+import '../shared/peer.dart';
 import '../shared/seeder.dart';
 import '../shared/stats.dart';
 
 /// Bytes benchmark: query → JSON bytes (for HTTP response).
+///
+/// resqlite's `selectBytes()` is a native-side-encoded, zero-copy path
+/// that returns `Uint8List` without materializing Dart maps. Other peers
+/// don't have this API — a drift/sqlite3/sqlite_async user gets bytes
+/// by calling `select()` + `utf8.encode(jsonEncode(...))` on the main
+/// isolate. To be fair, we report both:
+///
+///   * one dedicated row for resqlite's native `selectBytes()` (the
+///     feature being showcased)
+///   * one row per peer for the idiomatic "select + encode" path,
+///     including resqlite itself so readers can see the delta between
+///     its two options
+///
+/// That gives 4 peers' select+encode costs side-by-side (fair comparison
+/// of the path everyone has to run) plus resqlite's native fast path as
+/// a separate data point.
 Future<String> runSelectBytesBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Select → JSON Bytes');
   markdown.writeln('');
-  markdown.writeln('Query result serialized to JSON-encoded `Uint8List` for HTTP response.');
+  markdown.writeln(
+    'Query result serialized to JSON-encoded `Uint8List` for HTTP response. '
+    'resqlite\'s `selectBytes()` encodes natively on the worker isolate (zero-copy '
+    'transfer to main); other peers and resqlite\'s own `select()` path go through '
+    '`jsonEncode + utf8.encode` on the main isolate. Both numbers are reported '
+    'per peer for the select+encode path; resqlite also reports its native '
+    'selectBytes path as a separate row.',
+  );
   markdown.writeln('');
 
   for (final rowCount in standardRowCounts) {
@@ -36,92 +59,82 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   String dir,
   int rowCount,
 ) async {
-  final resqliteDb = await resqlite.Database.open('$dir/resqlite.db');
-  final sqlite3Db = sqlite3.sqlite3.open('$dir/sqlite3.db');
-  sqlite3Db.execute('PRAGMA journal_mode = WAL');
-  final asyncDb = sqlite_async.SqliteDatabase(path: '$dir/async.db');
-  await asyncDb.initialize();
+  final timings = <BenchmarkTiming>[];
 
-  await seedResqlite(resqliteDb, rowCount);
-  seedSqlite3(sqlite3Db, rowCount);
-  await seedSqliteAsync(asyncDb, rowCount);
+  // --- Peer path: select() + utf8.encode(jsonEncode(...)) -------------
+  final peers = await PeerSet.open(
+    dir,
+    driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+  );
+  try {
+    for (final peer in peers.all) {
+      await seedPeer(peer, rowCount);
+    }
 
-  const sql = standardSelectSql;
-
-  // --- resqlite selectBytes() ---
-  final tResqlite = BenchmarkTiming('resqlite selectBytes()');
-  for (var i = 0; i < defaultWarmup; i++) {
-    await resqliteDb.selectBytes(sql);
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final swMain = Stopwatch();
-    final swWall = Stopwatch()..start();
-    swMain.start();
-    final future = resqliteDb.selectBytes(sql); // sync dispatch on main
-    swMain.stop();
-    final bytes = await future; // isolate work; main is idle
-    swMain.start();
-    bytes.length; // post-await resume
-    swMain.stop();
-    swWall.stop();
-    tResqlite.record(
-      wallMicroseconds: swWall.elapsedMicroseconds,
-      mainMicroseconds: swMain.elapsedMicroseconds,
-    );
-  }
-
-  // --- sqlite3 + jsonEncode ---
-  final tSqlite3 = BenchmarkTiming('sqlite3 + jsonEncode');
-  for (var i = 0; i < defaultWarmup; i++) {
-    final stmt = sqlite3Db.prepare(sql);
-    utf8.encode(jsonEncode(
-      stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
-    ));
-    stmt.close();
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final sw = Stopwatch()..start();
-    final stmt = sqlite3Db.prepare(sql);
-    utf8.encode(jsonEncode(
-      stmt.select().map((r) => Map<String, Object?>.from(r)).toList(),
-    ));
-    stmt.close();
-    sw.stop();
-    tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
+    for (final peer in peers.all) {
+      final t = BenchmarkTiming('${peer.label} + jsonEncode');
+      for (var i = 0; i < defaultWarmup; i++) {
+        final r = await peer.select(standardSelectSql);
+        utf8.encode(jsonEncode(r));
+      }
+      for (var i = 0; i < defaultIterations; i++) {
+        final swMain = Stopwatch();
+        final swWall = Stopwatch()..start();
+        swMain.start();
+        final future = peer.select(standardSelectSql);
+        swMain.stop();
+        final r = await future;
+        swMain.start();
+        utf8.encode(jsonEncode(r));
+        swMain.stop();
+        swWall.stop();
+        if (peer.isSynchronous) {
+          t.recordWallOnly(swWall.elapsedMicroseconds);
+        } else {
+          t.record(
+            wallMicroseconds: swWall.elapsedMicroseconds,
+            mainMicroseconds: swMain.elapsedMicroseconds,
+          );
+        }
+      }
+      timings.add(t);
+    }
+  } finally {
+    await peers.closeAll();
   }
 
-  // --- sqlite_async + jsonEncode ---
-  final tAsync = BenchmarkTiming('sqlite_async + jsonEncode');
-  for (var i = 0; i < defaultWarmup; i++) {
-    final r = await asyncDb.getAll(sql);
-    utf8.encode(jsonEncode(
-      r.map((row) => Map<String, Object?>.from(row)).toList(),
-    ));
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final swMain = Stopwatch();
-    final swWall = Stopwatch()..start();
-    swMain.start();
-    final future = asyncDb.getAll(sql);
-    swMain.stop();
-    final r = await future;
-    swMain.start();
-    utf8.encode(jsonEncode(
-      r.map((row) => Map<String, Object?>.from(row)).toList(),
-    ));
-    swMain.stop();
-    swWall.stop();
-    tAsync.record(
-      wallMicroseconds: swWall.elapsedMicroseconds,
-      mainMicroseconds: swMain.elapsedMicroseconds,
-    );
+  // --- resqlite native selectBytes() ----------------------------------
+  // Uses a dedicated db file to avoid any interference with the peer-set
+  // cleanup above.
+  final resqliteDb = await resqlite.Database.open('$dir/resqlite_bytes.db');
+  try {
+    await seedResqlite(resqliteDb, rowCount);
+    final t = BenchmarkTiming('resqlite selectBytes()');
+    for (var i = 0; i < defaultWarmup; i++) {
+      await resqliteDb.selectBytes(standardSelectSql);
+    }
+    for (var i = 0; i < defaultIterations; i++) {
+      final swMain = Stopwatch();
+      final swWall = Stopwatch()..start();
+      swMain.start();
+      final future = resqliteDb.selectBytes(standardSelectSql);
+      swMain.stop();
+      final bytes = await future;
+      swMain.start();
+      bytes.length; // post-await resume
+      swMain.stop();
+      swWall.stop();
+      t.record(
+        wallMicroseconds: swWall.elapsedMicroseconds,
+        mainMicroseconds: swMain.elapsedMicroseconds,
+      );
+    }
+    timings.add(t);
+  } finally {
+    await resqliteDb.close();
   }
 
-  await resqliteDb.close();
-  sqlite3Db.close();
-  await asyncDb.close();
-
-  return [tResqlite, tSqlite3, tAsync];
+  return timings;
 }
 
 Future<void> main() async {

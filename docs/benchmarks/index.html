@@ -1166,23 +1166,55 @@ function buildSingleBar(B, titleMatch, canvasId) {
   }));
 }
 
-// Concurrent reads — special format with concurrency as labels.
-// Only meaningful in peer mode because its data schema is unique (numeric concurrency
-// levels as "library", paired resqlite/async columns).
+// Concurrent reads — new format (one subsection per concurrency level,
+// standard per-peer rows inside each). Builds a line chart across
+// concurrency levels with one series per peer.
+//
+// Prior implementation expected a single "Concurrent Reads" section
+// with entries keyed by numeric concurrency level and paired-peer
+// columns. That format didn't scale to a 4th peer (drift); the suite
+// now emits the standard per-subsection shape used by every other
+// scenario, so we read it like any other grouped-bar workload.
 function buildConcurrent(B, canvasId) {
   if (currentMode !== 'peer') { renderEmptyCanvas(canvasId); return; }
-  const sec = B.find(s => s.key?.includes('Concurrent Reads'));
-  if (!sec) { renderEmptyCanvas(canvasId); return; }
-  // Entries have library="1","2","4","8" with values=[resqlite_wall, resqlite_per, async_wall, async_per]
-  const labels = sec.entries.map(e => e.library + '\u00d7');
-  const resqliteData = sec.entries.map(e => e.values[0]);
-  const asyncData = sec.entries.map(e => e.values[2]);
+  const sections = B
+      .filter(s => s.title?.includes('Concurrent Reads') && s.subtitle)
+      // Subtitle shape: "Nx concurrency" (the literal x character). Parse
+      // the leading number so the x-axis is numerically ordered rather
+      // than alphabetically (1, 2, 4, 8 vs 1, 2, 4, 8 — same here but
+      // defensive if sizes change).
+      .map(s => ({ sec: s, concurrency: parseInt(s.subtitle, 10) }))
+      .filter(x => !isNaN(x.concurrency))
+      .sort((a, b) => a.concurrency - b.concurrency);
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
+  const labels = sections.map(x => x.concurrency + '\u00d7');
+
+  // Collect wall-time values per peer across all concurrency levels.
+  const libs = {};
+  for (const { sec } of sections) {
+    for (const entry of sec.entries) {
+      const meta = seriesMeta(entry.library, currentMode);
+      if (!libs[meta.short]) libs[meta.short] = { data: [], color: meta.color };
+    }
+  }
+  for (const { sec } of sections) {
+    const byName = {};
+    for (const entry of sec.entries) {
+      byName[seriesMeta(entry.library, currentMode).short] = entry.values[0];
+    }
+    for (const name of Object.keys(libs)) {
+      libs[name].data.push(byName[name] ?? null);
+    }
+  }
+
+  const datasets = Object.entries(libs).map(([name, d]) => ({
+    label: name, data: d.data,
+    borderColor: d.color, backgroundColor: d.color + '33',
+    tension: 0.3, pointRadius: 5, fill: true, spanGaps: true,
+  }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'line',
-    data: { labels, datasets: [
-      { label: 'resqlite', data: resqliteData, borderColor: C.resqlite, backgroundColor: C.resqlite + '33', tension: 0.3, pointRadius: 5, fill: true },
-      { label: 'sqlite_async', data: asyncData, borderColor: C.async, backgroundColor: C.async + '33', tension: 0.3, pointRadius: 5, fill: true },
-    ]},
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },

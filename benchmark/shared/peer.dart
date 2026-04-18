@@ -202,8 +202,21 @@ final class Sqlite3Peer implements BenchmarkPeer {
   @override
   Future<void> open(String path) async {
     final db = sqlite3.sqlite3.open(path);
-    // Match resqlite's default mode for fair comparison.
+    // Normalize PRAGMAs across peers for fair cross-library comparison.
+    // See benchmark/SCOPE.md § "PRAGMA normalization across peers" — all
+    // four peers run at WAL + synchronous=NORMAL:
+    //   * resqlite: baked in via SQLITE_DEFAULT_WAL_SYNCHRONOUS=1
+    //     compile flag (native/resqlite.c), automatic for WAL connections
+    //   * sqlite_async: default via SqliteOptions
+    //     (synchronous: SqliteSynchronous.normal)
+    //   * sqlite3.dart: explicit PRAGMA here
+    //   * drift: explicit PRAGMA in driftFactoryFor's setup callback
+    // Without this normalization, sqlite3 and drift would pay an extra
+    // fsync per commit vs resqlite and sqlite_async, making small-write
+    // comparisons a measurement of fsync policy rather than of
+    // library overhead.
     db.execute('PRAGMA journal_mode = WAL');
+    db.execute('PRAGMA synchronous = NORMAL');
     _db = db;
   }
 
@@ -351,22 +364,23 @@ typedef DriftDbFactory = drift.GeneratedDatabase Function(String path);
 
 /// Adapter for [`drift`](https://pub.dev/packages/drift) v2.x.
 ///
-/// Benchmarks drift idiomatically — via its reactive APIs on top of the
-/// codegen-produced database class. Uses `customSelect` / `customUpdate`
-/// / `customInsert` with explicit `readsFrom` and auto-extracted `updates`
-/// sets, which:
-///   1. Keeps this adapter generic (one class handles every scenario).
-///   2. Preserves drift's invalidation semantics — streams do invalidate
-///      on relevant writes, as they would for a user-written drift app.
-///   3. Matches the performance characteristics of `customSelect` drift
-///      usage, which is widely used in the drift community for queries
-///      that don't fit the DSL (raw SQL is faster at call time than the
-///      DSL path because it bypasses query-planning overhead).
+/// Benchmarks drift idiomatically via the codegen-produced database
+/// class. Uses `customSelect` / `customUpdate` / `customInsert` with
+/// explicit `readsFrom` and auto-extracted `updates` sets — both raw
+/// and DSL paths end up running the same prepared SQL at runtime, and
+/// `customSelect` is the documented drift-community path for queries
+/// that would be awkward to express via the DSL. Choosing it here is
+/// about keeping the adapter generic (one class handles every scenario
+/// without per-scenario DSL code), not about a performance advantage
+/// over the DSL.
 ///
-/// Drift's `customStatement` is explicitly NOT used — it doesn't notify
-/// the `StreamQueryStore`, which would silently break every reactive
-/// benchmark. See `test/benchmark_drift_peer_test.dart` for the
-/// regression guard.
+/// Preserves drift's invalidation semantics: streams invalidate on
+/// relevant writes exactly as they would for a user-written drift app.
+///
+/// `customStatement` is explicitly NOT used for writes — it skips
+/// `StreamQueryStore` notification, which would silently break every
+/// reactive benchmark. See `test/benchmark_drift_peer_test.dart` for
+/// the regression guard.
 final class DriftPeer implements BenchmarkPeer {
   DriftPeer(this._factory);
 
@@ -397,11 +411,10 @@ final class DriftPeer implements BenchmarkPeer {
   @override
   Future<void> open(String path) async {
     _db = _factory(path);
-    // Match resqlite/sqlite_async: WAL mode, same PRAGMAs as the sqlite3
-    // peer. Drift's `customStatement` doesn't notify streams — that's
-    // fine for PRAGMAs (they don't modify user tables), so we use it
-    // here rather than `customUpdate`.
-    await _db!.customStatement('PRAGMA journal_mode = WAL');
+    // PRAGMAs run inside the drift isolate's `setup:` callback (see
+    // `driftFactoryFor`) so they're applied before the migrator opens
+    // the database. No need to re-apply here — doing so would just add
+    // an isolate round-trip for no effect.
 
     // Build the table lookup from the db's registered table set. Drift
     // exposes this via `allTables` on `GeneratedDatabase`. Keys are the
@@ -601,10 +614,17 @@ DriftDbFactory driftFactoryFor(
   return (String path) => dbCtor(
         drift_native.NativeDatabase.createInBackground(
           File(path),
-          // Match the other peers' open-time PRAGMAs. Drift's `setup`
-          // runs once when the background isolate opens the db file.
+          // Drift's `setup:` runs once when the background isolate opens
+          // the db, before any migrator or app query — the idiomatic
+          // place to configure PRAGMAs.
+          //
+          // Normalize to match other peers: WAL mode + synchronous=NORMAL.
+          // See benchmark/SCOPE.md § "PRAGMA normalization across peers"
+          // and the comment on `Sqlite3Peer.open` for why this matters
+          // for cross-library fairness.
           setup: (rawDb) {
             rawDb.execute('PRAGMA journal_mode = WAL');
+            rawDb.execute('PRAGMA synchronous = NORMAL');
           },
         ),
       );
@@ -662,6 +682,14 @@ final class PeerSet {
     bool Function(BenchmarkPeer peer)? require,
     DriftDbFactory? driftFactory,
   }) async {
+    // Create the target directory if it's missing — scenarios that
+    // pass a nested subdir path (e.g. `$tempDir/single`) otherwise trip
+    // over a peer.open() that can't write its db file into a
+    // non-existent parent.
+    final tempDir = Directory(tempDirPath);
+    if (!tempDir.existsSync()) {
+      await tempDir.create(recursive: true);
+    }
     final candidates = <BenchmarkPeer>[
       ResqlitePeer(),
       Sqlite3Peer(),

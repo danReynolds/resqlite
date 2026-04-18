@@ -1,11 +1,9 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
 
-import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
-
+import '../drift/micro_items_db.dart';
 import '../shared/config.dart';
+import '../shared/peer.dart';
 import '../shared/seeder.dart';
 import '../shared/stats.dart';
 
@@ -35,99 +33,56 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   String dir,
   int rowCount,
 ) async {
-  // --- Open databases ---
-  final resqliteDb = await resqlite.Database.open('$dir/resqlite.db');
-  final sqlite3Db = sqlite3.sqlite3.open('$dir/sqlite3.db');
-  sqlite3Db.execute('PRAGMA journal_mode = WAL');
-  final asyncDb = sqlite_async.SqliteDatabase(path: '$dir/async.db');
-  await asyncDb.initialize();
+  final peers = await PeerSet.open(
+    dir,
+    driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+  );
+  final timings = <BenchmarkTiming>[];
+  try {
+    for (final peer in peers.all) {
+      await seedPeer(peer, rowCount);
+    }
 
-  // --- Seed identical data ---
-  await seedResqlite(resqliteDb, rowCount);
-  seedSqlite3(sqlite3Db, rowCount);
-  await seedSqliteAsync(asyncDb, rowCount);
-
-  const sql = standardSelectSql;
-
-  // --- resqlite select() ---
-  final tResqlite = BenchmarkTiming('resqlite select()');
-  for (var i = 0; i < defaultWarmup; i++) {
-    final r = await resqliteDb.select(sql);
-    _consumeRows(r);
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final swMain = Stopwatch();
-    final swWall = Stopwatch()..start();
-    swMain.start();
-    final future = resqliteDb.select(sql);
-    swMain.stop();
-    final r = await future;
-    swMain.start();
-    _consumeRows(r);
-    swMain.stop();
-    swWall.stop();
-    tResqlite.record(
-      wallMicroseconds: swWall.elapsedMicroseconds,
-      mainMicroseconds: swMain.elapsedMicroseconds,
-    );
-  }
-
-  // --- sqlite3 select() ---
-  final tSqlite3 = BenchmarkTiming('sqlite3 select()');
-  for (var i = 0; i < defaultWarmup; i++) {
-    final stmt = sqlite3Db.prepare(sql);
-    _consumeSqlite3Rows(stmt.select());
-    stmt.close();
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final sw = Stopwatch()..start();
-    final stmt = sqlite3Db.prepare(sql);
-    _consumeSqlite3Rows(stmt.select());
-    stmt.close();
-    sw.stop();
-    tSqlite3.recordWallOnly(sw.elapsedMicroseconds);
+    // Same SQL + same consume-every-field loop on every peer. Each
+    // peer decodes at its own natural pace; we measure wall (dispatch
+    // + await + consume) and, for async peers, split main-isolate time
+    // to capture post-return materialization cost separately.
+    for (final peer in peers.all) {
+      final t = BenchmarkTiming('${peer.label} select()');
+      for (var i = 0; i < defaultWarmup; i++) {
+        final r = await peer.select(standardSelectSql);
+        _consumeRows(r);
+      }
+      for (var i = 0; i < defaultIterations; i++) {
+        final swMain = Stopwatch();
+        final swWall = Stopwatch()..start();
+        swMain.start();
+        final future = peer.select(standardSelectSql);
+        swMain.stop();
+        final r = await future;
+        swMain.start();
+        _consumeRows(r);
+        swMain.stop();
+        swWall.stop();
+        if (peer.isSynchronous) {
+          t.recordWallOnly(swWall.elapsedMicroseconds);
+        } else {
+          t.record(
+            wallMicroseconds: swWall.elapsedMicroseconds,
+            mainMicroseconds: swMain.elapsedMicroseconds,
+          );
+        }
+      }
+      timings.add(t);
+    }
+  } finally {
+    await peers.closeAll();
   }
 
-  // --- sqlite_async getAll() ---
-  final tAsync = BenchmarkTiming('sqlite_async getAll()');
-  for (var i = 0; i < defaultWarmup; i++) {
-    final r = await asyncDb.getAll(sql);
-    _consumeSqlite3Rows(r);
-  }
-  for (var i = 0; i < defaultIterations; i++) {
-    final swMain = Stopwatch();
-    final swWall = Stopwatch()..start();
-    swMain.start();
-    final future = asyncDb.getAll(sql);
-    swMain.stop();
-    final r = await future;
-    swMain.start();
-    _consumeSqlite3Rows(r);
-    swMain.stop();
-    swWall.stop();
-    tAsync.record(
-      wallMicroseconds: swWall.elapsedMicroseconds,
-      mainMicroseconds: swMain.elapsedMicroseconds,
-    );
-  }
-
-  // --- Cleanup ---
-  await resqliteDb.close();
-  sqlite3Db.close();
-  await asyncDb.close();
-
-  return [tResqlite, tSqlite3, tAsync];
+  return timings;
 }
 
 void _consumeRows(List<Map<String, Object?>> rows) {
-  for (final row in rows) {
-    for (final key in row.keys) {
-      row[key];
-    }
-  }
-}
-
-void _consumeSqlite3Rows(Iterable<Map<String, dynamic>> rows) {
   for (final row in rows) {
     for (final key in row.keys) {
       row[key];
