@@ -36,6 +36,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
+
+import '../drift/large_working_set_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -125,13 +128,27 @@ Future<String> _runLargeWorkingSetBenchmark({
     final tempDir =
         await Directory.systemTemp.createTemp('bench_large_${mode.name}_');
     try {
-      final peers = await PeerSet.open(tempDir.path);
+      final peers = await PeerSet.open(
+        tempDir.path,
+        driftFactory:
+            driftFactoryFor((exec) => LargeWorkingSetDriftDb(exec)),
+      );
       try {
         for (final peer in peers.all) {
           // Copy the seed data into the peer's working db.
+          final peerDbPath = '${tempDir.path}/${peer.name}.db';
           await peer.close();
-          await _copyFile(seedFile, File('${tempDir.path}/${peer.name}.db'));
-          await peer.open('${tempDir.path}/${peer.name}.db');
+          await _copyFile(seedFile, File(peerDbPath));
+          // Drift tracks schema via `PRAGMA user_version`. The cached
+          // seed was produced by the resqlite peer with raw SQL, so
+          // user_version is 0 and drift would try to run its
+          // onCreate migrator (which does CREATE TABLE items again,
+          // conflicting with the already-seeded table). Stamp the
+          // file to schemaVersion=1 so drift treats it as already
+          // migrated. No-op for non-drift peers. Schema on disk must
+          // match benchmark/drift/large_working_set_db.dart exactly.
+          _stampDriftUserVersion(peerDbPath, 1);
+          await peer.open(peerDbPath);
 
           print('  running ${mode.name} on ${peer.name}...');
           final reading = await _measureRounds(
@@ -287,6 +304,20 @@ Future<void> _seedCacheFile(String path, int seedRowCount) async {
 
 Future<void> _copyFile(File src, File dest) async {
   await src.openRead().pipe(dest.openWrite());
+}
+
+/// Stamp a SQLite file's `PRAGMA user_version` synchronously. Used to
+/// signal drift's migrator that the seeded table is at the current
+/// schema version, so drift skips its `onCreate` step. A raw
+/// `sqlite3.dart` open is cheap and avoids polluting the peer abstraction
+/// with a setup-only hook.
+void _stampDriftUserVersion(String path, int version) {
+  final raw = sqlite3.sqlite3.open(path);
+  try {
+    raw.execute('PRAGMA user_version = $version');
+  } finally {
+    raw.close();
+  }
 }
 
 void _writeSection(

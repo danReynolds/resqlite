@@ -27,6 +27,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import '../drift/sync_burst_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -63,7 +64,10 @@ Future<String> runSyncBurstBenchmark() async {
   final tempDir =
       await Directory.systemTemp.createTemp('bench_sync_burst_');
   try {
-    final peers = await PeerSet.open(tempDir.path);
+    final peers = await PeerSet.open(
+      tempDir.path,
+      driftFactory: driftFactoryFor((exec) => SyncBurstDriftDb(exec)),
+    );
     try {
       for (final peer in peers.all) {
         print('  running on ${peer.name}...');
@@ -97,8 +101,13 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
   for (var iter = 0; iter < _warmup + _iterations; iter++) {
     // Fresh schema per iteration — bulk insert into an empty table
     // is the behavior we want to measure repeatedly.
+    // DROP then CREATE IF NOT EXISTS so the drift peer (which auto-
+    // creates the table at open) doesn't trip on "already exists", and
+    // every iteration still starts from an empty table — the bulk-
+    // insert path is what we're measuring. Schema must match
+    // benchmark/drift/sync_burst_db.dart exactly.
     await peer.execute('DROP TABLE IF EXISTS items');
-    await peer.execute('CREATE TABLE items('
+    await peer.execute('CREATE TABLE IF NOT EXISTS items('
         'id INTEGER PRIMARY KEY, '
         'external_id INTEGER UNIQUE, '
         'payload TEXT NOT NULL)');
@@ -107,7 +116,10 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
     var emitCount = 0;
     StreamSubscription<List<Map<String, Object?>>>? sub;
     if (peer.hasStreams) {
-      final stream = peer.watch('SELECT COUNT(*) AS c FROM items');
+      final stream = peer.watch(
+        'SELECT COUNT(*) AS c FROM items',
+        readsFrom: const {'items'},
+      );
       sub = stream.listen((_) => emitCount++);
       // Drain initial emission.
       final initialDeadline =

@@ -2,8 +2,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
+import '../drift/disjoint_columns_db.dart';
+import '../shared/peer.dart';
 
 /// Cross-column streaming invalidation precision.
 ///
@@ -45,7 +45,7 @@ import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 ///
 /// sqlite_async has neither mechanism; its ratio is expected to be
 /// ≈1.0 (table-level invalidation, every write re-emits on every
-/// stream).
+/// stream). drift's StreamQueryStore is likewise table-level.
 ///
 /// ## Implementation notes
 ///
@@ -58,8 +58,7 @@ import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 /// writer-worker batching is library-internal and intentional. The
 /// ratio metric is robust to these per-library differences.
 ///
-/// sqlite3 is excluded (no stream/watch API). sqlite_async uses
-/// `throttle: Duration.zero` so throttling doesn't mask precision.
+/// sqlite3 is excluded (no stream/watch API). Reactive peers only.
 Future<String> runDisjointColumnsBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Streaming (Column Granularity)');
@@ -86,7 +85,11 @@ Future<String> runDisjointColumnsBenchmark() async {
     final colNames = [
       for (var i = 0; i < 20; i++) String.fromCharCode('a'.codeUnitAt(0) + i),
     ];
-    final createSql = 'CREATE TABLE wide(id INTEGER PRIMARY KEY, ' +
+    // IF NOT EXISTS because drift auto-creates the table from its
+    // @DriftDatabase schema at open; bare CREATE TABLE would throw
+    // "already exists" on the drift peer. Schema must match
+    // benchmark/drift/disjoint_columns_db.dart exactly.
+    final createSql = 'CREATE TABLE IF NOT EXISTS wide(id INTEGER PRIMARY KEY, ' +
         colNames.map((c) => '$c TEXT NOT NULL').join(', ') +
         ')';
     final insertSql = 'INSERT INTO wide(id, ${colNames.join(', ')}) '
@@ -101,88 +104,64 @@ Future<String> runDisjointColumnsBenchmark() async {
           for (final _ in colNames) 'v$i',
         ];
 
-    // ---- resqlite ----
-    final resqliteDb = await resqlite.Database.open('${dir.path}/resqlite.db');
-    await resqliteDb.execute(createSql);
-    await resqliteDb.executeBatch(
-      insertSql,
-      [for (var i = 0; i < rowCount; i++) row(i)],
+    final peers = await PeerSet.open(
+      dir.path,
+      require: (p) => p.hasStreams,
+      driftFactory:
+          driftFactoryFor((exec) => DisjointColumnsDriftDb(exec)),
     );
+    final resultsByPeer = <String, (_StreamResult, _StreamResult)>{};
 
-    final resqliteDisjoint = await _measureResqlite(
-      db: resqliteDb,
-      watchQuery: watchQuery,
-      streamCount: streamCount,
-      writeCount: writeCount,
-      updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-      newValueFor: (i) => 'd$i',
-    );
-    final resqliteOverlap = await _measureResqlite(
-      db: resqliteDb,
-      watchQuery: watchQuery,
-      streamCount: streamCount,
-      writeCount: writeCount,
-      updateSql: 'UPDATE wide SET a = ? WHERE id = ?',
-      newValueFor: (i) => 'z$i',
-    );
-    await resqliteDb.close();
+    try {
+      for (final peer in peers.all) {
+        print('  running on ${peer.name}...');
+        await peer.execute(createSql);
+        await peer.executeBatch(
+          insertSql,
+          [for (var i = 0; i < rowCount; i++) row(i)],
+        );
 
-    // ---- sqlite_async ----
-    final asyncDb = sqlite_async.SqliteDatabase(path: '${dir.path}/async.db');
-    await asyncDb.initialize();
-    await asyncDb.execute(createSql);
-    await asyncDb.executeBatch(
-      insertSql,
-      [for (var i = 0; i < rowCount; i++) row(i)],
-    );
+        final disjoint = await _measurePeer(
+          peer: peer,
+          watchQuery: watchQuery,
+          streamCount: streamCount,
+          writeCount: writeCount,
+          updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
+          newValueFor: (i) => 'd$i',
+        );
+        final overlap = await _measurePeer(
+          peer: peer,
+          watchQuery: watchQuery,
+          streamCount: streamCount,
+          writeCount: writeCount,
+          updateSql: 'UPDATE wide SET a = ? WHERE id = ?',
+          newValueFor: (i) => 'z$i',
+        );
 
-    final asyncDisjoint = await _measureSqliteAsync(
-      db: asyncDb,
-      watchQuery: watchQuery,
-      streamCount: streamCount,
-      writeCount: writeCount,
-      updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-      newValueFor: (i) => 'd$i',
-    );
-    final asyncOverlap = await _measureSqliteAsync(
-      db: asyncDb,
-      watchQuery: watchQuery,
-      streamCount: streamCount,
-      writeCount: writeCount,
-      updateSql: 'UPDATE wide SET a = ? WHERE id = ?',
-      newValueFor: (i) => 'z$i',
-    );
-    await asyncDb.close();
+        resultsByPeer[peer.label] = (disjoint, overlap);
+
+        print(
+          '${peer.label} disjoint re-emits: ${disjoint.reemits} '
+          '(${disjoint.drainMs.toStringAsFixed(1)} ms drain)',
+        );
+        print(
+          '${peer.label} overlap  re-emits: ${overlap.reemits} '
+          '(${overlap.drainMs.toStringAsFixed(1)} ms drain)',
+        );
+      }
+    } finally {
+      await peers.closeAll();
+    }
 
     // ---- Render ----
-    _writeSubsection(markdown, 'Disjoint column writes (SET c = ?)', {
-      'resqlite': (resqliteDisjoint, resqliteOverlap),
-      'sqlite_async': (asyncDisjoint, asyncOverlap),
-    }, disjoint: true);
+    _writeSubsection(markdown, 'Disjoint column writes (SET c = ?)',
+        resultsByPeer, disjoint: true);
 
-    _writeSubsection(markdown, 'Overlapping column writes (SET a = ?)', {
-      'resqlite': (resqliteDisjoint, resqliteOverlap),
-      'sqlite_async': (asyncDisjoint, asyncOverlap),
-    }, disjoint: false);
+    _writeSubsection(markdown, 'Overlapping column writes (SET a = ?)',
+        resultsByPeer, disjoint: false);
 
     print('');
     print('=== Disjoint-column streaming ===');
-    print(
-      'resqlite disjoint re-emits: ${resqliteDisjoint.reemits} '
-      '(${resqliteDisjoint.drainMs.toStringAsFixed(1)} ms drain)',
-    );
-    print(
-      'resqlite overlap  re-emits: ${resqliteOverlap.reemits} '
-      '(${resqliteOverlap.drainMs.toStringAsFixed(1)} ms drain)',
-    );
-    print(
-      'sqlite_async disjoint re-emits: ${asyncDisjoint.reemits} '
-      '(${asyncDisjoint.drainMs.toStringAsFixed(1)} ms drain)',
-    );
-    print(
-      'sqlite_async overlap  re-emits: ${asyncOverlap.reemits} '
-      '(${asyncOverlap.drainMs.toStringAsFixed(1)} ms drain)',
-    );
   } finally {
     await dir.delete(recursive: true);
   }
@@ -220,8 +199,8 @@ void _writeSubsection(
   md.writeln('');
 }
 
-Future<_StreamResult> _measureResqlite({
-  required resqlite.Database db,
+Future<_StreamResult> _measurePeer({
+  required BenchmarkPeer peer,
   required String watchQuery,
   required int streamCount,
   required int writeCount,
@@ -236,7 +215,7 @@ Future<_StreamResult> _measureResqlite({
     final initialC = Completer<void>();
     initials.add(initialC);
     subs.add(
-      db.stream(watchQuery).listen((_) {
+      peer.watch(watchQuery, readsFrom: const {'wide'}).listen((_) {
         if (!initialC.isCompleted) {
           initialC.complete();
         } else {
@@ -250,7 +229,7 @@ Future<_StreamResult> _measureResqlite({
 
   final sw = Stopwatch()..start();
   for (var i = 0; i < writeCount; i++) {
-    await db.execute(updateSql, [newValueFor(i), i]);
+    await peer.execute(updateSql, [newValueFor(i), i]);
     // Two event-queue yields. `Future.delayed(Duration.zero)` schedules
     // via `Timer.run`, which drains the microtask queue first and then
     // fires on the next event-loop turn — so this defeats resqlite's
@@ -261,57 +240,6 @@ Future<_StreamResult> _measureResqlite({
     await Future<void>.delayed(Duration.zero);
   }
   // Wait for any trailing re-emits in flight.
-  await Future<void>.delayed(const Duration(milliseconds: 50));
-  sw.stop();
-
-  for (final sub in subs) {
-    await sub.cancel();
-  }
-
-  return _StreamResult(
-    reemits: totalEmits,
-    drainMs: sw.elapsedMicroseconds / 1000.0,
-  );
-}
-
-Future<_StreamResult> _measureSqliteAsync({
-  required sqlite_async.SqliteDatabase db,
-  required String watchQuery,
-  required int streamCount,
-  required int writeCount,
-  required String updateSql,
-  required String Function(int i) newValueFor,
-}) async {
-  final subs = <StreamSubscription<Object?>>[];
-  var totalEmits = 0;
-  final initials = <Completer<void>>[];
-
-  for (var i = 0; i < streamCount; i++) {
-    final initialC = Completer<void>();
-    initials.add(initialC);
-    subs.add(
-      db
-          .watch(watchQuery, throttle: Duration.zero)
-          .listen((_) {
-        if (!initialC.isCompleted) {
-          initialC.complete();
-        } else {
-          totalEmits++;
-        }
-      }),
-    );
-  }
-
-  await Future.wait(initials.map((c) => c.future));
-
-  final sw = Stopwatch()..start();
-  for (var i = 0; i < writeCount; i++) {
-    await db.execute(updateSql, [newValueFor(i), i]);
-    // Same coalescing-defeat yield as the resqlite measurement, so both
-    // libraries are measured identically.
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
-  }
   await Future<void>.delayed(const Duration(milliseconds: 50));
   sw.stop();
 

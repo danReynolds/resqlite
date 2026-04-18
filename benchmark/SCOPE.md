@@ -14,42 +14,55 @@ The statistical and measurement rules that govern every test are in
 | **resqlite** | this repo (current commit) | Subject of benchmarks |
 | **sqlite3.dart** ([pub.dev](https://pub.dev/packages/sqlite3)) | `3.3.0` | Synchronous FFI baseline — the "raw sqlite" reference |
 | **sqlite_async** ([pub.dev](https://pub.dev/packages/sqlite_async)) | `0.14.0-wip.0` | Async, isolate-pool-backed, reactive peer |
+| **drift** ([pub.dev](https://pub.dev/packages/drift)) | `2.21.0` | Codegen-backed, isolate-backed, reactive. Most-used reactive Dart SQL library. |
 
 Pins live in `pubspec.yaml`. Upgrading a peer is a deliberate PR with
 before/after benchmark runs attached — see
 [METHODOLOGY.md § Peer versions and upgrade policy](./METHODOLOGY.md#peer-versions-and-upgrade-policy).
 
+### Drift-specific setup
+
+Drift is codegen-backed, but we use it via `customSelect` + `customUpdate`
++ `customInsert` rather than the typed DSL. Both are idiomatic drift
+usage, and `customSelect` is typically the fast-path choice for drift
+users with perf-sensitive queries. The `@DriftDatabase` schema
+definitions still generate code — that's what drift's `StreamQueryStore`
+needs for invalidation to work correctly.
+
+- Drift schemas live in `benchmark/drift/<scenario>_db.dart`, one per
+  benchmark scenario, mirroring each scenario's SQL DDL 1:1 (tables +
+  indexes + constraints).
+- Generated `<scenario>_db.g.dart` files are **gitignored** — they
+  regenerate deterministically via `dart run build_runner build`.
+- `benchmark/run_all.dart` auto-regenerates on stale-ness before the
+  suite runs; contributors don't think about it.
+- Drift runs in an isolate via `NativeDatabase.createInBackground` —
+  same async-isolate model as resqlite. Fair comparison point.
+- Stream invalidation for `customSelect` requires explicit `readsFrom`
+  sets. The `DriftPeer` adapter auto-extracts modified table names from
+  write SQL via regex. A unit test suite (`test/benchmark_drift_peer_test.dart`)
+  verifies streams actually emit on INSERT/UPDATE/DELETE/batch/INSERT
+  OR REPLACE, so schema/SQL changes that break invalidation surface as
+  test failures, not as silently-fast benchmark numbers.
+
 ## Peers we do NOT compare against
-
-### drift ([pub.dev](https://pub.dev/packages/drift))
-
-The most-used reactive Dart SQL library. Not included because:
-- Drift is codegen-backed; integrating it into our benchmark
-  harness requires a build step per workload, which conflicts with the
-  "simple dart run" ergonomic the existing suite has.
-- Drift's reactive stream heuristic is table-set based and covered
-  equivalently by `sqlite_async`'s `watch()` for our current comparison
-  purposes.
-- Adding drift would materially increase the surface area of the
-  benchmark package — we'd need to track drift's codegen output in source
-  control or generate it on each run.
-
-This is a real gap. When drift ships a measurable architectural change
-(e.g., column-level invalidation, IVM-style maintenance) and resqlite
-wants to claim a specific win against it, drift gets added.
 
 ### sqflite ([pub.dev](https://pub.dev/packages/sqflite))
 
-The Flutter-default SQLite library. Not included because:
-- sqflite is Flutter-only (uses platform channels). Our benchmarks run
-  under `dart` not `flutter`; adding sqflite would force a
-  `flutter test`-based harness for its portion, splitting the runner.
-- sqflite's synchronous-over-platform-channel model is fundamentally
-  slower than any in-process peer; including it wouldn't change our
-  narrative, only add noise.
+Excluded until mobile CI lands. The desktop-compatible variant
+(`sqflite_common_ffi`) uses sqlite3.dart under the hood and would not
+represent actual mobile sqflite performance:
 
-When mobile CI lands (not currently scoped), sqflite becomes comparable
-alongside the mobile-oriented workloads.
+- Platform channel serialization cost is absent under the ffi variant.
+- Mobile iOS/Android ship different SQLite versions with different
+  default PRAGMAs.
+- F2FS (Android) vs APFS (macOS) vs ext4 (Linux) fsync behavior differs
+  meaningfully, and the ffi variant reflects the dev-machine filesystem,
+  not the device's.
+
+Including `sqflite_common_ffi` with a caveat would be misleading;
+excluding and saying why is honest. Will be added when `flutter test
+integration_test/` on simulators/emulators is wired into CI.
 
 ### libsql_dart (Turso)
 
@@ -178,7 +191,7 @@ These are real gaps that should be explicit rather than hidden:
 
 ### Compared-to gaps
 
-- **No drift, sqflite, libsql_dart** (see "Peers we do NOT compare against" above)
+- **No sqflite, libsql_dart** (see "Peers we do NOT compare against" above)
 - **No version-drift testing** on peers — we pin versions deliberately,
   but don't test resqlite against the latest nightly of each peer.
 

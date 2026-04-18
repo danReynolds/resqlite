@@ -15,6 +15,7 @@
     --resqlite: #58a6ff;
     --sqlite3: #f0883e;
     --async: #a371f7;
+    --drift: #14b8a6;
     --win: #3fb950;
     --accent: #58a6ff;
   }
@@ -134,6 +135,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:var(--resqlite)"></div> resqlite</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--sqlite3)"></div> sqlite3 (raw FFI)</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--async)"></div> sqlite_async (PowerSync)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--drift)"></div> drift</div>
 </div>
 
 <div id="callouts" class="callouts"></div>
@@ -152,7 +154,8 @@
   <p><strong style="color:var(--text)">Peers tested:</strong>
     resqlite (this repo, current commit),
     <a href="https://pub.dev/packages/sqlite3">sqlite3.dart <code>3.3.0</code></a> (synchronous FFI baseline),
-    <a href="https://pub.dev/packages/sqlite_async">sqlite_async <code>0.14.0-wip.0</code></a> (PowerSync, async + reactive).
+    <a href="https://pub.dev/packages/sqlite_async">sqlite_async <code>0.14.0-wip.0</code></a> (PowerSync, async + reactive),
+    <a href="https://pub.dev/packages/drift">drift <code>2.21.0</code></a> (codegen-backed, isolate-backed, reactive).
     Hardware is shown in the device selector above; each device has its own full run.
     See <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/SCOPE.md">SCOPE.md</a> for the full peer list, versioning policy, and upgrade process.</p>
 
@@ -178,12 +181,13 @@
 
   <p style="margin-top:0.75rem;"><strong style="color:var(--text)">Peers not included:</strong></p>
   <ul style="margin-top:0.25rem;">
-    <li><a href="https://pub.dev/packages/drift">drift</a> — the most-used reactive Dart SQL
-      library. Excluded because it's codegen-backed and adding a build step to the benchmark
-      harness is out of scope for the current round. Real gap.</li>
-    <li><a href="https://pub.dev/packages/sqflite">sqflite</a> — the Flutter-default SQLite
-      library. Excluded because it's platform-channel-only (Flutter, not plain Dart). Will
-      be included when mobile CI lands.</li>
+    <li><a href="https://pub.dev/packages/sqflite">sqflite</a> — excluded until mobile CI
+      lands. The desktop-compatible variant (<code>sqflite_common_ffi</code>) uses sqlite3.dart
+      under the hood and would not represent actual mobile sqflite performance (platform
+      channel serialization cost, native iOS/Android SQLite version differences, F2FS vs APFS
+      fsync behavior). Including it with a caveat would be misleading; excluding and saying
+      why is honest. Will be added when <code>flutter test integration_test/</code> on
+      simulators/emulators is wired into CI.</li>
     <li><a href="https://pub.dev/packages/libsql_dart">libsql_dart</a> — still maturing as of
       this writing. Revisit when stable.</li>
   </ul>
@@ -219,7 +223,7 @@
 </div>
 
 <script>
-const C = { resqlite: '#58a6ff', sqlite3: '#f0883e', async: '#a371f7' };
+const C = { resqlite: '#58a6ff', sqlite3: '#f0883e', async: '#a371f7', drift: '#14b8a6' };
 
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#262b45';
@@ -337,14 +341,20 @@ function libColor(name) {
   const n = name.toLowerCase();
   if (n.includes('resqlite')) return C.resqlite;
   if (n.includes('async')) return C.async;
+  // drift must be checked before sqlite3 because drift's codegen may
+  // surface names like "drift (sqlite3)" in some result labels; we want
+  // drift's own color to take precedence over the underlying engine.
+  if (n.includes('drift')) return C.drift;
   if (n.includes('sqlite3')) return C.sqlite3;
   return '#8b949e';
 }
 
 function libShort(name) {
-  if (name.includes('resqlite')) return 'resqlite';
-  if (name.includes('sqlite_async') || name.includes('async')) return 'sqlite_async';
-  if (name.includes('sqlite3')) return 'sqlite3';
+  const n = name.toLowerCase();
+  if (n.includes('resqlite')) return 'resqlite';
+  if (n.includes('sqlite_async') || n.includes('async')) return 'sqlite_async';
+  if (n.includes('drift')) return 'drift';
+  if (n.includes('sqlite3')) return 'sqlite3';
   return name;
 }
 

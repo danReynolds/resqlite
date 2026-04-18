@@ -43,6 +43,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../drift/high_card_fanout_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -112,6 +113,8 @@ Future<String> _runFanoutBenchmark({
     final peers = await PeerSet.open(
       tempDir.path,
       require: (p) => p.hasStreams,
+      driftFactory:
+          driftFactoryFor((exec) => HighCardFanoutDriftDb(exec)),
     );
     try {
       for (final peer in peers.all) {
@@ -239,7 +242,8 @@ Future<_IterResult> _singleIteration(
     final ownerId = i + 1;
     final sub = peer.watch(
       'SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
-      [ownerId],
+      params: [ownerId],
+      readsFrom: const {'items'},
     ).listen((_) {
       final sw = Stopwatch()..start();
       emitCounts[idx]++;
@@ -313,13 +317,18 @@ Future<void> _seed(BenchmarkPeer peer, int streamCount) async {
   // scale) it's 500 items per owner. Either way each stream's query
   // returns a bounded result set.
   final itemsPerOwner = _itemCount ~/ streamCount;
+  // IF NOT EXISTS because drift auto-creates the table + index from its
+  // @DriftDatabase schema at open; bare CREATE would throw "already
+  // exists" on the drift peer. Schema must match
+  // benchmark/drift/high_card_fanout_db.dart exactly.
   await peer.execute(
-    'CREATE TABLE items('
+    'CREATE TABLE IF NOT EXISTS items('
     'id INTEGER PRIMARY KEY, '
     'owner_id INTEGER NOT NULL, '
     'value INTEGER NOT NULL)',
   );
-  await peer.execute('CREATE INDEX items_owner ON items(owner_id)');
+  await peer.execute(
+      'CREATE INDEX IF NOT EXISTS items_owner ON items(owner_id)');
   await peer.executeBatch(
     'INSERT INTO items(owner_id, value) VALUES (?, ?)',
     [

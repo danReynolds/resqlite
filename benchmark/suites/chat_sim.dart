@@ -27,6 +27,7 @@ library;
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../drift/chat_sim_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -81,7 +82,10 @@ Future<String> runChatSimBenchmark() async {
 
   final tempDir = await Directory.systemTemp.createTemp('bench_chat_sim_');
   try {
-    final peers = await PeerSet.open(tempDir.path);
+    final peers = await PeerSet.open(
+      tempDir.path,
+      driftFactory: driftFactoryFor((exec) => ChatSimDriftDb(exec)),
+    );
     try {
       for (final peer in peers.all) {
         print('  running on ${peer.name}...');
@@ -248,21 +252,25 @@ final class _ZipfianSampler {
 // ---------------------------------------------------------------------------
 
 Future<void> _seed(BenchmarkPeer peer) async {
-  await peer.execute('CREATE TABLE users('
+  // IF NOT EXISTS because drift auto-creates tables + indexes from its
+  // @DriftDatabase schema at open time; bare CREATE TABLE/INDEX would
+  // throw "already exists" on the drift peer. The schema here must
+  // match benchmark/drift/chat_sim_db.dart exactly.
+  await peer.execute('CREATE TABLE IF NOT EXISTS users('
       'id INTEGER PRIMARY KEY, '
       'name TEXT NOT NULL, '
       'avatar_url TEXT NOT NULL)');
-  await peer.execute('CREATE TABLE conversations('
+  await peer.execute('CREATE TABLE IF NOT EXISTS conversations('
       'id INTEGER PRIMARY KEY, '
       'last_msg_at INTEGER NOT NULL)');
-  await peer.execute('CREATE TABLE messages('
+  await peer.execute('CREATE TABLE IF NOT EXISTS messages('
       'id INTEGER PRIMARY KEY, '
       'conv_id INTEGER NOT NULL, '
       'sender_id INTEGER NOT NULL, '
       'body TEXT NOT NULL, '
       'sent_at INTEGER NOT NULL)');
   await peer.execute(
-    'CREATE INDEX messages_conv_sent ON messages(conv_id, sent_at)',
+    'CREATE INDEX IF NOT EXISTS messages_conv_sent ON messages(conv_id, sent_at)',
   );
 
   // Seed users.

@@ -1,5 +1,5 @@
 // ignore_for_file: avoid_print
-import 'dart:io' show Directory, File, exit;
+import 'dart:io' show Directory, File, Process, exit, stderr;
 import 'dart:math' as math;
 
 import 'shared/parse_results.dart';
@@ -24,6 +24,7 @@ import 'suites/writes.dart';
 
 Future<void> main(List<String> args) async {
   final options = _parseOptions(args);
+  await _ensureDriftCodegenFresh();
   final resultsDir = Directory('benchmark/results');
   final compareFile = _resolveComparisonFile(resultsDir, options.compareToPath);
 
@@ -740,4 +741,59 @@ String _generateStreamingColumnComparison(
   buf.writeln();
 
   return buf.toString();
+}
+
+/// Ensures the drift-generated `*.g.dart` files under `benchmark/drift/`
+/// are fresh relative to their source `.dart` files. If any source is
+/// newer than its generated counterpart (or the counterpart is missing),
+/// regenerates via `dart run build_runner build` before the benchmark
+/// suite runs. Keeps contributors from accidentally benchmarking against
+/// stale codegen after a schema edit.
+///
+/// Fast path when nothing changed: ~50ms (7 stat calls). Slow path
+/// when regen is needed: ~5–10s for the build_runner invocation.
+Future<void> _ensureDriftCodegenFresh() async {
+  final driftDir = Directory('benchmark/drift');
+  if (!driftDir.existsSync()) return;
+
+  final sources = driftDir
+      .listSync()
+      .whereType<File>()
+      .where((f) =>
+          f.path.endsWith('.dart') && !f.path.endsWith('.g.dart'))
+      .toList();
+
+  var stale = false;
+  for (final source in sources) {
+    final genPath = source.path.replaceAll(RegExp(r'\.dart$'), '.g.dart');
+    final gen = File(genPath);
+    if (!gen.existsSync()) {
+      stale = true;
+      break;
+    }
+    if (source.lastModifiedSync().isAfter(gen.lastModifiedSync())) {
+      stale = true;
+      break;
+    }
+  }
+  if (!stale) return;
+
+  print('Drift codegen stale — running build_runner...');
+  final result = await Process.run(
+    'dart',
+    ['run', 'build_runner', 'build', '--delete-conflicting-outputs'],
+    // Let build_runner print progress to the same stdout as our run.
+    // Important for contributors running from CI where buffered output
+    // would obscure which step is currently active.
+    runInShell: false,
+  );
+  if (result.exitCode != 0) {
+    stderr.writeln(result.stdout);
+    stderr.writeln(result.stderr);
+    throw StateError(
+      'build_runner failed (exit ${result.exitCode}). Fix the drift '
+      'schemas under benchmark/drift/ then re-run.',
+    );
+  }
+  print('Drift codegen up-to-date.');
 }
