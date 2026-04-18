@@ -30,11 +30,12 @@ void main() {
       expect(markdown, contains('### Fetch last-20 messages (JOIN users)'));
       expect(markdown, contains('### Fetch user by PK'));
 
-      // All three peers must be represented. sqlite3 is included here
+      // All four peers must be represented. sqlite3 is included here
       // because chat sim doesn't need streams.
       expect(markdown, contains('| resqlite '));
       expect(markdown, contains('| sqlite3 '));
       expect(markdown, contains('| sqlite_async '));
+      expect(markdown, contains('| drift '));
 
       // Standard 5-column header appears in each subsection.
       expect(

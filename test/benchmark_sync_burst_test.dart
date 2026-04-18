@@ -38,19 +38,22 @@ void main() {
         contains('### Stream emissions during burst (COUNT(*))'),
       );
 
-      // Bulk + merges: all three peers.
+      // Bulk + merges: all four peers.
       expect(markdown, contains('| resqlite '));
       expect(markdown, contains('| sqlite3 '));
       expect(markdown, contains('| sqlite_async '));
+      expect(markdown, contains('| drift '));
 
-      // Stream emissions subsection: only reactive peers; sqlite3
-      // has no streams so it should not appear in that table.
+      // Stream emissions subsection: only reactive peers (resqlite,
+      // sqlite_async, drift); sqlite3 has no streams so it should
+      // not appear in that table.
       final streamIdx =
           markdown.indexOf('### Stream emissions during burst');
       expect(streamIdx, isPositive);
       final streamSection = markdown.substring(streamIdx);
       expect(streamSection, contains('| resqlite |'));
       expect(streamSection, contains('| sqlite_async |'));
+      expect(streamSection, contains('| drift |'));
       expect(
         streamSection,
         isNot(contains('| sqlite3 |')),

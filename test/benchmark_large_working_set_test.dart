@@ -42,11 +42,12 @@ void main() {
       expect(markdown, contains('### Warm cache'));
       expect(markdown, contains('### Cold cache'));
 
-      // All three peers must be present (read-only workload, no
+      // All four peers must be present (read-only workload, no
       // capability filter).
       expect(markdown, contains('| resqlite '));
       expect(markdown, contains('| sqlite3 '));
       expect(markdown, contains('| sqlite_async '));
+      expect(markdown, contains('| drift '));
 
       // Each section has a point-query and range-scan column.
       expect(

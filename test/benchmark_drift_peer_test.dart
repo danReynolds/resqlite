@@ -9,6 +9,13 @@
 /// initial row and never update).
 ///
 /// These tests fail loudly in CI before that can happen.
+///
+/// Each test uses [_waitForEmission] — a short-poll with a budget — to
+/// wait for the post-write emission rather than fixed `Future.delayed`
+/// sleeps. Fixed sleeps race on CI runners under load; polling keeps
+/// the test passing on a fast machine (tight convergence) while giving
+/// a slow machine room to breathe, and a real invalidation regression
+/// still fails within the budget.
 library;
 import 'dart:async';
 import 'dart:io';
@@ -17,6 +24,33 @@ import 'package:test/test.dart';
 
 import '../benchmark/drift/keyed_pk_db.dart';
 import '../benchmark/shared/peer.dart';
+
+/// Wait until [emissions.length] reaches [target], or the budget
+/// expires. Used instead of a fixed `Future.delayed` to make the
+/// stream-invalidation tests stable on loaded CI while still failing
+/// fast when invalidation is genuinely broken.
+Future<void> _waitForEmission(
+  List<List<Map<String, Object?>>> emissions, {
+  required int target,
+  Duration budget = const Duration(seconds: 2),
+  String? description,
+}) async {
+  final deadline = DateTime.now().add(budget);
+  while (emissions.length < target && DateTime.now().isBefore(deadline)) {
+    // Short pull interval. 10 ms is small enough to resolve quickly on
+    // a fast machine, large enough that a slow machine doesn't burn
+    // the CPU polling.
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  if (emissions.length < target) {
+    fail(
+      '${description ?? "stream"}: expected ≥ $target emissions within '
+      '${budget.inMilliseconds}ms; got ${emissions.length}. '
+      'This usually means drift stream invalidation broke — a write '
+      'fired but no re-query followed.',
+    );
+  }
+}
 
 void main() {
   group('DriftPeer', () {
@@ -56,20 +90,19 @@ void main() {
           )
           .listen(emissions.add);
 
-      // Give the stream time to emit its initial row, then write.
-      await Future.delayed(const Duration(milliseconds: 50));
+      // Wait for initial emission (target=1), then write, then wait
+      // for post-invalidation emission (target=2). Polling tolerates
+      // CI runner variance without hiding real regressions.
+      await _waitForEmission(emissions,
+          target: 1, description: 'initial emission');
       await peer.execute(
         'INSERT INTO items (id, body, updated_at) VALUES (?, ?, ?)',
         [2, 'inserted', 10],
       );
-
-      // Wait for invalidation to settle. A missing readsFrom or a
-      // regex regression would leave emissions stuck at 1.
-      await Future.delayed(const Duration(milliseconds: 100));
+      await _waitForEmission(emissions,
+          target: 2, description: 'emission after INSERT');
       await sub.cancel();
 
-      expect(emissions.length, greaterThanOrEqualTo(2),
-          reason: 'stream should have emitted initial + post-insert values');
       expect(emissions.last, hasLength(2));
       expect(emissions.last.map((r) => r['id']), containsAll([1, 2]));
     });
@@ -84,16 +117,16 @@ void main() {
           )
           .listen(emissions.add);
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      await _waitForEmission(emissions,
+          target: 1, description: 'initial emission');
       await peer.execute(
         'UPDATE items SET body = ?, updated_at = ? WHERE id = ?',
         ['updated', 20, 1],
       );
-
-      await Future.delayed(const Duration(milliseconds: 100));
+      await _waitForEmission(emissions,
+          target: 2, description: 'emission after UPDATE');
       await sub.cancel();
 
-      expect(emissions.length, greaterThanOrEqualTo(2));
       expect(emissions.last.first['body'], 'updated');
     });
 
@@ -103,13 +136,13 @@ void main() {
           .watch('SELECT * FROM items', readsFrom: {'items'})
           .listen(emissions.add);
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      await _waitForEmission(emissions,
+          target: 1, description: 'initial emission');
       await peer.execute('DELETE FROM items WHERE id = ?', [1]);
-
-      await Future.delayed(const Duration(milliseconds: 100));
+      await _waitForEmission(emissions,
+          target: 2, description: 'emission after DELETE');
       await sub.cancel();
 
-      expect(emissions.length, greaterThanOrEqualTo(2));
       expect(emissions.last, isEmpty);
     });
 
@@ -119,7 +152,8 @@ void main() {
           .watch('SELECT * FROM items ORDER BY id', readsFrom: {'items'})
           .listen(emissions.add);
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      await _waitForEmission(emissions,
+          target: 1, description: 'initial emission');
       await peer.executeBatch(
         'INSERT INTO items (id, body, updated_at) VALUES (?, ?, ?)',
         [
@@ -128,15 +162,12 @@ void main() {
           [5, 'b3', 50],
         ],
       );
-
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Drift's batch commits once, so we expect a single post-batch
+      // emission. Some drift versions may emit extras; accept ≥ 2.
+      await _waitForEmission(emissions,
+          target: 2, description: 'emission after batch');
       await sub.cancel();
 
-      // The batch commits once, so we expect initial (1 row) + one
-      // post-batch emission (4 rows). Some drift versions may emit
-      // extra transient values; we only assert "at least 2" + final
-      // value is correct.
-      expect(emissions.length, greaterThanOrEqualTo(2));
       expect(emissions.last, hasLength(4));
     });
 
@@ -156,17 +187,16 @@ void main() {
           .watch('SELECT * FROM items ORDER BY id', readsFrom: {'items'})
           .listen(emissions.add);
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      await _waitForEmission(emissions,
+          target: 1, description: 'initial emission');
       await peer.execute(
         'INSERT OR REPLACE INTO items (id, body, updated_at) VALUES (?, ?, ?)',
         [1, 'replaced', 99],
       );
-
-      await Future.delayed(const Duration(milliseconds: 100));
+      await _waitForEmission(emissions,
+          target: 2, description: 'emission after INSERT OR REPLACE');
       await sub.cancel();
 
-      expect(emissions.length, greaterThanOrEqualTo(2),
-          reason: 'INSERT OR REPLACE should invalidate streams');
       expect(emissions.last.first['body'], 'replaced');
     });
   });

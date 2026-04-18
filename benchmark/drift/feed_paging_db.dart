@@ -19,7 +19,10 @@ class Posts extends Table {
   IntColumn get authorId => integer().named('author_id')();
   IntColumn get createdAt => integer().named('created_at')();
   TextColumn get body => text()();
-  IntColumn get likeCount => integer().named('like_count').withDefault(const Constant(0))();
+  // DDL: `like_count INTEGER NOT NULL` with no default. Match exactly —
+  // the benchmark seeds explicit values, so a drift-side default would
+  // be schema drift.
+  IntColumn get likeCount => integer().named('like_count')();
 
   @override
   Set<Column<Object>> get primaryKey => {id};

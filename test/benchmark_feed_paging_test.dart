@@ -25,22 +25,24 @@ void main() {
       expect(markdown, contains('### Keyset pagination'));
       expect(markdown, contains('### Reactive feed with 100 concurrent writes'));
 
-      // Part A — all three peers.
+      // Part A — all four peers.
       expect(markdown, contains('| resqlite '));
       expect(markdown, contains('| sqlite3 '));
       expect(markdown, contains('| sqlite_async '));
+      expect(markdown, contains('| drift '));
 
       // Part B — sqlite3 MUST NOT appear in the reactive subsection.
-      // Sanity-check: the reactive subsection's table should contain
-      // resqlite + sqlite_async only. We can't easily isolate the
-      // subsection here without parsing; instead, assert both
-      // reactive peers appear at least once in the markdown.
+      // The reactive subsection's table should contain resqlite +
+      // sqlite_async + drift. We can't easily isolate the subsection
+      // here without parsing; instead, assert all reactive peers
+      // appear at least once in the reactive substring.
       final reactiveIdx =
           markdown.indexOf('### Reactive feed with 100 concurrent writes');
       expect(reactiveIdx, isPositive);
       final reactiveSection = markdown.substring(reactiveIdx);
       expect(reactiveSection, contains('| resqlite '));
       expect(reactiveSection, contains('| sqlite_async '));
+      expect(reactiveSection, contains('| drift '));
       expect(
         reactiveSection,
         isNot(contains('| sqlite3 ')),

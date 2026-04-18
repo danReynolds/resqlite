@@ -17,7 +17,7 @@ part 'chat_sim_db.g.dart';
 class Users extends Table {
   IntColumn get id => integer()();
   TextColumn get name => text()();
-  TextColumn get avatarUrl => text().named('avatar_url').nullable()();
+  TextColumn get avatarUrl => text().named('avatar_url')();
 
   @override
   Set<Column<Object>> get primaryKey => {id};

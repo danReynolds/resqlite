@@ -202,11 +202,11 @@ per workload live in the workload's source comments and in
 | # | Workload | Status | Story |
 |---|---|---|---|
 | A11 | Keyed PK subscriptions | **Shipped** (Phase 1) | Many watchers each on a single PK; baseline for `watchRow()` API |
-| A5 | Chat sim | Planned (Phase 2) | Mixed R/W with joins and Zipfian distribution |
-| A6 | Feed paging | Planned (Phase 2) | Keyset pagination + reactive stream under concurrent writes |
-| A11b | High-cardinality fan-out | Planned (Phase 2) | 500 streams on a 10K-row table |
-| A7 | Sync burst | Planned (Phase 3, `--include-slow`) | 50K-row bulk insert with active stream |
-| A9 | 1 GB working set | Planned (Phase 3, `--include-slow`) | mmap behavior and cache locality |
+| A5 | Chat sim | **Shipped** (Phase 2) | Mixed R/W with joins and Zipfian distribution |
+| A6 | Feed paging | **Shipped** (Phase 2) | Keyset pagination + reactive stream under concurrent writes |
+| A11b | High-cardinality fan-out | **Shipped** (Phase 2) | 100 streams on a 10K-row table |
+| A7 | Sync burst | **Shipped** (Phase 3, `--include-slow`) | 50K-row bulk insert with active stream |
+| A9 | 1 GB working set | **Shipped** (Phase 3, `--include-slow`) | mmap behavior and cache locality |
 
 Column-disjoint streaming, originally planned as A10, is superseded by
 the more comprehensive `Streaming (Column Granularity)` microbenchmark

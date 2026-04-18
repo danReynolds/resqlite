@@ -32,9 +32,10 @@ void main() {
       expect(markdown, contains('## High-Cardinality Stream Fan-out (v1)'));
       expect(markdown, contains('### 20 streams × 50 writes'));
 
-      // Two reactive peers.
+      // Reactive peers: resqlite, sqlite_async, drift.
       expect(markdown, contains('| resqlite '));
       expect(markdown, contains('| sqlite_async '));
+      expect(markdown, contains('| drift '));
       expect(
         markdown,
         isNot(contains('| sqlite3 ')),

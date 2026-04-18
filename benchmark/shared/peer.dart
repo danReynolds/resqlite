@@ -35,11 +35,13 @@ import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 /// Futures — see [isSynchronous] for why this matters for timing.
 abstract class BenchmarkPeer {
   /// Short stable identifier. Used in metric keys, log output, and capability
-  /// filters. Must match one of: `resqlite`, `sqlite3`, `sqlite_async`.
+  /// filters. Must match one of: `resqlite`, `sqlite3`, `sqlite_async`,
+  /// `drift`.
   String get name;
 
   /// Human-readable label for markdown result tables — the peer /
-  /// library name only (`resqlite`, `sqlite3`, `sqlite_async`), with no
+  /// library name only (`resqlite`, `sqlite3`, `sqlite_async`, `drift`),
+  /// with no
   /// operation or method suffix. Workloads that want to include the
   /// method in the label (to match older suites like `select_maps.dart`
   /// which emit `resqlite select()`) can concatenate `peer.label` with
