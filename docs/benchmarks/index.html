@@ -70,6 +70,22 @@
   .mode-tabs button:last-child { border-right: 0; }
   .mode-tabs button.active { background: var(--accent); color: #fff; }
   .mode-tabs button:disabled { color: #586069; cursor: not-allowed; }
+
+  .kind-tabs {
+    display: flex; gap: 0.5rem; margin: 1rem 0 0.5rem;
+    border-bottom: 1px solid var(--border); padding-bottom: 0;
+  }
+  .kind-tabs button {
+    background: transparent; color: var(--muted); border: 0;
+    border-bottom: 2px solid transparent;
+    padding: 0.55rem 1rem; font-size: 0.92rem; font-weight: 500;
+    font-family: inherit; cursor: pointer;
+    margin-bottom: -1px;
+  }
+  .kind-tabs button.active {
+    color: var(--text); border-bottom-color: var(--accent);
+  }
+  .kind-tabs button:hover:not(.active) { color: var(--text); }
   .mode-note {
     font-size: 0.78rem; color: var(--muted); background: rgba(88,166,255,0.08);
     border: 1px solid rgba(88,166,255,0.2); border-radius: 6px;
@@ -121,6 +137,11 @@
 </div>
 
 <div id="callouts" class="callouts"></div>
+
+<div class="kind-tabs" id="kindTabs">
+  <button data-kind="micro" class="active">Microbenchmarks</button>
+  <button data-kind="scenarios">Scenarios</button>
+</div>
 
 <div id="chartsContainer">
   <div class="loading">Loading benchmark data...</div>
@@ -383,6 +404,8 @@ let allCharts = [];
 let devicesData = null;
 let historyData = null; // lazy-loaded when runs mode is first used
 let currentMode = 'peer';
+let currentKind = 'micro';   // 'micro' | 'scenarios'
+let currentScenarioId = 'chatSim'; // default scenario; overwritten on dropdown change
 let currentDeviceIdx = 0;
 let runsCount = 3;
 
@@ -443,6 +466,16 @@ async function init() {
     });
   });
   wireRunsInput();
+
+  document.querySelectorAll('#kindTabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.kind;
+      if (kind === currentKind) return;
+      currentKind = kind;
+      document.querySelectorAll('#kindTabs button').forEach(b => b.classList.toggle('active', b === btn));
+      render();
+    });
+  });
 
   render();
 }
@@ -591,9 +624,10 @@ function renderView(dev, view) {
 
   const B = view.benchmarks;
 
-  // Callouts are peer-mode only (they compare resqlite vs peers).
+  // Callouts are peer-mode + microbenchmarks only (they summarize the core
+  // microbenchmarks vs peers; scenarios each have their own comparison).
   const callouts = document.getElementById('callouts');
-  if (currentMode === 'peer') {
+  if (currentMode === 'peer' && currentKind === 'micro') {
     const selectMaps1k = B.find(s => s.key?.includes('Select') && s.key?.includes('Maps') && s.key?.includes('1000'));
     const singleInserts = B.find(s => s.key?.includes('Single Inserts'));
     const pointQuery = B.find(s => s.key?.includes('Point Query'));
@@ -629,7 +663,16 @@ function renderView(dev, view) {
     callouts.style.display = 'none';
   }
 
-  // ── Build all chart sections ──
+  if (currentKind === 'scenarios') {
+    renderScenariosView(B);
+  } else {
+    renderMicrobenchmarksView(B);
+  }
+}
+
+// ── Microbenchmarks view — the core per-API charts (select, write,
+// concurrent, streaming). Stable set, each chart answers a focused question.
+function renderMicrobenchmarksView(B) {
   const container = document.getElementById('chartsContainer');
   let html = '';
 
@@ -685,6 +728,298 @@ function renderView(dev, view) {
   buildConcurrent(B, 'cConcurrent');
   buildSingleBar(B, 'Parameterized', 'cParam');
   buildStreaming(B, 'cStreaming');
+}
+
+// ── Scenarios view — realistic app-shaped workloads rather than isolated
+// API probes. The reader picks one scenario from a dropdown; the card that
+// renders dives deep into that scenario with:
+//   • long description (what's being simulated and why)
+//   • primary chart (wall-time comparison — the headline number)
+//   • tail-latency chart (p90 — how painful is the worst case?)
+//   • main-isolate chart when relevant (what the Flutter UI thread pays)
+//   • "what to look at" bullets (how to read the chart in context)
+//
+// This replaces the earlier "list-all-scenarios" approach where every card
+// fought for attention. A focused view per scenario lets each workload
+// have its own context without overwhelming the reader.
+const SCENARIOS = [
+  {
+    id: 'chatSim',
+    title: 'Chat Sim',
+    keyMatch: 'Chat Sim',
+    description:
+      'A realistic chat application workload with four operation types mixed in ' +
+      'production-like proportions. Messages follow a Zipfian distribution across ' +
+      'conversations — a few hot threads receive most activity, the long tail is quiet — ' +
+      'which stresses page-cache locality and hash-lookup paths the way real chat apps do.',
+    conditions: {
+      Schema: '<code>users</code> (500 rows), <code>conversations</code> (100 rows), <code>messages</code> (10,000 seed rows) with compound index <code>(conv_id, sent_at)</code>. Seeded deterministically (PRNG seed <code>0x5EED</code>).',
+      Workload: '10,000 ops total + 500 unmeasured warmup. Zipfian skew <code>s=1.0</code> on conversation selection — hot threads get most traffic. Same op sequence replayed across all peers.',
+      'Op mix': '5% INSERT message · 5% UPDATE conversation · 45% SELECT last-20 messages (JOIN users, ORDER BY sent_at DESC LIMIT 20) · 45% SELECT user by PK.',
+      Measurement: 'Each op type timed separately. Reads force row materialization so lazy Row views don\'t win unfairly. Peers: resqlite, sqlite3, sqlite_async.',
+    },
+    whatToLookAt: [
+      '<strong>Insert message</strong> — pure write latency; punishes libraries with heavy per-call overhead.',
+      '<strong>Update conversation</strong> — write + indexed lookup on the parent conversation row.',
+      '<strong>Fetch last-20 messages</strong> — paginated read of the most recent N messages in a hot conversation.',
+      '<strong>Fetch user by PK</strong> — point-query by primary key; typically the fastest op.',
+    ],
+    breakdowns: [
+      { title: 'Wall time by op type', desc: 'Lower is better. Each op is measured independently so you can see which API shape each library handles best.', builder: (B, id) => buildGroupedBar(B, 'Chat Sim', id) },
+      { title: 'Main-isolate cost by op type', desc: 'Time spent on the calling/UI thread. Critical for Flutter — the budget per frame is 16ms at 60fps.', builder: (B, id) => buildGroupedBarAt(B, 'Chat Sim', id, 2, 'Main-isolate time (ms)') },
+    ],
+  },
+  {
+    id: 'feedPaging',
+    title: 'Feed Paging',
+    keyMatch: 'Feed Paging',
+    description:
+      'A social-feed paging workload with two sub-scenarios: static keyset pagination ' +
+      '(N pages × rows) and a reactive variant where a like/unlike write stream runs ' +
+      'concurrently with paging reads. The reactive variant stresses the ' +
+      'invalidation → re-query pipeline under realistic concurrent load.',
+    conditions: {
+      Schema: '<code>posts(id PK, author_id, created_at, body, like_count)</code> with compound index <code>(created_at DESC, id)</code>. Seed: 100,000 rows (PRNG seed <code>0xFEED</code>), 500 authors.',
+      Pagination: 'Keyset walk backwards via <code>(created_at, id) &lt; (?, ?)</code>. 20 pages × 50 rows per iteration. 2 warmup + 5 measured iterations.',
+      Reactive: 'One stream watching top-50 <code>ORDER BY created_at DESC, id DESC LIMIT 50</code>. 100 random <code>like_count++</code> writes per iteration against any of the 100K posts. Most writes miss the top-50 window. 2 warmup + 3 measured iterations.',
+      Measurement: 'Pagination: per-page wall/main. Reactive: settled-wall, main, post-baseline emission count. Settle window: 100 ms quiet, 20 s timeout. Peers: all three for pagination; resqlite + sqlite_async for reactive.',
+    },
+    whatToLookAt: [
+      '<strong>Keyset pagination</strong> — pure read cost, no reactivity. Measures the baseline query path.',
+      '<strong>Reactive feed</strong> — paging reads racing against like/unlike writes. Reveals whether the invalidation engine gates the feed cleanly or thrashes.',
+      'Emission count on the reactive variant should stay near zero — only likes on the ~50 visible posts should wake the stream.',
+    ],
+    breakdowns: [
+      { title: 'Wall time', desc: 'Lower is better. Compare the two sub-scenarios side by side.', builder: (B, id) => buildGroupedBar(B, 'Feed Paging', id) },
+      { title: 'Main-isolate cost', desc: 'UI-thread time. Important because paging is driven by user scroll.', builder: (B, id) => buildGroupedBarAt(B, 'Feed Paging', id, 2, 'Main-isolate time (ms)') },
+    ],
+  },
+  {
+    id: 'disjointColumns',
+    title: 'Column-Disjoint Streams',
+    keyMatch: 'Column Granularity',
+    description:
+      'Two streams watch the same table but select different column sets. An UPDATE ' +
+      'touching only one stream\'s columns should wake only that stream, not both. ' +
+      'This probes the invalidation engine\'s column-level precision — a column-' +
+      'agnostic engine wastes re-queries and emits duplicate results to subscribers.',
+    conditions: {
+      Schema: '<code>wide(id PK, a..t TEXT)</code> — 21 columns, seed 5,000 rows, each column filled with <code>v&lt;i&gt;</code>.',
+      Streams: '10 concurrent streams, all watching <code>SELECT id, a, b FROM wide WHERE id &lt; 1000 ORDER BY id</code>. Only <code>a</code> and <code>b</code> are in the projection.',
+      Phases: '<strong>Disjoint</strong> — 500 <code>UPDATE wide SET c = ?</code> writes (col <code>c</code> is not watched). <strong>Overlapping</strong> (control) — 500 <code>UPDATE wide SET a = ?</code> (col <code>a</code> is watched). Each write separated by 2× <code>Future.delayed(Duration.zero)</code> to defeat per-microtask coalescing.',
+      Measurement: 'Reports total re-emits (post-initial), drain ms, and primary metric <strong>re-emit ratio = disjoint / overlapping</strong>. sqlite_async uses <code>throttle: Duration.zero</code>. Peers: resqlite, sqlite_async (sqlite3 has no streams).',
+    },
+    whatToLookAt: [
+      '<strong>Disjoint column writes</strong> — the interesting case. resqlite should ignore writes to columns no stream watches.',
+      '<strong>Overlapping column writes</strong> — control case. Both streams re-query as expected.',
+      'Lower emission counts indicate a more precise invalidation engine, not a slower one. resqlite uses native result-hash suppression (exp 075) rather than column tracking.',
+    ],
+    breakdowns: [
+      { title: 'Wall time', desc: 'Lower is better.', builder: (B, id) => buildGroupedBar(B, 'Column Granularity', id) },
+    ],
+  },
+  {
+    id: 'keyedPk',
+    title: 'Keyed PK Subscriptions',
+    keyMatch: 'Keyed PK Subscriptions',
+    description:
+      'N streams, each watching a single row by primary key. Random-PK writes land ' +
+      'on a tiny subset of subscribed rows out of thousands; the remaining writes should ' +
+      'skip every stream. A naive invalidation engine re-queries all N streams on ' +
+      'every write and drowns in wasted work.',
+    conditions: {
+      Schema: '<code>items(id PK, body, updated_at)</code>, 10,000 seed rows.',
+      Streams: '50 streams each watching <code>SELECT id, body, updated_at FROM items WHERE id = ?</code>. Watched IDs are evenly spaced across the 10K rows (step = 200).',
+      Writes: '200 random-PK <code>UPDATE</code> writes per iteration. PRNG seed <code>0xBEEF</code> is chosen so ~3 of the 200 writes hit a watched PK. 1 warmup + 3 measured iterations.',
+      Measurement: 'Wall (first-write → settled), main (aggregate listener time), total emissions summed across all 50 streams, observed hits. Settle: 200 ms quiet window, 60 s deadline. Peers: resqlite, sqlite_async.',
+    },
+    whatToLookAt: [
+      '<strong>Wall time</strong> — how long the burst takes under subscription load.',
+      '<strong>Emissions</strong> — should match observed hits (≈3 per run), not total writes (200). resqlite hash-suppression may even emit fewer than hits when a write doesn\'t change row contents.',
+      'A library that reports ~equal emissions to resqlite but much higher wall time is doing redundant work per write.',
+    ],
+    breakdowns: [
+      { title: 'Wall time', desc: 'Lower is better.', builder: (B, id) => buildGroupedBar(B, 'Keyed PK Subscriptions', id) },
+    ],
+  },
+  {
+    id: 'highCardFanout',
+    title: 'High-Cardinality Stream Fan-out',
+    keyMatch: 'High-Cardinality Stream Fan-out',
+    description:
+      '100 concurrent streams during a sustained write burst. This scenario is a ' +
+      'regression guard for the PR #17 per-stream invalidation coalescing fix: ' +
+      'without coalescing, resqlite drained for 30+ seconds because every write ' +
+      'fired 100 fan-out re-queries that all queued behind each other. The fix ' +
+      'coalesces concurrent re-queries per stream using a monotonic write generation.',
+    conditions: {
+      Schema: '<code>items(id PK, owner_id, value)</code> with index <code>items_owner(owner_id)</code>. Seed: 10,000 items across 100 owners (100 each).',
+      Streams: '100 streams — one per <code>owner_id</code> — each watching <code>SELECT id, value FROM items WHERE owner_id = ? ORDER BY id</code>.',
+      Writes: '200 random-item <code>UPDATE items SET value = ?</code> writes per iteration. Every write potentially invalidates all 100 streams (the exact set depends on which owner the item belongs to). 1 warmup + 2 measured iterations.',
+      Measurement: 'Reports three medians — <strong>init drain ms</strong> (subscribe → last first-emission), <strong>write burst ms</strong> (first write → settled), and end-to-end wall. Settle: 200 ms quiet, 60 s deadline. Initial-drain timeout: 120 s. Peers: resqlite, sqlite_async.',
+    },
+    whatToLookAt: [
+      '<strong>Wall time</strong> — the total time for the burst to settle. Should be under a second on modern hardware (pre-fix: ~40s).',
+      '<strong>Init drain</strong> — how long all 100 streams take to emit their first result. Post-PR-#17: ~13ms.',
+      'A regression on this chart is the earliest signal that coalescing has broken.',
+    ],
+    breakdowns: [
+      { title: 'Wall time', desc: 'Lower is better. Anchor value: expect < 1s post-PR-#17.', builder: (B, id) => buildGroupedBar(B, 'High-Cardinality Stream Fan-out', id) },
+    ],
+  },
+  {
+    id: 'syncBurst',
+    title: 'Sync Burst',
+    slow: true,
+    keyMatch: 'Sync Burst',
+    description:
+      'Simulates a PowerSync-style initial sync: a bulk insert of thousands of rows ' +
+      'chunked into batches, followed by incremental merge rounds. Reports bulk-insert ' +
+      'throughput, merge-round latency, and the number of stream emissions that fire ' +
+      'during the burst. Opt-in via --include-slow; takes a few minutes per peer.',
+    conditions: {
+      Schema: '<code>items(id PK, external_id UNIQUE, payload TEXT)</code>. Dropped and recreated each iteration — empty table at start.',
+      'Bulk insert': '50,000 rows inserted as 100 chunks × 500-row <code>executeBatch</code> each. Primary measurement of batch throughput.',
+      'Merge rounds': '10 rounds × 100 rows each via <code>INSERT OR REPLACE</code>. IDs overlap the bulk range to exercise conflict handling.',
+      'Active stream': 'One <code>SELECT COUNT(*) FROM items</code> stream runs throughout both phases (reactive peers only). Initial emission drained before baseline reset.',
+      Measurement: '2 measured iterations, 0 warmup (too expensive). Separate wall/main for bulk vs merge. Emissions reported per peer. Settle: 200 ms quiet, 10 s deadline. Peers: all three for inserts; resqlite + sqlite_async for stream.',
+    },
+    whatToLookAt: [
+      '<strong>Bulk insert</strong> — raw write throughput at scale. Batch size matters more than per-call cost here.',
+      '<strong>Merge rounds</strong> — incremental upserts that land after the bulk. Closer to steady-state sync cost.',
+      '<strong>Stream emissions</strong> — how many times the watching COUNT(*) stream fires. Fewer emissions = better coalescing during a sustained write burst.',
+    ],
+    breakdowns: [
+      { title: 'Wall time by phase', desc: 'Lower is better. Bulk insert dominates; merge rounds are the tail.', builder: (B, id) => buildGroupedBar(B, 'Sync Burst', id) },
+    ],
+  },
+  {
+    id: 'largeWorkingSet',
+    title: 'Large Working Set',
+    slow: true,
+    keyMatch: 'Large Working Set',
+    description:
+      '~1 GB seed database queried under warm vs cold page cache. Point queries and ' +
+      'range scans are reported separately. Small-dataset benchmarks all fit in RAM, ' +
+      'which masks real memory-bound behaviors; this workload exposes what happens ' +
+      'when the database is genuinely larger than comfortable cache. Opt-in via ' +
+      '--include-slow; the 1 GB seed is cached locally after the first run.',
+    conditions: {
+      Schema: '<code>items(id PK, payload TEXT)</code>. Seed: 5,000,000 rows with a 200-char payload each (~1 GB DB + indexes). Seeded once, then cached at <code>benchmark/results/_cache/large_working_set_v1.db</code> and copied per-peer per-run.',
+      'Per round': '1,000 random point queries (<code>WHERE id = ?</code>) + 10 range scans (<code>WHERE id &gt;= ? AND id &lt; ? LIMIT 500</code>).',
+      'Warm cache': '5 rounds. Round 1 fills page caches; rounds 2+ measure steady-state hot-path.',
+      'Cold cache': '3 rounds. Each round preceded by <code>PRAGMA shrink_memory</code> to drop SQLite\'s page cache. (OS file cache is not evicted — cold is approximate.)',
+      Measurement: 'Per-op wall timing. Reports Point p50/p90 and Range p50/p90 per peer per mode. Read-only; no streams. Peers: all three.',
+    },
+    whatToLookAt: [
+      '<strong>Warm cache</strong> — page cache already populated from a prior query. Usually fast everywhere; measures per-call dispatch overhead on a hot database.',
+      '<strong>Cold cache</strong> — SQLite page cache dropped. Differentiates libraries that add their own caching layers above SQLite.',
+      '<strong>Point vs range</strong> — point queries hit one page; range scans stream through many. The gap tells you what the library\'s marginal-row cost is.',
+    ],
+    breakdowns: [
+      { title: 'Query latency (p50)', desc: 'Median latency. Columns: point p50, point p90, range p50, range p90.', builder: (B, id) => buildGroupedBar(B, 'Large Working Set', id) },
+    ],
+  },
+];
+
+function renderScenariosView(B) {
+  const container = document.getElementById('chartsContainer');
+  let html = '';
+
+  html += '<div class="device-bar" style="margin-bottom: 1rem;">';
+  html += '<label for="scenarioSelect">Scenario:</label>';
+  html += '<select id="scenarioSelect">';
+  for (const s of SCENARIOS) {
+    const hasData = B.some(sec => sec.key?.includes(s.keyMatch));
+    const suffix = s.slow && !hasData ? ' (opt-in, no data)' : (!hasData ? ' (no data)' : '');
+    html += `<option value="${s.id}"${s.id === currentScenarioId ? ' selected' : ''}>${s.title}${suffix}</option>`;
+  }
+  html += '</select>';
+  html += '<span class="device-meta">Pick a scenario for a detailed breakdown.</span>';
+  html += '</div>';
+
+  html += '<div id="scenarioCard"></div>';
+
+  container.innerHTML = html;
+
+  document.getElementById('scenarioSelect').addEventListener('change', (ev) => {
+    currentScenarioId = ev.target.value;
+    renderScenarioDetail(B);
+  });
+  renderScenarioDetail(B);
+}
+
+function renderScenarioDetail(B) {
+  const scenario = SCENARIOS.find(s => s.id === currentScenarioId) || SCENARIOS[0];
+  const hasData = B.some(sec => sec.key?.includes(scenario.keyMatch));
+  const target = document.getElementById('scenarioCard');
+
+  // Destroy any charts from a previous detail render so the new canvases
+  // get clean Chart.js state (reusing a canvas id without destroy throws).
+  allCharts.forEach(c => c.destroy());
+  allCharts = [];
+
+  const badge = scenario.slow
+    ? '<span style="display:inline-block;margin-left:0.6rem;padding:0.15rem 0.55rem;font-size:0.7rem;background:rgba(163,113,247,0.15);color:var(--async);border-radius:10px;vertical-align:middle;">opt-in</span>'
+    : '';
+
+  let html = '';
+  html += `<div class="card">
+    <h2 style="font-size: 1.15rem;">${scenario.title}${badge}</h2>
+    <p class="desc" style="font-size: 0.88rem; line-height: 1.6; margin-bottom: 1rem;">${scenario.description}</p>
+  `;
+
+  // Test conditions block — concrete parameters. Users shouldn't have to go
+  // read the suite source to know what was actually measured.
+  if (scenario.conditions) {
+    html += '<details class="scenario-conditions" style="margin-bottom:1rem;border:1px solid var(--border);border-radius:6px;background:rgba(139,148,158,0.04);">';
+    html += '<summary style="cursor:pointer;padding:0.7rem 1rem;font-size:0.82rem;font-weight:600;color:var(--text);user-select:none;">Test conditions</summary>';
+    html += '<dl style="margin:0;padding:0 1rem 0.85rem;font-size:0.82rem;line-height:1.6;">';
+    for (const [label, value] of Object.entries(scenario.conditions)) {
+      html += `<dt style="font-weight:600;color:var(--muted);margin-top:0.6rem;text-transform:uppercase;letter-spacing:0.03em;font-size:0.72rem;">${label}</dt>`;
+      html += `<dd style="margin:0.2rem 0 0;color:var(--text);">${value}</dd>`;
+    }
+    html += '</dl>';
+    html += '</details>';
+  }
+
+  if (!hasData) {
+    const extra = scenario.slow ? ' <code>--include-slow</code>' : '';
+    html += `<p class="desc" style="color:#8b949e;font-style:italic;padding:1rem;background:rgba(139,148,158,0.05);border:1px dashed var(--border);border-radius:6px;">
+      No data for this scenario in the current device's run.
+      Re-run <code>dart run benchmark/run_all.dart "&lt;device&gt;" --repeat=3${extra}</code>
+      then <code>dart run benchmark/generate_devices.dart</code> to populate.
+    </p>`;
+  } else {
+    // "What to look at" bullets.
+    html += '<div style="background:rgba(88,166,255,0.05);border:1px solid rgba(88,166,255,0.15);border-radius:6px;padding:0.85rem 1rem;margin-bottom:1.25rem;">';
+    html += '<div style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.5rem;">What to look at</div>';
+    html += '<ul style="margin-left:1rem;font-size:0.86rem;line-height:1.75;">';
+    for (const bullet of scenario.whatToLookAt) html += `<li>${bullet}</li>`;
+    html += '</ul>';
+    html += '</div>';
+
+    // One sub-card per breakdown chart.
+    html += '<div class="grid full" style="gap:1rem;">';
+    for (let i = 0; i < scenario.breakdowns.length; i++) {
+      const b = scenario.breakdowns[i];
+      html += `<div style="padding:1rem 0;border-top:1px solid var(--border);">
+        <h3 style="font-size: 0.98rem; margin-bottom: 0.2rem;">${b.title}</h3>
+        <p class="desc" style="margin-bottom: 0.75rem;">${b.desc}</p>
+        <div class="chart-wrap tall"><canvas id="scenario_${scenario.id}_${i}"></canvas></div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  target.innerHTML = html;
+
+  if (hasData) {
+    for (let i = 0; i < scenario.breakdowns.length; i++) {
+      scenario.breakdowns[i].builder(B, `scenario_${scenario.id}_${i}`);
+    }
+  }
 }
 
 // ── Chart builders ──
@@ -772,6 +1107,29 @@ function buildGroupedBar(B, titleMatch, canvasId) {
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)'),
+  }));
+}
+
+// Like buildGroupedBar but reads an arbitrary column index (e.g. p90 or
+// main-isolate time). Used for scenario detail breakdowns where we want
+// to surface more than just the wall-p50 headline.
+function buildGroupedBarAt(B, titleMatch, canvasId, valueIndex, yLabel) {
+  const sections = B.filter(s => s.key?.includes(titleMatch) && s.subtitle);
+  if (!sections.length) { renderEmptyCanvas(canvasId); return; }
+  const labels = sections.map(s => s.subtitle?.split('(')[0]?.trim() || s.subtitle);
+  const libs = collectSeries(sections, valueIndex);
+  // Drop series that have no data at this column (e.g. sync peers at main p50
+  // where main == wall is already reported under wall p50). Avoids a flat
+  // legend entry that adds no information.
+  for (const [name, d] of Object.entries(libs)) {
+    if (d.data.every(v => v == null)) delete libs[name];
+  }
+  if (!Object.keys(libs).length) { renderEmptyCanvas(canvasId); return; }
+  const datasets = Object.entries(libs).map(([name, d]) => ({
+    label: name, data: d.data, backgroundColor: d.color,
+  }));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar', data: { labels, datasets }, options: barOpts(yLabel, { valueLabels: true }),
   }));
 }
 

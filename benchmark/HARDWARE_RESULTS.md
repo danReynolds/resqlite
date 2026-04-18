@@ -17,6 +17,7 @@ Community-submitted benchmark results across different hardware.
 
 | Device | CPU | OS | Dart | Date | By | Result File |
 |---|---|---|---|---|---|---|
+| MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-17 | @danReynolds | 2026-04-17T20-39-40-MacBook Pro 14".md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-17 | @danReynolds | 2026-04-17T10-16-08-precision-fix.md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-16 | @danReynolds | 2026-04-16T22-30-30-rolling-history.md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-13 | @danReynolds | 2026-04-14T09-32-07-fresh-run.md |
