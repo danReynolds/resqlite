@@ -15,7 +15,11 @@
 /// because that logic is workload-specific and must remain visible to
 /// reviewers.
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:drift/drift.dart' as drift;
+import 'package:drift/native.dart' as drift_native;
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
@@ -94,8 +98,20 @@ abstract class BenchmarkPeer {
   /// Create a reactive query stream. Must throw [UnsupportedError] when
   /// [hasStreams] is false. Implementations should disable any library-side
   /// throttling so invalidation engines are compared directly.
-  Stream<List<Map<String, Object?>>> watch(String sql,
-      [List<Object?> params = const []]);
+  ///
+  /// [readsFrom] lists the table names the query reads. resqlite and
+  /// sqlite_async extract this from the SQL via the authorizer hook, so
+  /// they ignore the parameter. **Drift** has no such introspection for
+  /// `customSelect` — it needs the table set passed explicitly, or
+  /// streams never invalidate. Workloads using [watch] must pass
+  /// [readsFrom] correctly; an incorrect or missing set silently breaks
+  /// drift's results without crashing. See the [DriftPeer] stream test
+  /// for the regression guard.
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> params = const [],
+    Set<String> readsFrom = const {},
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -152,8 +168,11 @@ final class ResqlitePeer implements BenchmarkPeer {
   }
 
   @override
-  Stream<List<Map<String, Object?>>> watch(String sql,
-      [List<Object?> params = const []]) {
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> params = const [],
+    Set<String> readsFrom = const {}, // ignored — resqlite extracts from SQL.
+  }) {
     return _requireDb.stream(sql, params);
   }
 }
@@ -238,8 +257,11 @@ final class Sqlite3Peer implements BenchmarkPeer {
   }
 
   @override
-  Stream<List<Map<String, Object?>>> watch(String sql,
-      [List<Object?> params = const []]) {
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> params = const [],
+    Set<String> readsFrom = const {},
+  }) {
     throw UnsupportedError('sqlite3.dart does not support reactive streams');
   }
 }
@@ -301,8 +323,11 @@ final class SqliteAsyncPeer implements BenchmarkPeer {
   }
 
   @override
-  Stream<List<Map<String, Object?>>> watch(String sql,
-      [List<Object?> params = const []]) {
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> params = const [],
+    Set<String> readsFrom = const {}, // ignored — sqlite_async extracts from SQL.
+  }) {
     // Throttle disabled for fair comparison — see METHODOLOGY.md.
     return _requireDb
         .watch(sql, parameters: params, throttle: Duration.zero)
@@ -312,16 +337,297 @@ final class SqliteAsyncPeer implements BenchmarkPeer {
 }
 
 // ---------------------------------------------------------------------------
+// drift (via customSelect + customUpdate + codegen-produced GeneratedDatabase)
+// ---------------------------------------------------------------------------
+
+/// Factory type for producing a scenario-specific drift database.
+///
+/// Each scenario ships its own `@DriftDatabase(tables: [...])` class
+/// under `benchmark/drift/` which codegen materializes. The factory
+/// constructs that scenario's database using
+/// [drift_native.NativeDatabase.createInBackground] so drift runs in
+/// its own isolate (fair comparison with resqlite's writer isolate).
+typedef DriftDbFactory = drift.GeneratedDatabase Function(String path);
+
+/// Adapter for [`drift`](https://pub.dev/packages/drift) v2.x.
+///
+/// Benchmarks drift idiomatically — via its reactive APIs on top of the
+/// codegen-produced database class. Uses `customSelect` / `customUpdate`
+/// / `customInsert` with explicit `readsFrom` and auto-extracted `updates`
+/// sets, which:
+///   1. Keeps this adapter generic (one class handles every scenario).
+///   2. Preserves drift's invalidation semantics — streams do invalidate
+///      on relevant writes, as they would for a user-written drift app.
+///   3. Matches the performance characteristics of `customSelect` drift
+///      usage, which is widely used in the drift community for queries
+///      that don't fit the DSL (raw SQL is faster at call time than the
+///      DSL path because it bypasses query-planning overhead).
+///
+/// Drift's `customStatement` is explicitly NOT used — it doesn't notify
+/// the `StreamQueryStore`, which would silently break every reactive
+/// benchmark. See `test/benchmark_drift_peer_test.dart` for the
+/// regression guard.
+final class DriftPeer implements BenchmarkPeer {
+  DriftPeer(this._factory);
+
+  final DriftDbFactory _factory;
+
+  drift.GeneratedDatabase? _db;
+
+  @override
+  String get name => 'drift';
+
+  @override
+  String get label => 'drift';
+
+  @override
+  bool get isSynchronous => false;
+
+  @override
+  bool get hasStreams => true;
+
+  @override
+  bool get hasBatch => true;
+
+  /// Lookup from table SQL-name (`'messages'`) to the drift table
+  /// descriptor the `StreamQueryStore` uses for invalidation.
+  /// Rebuilt per [open] because tables belong to a specific opened db.
+  Map<String, drift.ResultSetImplementation> _tableByName = const {};
+
+  @override
+  Future<void> open(String path) async {
+    _db = _factory(path);
+    // Match resqlite/sqlite_async: WAL mode, same PRAGMAs as the sqlite3
+    // peer. Drift's `customStatement` doesn't notify streams — that's
+    // fine for PRAGMAs (they don't modify user tables), so we use it
+    // here rather than `customUpdate`.
+    await _db!.customStatement('PRAGMA journal_mode = WAL');
+
+    // Build the table lookup from the db's registered table set. Drift
+    // exposes this via `allTables` on `GeneratedDatabase`. Keys are the
+    // SQL-side table names (lowercased via `entityName`), not the
+    // Dart class names like `$ItemsTable`.
+    _tableByName = {
+      for (final t in _db!.allTables) t.entityName.toLowerCase(): t,
+    };
+  }
+
+  @override
+  Future<void> close() async {
+    await _db?.close();
+    _db = null;
+    _tableByName = const {};
+  }
+
+  drift.GeneratedDatabase get _requireDb =>
+      _db ?? (throw StateError('DriftPeer not open'));
+
+  @override
+  Future<void> execute(String sql, [List<Object?> params = const []]) async {
+    final db = _requireDb;
+    final writeTable = _extractWriteTable(sql);
+
+    if (writeTable == null) {
+      // DDL (CREATE TABLE etc) or anything we can't classify — no stream
+      // notification needed. `customStatement` is correct here.
+      await db.customStatement(sql, params);
+      return;
+    }
+
+    final resolved = _tableByName[writeTable];
+    if (resolved == null) {
+      throw StateError(
+        'DriftPeer write targets unknown table "$writeTable". '
+        'Either the scenario\'s @DriftDatabase is missing this table, '
+        'or _extractWriteTable parsed the SQL incorrectly. SQL: $sql',
+      );
+    }
+
+    // customUpdate/customInsert handle BOTH the execution AND the stream
+    // notification. Using them is what keeps drift streams fair vs the
+    // other peers' auto-tracking invalidation engines.
+    if (_isInsertSql(sql)) {
+      await db.customInsert(
+        sql,
+        variables: _toVariables(params),
+        updates: {resolved},
+      );
+    } else {
+      await db.customUpdate(
+        sql,
+        variables: _toVariables(params),
+        updates: {resolved},
+      );
+    }
+  }
+
+  @override
+  Future<void> executeBatch(
+      String sql, List<List<Object?>> paramSets) async {
+    final db = _requireDb;
+    final writeTable = _extractWriteTable(sql);
+    final resolved = writeTable == null ? null : _tableByName[writeTable];
+    if (writeTable != null && resolved == null) {
+      throw StateError(
+        'DriftPeer batch targets unknown table "$writeTable". SQL: $sql',
+      );
+    }
+
+    // drift's `batch()` runs all operations in a single transaction and
+    // notifies streams once at the end — exactly the semantics we want
+    // for a fair executeBatch comparison. Batch only exposes
+    // `customStatement`, not `customInsert/customUpdate`, but it accepts
+    // an `updates` list for stream notification.
+    final updates = resolved == null
+        ? const <drift.TableUpdate>[]
+        : [drift.TableUpdate(resolved.entityName)];
+    await db.batch((b) {
+      for (final params in paramSets) {
+        b.customStatement(sql, params, updates);
+      }
+    });
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> select(String sql,
+      [List<Object?> params = const []]) async {
+    final rows = await _requireDb
+        .customSelect(sql, variables: _toVariables(params))
+        .get();
+    return [for (final r in rows) Map<String, Object?>.from(r.data)];
+  }
+
+  @override
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> params = const [],
+    Set<String> readsFrom = const {},
+  }) {
+    final resolved = <drift.ResultSetImplementation>{
+      for (final name in readsFrom)
+        if (_tableByName[name] != null) _tableByName[name]!,
+    };
+    if (resolved.length != readsFrom.length) {
+      final missing = readsFrom.where((n) => !_tableByName.containsKey(n));
+      throw StateError(
+        'DriftPeer.watch: tables $missing not registered on this drift '
+        'db. The scenario\'s @DriftDatabase is missing them. Registered: '
+        '${_tableByName.keys.toList()}',
+      );
+    }
+    if (resolved.isEmpty) {
+      // Without readsFrom, drift's customSelect stream never invalidates
+      // — which would silently produce misleadingly-fast numbers. Fail
+      // loudly at setup time rather than at analysis time.
+      throw ArgumentError(
+        'DriftPeer.watch requires readsFrom for streams to invalidate. '
+        'Scenarios must pass the set of table names their SQL reads.',
+      );
+    }
+    return _requireDb
+        .customSelect(
+          sql,
+          variables: _toVariables(params),
+          readsFrom: resolved,
+        )
+        .watch()
+        .map((rs) => [for (final r in rs) Map<String, Object?>.from(r.data)]);
+  }
+
+  // --- SQL extraction helpers -----------------------------------------
+
+  /// Matches the target table of a single-table write statement. Our
+  /// benchmark corpus uses only simple INSERT/UPDATE/DELETE forms so a
+  /// regex is sufficient and testable. If this ever stops being true,
+  /// swap in drift's `package:sqlparser` for full parse.
+  static final RegExp _writeTableRegex = RegExp(
+    r'^\s*'
+    // INSERT [OR REPLACE|IGNORE|ABORT|FAIL|ROLLBACK] INTO <table>
+    // | UPDATE [OR ...] <table>
+    // | DELETE FROM <table>
+    r'(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE|ABORT|FAIL|ROLLBACK))?\s+INTO'
+    r'|UPDATE(?:\s+OR\s+(?:REPLACE|IGNORE|ABORT|FAIL|ROLLBACK))?'
+    r'|DELETE\s+FROM)'
+    r'\s+["`]?(\w+)["`]?',
+    caseSensitive: false,
+  );
+
+  static String? _extractWriteTable(String sql) {
+    final m = _writeTableRegex.firstMatch(sql);
+    return m?.group(1)?.toLowerCase();
+  }
+
+  static final RegExp _insertRegex =
+      RegExp(r'^\s*INSERT\b', caseSensitive: false);
+
+  static bool _isInsertSql(String sql) => _insertRegex.hasMatch(sql);
+
+  /// Wrap a raw value list as drift variables. Drift's `Variable<T>`
+  /// expects a typed value; type-switch on the runtime type gives
+  /// correct binding without runtime reflection.
+  static List<drift.Variable> _toVariables(List<Object?> params) {
+    return [
+      for (final p in params)
+        if (p == null)
+          // Drift's Variable<T> requires T extends Object, but the
+          // generic type is only used for type-directed binding — null
+          // values are special-cased in the binder regardless of T.
+          // Picking `int` here is arbitrary; any non-nullable T works.
+          const drift.Variable<int>(null)
+        else if (p is int)
+          drift.Variable<int>(p)
+        else if (p is double)
+          drift.Variable<double>(p)
+        else if (p is String)
+          drift.Variable<String>(p)
+        else if (p is bool)
+          drift.Variable<bool>(p)
+        else if (p is List<int>)
+          drift.Variable<Uint8List>(Uint8List.fromList(p))
+        else
+          throw ArgumentError(
+              'DriftPeer: unsupported parameter type ${p.runtimeType} '
+              'for value $p'),
+    ];
+  }
+}
+
+/// Helper for scenarios to construct a [DriftPeer] with a standard
+/// isolate-backed drift database. Scenarios provide the per-scenario
+/// constructor closure (e.g. `(exec) => KeyedPkDriftDb(exec)`).
+DriftDbFactory driftFactoryFor(
+  drift.GeneratedDatabase Function(drift.QueryExecutor executor) dbCtor,
+) {
+  return (String path) => dbCtor(
+        drift_native.NativeDatabase.createInBackground(
+          File(path),
+          // Match the other peers' open-time PRAGMAs. Drift's `setup`
+          // runs once when the background isolate opens the db file.
+          setup: (rawDb) {
+            rawDb.execute('PRAGMA journal_mode = WAL');
+          },
+        ),
+      );
+}
+
+// ---------------------------------------------------------------------------
 // PeerSet — convenience for opening all applicable peers on the same tempdir
 // ---------------------------------------------------------------------------
 
 /// A collection of [BenchmarkPeer]s opened on separate database files in a
 /// shared temp directory. Handles setup + teardown uniformly so workloads
-/// don't reimplement the triple-open dance.
+/// don't reimplement the per-peer open dance.
 ///
 /// Usage:
 /// ```dart
+/// // 3 peers (resqlite, sqlite3, sqlite_async):
 /// final peers = await PeerSet.open(tempDir.path);
+///
+/// // 4 peers including drift — scenario provides its own drift schema:
+/// final peers = await PeerSet.open(
+///   tempDir.path,
+///   driftFactory: driftFactoryFor((exec) => ChatSimDriftDb(exec)),
+/// );
 /// try {
 ///   for (final peer in peers.all) {
 ///     // seed and benchmark
@@ -333,7 +639,10 @@ final class SqliteAsyncPeer implements BenchmarkPeer {
 final class PeerSet {
   PeerSet._(this.all);
 
-  /// All peers in this set, in a stable order (resqlite, sqlite3, sqlite_async).
+  /// All peers in this set, in a stable order. With no drift factory:
+  /// [resqlite, sqlite3, sqlite_async]. With a drift factory: append
+  /// drift at the end. Order matters for deterministic chart series
+  /// ordering in the dashboard.
   final List<BenchmarkPeer> all;
 
   /// Open one of each peer type on separate db files inside [tempDirPath].
@@ -341,14 +650,23 @@ final class PeerSet {
   ///
   /// [require] optionally filters to peers that satisfy a predicate. For
   /// example, `require: (p) => p.hasStreams` opens only reactive peers.
+  ///
+  /// [driftFactory] — if provided, a [DriftPeer] is added to the set
+  /// using this factory. Scenarios wanting drift coverage must supply
+  /// their scenario-specific drift database factory (typically
+  /// `driftFactoryFor((exec) => MyScenarioDriftDb(exec))`). If omitted,
+  /// drift is not included — useful for scenarios where drift cannot
+  /// participate (none currently; all 7 scenarios include it).
   static Future<PeerSet> open(
     String tempDirPath, {
     bool Function(BenchmarkPeer peer)? require,
+    DriftDbFactory? driftFactory,
   }) async {
     final candidates = <BenchmarkPeer>[
       ResqlitePeer(),
       Sqlite3Peer(),
       SqliteAsyncPeer(),
+      if (driftFactory != null) DriftPeer(driftFactory),
     ];
     final chosen =
         require == null ? candidates : candidates.where(require).toList();

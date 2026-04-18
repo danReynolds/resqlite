@@ -28,6 +28,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../drift/keyed_pk_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
@@ -85,6 +86,7 @@ Future<String> runKeyedPkSubscriptionsBenchmark() async {
     final peers = await PeerSet.open(
       tempDir.path,
       require: (p) => p.hasStreams,
+      driftFactory: driftFactoryFor((exec) => KeyedPkDriftDb(exec)),
     );
     try {
       for (final peer in peers.all) {
@@ -200,7 +202,8 @@ Future<_IterationResult> _singleIteration(
     final idx = i; // Capture for closure.
     final sub = peer.watch(
       'SELECT id, body, updated_at FROM items WHERE id = ?',
-      [watchedIds[i]],
+      params: [watchedIds[i]],
+      readsFrom: const {'items'},
     ).listen((_) {
       final sw = Stopwatch()..start();
       emitCounts[idx]++;
@@ -284,8 +287,12 @@ List<int> _pickWatchedIds() {
 // ---------------------------------------------------------------------------
 
 Future<void> _seed(BenchmarkPeer peer) async {
+  // IF NOT EXISTS because drift auto-creates the table from its
+  // @DriftDatabase schema at open; re-issuing bare CREATE TABLE would
+  // throw "table already exists" on that peer. The schema here must
+  // match benchmark/drift/keyed_pk_db.dart exactly.
   await peer.execute(
-    'CREATE TABLE items('
+    'CREATE TABLE IF NOT EXISTS items('
     'id INTEGER PRIMARY KEY, '
     'body TEXT NOT NULL, '
     'updated_at INTEGER NOT NULL'
