@@ -17,6 +17,7 @@ Community-submitted benchmark results across different hardware.
 
 | Device | CPU | OS | Dart | Date | By | Result File |
 |---|---|---|---|---|---|---|
+| MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-18 | @danReynolds | 2026-04-18T16-15-52-exp-079-slow.md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-18 | @danReynolds | 2026-04-18T10-27-16-MacBook Pro 14".md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-17 | @danReynolds | 2026-04-17T21-35-02-MacBook Pro 14".md |
 | MacBook Pro 14" | M1 Pro 10c | macOS 26.2 | 3.11 | 2026-04-17 | @danReynolds | 2026-04-17T20-39-40-MacBook Pro 14".md |

@@ -30,6 +30,23 @@ final class StreamEngine {
   Set<String>? _pendingDirtyTables;
   bool _flushScheduled = false;
 
+  /// Experiment 079: probe that returns `true` if any write is currently
+  /// in flight on the writer isolate. Wired up by the [Writer]
+  /// constructor. Used by [_reQuery] to suppress emissions whose data
+  /// is about to be invalidated by the in-flight write's response.
+  ///
+  /// Reads "busy" conservatively — a value of `true` only means "don't
+  /// emit now" (the follow-up re-query, scheduled by the write's own
+  /// `handleDirtyTables`, will emit fresh data). False negatives (missing
+  /// a write that's about to start) are already handled by the post-
+  /// flight `writeGen` check.
+  bool Function()? _writerBusyProbe;
+
+  /// Register the writer-busy probe. Called by [Writer].
+  void setWriterBusyProbe(bool Function() probe) {
+    _writerBusyProbe = probe;
+  }
+
   /// Number of active stream entries.
   ///
   /// Increments when [stream] registers a new query, decrements when all
@@ -270,8 +287,29 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (entry.writeGen != gen) return;  // stale
+      if (entry.writeGen != gen) return;  // stale — caught during flight
       if (rows == null) return; // Unchanged — worker-side hash matched.
+
+      // Experiment 079: if the writer is busy right now, another write
+      // is in progress and its response will arrive soon, fire its own
+      // `handleDirtyTables`, bump this entry's writeGen, and schedule
+      // a follow-up re-query. Emitting our (soon-stale) result now
+      // just burns the UI thread for an emission the user would
+      // immediately supersede. Skip it — the follow-up will emit fresh.
+      //
+      // Mirrors drift's cancel-on-new-invalidation behavior via a
+      // different mechanism: drift cancels the reader mid-query; we
+      // let it finish but drop the result if a write is already
+      // queued up. Correctness invariant: the follow-up re-query IS
+      // guaranteed to fire because the in-flight write WILL call
+      // handleDirtyTables on response (see database.dart:execute +
+      // executeBatch + transaction paths).
+      //
+      // Concrete win: Sync Burst COUNT(*) emissions 103 → 1–2. The
+      // stream watcher sees the final count after all 100 batches,
+      // not a per-batch intermediate count nobody uses.
+      if (_writerBusyProbe?.call() ?? false) return;
+
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
       entry.lastRowCount = newRowCount;

@@ -43,6 +43,7 @@ Experiments that proved their value and were merged into the codebase.
 | [070](070-zero-row-change-shortcircuit.md) | Zero-row-change short-circuit + persistent dirty buffer | Removes per-write calloc/free pair and short-circuits empty dirty set to a const empty list |  |
 | [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 | [077](077-cheap-check-first-sweep.md) | Cheap-check-first sweep (four small wins) | **−13 % to −23 % on write benchmarks** from cached `sqlite3_bind_parameter_count`; pairs with three correctness-neutral fast-rejects on invalidation, hash, and subscription paths |  |
+| [079](079-batch-emission-coalescing.md) | Batch-scoped stream invalidation coalescing | **Sync Burst COUNT(*) emissions 103 → 1** via a writer-busy probe on the mutex. Matches drift's per-transaction coalescing behavior without user-facing API change; 0 regressions in reactive or timing scenarios |  |
 
 ## Rejected
 

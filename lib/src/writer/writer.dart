@@ -24,7 +24,13 @@ final class Writer {
   // starvation is possible.
   final _mutex = Mutex();
 
-  Writer(this._streamEngine);
+  Writer(this._streamEngine) {
+    // Let the stream engine probe "is any write currently in flight?"
+    // Experiment 079 uses this to suppress stream emissions that are
+    // about to be superseded by a write whose response hasn't arrived
+    // yet. See StreamEngine._reQuery for the use site.
+    _streamEngine.setWriterBusyProbe(() => _mutex.isLocked);
+  }
 
   static Future<Writer> spawn(
       StreamEngine streamEngine, Pointer<void> handle) async {

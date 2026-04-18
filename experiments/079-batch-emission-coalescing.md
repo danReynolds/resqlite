@@ -1,7 +1,196 @@
 # Experiment 079: Batch-scoped stream invalidation coalescing
 
 **Date:** 2026-04-18
-**Status:** Planned
+**Status:** **Accepted** — Sync Burst COUNT(*) emissions 103 → 1, no reactive regression
+
+## Result
+
+| Metric | Baseline | Post-079 | Drift (ref) |
+|---|---|---|---|
+| Sync Burst stream emissions (50K-row burst + 10 merge rounds) | **103** | **1** | 1 |
+| Sync Burst emission repeat-stability (3 runs) | — | 1.00 med / 0% range | — |
+| Keyed PK wall / emissions | 225ms / 0 | 229ms / 0 | 557ms / 10,000 |
+| High-Cardinality wall / emissions | 246ms / 0 | 250ms / 0 | 1,742ms / 20,000 |
+| Feed Paging reactive / emissions | 109ms / 0 | 108ms / 0 | 233ms / 100 |
+| Column-Disjoint re-emit ratio | 0.000 | 0.000 | 1.000 |
+| Comparison summary (timing) | — | **0 wins / 0 regressions / 153 neutral** | — |
+
+Primary win landed. Regression guards all clean — reactive emission
+counts unchanged (0 across the board), wall-time deltas within noise
+(≤ 3% on every stream scenario).
+
+The initial fast run flagged 2 "regressions" on `resqlite tx.execute()
+loop` (5.55 → 6.30ms); confirmed noise by the --include-slow run
+(0 regressions, repeat-stability classified this benchmark as
+"stable" with 0.5% MAD).
+
+## Implementation
+
+A single-line addition in `StreamEngine._reQuery`, plus a probe wired
+up from the `Writer` constructor. The mutex already tracks lock state;
+we just expose it.
+
+```dart
+// lib/src/stream_engine.dart
+// After the reader response + hash-change check:
+if (_writerBusyProbe?.call() ?? false) return;
+```
+
+The probe returns true if any write holds the writer mutex at the
+moment we'd emit. A true reading means: a write's response is
+about to arrive, will call `handleDirtyTables`, bump writeGen, and
+schedule a fresh re-query. Our current re-query's data is already
+provisional, so skip the emission — the follow-up emits fresh.
+
+Correctness invariant preserved: the in-flight write WILL call
+`handleDirtyTables` on response (see `database.dart:execute`/
+`executeBatch`/`transaction`). Thus every skipped emission is
+guaranteed to have a follow-up re-query queued.
+
+## Phase 1 findings (2026-04-18)
+
+## Phase 1 findings (2026-04-18)
+
+Drift's mechanism, read from
+`~/.pub-cache/hosted/pub.dev/drift-2.32.1/lib/src/runtime/executor/stream_queries.dart`:
+
+### 1. Invalidations dispatch synchronously
+
+```dart
+// stream_queries.dart:84-90
+// Why is this stream synchronous? We want to dispatch table updates before
+// the future from the query completes. This allows streams to invalidate
+// their cached data before the user can send another query.
+final StreamController<Set<TableUpdate>> _tableUpdates =
+    StreamController.broadcast(sync: true);
+```
+
+Every `handleTableUpdates(...)` call runs subscriber callbacks
+synchronously within the caller's stack.
+
+### 2. The subscriber cancels in-flight queries
+
+```dart
+// stream_queries.dart:273-289 (QueryStream._onListenOrResume)
+_tablesChangedSubscription =
+    _store.updatesForSync(_fetcher.readsFrom).listen((_) {
+  _lastData = null;
+  _cancelRunningQueries();   // <-- key line
+  if (_activeListeners > 0) {
+    fetchAndEmitData();
+  }
+});
+```
+
+When a new invalidation arrives, drift cancels any running query
+for that stream before starting a fresh one.
+
+### 3. Cancelled queries don't emit
+
+```dart
+// stream_queries.dart:328-347 (QueryStream.fetchAndEmitData)
+runCancellable<Rows>(_fetcher.fetchData, token: operation);
+final data = await operation.resultOrNullIfCancelled;
+if (data == null) return;  // <-- cancelled path: no emit
+_lastData = data;
+// ... emit to listeners
+```
+
+If the cancellation token fires between `runCancellable` and the
+await's resolution, `resultOrNullIfCancelled` returns null and the
+function exits without emitting.
+
+### Why our current mechanism doesn't achieve this
+
+Our `_reQuery` (stream_engine.dart:264–294) has a `writeGen` check
+after the await:
+
+```dart
+final (rows, ...) = await pool.selectIfChanged(...);
+if (entry.writeGen != gen) return;  // stale
+// ... emit
+```
+
+This catches invalidations that land **during** the reader's
+response-processing (case B below) but not invalidations that land
+**after** the reader responds, **while** our microtask is running
+(case A below).
+
+Sync Burst's timing:
+
+```
+t=0    user: await batch1      [waiting for writer]
+t=1    writer responds batch1  [queues event-loop msg]
+t=2    main runs msg: handleDirtyTables → schedules microtask M1
+t=3    user: await batch2      [waiting for writer]
+t=4    M1 runs: _reQuery dispatches COUNT(*), awaits reader
+t=5    reader responds to COUNT(*)  [queues event-loop msg for us]
+t=6    writer responds batch2       [queues event-loop msg]
+t=7    (!) order of t=5 vs t=6 on the event loop determines case A or B
+```
+
+- **Case A** (t=5 before t=6): reader msg runs first → resolves our
+  await → writeGen check passes → **emit**. Then batch2 msg runs →
+  handleDirtyTables → fresh re-query for batch2.
+- **Case B** (t=6 before t=5): batch2 msg runs first → writeGen
+  bumps → reader msg runs → writeGen check fails → **skip emit**.
+  Next re-query scheduled, runs fresh.
+
+For Sync Burst, `SELECT COUNT(*)` is cheap and usually completes
+before the next 500-row batch does, so Case A dominates: 103 emits.
+
+Drift's sync-dispatch + query-cancellation means the equivalent of
+Case A is impossible: the next batch's invalidation fires
+synchronously inside the writer isolate's response-processing
+callback (before control returns to user code), cancelling the
+in-flight COUNT before it can resolve its await.
+
+### Candidate fix — add an event-loop yield before emit
+
+Insert a single `await Future<void>.delayed(Duration.zero)` between
+"reader response processed" and "emit to subscribers". That yields
+back to the event loop, letting pending writer responses run their
+`handleDirtyTables` microtask. Then re-check `writeGen`:
+
+```dart
+final (rows, ...) = await pool.selectIfChanged(...);
+if (entry.writeGen != gen) return;  // existing: during-flight check
+if (rows == null) return;
+
+// NEW: yield to the event loop so any pending writer response has
+// a chance to bump writeGen before we emit. Mirrors drift's sync-
+// dispatch property at the emit boundary.
+await Future<void>.delayed(Duration.zero);
+if (entry.writeGen != gen) return;  // NEW: supersession check
+
+entry.lastResult = rows;
+for (final sub in entry.subscribers) sub.add(rows);
+```
+
+**Cost:** one event-loop tick of latency per emission.
+
+**Expected win:** Sync Burst emissions drop from 103 to single digits
+(matching drift's 2).
+
+**Risks to verify before accepting:**
+- A11b wall-time regression — the added tick per emission might hurt
+  fan-out, but A11b already emits 0 (hash suppression), so the yield
+  runs approximately 0 times. Verify.
+- A11 Keyed PK emission count — currently 0. Must stay 0.
+- Reactive Feed (A6 Part B) emission — currently 0. Must stay 0.
+- Interactive transaction timing — the yield runs for `db.stream`
+  emissions, not for `db.select` returns, so should be unaffected.
+
+### Going into Phase 2 with
+
+- **Mechanism identified:** invalidation processing timing,
+  specifically the asymmetry between drift's sync-dispatch+cancel
+  and our microtask+post-check
+- **Fix approach:** event-loop yield + re-check writeGen at emit
+  boundary (candidate mechanism (c) from the original plan — the
+  cheapest, most localized fix)
+- **Primary metric:** Sync Burst emissions → single digits
+- **Regression guards:** A11b wall, A11/A5/A6 emission counts
 
 ## Problem
 
