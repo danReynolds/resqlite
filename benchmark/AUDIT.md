@@ -73,6 +73,9 @@ Rules the parsers enforce:
 **What it extracts:**
 - **Runs**: one entry per result file, each with a flat `metrics` map
   (keys like `Select → Maps / 1000 rows / resqlite select()` → wall-med value)
+- **Optional namespaced metrics**: `memoryMetrics` and
+  `sqliteDiagnosticsMetrics` from the non-timing `## Memory` and
+  `## SQLite Diagnostics` sections
 - **Experiments**: parses `experiments/README.md` table rows + reads each
   individual `experiments/NNN-*.md` for date, commit, sections (Problem,
   Hypothesis, What We Built, Results, Decision)
@@ -96,8 +99,10 @@ Rules the parsers enforce:
 - `_extractSection()` — whitelist of accepted experiment-doc headings.
   Already covers 10+ variants (Problem, Hypothesis, What We Built, etc.).
 - The `metrics` map extraction in `extractResqliteMedians()` is already
-  general — **any new `## Section / ### Subsection` with a standard
-  library-row table is picked up without generator changes.**
+  general for timing sections, but explicit non-timing sections must be
+  excluded there and parsed by dedicated extractors. Today those are
+  `## Memory`, `## SQLite Diagnostics`, and
+  `## Streaming (Column Granularity)`.
 
 ## Parser #2 — `generate_devices.dart`
 
