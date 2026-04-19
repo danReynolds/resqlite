@@ -1,4 +1,22 @@
 // ignore_for_file: avoid_print
+//
+// Release-mode benchmark entry point.
+//
+// This is the pristine peer-comparison harness. Runs resqlite against
+// drift / sqlite_async / sqlite3 with NO diagnostic instrumentation —
+// what ships here is exactly what downstream users run. Results feed
+// the public dashboard and HARDWARE_RESULTS.md.
+//
+// **If you are running an experiment** on a branch and want to know
+// whether your change helped or hurt, use `benchmark/run_profile.dart`
+// instead — that harness compiles in Timeline markers + ProfiledDatabase
+// instrumentation (gated behind `kProfileMode`) so you can see
+// dispatch-vs-work splits, p99/max regressions, and cross-isolate
+// timelines. Both your experiment branch and its baseline run under
+// the same profile build, so the diagnostic overhead cancels out in
+// the A/B delta.
+//
+// See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
 import 'dart:io' show Directory, File, Process, exit, stderr;
 import 'dart:math' as math;
 
@@ -361,7 +379,7 @@ _RunAllOptions _parseOptions(List<String> args) {
 }
 
 void _printUsageAndExit() {
-  print('Usage: dart run benchmark/run_all.dart [label] [--repeat=N] '
+  print('Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
       '[--compare-to=PATH] [--hardware-summary] [--include-slow]');
   print('');
   print('  --repeat=N           Run the suite N times (default: 1)');

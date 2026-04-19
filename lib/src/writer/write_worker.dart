@@ -15,6 +15,7 @@ import 'package:ffi/ffi.dart';
 
 import '../exceptions.dart';
 import '../native/resqlite_bindings.dart';
+import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
 
@@ -170,10 +171,14 @@ void writerEntrypoint(List<Object> args) {
     // Timeline markers scope the writer-isolate's per-message work so
     // external profilers (DevTools, `dart --observe`) can show the
     // cross-isolate breakdown without any custom protocol changes.
-    // Near-zero cost when the timeline stream isn't active (a single
-    // atomic load + branch per marker). See experiments/080-dispatch-
-    // budget.md for the analysis these markers enable.
-    Timeline.startSync('writer.handle.${message.runtimeType}');
+    // Gated behind `kProfileMode` (compile-time const) so peer-
+    // comparison release builds pay zero — the const-false branch
+    // tree-shakes away entirely at AOT. Build with
+    // `-DRESQLITE_PROFILE=true` to enable (see lib/src/profile_mode.dart
+    // and experiments/080-dispatch-budget.md).
+    if (kProfileMode) {
+      Timeline.startSync('writer.handle.${message.runtimeType}');
+    }
     try {
       switch (message) {
         case ExecuteRequest():
@@ -208,7 +213,9 @@ void writerEntrypoint(List<Object> args) {
         ResqliteException('Internal error in writer isolate: $e\n$st'),
       );
     } finally {
-      Timeline.finishSync();
+      if (kProfileMode) {
+        Timeline.finishSync();
+      }
     }
   };
 }

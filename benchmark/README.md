@@ -1,11 +1,31 @@
 # resqlite Benchmarks
 
-This folder has two distinct purposes:
+This folder serves **three distinct purposes**, each with its own
+entry point. Choosing the right one matters because the production
+code path you measure differs between them.
 
-1. package-local `resqlite` performance exploration via [run_all.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/run_all.dart)
-2. cross-library comparison via the shared verifier harness in [`sqlite_reactive_verifier`](/Users/dan/Coding/dune_gemini/packages/sqlite_reactive_verifier)
+| Purpose | Entry point | resqlite code instrumented? |
+|---|---|---|
+| **Peer comparison / public dashboard** | [`run_release.dart`](./run_release.dart) | **No** — pristine, zero diagnostic overhead |
+| **Experiment vs baseline (resqlite-only A/B)** | [`run_profile.dart`](./run_profile.dart) | **Yes** — Timeline markers + per-call profiling |
+| **Cross-library comparison via verifier harness** | `sqlite_reactive_verifier` | N/A (separate package) |
 
-The second path is the canonical comparison flow.
+**Rule of thumb.** If you're publishing a number that will end up on
+the public dashboard, or comparing resqlite against drift /
+sqlite_async / sqlite3, use `run_release.dart` — it runs the exact
+code a downstream user ships, with no instrumentation that could
+distort the comparison.
+
+If you're running an experiment on a branch and want to know whether
+your change helped or hurt, use `run_profile.dart` — it compiles in
+Timeline markers and wraps every call in `ProfiledDatabase`, so you
+see dispatch-vs-work split, p99/max, cross-isolate timelines in
+DevTools, and per-call JSON you can diff against a baseline. Both
+your experiment branch AND its baseline run under the same profile
+build, so the diagnostic overhead cancels out in the A/B delta.
+
+See [EXPERIMENTS.md](./EXPERIMENTS.md) for the experiment-mode
+workflow and A/B tabulation tools.
 
 ## Documentation
 
@@ -13,27 +33,31 @@ The second path is the canonical comparison flow.
 - [`SCOPE.md`](./SCOPE.md) — exact peer versions, hardware tested, known gaps, what we test and what we don't
 - [`AUDIT.md`](./AUDIT.md) — how benchmark results propagate from Dart code to the public dashboard (parsers, generators, chart builders)
 - [`HARDWARE_RESULTS.md`](./HARDWARE_RESULTS.md) — device registry pointing at canonical result files per device
+- [`EXPERIMENTS.md`](./EXPERIMENTS.md) — experiment-mode workflow using `run_profile.dart` and diff tools
 
-## Local resqlite Suite
+## Release Mode (peer comparison)
+
+Pristine code, no diagnostic overhead. Feeds the public dashboard.
 
 From [`packages/resqlite`](/Users/dan/Coding/dune_gemini/packages/resqlite):
 
 ```bash
-dart run benchmark/run_all.dart my-label
+dart run benchmark/run_release.dart my-label
 ```
 
 Useful options:
 
 ```bash
-dart run benchmark/run_all.dart my-label --repeat=5
-dart run benchmark/run_all.dart my-label --repeat=5 --compare-to=benchmark/results/2026-04-08T14-44-58-final.md
+dart run benchmark/run_release.dart my-label --repeat=5
+dart run benchmark/run_release.dart my-label --repeat=5 --compare-to=benchmark/results/2026-04-08T14-44-58-final.md
 ```
 
-`run_all.dart` now:
+`run_release.dart`:
 - accepts an explicit `--compare-to=...` baseline instead of always diffing against the latest file
 - supports `--repeat=N` to rerun the full package-local suite multiple times
 - emits a `Repeat Stability` section for resqlite medians
 - uses a noise-aware comparison threshold of `max(10%, 3 × current MAD%)` with a `±0.02 ms` absolute floor for ultra-fast cases
+- reports median (p50) and p90 per workload — same columns the dashboard parsers expect. Tail-percentile views (p99, max) are intentionally kept out of the release output and live in profile mode instead
 
 That runs the package-local suites:
 
@@ -52,6 +76,31 @@ Recommended workflow for performance decisions:
 1. Pick a pinned baseline with `--compare-to=...`
 2. Run at least `--repeat=5`
 3. Trust stable cases first; treat `Repeat Stability: noisy` rows as advisory
+
+## Profile Mode (experiment vs baseline)
+
+See [`EXPERIMENTS.md`](./EXPERIMENTS.md) for the full workflow. Short
+version:
+
+```bash
+# On main (baseline)
+dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
+  --out=benchmark/profile/results/baseline.json
+
+# On exp-N branch
+dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
+  --out=benchmark/profile/results/exp-N.json
+
+# Compare
+dart run benchmark/profile/diff.dart \
+  benchmark/profile/results/baseline.json \
+  benchmark/profile/results/exp-N.json
+```
+
+The `-DRESQLITE_PROFILE=true` flag compiles in Timeline markers and
+wraps scenarios in `ProfiledDatabase`. Because both runs use the
+same flag, any diagnostic overhead cancels out in the delta — what
+you see is the signal of your actual change.
 
 ## Main-only Four-Way Comparison
 

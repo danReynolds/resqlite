@@ -22,9 +22,23 @@ and those files feed the live charts on the GitHub Pages site
    whose **filename timestamp's date** matches the experiment doc's `**Date:**`
 
 If you're unsure whether a commit needs a benchmark result, it's because you
-ran `dart run benchmark/run_all.dart <label>` locally to validate. That
+ran `dart run benchmark/run_release.dart <label>` locally to validate. That
 produced a file — commit it. If you didn't run a benchmark, you should have
 before shipping a "performance experiment."
+
+For A/B comparisons between an experiment branch and baseline (where you
+want to see dispatch-vs-work split, p99/max, and cross-isolate timelines),
+use profile mode instead:
+
+```bash
+dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
+  --out=benchmark/profile/results/<baseline-or-exp>.json
+```
+
+Both sides of the A/B run under the same `-DRESQLITE_PROFILE=true` flag
+so the diagnostic overhead cancels out in the delta. See
+[benchmark/EXPERIMENTS.md](../../../benchmark/EXPERIMENTS.md) for the
+full workflow.
 
 ## Why all three
 
