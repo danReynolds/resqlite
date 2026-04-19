@@ -36,6 +36,7 @@ import 'suites/scaling.dart';
 import 'suites/schema_shapes.dart';
 import 'suites/select_bytes.dart';
 import 'suites/select_maps.dart';
+import 'suites/sqlite_diagnostics.dart';
 import 'suites/streaming.dart';
 import 'suites/sync_burst.dart';
 import 'suites/writes.dart';
@@ -79,7 +80,8 @@ Future<void> main(List<String> args) async {
     ..writeln('Generated: ${DateTime.now().toIso8601String()}')
     ..writeln()
     ..writeln('Libraries compared:')
-    ..writeln('- **resqlite** — raw FFI + C JSON/binary serialization + Isolate.exit zero-copy')
+    ..writeln(
+        '- **resqlite** — raw FFI + C JSON/binary serialization + Isolate.exit zero-copy')
     ..writeln('- **sqlite3** — raw FFI, synchronous, per-cell column reads')
     ..writeln('- **sqlite_async** — PowerSync, async connection pool')
     ..writeln()
@@ -127,11 +129,13 @@ Future<void> main(List<String> args) async {
   } else {
     markdown.writeln('## Comparison');
     markdown.writeln();
-    markdown.writeln('No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.');
+    markdown.writeln(
+        'No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.');
     markdown.writeln();
   }
 
-  final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+  final timestamp =
+      DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
   final resultsFile = File('${resultsDir.path}/$timestamp-${options.label}.md');
   await resultsFile.writeAsString(markdown.toString());
 
@@ -301,8 +305,11 @@ Future<String> _runSuiteOnce({required bool includeSlow}) async {
   print('[14/15] High-Cardinality Stream Fan-out (A11b)...');
   markdown.write(await runHighCardinalityFanoutBenchmark());
 
-  print('[15/15] Memory...');
+  print('[15/16] Memory...');
   markdown.write(await runMemoryBenchmark());
+
+  print('[16/16] SQLite Diagnostics...');
+  markdown.write(await runSqliteDiagnosticsBenchmark());
 
   // Slow workloads — opt-in via --include-slow because they take
   // multiple minutes each. Register here so they append to the
@@ -383,8 +390,10 @@ void _printUsageAndExit() {
       '[--compare-to=PATH] [--hardware-summary] [--include-slow]');
   print('');
   print('  --repeat=N           Run the suite N times (default: 1)');
-  print('  --compare-to=PATH    Compare against a specific baseline results file');
-  print('  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md');
+  print(
+      '  --compare-to=PATH    Compare against a specific baseline results file');
+  print(
+      '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md');
   print('  --include-slow       Also run multi-minute slow workloads');
   print('                       (sync burst, 1GB working set)');
   exit(0);
@@ -435,10 +444,13 @@ String _renderRepeatStability(Map<String, AggregateStats> aggregates) {
   final buf = StringBuffer();
   buf.writeln('## Repeat Stability');
   buf.writeln();
-  buf.writeln('These rows summarize resqlite wall medians across repeated full-suite runs.');
-  buf.writeln('Use this section to judge whether small deltas are real or just noise.');
+  buf.writeln(
+      'These rows summarize resqlite wall medians across repeated full-suite runs.');
+  buf.writeln(
+      'Use this section to judge whether small deltas are real or just noise.');
   buf.writeln();
-  buf.writeln('| Benchmark | Median (ms) | Min | Max | Range | MAD | Stability |');
+  buf.writeln(
+      '| Benchmark | Median (ms) | Min | Max | Range | MAD | Stability |');
   buf.writeln('|---|---|---|---|---|---|---|');
 
   final keys = aggregates.keys.toList()..sort();
@@ -476,17 +488,15 @@ String _generateComparison(
   buf.writeln();
   buf.writeln('Previous: `$previousFileName`');
   buf.writeln();
-  buf.writeln('| Benchmark | Previous (ms) | Current med (ms) | Delta | Noise threshold | Stability | Status |');
+  buf.writeln(
+      '| Benchmark | Previous (ms) | Current med (ms) | Delta | Noise threshold | Stability | Status |');
   buf.writeln('|---|---|---|---|---|---|---|');
 
   var wins = 0;
   var regressions = 0;
   var neutral = 0;
 
-  final allKeys = current.keys
-      .where(previous.containsKey)
-      .toList()
-    ..sort();
+  final allKeys = current.keys.where(previous.containsKey).toList()..sort();
 
   for (final key in allKeys) {
     final prev = previous[key]!;
@@ -510,12 +520,11 @@ String _generateComparison(
       status = '🟢 Win (${pct.toStringAsFixed(0)}%)';
       wins++;
     } else if (improvementDelta > thresholdMs) {
-      status = '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
+      status =
+          '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
       regressions++;
     } else {
-      status = stats.runs.length > 1
-          ? '⚪ Within noise'
-          : '⚪ Neutral';
+      status = stats.runs.length > 1 ? '⚪ Within noise' : '⚪ Neutral';
       neutral++;
     }
 
@@ -532,7 +541,8 @@ String _generateComparison(
   }
 
   buf.writeln();
-  buf.writeln('**Summary:** $wins wins, $regressions regressions, $neutral neutral');
+  buf.writeln(
+      '**Summary:** $wins wins, $regressions regressions, $neutral neutral');
   buf.writeln();
   buf.writeln(
     'Comparison threshold uses `max(10%, 3 × current MAD%)`, '
@@ -545,9 +555,11 @@ String _generateComparison(
   buf.writeln();
 
   if (regressions > 0) {
-    buf.writeln('⚠️ **Regressions detected beyond current-run noise.** Review the flagged benchmarks above.');
+    buf.writeln(
+        '⚠️ **Regressions detected beyond current-run noise.** Review the flagged benchmarks above.');
   } else if (wins > 0) {
-    buf.writeln('✅ **No regressions beyond noise.** $wins benchmarks improved.');
+    buf.writeln(
+        '✅ **No regressions beyond noise.** $wins benchmarks improved.');
   } else {
     buf.writeln('✅ **No changes beyond noise.**');
   }
@@ -669,7 +681,8 @@ String _generateStreamingColumnComparison(
   buf.writeln();
 
   if (current.isEmpty) {
-    buf.writeln('Current run has no `## Streaming (Column Granularity)` section.');
+    buf.writeln(
+        'Current run has no `## Streaming (Column Granularity)` section.');
     buf.writeln();
     return buf.toString();
   }
@@ -777,8 +790,7 @@ Future<void> _ensureDriftCodegenFresh() async {
   final sources = driftDir
       .listSync()
       .whereType<File>()
-      .where((f) =>
-          f.path.endsWith('.dart') && !f.path.endsWith('.g.dart'))
+      .where((f) => f.path.endsWith('.dart') && !f.path.endsWith('.g.dart'))
       .toList();
 
   var stale = false;

@@ -49,6 +49,18 @@ Future<void> main() async {
           'mdeMB': entry.value.mdeMB,
         },
     };
+    final sqliteDiagnostics = extractSqliteDiagnosticsMedians(content);
+    final sqliteDiagnosticsJson = {
+      for (final entry in sqliteDiagnostics.entries)
+        entry.key: {
+          'sqliteTotalKiB': entry.value.sqliteTotalKiB,
+          'pageCacheKiB': entry.value.pageCacheKiB,
+          'schemaKiB': entry.value.schemaKiB,
+          'stmtKiB': entry.value.stmtKiB,
+          'walKiB': entry.value.walKiB,
+          'readersBusy': entry.value.readersBusy,
+        },
+    };
 
     runs.add({
       'id': meta.label,
@@ -57,6 +69,8 @@ Future<void> main() async {
       'label': meta.label,
       'metrics': metrics,
       if (memoryJson.isNotEmpty) 'memoryMetrics': memoryJson,
+      if (sqliteDiagnosticsJson.isNotEmpty)
+        'sqliteDiagnosticsMetrics': sqliteDiagnosticsJson,
     });
   }
 
@@ -177,7 +191,8 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     final id = match.group(1)!;
     final filename = match.group(2)!;
     final title = match.group(3)!.trim();
-    final impact = match.group(4)!
+    final impact = match
+        .group(4)!
         .replaceAll(RegExp(r'\[`?[a-f0-9]+`?\]\([^)]*\)'), '')
         .replaceAll('|', '')
         .trim();
@@ -191,9 +206,11 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     final expFile = File('${experimentsDir.path}/$filename');
     if (expFile.existsSync()) {
       final content = expFile.readAsStringSync();
-      final dateMatch = RegExp(r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})').firstMatch(content);
+      final dateMatch =
+          RegExp(r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})').firstMatch(content);
       date = dateMatch?.group(1);
-      final commitMatch = RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
+      final commitMatch =
+          RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
       commit = commitMatch?.group(1);
       // Archive tag — added for rejected experiments whose code was
       // preserved via `git tag archive/exp-NNN` before branch deletion.

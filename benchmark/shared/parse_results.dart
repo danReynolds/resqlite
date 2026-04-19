@@ -22,6 +22,7 @@ Map<String, double> extractResqliteMedians(String content) {
   // mixed into the timing `metrics` map.
   const nonTimingSections = {
     'Memory',
+    'SQLite Diagnostics',
     'Streaming (Column Granularity)',
   };
 
@@ -48,8 +49,8 @@ Map<String, double> extractResqliteMedians(String content) {
         // gate stops the parser from polluting `metrics` with QPS
         // values misread as ms. Single-cell rows like `| resqlite qps |
         // N |` (parts.length == 2) remain fully supported.
-        final isTimingRow = parts.length < 3 ||
-            double.tryParse(parts[2]) != null;
+        final isTimingRow =
+            parts.length < 3 || double.tryParse(parts[2]) != null;
         if (wallMed != null && isTimingRow) {
           final key = currentSubsection != null
               ? '$currentSection / $currentSubsection / $label'
@@ -118,6 +119,29 @@ class MemoryMetric {
   final double mdeMB;
 }
 
+/// SQLite diagnostics suite metrics parsed from a benchmark results file.
+///
+/// Emitted by `suites/sqlite_diagnostics.dart` in the
+/// `## SQLite Diagnostics` section. Values are KiB except
+/// [readersBusy], which is 0/1.
+class SqliteDiagnosticsMetric {
+  SqliteDiagnosticsMetric({
+    required this.sqliteTotalKiB,
+    required this.pageCacheKiB,
+    required this.schemaKiB,
+    required this.stmtKiB,
+    required this.walKiB,
+    required this.readersBusy,
+  });
+
+  final double sqliteTotalKiB;
+  final double pageCacheKiB;
+  final double schemaKiB;
+  final double stmtKiB;
+  final double walKiB;
+  final int readersBusy;
+}
+
 /// Extract memory suite medians from markdown content.
 ///
 /// Returns a map of `Memory / subsection / library` → [MemoryMetric].
@@ -160,7 +184,10 @@ Map<String, MemoryMetric> extractMemoryMedians(String content) {
       // MDE column rendered as "±N.NN"; strip the leading ±.
       final mdeStr = parts[4].replaceFirst('±', '').trim();
       final mde = double.tryParse(mdeStr);
-      if (med == null || p90 == null || ciLow == null || ciHigh == null ||
+      if (med == null ||
+          p90 == null ||
+          ciLow == null ||
+          ciHigh == null ||
           mde == null) {
         continue;
       }
@@ -173,6 +200,72 @@ Map<String, MemoryMetric> extractMemoryMedians(String content) {
         ciLowMB: ciLow,
         ciHighMB: ciHigh,
         mdeMB: mde,
+      );
+    }
+  }
+
+  return results;
+}
+
+/// Extract SQLite diagnostics metrics from markdown content.
+///
+/// Returns a map of `SQLite Diagnostics / subsection / library` →
+/// [SqliteDiagnosticsMetric]. Scans only the owning section and stops at
+/// the next `## ` header.
+Map<String, SqliteDiagnosticsMetric> extractSqliteDiagnosticsMedians(
+  String content,
+) {
+  final results = <String, SqliteDiagnosticsMetric>{};
+  final lines = content.split('\n');
+
+  var inSection = false;
+  String? subsection;
+
+  for (final line in lines) {
+    if (line.startsWith('## ')) {
+      inSection = line.substring(3).trim() == 'SQLite Diagnostics';
+      subsection = null;
+      continue;
+    }
+    if (!inSection) continue;
+    if (line.startsWith('### ')) {
+      subsection = line.substring(4).trim();
+      continue;
+    }
+    if (line.startsWith('|') &&
+        !line.startsWith('|---') &&
+        !line.startsWith('| Library')) {
+      final parts = line
+          .split('|')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.length < 7) continue;
+      final label = parts[0];
+      final total = double.tryParse(parts[1]);
+      final pageCache = double.tryParse(parts[2]);
+      final schema = double.tryParse(parts[3]);
+      final stmt = double.tryParse(parts[4]);
+      final wal = double.tryParse(parts[5]);
+      final readersBusy = int.tryParse(parts[6]);
+      if (total == null ||
+          pageCache == null ||
+          schema == null ||
+          stmt == null ||
+          wal == null ||
+          readersBusy == null) {
+        continue;
+      }
+      final key = subsection != null
+          ? 'SQLite Diagnostics / $subsection / $label'
+          : 'SQLite Diagnostics / $label';
+      results[key] = SqliteDiagnosticsMetric(
+        sqliteTotalKiB: total,
+        pageCacheKiB: pageCache,
+        schemaKiB: schema,
+        stmtKiB: stmt,
+        walKiB: wal,
+        readersBusy: readersBusy,
       );
     }
   }
@@ -213,8 +306,7 @@ Map<String, StreamingColumnMetric> extractStreamingColumnMedians(
 
   for (final line in lines) {
     if (line.startsWith('## ')) {
-      inSection =
-          line.substring(3).trim() == 'Streaming (Column Granularity)';
+      inSection = line.substring(3).trim() == 'Streaming (Column Granularity)';
       subsection = null;
       continue;
     }
