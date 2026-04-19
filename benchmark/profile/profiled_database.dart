@@ -15,6 +15,8 @@
 library;
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 
 import 'profile_sample.dart';
 
@@ -83,6 +85,13 @@ class ProfiledDatabase {
       rowsReturned: rows.length,
       tag: tag,
     ));
+    // Feed the shared decoder-allocation counters so the harness can
+    // snapshot main-visible aggregates around a workload. Tree-shaken
+    // out in release builds via the `kProfileMode` const gate.
+    if (kProfileMode && rows.isNotEmpty) {
+      ProfileCounters.rowsDecoded += rows.length;
+      ProfileCounters.cellsDecoded += rows.length * rows.first.length;
+    }
     return rows;
   }
 

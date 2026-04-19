@@ -4,18 +4,31 @@
 //
 // Unlike `run_release.dart` (which runs the pristine peer-comparison
 // suite against drift/sqlite_async/sqlite3), this harness runs
-// resqlite ONLY under diagnostic instrumentation:
+// resqlite ONLY under full diagnostic instrumentation:
 //
-//   - `ProfiledDatabase` wraps every call with per-op Stopwatch timing.
-//   - Timeline markers inside the writer and reader isolates are compiled
-//     in when run with `-DRESQLITE_PROFILE=true` — visible in DevTools.
-//   - A `noop` baseline workload (SELECT 1 / UPDATE WHERE 1=0) is always
-//     run first, and `work_us = total_us - noop_median_us` is computed
-//     for every other workload. Lets you say "this experiment saved
-//     X μs of work on top of Y μs of unavoidable dispatch."
+//   TIME
+//     - `ProfiledDatabase` wraps every call with per-op Stopwatch timing.
+//     - Timeline markers inside the writer and reader isolates are compiled
+//       in when run with `-DRESQLITE_PROFILE=true` — visible in DevTools.
+//     - A `noop` baseline workload (SELECT 1 / UPDATE WHERE 1=0) is always
+//       run first, and `work_us = total_us - noop_median_us` is computed
+//       for every other workload. Lets you say "this experiment saved
+//       X μs of work on top of Y μs of unavoidable dispatch."
+//
+//   MEMORY
+//     - `ProcessInfo.currentRss` captured before and after each workload,
+//       with heap-churn preamble for stability (same methodology as the
+//       release-mode memory suite). `rss_delta_mb` tells you how much
+//       process memory each workload retained.
+//     - `Database.diagnostics()` captured before and after — exposes
+//       SQLite-specific counters (page cache, schema, stmt cache, WAL
+//       sidecar size). Per-SQLite counters are exact, unlike RSS which
+//       is a lower bound.
+//     - Both sets of memory deltas survive into the output JSON and are
+//       diffable via `benchmark/profile/diff.dart`.
 //
 // Purpose: A/B experiments between a branch and its baseline. Both runs
-// use the same profile build, so the diagnostic overhead cancels out
+// use the same profile build, so any diagnostic overhead cancels out
 // in the delta — what you see is the signal of the change under test.
 //
 // Usage:
@@ -43,6 +56,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
 
 import 'profile/profile_sample.dart';
@@ -56,6 +70,9 @@ const _mergeRowsPerRound = 100;
 const _warmupIterations = 50;
 const _measureIterations = 100;
 
+// Memory stabilization constants. Mirrors release-mode memory.dart.
+const _churnSize = 10000;
+
 Future<void> main(List<String> args) async {
   final options = _parseOptions(args);
 
@@ -64,9 +81,9 @@ Future<void> main(List<String> args) async {
   print('');
   if (!kProfileMode) {
     print('⚠  kProfileMode=false (Timeline markers tree-shaken out).');
-    print('   ProfiledDatabase per-call timing still works, but you will');
-    print('   not see writer.handle.* / reader.handle.* spans in DevTools.');
-    print('   Rerun with -DRESQLITE_PROFILE=true to enable them.');
+    print('   ProfiledDatabase per-call timing + memory capture still');
+    print('   work, but you will not see writer.handle.* / reader.handle.*');
+    print('   spans in DevTools. Rerun with -DRESQLITE_PROFILE=true.');
     print('');
   } else {
     print('kProfileMode=true — Timeline markers active.');
@@ -84,46 +101,47 @@ Future<void> main(List<String> args) async {
     // Noop first — gives us the dispatch floor. Every subsequent
     // workload's `work_us` is computed relative to this.
     print('=== Workload Z: Noop Baseline (SELECT 1 / UPDATE WHERE 1=0) ===');
-    profiled.samples.clear();
-    for (var iter = 0; iter < _measureIterations; iter++) {
-      await _workloadNoop(profiled, iter);
-    }
-    final noopSamples = List.of(profiled.samples);
-    final noopSummary = _summarize(noopSamples);
-    final readerFloor = (noopSummary['select'] as Map)['median_us'] as int;
-    final writerFloor = (noopSummary['execute'] as Map)['median_us'] as int;
-    _reportWorkload('noop', noopSamples, readerFloor: null, writerFloor: null);
+    final noop = await _runWorkload(
+      name: 'noop',
+      profiled: profiled,
+      body: (iter) => _workloadNoop(profiled, iter),
+    );
+    final readerFloor =
+        (_summarize(noop.samples)['select'] as Map)['median_us'] as int;
+    final writerFloor =
+        (_summarize(noop.samples)['execute'] as Map)['median_us'] as int;
+    _reportWorkload(noop, readerFloor: null, writerFloor: null);
     print('  reader dispatch floor ≈ $readerFloor μs');
     print('  writer dispatch floor ≈ $writerFloor μs');
 
     print('');
     print('=== Workload A: Single Inserts ===');
-    profiled.samples.clear();
-    for (var iter = 0; iter < _measureIterations; iter++) {
-      await _workloadSingleInserts(profiled, iter);
-    }
-    final singleInsert = List.of(profiled.samples);
-    _reportWorkload('single_insert', singleInsert,
+    final singleInsert = await _runWorkload(
+      name: 'single_insert',
+      profiled: profiled,
+      body: (iter) => _workloadSingleInserts(profiled, iter),
+    );
+    _reportWorkload(singleInsert,
         readerFloor: readerFloor, writerFloor: writerFloor);
 
     print('');
     print('=== Workload B: Point Queries ===');
-    profiled.samples.clear();
-    for (var iter = 0; iter < _measureIterations; iter++) {
-      await _workloadPointQuery(profiled, iter);
-    }
-    final pointQuery = List.of(profiled.samples);
-    _reportWorkload('point_query', pointQuery,
+    final pointQuery = await _runWorkload(
+      name: 'point_query',
+      profiled: profiled,
+      body: (iter) => _workloadPointQuery(profiled, iter),
+    );
+    _reportWorkload(pointQuery,
         readerFloor: readerFloor, writerFloor: writerFloor);
 
     print('');
     print('=== Workload C: Merge Rounds ===');
-    profiled.samples.clear();
-    for (var iter = 0; iter < _measureIterations; iter++) {
-      await _workloadMergeRounds(profiled, iter);
-    }
-    final mergeRounds = List.of(profiled.samples);
-    _reportWorkload('merge_rounds', mergeRounds,
+    final mergeRounds = await _runWorkload(
+      name: 'merge_rounds',
+      profiled: profiled,
+      body: (iter) => _workloadMergeRounds(profiled, iter),
+    );
+    _reportWorkload(mergeRounds,
         readerFloor: readerFloor, writerFloor: writerFloor);
 
     // Persist the whole thing. diff.dart reads these JSON files.
@@ -141,7 +159,7 @@ Future<void> main(List<String> args) async {
           'writer_us': writerFloor,
         },
         'workloads': {
-          'noop': _workloadJson(noopSamples,
+          'noop': _workloadJson(noop,
               readerFloor: null, writerFloor: null),
           'single_insert': _workloadJson(singleInsert,
               readerFloor: readerFloor, writerFloor: writerFloor),
@@ -168,6 +186,108 @@ Future<void> main(List<String> args) async {
     await profiled.close();
     await tempDir.delete(recursive: true);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Workload execution — captures time + memory together
+// ---------------------------------------------------------------------------
+
+/// Results of running a single workload: time samples, RSS deltas, and
+/// SQLite per-connection memory counters before/after.
+class _WorkloadResult {
+  _WorkloadResult({
+    required this.name,
+    required this.samples,
+    required this.rssBeforeMB,
+    required this.rssAfterMB,
+    required this.diagnosticsBefore,
+    required this.diagnosticsAfter,
+    required this.countersBefore,
+    required this.countersAfter,
+  });
+
+  final String name;
+  final List<ProfileSample> samples;
+  final double rssBeforeMB;
+  final double rssAfterMB;
+  final Diagnostics diagnosticsBefore;
+  final Diagnostics diagnosticsAfter;
+
+  /// Decoder allocation counters snapshotted immediately before the
+  /// measured iterations began. Null when `kProfileMode` is false —
+  /// the counters don't fire in that mode so their "before" and
+  /// "after" values are identical and meaningless.
+  final Map<String, int>? countersBefore;
+
+  /// Decoder allocation counters snapshotted immediately after the
+  /// measured iterations ended.
+  final Map<String, int>? countersAfter;
+
+  double get rssDeltaMB => rssAfterMB - rssBeforeMB;
+
+  Map<String, int>? get counterDelta {
+    if (countersBefore == null || countersAfter == null) return null;
+    return ProfileCounters.diff(countersBefore!, countersAfter!);
+  }
+}
+
+/// Runs a workload with memory stabilization before measurement, then
+/// takes RSS and Diagnostics snapshots around the measured iterations.
+///
+/// Memory methodology mirrors release-mode memory.dart:
+///   1. Heap-churn to stabilize baseline (drop 10k small Maps).
+///   2. Take RSS + Diagnostics snapshot (baseline).
+///   3. Run [_measureIterations] iterations of [body].
+///   4. Take RSS + Diagnostics snapshot (post).
+///
+/// Per-call timing is still captured via ProfiledDatabase inside [body].
+Future<_WorkloadResult> _runWorkload({
+  required String name,
+  required ProfiledDatabase profiled,
+  required Future<void> Function(int iter) body,
+}) async {
+  // Stabilize the heap before baseline capture so leftover allocations
+  // from prior workloads don't inflate this workload's rss_delta.
+  _churnHeap();
+  _churnHeap();
+
+  final rssBefore = _rssMB();
+  final diagBefore = await profiled.raw.diagnostics();
+  final countersBefore = kProfileMode ? ProfileCounters.snapshot() : null;
+
+  profiled.samples.clear();
+  for (var iter = 0; iter < _measureIterations; iter++) {
+    await body(iter);
+  }
+
+  final rssAfter = _rssMB();
+  final diagAfter = await profiled.raw.diagnostics();
+  final countersAfter = kProfileMode ? ProfileCounters.snapshot() : null;
+
+  return _WorkloadResult(
+    name: name,
+    samples: List.of(profiled.samples),
+    rssBeforeMB: rssBefore,
+    rssAfterMB: rssAfter,
+    diagnosticsBefore: diagBefore,
+    diagnosticsAfter: diagAfter,
+    countersBefore: countersBefore,
+    countersAfter: countersAfter,
+  );
+}
+
+double _rssMB() => ProcessInfo.currentRss / (1024 * 1024);
+
+/// Pre-measurement churn loop. Allocates + drops [_churnSize] small maps
+/// to stabilize the heap before baseline capture. Without this, heap
+/// pages from the prior workload grow the RSS baseline and contaminate
+/// the delta.
+void _churnHeap() {
+  final junk = <Map<String, Object?>>[];
+  for (var i = 0; i < _churnSize; i++) {
+    junk.add({'a': i, 'b': 'x$i', 'c': i * 1.5});
+  }
+  junk.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -309,9 +429,7 @@ Future<void> _workloadMergeRounds(ProfiledDatabase db, int iter) async {
 // ---------------------------------------------------------------------------
 
 /// Compute per-op aggregate statistics. Includes `work_us_median` — the
-/// per-op wall time minus the appropriate dispatch floor. That gives a
-/// pure "time spent actually doing work" number, which is what you want
-/// to compare across experiments on the dispatch hot path.
+/// per-op wall time minus the appropriate dispatch floor.
 Map<String, Object?> _summarize(
   List<ProfileSample> samples, {
   int? readerFloor,
@@ -337,10 +455,6 @@ Map<String, Object?> _summarize(
           sorted[(sorted.length * 0.99).floor().clamp(0, sorted.length - 1)],
       'max_us': sorted.last,
       'mean_us': (sorted.reduce((a, b) => a + b) / sorted.length).round(),
-      // work_us_median = median total time minus dispatch floor for the
-      // relevant path. Null for the noop workload itself (no meaningful
-      // "work" to subtract from). Clamped at zero — negative values mean
-      // this workload ran faster than the noop floor (noise).
       if (floor != null)
         'work_us_median': (medianUs - floor).clamp(0, 1 << 30),
       if (floor != null) 'dispatch_floor_us': floor,
@@ -349,27 +463,57 @@ Map<String, Object?> _summarize(
   return summary;
 }
 
+/// Render Diagnostics to a JSON-friendly map.
+Map<String, int> _diagnosticsJson(Diagnostics d) => {
+      'sqlite_page_cache_bytes': d.sqlitePageCacheBytes,
+      'sqlite_schema_bytes': d.sqliteSchemaBytes,
+      'sqlite_stmt_bytes': d.sqliteStmtBytes,
+      'wal_bytes': d.walBytes,
+    };
+
+/// Compute Diagnostics delta (after minus before) as a JSON-friendly map.
+Map<String, int> _diagnosticsDelta(Diagnostics before, Diagnostics after) => {
+      'sqlite_page_cache_bytes_delta':
+          after.sqlitePageCacheBytes - before.sqlitePageCacheBytes,
+      'sqlite_schema_bytes_delta':
+          after.sqliteSchemaBytes - before.sqliteSchemaBytes,
+      'sqlite_stmt_bytes_delta':
+          after.sqliteStmtBytes - before.sqliteStmtBytes,
+      'wal_bytes_delta': after.walBytes - before.walBytes,
+    };
+
 Map<String, Object?> _workloadJson(
-  List<ProfileSample> samples, {
+  _WorkloadResult r, {
   required int? readerFloor,
   required int? writerFloor,
 }) {
   return {
-    'samples': samples.map((s) => s.toJson()).toList(),
-    'summary': _summarize(samples,
+    'samples': r.samples.map((s) => s.toJson()).toList(),
+    'summary': _summarize(r.samples,
         readerFloor: readerFloor, writerFloor: writerFloor),
+    'memory': {
+      'rss_before_mb': double.parse(r.rssBeforeMB.toStringAsFixed(3)),
+      'rss_after_mb': double.parse(r.rssAfterMB.toStringAsFixed(3)),
+      'rss_delta_mb': double.parse(r.rssDeltaMB.toStringAsFixed(3)),
+      'diagnostics_before': _diagnosticsJson(r.diagnosticsBefore),
+      'diagnostics_after': _diagnosticsJson(r.diagnosticsAfter),
+      'diagnostics_delta':
+          _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter),
+      // Decoder allocation counters. Only populated when kProfileMode
+      // is compiled in (otherwise the counters never fire).
+      if (r.counterDelta != null) 'allocation_delta': r.counterDelta,
+    },
   };
 }
 
 void _reportWorkload(
-  String name,
-  List<ProfileSample> samples, {
+  _WorkloadResult r, {
   required int? readerFloor,
   required int? writerFloor,
 }) {
-  final summary = _summarize(samples,
+  final summary = _summarize(r.samples,
       readerFloor: readerFloor, writerFloor: writerFloor);
-  print('${samples.length} samples collected.');
+  print('${r.samples.length} samples collected.');
   for (final entry in summary.entries) {
     final s = entry.value! as Map<String, Object?>;
     final workPart = s.containsKey('work_us_median')
@@ -383,5 +527,17 @@ void _reportWorkload(
         'p99=${s['p99_us']}μs '
         'max=${s['max_us']}μs'
         '$workPart');
+  }
+  final delta = _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter);
+  print('  memory:        '
+      'rss Δ=${r.rssDeltaMB.toStringAsFixed(2)} MB  '
+      'page cache Δ=${delta['sqlite_page_cache_bytes_delta']} B  '
+      'stmt Δ=${delta['sqlite_stmt_bytes_delta']} B  '
+      'wal Δ=${delta['wal_bytes_delta']} B');
+  final cdelta = r.counterDelta;
+  if (cdelta != null) {
+    print('  alloc:         '
+        'rows=${cdelta['rows_decoded']}  '
+        'cells=${cdelta['cells_decoded']}');
   }
 }

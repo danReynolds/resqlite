@@ -27,6 +27,12 @@ opposite. You want rich diagnostics:
   dispatch" instead of just "total got faster."
 - Cross-isolate Timeline spans visible in DevTools (`writer.handle.*`
   / `reader.handle.*`) so you can see where each microsecond goes.
+- **Memory diagnostics** — per-workload RSS deltas, SQLite
+  per-connection memory counters (page cache / schema cache / stmt
+  cache / WAL bytes), and Dart-side allocation counters (rows
+  decoded, cells decoded). This is the axis exp 055's columnar
+  typed arrays and similar memory-targeted experiments live on —
+  wins there are invisible to time-only benchmarks.
 
 Profile mode gives you all of this. Because both your experiment
 branch AND the baseline it's compared against run under the same
@@ -55,6 +61,10 @@ Currently gated:
 - `Timeline.startSync` / `finishSync` markers around per-message
   dispatch in the writer (`lib/src/writer/write_worker.dart`) and
   reader (`lib/src/reader/read_worker.dart`) isolates.
+- `ProfileCounters.rowsDecoded` / `cellsDecoded` increments in the
+  `benchmark/profile/profiled_database.dart` wrapper's `select()`
+  method. The counter fields themselves live in
+  `lib/src/profile_counters.dart` and cost nothing unless incremented.
 
 If you add new diagnostic instrumentation, gate it the same way.
 Never add unconditional instrumentation to production code paths
@@ -109,26 +119,47 @@ Example output from `dart run benchmark/profile/diff.dart A.json B.json`:
 
 ```
 ## merge_rounds
-  executeBatch:
+  TIME executeBatch:
     p50      110μs →    106μs      -4μs  (-3.6%)
     p90      178μs →    131μs     -47μs  (-26.4%)
     p99      607μs →    335μs    -272μs  (-44.8%)
     max     4034μs →    800μs   -3234μs  (-80.2%)
     work      99μs →     95μs      -4μs  (-4.0%)
+  MEMORY (process RSS):
+    rss Δ   1.53 MB →   0.05 MB  -1.48 MB  (-96.9%)
+  SQLITE (per-connection counters, per-workload delta):
+    page cache    21.3 KB →    21.3 KB          +0 B  (+0.0%)
+    stmt           2.0 KB →     2.0 KB          +0 B  (+0.0%)
+    wal            8.0 KB →     8.0 KB          +0 B  (+0.0%)
+  ALLOC (decoder counters, per-workload delta):
+    rows                50000 →      50000            +0
+    cells              300000 →     300000            +0
 ```
 
 Reading this:
 
-- **p50 barely moved** (−3.6%). The median case is unaffected.
-- **p99 dropped 44.8%**. The tail shrank dramatically. Something that
-  was happening ~1% of the time — a WAL checkpoint, a GC pause, a
-  scheduler stall — is happening less often or being resolved faster
-  in the candidate build.
-- **max dropped 80%**. The absolute worst case got much better.
-- **work dropped 4μs**. The dispatch-subtracted time (i.e. actual
-  per-batch SQL work) is 4μs faster at the median.
+- **TIME p50 barely moved** (−3.6%). The median case is unaffected.
+- **TIME p99 dropped 44.8%**. The tail shrank dramatically. Something
+  that was happening ~1% of the time — a WAL checkpoint, a GC pause,
+  a scheduler stall — is happening less often or being resolved
+  faster in the candidate build.
+- **TIME max dropped 80%**. The absolute worst case got much better.
+- **TIME work dropped 4μs**. The dispatch-subtracted time (i.e.
+  actual per-batch SQL work) is 4μs faster at the median.
+- **MEMORY rss Δ dropped 97%**. Far less process memory grew during
+  this workload — a strong allocation-reduction signal. (Note: RSS is
+  a lower bound; the Dart VM retains heap pages after GC so small
+  wins may show as zero.)
+- **SQLITE counters unchanged**. The SQLite-internal memory (page
+  cache, stmt cache, WAL) is identical across builds — the change
+  didn't affect SQLite-level memory, only Dart-heap allocation.
+- **ALLOC counters unchanged**. The decoder materialized the same
+  number of rows and cells — the workload produced the same data.
+  If an exp-055-style columnar-typed-arrays candidate were being
+  tested, you'd look for the rows/cells columns staying identical
+  (same work) while RSS Δ dropped (less allocation for that work).
 
-Two things to keep in mind when interpreting:
+Three things to keep in mind when interpreting:
 
 1. **p99 and max on single runs are noisy.** Even with 1k samples, a
    single GC pause landing in one run and not the other can move p99
@@ -139,6 +170,47 @@ Two things to keep in mind when interpreting:
    workloads.** Point queries are ~100% dispatch-bound — a "+1μs total"
    delta there could be pure dispatch-floor drift between runs, not
    anything your change did. The `work` column subtracts that.
+3. **RSS is a lower bound.** `ProcessInfo.currentRss` doesn't report
+   heap space freed by GC but not returned to the OS. A visible RSS
+   reduction means the allocation reduction is *at least* that large —
+   often much more. SQLite counters and ALLOC counters are exact.
+
+## Memory diagnostics in detail
+
+`run_profile.dart` captures three layers of memory data around each
+workload, each answering a different question:
+
+**Process RSS** (`rss_before_mb`, `rss_after_mb`, `rss_delta_mb`) —
+coarse, inclusive of everything: Dart heap, SQLite's internal
+buffers, FFI allocations, OS page tables, and any other process
+memory. The methodology mirrors `benchmark/suites/memory.dart` —
+heap-churn preamble, two churn passes, then baseline capture. Lower
+bound on actual allocation because the VM retains freed pages. Best
+for broad "did this change reduce total memory pressure" questions.
+
+**SQLite per-connection counters** (`diagnostics_before`,
+`diagnostics_after`, `diagnostics_delta`) — exact bytes reported by
+SQLite's `sqlite3_db_status` API for page cache, schema cache, and
+prepared statement cache, plus the `-wal` sidecar file size on disk.
+Cross-isolate aware (the underlying FFI call aggregates across the
+writer + idle readers). Best for distinguishing "SQLite held more
+pages" from "Dart heap grew."
+
+**Decoder allocation counters** (`allocation_delta`) — exact count
+of rows and cells that passed through the decode path and reached
+user code. Currently populated main-isolate-side via the
+`ProfiledDatabase` wrapper, so it sees reader-pool results but not
+internal stream re-queries unless they route through a harness call
+site. Best for sanity checking that two runs did the same work (a
+candidate that decodes fewer rows because it was hash-short-
+circuited is not comparable).
+
+If you need per-SQLite-type counts (e.g. "how many int cells got
+boxed into the `List<Object?>`, the exp 055 metric), that's a
+worker-isolate counter that requires a cross-isolate snapshot
+round-trip — not shipped today. Add the round-trip as part of the
+experiment that needs it; `lib/src/profile_counters.dart` has room
+for new fields.
 
 ## Writing results to `experiments/NNN-*.md`
 
@@ -214,10 +286,21 @@ allocation.
 
 - [`lib/src/profile_mode.dart`](../lib/src/profile_mode.dart) — the
   compile-time gate
+- [`lib/src/profile_counters.dart`](../lib/src/profile_counters.dart)
+  — allocation counter module; add new fields here for future
+  memory-axis experiments
+- [`lib/src/diagnostics.dart`](../lib/src/diagnostics.dart) —
+  the public SQLite per-connection memory API (not profile-gated;
+  production users can call `Database.diagnostics()` at runtime)
 - [`benchmark/profile/profiled_database.dart`](./profile/profiled_database.dart)
-  — the per-call timing wrapper
+  — the per-call timing wrapper, also home of the main-side counter
+  increments
 - [`benchmark/profile/dispatch_budget.dart`](./profile/dispatch_budget.dart)
   — the original Phase-1 harness that `run_profile.dart` is built on
+- [`benchmark/suites/memory.dart`](./suites/memory.dart) — the
+  release-mode peer memory comparison suite (what the dashboard
+  consumes); profile mode's memory capture is a superset for
+  resqlite-only A/B
 - [`experiments/080-dispatch-budget.md`](../experiments/080-dispatch-budget.md)
   — the findings that motivated this infrastructure
 - [`README.md`](./README.md) § Release Mode vs Profile Mode — the
