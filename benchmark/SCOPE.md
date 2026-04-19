@@ -63,8 +63,8 @@ needs for invalidation to work correctly.
   indexes + constraints).
 - Generated `<scenario>_db.g.dart` files are **gitignored** — they
   regenerate deterministically via `dart run build_runner build`.
-- `benchmark/run_all.dart` auto-regenerates on stale-ness before the
-  suite runs; contributors don't think about it.
+- `benchmark/run_release.dart` auto-regenerates on stale-ness before
+  the suite runs; contributors don't think about it.
 - Drift runs in an isolate via `NativeDatabase.createInBackground` —
   same async-isolate model as resqlite. Fair comparison point.
 - Stream invalidation for `customSelect` requires explicit `readsFrom`

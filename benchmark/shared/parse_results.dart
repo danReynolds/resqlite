@@ -1,6 +1,6 @@
 /// Shared parsing utilities for benchmark result markdown files.
 ///
-/// Used by both `run_all.dart` (for pairwise comparison) and
+/// Used by both `run_release.dart` (for pairwise comparison) and
 /// `generate_history.dart` (for historical timeline generation).
 
 /// Extract resqlite median wall times from markdown content.

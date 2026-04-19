@@ -9,7 +9,7 @@ constraints (not assumptions). Produced as Phase 0.1 of the Track A plan.
 ```
 benchmark/suites/*.dart
     │
-    │  dart run benchmark/run_all.dart <label>
+    │  dart run benchmark/run_release.dart <label>
     ▼
 benchmark/results/YYYY-MM-DDTHH-MM-SS-<label>.md   (per-run markdown)
     │
@@ -217,7 +217,7 @@ natively.
 ### Phase 3 workloads (behind `--include-slow`)
 
 Same format. No special treatment needed beyond the `--include-slow` flag
-in `run_all.dart` to opt in.
+in `run_release.dart` to opt in.
 
 ## Generator changes needed (summary)
 

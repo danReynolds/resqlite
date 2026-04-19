@@ -217,7 +217,7 @@
 </div>
 
 <div class="contribute-note" style="margin-top:1.5rem;">
-  Run <code>dart run benchmark/run_all.dart "your-device" --repeat=3</code>
+  Run <code>dart run benchmark/run_release.dart "your-device" --repeat=3</code>
   and <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md">submit a PR</a>
   to add your device.
 </div>
@@ -997,7 +997,7 @@ function renderScenarioDetail(B) {
     const extra = scenario.slow ? ' <code>--include-slow</code>' : '';
     html += `<p class="desc" style="color:#8b949e;font-style:italic;padding:1rem;background:rgba(139,148,158,0.05);border:1px dashed var(--border);border-radius:6px;">
       No data for this scenario in the current device's run.
-      Re-run <code>dart run benchmark/run_all.dart "&lt;device&gt;" --repeat=3${extra}</code>
+      Re-run <code>dart run benchmark/run_release.dart "&lt;device&gt;" --repeat=3${extra}</code>
       then <code>dart run benchmark/generate_devices.dart</code> to populate.
     </p>`;
   } else {

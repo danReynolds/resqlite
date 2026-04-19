@@ -124,7 +124,7 @@ _QpsResult _summarize(List<int> iterationTimingsUs) {
   // Convert to per-iteration QPS samples, then feed through the bootstrap
   // and MDE helpers. Operating on QPS directly (rather than microseconds)
   // matches how the metric is reported and how the comparison threshold
-  // is applied downstream in run_all.
+  // is applied downstream in run_release.
   final qpsSamples = [
     for (final us in iterationTimingsUs)
       if (us > 0) _queryCount * 1000000 / us,

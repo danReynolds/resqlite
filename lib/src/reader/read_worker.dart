@@ -6,6 +6,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -14,6 +15,7 @@ import 'package:ffi/ffi.dart';
 
 import '../exceptions.dart';
 import '../native/resqlite_bindings.dart';
+import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
 
@@ -91,6 +93,14 @@ void readerEntrypoint(List<Object> args) {
 
     final request = message as ReadRequest;
 
+    // Timeline marker scopes the reader-isolate's per-message work so
+    // external profilers can see the cross-isolate breakdown. Gated
+    // behind `kProfileMode` (compile-time const) so release builds pay
+    // zero — the const-false branch tree-shakes away at AOT. Build with
+    // `-DRESQLITE_PROFILE=true` to enable. See lib/src/profile_mode.dart.
+    if (kProfileMode) {
+      Timeline.startSync('reader.handle.${request.runtimeType}');
+    }
     try {
       final Object? result;
       final bool sacrifice;
@@ -146,6 +156,10 @@ void readerEntrypoint(List<Object> args) {
 
       if (sacrifice) {
         receivePort.close();
+        // Isolate.exit skips `finally`; close the timeline span manually.
+        if (kProfileMode) {
+          Timeline.finishSync();
+        }
         Isolate.exit(eventPort, (result, true, null));
       }
       eventPort.send((result, false, null));
@@ -162,6 +176,10 @@ void readerEntrypoint(List<Object> args) {
               parameters: request.parameters,
             );
       eventPort.send((null, false, error));
+    } finally {
+      if (kProfileMode) {
+        Timeline.finishSync();
+      }
     }
   };
 }
