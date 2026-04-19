@@ -23,6 +23,10 @@
 /// - `Timeline.startSync` / `finishSync` markers around per-message
 ///   dispatch in the writer and reader isolates. See
 ///   `lib/src/writer/write_worker.dart` and `lib/src/reader/read_worker.dart`.
+/// - `ProfileCounters` increments in the benchmark harness wrapper
+///   (`benchmark/profile/profiled_database.dart`). The counters
+///   themselves live in `lib/src/profile_counters.dart` and are
+///   public API — but increments only fire when the flag is on.
 ///
 /// **Design contract.** This flag exists so the main peer-comparison
 /// benchmarks (`run_release.dart`) can measure resqlite's actual

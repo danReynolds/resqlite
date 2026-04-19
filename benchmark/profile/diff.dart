@@ -251,7 +251,7 @@ String _signedMB(double mb) {
 
 String _formatBytes(int bytes) {
   final abs = bytes.abs();
-  if (abs < 1024) return '${bytes} B';
+  if (abs < 1024) return '$bytes B';
   if (abs < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
   return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
 }

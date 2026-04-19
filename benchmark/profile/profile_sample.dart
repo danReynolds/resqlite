@@ -1,12 +1,11 @@
 /// Timing + meta for a single instrumented Database call.
 ///
-/// Used by the Phase 1 "dispatch budget" research pass — measures
-/// where each millisecond goes on workloads where resqlite currently
-/// trails sqlite3 (small inserts, point queries, merge rounds).
+/// Produced by `ProfiledDatabase` and consumed by the profile-mode
+/// harnesses (`run_profile.dart`, `dispatch_budget.dart`). See
+/// `benchmark/EXPERIMENTS.md` for the full workflow.
 ///
 /// Stays entirely in `benchmark/profile/` so production code is not
-/// touched. See experiments/080-dispatch-budget.md for the analysis
-/// this data feeds.
+/// touched.
 class ProfileSample {
   const ProfileSample({
     required this.op,
@@ -14,25 +13,35 @@ class ProfileSample {
     required this.totalMicros,
     this.paramCount = 0,
     this.rowsReturned,
+    this.batchSize,
     this.tag,
   });
 
-  /// Which public API was called — `execute`, `executeBatch`, `select`, `stream-initial`.
+  /// Which `ProfiledDatabase` method was called: `execute`,
+  /// `executeBatch`, or `select`.
   final String op;
 
-  /// SQL text (truncated to 80 chars for compactness in output).
+  /// SQL text (truncated to 80 chars in [toJson] for compactness).
   final String sql;
 
   /// Total wall time from the caller's perspective, await-to-return.
   final int totalMicros;
 
-  /// Parameter count, for correlating perf with bind work.
+  /// Parameter count — bind arity for `execute`/`select`, or the
+  /// per-row parameter count for `executeBatch` (all rows share a
+  /// single SQL statement + bind arity).
   final int paramCount;
 
-  /// Rows in the response (null for writes).
+  /// Number of rows returned to the caller. Populated for `select`;
+  /// null for writes.
   final int? rowsReturned;
 
-  /// Optional tag for grouping samples in the report (e.g. "hot loop iteration N").
+  /// Number of parameter-row tuples in an `executeBatch` call.
+  /// Populated for `executeBatch`; null for other ops.
+  final int? batchSize;
+
+  /// Optional tag for grouping samples in the report (e.g. "hot loop
+  /// iteration N").
   final String? tag;
 
   Map<String, Object?> toJson() => {
@@ -41,6 +50,7 @@ class ProfileSample {
         'total_us': totalMicros,
         'params': paramCount,
         if (rowsReturned != null) 'rows': rowsReturned,
+        if (batchSize != null) 'batch_size': batchSize,
         if (tag != null) 'tag': tag,
       };
 }

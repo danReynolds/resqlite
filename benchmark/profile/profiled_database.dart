@@ -1,17 +1,21 @@
-/// Composition wrapper around [Database] that records timing for every
-/// public call. Used exclusively by the Phase 1 dispatch-budget research
-/// pass (see experiments/080-dispatch-budget.md).
+/// Composition wrapper around [Database] that records per-call timing
+/// (and, when kProfileMode is compiled in, decoder allocation counts)
+/// for the benchmark-harness subset of the Database API.
 ///
 /// Composition (not subclassing) because `Database` is `final class`.
-/// The contract with the benchmark harness is: this wrapper exposes the
-/// same 4 methods the harness uses (`execute`, `executeBatch`, `select`,
-/// `stream`) — no attempt to reproduce the full Database surface, and no
-/// production code is touched.
+/// The wrapper exposes the three benchmarked methods the harness calls
+/// directly — `execute`, `executeBatch`, `select` — plus a `close`
+/// passthrough. No attempt to reproduce the full Database surface, and
+/// no production code is modified. Pure streams (`Database.stream`) are
+/// not wrapped; the profile harnesses don't exercise them at this layer.
 ///
-/// Paired with [Timeline] markers inside the production code at key
-/// internal boundaries (writer isolate entry, reader isolate entry) so
-/// we get both the external wall time (from this wrapper) AND the
-/// cross-isolate breakdown (from DevTools timeline).
+/// Paired with `Timeline` markers inside the production worker isolates
+/// (gated behind `kProfileMode`) so a profile run produces both the
+/// external wall time (from this wrapper) AND the cross-isolate
+/// breakdown (from DevTools timeline).
+///
+/// Allocation counter increments live in [select] and are gated
+/// behind `kProfileMode` — tree-shaken out of release builds.
 library;
 
 import 'package:resqlite/resqlite.dart';
@@ -64,7 +68,7 @@ class ProfiledDatabase {
       sql: sql,
       totalMicros: sw.elapsedMicroseconds,
       paramCount: paramSets.isEmpty ? 0 : paramSets.first.length,
-      rowsReturned: paramSets.length, // reuse field for "batch size"
+      batchSize: paramSets.length,
       tag: tag,
     ));
   }
