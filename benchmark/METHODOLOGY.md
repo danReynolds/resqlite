@@ -43,10 +43,16 @@ isolate offloading is in play.
 
 - **Default repeats**: `--repeat=5`, though quick iteration may use `--repeat=3`.
   Published results use 5.
-- **Percentiles reported**: median (p50) and p90. p99 is captured internally
-  for scenarios but not surfaced in the default markdown table (future
-  enhancement).
-- **Noise-aware comparison**: `run_all.dart --compare-to=<baseline>` uses
+- **Percentiles reported in release mode**: median (p50) and p90. These
+  are the columns the public dashboard and its downstream parsers
+  (`parse_results.dart`, `generate_devices.dart`) expect, so they
+  stay fixed for backward compatibility.
+- **Percentiles reported in profile mode** (`run_profile.dart`):
+  median, p90, p99, and max. p99/max are where tail-latency
+  regressions (GC pauses, WAL checkpoint stalls, isolate scheduler
+  preemption) actually hide — exp 083 showed passive WAL checkpoints
+  drove merge-round p99 by 57% while p50/p90 were unchanged.
+- **Noise-aware comparison**: `run_release.dart --compare-to=<baseline>` uses
   threshold `max(10%, 3 × current MAD%)` with a `±0.02 ms` absolute floor.
   - Stable benchmarks: MAD < 5% → 10% threshold
   - Moderate: 5% ≤ MAD < 15% → 3×MAD threshold

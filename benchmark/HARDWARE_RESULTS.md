@@ -6,7 +6,7 @@ Community-submitted benchmark results across different hardware.
 
 1. Run the full benchmark suite:
    ```bash
-   dart run benchmark/run_all.dart "your-device" --repeat=3
+   dart run benchmark/run_release.dart "your-device" --repeat=3
    ```
 
 2. Add a new row to the table below, referencing the result file that was generated in `benchmark/results/`. Re-runs on the same hardware should be appended as additional rows (not overwrites) so the dashboard can surface a history of runs per device.

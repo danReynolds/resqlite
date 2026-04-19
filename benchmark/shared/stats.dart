@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 /// Aggregate statistics across repeated runs of a metric.
 ///
-/// Moved from `run_all.dart` to support new suites that need noise-aware
+/// Moved from `run_release.dart` to support new suites that need noise-aware
 /// thresholds (memory, disjoint-column streaming, point-query stability).
 /// Behavior matches the prior private `_AggregateStats` exactly.
 final class AggregateStats {
@@ -122,7 +122,7 @@ double minimumDetectableEffectPct(
 
 /// MAD-based detectable effect (%) — matches the existing comparison
 /// threshold (`3 × MAD%`). Useful to print alongside CI-based MDE so the
-/// value lines up with the acceptance heuristic already in `run_all.dart`.
+/// value lines up with the acceptance heuristic already in `run_release.dart`.
 double madBasedDetectableEffectPct(List<double> samples) {
   if (samples.isEmpty) return 0;
   return AggregateStats(samples).madPct * 3.0;
@@ -149,7 +149,20 @@ final class BenchmarkTiming {
   Stats get main => Stats(mainUs);
 }
 
-/// Computed statistics (median, p90, mean) for a set of timing samples.
+/// Computed statistics (median, p90, p99, max, mean) for a set of timing
+/// samples.
+///
+/// The `p99Ms` and `maxMs` getters are intentionally NOT surfaced in the
+/// release-mode markdown tables emitted by `run_release.dart` — those
+/// tables feed the public dashboard, and their column layout is
+/// consumed by downstream parsers (`parse_results.dart`,
+/// `generate_devices.dart`, `generate_history.dart`, the dashboard JS
+/// in `docs/benchmarks/index.html`). Adding columns would silently
+/// break column-index-based extraction.
+///
+/// Profile-mode harnesses (`run_profile.dart`) read these getters
+/// directly and emit their own richer JSON format for A/B diffing,
+/// where p99/max are where tail-latency regressions actually hide.
 final class Stats {
   Stats(List<int> raw) : _sorted = List.of(raw)..sort();
 
@@ -157,6 +170,17 @@ final class Stats {
 
   double get medianMs => _sorted[_sorted.length ~/ 2] / 1000.0;
   double get p90Ms => _sorted[(_sorted.length * 0.9).floor()] / 1000.0;
+
+  /// 99th percentile. Surfaces tail-latency regressions that p90 misses —
+  /// exp 083 showed passive WAL checkpoints drove p99 +57% on merge
+  /// workloads while p50/p90 were unchanged.
+  double get p99Ms => _sorted[(_sorted.length * 0.99).floor()] / 1000.0;
+
+  /// Maximum observed timing. Useful for spotting outlier spikes (GC
+  /// pauses, OS scheduler preemption, filesystem variability) that
+  /// don't move percentiles but can drop frames in a UI app.
+  double get maxMs => _sorted.last / 1000.0;
+
   double get meanMs {
     final sum = _sorted.fold<int>(0, (a, b) => a + b);
     return sum / _sorted.length / 1000.0;
