@@ -468,6 +468,26 @@ static sqlite3* open_connection(const char* path, int read_only,
         }
     }
     sqlite3_exec(db, "PRAGMA busy_timeout = 5000", NULL, NULL, NULL);
+#ifdef SQLITE_ENABLE_SETLK_TIMEOUT
+    // Experiment 084: On VFSes that support blocking file locks (currently
+    // the unix-dotfile VFS on POSIX), `sqlite3_setlk_timeout` lets readers
+    // sleep in the kernel on a WAL-mode lock contention instead of spinning
+    // through SQLite's busy_timeout retry loop. Targets the p99 / max tail
+    // that exp-080 traced to passive WAL checkpoint stalls. On VFSes that
+    // don't support blocking locks this is a silent no-op, so `busy_timeout`
+    // above still governs the fallback behaviour — the two settings are
+    // complementary per the SQLite docs. We intentionally don't pass
+    // SQLITE_SETLK_BLOCK_ON_CONNECT; we only want eligible lock waits to
+    // block, not the one-to-zero-connections checkpoint dance.
+    {
+        int setlk_rc = sqlite3_setlk_timeout(db, 10000, 0);
+        if (setlk_rc != SQLITE_OK) {
+            // Not fatal — older non-unix-dotfile VFS may not support it.
+            // Log and continue; busy_timeout is still in effect.
+            fprintf(stderr, "resqlite: sqlite3_setlk_timeout returned %d (non-fatal)\n", setlk_rc);
+        }
+    }
+#endif
     sqlite3_exec(db, "PRAGMA mmap_size = 268435456", NULL, NULL, NULL);  // 256 MB
     sqlite3_exec(db, "PRAGMA cache_size = -8192", NULL, NULL, NULL);    // 8 MB
     sqlite3_exec(db, "PRAGMA temp_store = MEMORY", NULL, NULL, NULL);

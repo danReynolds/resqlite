@@ -121,6 +121,7 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         'SQLITE_ENABLE_FTS5': null,
         'SQLITE_ENABLE_MATH_FUNCTIONS': null,
         'SQLITE_ENABLE_PREUPDATE_HOOK': null,
+        'SQLITE_ENABLE_SETLK_TIMEOUT': null, // Experiment 084: kernel-level blocking locks (unix-dotfile VFS) let readers wait in the kernel during WAL checkpoints instead of spinning through busy_timeout retries — targets the p99/max tail on write workloads.
         'SQLITE_ENABLE_STAT4': null,
 
         // Features we don't use — strip from binary.
