@@ -101,6 +101,20 @@ final class StreamEngine {
     }
   }
 
+  /// Route a committed write based on whether dirty tables were captured.
+  ///
+  /// `null` means the writer intentionally skipped dirty-table capture for
+  /// this commit, so we conservatively record a write via [noteWrite].
+  /// A non-null list means capture was attempted; an empty list is a real
+  /// "nothing dirty" result and should not be treated like a skipped capture.
+  void handleCommittedWrite(List<String>? dirtyTables) {
+    if (dirtyTables == null) {
+      noteWrite();
+    } else {
+      handleDirtyTables(dirtyTables);
+    }
+  }
+
   /// Record that a write committed even when no dirty-table payload was
   /// marshalled back from the writer. This preserves the initial-query
   /// race check in [_createStream] without paying the table-list round trip.

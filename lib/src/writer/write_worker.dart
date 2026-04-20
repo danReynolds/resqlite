@@ -91,7 +91,7 @@ final class CloseRequest extends WriterRequest {
 final class ExecuteResponse {
   const ExecuteResponse(this.result, this.dirtyTables);
   final WriteResult result;
-  final List<String> dirtyTables;
+  final List<String>? dirtyTables;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -104,7 +104,7 @@ final class QueryResponse {
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
   const BatchResponse(this.dirtyTables);
-  final List<String> dirtyTables;
+  final List<String>? dirtyTables;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +244,7 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   // transaction they accumulate in the C-level dirty set until the
   // outermost transaction completes.
   final dirty = state.txDepth > 0 || !msg.captureDirtyTables
-      ? const <String>[]
+      ? null
       : getDirtyTables(state.dbHandle);
   msg.replyPort.send(ExecuteResponse(result, dirty));
 }
@@ -254,14 +254,12 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(<String>[]));
+    msg.replyPort.send(const BatchResponse(null));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     msg.replyPort.send(
       BatchResponse(
-        msg.captureDirtyTables
-            ? getDirtyTables(state.dbHandle)
-            : const <String>[],
+        msg.captureDirtyTables ? getDirtyTables(state.dbHandle) : null,
       ),
     );
   }
@@ -365,9 +363,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     msg.replyPort.send(
       BatchResponse(
-        msg.captureDirtyTables
-            ? getDirtyTables(state.dbHandle)
-            : const <String>[],
+        msg.captureDirtyTables ? getDirtyTables(state.dbHandle) : null,
       ),
     );
   } else {
@@ -408,7 +404,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(const BatchResponse(<String>[]));
+    msg.replyPort.send(const BatchResponse(null));
   }
 }
 

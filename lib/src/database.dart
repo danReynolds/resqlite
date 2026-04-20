@@ -340,11 +340,7 @@ final class Database {
       () => writer.execute(sql, parameters, captureDirtyTables),
     );
 
-    if (captureDirtyTables) {
-      _streamEngine.handleDirtyTables(response.dirtyTables);
-    } else {
-      _streamEngine.noteWrite();
-    }
+    _streamEngine.handleCommittedWrite(response.dirtyTables);
 
     return response.result;
   }
@@ -386,12 +382,8 @@ final class Database {
       ),
     );
 
-    if (captureDirtyTables) {
-      if (reponse?.dirtyTables case List<String> dirtyTables) {
-        _streamEngine.handleDirtyTables(dirtyTables);
-      }
-    } else {
-      _streamEngine.noteWrite();
+    if (reponse != null) {
+      _streamEngine.handleCommittedWrite(reponse.dirtyTables);
     }
   }
 

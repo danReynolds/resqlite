@@ -167,11 +167,7 @@ final class Writer {
     );
 
     if (Transaction.current == null) {
-      if (captureDirtyTables) {
-        _streamEngine.handleDirtyTables(response.dirtyTables);
-      } else {
-        _streamEngine.noteWrite();
-      }
+      _streamEngine.handleCommittedWrite(response.dirtyTables);
     }
 
     return result;
