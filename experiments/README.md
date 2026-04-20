@@ -88,6 +88,8 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [073](073-schema-cache-fast-path.md) | Single-slot schema-cache fast-path | Within noise: Dart's cached `String.hashCode` already makes map lookups fast enough that a one-slot bypass is below the measurement floor for the current suite |
 | [074](074-bulk-step-many.md) | Bulk `step_many` batched FFI for read path | Same wall as exp 018: memcpy-in-C cost exceeds FFI-crossing savings. Text-heavy workloads regressed +38 %. Dart already reads directly from SQLite's text buffer; adding a C-side copy before Dart decode is strictly worse |
 | [076](076-prebound-stmt-cache-analysis.md) | Pre-bound statement cache | Rejected in pre-implementation analysis: bind is ~0.3 % of re-query wall time (~50 ns per call). No measurable headroom even for a perfect implementation |
+| [081](081-binary-row-result-storage.md) | Binary row result storage | Transfer-side numeric scan wins collapsed once full main-isolate row consumption was measured; mixed rows regressed and point-query floor worsened |
+| [082](082-message-graph-handoff.md) | Message-graph hand-off benchmark | Current `ResultSet` / `Row` shape is already near-optimal for the shipped `select()` contract; materialized maps and binary row facades both lose on end-to-end total |
 
 ## Conventions
 
