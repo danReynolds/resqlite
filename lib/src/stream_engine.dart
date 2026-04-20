@@ -104,34 +104,18 @@ final class StreamEngine {
   /// Route a committed write based on whether dirty tables were captured.
   ///
   /// `null` means the writer intentionally skipped dirty-table capture for
-  /// this commit, so we conservatively record a write via [noteWrite].
+  /// this commit, so we conservatively mark every active entry dirty.
   /// A non-null list means capture was attempted; an empty list is a real
   /// "nothing dirty" result and should not be treated like a skipped capture.
   void handleCommittedWrite(List<String>? dirtyTables) {
-    if (dirtyTables == null) {
-      noteWrite();
-    } else {
+    if (dirtyTables != null) {
       handleDirtyTables(dirtyTables);
+      return;
     }
-  }
 
-  /// Record that a write committed even when no dirty-table payload was
-  /// marshalled back from the writer. This preserves the initial-query
-  /// race check in [_createStream] without paying the table-list round trip.
-  ///
-  /// Because dirty tables were skipped, any stream that appeared after the
-  /// write started but before it committed has unknown dependencies. In that
-  /// rare case we conservatively catch up every active stream entry once.
-  void noteWrite() {
     _writeGeneration++;
-    if (_entries.isEmpty) return;
-
     for (final entry in _entries.values) {
-      if (entry.lastResult == null) {
-        entry.writeGen++;
-      } else {
-        _scheduleReQuery(entry);
-      }
+      _scheduleReQuery(entry);
     }
   }
 
@@ -179,6 +163,9 @@ final class StreamEngine {
   ///      reads current state (reflecting every intermediate write).
   void _scheduleReQuery(StreamEntry entry) {
     entry.writeGen++;
+    // Before the initial query establishes a baseline, we can only record
+    // that a catch-up re-query is needed later.
+    if (entry.lastRowCount == -1) return;
     if (entry.inFlightReQuery != null) return;
     _startReQuery(entry);
   }
@@ -451,8 +438,8 @@ final class StreamEntry {
 
   /// Monotonic counter bumped for qualifying invalidations.
   ///
-  /// While the initial query is still in flight, [StreamEngine.noteWrite]
-  /// uses this as a pending catch-up marker for writes whose dirty tables
+  /// While the initial query is still in flight, [_scheduleReQuery] can
+  /// use this as a pending catch-up marker for writes whose dirty tables
   /// were intentionally not captured. After initial setup completes,
   /// [StreamEngine._scheduleReQuery] owns the counter for normal re-query
   /// coalescing. Never decreases.

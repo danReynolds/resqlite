@@ -1,13 +1,13 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
-import 'dart:collection';
 import 'dart:ffi' as ffi;
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import '../exceptions.dart';
+import 'request_cache.dart';
 
 // ---------------------------------------------------------------------------
 // C-level connection handle
@@ -452,50 +452,12 @@ List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
 // ---------------------------------------------------------------------------
 
 const int _paramStructSize = 24;
-const int _sqlCacheMax = 32;
-const int _maxReusableParamBufBytes = 64 * 1024;
-
-final Map<String, ffi.Pointer<Utf8>> _sqlUtf8Cache =
-    LinkedHashMap<String, ffi.Pointer<Utf8>>();
-
-ffi.Pointer<Utf8> cachedSqlUtf8(String sql) {
-  final cached = _sqlUtf8Cache.remove(sql);
-  if (cached != null) {
-    _sqlUtf8Cache[sql] = cached;
-    return cached;
-  }
-
-  final native = sql.toNativeUtf8();
-  _sqlUtf8Cache[sql] = native;
-  if (_sqlUtf8Cache.length > _sqlCacheMax) {
-    final oldestKey = _sqlUtf8Cache.keys.first;
-    final evicted = _sqlUtf8Cache.remove(oldestKey);
-    if (evicted != null) calloc.free(evicted);
-  }
-  return native;
-}
-
-ffi.Pointer<ffi.Uint8> _reusableParamsBuf = ffi.nullptr;
-int _reusableParamsBufBytes = 0;
-
-ffi.Pointer<ffi.Uint8> _allocReusableParamsBuf(int byteCount) {
-  if (byteCount > _maxReusableParamBufBytes) {
-    return calloc<ffi.Uint8>(byteCount);
-  }
-  if (_reusableParamsBuf == ffi.nullptr ||
-      byteCount > _reusableParamsBufBytes) {
-    if (_reusableParamsBuf != ffi.nullptr) calloc.free(_reusableParamsBuf);
-    _reusableParamsBuf = calloc<ffi.Uint8>(byteCount);
-    _reusableParamsBufBytes = byteCount;
-  }
-  return _reusableParamsBuf;
-}
 
 ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
   final byteCount = _paramStructSize * params.length;
-  final buf = _allocReusableParamsBuf(byteCount);
+  final buf = allocateReusableParamStructBuf(byteCount);
   final view = buf.cast<ffi.Uint8>().asTypedList(
     _paramStructSize * params.length,
   );
@@ -548,9 +510,7 @@ void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> params) {
       calloc.free(ptr);
     }
   }
-  if (buf.address != _reusableParamsBuf.address) {
-    calloc.free(buf);
-  }
+  freeReusableParamStructBuf(buf);
 }
 
 // ---------------------------------------------------------------------------

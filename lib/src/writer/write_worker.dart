@@ -14,6 +14,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import '../exceptions.dart';
+import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
