@@ -44,6 +44,15 @@ Experiments that proved their value and were merged into the codebase.
 | [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 | [077](077-cheap-check-first-sweep.md) | Cheap-check-first sweep (four small wins) | **−13 % to −23 % on write benchmarks** from cached `sqlite3_bind_parameter_count`; pairs with three correctness-neutral fast-rejects on invalidation, hash, and subscription paths |  |
 
+## In Review
+
+Promising experiments with an active implementation or PR, but not yet
+merged into the codebase.
+
+| # | Experiment | Impact | PR |
+|---|---|---|---|
+| [083](083-stream-rerun-pre-dispatch-queue.md) | Stream rerun pre-dispatch queue | Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission | [#25](https://github.com/danReynolds/resqlite/pull/25) |
+
 ## Rejected
 
 Experiments that didn't work out. Each has valuable context on *why* — check before revisiting similar ideas.
@@ -90,6 +99,8 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [076](076-prebound-stmt-cache-analysis.md) | Pre-bound statement cache | Rejected in pre-implementation analysis: bind is ~0.3 % of re-query wall time (~50 ns per call). No measurable headroom even for a perfect implementation |
 | [081](081-binary-row-result-storage.md) | Binary row result storage | Transfer-side numeric scan wins collapsed once full main-isolate row consumption was measured; mixed rows regressed and point-query floor worsened |
 | [082](082-message-graph-handoff.md) | Message-graph hand-off benchmark | Current `ResultSet` / `Row` shape is already near-optimal for the shipped `select()` contract; materialized maps and binary row facades both lose on end-to-end total |
+| [084](084-late-dispatch-generation-stamp.md) | Late dispatch generation stamp | Real partial improvement, but materially weaker than 083 because reruns still pile up inside `ReaderPool` |
+| [085](085-reserved-reader-slot-for-reruns.md) | Reserved reader slot for reruns | The queue is the real source of the `A11` / `A11b` win; removing the reserved reader regressed broader workload balance, especially `A7` |
 
 ## Conventions
 
