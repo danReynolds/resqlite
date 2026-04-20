@@ -40,6 +40,40 @@ so the diagnostic overhead cancels out in the delta. See
 [benchmark/EXPERIMENTS.md](../../../benchmark/EXPERIMENTS.md) for the
 full workflow.
 
+### What to commit from profile mode (and what not to)
+
+Profile JSONs are **~10–15 MB each** — raw per-sample timing arrays.
+They are local scratch, not a committed artifact:
+
+- **Commit:** the aggregate markdown produced by `diff_multirun.dart`,
+  e.g. `benchmark/profile/results/<label>-aggregate.md` (~5 KB). That
+  file has the medians, CVs, and per-run values the decision actually
+  rested on.
+- **Do NOT commit:** the raw `*.json` outputs. They are gitignored
+  (`benchmark/profile/results/*.json`) and a CI job
+  (`guard-raw-profile-json` in `ci.yml`) will fail any PR that adds them.
+- **Workflow:**
+  ```bash
+  # Run N times per side locally (raw JSONs stay untracked)
+  for i in 1 2 3 4 5; do
+    dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
+      --out=benchmark/profile/results/baseline-expNNN-run$i.json
+    # ...and candidate side
+  done
+
+  # Aggregate once, commit the markdown only
+  dart run benchmark/profile/diff_multirun.dart \
+    --baseline='benchmark/profile/results/baseline-expNNN-run*.json' \
+    --candidate='benchmark/profile/results/exp-NNN-run*.json' \
+    > benchmark/profile/results/exp-NNN-aggregate.md
+  git add benchmark/profile/results/exp-NNN-aggregate.md
+  ```
+
+Raw JSONs are not comparable across time/hardware — a future evaluator
+re-runs against their own current baseline anyway. The aggregate
+captures the decision-relevant signal; 10 × 15 MB of per-sample arrays
+does not.
+
 ## Why all three
 
 The Update Docs Data workflow (`.github/workflows/update-experiments.yml`)
@@ -113,12 +147,34 @@ the calculus, or (c) a seemingly-rejected idea turns out to be the right
 starting point for a follow-up.
 
 **Tag rejected experiments before cleaning up the branch.** Tags are
-~100 bytes of ref metadata, live forever, and keep the commit reachable:
+~100 bytes of ref metadata, live forever, and keep the commit reachable.
+
+Point the tag at a **single slim commit off `main`** — not the messy
+working-branch HEAD. The slim commit should contain exactly what a
+future evaluator needs to cherry-pick the idea onto the current tree:
+
+- Code change (under `native/`, `lib/`, `hook/`)
+- `experiments/NNN-*.md` writeup with full reasoning + root cause
+- `experiments/README.md` row
+- `benchmark/profile/results/<label>-aggregate.md` (the medians, not
+  the raw JSONs)
+- Any tooling added (e.g. `diff_multirun.dart`)
+- `benchmark/results/<timestamp>-<label>.md` (release-mode summary)
 
 ```
-git tag archive/exp-NNN <last-commit-on-branch>
-git push origin archive/exp-NNN
-git branch -D <experiment-branch>
+# Build the slim commit off a fresh branch from main
+git checkout -b tmp-archive-slim origin/main
+git checkout <code-commit> -- <paths under native/, lib/, hook/>
+git checkout <docs-branch> -- experiments/NNN-*.md experiments/README.md \
+  benchmark/profile/results/<label>-aggregate.md \
+  benchmark/results/<timestamp>-<label>.md
+git commit -m "exp NNN: archived — <title> (rejected)"
+
+# Move the tag
+git tag -f archive/exp-NNN HEAD
+git push -f origin archive/exp-NNN
+git checkout main
+git branch -D tmp-archive-slim
 ```
 
 Then add an **Archive** line to the experiment writeup so readers can jump
