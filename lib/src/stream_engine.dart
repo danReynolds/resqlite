@@ -128,7 +128,7 @@ final class StreamEngine {
 
     for (final entry in _entries.values) {
       if (entry.lastResult == null) {
-        entry.needsCatchUpAfterInit = true;
+        entry.writeGen++;
       } else {
         _scheduleReQuery(entry);
       }
@@ -274,9 +274,7 @@ final class StreamEngine {
             // in _reQuery suppresses the emission if data is unchanged.
             // Goes through the same coalescing path as normal invalidation
             // so the in-flight cap is honored even at setup.
-            if (_writeGeneration != generationBefore ||
-                entry.needsCatchUpAfterInit) {
-              entry.needsCatchUpAfterInit = false;
+            if (_writeGeneration != generationBefore || entry.writeGen != 0) {
               _scheduleReQuery(entry);
             }
           },
@@ -451,9 +449,13 @@ final class StreamEntry {
   /// [StreamEngine._scheduleReQuery] for the full rationale.
   Future<void>? inFlightReQuery;
 
-  /// Monotonic counter bumped by [StreamEngine._scheduleReQuery] on
-  /// every qualifying invalidation (writes that touch this entry's
-  /// watched tables, plus the initial-query race catchup). Never decreases.
+  /// Monotonic counter bumped for qualifying invalidations.
+  ///
+  /// While the initial query is still in flight, [StreamEngine.noteWrite]
+  /// uses this as a pending catch-up marker for writes whose dirty tables
+  /// were intentionally not captured. After initial setup completes,
+  /// [StreamEngine._scheduleReQuery] owns the counter for normal re-query
+  /// coalescing. Never decreases.
   ///
   /// [StreamEngine._startReQuery] captures this value at dispatch time;
   /// on completion, if the captured value and the current value differ,
@@ -461,12 +463,6 @@ final class StreamEntry {
   /// skipped in favor of a fresh follow-up (which captures the now-current
   /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
   int writeGen = 0;
-
-  /// Set when a write committed while this stream was still running its
-  /// initial query and the writer skipped dirty-table marshalling because
-  /// no streams existed at write start. The first-query completion path
-  /// consumes this flag and performs one conservative catch-up re-query.
-  bool needsCatchUpAfterInit = false;
 }
 
 /// Compute a stable hash key for a stream query.
