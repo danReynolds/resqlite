@@ -26,6 +26,8 @@ final class Writer {
 
   Writer(this._streamEngine);
 
+  bool get _captureDirtyTables => _streamEngine.length > 0;
+
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
@@ -80,19 +82,17 @@ final class Writer {
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
-    bool captureDirtyTables = true,
   ]) async {
     return _request<ExecuteResponse>(
       (replyPort) =>
-          ExecuteRequest(sql, parameters, captureDirtyTables, replyPort),
+          ExecuteRequest(sql, parameters, _captureDirtyTables, replyPort),
     );
   }
 
   Future<BatchResponse?> executeBatch(
     String sql,
-    List<List<Object?>> paramSets, {
-    bool captureDirtyTables = true,
-  }) async {
+    List<List<Object?>> paramSets,
+  ) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -105,7 +105,7 @@ final class Writer {
 
     return _request<BatchResponse>(
       (replyPort) =>
-          BatchRequest(sql, paramSets, captureDirtyTables, replyPort),
+          BatchRequest(sql, paramSets, _captureDirtyTables, replyPort),
     );
   }
 
@@ -161,9 +161,8 @@ final class Writer {
     // Commit is deliberately outside the try/catch: on commit failure the
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
-    final captureDirtyTables = _streamEngine.length > 0;
     final response = await _request<BatchResponse>(
-      (replyPort) => CommitRequest(captureDirtyTables, replyPort),
+      (replyPort) => CommitRequest(_captureDirtyTables, replyPort),
     );
 
     if (Transaction.current == null) {

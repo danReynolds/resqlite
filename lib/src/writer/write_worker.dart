@@ -96,9 +96,8 @@ final class ExecuteResponse {
 
 /// Response to [QueryRequest] (transaction reads).
 final class QueryResponse {
-  const QueryResponse(this.rows, this.dirtyTables);
+  const QueryResponse(this.rows);
   final List<Map<String, Object?>> rows;
-  final List<String> dirtyTables;
 }
 
 /// Response to [BatchRequest] and [CommitRequest].
@@ -285,13 +284,8 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
       );
     }
     final raw = decodeQuery(stmt, msg.sql);
-    // No dirty table collection — this path only runs during transactions
-    // and the dirty set must accumulate until commit.
     msg.replyPort.send(
-      QueryResponse(
-        ResultSet(raw.values, raw.schema, raw.rowCount),
-        const <String>[],
-      ),
+      QueryResponse(ResultSet(raw.values, raw.schema, raw.rowCount)),
     );
   } finally {
     // Both resources are freed in one finally regardless of which line
