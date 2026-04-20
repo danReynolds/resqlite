@@ -163,10 +163,7 @@ final class StreamEngine {
   ///      reads current state (reflecting every intermediate write).
   void _scheduleReQuery(StreamEntry entry) {
     entry.writeGen++;
-    // Before the initial query establishes a baseline, we can only record
-    // that a catch-up re-query is needed later.
-    if (entry.lastRowCount == -1) return;
-    if (entry.inFlightReQuery != null) return;
+    if (entry.inFlight != null) return;
     _startReQuery(entry);
   }
 
@@ -175,8 +172,11 @@ final class StreamEngine {
   /// in-flight invariant.
   void _startReQuery(StreamEntry entry) {
     final gen = entry.writeGen;
-    entry.inFlightReQuery = _reQuery(entry, gen).whenComplete(() {
-      entry.inFlightReQuery = null;
+    final future = _reQuery(entry, gen);
+    entry.inFlight = future;
+    future.whenComplete(() {
+      if (!identical(entry.inFlight, future)) return;
+      entry.inFlight = null;
       // If the stream was invalidated while running, re-query it again.
       if (_entries[entry.key] != null && entry.writeGen != gen) {
         _startReQuery(entry);
@@ -231,7 +231,7 @@ final class StreamEngine {
     final generationBefore = _writeGeneration;
 
     // Run initial query on the reader pool to discover read tables.
-    _pool()
+    final future = _pool()
         .then((pool) => pool.selectWithDeps(sql, params))
         .then(
           (result) {
@@ -261,8 +261,8 @@ final class StreamEngine {
             // in _reQuery suppresses the emission if data is unchanged.
             // Goes through the same coalescing path as normal invalidation
             // so the in-flight cap is honored even at setup.
-            if (_writeGeneration != generationBefore || entry.writeGen != 0) {
-              _scheduleReQuery(entry);
+            if (_writeGeneration != generationBefore && entry.writeGen == 0) {
+              entry.writeGen++;
             }
           },
           onError: (Object error) {
@@ -273,6 +273,14 @@ final class StreamEngine {
             _remove(key);
           },
         );
+    entry.inFlight = future;
+    future.whenComplete(() {
+      if (!identical(entry.inFlight, future)) return;
+      entry.inFlight = null;
+      if (_entries[entry.key] != null && entry.writeGen != 0) {
+        _startReQuery(entry);
+      }
+    });
 
     return subscriberStream;
   }
@@ -429,20 +437,19 @@ final class StreamEntry {
   /// knows the fresh row count diverges.
   int lastRowCount = -1;
 
-  /// Tracks the currently-executing re-query for this entry, if any.
-  /// `null` means no re-query is in flight; a non-null value means
-  /// additional invalidations should be absorbed into [writeGen]
-  /// rather than dispatching fresh pool work. See
+  /// Tracks the currently-executing query work for this entry, if any.
+  /// `null` means no initial query or re-query is in flight; a non-null
+  /// value means additional invalidations should be absorbed into
+  /// [writeGen] rather than dispatching fresh pool work. See
   /// [StreamEngine._scheduleReQuery] for the full rationale.
-  Future<void>? inFlightReQuery;
+  Future<void>? inFlight;
 
   /// Monotonic counter bumped for qualifying invalidations.
   ///
-  /// While the initial query is still in flight, [_scheduleReQuery] can
-  /// use this as a pending catch-up marker for writes whose dirty tables
-  /// were intentionally not captured. After initial setup completes,
-  /// [StreamEngine._scheduleReQuery] owns the counter for normal re-query
-  /// coalescing. Never decreases.
+  /// While the initial query is still in flight, this acts as a pending
+  /// catch-up marker for writes whose dirty tables were intentionally not
+  /// captured. After initial setup completes, [StreamEngine._scheduleReQuery]
+  /// owns the counter for normal re-query coalescing. Never decreases.
   ///
   /// [StreamEngine._startReQuery] captures this value at dispatch time;
   /// on completion, if the captured value and the current value differ,
