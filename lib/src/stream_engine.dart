@@ -34,7 +34,9 @@ final class StreamEngine {
   bool _flushScheduled = false;
 
   /// Stream keys waiting to acquire one of the bounded rerun dispatch
-  /// slots owned by the stream engine.
+  /// slots owned by the stream engine. Membership in this set is the
+  /// source of truth for whether an entry has a queued-but-undispatched
+  /// rerun.
   Set<int>? _pendingReruns;
 
   /// Number of reruns currently dispatched to the reader pool.
@@ -182,7 +184,7 @@ final class StreamEngine {
       ProfileCounters.streamRerunsRequested++;
     }
     entry.writeGen++;
-    if (entry.inFlight || entry.reQueryQueued) {
+    if (entry.inFlight || _isReQueryQueued(entry)) {
       if (kProfileMode) {
         ProfileCounters.streamRerunsDeferredInflight++;
       }
@@ -192,7 +194,7 @@ final class StreamEngine {
   }
 
   void _ensureReQueryScheduled(StreamEntry entry) {
-    if (entry.inFlight || entry.reQueryQueued) return;
+    if (entry.inFlight || _isReQueryQueued(entry)) return;
     if (_rerunsInFlight >= _maxConcurrentReruns ||
         (_pendingReruns?.isNotEmpty ?? false)) {
       _enqueueReQuery(entry);
@@ -200,6 +202,10 @@ final class StreamEngine {
       return;
     }
     _startReQuery(entry);
+  }
+
+  bool _isReQueryQueued(StreamEntry entry) {
+    return _pendingReruns?.contains(entry.key) ?? false;
   }
 
   /// Actually dispatches the re-query and manages the bounded rerun slot.
@@ -227,8 +233,6 @@ final class StreamEngine {
   }
 
   void _enqueueReQuery(StreamEntry entry) {
-    if (entry.reQueryQueued) return;
-    entry.reQueryQueued = true;
     (_pendingReruns ??= <int>{}).add(entry.key);
   }
 
@@ -241,7 +245,6 @@ final class StreamEngine {
       keys.remove(key);
       final entry = _entries[key];
       if (entry == null) continue;
-      entry.reQueryQueued = false;
       if (entry.inFlight) continue;
       _startReQuery(entry);
     }
@@ -483,7 +486,9 @@ final class StreamEngine {
     final entry = _entries.remove(key);
     if (entry == null) return;
     _pendingReruns?.remove(key);
-    entry.reQueryQueued = false;
+    if (_pendingReruns?.isEmpty ?? false) {
+      _pendingReruns = null;
+    }
 
     // Clean up inverted index.
     for (final table in entry.readTables) {
@@ -566,10 +571,6 @@ final class StreamEntry {
   /// skipped in favor of a fresh follow-up (which captures the now-current
   /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
   int writeGen = 0;
-
-  /// Whether a rerun for this entry has already been queued in the
-  /// stream-engine scheduler but not yet dispatched to the reader pool.
-  bool reQueryQueued = false;
 }
 
 /// Compute a stable hash key for a stream query.
