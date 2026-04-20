@@ -16,7 +16,9 @@ final class _StreamProbe<T> {
     _subscription = stream.listen(
       (event) {
         _events.add(event);
-        final ready = _waiters.where((waiter) => waiter.count <= _events.length);
+        final ready = _waiters.where(
+          (waiter) => waiter.count <= _events.length,
+        );
         for (final waiter in ready.toList()) {
           _waiters.remove(waiter);
           if (!waiter.completer.isCompleted) {
@@ -41,10 +43,7 @@ final class _StreamProbe<T> {
 
   List<T> get events => List.unmodifiable(_events);
 
-  Future<T> event(
-    int count, {
-    Duration timeout = const Duration(seconds: 2),
-  }) {
+  Future<T> event(int count, {Duration timeout = const Duration(seconds: 2)}) {
     if (_events.length >= count) {
       return Future.value(_events[count - 1]);
     }
@@ -70,9 +69,7 @@ final class _StreamProbe<T> {
     }
   }
 
-  Future<void> waitForDone({
-    Duration timeout = const Duration(seconds: 2),
-  }) {
+  Future<void> waitForDone({Duration timeout = const Duration(seconds: 2)}) {
     return _done.future.timeout(timeout);
   }
 
@@ -104,8 +101,14 @@ void main() {
     });
 
     test('emits initial results', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bob', 2]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'bob',
+        2,
+      ]);
 
       final stream = db.stream('SELECT name FROM items ORDER BY id');
       final first = await stream.first;
@@ -116,15 +119,23 @@ void main() {
     });
 
     test('re-emits after write to dependent table', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
-      final probe = _StreamProbe(db.stream('SELECT name FROM items ORDER BY id'));
+      final probe = _StreamProbe(
+        db.stream('SELECT name FROM items ORDER BY id'),
+      );
 
       final initialRows = await probe.event(1);
       expect(initialRows, hasLength(1));
 
       // Write to the table — should trigger re-emission.
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bob', 2]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'bob',
+        2,
+      ]);
 
       final updatedRows = await probe.event(2);
       expect(probe.events, hasLength(2));
@@ -136,9 +147,14 @@ void main() {
 
     test('does not re-emit for writes to unrelated tables', () async {
       await db.execute('CREATE TABLE other(id INTEGER PRIMARY KEY, data TEXT)');
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
-      final probe = _StreamProbe(db.stream('SELECT name FROM items ORDER BY id'));
+      final probe = _StreamProbe(
+        db.stream('SELECT name FROM items ORDER BY id'),
+      );
       await probe.event(1);
       expect(probe.events, hasLength(1));
 
@@ -152,9 +168,18 @@ void main() {
     });
 
     test('stream with parameters', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bob', 2]);
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['charlie', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'bob',
+        2,
+      ]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'charlie',
+        1,
+      ]);
 
       final stream = db.stream(
         'SELECT name FROM items WHERE value = ? ORDER BY name',
@@ -167,53 +192,65 @@ void main() {
       expect(first[1]['name'], 'charlie');
     });
 
-    test('recreated parameterized stream still re-emits after update', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bob', 2]);
-
-      Future<void> expectRoundTrip(int id, int expectedValue) async {
-        final initial = Completer<void>();
-        final updated = Completer<void>();
-        final results = <List<Map<String, Object?>>>[];
-
-        final sub = db
-            .stream('SELECT id, name, value FROM items WHERE id = ?', [id])
-            .listen((rows) {
-              results.add(rows);
-              if (!initial.isCompleted) {
-                initial.complete();
-                return;
-              }
-              if (!updated.isCompleted) {
-                updated.complete();
-              }
-            });
-
-        await initial.future.timeout(const Duration(seconds: 2));
-        expect(results, hasLength(1));
-        expect(results[0], hasLength(1));
-        expect(results[0][0]['id'], id);
-
-        await db.execute('UPDATE items SET value = ? WHERE id = ?', [
-          expectedValue,
-          id,
+    test(
+      'recreated parameterized stream still re-emits after update',
+      () async {
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'alice',
+          1,
+        ]);
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'bob',
+          2,
         ]);
 
-        await updated.future.timeout(const Duration(seconds: 2));
-        expect(results, hasLength(2));
-        expect(results[1][0]['value'], expectedValue);
+        Future<void> expectRoundTrip(int id, int expectedValue) async {
+          final initial = Completer<void>();
+          final updated = Completer<void>();
+          final results = <List<Map<String, Object?>>>[];
 
-        await sub.cancel();
-      }
+          final sub = db
+              .stream('SELECT id, name, value FROM items WHERE id = ?', [id])
+              .listen((rows) {
+                results.add(rows);
+                if (!initial.isCompleted) {
+                  initial.complete();
+                  return;
+                }
+                if (!updated.isCompleted) {
+                  updated.complete();
+                }
+              });
 
-      // First run prepares and caches the statement shape.
-      await expectRoundTrip(1, 11);
-      // Second run reuses the same SQL shape with a different parameter.
-      await expectRoundTrip(2, 22);
-    });
+          await initial.future.timeout(const Duration(seconds: 2));
+          expect(results, hasLength(1));
+          expect(results[0], hasLength(1));
+          expect(results[0][0]['id'], id);
+
+          await db.execute('UPDATE items SET value = ? WHERE id = ?', [
+            expectedValue,
+            id,
+          ]);
+
+          await updated.future.timeout(const Duration(seconds: 2));
+          expect(results, hasLength(2));
+          expect(results[1][0]['value'], expectedValue);
+
+          await sub.cancel();
+        }
+
+        // First run prepares and caches the statement shape.
+        await expectRoundTrip(1, 11);
+        // Second run reuses the same SQL shape with a different parameter.
+        await expectRoundTrip(2, 22);
+      },
+    );
 
     test('deduplicates same query', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
       const sql = 'SELECT name FROM items ORDER BY id';
 
@@ -238,15 +275,18 @@ void main() {
     });
 
     test('re-emits after batch write', () async {
-      final probe = _StreamProbe(db.stream('SELECT COUNT(*) as cnt FROM items'));
+      final probe = _StreamProbe(
+        db.stream('SELECT COUNT(*) as cnt FROM items'),
+      );
       final initialRows = await probe.event(1);
       expect(initialRows[0]['cnt'], 0);
 
       // Batch insert.
-      await db.executeBatch(
-        'INSERT INTO items(name, value) VALUES (?, ?)',
-        [['a', 1], ['b', 2], ['c', 3]],
-      );
+      await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+        ['a', 1],
+        ['b', 2],
+        ['c', 3],
+      ]);
 
       final updatedRows = await probe.event(2);
       expect(probe.events, hasLength(2));
@@ -255,14 +295,55 @@ void main() {
       await probe.cancel();
     });
 
+    test(
+      'stream catches up when created during a write with no active streams',
+      () async {
+        const rowCount = 5000;
+        final paramSets = List.generate(rowCount, (i) => ['item_$i', i]);
+
+        final writeFuture = db.executeBatch(
+          'INSERT INTO items(name, value) VALUES (?, ?)',
+          paramSets,
+        );
+
+        // Let the write request reach the writer first so it takes the
+        // no-active-streams fast path before the stream registers.
+        await Future<void>.delayed(Duration.zero);
+
+        final probe = _StreamProbe(
+          db.stream('SELECT COUNT(*) as cnt FROM items'),
+        );
+        final initialRows = await probe.event(1);
+        expect(initialRows[0]['cnt'], anyOf(0, rowCount));
+
+        await writeFuture;
+
+        if ((probe.events.last[0]['cnt'] as int) != rowCount) {
+          final updatedRows = await probe.event(2);
+          expect(updatedRows[0]['cnt'], rowCount);
+        }
+
+        expect(probe.events.last[0]['cnt'], rowCount);
+        await probe.cancel();
+      },
+    );
+
     test('re-emits after transaction', () async {
-      final probe = _StreamProbe(db.stream('SELECT COUNT(*) as cnt FROM items'));
+      final probe = _StreamProbe(
+        db.stream('SELECT COUNT(*) as cnt FROM items'),
+      );
       await probe.event(1);
       expect(probe.events, hasLength(1));
 
       await db.transaction((tx) async {
-        await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['a', 1]);
-        await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['b', 2]);
+        await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'a',
+          1,
+        ]);
+        await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'b',
+          2,
+        ]);
       });
 
       final updatedRows = await probe.event(2);
@@ -272,64 +353,81 @@ void main() {
       await probe.cancel();
     });
 
-    test('re-emits after transaction read observes uncommitted write', () async {
-      final initial = Completer<void>();
-      final updated = Completer<void>();
-      final counts = <int>[];
+    test(
+      're-emits after transaction read observes uncommitted write',
+      () async {
+        final initial = Completer<void>();
+        final updated = Completer<void>();
+        final counts = <int>[];
 
-      final sub = db.stream('SELECT COUNT(*) as cnt FROM items').listen((rows) {
-        final count = rows[0]['cnt'] as int;
-        counts.add(count);
-        if (!initial.isCompleted) {
-          initial.complete();
-          return;
-        }
-        if (!updated.isCompleted) {
-          updated.complete();
-        }
-      });
+        final sub = db.stream('SELECT COUNT(*) as cnt FROM items').listen((
+          rows,
+        ) {
+          final count = rows[0]['cnt'] as int;
+          counts.add(count);
+          if (!initial.isCompleted) {
+            initial.complete();
+            return;
+          }
+          if (!updated.isCompleted) {
+            updated.complete();
+          }
+        });
 
-      await initial.future.timeout(const Duration(seconds: 2));
-      expect(counts, [0]);
+        await initial.future.timeout(const Duration(seconds: 2));
+        expect(counts, [0]);
 
-      final txCount = await db.transaction((tx) async {
-        await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-          'inside_tx',
+        final txCount = await db.transaction((tx) async {
+          await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+            'inside_tx',
+            1,
+          ]);
+          final rows = await tx.select('SELECT COUNT(*) as cnt FROM items');
+          return rows[0]['cnt'] as int;
+        });
+
+        expect(txCount, 1);
+
+        await updated.future.timeout(const Duration(seconds: 2));
+        expect(counts, [0, 1]);
+
+        await sub.cancel();
+      },
+    );
+
+    test(
+      'does not re-emit when data unchanged (result-change detection)',
+      () async {
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'alice',
           1,
         ]);
-        final rows = await tx.select('SELECT COUNT(*) as cnt FROM items');
-        return rows[0]['cnt'] as int;
-      });
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'bob',
+          2,
+        ]);
 
-      expect(txCount, 1);
+        final probe = _StreamProbe(
+          db.stream('SELECT name, value FROM items ORDER BY id'),
+        );
+        final initialRows = await probe.event(1);
+        expect(initialRows, hasLength(2));
 
-      await updated.future.timeout(const Duration(seconds: 2));
-      expect(counts, [0, 1]);
+        // Write that doesn't actually change any data: SET value = value.
+        await db.execute('UPDATE items SET value = value WHERE id = 1');
 
-      await sub.cancel();
-    });
+        await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
+        expect(probe.events, hasLength(1)); // Still just initial.
 
-    test('does not re-emit when data unchanged (result-change detection)', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bob', 2]);
-
-      final probe = _StreamProbe(
-        db.stream('SELECT name, value FROM items ORDER BY id'),
-      );
-      final initialRows = await probe.event(1);
-      expect(initialRows, hasLength(2));
-
-      // Write that doesn't actually change any data: SET value = value.
-      await db.execute('UPDATE items SET value = value WHERE id = 1');
-
-      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
-      expect(probe.events, hasLength(1)); // Still just initial.
-
-      await probe.cancel();
-    });
+        await probe.cancel();
+      },
+    );
 
     test('re-emits when data actually changes after no-op write', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
       final probe = _StreamProbe(
         db.stream('SELECT name, value FROM items ORDER BY id'),
@@ -358,7 +456,10 @@ void main() {
 
       // Insert initial data.
       for (var i = 0; i < 50; i++) {
-        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['item_$i', i]);
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'item_$i',
+          i,
+        ]);
       }
 
       final initialCompleters = <int, Completer<void>>{};
@@ -376,14 +477,16 @@ void main() {
           "SELECT COUNT(*) as cnt, '$i' as sid FROM items",
         );
 
-        subs.add(stream.listen((rows) {
-          emitCount++;
-          if (emitCount == 1 && !initialCompleters[idx]!.isCompleted) {
-            initialCompleters[idx]!.complete();
-          } else if (emitCount >= 2 && !reEmitCompleters[idx]!.isCompleted) {
-            reEmitCompleters[idx]!.complete();
-          }
-        }));
+        subs.add(
+          stream.listen((rows) {
+            emitCount++;
+            if (emitCount == 1 && !initialCompleters[idx]!.isCompleted) {
+              initialCompleters[idx]!.complete();
+            } else if (emitCount >= 2 && !reEmitCompleters[idx]!.isCompleted) {
+              reEmitCompleters[idx]!.complete();
+            }
+          }),
+        );
       }
 
       // All initial emissions should arrive.
@@ -392,7 +495,10 @@ void main() {
       ).timeout(const Duration(seconds: 5));
 
       // Write to trigger re-emission for all streams.
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['trigger', 0]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'trigger',
+        0,
+      ]);
 
       // All re-emissions should arrive.
       await Future.wait(
@@ -404,24 +510,35 @@ void main() {
       }
     });
 
-    test('stream entry is removed from registry after last listener cancels', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+    test(
+      'stream entry is removed from registry after last listener cancels',
+      () async {
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'alice',
+          1,
+        ]);
 
-      final registry = db.streamEngine;
-      expect(registry.length, 0);
+        final registry = db.streamEngine;
+        expect(registry.length, 0);
 
-      // Create a stream and listen.
-      final probe = _StreamProbe(db.stream('SELECT name FROM items ORDER BY id'));
-      await probe.event(1);
-      expect(registry.length, 1);
+        // Create a stream and listen.
+        final probe = _StreamProbe(
+          db.stream('SELECT name FROM items ORDER BY id'),
+        );
+        await probe.event(1);
+        expect(registry.length, 1);
 
-      // Cancel the subscription — entry should be cleaned up.
-      await probe.cancel();
-      expect(registry.length, 0);
-    });
+        // Cancel the subscription — entry should be cleaned up.
+        await probe.cancel();
+        expect(registry.length, 0);
+      },
+    );
 
     test('stream entry persists while at least one listener remains', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
       final registry = db.streamEngine;
       const sql = 'SELECT name FROM items ORDER BY id';
@@ -445,7 +562,10 @@ void main() {
     });
 
     test('stream can be re-created after cleanup', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['alice', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
 
       final registry = db.streamEngine;
       const sql = 'SELECT name FROM items ORDER BY id';
@@ -466,16 +586,24 @@ void main() {
     });
 
     test('does not re-emit after rolled-back transaction', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['initial', 1]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'initial',
+        1,
+      ]);
 
-      final probe = _StreamProbe(db.stream('SELECT COUNT(*) as cnt FROM items'));
+      final probe = _StreamProbe(
+        db.stream('SELECT COUNT(*) as cnt FROM items'),
+      );
       final initialRows = await probe.event(1);
       expect(initialRows[0]['cnt'], 1);
 
       // Rolled-back transaction — should NOT trigger re-emission.
       try {
         await db.transaction((tx) async {
-          await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['ghost', 2]);
+          await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+            'ghost',
+            2,
+          ]);
           throw StateError('rollback');
         });
       } catch (_) {}
@@ -509,10 +637,10 @@ void main() {
 
       // Fire 20 sequential writes as fast as possible.
       for (var i = 0; i < 20; i++) {
-        await db.execute(
-          'INSERT INTO items(name, value) VALUES (?, ?)',
-          ['item_$i', i],
-        );
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'item_$i',
+          i,
+        ]);
       }
 
       // Wait for the stream to catch up.
@@ -522,8 +650,12 @@ void main() {
       // but must be monotonically non-decreasing (no stale snapshots).
       expect(results.last, 20);
       for (var i = 1; i < results.length; i++) {
-        expect(results[i], greaterThanOrEqualTo(results[i - 1]),
-            reason: 'emission $i (${results[i]}) < emission ${i - 1} (${results[i - 1]}) — stale snapshot');
+        expect(
+          results[i],
+          greaterThanOrEqualTo(results[i - 1]),
+          reason:
+              'emission $i (${results[i]}) < emission ${i - 1} (${results[i - 1]}) — stale snapshot',
+        );
       }
 
       await sub.cancel();
@@ -533,10 +665,7 @@ void main() {
       final stream = db.stream('SELECT * FROM nonexistent_table');
 
       // The stream should emit a typed query error, not hang forever.
-      await expectLater(
-        stream.first,
-        throwsA(isA<ResqliteQueryException>()),
-      );
+      await expectLater(stream.first, throwsA(isA<ResqliteQueryException>()));
     });
 
     test('stream error cleans up entry', () async {
@@ -560,63 +689,68 @@ void main() {
       await sub.cancel();
     });
 
-    test('re-query failure after initial success propagates error and recovers', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-        'alice',
-        1,
-      ]);
+    test(
+      're-query failure after initial success propagates error and recovers',
+      () async {
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'alice',
+          1,
+        ]);
 
-      final initial = Completer<void>();
-      final recovered = Completer<void>();
-      final errorReceived = Completer<void>();
-      final results = <List<Map<String, Object?>>>[];
-      Object? streamError;
+        final initial = Completer<void>();
+        final recovered = Completer<void>();
+        final errorReceived = Completer<void>();
+        final results = <List<Map<String, Object?>>>[];
+        Object? streamError;
 
-      final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
-        (rows) {
-          results.add(rows);
-          if (!initial.isCompleted) {
-            initial.complete();
-            return;
-          }
-          if (!recovered.isCompleted) {
-            recovered.complete();
-          }
-        },
-        onError: (error, stackTrace) {
-          streamError = error;
-          if (!errorReceived.isCompleted) errorReceived.complete();
-        },
-      );
+        final sub = db
+            .stream('SELECT name FROM items ORDER BY id')
+            .listen(
+              (rows) {
+                results.add(rows);
+                if (!initial.isCompleted) {
+                  initial.complete();
+                  return;
+                }
+                if (!recovered.isCompleted) {
+                  recovered.complete();
+                }
+              },
+              onError: (error, stackTrace) {
+                streamError = error;
+                if (!errorReceived.isCompleted) errorReceived.complete();
+              },
+            );
 
-      await initial.future.timeout(const Duration(seconds: 2));
-      expect(results, hasLength(1));
-      expect(results[0][0]['name'], 'alice');
+        await initial.future.timeout(const Duration(seconds: 2));
+        expect(results, hasLength(1));
+        expect(results[0][0]['name'], 'alice');
 
-      // Break the query by renaming the column it selects.
-      await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-      db.streamEngine.handleDirtyTables(['items']);
+        // Break the query by renaming the column it selects.
+        await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
+        db.streamEngine.handleDirtyTables(['items']);
 
-      // Error should be delivered to onError, not swallowed.
-      await errorReceived.future.timeout(const Duration(seconds: 2));
-      expect(streamError, isA<ResqliteQueryException>());
-      expect(results, hasLength(1)); // No data emission during failure.
+        // Error should be delivered to onError, not swallowed.
+        await errorReceived.future.timeout(const Duration(seconds: 2));
+        expect(streamError, isA<ResqliteQueryException>());
+        expect(results, hasLength(1)); // No data emission during failure.
 
-      // Fix the schema and insert — stream should recover.
-      streamError = null;
-      await db.execute('ALTER TABLE items RENAME COLUMN title TO name');
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-        'bob',
-        2,
-      ]);
+        // Fix the schema and insert — stream should recover.
+        streamError = null;
+        await db.execute('ALTER TABLE items RENAME COLUMN title TO name');
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'bob',
+          2,
+        ]);
 
-      await recovered.future.timeout(const Duration(seconds: 2));
-      expect(streamError, isNull); // No new errors after recovery.
-      expect(results, hasLength(2));
-      expect(results[1].map((row) => row['name']), ['alice', 'bob']);
+        await recovered.future.timeout(const Duration(seconds: 2));
+        expect(streamError, isNull); // No new errors after recovery.
+        expect(results, hasLength(2));
+        expect(results[1].map((row) => row['name']), ['alice', 'bob']);
 
-      await sub.cancel();
-    });
+        await sub.cancel();
+      },
+    );
 
     test('many rapid writes to same table with active stream', () async {
       // Stress test: 50 writes in quick succession with an active stream.
@@ -656,14 +790,16 @@ void main() {
       final initial = Completer<void>();
       final done = Completer<void>();
 
-      final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
-        (_) {
-          if (!initial.isCompleted) initial.complete();
-        },
-        onDone: () {
-          if (!done.isCompleted) done.complete();
-        },
-      );
+      final sub = db
+          .stream('SELECT name FROM items ORDER BY id')
+          .listen(
+            (_) {
+              if (!initial.isCompleted) initial.complete();
+            },
+            onDone: () {
+              if (!done.isCompleted) done.complete();
+            },
+          );
 
       await initial.future.timeout(const Duration(seconds: 2));
       expect(db.streamEngine.length, 1);

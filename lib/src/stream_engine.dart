@@ -101,6 +101,26 @@ final class StreamEngine {
     }
   }
 
+  /// Record that a write committed even when no dirty-table payload was
+  /// marshalled back from the writer. This preserves the initial-query
+  /// race check in [_createStream] without paying the table-list round trip.
+  ///
+  /// Because dirty tables were skipped, any stream that appeared after the
+  /// write started but before it committed has unknown dependencies. In that
+  /// rare case we conservatively catch up every active stream entry once.
+  void noteWrite() {
+    _writeGeneration++;
+    if (_entries.isEmpty) return;
+
+    for (final entry in _entries.values) {
+      if (entry.lastResult == null) {
+        entry.needsCatchUpAfterInit = true;
+      } else {
+        _scheduleReQuery(entry);
+      }
+    }
+  }
+
   /// Flush accumulated dirty tables and dispatch re-queries.
   void _flushDirtyTables() {
     _flushScheduled = false;
@@ -210,45 +230,50 @@ final class StreamEngine {
     final generationBefore = _writeGeneration;
 
     // Run initial query on the reader pool to discover read tables.
-    _pool().then((pool) => pool.selectWithDeps(sql, params)).then(
-      (result) {
-        if (entry.subscribers.isEmpty) {
-          return; // cancelled before query finished
-        }
+    _pool()
+        .then((pool) => pool.selectWithDeps(sql, params))
+        .then(
+          (result) {
+            if (entry.subscribers.isEmpty) {
+              return; // cancelled before query finished
+            }
 
-        final (initialRows, readTables, initialHash, initialRowCount) = result;
+            final (initialRows, readTables, initialHash, initialRowCount) =
+                result;
 
-        // Set real read tables so future writes trigger invalidation.
-        _updateReadTables(key, readTables);
-        entry.lastResult = initialRows;
-        // Hash (exp 075) and row count (exp 077) both come from the
-        // worker. Together they form the baseline that selectIfChanged
-        // re-queries short-circuit against.
-        entry.lastResultHash = initialHash;
-        entry.lastRowCount = initialRowCount;
+            // Set real read tables so future writes trigger invalidation.
+            _updateReadTables(key, readTables);
+            entry.lastResult = initialRows;
+            // Hash (exp 075) and row count (exp 077) both come from the
+            // worker. Together they form the baseline that selectIfChanged
+            // re-queries short-circuit against.
+            entry.lastResultHash = initialHash;
+            entry.lastRowCount = initialRowCount;
 
-        // Push initial result to all subscribers.
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.add(initialRows);
-        }
+            // Push initial result to all subscribers.
+            for (final sub in entry.subscribers) {
+              if (!sub.isClosed) sub.add(initialRows);
+            }
 
-        // If a write happened while the initial query was in-flight,
-        // the data may be stale. Re-query to catch up. The hash check
-        // in _reQuery suppresses the emission if data is unchanged.
-        // Goes through the same coalescing path as normal invalidation
-        // so the in-flight cap is honored even at setup.
-        if (_writeGeneration != generationBefore) {
-          _scheduleReQuery(entry);
-        }
-      },
-      onError: (Object error) {
-        // Propagate error to all subscribers so they don't hang.
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.addError(error);
-        }
-        _remove(key);
-      },
-    );
+            // If a write happened while the initial query was in-flight,
+            // the data may be stale. Re-query to catch up. The hash check
+            // in _reQuery suppresses the emission if data is unchanged.
+            // Goes through the same coalescing path as normal invalidation
+            // so the in-flight cap is honored even at setup.
+            if (_writeGeneration != generationBefore ||
+                entry.needsCatchUpAfterInit) {
+              entry.needsCatchUpAfterInit = false;
+              _scheduleReQuery(entry);
+            }
+          },
+          onError: (Object error) {
+            // Propagate error to all subscribers so they don't hang.
+            for (final sub in entry.subscribers) {
+              if (!sub.isClosed) sub.addError(error);
+            }
+            _remove(key);
+          },
+        );
 
     return subscriberStream;
   }
@@ -270,7 +295,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (entry.writeGen != gen) return;  // stale
+      if (entry.writeGen != gen) return; // stale
       if (rows == null) return; // Unchanged — worker-side hash matched.
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
@@ -422,6 +447,12 @@ final class StreamEntry {
   /// skipped in favor of a fresh follow-up (which captures the now-current
   /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
   int writeGen = 0;
+
+  /// Set when a write committed while this stream was still running its
+  /// initial query and the writer skipped dirty-table marshalling because
+  /// no streams existed at write start. The first-query completion path
+  /// consumes this flag and performs one conservative catch-up re-query.
+  bool needsCatchUpAfterInit = false;
 }
 
 /// Compute a stable hash key for a stream query.

@@ -27,7 +27,9 @@ final class Writer {
   Writer(this._streamEngine);
 
   static Future<Writer> spawn(
-      StreamEngine streamEngine, Pointer<void> handle) async {
+    StreamEngine streamEngine,
+    Pointer<void> handle,
+  ) async {
     final writer = Writer(streamEngine);
 
     final receivePort = ReceivePort();
@@ -78,14 +80,19 @@ final class Writer {
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
+    bool captureDirtyTables = true,
   ]) async {
     return _request<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      (replyPort) =>
+          ExecuteRequest(sql, parameters, captureDirtyTables, replyPort),
     );
   }
 
   Future<BatchResponse?> executeBatch(
-      String sql, List<List<Object?>> paramSets) async {
+    String sql,
+    List<List<Object?>> paramSets, {
+    bool captureDirtyTables = true,
+  }) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -97,7 +104,8 @@ final class Writer {
     assertUniformParamSets(sql, paramSets);
 
     return _request<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
+      (replyPort) =>
+          BatchRequest(sql, paramSets, captureDirtyTables, replyPort),
     );
   }
 
@@ -153,12 +161,17 @@ final class Writer {
     // Commit is deliberately outside the try/catch: on commit failure the
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
+    final captureDirtyTables = _streamEngine.length > 0;
     final response = await _request<BatchResponse>(
-      (replyPort) => CommitRequest(replyPort),
+      (replyPort) => CommitRequest(captureDirtyTables, replyPort),
     );
 
     if (Transaction.current == null) {
-      _streamEngine.handleDirtyTables(response.dirtyTables);
+      if (captureDirtyTables) {
+        _streamEngine.handleDirtyTables(response.dirtyTables);
+      } else {
+        _streamEngine.noteWrite();
+      }
     }
 
     return result;

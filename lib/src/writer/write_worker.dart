@@ -30,9 +30,15 @@ sealed class WriterRequest {
 
 /// Single parameterized write (INSERT, UPDATE, DELETE, DDL).
 final class ExecuteRequest extends WriterRequest {
-  ExecuteRequest(this.sql, this.params, super.replyPort);
+  ExecuteRequest(
+    this.sql,
+    this.params,
+    this.captureDirtyTables,
+    super.replyPort,
+  );
   final String sql;
   final List<Object?> params;
+  final bool captureDirtyTables;
 }
 
 /// Read query within a transaction — runs on the writer connection so it
@@ -45,9 +51,15 @@ final class QueryRequest extends WriterRequest {
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
 final class BatchRequest extends WriterRequest {
-  BatchRequest(this.sql, this.paramSets, super.replyPort);
+  BatchRequest(
+    this.sql,
+    this.paramSets,
+    this.captureDirtyTables,
+    super.replyPort,
+  );
   final String sql;
   final List<List<Object?>> paramSets;
+  final bool captureDirtyTables;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
@@ -57,7 +69,8 @@ final class BeginRequest extends WriterRequest {
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(super.replyPort);
+  CommitRequest(this.captureDirtyTables, super.replyPort);
+  final bool captureDirtyTables;
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
@@ -99,12 +112,13 @@ final class BatchResponse {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-    ffi.Pointer<ffi.Void> Function(
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Uint8>,
-      ffi.Int,
-    )>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Void> sql,
@@ -229,8 +243,9 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
   // outermost transaction completes.
-  final dirty =
-      state.txDepth > 0 ? const <String>[] : getDirtyTables(state.dbHandle);
+  final dirty = state.txDepth > 0 || !msg.captureDirtyTables
+      ? const <String>[]
+      : getDirtyTables(state.dbHandle);
   msg.replyPort.send(ExecuteResponse(result, dirty));
 }
 
@@ -242,14 +257,20 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     msg.replyPort.send(const BatchResponse(<String>[]));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
+    msg.replyPort.send(
+      BatchResponse(
+        msg.captureDirtyTables
+            ? getDirtyTables(state.dbHandle)
+            : const <String>[],
+      ),
+    );
   }
 }
 
 /// Transaction-scoped read. Runs on the writer connection so uncommitted
 /// writes from earlier statements in the same transaction are visible.
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
-  final sqlNative = msg.sql.toNativeUtf8();
+  final sqlNative = cachedSqlUtf8(msg.sql);
   final paramsNative = allocateParams(msg.params);
   try {
     final stmt = _resqliteStmtAcquireWriter(
@@ -268,16 +289,17 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     final raw = decodeQuery(stmt, msg.sql);
     // No dirty table collection — this path only runs during transactions
     // and the dirty set must accumulate until commit.
-    msg.replyPort.send(QueryResponse(
-      ResultSet(raw.values, raw.schema, raw.rowCount),
-      const <String>[],
-    ));
+    msg.replyPort.send(
+      QueryResponse(
+        ResultSet(raw.values, raw.schema, raw.rowCount),
+        const <String>[],
+      ),
+    );
   } finally {
     // Both resources are freed in one finally regardless of which line
     // threw — an earlier version of this function had a paired try/finally
     // that leaked `paramsNative` when stmt acquisition failed.
     freeParams(paramsNative, msg.params);
-    calloc.free(sqlNative);
   }
 }
 
@@ -341,7 +363,13 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
+    msg.replyPort.send(
+      BatchResponse(
+        msg.captureDirtyTables
+            ? getDirtyTables(state.dbHandle)
+            : const <String>[],
+      ),
+    );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
     final rc = resqliteExec(state.dbHandle, sp);
