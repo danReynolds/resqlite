@@ -11,6 +11,16 @@ import 'dart:typed_data';
 import '../exceptions.dart';
 import 'read_worker.dart';
 
+typedef SelectIfChangedResult =
+    ({
+      List<Map<String, Object?>>? rows,
+      int newHash,
+      int newRowCount,
+      int poolWaitUs,
+      int roundTripUs,
+      int workerExecUs,
+    });
+
 /// A pool of persistent reader isolates with automatic replacement.
 ///
 /// Each worker handles one query at a time. All worker events flow through a
@@ -94,16 +104,25 @@ final class ReaderPool {
   /// Execute a re-query with worker-side hash comparison.
   /// Returns `(rows, newHash, newRowCount)` — `rows` is null when the
   /// result is unchanged (hash AND row count match).
-  Future<(List<Map<String, Object?>>?, int, int)> selectIfChanged(
+  Future<SelectIfChangedResult> selectIfChanged(
     String sql,
     List<Object?> parameters,
     int lastResultHash,
     int lastRowCount,
   ) async {
-    final result = await _dispatch(
+    final (rawResult, poolWaitUs, roundTripUs) = await _dispatchTimed(
       SelectIfChangedRequest(sql, parameters, lastResultHash, lastRowCount),
     );
-    return result as (List<Map<String, Object?>>?, int, int);
+    final (rows, newHash, newRowCount, workerExecUs) =
+        rawResult as (List<Map<String, Object?>>?, int, int, int);
+    return (
+      rows: rows,
+      newHash: newHash,
+      newRowCount: newRowCount,
+      poolWaitUs: poolWaitUs,
+      roundTripUs: roundTripUs,
+      workerExecUs: workerExecUs,
+    );
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {
@@ -132,6 +151,45 @@ final class ReaderPool {
 
       // Re-check after waking: close() may have run while we were
       // parked and we must not loop forever over dead slots.
+      if (_closed) {
+        throw ResqliteConnectionException('Reader pool is closed.');
+      }
+    }
+  }
+
+  Future<(Object?, int, int)> _dispatchTimed(ReadRequest request) async {
+    if (_closed) {
+      throw ResqliteConnectionException('Reader pool is closed.');
+    }
+
+    final count = _workers.length;
+    final waitSw = Stopwatch()..start();
+
+    while (true) {
+      for (var attempt = 0; attempt < count; attempt++) {
+        final slot = _workers[_next % count];
+        _next++;
+        if (slot.isAvailable) {
+          waitSw.stop();
+          final roundTripSw = Stopwatch()..start();
+          try {
+            final result = await slot.request(request);
+            roundTripSw.stop();
+            return (
+              result,
+              waitSw.elapsedMicroseconds,
+              roundTripSw.elapsedMicroseconds,
+            );
+          } catch (_) {
+            roundTripSw.stop();
+            rethrow;
+          }
+        }
+      }
+
+      _workerAvailable ??= Completer<void>.sync();
+      await _workerAvailable!.future;
+
       if (_closed) {
         throw ResqliteConnectionException('Reader pool is closed.');
       }

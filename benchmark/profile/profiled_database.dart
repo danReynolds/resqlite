@@ -1,5 +1,5 @@
 /// Composition wrapper around [Database] that records per-call timing
-/// (and, when kProfileMode is compiled in, decoder allocation counts)
+/// (and, when kProfileMode is compiled in, decode counters)
 /// for the benchmark-harness subset of the Database API.
 ///
 /// Composition (not subclassing) because `Database` is `final class`.
@@ -14,7 +14,7 @@
 /// external wall time (from this wrapper) AND the cross-isolate
 /// breakdown (from DevTools timeline).
 ///
-/// Allocation counter increments live in [select] and are gated
+/// Counter increments live in [select] and are gated
 /// behind `kProfileMode` — tree-shaken out of release builds.
 library;
 
@@ -89,7 +89,7 @@ class ProfiledDatabase {
       rowsReturned: rows.length,
       tag: tag,
     ));
-    // Feed the shared decoder-allocation counters so the harness can
+    // Feed the shared profile counters so the harness can
     // snapshot main-visible aggregates around a workload. Tree-shaken
     // out in release builds via the `kProfileMode` const gate.
     if (kProfileMode && rows.isNotEmpty) {

@@ -37,6 +37,11 @@ import 'stream_engine.dart';
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
   Database._(this._handle, this._path, int readerCount) {
+    _streamEngine = StreamEngine(
+      () => _readerPool,
+      readerCount > 1 ? readerCount - 1 : 1,
+    );
+
     // Spawn the single writer isolate.
     _writer = Writer.spawn(_streamEngine, _handle);
 
@@ -58,7 +63,7 @@ final class Database {
   Completer<void>? _closedCompleter = null;
 
   // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
-  late final StreamEngine _streamEngine = StreamEngine(() => _readerPool);
+  late final StreamEngine _streamEngine;
 
   /// The raw native database handle.
   ///

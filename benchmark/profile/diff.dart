@@ -13,9 +13,9 @@
 //   TIME        p50 / p90 / p99 / max / work (μs median)
 //   MEMORY      RSS delta (MB) — end-of-workload process RSS
 //   SQLITE      page cache, schema, stmt, WAL bytes — per-connection counters
-//   ALLOC       rows / cells — decoder counters from
-//               `lib/src/profile_counters.dart`. Only emitted when the
-//               harness compiled with -DRESQLITE_PROFILE=true.
+//   COUNTERS    profile-mode counters from `lib/src/profile_counters.dart`.
+//               Includes decode counters and any stream-engine counters
+//               the current experiment needs.
 //
 // Missing blocks are simply skipped (graceful fallback for older JSONs
 // from dispatch_budget.dart that don't carry memory fields).
@@ -181,6 +181,18 @@ void _printMemoryDiff(
         '(${_signedPct(pct)})');
   }
 
+  final peakA = (memA['rss_peak_mb'] as num?)?.toDouble();
+  final peakB = (memB['rss_peak_mb'] as num?)?.toDouble();
+  if (peakA != null && peakB != null) {
+    final d = peakB - peakA;
+    final pct = peakA == 0 ? 0.0 : (d / peakA * 100);
+    print('    rss peak '
+        '${peakA.toStringAsFixed(2).padLeft(4)} MB → '
+        '${peakB.toStringAsFixed(2).padLeft(4)} MB  '
+        '${_signedMB(d).padLeft(8)}  '
+        '(${_signedPct(pct)})');
+  }
+
   // SQLite per-connection counters — exact, unlike RSS. Useful for
   // distinguishing "our schema cache grew" from "Dart heap grew."
   final diagDeltaA = memA['diagnostics_delta'] as Map<String, dynamic>?;
@@ -207,24 +219,22 @@ void _printMemoryDiff(
     }
   }
 
-  // Decoder allocation counters — only present when profile-mode build
-  // was used. Useful for memory experiments: a change that decodes the
-  // same workload with fewer rows/cells indicates an allocation win.
-  final allocA = memA['allocation_delta'] as Map<String, dynamic>?;
-  final allocB = memB['allocation_delta'] as Map<String, dynamic>?;
-  if (allocA != null && allocB != null) {
-    print('  ALLOC (decoder counters, per-workload delta):');
-    const counters = [
-      ('rows_decoded', 'rows'),
-      ('cells_decoded', 'cells'),
-    ];
-    for (final (key, label) in counters) {
-      final av = (allocA[key] as num?)?.toInt();
-      final bv = (allocB[key] as num?)?.toInt();
+  // Profile counters. `allocation_delta` is the legacy key kept for
+  // backward compatibility with older JSONs.
+  final countersA = (memA['profile_counters_delta'] ??
+      memA['allocation_delta']) as Map<String, dynamic>?;
+  final countersB = (memB['profile_counters_delta'] ??
+      memB['allocation_delta']) as Map<String, dynamic>?;
+  if (countersA != null && countersB != null) {
+    print('  COUNTERS (per-workload delta):');
+    final keys = {...countersA.keys, ...countersB.keys}.toList()..sort();
+    for (final key in keys) {
+      final av = (countersA[key] as num?)?.toInt();
+      final bv = (countersB[key] as num?)?.toInt();
       if (av == null || bv == null) continue;
       final d = bv - av;
       final pct = av == 0 ? 0.0 : (d / av * 100);
-      print('    ${label.padRight(14)} '
+      print('    ${key.padRight(30)} '
           '${av.toString().padLeft(10)} → '
           '${bv.toString().padLeft(10)}  '
           '${_signed(d).padLeft(12)}  '
