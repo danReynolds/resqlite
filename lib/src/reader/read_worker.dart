@@ -14,6 +14,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import '../exceptions.dart';
+import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
@@ -116,15 +117,17 @@ void readerEntrypoint(List<Object> args) {
           // (exp 075 + 077) so future selectIfChanged calls can
           // short-circuit on unchanged state.
           final (raw, readTables, initialHash, initialRowCount) =
-              executeQueryWithDeps(
-            dbHandleAddr, readerId, sql, parameters,
-          );
+              executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           result = (_toRows(raw), readTables, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes =
-              executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
+          final bytes = executeQueryBytes(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+          );
           sacrifice = bytes.length > sacrificeByteThreshold;
           result = bytes;
 
@@ -147,11 +150,7 @@ void readerEntrypoint(List<Object> args) {
           );
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
-          result = (
-            raw == null ? null : _toRows(raw),
-            newHash,
-            newRowCount,
-          );
+          result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 
       if (sacrifice) {
@@ -230,7 +229,7 @@ T _withAcquiredStmt<T>(
   T Function(ffi.Pointer<ffi.Void> dbHandle, ffi.Pointer<ffi.Void> stmt) body,
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
-  final sqlNative = sql.toNativeUtf8();
+  final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(parameters);
   try {
     final stmt = _resqliteStmtAcquireOn(
@@ -250,7 +249,6 @@ T _withAcquiredStmt<T>(
     return body(dbHandle, stmt);
   } finally {
     freeParams(paramsNative, parameters);
-    calloc.free(sqlNative);
   }
 }
 
@@ -260,14 +258,13 @@ RawQueryResult executeQuery(
   int readerId,
   String sql,
   List<Object?> parameters,
-) =>
-    _withAcquiredStmt(
-      handleAddr,
-      readerId,
-      sql,
-      parameters,
-      (_, stmt) => decodeQuery(stmt, sql),
-    );
+) => _withAcquiredStmt(
+  handleAddr,
+  readerId,
+  sql,
+  parameters,
+  (_, stmt) => decodeQuery(stmt, sql),
+);
 
 /// Execute a query returning JSON-encoded bytes on a dedicated reader.
 Uint8List executeQueryBytes(
@@ -292,15 +289,14 @@ Uint8List executeQueryBytes(
   int readerId,
   String sql,
   List<Object?> parameters,
-) =>
-    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
-      final raw = decodeQuery(stmt, sql);
-      // Pass -1 to opt out of the row-count short-circuit: on the
-      // initial query we don't have a baseline count to compare against.
-      final (hash, rowCount) = callQueryHash(stmt, -1);
-      final readTables = getReadTables(dbHandle, readerId);
-      return (raw, readTables, hash, rowCount);
-    });
+) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
+  final raw = decodeQuery(stmt, sql);
+  // Pass -1 to opt out of the row-count short-circuit: on the
+  // initial query we don't have a baseline count to compare against.
+  final (hash, rowCount) = callQueryHash(stmt, -1);
+  final readTables = getReadTables(dbHandle, readerId);
+  return (raw, readTables, hash, rowCount);
+});
 
 /// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
 ///
@@ -320,11 +316,10 @@ Uint8List executeQueryBytes(
   List<Object?> parameters,
   int lastResultHash,
   int lastRowCount,
-) =>
-    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-      final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
-      if (newHash == lastResultHash && newRowCount == lastRowCount) {
-        return (newHash, newRowCount, null);
-      }
-      return (newHash, newRowCount, decodeQuery(stmt, sql));
-    });
+) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+  final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
+  if (newHash == lastResultHash && newRowCount == lastRowCount) {
+    return (newHash, newRowCount, null);
+  }
+  return (newHash, newRowCount, decodeQuery(stmt, sql));
+});

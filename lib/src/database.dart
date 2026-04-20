@@ -337,7 +337,7 @@ final class Database {
     final writer = await _writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
-    _streamEngine.handleDirtyTables(response.dirtyTables);
+    _streamEngine.handleCommittedWrite(response.dirtyTables);
 
     return response.result;
   }
@@ -370,11 +370,12 @@ final class Database {
     _ensureOpen();
 
     final writer = await _writer;
-    final reponse =
-        await writer.locked(() => writer.executeBatch(sql, paramSets));
+    final reponse = await writer.locked(
+      () => writer.executeBatch(sql, paramSets),
+    );
 
-    if (reponse?.dirtyTables case List<String> dirtyTables) {
-      _streamEngine.handleDirtyTables(dirtyTables);
+    if (reponse != null) {
+      _streamEngine.handleCommittedWrite(reponse.dirtyTables);
     }
   }
 

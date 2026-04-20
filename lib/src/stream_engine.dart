@@ -101,6 +101,24 @@ final class StreamEngine {
     }
   }
 
+  /// Route a committed write based on whether dirty tables were captured.
+  ///
+  /// `null` means the writer intentionally skipped dirty-table capture for
+  /// this commit, so we conservatively mark every active entry dirty.
+  /// A non-null list means capture was attempted; an empty list is a real
+  /// "nothing dirty" result and should not be treated like a skipped capture.
+  void handleCommittedWrite(List<String>? dirtyTables) {
+    if (dirtyTables != null) {
+      handleDirtyTables(dirtyTables);
+      return;
+    }
+
+    _writeGeneration++;
+    for (final entry in _entries.values) {
+      _scheduleReQuery(entry);
+    }
+  }
+
   /// Flush accumulated dirty tables and dispatch re-queries.
   void _flushDirtyTables() {
     _flushScheduled = false;
@@ -145,7 +163,7 @@ final class StreamEngine {
   ///      reads current state (reflecting every intermediate write).
   void _scheduleReQuery(StreamEntry entry) {
     entry.writeGen++;
-    if (entry.inFlightReQuery != null) return;
+    if (entry.inFlight) return;
     _startReQuery(entry);
   }
 
@@ -154,8 +172,9 @@ final class StreamEngine {
   /// in-flight invariant.
   void _startReQuery(StreamEntry entry) {
     final gen = entry.writeGen;
-    entry.inFlightReQuery = _reQuery(entry, gen).whenComplete(() {
-      entry.inFlightReQuery = null;
+    entry.inFlight = true;
+    _reQuery(entry, gen).whenComplete(() {
+      entry.inFlight = false;
       // If the stream was invalidated while running, re-query it again.
       if (_entries[entry.key] != null && entry.writeGen != gen) {
         _startReQuery(entry);
@@ -210,45 +229,55 @@ final class StreamEngine {
     final generationBefore = _writeGeneration;
 
     // Run initial query on the reader pool to discover read tables.
-    _pool().then((pool) => pool.selectWithDeps(sql, params)).then(
-      (result) {
-        if (entry.subscribers.isEmpty) {
-          return; // cancelled before query finished
-        }
+    entry.inFlight = true;
+    _pool()
+        .then((pool) => pool.selectWithDeps(sql, params))
+        .then(
+          (result) {
+            if (entry.subscribers.isEmpty) {
+              return; // cancelled before query finished
+            }
 
-        final (initialRows, readTables, initialHash, initialRowCount) = result;
+            final (initialRows, readTables, initialHash, initialRowCount) =
+                result;
 
-        // Set real read tables so future writes trigger invalidation.
-        _updateReadTables(key, readTables);
-        entry.lastResult = initialRows;
-        // Hash (exp 075) and row count (exp 077) both come from the
-        // worker. Together they form the baseline that selectIfChanged
-        // re-queries short-circuit against.
-        entry.lastResultHash = initialHash;
-        entry.lastRowCount = initialRowCount;
+            // Set real read tables so future writes trigger invalidation.
+            _updateReadTables(key, readTables);
+            entry.lastResult = initialRows;
+            // Hash (exp 075) and row count (exp 077) both come from the
+            // worker. Together they form the baseline that selectIfChanged
+            // re-queries short-circuit against.
+            entry.lastResultHash = initialHash;
+            entry.lastRowCount = initialRowCount;
 
-        // Push initial result to all subscribers.
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.add(initialRows);
-        }
+            // Push initial result to all subscribers.
+            for (final sub in entry.subscribers) {
+              if (!sub.isClosed) sub.add(initialRows);
+            }
 
-        // If a write happened while the initial query was in-flight,
-        // the data may be stale. Re-query to catch up. The hash check
-        // in _reQuery suppresses the emission if data is unchanged.
-        // Goes through the same coalescing path as normal invalidation
-        // so the in-flight cap is honored even at setup.
-        if (_writeGeneration != generationBefore) {
-          _scheduleReQuery(entry);
-        }
-      },
-      onError: (Object error) {
-        // Propagate error to all subscribers so they don't hang.
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.addError(error);
-        }
-        _remove(key);
-      },
-    );
+            // If a write happened while the initial query was in-flight,
+            // the data may be stale. Re-query to catch up. The hash check
+            // in _reQuery suppresses the emission if data is unchanged.
+            // Goes through the same coalescing path as normal invalidation
+            // so the in-flight cap is honored even at setup.
+            if (_writeGeneration != generationBefore || entry.writeGen != 0) {
+              _scheduleReQuery(entry);
+            }
+          },
+          onError: (Object error) {
+            // Propagate error to all subscribers so they don't hang.
+            for (final sub in entry.subscribers) {
+              if (!sub.isClosed) sub.addError(error);
+            }
+            _remove(key);
+          },
+        )
+        .whenComplete(() {
+          entry.inFlight = false;
+          if (_entries[entry.key] != null && entry.writeGen != 0) {
+            _startReQuery(entry);
+          }
+        });
 
     return subscriberStream;
   }
@@ -270,7 +299,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (entry.writeGen != gen) return;  // stale
+      if (entry.writeGen != gen) return; // stale
       if (rows == null) return; // Unchanged — worker-side hash matched.
       // Changed — update cache and emit.
       entry.lastResultHash = newHash;
@@ -405,16 +434,19 @@ final class StreamEntry {
   /// knows the fresh row count diverges.
   int lastRowCount = -1;
 
-  /// Tracks the currently-executing re-query for this entry, if any.
-  /// `null` means no re-query is in flight; a non-null value means
-  /// additional invalidations should be absorbed into [writeGen]
-  /// rather than dispatching fresh pool work. See
+  /// Tracks whether any query work for this entry is currently in flight.
+  /// `true` means the initial query or a re-query is running, so additional
+  /// invalidations should be absorbed into
+  /// [writeGen] rather than dispatching fresh pool work. See
   /// [StreamEngine._scheduleReQuery] for the full rationale.
-  Future<void>? inFlightReQuery;
+  bool inFlight = false;
 
-  /// Monotonic counter bumped by [StreamEngine._scheduleReQuery] on
-  /// every qualifying invalidation (writes that touch this entry's
-  /// watched tables, plus the initial-query race catchup). Never decreases.
+  /// Monotonic counter bumped for qualifying invalidations.
+  ///
+  /// While the initial query is still in flight, this acts as a pending
+  /// catch-up marker for writes whose dirty tables were intentionally not
+  /// captured. After initial setup completes, [StreamEngine._scheduleReQuery]
+  /// owns the counter for normal re-query coalescing. Never decreases.
   ///
   /// [StreamEngine._startReQuery] captures this value at dispatch time;
   /// on completion, if the captured value and the current value differ,
