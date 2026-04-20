@@ -90,6 +90,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [076](076-prebound-stmt-cache-analysis.md) | Pre-bound statement cache | Rejected in pre-implementation analysis: bind is ~0.3 % of re-query wall time (~50 ns per call). No measurable headroom even for a perfect implementation |
 | [081](081-binary-row-result-storage.md) | Binary row result storage | Transfer-side numeric scan wins collapsed once full main-isolate row consumption was measured; mixed rows regressed and point-query floor worsened |
 | [082](082-message-graph-handoff.md) | Message-graph hand-off benchmark | Current `ResultSet` / `Row` shape is already near-optimal for the shipped `select()` contract; materialized maps and binary row facades both lose on end-to-end total |
+| [088](088-setlk-timeout.md) | `SQLITE_ENABLE_SETLK_TIMEOUT` + `sqlite3_setlk_timeout` on every connection | Downgraded from Accepted after 5-run confirmation: original single-run p99/max wins were noise (baseline outlier that never reproduced). Multi-run median shows p99 +74 % to +172 % worse and max +29 % to +529 % worse on writes; noop regresses even though it has no lock contention. Needs a concurrent-reader harness + shorter timeout to be evaluable |
 
 ## Conventions
 
