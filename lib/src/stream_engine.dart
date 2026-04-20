@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:async';
 
 import 'profile_counters.dart';
@@ -37,7 +38,7 @@ final class StreamEngine {
   /// slots owned by the stream engine. Membership in this set is the
   /// source of truth for whether an entry has a queued-but-undispatched
   /// rerun.
-  Set<int>? _pendingReruns;
+  LinkedHashSet<int>? _pendingReruns;
 
   /// Number of reruns currently dispatched to the reader pool.
   int _rerunsInFlight = 0;
@@ -184,17 +185,21 @@ final class StreamEngine {
       ProfileCounters.streamRerunsRequested++;
     }
     entry.writeGen++;
-    if (entry.inFlight || _isReQueryQueued(entry)) {
+    if (_isReQueryActiveOrQueued(entry)) {
       if (kProfileMode) {
         ProfileCounters.streamRerunsDeferredInflight++;
       }
       return;
     }
-    _ensureReQueryScheduled(entry);
+    _queueOrStartReQuery(entry);
   }
 
-  void _ensureReQueryScheduled(StreamEntry entry) {
-    if (entry.inFlight || _isReQueryQueued(entry)) return;
+  bool _isReQueryActiveOrQueued(StreamEntry entry) {
+    return entry.inFlight || _isReQueryQueued(entry);
+  }
+
+  void _queueOrStartReQuery(StreamEntry entry) {
+    if (_isReQueryActiveOrQueued(entry)) return;
     if (_rerunsInFlight >= _maxConcurrentReruns ||
         (_pendingReruns?.isNotEmpty ?? false)) {
       _enqueueReQuery(entry);
@@ -226,14 +231,14 @@ final class StreamEngine {
       // fresh rerun. Additional invalidations have already been absorbed
       // into [StreamEntry.writeGen].
       if (_entries[entry.key] != null && entry.writeGen != gen) {
-        _ensureReQueryScheduled(entry);
+        _queueOrStartReQuery(entry);
       }
       _flushPendingReruns();
     });
   }
 
   void _enqueueReQuery(StreamEntry entry) {
-    (_pendingReruns ??= <int>{}).add(entry.key);
+    (_pendingReruns ??= LinkedHashSet<int>()).add(entry.key);
   }
 
   void _flushPendingReruns() {
@@ -351,7 +356,7 @@ final class StreamEngine {
         .whenComplete(() {
           entry.inFlight = false;
           if (_entries[entry.key] != null && entry.writeGen != 0) {
-            _ensureReQueryScheduled(entry);
+            _queueOrStartReQuery(entry);
           }
         });
 
