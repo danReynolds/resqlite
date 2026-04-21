@@ -33,7 +33,7 @@ await db.transaction((tx) async {
 });
 ```
 
-## References
+## Directory
 
 - 🏠 [Homepage](https://danreynolds.github.io/resqlite/) — project overview, architecture, and write-up
 - 📈 [Visual Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) — compare performance over time and across devices
