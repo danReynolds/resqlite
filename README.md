@@ -10,8 +10,6 @@
 
 High-performance, reactive SQLite for Dart and Flutter.
 
-**Start here:** [Homepage](https://danreynolds.github.io/resqlite/) · [Interactive Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) · [API Reference](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html)
-
 Write plain SQL. Stream anything. No main isolate jank. No ORM. No codegen.
 
 ```dart
@@ -35,11 +33,11 @@ await db.transaction((tx) async {
 });
 ```
 
-## Start Here
+## References
 
-- [Homepage](https://danreynolds.github.io/resqlite/) — project overview, architecture, and write-up
-- [Interactive Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) — compare performance over time and across devices
-- [API Reference](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html) — full Dart API docs
+- 🏠 [Homepage](https://danreynolds.github.io/resqlite/) — project overview, architecture, and write-up
+- 📈 [Visual Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) — compare performance over time and across devices
+- 📄 [API Reference](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html) — full Dart API docs
 
 ## Features
 
