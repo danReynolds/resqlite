@@ -137,9 +137,6 @@ void readerEntrypoint(List<Object> args) {
           :final lastResultHash,
           :final lastRowCount,
         ):
-          final Stopwatch? execSw = kProfileMode
-              ? (Stopwatch()..start())
-              : null;
           // Two-pass selectIfChanged (exp 075). Row-count short-circuit
           // (exp 077) stops the hash walk early if count-differ is already
           // evident, so the changed case pays less pass-1 work.
@@ -151,15 +148,9 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
           );
-          final workerExecUs = execSw?.elapsedMicroseconds ?? 0;
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
-          result = (
-            raw == null ? null : _toRows(raw),
-            newHash,
-            newRowCount,
-            workerExecUs,
-          );
+          result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 
       if (sacrifice) {

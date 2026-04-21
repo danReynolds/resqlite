@@ -7,7 +7,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:async';
 
 import 'profile_sample.dart';
 import 'profiled_database.dart';
@@ -41,24 +40,6 @@ const int warmupIterations = 50;
 
 /// Measured iterations per workload.
 const int measureIterations = 100;
-
-/// Rows in the numeric-heavy table used for exp-055-style memory scans.
-const int numericSeedRowCount = 10000;
-
-/// Full-table numeric scans per measured iteration.
-const int numericScanCount = 10;
-
-/// Distinct raw SQL strings rotated by [workloadSqlDiversity].
-const int sqlDiversityDistinct = 64;
-
-/// Loops over the [sqlDiversityDistinct] query set per measured iteration.
-const int sqlDiversityLoops = 8;
-
-/// Streams held open during the disjoint/overlap write workloads.
-const int streamFanoutCount = 10;
-
-/// Writes issued per stream-profile workload iteration.
-const int streamWriteCount = 200;
 
 // ---------------------------------------------------------------------------
 // Percentile + summary helpers
@@ -138,28 +119,6 @@ Future<void> setupSchema(ProfiledDatabase db) async {
       created_at TEXT NOT NULL
     )
   ''');
-  await db.raw.execute('''
-    CREATE TABLE wide(
-      id INTEGER PRIMARY KEY,
-      a TEXT NOT NULL,
-      b TEXT NOT NULL,
-      c TEXT NOT NULL,
-      d TEXT NOT NULL
-    )
-  ''');
-  await db.raw.execute('''
-    CREATE TABLE metrics(
-      id INTEGER PRIMARY KEY,
-      n0 INTEGER NOT NULL,
-      n1 INTEGER NOT NULL,
-      n2 INTEGER NOT NULL,
-      n3 INTEGER NOT NULL,
-      f0 REAL NOT NULL,
-      f1 REAL NOT NULL,
-      f2 REAL NOT NULL,
-      f3 REAL NOT NULL
-    )
-  ''');
   await db.raw.executeBatch(
     'INSERT INTO items(name, description, value, category, created_at) '
     'VALUES (?, ?, ?, ?, ?)',
@@ -171,30 +130,6 @@ Future<void> setupSchema(ProfiledDatabase db) async {
           i * 1.5,
           'cat-${i % 10}',
           '2026-04-18T12:00:00Z',
-        ],
-    ],
-  );
-  await db.raw.executeBatch(
-    'INSERT INTO wide(id, a, b, c, d) VALUES (?, ?, ?, ?, ?)',
-    [
-      for (var i = 0; i < 2000; i++) [i, 'a$i', 'b$i', 'c$i', 'd$i'],
-    ],
-  );
-  await db.raw.executeBatch(
-    'INSERT INTO metrics(id, n0, n1, n2, n3, f0, f1, f2, f3) '
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [
-      for (var i = 0; i < numericSeedRowCount; i++)
-        [
-          i,
-          i,
-          i * 2,
-          i * 3,
-          i * 4,
-          i / 10.0,
-          i / 20.0,
-          i / 30.0,
-          i / 40.0,
         ],
     ],
   );
@@ -288,98 +223,4 @@ Future<void> workloadMergeRounds(ProfiledDatabase db, int iter) async {
     );
   }
   await db.raw.execute('DELETE FROM items WHERE id > $seedRowCount');
-}
-
-/// Numeric-heavy full-table scans for exp 055-style memory and transfer work.
-///
-/// This intentionally returns a wide numeric result-set so branch-to-branch
-/// diffs can look at:
-/// - time
-/// - RSS / peak RSS
-/// - rows/cells decoded
-///
-/// Any future columnar-storage experiment should move the memory numbers
-/// more than the time numbers here.
-Future<void> workloadNumericScan(ProfiledDatabase db, int iter) async {
-  for (var i = 0; i < numericScanCount; i++) {
-    await db.select(
-      'SELECT id, n0, n1, n2, n3, f0, f1, f2, f3 '
-      'FROM metrics ORDER BY id',
-      const [],
-      'iter$iter',
-    );
-  }
-}
-
-/// Rotates through many distinct but same-length SQL strings to stress the
-/// stmt-cache lookup / eviction path (exp 071 / 069 revisit harness).
-Future<void> workloadSqlDiversity(ProfiledDatabase db, int iter) async {
-  for (var loop = 0; loop < sqlDiversityLoops; loop++) {
-    for (var i = 0; i < sqlDiversityDistinct; i++) {
-      final id = (i % 64) + 1;
-      await db.select(
-        'SELECT value FROM items WHERE id = ${id.toString().padLeft(4, '0')}',
-        const [],
-        'iter$iter',
-      );
-    }
-  }
-}
-
-/// Projection-disjoint writes against active streams.
-///
-/// The result bytes stay unchanged, so current main should show:
-/// - many reruns started
-/// - many `stream_results_unchanged`
-/// - zero `stream_emits_delivered`
-///
-/// A future exp-052 branch with writer-side column precision should cut
-/// reruns themselves, not just emissions.
-Future<void> workloadStreamDisjointWrites(ProfiledDatabase db, int iter) async {
-  await _workloadStreamWrites(db, iter, disjoint: true);
-}
-
-/// Projection-overlapping writes against active streams.
-///
-/// Control case for [workloadStreamDisjointWrites] — reruns and emissions
-/// should both happen because projected column `a` changes.
-Future<void> workloadStreamOverlapWrites(ProfiledDatabase db, int iter) async {
-  await _workloadStreamWrites(db, iter, disjoint: false);
-}
-
-Future<void> _workloadStreamWrites(
-  ProfiledDatabase db,
-  int iter, {
-  required bool disjoint,
-}) async {
-  final ready = <Completer<void>>[
-    for (var i = 0; i < streamFanoutCount; i++) Completer<void>(),
-  ];
-  final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
-
-  for (var i = 0; i < streamFanoutCount; i++) {
-    final watchQuery =
-        'SELECT id, a, b, $i as sid FROM wide WHERE id < 1000 ORDER BY id';
-    subs.add(
-      db.raw.stream(watchQuery).listen((_) {
-        if (!ready[i].isCompleted) ready[i].complete();
-      }),
-    );
-  }
-
-  await Future.wait(ready.map((c) => c.future));
-
-  final sql =
-      disjoint ? 'UPDATE wide SET c = ? WHERE id = ?' : 'UPDATE wide SET a = ? WHERE id = ?';
-  final prefix = disjoint ? 'd' : 'z';
-  for (var i = 0; i < streamWriteCount; i++) {
-    await db.execute(sql, ['$prefix-$iter-$i', i], 'iter$iter');
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
-  }
-  await Future<void>.delayed(const Duration(milliseconds: 50));
-
-  for (final sub in subs) {
-    await sub.cancel();
-  }
 }

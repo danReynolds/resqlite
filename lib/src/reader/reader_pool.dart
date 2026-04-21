@@ -11,15 +11,6 @@ import 'dart:typed_data';
 import '../exceptions.dart';
 import 'read_worker.dart';
 
-typedef SelectIfChangedResult = ({
-  List<Map<String, Object?>>? rows,
-  int newHash,
-  int newRowCount,
-  int poolWaitUs,
-  int roundTripUs,
-  int workerExecUs,
-});
-
 /// A pool of persistent reader isolates with automatic replacement.
 ///
 /// Each worker handles one query at a time. All worker events flow through a
@@ -85,7 +76,9 @@ final class ReaderPool {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
+    final result = await _dispatch(
+      SelectWithDepsRequest(sql, parameters),
+    );
     return result as (List<Map<String, Object?>>, List<String>, int, int);
   }
 
@@ -101,35 +94,19 @@ final class ReaderPool {
   /// Execute a re-query with worker-side hash comparison.
   /// Returns `(rows, newHash, newRowCount)` — `rows` is null when the
   /// result is unchanged (hash AND row count match).
-  Future<SelectIfChangedResult> selectIfChanged(
+  Future<(List<Map<String, Object?>>?, int, int)> selectIfChanged(
     String sql,
     List<Object?> parameters,
     int lastResultHash,
     int lastRowCount,
   ) async {
-    final (rawResult, poolWaitUs, roundTripUs) = await _dispatchTimed(
+    final result = await _dispatch(
       SelectIfChangedRequest(sql, parameters, lastResultHash, lastRowCount),
     );
-    final (rows, newHash, newRowCount, workerExecUs) =
-        rawResult as (List<Map<String, Object?>>?, int, int, int);
-    return (
-      rows: rows,
-      newHash: newHash,
-      newRowCount: newRowCount,
-      poolWaitUs: poolWaitUs,
-      roundTripUs: roundTripUs,
-      workerExecUs: workerExecUs,
-    );
+    return result as (List<Map<String, Object?>>?, int, int);
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {
-    return _withAvailableSlot((slot, _) => slot.request(request));
-  }
-
-  Future<T> _withAvailableSlot<T>(
-    Future<T> Function(_WorkerSlot slot, int poolWaitUs) run, {
-    bool measureWait = false,
-  }) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever on `_workerAvailable`
@@ -139,15 +116,13 @@ final class ReaderPool {
     }
 
     final count = _workers.length;
-    final waitSw = measureWait ? (Stopwatch()..start()) : null;
 
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
-          waitSw?.stop();
-          return run(slot, waitSw?.elapsedMicroseconds ?? 0);
+          return slot.request(request);
         }
       }
 
@@ -161,20 +136,6 @@ final class ReaderPool {
         throw ResqliteConnectionException('Reader pool is closed.');
       }
     }
-  }
-
-  Future<(Object?, int, int)> _dispatchTimed(ReadRequest request) async {
-    return _withAvailableSlot((slot, poolWaitUs) async {
-      final roundTripSw = Stopwatch()..start();
-      try {
-        final result = await slot.request(request);
-        roundTripSw.stop();
-        return (result, poolWaitUs, roundTripSw.elapsedMicroseconds);
-      } catch (_) {
-        roundTripSw.stop();
-        rethrow;
-      }
-    }, measureWait: true);
   }
 
   /// Drains any in-flight read and then shuts every worker down.
@@ -324,11 +285,14 @@ class _WorkerSlot {
       }
     };
 
-    await Isolate.spawn(readerEntrypoint, [
-      dbHandleAddr,
-      _readerId,
-      workerPort.sendPort,
-    ], onExit: workerPort.sendPort);
+    await Isolate.spawn(
+        readerEntrypoint,
+        [
+          dbHandleAddr,
+          _readerId,
+          workerPort.sendPort,
+        ],
+        onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

@@ -1,8 +1,6 @@
 import 'dart:collection';
 import 'dart:async';
 
-import 'profile_counters.dart';
-import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 
 /// Stream engine — reactive query lifecycle.
@@ -36,9 +34,9 @@ final class StreamEngine {
 
   /// Stream keys waiting to acquire one of the bounded rerun dispatch
   /// slots owned by the stream engine. Membership in this set is the
-  /// source of truth for whether an entry has a queued-but-undispatched
-  /// rerun.
-  LinkedHashSet<int>? _pendingReruns;
+  /// source of truth for whether an entry has a scheduled-but-undispatched
+  /// re-query.
+  final LinkedHashSet<int> _scheduledRequeries = LinkedHashSet<int>();
 
   /// Number of reruns currently dispatched to the reader pool.
   int _rerunsInFlight = 0;
@@ -98,9 +96,6 @@ final class StreamEngine {
     // [_createStream], not on the dirty-tables pipeline. Either way,
     // the accumulate + microtask below would be pure waste.
     if (_tableToKeys.isEmpty) return;
-    if (kProfileMode) {
-      ProfileCounters.streamInvalidationsReceived++;
-    }
 
     // Accumulate dirty tables for microtask coalescing.
     // Multiple writes within the same synchronous work batch are combined
@@ -149,9 +144,6 @@ final class StreamEngine {
       if (keys != null) affected.addAll(keys);
     }
     if (affected.isEmpty) return;
-    if (kProfileMode) {
-      ProfileCounters.streamAffectedEntries += affected.length;
-    }
 
     for (final key in affected) {
       final entry = _entries[key];
@@ -181,46 +173,31 @@ final class StreamEngine {
   ///      exactly one follow-up, which captures the now-current gen and
   ///      reads current state (reflecting every intermediate write).
   void _scheduleReQuery(StreamEntry entry) {
-    if (kProfileMode) {
-      ProfileCounters.streamRerunsRequested++;
-    }
     entry.writeGen++;
-    if (_isReQueryActiveOrQueued(entry)) {
-      if (kProfileMode) {
-        ProfileCounters.streamRerunsDeferredInflight++;
-      }
-      return;
-    }
-    _queueOrStartReQuery(entry);
+    if (_isScheduled(entry)) return;
+    _requery(entry);
   }
 
-  bool _isReQueryActiveOrQueued(StreamEntry entry) {
-    return entry.inFlight || _isReQueryQueued(entry);
+  bool _isScheduled(StreamEntry entry) {
+    return entry.inFlight || _scheduledRequeries.contains(entry.key);
   }
 
-  void _queueOrStartReQuery(StreamEntry entry) {
-    if (_isReQueryActiveOrQueued(entry)) return;
+  void _requery(StreamEntry entry) {
+    if (_isScheduled(entry)) return;
     if (_rerunsInFlight >= _maxConcurrentReruns ||
-        (_pendingReruns?.isNotEmpty ?? false)) {
-      _enqueueReQuery(entry);
-      _flushPendingReruns();
+        _scheduledRequeries.isNotEmpty) {
+      _scheduledRequeries.add(entry.key);
+      _flushScheduledRequeries();
       return;
     }
-    _startReQuery(entry);
-  }
-
-  bool _isReQueryQueued(StreamEntry entry) {
-    return _pendingReruns?.contains(entry.key) ?? false;
+    _dispatchReQuery(entry);
   }
 
   /// Actually dispatches the re-query and manages the bounded rerun slot.
   ///
   /// Only called after the stream-engine scheduler has decided this entry
   /// may occupy one of the limited concurrent rerun slots.
-  void _startReQuery(StreamEntry entry) {
-    if (kProfileMode) {
-      ProfileCounters.streamRerunsStarted++;
-    }
+  void _dispatchReQuery(StreamEntry entry) {
     final gen = entry.writeGen;
     entry.inFlight = true;
     _rerunsInFlight++;
@@ -231,31 +208,21 @@ final class StreamEngine {
       // fresh rerun. Additional invalidations have already been absorbed
       // into [StreamEntry.writeGen].
       if (_entries[entry.key] != null && entry.writeGen != gen) {
-        _queueOrStartReQuery(entry);
+        _requery(entry);
       }
-      _flushPendingReruns();
+      _flushScheduledRequeries();
     });
   }
 
-  void _enqueueReQuery(StreamEntry entry) {
-    (_pendingReruns ??= LinkedHashSet<int>()).add(entry.key);
-  }
-
-  void _flushPendingReruns() {
-    final keys = _pendingReruns;
-    if (keys == null || keys.isEmpty) return;
-
-    while (_rerunsInFlight < _maxConcurrentReruns && keys.isNotEmpty) {
-      final key = keys.first;
-      keys.remove(key);
+  void _flushScheduledRequeries() {
+    while (_rerunsInFlight < _maxConcurrentReruns &&
+        _scheduledRequeries.isNotEmpty) {
+      final key = _scheduledRequeries.first;
+      _scheduledRequeries.remove(key);
       final entry = _entries[key];
       if (entry == null) continue;
-      if (entry.inFlight) continue;
-      _startReQuery(entry);
-    }
-
-    if (keys.isEmpty) {
-      _pendingReruns = null;
+      assert(!entry.inFlight);
+      _dispatchReQuery(entry);
     }
   }
 
@@ -265,7 +232,7 @@ final class StreamEngine {
   /// receive a done event and no new streams can be created.
   void close() {
     _pendingDirtyTables = null;
-    _pendingReruns = null;
+    _scheduledRequeries.clear();
     _flushScheduled = false;
     _rerunsInFlight = 0;
     for (final entry in _entries.values) {
@@ -356,7 +323,7 @@ final class StreamEngine {
         .whenComplete(() {
           entry.inFlight = false;
           if (_entries[entry.key] != null && entry.writeGen != 0) {
-            _queueOrStartReQuery(entry);
+            _requery(entry);
           }
         });
 
@@ -366,69 +333,38 @@ final class StreamEngine {
   /// Re-query a single stream on the reader pool.
   ///
   /// [gen] is [StreamEntry.writeGen] captured at dispatch time by
-  /// [_startReQuery]. If `entry.writeGen` differs at completion,
+  /// [_dispatchReQuery]. If `entry.writeGen` differs at completion,
   /// at least one invalidation landed during our flight — the result is
   /// potentially stale (DB snapshot may predate the intervening write),
   /// so we return without emitting. The rerun scheduler in
-  /// [_startReQuery]'s `whenComplete` hook reads current state.
+  /// [_dispatchReQuery]'s `whenComplete` hook reads current state.
   Future<void> _reQuery(StreamEntry entry, int gen) async {
     try {
       final pool = await _pool();
-      final result = await pool.selectIfChanged(
+      final (rows, newHash, newRowCount) = await pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (kProfileMode) {
-        ProfileCounters.streamRerunPoolWaitUs += result.poolWaitUs;
-        ProfileCounters.streamRerunRoundTripUs += result.roundTripUs;
-        ProfileCounters.streamRerunWorkerExecUs += result.workerExecUs;
+      if (entry.writeGen != gen) {
+        return; // stale
       }
-      final Stopwatch? completionSw = kProfileMode
-          ? (Stopwatch()..start())
-          : null;
-      try {
-        final rows = result.rows;
-        final newHash = result.newHash;
-        final newRowCount = result.newRowCount;
-        if (entry.writeGen != gen) {
-          if (kProfileMode) {
-            ProfileCounters.streamResultsStale++;
-          }
-          return; // stale
-        }
-        if (rows == null) {
-          if (kProfileMode) {
-            ProfileCounters.streamResultsUnchanged++;
-          }
-          return; // Unchanged — worker-side hash matched.
-        }
-        // Changed — update cache and emit.
-        entry.lastResultHash = newHash;
-        entry.lastRowCount = newRowCount;
-        entry.lastResult = rows;
-        if (kProfileMode) {
-          ProfileCounters.streamEmitsDelivered += entry.subscribers.length;
-        }
-        for (final sub in entry.subscribers) {
-          if (!sub.isClosed) sub.add(rows);
-        }
-      } finally {
-        if (completionSw != null) {
-          completionSw.stop();
-          ProfileCounters.streamRerunCompletionUs +=
-              completionSw.elapsedMicroseconds;
-        }
+      if (rows == null) {
+        return; // Unchanged — worker-side hash matched.
+      }
+      // Changed — update cache and emit.
+      entry.lastResultHash = newHash;
+      entry.lastRowCount = newRowCount;
+      entry.lastResult = rows;
+      for (final sub in entry.subscribers) {
+        if (!sub.isClosed) sub.add(rows);
       }
     } catch (e, st) {
       // Stale: skip surfacing the error too; the follow-up may succeed
       // (e.g. schema re-created, connection recovered) or may fail in
       // the same way, at which point its own error handling fires.
       if (entry.writeGen != gen) {
-        if (kProfileMode) {
-          ProfileCounters.streamResultsStale++;
-        }
         return;
       }
       // Propagate error to subscribers so they can handle it (e.g., table
@@ -490,10 +426,7 @@ final class StreamEngine {
   void _remove(int key) {
     final entry = _entries.remove(key);
     if (entry == null) return;
-    _pendingReruns?.remove(key);
-    if (_pendingReruns?.isEmpty ?? false) {
-      _pendingReruns = null;
-    }
+    _scheduledRequeries.remove(key);
 
     // Clean up inverted index.
     for (final table in entry.readTables) {
@@ -570,7 +503,7 @@ final class StreamEntry {
   /// captured. After initial setup completes, [StreamEngine._scheduleReQuery]
   /// owns the counter for normal re-query coalescing. Never decreases.
   ///
-  /// [StreamEngine._startReQuery] captures this value at dispatch time;
+  /// [StreamEngine._dispatchReQuery] captures this value at dispatch time;
   /// on completion, if the captured value and the current value differ,
   /// invalidations arrived during the in-flight run and the result is
   /// skipped in favor of a fresh follow-up (which captures the now-current

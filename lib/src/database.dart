@@ -39,7 +39,7 @@ final class Database {
   Database._(this._handle, this._path, int readerCount) {
     _streamEngine = StreamEngine(
       () => _readerPool,
-      _maxConcurrentRerunsFor(readerCount),
+      readerCount > 1 ? readerCount - 1 : 1,
     );
 
     // Spawn the single writer isolate.
@@ -76,12 +76,6 @@ final class Database {
   /// Exposed for testing stream cleanup behavior. Use [stream] for the
   /// public reactive query API.
   StreamEngine get streamEngine => _streamEngine;
-
-  static int _maxConcurrentRerunsFor(int readerCount) {
-    // Keep one reader available for fresh reads / initial stream queries
-    // whenever possible so reruns do not monopolize the pool.
-    return readerCount > 1 ? readerCount - 1 : 1;
-  }
 
   // -------------------------------------------------------------------------
   // Lifecycle
