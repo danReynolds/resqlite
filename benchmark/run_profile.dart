@@ -24,9 +24,9 @@
 //       SQLite-specific counters (page cache, schema, stmt cache, WAL
 //       sidecar size). Per-SQLite counters are exact, unlike RSS which
 //       is a lower bound.
-//     - ProfileCounters snapshot decode + stream-engine counters per
-//       workload. Useful for exp-055-style work (same rows/cells, lower
-//       memory) and exp-052-style work (same writes, fewer reruns).
+//     - ProfileCounters snapshot decode counters per workload. Useful
+//       for memory-axis work where RSS and SQLite diagnostics do not
+//       explain Dart-side materialization cost.
 //
 // Purpose: A/B experiments between a branch and its baseline. Both runs
 // use the same profile build, so any diagnostic overhead cancels out
@@ -137,50 +137,6 @@ Future<void> main(List<String> args) async {
     _reportWorkload(mergeRounds,
         readerFloor: readerFloor, writerFloor: writerFloor);
 
-    print('');
-    print('=== Workload D: Numeric Scan ===');
-    final numericScan = await _runWorkload(
-      name: 'numeric_scan',
-      profiled: profiled,
-      iterations: 20,
-      body: (iter) => workloadNumericScan(profiled, iter),
-    );
-    _reportWorkload(numericScan,
-        readerFloor: readerFloor, writerFloor: writerFloor);
-
-    print('');
-    print('=== Workload E: SQL Diversity ===');
-    final sqlDiversity = await _runWorkload(
-      name: 'sql_diversity',
-      profiled: profiled,
-      iterations: 25,
-      body: (iter) => workloadSqlDiversity(profiled, iter),
-    );
-    _reportWorkload(sqlDiversity,
-        readerFloor: readerFloor, writerFloor: writerFloor);
-
-    print('');
-    print('=== Workload F: Stream Disjoint Writes ===');
-    final streamDisjoint = await _runWorkload(
-      name: 'stream_disjoint_writes',
-      profiled: profiled,
-      iterations: 5,
-      body: (iter) => workloadStreamDisjointWrites(profiled, iter),
-    );
-    _reportWorkload(streamDisjoint,
-        readerFloor: readerFloor, writerFloor: writerFloor);
-
-    print('');
-    print('=== Workload G: Stream Overlap Writes ===');
-    final streamOverlap = await _runWorkload(
-      name: 'stream_overlap_writes',
-      profiled: profiled,
-      iterations: 5,
-      body: (iter) => workloadStreamOverlapWrites(profiled, iter),
-    );
-    _reportWorkload(streamOverlap,
-        readerFloor: readerFloor, writerFloor: writerFloor);
-
     // Persist the whole thing. diff.dart reads these JSON files.
     final outPath = options.outPath ?? _defaultOutPath();
     final outDir = File(outPath).parent;
@@ -203,14 +159,6 @@ Future<void> main(List<String> args) async {
           'point_query': _workloadJson(pointQuery,
               readerFloor: readerFloor, writerFloor: writerFloor),
           'merge_rounds': _workloadJson(mergeRounds,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'numeric_scan': _workloadJson(numericScan,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'sql_diversity': _workloadJson(sqlDiversity,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'stream_disjoint_writes': _workloadJson(streamDisjoint,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'stream_overlap_writes': _workloadJson(streamOverlap,
               readerFloor: readerFloor, writerFloor: writerFloor),
         },
       }),
