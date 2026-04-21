@@ -7,6 +7,30 @@ on:
     branches: [main]
 
 jobs:
+  guard-raw-profile-json:
+    # Block raw per-sample profile JSONs (~15 MB each) from landing on main.
+    # The decision-relevant signal is the aggregate markdown produced by
+    # `benchmark/profile/diff_multirun.dart`; raw JSONs are local scratch.
+    # See the resqlite-experiment skill for rationale.
+    name: Guard against raw profile JSONs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check PR diff for benchmark/profile/results/*.json
+        run: |
+          base="origin/${{ github.base_ref }}"
+          added=$(git diff --name-only --diff-filter=A "$base...HEAD" \
+            -- 'benchmark/profile/results/*.json' || true)
+          if [ -n "$added" ]; then
+            echo "::error::Raw profile JSONs must not be committed. Commit the aggregate markdown from benchmark/profile/diff_multirun.dart instead."
+            echo "Offending files:"
+            printf '  %s\n' $added
+            exit 1
+          fi
+
   test:
     name: Tests
     runs-on: macos-latest

@@ -14,3 +14,9 @@ benchmark/results/_cache/
 # Drift-generated code is reproducible from the .dart sources via
 # `dart run build_runner build`. Never commit.
 benchmark/drift/*.g.dart
+
+# Raw profile-mode benchmark data. 10-15 MB each, not comparable across
+# time/hardware — a future evaluator re-runs from scratch anyway. Commit
+# the aggregate markdown written by `benchmark/profile/diff_multirun.dart`
+# instead. Enforced by the `guard-raw-profile-json` job in ci.yml.
+benchmark/profile/results/*.json
