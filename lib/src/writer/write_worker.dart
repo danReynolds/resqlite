@@ -31,15 +31,9 @@ sealed class WriterRequest {
 
 /// Single parameterized write (INSERT, UPDATE, DELETE, DDL).
 final class ExecuteRequest extends WriterRequest {
-  ExecuteRequest(
-    this.sql,
-    this.params,
-    this.captureDirtyTables,
-    super.replyPort,
-  );
+  ExecuteRequest(this.sql, this.params, super.replyPort);
   final String sql;
   final List<Object?> params;
-  final bool captureDirtyTables;
 }
 
 /// Read query within a transaction — runs on the writer connection so it
@@ -52,15 +46,9 @@ final class QueryRequest extends WriterRequest {
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
 final class BatchRequest extends WriterRequest {
-  BatchRequest(
-    this.sql,
-    this.paramSets,
-    this.captureDirtyTables,
-    super.replyPort,
-  );
+  BatchRequest(this.sql, this.paramSets, super.replyPort);
   final String sql;
   final List<List<Object?>> paramSets;
-  final bool captureDirtyTables;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
@@ -70,8 +58,7 @@ final class BeginRequest extends WriterRequest {
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(this.captureDirtyTables, super.replyPort);
-  final bool captureDirtyTables;
+  CommitRequest(super.replyPort);
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
@@ -243,9 +230,7 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   // Dirty tables are only collected outside transactions. Inside a
   // transaction they accumulate in the C-level dirty set until the
   // outermost transaction completes.
-  final dirty = state.txDepth > 0 || !msg.captureDirtyTables
-      ? null
-      : getDirtyTables(state.dbHandle);
+  final dirty = state.txDepth > 0 ? null : getDirtyTables(state.dbHandle);
   msg.replyPort.send(ExecuteResponse(result, dirty));
 }
 
@@ -257,11 +242,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     msg.replyPort.send(const BatchResponse(null));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(
-        msg.captureDirtyTables ? getDirtyTables(state.dbHandle) : null,
-      ),
-    );
+    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
   }
 }
 
@@ -356,11 +337,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(
-      BatchResponse(
-        msg.captureDirtyTables ? getDirtyTables(state.dbHandle) : null,
-      ),
-    );
+    msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
     final rc = resqliteExec(state.dbHandle, sp);

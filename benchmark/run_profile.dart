@@ -24,10 +24,9 @@
 //       SQLite-specific counters (page cache, schema, stmt cache, WAL
 //       sidecar size). Per-SQLite counters are exact, unlike RSS which
 //       is a lower bound.
-//     - Decoder allocation counters (`ProfileCounters`) snapshot rows and
-//       cells materialized per workload. Useful for exp-055-style work:
-//       a change that decodes the same rows/cells but reduces RSS is
-//       the allocation win the time-only harness can't see.
+//     - ProfileCounters snapshot decode + stream-engine counters per
+//       workload. Useful for exp-055-style work (same rows/cells, lower
+//       memory) and exp-052-style work (same writes, fewer reruns).
 //
 // Purpose: A/B experiments between a branch and its baseline. Both runs
 // use the same profile build, so any diagnostic overhead cancels out
@@ -138,6 +137,50 @@ Future<void> main(List<String> args) async {
     _reportWorkload(mergeRounds,
         readerFloor: readerFloor, writerFloor: writerFloor);
 
+    print('');
+    print('=== Workload D: Numeric Scan ===');
+    final numericScan = await _runWorkload(
+      name: 'numeric_scan',
+      profiled: profiled,
+      iterations: 20,
+      body: (iter) => workloadNumericScan(profiled, iter),
+    );
+    _reportWorkload(numericScan,
+        readerFloor: readerFloor, writerFloor: writerFloor);
+
+    print('');
+    print('=== Workload E: SQL Diversity ===');
+    final sqlDiversity = await _runWorkload(
+      name: 'sql_diversity',
+      profiled: profiled,
+      iterations: 25,
+      body: (iter) => workloadSqlDiversity(profiled, iter),
+    );
+    _reportWorkload(sqlDiversity,
+        readerFloor: readerFloor, writerFloor: writerFloor);
+
+    print('');
+    print('=== Workload F: Stream Disjoint Writes ===');
+    final streamDisjoint = await _runWorkload(
+      name: 'stream_disjoint_writes',
+      profiled: profiled,
+      iterations: 5,
+      body: (iter) => workloadStreamDisjointWrites(profiled, iter),
+    );
+    _reportWorkload(streamDisjoint,
+        readerFloor: readerFloor, writerFloor: writerFloor);
+
+    print('');
+    print('=== Workload G: Stream Overlap Writes ===');
+    final streamOverlap = await _runWorkload(
+      name: 'stream_overlap_writes',
+      profiled: profiled,
+      iterations: 5,
+      body: (iter) => workloadStreamOverlapWrites(profiled, iter),
+    );
+    _reportWorkload(streamOverlap,
+        readerFloor: readerFloor, writerFloor: writerFloor);
+
     // Persist the whole thing. diff.dart reads these JSON files.
     final outPath = options.outPath ?? _defaultOutPath();
     final outDir = File(outPath).parent;
@@ -160,6 +203,14 @@ Future<void> main(List<String> args) async {
           'point_query': _workloadJson(pointQuery,
               readerFloor: readerFloor, writerFloor: writerFloor),
           'merge_rounds': _workloadJson(mergeRounds,
+              readerFloor: readerFloor, writerFloor: writerFloor),
+          'numeric_scan': _workloadJson(numericScan,
+              readerFloor: readerFloor, writerFloor: writerFloor),
+          'sql_diversity': _workloadJson(sqlDiversity,
+              readerFloor: readerFloor, writerFloor: writerFloor),
+          'stream_disjoint_writes': _workloadJson(streamDisjoint,
+              readerFloor: readerFloor, writerFloor: writerFloor),
+          'stream_overlap_writes': _workloadJson(streamOverlap,
               readerFloor: readerFloor, writerFloor: writerFloor),
         },
       }),
@@ -191,9 +242,11 @@ Future<void> main(List<String> args) async {
 class _WorkloadResult {
   _WorkloadResult({
     required this.name,
+    required this.iterations,
     required this.samples,
     required this.rssBeforeMB,
     required this.rssAfterMB,
+    required this.rssPeakMB,
     required this.diagnosticsBefore,
     required this.diagnosticsAfter,
     required this.countersBefore,
@@ -201,9 +254,11 @@ class _WorkloadResult {
   });
 
   final String name;
+  final int iterations;
   final List<ProfileSample> samples;
   final double rssBeforeMB;
   final double rssAfterMB;
+  final double rssPeakMB;
   final Diagnostics diagnosticsBefore;
   final Diagnostics diagnosticsAfter;
 
@@ -236,6 +291,7 @@ Future<_WorkloadResult> _runWorkload({
   required String name,
   required ProfiledDatabase profiled,
   required Future<void> Function(int iter) body,
+  int iterations = measureIterations,
 }) async {
   // Stabilize the heap before baseline capture so leftover allocations
   // from prior workloads don't inflate this workload's rss_delta. Two
@@ -247,10 +303,13 @@ Future<_WorkloadResult> _runWorkload({
   final rssBefore = _rssMB();
   final diagBefore = await profiled.raw.diagnostics();
   final countersBefore = kProfileMode ? ProfileCounters.snapshot() : null;
+  var peakRss = rssBefore;
 
   profiled.samples.clear();
-  for (var iter = 0; iter < measureIterations; iter++) {
+  for (var iter = 0; iter < iterations; iter++) {
     await body(iter);
+    final rssNow = _rssMB();
+    if (rssNow > peakRss) peakRss = rssNow;
   }
 
   final rssAfter = _rssMB();
@@ -259,9 +318,11 @@ Future<_WorkloadResult> _runWorkload({
 
   return _WorkloadResult(
     name: name,
+    iterations: iterations,
     samples: List.of(profiled.samples),
     rssBeforeMB: rssBefore,
     rssAfterMB: rssAfter,
+    rssPeakMB: peakRss,
     diagnosticsBefore: diagBefore,
     diagnosticsAfter: diagAfter,
     countersBefore: countersBefore,
@@ -352,20 +413,22 @@ Map<String, Object?> _workloadJson(
   required int? writerFloor,
 }) {
   return {
+    'iterations': r.iterations,
     'samples': r.samples.map((s) => s.toJson()).toList(),
     'summary': summarizeSamples(r.samples,
         readerFloor: readerFloor, writerFloor: writerFloor),
     'memory': {
       'rss_before_mb': double.parse(r.rssBeforeMB.toStringAsFixed(3)),
       'rss_after_mb': double.parse(r.rssAfterMB.toStringAsFixed(3)),
+      'rss_peak_mb': double.parse(r.rssPeakMB.toStringAsFixed(3)),
       'rss_delta_mb': double.parse(r.rssDeltaMB.toStringAsFixed(3)),
       'diagnostics_before': _diagnosticsJson(r.diagnosticsBefore),
       'diagnostics_after': _diagnosticsJson(r.diagnosticsAfter),
       'diagnostics_delta':
           _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter),
-      // Decoder allocation counters. Only populated when kProfileMode
-      // is compiled in (otherwise the counters never fire).
-      if (r.counterDelta != null) 'allocation_delta': r.counterDelta,
+      // Profile counters. Only populated when kProfileMode is compiled
+      // in (otherwise the counters never fire).
+      if (r.counterDelta != null) 'profile_counters_delta': r.counterDelta,
     },
   };
 }
@@ -395,13 +458,17 @@ void _reportWorkload(
   final delta = _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter);
   print('  memory:        '
       'rss Δ=${r.rssDeltaMB.toStringAsFixed(2)} MB  '
+      'rss peak=${r.rssPeakMB.toStringAsFixed(2)} MB  '
       'page cache Δ=${delta['sqlite_page_cache_bytes_delta']} B  '
       'stmt Δ=${delta['sqlite_stmt_bytes_delta']} B  '
       'wal Δ=${delta['wal_bytes_delta']} B');
   final cdelta = r.counterDelta;
   if (cdelta != null) {
-    print('  alloc:         '
-        'rows=${cdelta['rows_decoded']}  '
-        'cells=${cdelta['cells_decoded']}');
+    final nonZero = cdelta.entries.where((e) => e.value != 0).toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    if (nonZero.isNotEmpty) {
+      print('  counters:      '
+          '${nonZero.map((e) => '${e.key}=${e.value}').join('  ')}');
+    }
   }
 }

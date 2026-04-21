@@ -38,6 +38,8 @@ final class ReaderPool {
   /// or finishes respawning). Callers waiting in _dispatch are woken up.
   Completer<void>? _workerAvailable;
 
+  bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
+
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
     final pool = ReaderPool._([]);
     final slots = List.generate(

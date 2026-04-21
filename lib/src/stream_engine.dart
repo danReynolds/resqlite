@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:async';
 
 import 'reader/reader_pool.dart';
@@ -11,24 +12,19 @@ import 'reader/reader_pool.dart';
 final class StreamEngine {
   StreamEngine(this._pool);
 
-  final Future<ReaderPool> Function() _pool;
+  final Future<ReaderPool> _pool;
 
+  /// The index of streamed queries by their hash key.
   final Map<int, StreamEntry> _entries = {};
 
-  /// Inverted index: table name → set of stream keys that read from it.
-  /// Maintained on register/remove so invalidation is O(dirtyTables)
-  /// instead of O(streams × dirtyTables).
-  final Map<String, Set<int>> _tableToKeys = {};
+  /// The set of stream queries pending initialization and performing their first initial query.
+  final Set<StreamEntry> _pendingEntries = {};
 
-  /// Monotonic write counter. Streams compare before/after their initial
-  /// query to detect writes that landed during the setup window.
-  int _writeGeneration = 0;
+  /// Index of tables to the set of stream entries that depend on that table.
+  final Map<String, Set<StreamEntry>> _tableIndex = {};
 
-  /// Accumulated dirty tables for microtask coalescing.
-  /// Multiple handleDirtyTables calls within the same microtask are batched
-  /// into a single invalidation pass, reducing redundant re-queries.
-  Set<String>? _pendingDirtyTables;
-  bool _flushScheduled = false;
+  /// Stream entries scheduled to be requeried when an available reader opens up.
+  final LinkedHashSet<StreamEntry> _requeryQueue = LinkedHashSet<StreamEntry>();
 
   /// Number of active stream entries.
   ///
@@ -51,135 +47,61 @@ final class StreamEngine {
   ]) {
     final key = _streamKey(sql, parameters);
 
-    // Check for existing stream with same query.
-    final existing = _entries[key];
-    if (existing != null) {
-      return _subscribe(existing);
+    // If there is already a stream entry for this query, then subscribe to it.
+    if (_entries[key] case StreamEntry entry) {
+      return _subscribe(entry);
     }
 
-    // No existing stream — register, subscribe, run initial query.
+    // Otherwise, create the stream and execute its initial query.
     return _createStream(key, sql, parameters);
   }
 
-  /// Called after every write — checks dirty tables against active streams
-  /// and re-queries affected ones.
-  ///
-  /// Re-queries fire concurrently. The C reader pool handles contention
-  /// via spin-wait — each reader-holding isolate makes independent forward
-  /// progress, so there's no circular dependency and no livelock risk.
-  ///
-  /// Each affected entry's in-flight re-query (if any) is flagged for a
-  /// follow-up via [_scheduleReQuery]; otherwise a fresh re-query is
-  /// dispatched. At most one re-query per entry is in flight at a time.
-  void handleDirtyTables(List<String> dirtyTables) {
-    if (dirtyTables.isEmpty) return;
-    _writeGeneration++;
-
-    // Experiment 077: fast-reject when no stream has yet registered any
-    // table dependencies. `_tableToKeys` is populated by
-    // [_updateReadTables], which only fires after a stream's initial
-    // query returns. If it's empty, either (a) there are no streams at
-    // all, or (b) every active stream is still waiting for its initial
-    // query to return — in which case those streams rely on the
-    // `_writeGeneration != generationBefore` race-detection path in
-    // [_createStream], not on the dirty-tables pipeline. Either way,
-    // the accumulate + microtask below would be pure waste.
-    if (_tableToKeys.isEmpty) return;
-
-    // Accumulate dirty tables for microtask coalescing.
-    // Multiple writes within the same synchronous work batch are combined
-    // into a single invalidation pass, reducing redundant re-queries.
-    if (_pendingDirtyTables == null) {
-      _pendingDirtyTables = Set<String>.from(dirtyTables);
-    } else {
-      _pendingDirtyTables!.addAll(dirtyTables);
-    }
-
-    if (!_flushScheduled) {
-      _flushScheduled = true;
-      scheduleMicrotask(_flushDirtyTables);
-    }
-  }
-
-  /// Route a committed write based on whether dirty tables were captured.
-  ///
-  /// `null` means the writer intentionally skipped dirty-table capture for
-  /// this commit, so we conservatively mark every active entry dirty.
-  /// A non-null list means capture was attempted; an empty list is a real
-  /// "nothing dirty" result and should not be treated like a skipped capture.
-  void handleCommittedWrite(List<String>? dirtyTables) {
-    if (dirtyTables != null) {
-      handleDirtyTables(dirtyTables);
+  /// Invalidate all streams dependent on the given tables, scheduling them for requery.
+  Future<void> invalidate(List<String>? dirtyTables) async {
+    if (_entries.isEmpty || dirtyTables == null || dirtyTables.isEmpty) {
       return;
     }
 
-    _writeGeneration++;
-    for (final entry in _entries.values) {
-      _scheduleReQuery(entry);
+    // Pending entries have not resolved dependencies yet, so any table write
+    // could affect their eventual result.
+    for (final entry in _pendingEntries) {
+      entry.dirty = true;
     }
-  }
 
-  /// Flush accumulated dirty tables and dispatch re-queries.
-  void _flushDirtyTables() {
-    _flushScheduled = false;
-    final tables = _pendingDirtyTables;
-    _pendingDirtyTables = null;
-    if (tables == null || tables.isEmpty) return;
+    final dirtyEntries = <StreamEntry>{};
 
-    // Find affected stream keys via inverted index.
-    final affected = <int>{};
-    for (final table in tables) {
-      final keys = _tableToKeys[table];
-      if (keys != null) affected.addAll(keys);
-    }
-    if (affected.isEmpty) return;
-
-    for (final key in affected) {
-      final entry = _entries[key];
-      if (entry == null) continue;
-      _scheduleReQuery(entry);
-    }
-  }
-
-  /// Dispatch a re-query for [entry], coalescing against any in-flight one.
-  ///
-  /// Without coalescing, a tight write burst against a table watched by N
-  /// streams queues O(writes × N) re-queries in the reader pool. For a
-  /// workload with 100 streams and 200 writes, that's up to 20,000
-  /// dispatches — each one a full pool round-trip.
-  ///
-  /// With coalescing, at most ONE re-query is in flight per stream entry
-  /// at a time. Each invalidation bumps [StreamEntry.writeGen]; if
-  /// a re-query is already in flight, we return without dispatching. The
-  /// in-flight re-query captured the pre-bump value of `writeGen`
-  /// when it was dispatched, so on completion it can compare:
-  ///
-  ///   - `entry.writeGen == gen` → no invalidations arrived during
-  ///      the in-flight run; its result is current, emit normally, done.
-  ///   - `entry.writeGen != gen` → at least one invalidation landed
-  ///      during the in-flight run. Skip the emit (the DB snapshot the
-  ///      in-flight read may predate the intervening write) and dispatch
-  ///      exactly one follow-up, which captures the now-current gen and
-  ///      reads current state (reflecting every intermediate write).
-  void _scheduleReQuery(StreamEntry entry) {
-    entry.writeGen++;
-    if (entry.inFlight) return;
-    _startReQuery(entry);
-  }
-
-  /// Actually dispatches the re-query and manages the in-flight slot.
-  /// Only called via [_scheduleReQuery], which enforces the single-
-  /// in-flight invariant.
-  void _startReQuery(StreamEntry entry) {
-    final gen = entry.writeGen;
-    entry.inFlight = true;
-    _reQuery(entry, gen).whenComplete(() {
-      entry.inFlight = false;
-      // If the stream was invalidated while running, re-query it again.
-      if (_entries[entry.key] != null && entry.writeGen != gen) {
-        _startReQuery(entry);
+    for (final table in dirtyTables) {
+      if (_tableIndex[table] case Set<StreamEntry> entries) {
+        dirtyEntries.addAll(entries);
       }
-    });
+    }
+
+    for (final entry in dirtyEntries) {
+      entry.dirty = true;
+
+      // Don't schedule dirty entries for requery if they are *already in-flight*
+      // so that there is at most 1 reader assigned to a given stream query at a time.
+      // This is a performance trade-off that optimizes for availability to other streams
+      // versus eagerly re-querying a stream that is invalidated while still reading.
+      if (!entry.inFlight) {
+        _requeryQueue.add(entry);
+      }
+    }
+
+    _flushQueue();
+  }
+
+  Future<void> _flushQueue() async {
+    if (_requeryQueue.isEmpty) {
+      return;
+    }
+
+    final pool = await _pool;
+    while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
+      final entry = _requeryQueue.first;
+      _requeryQueue.remove(entry);
+      _requery(entry);
+    }
   }
 
   /// Closes all active streams and clears internal state.
@@ -193,13 +115,11 @@ final class StreamEngine {
       }
       entry.subscribers.clear();
     }
-    _entries.clear();
-    _tableToKeys.clear();
-  }
 
-  // ---------------------------------------------------------------------------
-  // Stream lifecycle
-  // ---------------------------------------------------------------------------
+    _entries.clear();
+    _tableIndex.clear();
+    _requeryQueue.clear();
+  }
 
   /// Create a new stream entry and return a subscriber stream.
   ///
@@ -207,9 +127,6 @@ final class StreamEngine {
   /// eliminating the race condition where async* generators + broadcast
   /// controllers silently drop events during microtask gaps.
   ///
-  /// Uses the write generation counter to detect writes that happened during
-  /// the initial query — if the generation changed, triggers an immediate
-  /// re-query so the stream reflects the latest data.
   Stream<List<Map<String, Object?>>> _createStream(
     int key,
     String sql,
@@ -220,126 +137,100 @@ final class StreamEngine {
       sql: sql,
       params: params,
     );
+    entry.inFlight = true;
+
+    // Add the new entry to the list of entries pending initialization.
+    _pendingEntries.add(entry);
 
     // Subscribe immediately — buffered controller queues events until listened.
     final subscriberStream = _subscribe(entry);
 
-    // Capture write generation before the initial query. If any write
-    // lands while the query is in-flight, we'll re-query after setup.
-    final generationBefore = _writeGeneration;
+    Future.sync(() async {
+      try {
+        final pool = await _pool;
+        final result = await pool.selectWithDeps(sql, params);
 
-    // Run initial query on the reader pool to discover read tables.
-    entry.inFlight = true;
-    _pool()
-        .then((pool) => pool.selectWithDeps(sql, params))
-        .then(
-          (result) {
-            if (entry.subscribers.isEmpty) {
-              return; // cancelled before query finished
-            }
+        // Cancelled before query finished.
+        if (entry.subscribers.isEmpty) {
+          return;
+        }
 
-            final (initialRows, readTables, initialHash, initialRowCount) =
-                result;
+        final (initialRows, initialTables, initialHash, initialRowCount) =
+            result;
 
-            // Set real read tables so future writes trigger invalidation.
-            _updateReadTables(key, readTables);
-            entry.lastResult = initialRows;
-            // Hash (exp 075) and row count (exp 077) both come from the
-            // worker. Together they form the baseline that selectIfChanged
-            // re-queries short-circuit against.
-            entry.lastResultHash = initialHash;
-            entry.lastRowCount = initialRowCount;
+        // Index the entry's table dependencies after its initial query completes.
+        for (final table in initialTables) {
+          (_tableIndex[table] ??= {}).add(entry);
+        }
 
-            // Push initial result to all subscribers.
-            for (final sub in entry.subscribers) {
-              if (!sub.isClosed) sub.add(initialRows);
-            }
+        entry.lastResult = initialRows;
+        entry.lastResultHash = initialHash;
+        entry.lastRowCount = initialRowCount;
+        entry.dependencies = initialTables.toSet();
 
-            // If a write happened while the initial query was in-flight,
-            // the data may be stale. Re-query to catch up. The hash check
-            // in _reQuery suppresses the emission if data is unchanged.
-            // Goes through the same coalescing path as normal invalidation
-            // so the in-flight cap is honored even at setup.
-            if (_writeGeneration != generationBefore || entry.writeGen != 0) {
-              _scheduleReQuery(entry);
-            }
-          },
-          onError: (Object error) {
-            // Propagate error to all subscribers so they don't hang.
-            for (final sub in entry.subscribers) {
-              if (!sub.isClosed) sub.addError(error);
-            }
-            _remove(key);
-          },
-        )
-        .whenComplete(() {
-          entry.inFlight = false;
-          if (_entries[entry.key] != null && entry.writeGen != 0) {
-            _startReQuery(entry);
-          }
-        });
+        // If an invalidation occurred while performing the entry's initial query then the entry
+        // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
+        if (entry.dirty) {
+          _requeryQueue.add(entry);
+          _flushQueue();
+        } else {
+          entry.emit(initialRows);
+        }
+      } catch (e, stackTrace) {
+        // Propagate error to all subscribers so they don't hang.
+        entry.emitError(e, stackTrace);
+        _remove(entry);
+      } finally {
+        entry.inFlight = false;
+        _pendingEntries.remove(entry);
+      }
+    });
 
     return subscriberStream;
   }
 
   /// Re-query a single stream on the reader pool.
-  ///
-  /// [gen] is [StreamEntry.writeGen] captured at dispatch time by
-  /// [_startReQuery]. If `entry.writeGen` differs at completion,
-  /// at least one invalidation landed during our flight — the result is
-  /// potentially stale (DB snapshot may predate the intervening write),
-  /// so we return without emitting. The follow-up dispatched by
-  /// [_startReQuery]'s `whenComplete` hook reads current state.
-  Future<void> _reQuery(StreamEntry entry, int gen) async {
+  Future<void> _requery(StreamEntry entry) async {
     try {
-      final pool = await _pool();
+      entry.inFlight = true;
+      entry.dirty = false;
+
+      final pool = await _pool;
       final (rows, newHash, newRowCount) = await pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
       );
-      if (entry.writeGen != gen) return; // stale
-      if (rows == null) return; // Unchanged — worker-side hash matched.
-      // Changed — update cache and emit.
+
+      // If the entry has already been marked dirty again from an invalidation that ocurred
+      // while it was requerying, then this intermediate result should be discarded and instead
+      // the entry should be re-scheduled for requery.
+      if (entry.dirty) {
+        _requeryQueue.add(entry);
+        return;
+      }
+
+      // If no rows were returned, then the query result has not changed.
+      if (rows == null) {
+        return;
+      }
+
       entry.lastResultHash = newHash;
       entry.lastRowCount = newRowCount;
       entry.lastResult = rows;
-      for (final sub in entry.subscribers) {
-        if (!sub.isClosed) sub.add(rows);
-      }
+
+      entry.emit(rows);
     } catch (e, st) {
-      // Stale: skip surfacing the error too; the follow-up may succeed
-      // (e.g. schema re-created, connection recovered) or may fail in
-      // the same way, at which point its own error handling fires.
-      if (entry.writeGen != gen) return;
       // Propagate error to subscribers so they can handle it (e.g., table
       // dropped, schema changed). Silent failure would leave the stream
       // stuck with stale data and no signal to the listener.
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.addError(e, st);
       }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Registry operations
-  // ---------------------------------------------------------------------------
-
-  void _updateReadTables(int key, List<String> readTables) {
-    final entry = _entries[key];
-    if (entry == null) return;
-
-    // Remove old table mappings.
-    for (final table in entry.readTables) {
-      _tableToKeys[table]?.remove(key);
-    }
-
-    // Set new tables and update inverted index.
-    final tables = Set<String>.unmodifiable(readTables.toSet());
-    entry.readTables = tables;
-    for (final table in tables) {
-      (_tableToKeys[table] ??= {}).add(key);
+    } finally {
+      entry.inFlight = false;
+      _flushQueue();
     }
   }
 
@@ -355,7 +246,7 @@ final class StreamEngine {
       if (!controller.isClosed) controller.close();
       // Clean up entry when last subscriber cancels.
       if (entry.subscribers.isEmpty) {
-        _remove(entry.key);
+        _remove(entry);
       }
     };
 
@@ -369,17 +260,13 @@ final class StreamEngine {
   }
 
   /// Remove a stream entry.
-  void _remove(int key) {
-    final entry = _entries.remove(key);
-    if (entry == null) return;
+  void _remove(StreamEntry entry) {
+    _entries.remove(entry.key);
+    _requeryQueue.remove(entry);
 
     // Clean up inverted index.
-    for (final table in entry.readTables) {
-      final keys = _tableToKeys[table];
-      if (keys != null) {
-        keys.remove(key);
-        if (keys.isEmpty) _tableToKeys.remove(table);
-      }
+    for (final table in entry.dependencies) {
+      _tableIndex[table]?.remove(entry);
     }
 
     // Close any remaining subscriber controllers.
@@ -400,7 +287,7 @@ final class StreamEntry {
     required this.key,
     required this.sql,
     required this.params,
-    this.readTables = const {},
+    this.dependencies = const {},
   });
 
   /// Hash key identifying this stream (derived from SQL + params).
@@ -412,9 +299,8 @@ final class StreamEntry {
   /// Bind parameters for the query.
   final List<Object?> params;
 
-  /// Tables this query reads from, used for invalidation matching.
-  /// Mutable — updated after initial query when tables aren't known at registration.
-  Set<String> readTables;
+  /// The table dependencies of the query.
+  Set<String> dependencies;
 
   /// Per-subscriber buffered controllers. Each subscriber gets their own
   /// non-broadcast StreamController that buffers events, eliminating the
@@ -434,26 +320,33 @@ final class StreamEntry {
   /// knows the fresh row count diverges.
   int lastRowCount = -1;
 
-  /// Tracks whether any query work for this entry is currently in flight.
-  /// `true` means the initial query or a re-query is running, so additional
-  /// invalidations should be absorbed into
-  /// [writeGen] rather than dispatching fresh pool work. See
-  /// [StreamEngine._scheduleReQuery] for the full rationale.
+  /// Whether the stream is dirty and needs to be requeried.
+  bool dirty = false;
+
+  /// Whether the stream is currently being queried (and we are waiting for the result).
   bool inFlight = false;
 
-  /// Monotonic counter bumped for qualifying invalidations.
-  ///
-  /// While the initial query is still in flight, this acts as a pending
-  /// catch-up marker for writes whose dirty tables were intentionally not
-  /// captured. After initial setup completes, [StreamEngine._scheduleReQuery]
-  /// owns the counter for normal re-query coalescing. Never decreases.
-  ///
-  /// [StreamEngine._startReQuery] captures this value at dispatch time;
-  /// on completion, if the captured value and the current value differ,
-  /// invalidations arrived during the in-flight run and the result is
-  /// skipped in favor of a fresh follow-up (which captures the now-current
-  /// gen and re-reads). Monotonic-capture-and-compare — no manual reset.
-  int writeGen = 0;
+  @override
+  int get hashCode => key;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! StreamEntry) return false;
+    return key == other.key;
+  }
+
+  void emit(List<Map<String, Object?>> rows) {
+    for (final sub in subscribers) {
+      if (!sub.isClosed) sub.add(rows);
+    }
+  }
+
+  void emitError(Object e, StackTrace? st) {
+    for (final sub in subscribers) {
+      if (!sub.isClosed) sub.addError(e, st);
+    }
+  }
 }
 
 /// Compute a stable hash key for a stream query.
