@@ -1,12 +1,28 @@
-# Feasibility: deeply-immutable `ResultSet` for zero-copy isolate transfer
+# Experiment 089: Deeply-immutable `ResultSet` for zero-copy isolate transfer
 
 **Date:** 2026-04-21
-**Status:** Blocked — re-check when `UnmodifiableTypedData`-style factories land
-**Verdict:** **Not ready to prototype.** The pragma itself is stable, but the set of types Dart currently accepts as deeply immutable does not include `List<Object?>` or `Uint8List`. Both are structural requirements of our `ResultSet` shape.
+**Status:** Rejected (blocked upstream — re-check when DI typed-data factory ships)
 
----
+## Problem
 
-## 1. SDK status
+Every read crosses an isolate boundary. Below the byte-size sacrifice
+threshold (exp 039) we pay a `SendPort.send` copy; above it we pay an
+`Isolate.exit` + reader respawn. The ~0.05 ms copy on sub-256 KB results
+scales linearly with result size.
+
+## Hypothesis
+
+Dart's `@pragma('vm:deeply-immutable')` lets an instance of an annotated
+class pass between isolates **in the same isolate group** as a pointer
+handoff — zero-copy on `SendPort.send`. Our reader pool is one isolate
+group (workers spawned from the main isolate). If `ResultSet`, `Row`,
+and their backing storage can be marked deeply immutable, every read
+becomes zero-copy regardless of size, and the sacrifice-threshold
+machinery (exp 039) retires.
+
+## Investigation
+
+### 1. SDK status
 
 - `pubspec.yaml` pins `environment.sdk: ^3.10.4`.
 - I could not execute `dart --version` in this worktree (Bash denied), but the constraint floor is 3.10.4.
@@ -14,7 +30,7 @@
 - The broader *shared-memory multithreading* work (SDK issue #56841, language proposal 333) is still in-progress; the pragma is the one piece that has already stabilized.
 - A runtime probe (declare a class, annotate it, send across `SendPort`) was not executed because Bash is denied in this environment. The existing scratch probe at `overnight-experiments/deeply_immutable_bench.dart` already uses the pragma on a class whose fields are all `String` / `int` — the likely-to-compile case. A follow-up probe under full `dart` access should confirm compilation and round-trip.
 
-## 2. Constraints on what can be marked (from the design doc)
+### 2. Constraints on what can be marked (from the design doc)
 
 A class annotated `@pragma('vm:deeply-immutable')` must:
 
@@ -35,7 +51,7 @@ The **closed** list of deeply-immutable types today:
 
 SDK issue #50068 ("API to create deeply immutable typed data") is open and unresolved: the VM supports deeply-immutable typed data internally (via an embedder API), but no public Dart factory exists to produce one.
 
-## 3. How our current shape conforms
+### 3. How our current shape conforms
 
 `lib/src/row.dart`:
 
@@ -67,34 +83,46 @@ Cell payload types produced by `decodeQuery` include `Uint8List` for BLOB column
 
 The worker message tuple sent via `SendPort.send` / `Isolate.exit` in `lib/src/reader/read_worker.dart` is a `Record` containing the `ResultSet` (or a nested record with it). Records themselves are not in the deeply-immutable set either — the design doc doesn't carve out record types.
 
-## 4. Ecosystem survey
+### 4. Ecosystem survey
 
 - No existing uses of `vm:deeply-immutable` in this repo other than `overnight-experiments/deeply_immutable_bench.dart` (the probe scratch file).
 - Pub.dev search (via WebSearch) surfaced no packages that use the pragma in shipped code. It is almost entirely an internal VM concept today, with a handful of experimental users inside `dart-lang/*`.
 
-## 5. Blocker assessment
+## Decision
 
-Two independent hard blockers:
+**Rejected — blocked upstream.** Two independent hard blockers:
 
-1. **No deeply-immutable list type.** `ResultSet` and `RawQueryResult` are centered on `List<Object?>` and `RowSchema.names` is `List<String>`. Without a DI list, nothing above them can be marked. Replacing the backing list with a chain of DI records (one DI class per value, linked) would explode object count, lose flat-list cache locality, and almost certainly regress the shape exp 082 just showed is near-optimal.
-2. **No deeply-immutable `Uint8List`.** BLOB cells are `Uint8List`. Even if we solved blocker 1, blobs would block. SDK #50068 is the upstream tracking issue.
+1. **No deeply-immutable list type.** `ResultSet` and `RawQueryResult`
+   are centered on `List<Object?>` and `RowSchema.names` is
+   `List<String>`. Without a DI list, nothing above them can be marked.
+   Replacing the backing list with a chain of DI records (one DI class
+   per value, linked) would explode object count, lose flat-list cache
+   locality, and almost certainly regress the shape exp 082 just
+   showed is near-optimal.
+2. **No deeply-immutable `Uint8List`.** BLOB cells are `Uint8List`.
+   Even if we solved blocker 1, blobs would block. SDK #50068 is the
+   upstream tracking issue.
 
-Blocker 1 is the structural one. Blocker 2 is a subset of it.
+Blocker 1 is the structural one; blocker 2 is a subset of it.
 
-## 6. Verdict and upstream watch
+Re-check when either:
+- a public `List.deeplyImmutable` / `UnmodifiableTypedData.fromCopy`
+  factory ships (track SDK #50068), **or**
+- the "shared isolates" phase of language proposal 333 lands with a
+  broader zero-copy send path for shallow-immutable graphs (track
+  SDK #56841).
 
-**Blocked. Re-check when either:**
-- a public `List.deeplyImmutable` / `UnmodifiableTypedData.fromCopy` factory ships (track SDK #50068), **or**
-- the "shared isolates" phase of language proposal 333 lands with a broader zero-copy send path for shallow-immutable graphs (track SDK #56841).
+Until then, the ~0.05 ms `memcpy` cost for sub-256 KB results isn't
+worth a restructuring that would fight the language. Exp 082 already
+showed the current shape wins at 10 k rows on both `SendPort.send`
+and `Isolate.exit`. The sacrifice-threshold machinery (exp 039) stays.
 
-Until then, the ~0.05 ms `memcpy` cost for our sub-256 KB results is not worth a restructuring that would fight the language. Exp 082 already showed current shape wins at 10 k rows both on `SendPort.send` and `Isolate.exit`. The sacrifice-threshold machinery (exp 039) stays.
-
-## 7. Low-cost follow-ups worth doing now
+## Low-cost follow-ups worth doing now
 
 - Confirm under real `dart` access that `overnight-experiments/deeply_immutable_bench.dart` compiles and that `SendPort.send` of the `ImmutableResult` (three `String` + two `int` fields) measurably beats an equivalent mutable class. This pins down whether the same-group zero-copy path actually activates, giving a numeric ceiling for any future refactor.
 - Subscribe / poll SDK #50068 quarterly. The day a DI typed-data factory ships, blocker 2 dissolves.
 
-## 8. If blocker 1 ever lifts — minimal refactor sketch
+## If blocker 1 ever lifts — minimal refactor sketch
 
 Breadth estimate: ~4 files, ~150 LoC, one new cell-storage abstraction, full test suite should pass unchanged because the `Map`/`List` facades don't change.
 
@@ -116,8 +144,8 @@ final class ImmutableResultSet {
 }
 ```
 
-Files that would touch: `lib/src/row.dart`, `lib/src/query_decoder.dart`, `lib/src/reader/read_worker.dart`, `lib/src/writer/writer_worker.dart`. Blob cells would need a `ImmutableBytes` wrapper once #50068 ships. `selectBytes` is unaffected — it already transports a single `Uint8List` via the raw bytes path.
-
----
-
-**Word count:** ~690
+Files that would touch: `lib/src/row.dart`, `lib/src/query_decoder.dart`,
+`lib/src/reader/read_worker.dart`, `lib/src/writer/writer_worker.dart`.
+Blob cells would need an `ImmutableBytes` wrapper once #50068 ships.
+`selectBytes` is unaffected — it already transports a single `Uint8List`
+via the raw bytes path.

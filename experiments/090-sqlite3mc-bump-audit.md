@@ -1,12 +1,22 @@
-# SQLite / sqlite3mc Bump Investigation — 2026-04-21
+# Experiment 090: sqlite3mc bump audit — already current
 
-## TL;DR
+**Date:** 2026-04-21
+**Status:** Rejected (no bump needed — already on newest stable sqlite3mc)
 
-**Recommendation: NO bump. Revisit in ~6 weeks once a SQLite 3.53.2+ patch release ships.**
+## Problem
 
-We are already on the newest stable sqlite3mc release that tracks a stable SQLite. The only "newer" option available today is sqlite3mc 2.3.3 → SQLite **3.53.0**, released **12 days ago** (2026-04-09). That violates our documented "no .0 releases, pin to .2+" rule, and 3.53.0 ships a known behavior change (FP rounding default moved from 15 → 17 significant digits) plus several parser / planner feature additions that have had minimal bake time.
+SQLite 3.51.0 (2025-11-04) advertised "use fewer CPU cycles to commit a
+read transaction." The daily-research note flagged a bump as a
+candidate: if our vendored sqlite3mc is behind, we get across-the-board
+read-path wins for free.
 
-## Current vs. target
+## Hypothesis
+
+Vendored copy lags upstream ⇒ a dependency bump pays for itself.
+
+## Investigation
+
+### Current vs. target
 
 | Axis | Current (worktree) | Target candidate | Notes |
 |---|---|---|---|
@@ -16,7 +26,7 @@ We are already on the newest stable sqlite3mc release that tracks a stable SQLit
 
 Our vendored copy is **37 days old**. The premise of the task brief — "If our vendored copy is older, bumping should produce free, across-the-board read-path wins" — does not hold. We already pulled the "fewer CPU cycles to commit a read transaction" work. That change shipped in 3.51.0 and we are on 3.51.3.
 
-## What SQLite 3.53.0 would buy us
+### What SQLite 3.53.0 would buy us
 
 Based on the official 3.53.0 release log:
 
@@ -35,7 +45,7 @@ Based on the official 3.53.0 release log:
 
 **Net verdict:** no meaningful read-path or write-path perf win we can reliably bank. The FP default change is a *minor correctness hazard* (snapshot diffs) and adds risk we'd normally want a point release to shake out.
 
-## Compile-flag drift audit
+### Compile-flag drift audit
 
 Diffed our `hook/build.dart:84-137` defines against SQLite 3.53.0's documented compile options. No drift:
 
@@ -52,7 +62,7 @@ Diffed our `hook/build.dart:84-137` defines against SQLite 3.53.0's documented c
 
 No removed or renamed flags affect us. No new *required* flags for 3.53.0. One new *optional* flag worth noting for a future bump: `SQLITE_DBCONFIG_FP_DIGITS` runtime option if we ever want to keep 3.52 / pre-3.53 FP rounding on a 3.53 binary.
 
-## Risk table
+### Risk table
 
 | Risk | Severity | Mitigation if we bumped |
 |---|---|---|
@@ -62,15 +72,18 @@ No removed or renamed flags affect us. No new *required* flags for 3.53.0. One n
 | sqlite3mc 2.3.3 encryption API surface | Low — only delta is issue #230 fix | We don't use the encryption init path in a way affected by the fix |
 | `SQLITE_ENABLE_STAT4` interaction with new multi-way join planner | Low–Medium — historically planner reworks + STAT4 have had cost-estimate regressions (e.g. 3.46.x) | Monitor benchmark deltas post-bump |
 
-## Benchmarks
+### Benchmarks
 
-**Not run.** The investigation stopped at step 2 (target version feasibility) because the target fails our pre-existing .0-release policy. Running a bench would not change the recommendation: even if 3.53.0 won by 5% on some workload, we would not land it at .0. The cautionary exp-088 guidance about "don't hand-wave single runs" applies equally to "don't hand-wave a bake-time policy."
+**Not run.** The investigation stopped at target-version feasibility
+because 3.53.0 fails our pre-existing .0-release policy. Running a
+bench wouldn't change the recommendation: even if 3.53.0 won by 5% on
+some workload, we wouldn't land it at .0. The cautionary exp-088
+guidance about "don't hand-wave single runs" applies equally to "don't
+hand-wave a bake-time policy."
 
-## Recommendation
+## Decision
 
-**NO** — hold at sqlite3mc 2.3.2 / SQLite 3.51.3.
-
-### Reasons
+**Rejected — hold at sqlite3mc 2.3.2 / SQLite 3.51.3.** Reasons:
 
 1. We are already on the newest stable sqlite3mc tracking a stable SQLite release. The bump thesis ("our vendored copy is old") is false — it is 37 days old.
 2. The only newer target (3.53.0) is a .0 release 12 days old, explicitly excluded by the policy in the task brief.
