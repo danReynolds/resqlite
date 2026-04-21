@@ -26,8 +26,6 @@ final class Writer {
 
   Writer(this._streamEngine);
 
-  bool get _captureDirtyTables => _streamEngine.length > 0;
-
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
@@ -84,8 +82,7 @@ final class Writer {
     List<Object?> parameters = const [],
   ]) async {
     return _request<ExecuteResponse>(
-      (replyPort) =>
-          ExecuteRequest(sql, parameters, _captureDirtyTables, replyPort),
+      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
     );
   }
 
@@ -104,8 +101,7 @@ final class Writer {
     assertUniformParamSets(sql, paramSets);
 
     return _request<BatchResponse>(
-      (replyPort) =>
-          BatchRequest(sql, paramSets, _captureDirtyTables, replyPort),
+      (replyPort) => BatchRequest(sql, paramSets, replyPort),
     );
   }
 
@@ -162,11 +158,11 @@ final class Writer {
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
     final response = await _request<BatchResponse>(
-      (replyPort) => CommitRequest(_captureDirtyTables, replyPort),
+      (replyPort) => CommitRequest(replyPort),
     );
 
     if (Transaction.current == null) {
-      _streamEngine.handleCommittedWrite(response.dirtyTables);
+      _streamEngine.invalidate(response.dirtyTables);
     }
 
     return result;

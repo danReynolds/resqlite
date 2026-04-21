@@ -209,18 +209,18 @@ void main() {
           final updated = Completer<void>();
           final results = <List<Map<String, Object?>>>[];
 
-          final sub = db
-              .stream('SELECT id, name, value FROM items WHERE id = ?', [id])
-              .listen((rows) {
-                results.add(rows);
-                if (!initial.isCompleted) {
-                  initial.complete();
-                  return;
-                }
-                if (!updated.isCompleted) {
-                  updated.complete();
-                }
-              });
+          final sub = db.stream(
+              'SELECT id, name, value FROM items WHERE id = ?',
+              [id]).listen((rows) {
+            results.add(rows);
+            if (!initial.isCompleted) {
+              initial.complete();
+              return;
+            }
+            if (!updated.isCompleted) {
+              updated.complete();
+            }
+          });
 
           await initial.future.timeout(const Duration(seconds: 2));
           expect(results, hasLength(1));
@@ -703,24 +703,22 @@ void main() {
         final results = <List<Map<String, Object?>>>[];
         Object? streamError;
 
-        final sub = db
-            .stream('SELECT name FROM items ORDER BY id')
-            .listen(
-              (rows) {
-                results.add(rows);
-                if (!initial.isCompleted) {
-                  initial.complete();
-                  return;
-                }
-                if (!recovered.isCompleted) {
-                  recovered.complete();
-                }
-              },
-              onError: (error, stackTrace) {
-                streamError = error;
-                if (!errorReceived.isCompleted) errorReceived.complete();
-              },
-            );
+        final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
+          (rows) {
+            results.add(rows);
+            if (!initial.isCompleted) {
+              initial.complete();
+              return;
+            }
+            if (!recovered.isCompleted) {
+              recovered.complete();
+            }
+          },
+          onError: (error, stackTrace) {
+            streamError = error;
+            if (!errorReceived.isCompleted) errorReceived.complete();
+          },
+        );
 
         await initial.future.timeout(const Duration(seconds: 2));
         expect(results, hasLength(1));
@@ -728,7 +726,7 @@ void main() {
 
         // Break the query by renaming the column it selects.
         await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-        db.streamEngine.handleDirtyTables(['items']);
+        db.streamEngine.invalidate(['items']);
 
         // Error should be delivered to onError, not swallowed.
         await errorReceived.future.timeout(const Duration(seconds: 2));
@@ -790,16 +788,14 @@ void main() {
       final initial = Completer<void>();
       final done = Completer<void>();
 
-      final sub = db
-          .stream('SELECT name FROM items ORDER BY id')
-          .listen(
-            (_) {
-              if (!initial.isCompleted) initial.complete();
-            },
-            onDone: () {
-              if (!done.isCompleted) done.complete();
-            },
-          );
+      final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
+        (_) {
+          if (!initial.isCompleted) initial.complete();
+        },
+        onDone: () {
+          if (!done.isCompleted) done.complete();
+        },
+      );
 
       await initial.future.timeout(const Duration(seconds: 2));
       expect(db.streamEngine.length, 1);

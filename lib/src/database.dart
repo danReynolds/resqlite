@@ -37,16 +37,14 @@ import 'stream_engine.dart';
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
   Database._(this._handle, this._path, int readerCount) {
-    _streamEngine = StreamEngine(
-      () => _readerPool,
-      readerCount > 1 ? readerCount - 1 : 1,
-    );
+    // Spawn the reader pool.
+    _readerPool = ReaderPool.spawn(_handle.address, readerCount);
+
+    // Start the reactive query stream engine.
+    _streamEngine = StreamEngine(_readerPool);
 
     // Spawn the single writer isolate.
     _writer = Writer.spawn(_streamEngine, _handle);
-
-    // Spawn the reader pool.
-    _readerPool = ReaderPool.spawn(_handle.address, readerCount);
   }
 
   late final Future<Writer> _writer;
@@ -342,7 +340,7 @@ final class Database {
     final writer = await _writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
-    _streamEngine.handleCommittedWrite(response.dirtyTables);
+    _streamEngine.invalidate(response.dirtyTables);
 
     return response.result;
   }
@@ -380,7 +378,7 @@ final class Database {
     );
 
     if (reponse != null) {
-      _streamEngine.handleCommittedWrite(reponse.dirtyTables);
+      _streamEngine.invalidate(reponse.dirtyTables);
     }
   }
 
