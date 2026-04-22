@@ -16,12 +16,13 @@ Future<void> main() async {
 
   // 1. Parse all benchmark result files.
   final runs = <Map<String, Object?>>[];
-  final mdFiles = resultsDir
-      .listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('.md'))
-      .toList()
-    ..sort((a, b) => a.path.compareTo(b.path));
+  final mdFiles =
+      resultsDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.md'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
 
   for (final file in mdFiles) {
     final basename = file.path.split('/').last;
@@ -76,6 +77,11 @@ Future<void> main() async {
 
   print('Parsed ${runs.length} benchmark runs from ${mdFiles.length} files.');
 
+  final allKeys = <String>{};
+  for (final run in runs) {
+    allKeys.addAll((run['metrics'] as Map<String, double>).keys);
+  }
+
   // 2. Parse experiments from the README table + individual files.
   final experiments = <Map<String, Object?>>[];
 
@@ -83,18 +89,18 @@ Future<void> main() async {
     final readmeFile = File('${experimentsDir.path}/README.md');
     if (readmeFile.existsSync()) {
       final readme = readmeFile.readAsStringSync();
-      experiments.addAll(_parseExperimentsReadme(readme, experimentsDir));
+      experiments.addAll(
+        _parseExperimentsReadme(readme, experimentsDir, allKeys),
+      );
     }
   }
 
   print('Parsed ${experiments.length} experiments.');
 
+  _attachBenchmarkRunMappings(experiments, runs);
+
   // 3. Build the tracked metrics list — curated keys for default chart display.
   final tracked = <String>[];
-  final allKeys = <String>{};
-  for (final run in runs) {
-    allKeys.addAll((run['metrics'] as Map<String, double>).keys);
-  }
 
   // Find the best matching key for each desired metric.
   for (final pattern in _trackedPatterns) {
@@ -125,6 +131,155 @@ Future<void> main() async {
   print('Tracked: ${tracked.join(', ')}');
 }
 
+void _attachBenchmarkRunMappings(
+  List<Map<String, Object?>> experiments,
+  List<Map<String, Object?>> runs,
+) {
+  final claimedRunIndices = <int>{};
+
+  // First pass: exact explicit experiment-id matches in the run label,
+  // e.g. experiment 088 -> run id "exp088-setlk-timeout".
+  for (final exp in experiments) {
+    final expNum = (exp['id'] as String).toLowerCase();
+    final exactPatterns = ['exp$expNum', 'exp-$expNum'];
+    int matchedIdx = -1;
+    for (var idx = 0; idx < runs.length; idx++) {
+      if (claimedRunIndices.contains(idx)) continue;
+      final id = (runs[idx]['id'] as String? ?? '').toLowerCase();
+      if (exactPatterns.any(id.contains)) {
+        matchedIdx = idx;
+        break;
+      }
+    }
+    if (matchedIdx >= 0) {
+      exp['benchmarkRun'] = {
+        'id': runs[matchedIdx]['id'],
+        'date': runs[matchedIdx]['date'],
+        'timestamp': runs[matchedIdx]['timestamp'],
+        'source': 'exact',
+      };
+      claimedRunIndices.add(matchedIdx);
+    }
+  }
+
+  final byDate = <String, List<Map<String, Object?>>>{};
+  for (final exp in experiments) {
+    if (exp['benchmarkRun'] != null) continue;
+    final date = exp['date'] as String? ?? '';
+    if (date.isEmpty) continue;
+    (byDate[date] ??= []).add(exp);
+  }
+
+  final runsByDate = <String, List<int>>{};
+  for (var i = 0; i < runs.length; i++) {
+    final date = runs[i]['date'] as String? ?? '';
+    if (date.isEmpty) continue;
+    (runsByDate[date] ??= []).add(i);
+  }
+
+  for (final entry in byDate.entries) {
+    final date = entry.key;
+    final dateExps = entry.value;
+    final dateRuns =
+        (runsByDate[date] ?? const <int>[])
+            .where((idx) => !claimedRunIndices.contains(idx))
+            .toList();
+
+    if (dateRuns.isEmpty) {
+      String? bestDate;
+      var bestDist = double.infinity;
+      for (final rd in runsByDate.keys) {
+        final candidateRuns =
+            runsByDate[rd]!
+                .where((idx) => !claimedRunIndices.contains(idx))
+                .toList();
+        if (candidateRuns.isEmpty) continue;
+        final dist =
+            (DateTime.parse(rd).millisecondsSinceEpoch -
+                    DateTime.parse(date).millisecondsSinceEpoch)
+                .abs()
+                .toDouble();
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestDate = rd;
+        }
+      }
+
+      if (bestDate != null && bestDist < 3 * 86400000) {
+        final fallbackRuns =
+            runsByDate[bestDate]!
+                .where((idx) => !claimedRunIndices.contains(idx))
+                .toList();
+        for (var j = 0; j < dateExps.length; j++) {
+          final preferredIndex =
+              j < fallbackRuns.length ? j : fallbackRuns.length - 1;
+          final runIdx = _pickClosestUnclaimedRun(
+            fallbackRuns,
+            preferredIndex,
+            claimedRunIndices,
+          );
+          if (runIdx == null) continue;
+          dateExps[j]['benchmarkRun'] = {
+            'id': runs[runIdx]['id'],
+            'date': runs[runIdx]['date'],
+            'timestamp': runs[runIdx]['timestamp'],
+            'source': 'nearby',
+          };
+          claimedRunIndices.add(runIdx);
+        }
+      }
+      continue;
+    }
+
+    for (var j = 0; j < dateExps.length; j++) {
+      final proportionalIndex =
+          (j * dateRuns.length / dateExps.length).floor().clamp(
+            0,
+            dateRuns.length - 1,
+          );
+      final runIdx = _pickClosestUnclaimedRun(
+        dateRuns,
+        proportionalIndex,
+        claimedRunIndices,
+      );
+      if (runIdx == null) continue;
+      dateExps[j]['benchmarkRun'] = {
+        'id': runs[runIdx]['id'],
+        'date': runs[runIdx]['date'],
+        'timestamp': runs[runIdx]['timestamp'],
+        'source': 'same-day',
+      };
+      claimedRunIndices.add(runIdx);
+    }
+  }
+}
+
+int? _pickClosestUnclaimedRun(
+  List<int> candidates,
+  int preferredIndex,
+  Set<int> claimedRunIndices,
+) {
+  if (candidates.isEmpty) return null;
+
+  for (var offset = 0; offset < candidates.length; offset++) {
+    final left = preferredIndex - offset;
+    if (left >= 0) {
+      final candidate = candidates[left];
+      if (!claimedRunIndices.contains(candidate)) return candidate;
+    }
+
+    if (offset == 0) continue;
+
+    final right = preferredIndex + offset;
+    if (right < candidates.length) {
+      final candidate = candidates[right];
+      if (!claimedRunIndices.contains(candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
 /// Patterns used to find the curated tracked metrics from all available keys.
 const _trackedPatterns = [
   '1000 rows / resqlite select()',
@@ -141,6 +296,7 @@ const _trackedPatterns = [
   'Unchanged Fanout Throughput',
   'resqlite qps',
   // Scenario-level trajectories (Track A Phase 1+).
+  'Reactive feed with 100 concurrent writes',
   'Keyed PK Subscriptions',
   // Chat Sim emits 4 op-type subsections; pattern matches "Chat Sim"
   // generically — the generator picks up the first match, which will
@@ -165,6 +321,7 @@ const _trackedPatterns = [
 List<Map<String, Object?>> _parseExperimentsReadme(
   String readme,
   Directory experimentsDir,
+  Set<String> allKeys,
 ) {
   final experiments = <Map<String, Object?>>[];
   final lines = readme.split('\n');
@@ -206,11 +363,13 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     final expFile = File('${experimentsDir.path}/$filename');
     if (expFile.existsSync()) {
       final content = expFile.readAsStringSync();
-      final dateMatch =
-          RegExp(r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})').firstMatch(content);
+      final dateMatch = RegExp(
+        r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})',
+      ).firstMatch(content);
       date = dateMatch?.group(1);
-      final commitMatch =
-          RegExp(r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]').firstMatch(content);
+      final commitMatch = RegExp(
+        r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]',
+      ).firstMatch(content);
       commit = commitMatch?.group(1);
       // Archive tag — added for rejected experiments whose code was
       // preserved via `git tag archive/exp-NNN` before branch deletion.
@@ -219,12 +378,14 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         r'\*\*Archive:\*\*\s*\[`?(archive/[^`\]]+)`?\]',
       ).firstMatch(content);
       archive = archiveMatch?.group(1);
-      problem = _extractSection(content, 'Problem') ??
+      problem =
+          _extractSection(content, 'Problem') ??
           _extractSection(content, 'Background') ??
           _extractSection(content, 'Analysis');
       hypothesis = _extractSection(content, 'Hypothesis');
       // Try all known heading variants for implementation.
-      final built = _extractSection(content, 'What We Built') ??
+      final built =
+          _extractSection(content, 'What We Built') ??
           _extractSection(content, 'What We Tested') ??
           _extractSection(content, 'What Changed') ??
           _extractSection(content, 'Change') ??
@@ -233,18 +394,32 @@ List<Map<String, Object?>> _parseExperimentsReadme(
           _extractSection(content, 'Design') ??
           _extractSection(content, 'Approaches Tested');
       // Try all known heading variants for results.
-      final results = _extractSection(content, 'Results') ??
+      final results =
+          _extractSection(content, 'Results') ??
           _extractSection(content, 'Result') ??
           _extractSection(content, 'Benchmark') ??
           _extractSection(content, 'Detailed Findings');
       // Try all known heading variants for reasoning.
-      final whyAccepted = _extractSection(content, 'Decision') ??
+      final whyAccepted =
+          _extractSection(content, 'Decision') ??
           _extractSection(content, 'Why Accepted') ??
           _extractSection(content, 'Recommendation') ??
           _extractSection(content, 'Why It Works');
-      final whyRejected = _extractSection(content, 'Why Rejected') ??
+      final whyRejected =
+          _extractSection(content, 'Why Rejected') ??
           _extractSection(content, 'Why It Failed') ??
           _extractSection(content, 'Takeaway');
+      final primaryMetrics = _resolveMetricPatterns(
+        _parseMetricPatterns(_extractSection(content, 'Primary Metrics')),
+        allKeys,
+      );
+      final guardrailMetrics = _resolveMetricPatterns(
+        _parseMetricPatterns(
+          _extractSection(content, 'Guardrail Metrics') ??
+              _extractSection(content, 'Guardrails'),
+        ),
+        allKeys,
+      );
 
       experiments.add({
         'id': id,
@@ -259,6 +434,8 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         'approach': built,
         'results': results,
         'reasoning': whyAccepted ?? whyRejected,
+        if (primaryMetrics.isNotEmpty) 'primaryMetrics': primaryMetrics,
+        if (guardrailMetrics.isNotEmpty) 'guardrailMetrics': guardrailMetrics,
       });
     } else {
       experiments.add({
@@ -274,13 +451,11 @@ List<Map<String, Object?>> _parseExperimentsReadme(
 
   // Sort by experiment number.
   experiments.sort((a, b) {
-    final aNum = int.tryParse(
-          (a['id'] as String).replaceAll(RegExp(r'[^0-9]'), ''),
-        ) ??
+    final aNum =
+        int.tryParse((a['id'] as String).replaceAll(RegExp(r'[^0-9]'), '')) ??
         0;
-    final bNum = int.tryParse(
-          (b['id'] as String).replaceAll(RegExp(r'[^0-9]'), ''),
-        ) ??
+    final bNum =
+        int.tryParse((b['id'] as String).replaceAll(RegExp(r'[^0-9]'), '')) ??
         0;
     return aNum.compareTo(bNum);
   });
@@ -288,13 +463,54 @@ List<Map<String, Object?>> _parseExperimentsReadme(
   return experiments;
 }
 
+List<String> _parseMetricPatterns(String? section) {
+  if (section == null || section.isEmpty) return const [];
+
+  final patterns = <String>[];
+  final seen = <String>{};
+  for (final rawLine in section.split('\n')) {
+    final line = rawLine.trim();
+    if (!line.startsWith('- ') && !line.startsWith('* ')) continue;
+    final pattern = line.substring(2).trim().replaceAll('`', '');
+    if (pattern.isNotEmpty && seen.add(pattern)) {
+      patterns.add(pattern);
+    }
+  }
+  return patterns;
+}
+
+List<String> _resolveMetricPatterns(
+  List<String> patterns,
+  Set<String> allKeys,
+) {
+  if (patterns.isEmpty) return const [];
+
+  final resolved = <String>[];
+  final seen = <String>{};
+  for (final pattern in patterns) {
+    String? match;
+    if (allKeys.contains(pattern) && !pattern.endsWith('[main]')) {
+      match = pattern;
+    } else {
+      for (final key in allKeys) {
+        if (key.endsWith('[main]')) continue;
+        if (key.contains(pattern)) {
+          match = key;
+          break;
+        }
+      }
+    }
+    if (match != null && seen.add(match)) {
+      resolved.add(match);
+    }
+  }
+  return resolved;
+}
+
 /// Extract the full content of a `## Section` from markdown content,
 /// up to the next `##` heading. Returns null if the section is not found.
 String? _extractSection(String content, String sectionName) {
-  final pattern = RegExp(
-    '^## $sectionName\\s*\n+',
-    multiLine: true,
-  );
+  final pattern = RegExp('^## $sectionName\\s*\n+', multiLine: true);
   final match = pattern.firstMatch(content);
   if (match == null) return null;
 

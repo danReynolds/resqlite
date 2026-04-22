@@ -41,8 +41,40 @@
     background: var(--card); border: 1px solid var(--border);
     border-radius: 10px; padding: 1.25rem;
   }
+  .card.focused {
+    border-color: rgba(88,166,255,0.65);
+    box-shadow: 0 0 0 1px rgba(88,166,255,0.22), 0 0 0 6px rgba(88,166,255,0.08);
+    animation: focusPulse 1.4s ease-out;
+  }
+  @keyframes focusPulse {
+    0% {
+      box-shadow: 0 0 0 1px rgba(88,166,255,0.40), 0 0 0 12px rgba(88,166,255,0.16);
+    }
+    100% {
+      box-shadow: 0 0 0 1px rgba(88,166,255,0.22), 0 0 0 6px rgba(88,166,255,0.08);
+    }
+  }
+  .card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+  }
   .card h2 { font-size: 1rem; margin-bottom: 0.25rem; }
   .card .desc { font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
+  .card-head h2 { margin-bottom: 0; }
+  .chart-detail-btn {
+    background: transparent;
+    color: var(--accent);
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chart-detail-btn:hover { text-decoration: underline; }
   .chart-wrap { position: relative; width: 100%; }
   .chart-wrap.tall { height: 350px; }
   .chart-wrap.short { height: 280px; }
@@ -92,10 +124,36 @@
     border: 1px solid rgba(88,166,255,0.2); border-radius: 6px;
     padding: 0.5rem 0.85rem; margin-bottom: 1rem;
   }
+  .helper-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin: 0.25rem 0 1rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .helper-pill {
+    background: rgba(88,166,255,0.08);
+    color: var(--accent);
+    border: 1px solid rgba(88,166,255,0.18);
+    border-radius: 999px;
+    padding: 0.18rem 0.6rem;
+    font: inherit;
+    cursor: pointer;
+  }
+  .helper-pill:hover { text-decoration: underline; }
   .callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
   .callout { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; text-align: center; }
   .callout .big { font-size: 2rem; font-weight: 700; color: var(--win); }
   .callout .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+  .why {
+    margin-top: -0.3rem;
+    margin-bottom: 0.8rem;
+    font-size: 0.76rem;
+    color: var(--muted);
+  }
+  .why strong { color: var(--text); font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
   th, td { padding: 0.5rem 0.75rem; text-align: right; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; }
@@ -108,6 +166,66 @@
     padding: 0.75rem 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border);
   }
   .contribute-note a { color: var(--accent); }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 8, 18, 0.76);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    z-index: 50;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal {
+    width: min(760px, 100%);
+    max-height: min(80vh, 900px);
+    overflow: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem 1.25rem 1rem;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  }
+  .modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .modal-head h2 {
+    font-size: 1.1rem;
+    margin-bottom: 0.25rem;
+  }
+  .modal-close {
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-body p {
+    color: var(--muted);
+    font-size: 0.88rem;
+    margin-bottom: 0.9rem;
+  }
+  .modal-body h3 {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    margin: 1rem 0 0.4rem;
+  }
+  .modal-body ul {
+    margin-left: 1.1rem;
+    color: var(--muted);
+    font-size: 0.86rem;
+    line-height: 1.6;
+  }
+  .modal-body li + li { margin-top: 0.25rem; }
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .callouts { grid-template-columns: 1fr 1fr; }
@@ -145,8 +263,28 @@
   <button data-kind="scenarios">Scenarios</button>
 </div>
 
+<div class="helper-bar">
+  <span>Glossary:</span>
+  <button class="helper-pill" data-detail="glossaryWall">wall time</button>
+  <button class="helper-pill" data-detail="glossaryMain">main-isolate</button>
+  <button class="helper-pill" data-detail="glossaryTail">p50 / p90</button>
+</div>
+
 <div id="chartsContainer">
   <div class="loading">Loading benchmark data...</div>
+</div>
+
+<div id="detailModalBackdrop" class="modal-backdrop hidden" role="presentation">
+  <div id="detailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+    <div class="modal-head">
+      <div>
+        <h2 id="detailModalTitle">Metric details</h2>
+        <p id="detailModalSubtitle" style="color:var(--muted);font-size:0.85rem;"></p>
+      </div>
+      <button id="detailModalClose" class="modal-close" aria-label="Close metric details">&times;</button>
+    </div>
+    <div id="detailModalBody" class="modal-body"></div>
+  </div>
 </div>
 
 <h3 class="section-title">Scope &amp; Methodology</h3>
@@ -358,6 +496,366 @@ function libShort(name) {
   return name;
 }
 
+const CHART_DETAILS = {
+  glossaryWall: {
+    title: 'Glossary — Wall time',
+    subtitle: 'The total elapsed time the caller experiences.',
+    summary: 'Wall time is end-to-end elapsed time, not just raw SQLite execution. It includes the library overhead around the query or write path.',
+    methodology: [
+      'Used as the default headline metric for most charts on this page.',
+      'For async libraries, wall time includes isolate handoff, decoding, and any result transfer work that happens before the caller gets control back.',
+    ],
+    readItAs: [
+      'Use wall time when you care about how long the whole operation feels to the app.',
+      'A low wall time does not necessarily mean a low UI-thread cost — that is why the main-isolate charts also exist.',
+    ],
+  },
+  glossaryMain: {
+    title: 'Glossary — Main-isolate time',
+    subtitle: 'The time actually spent on the calling / UI isolate.',
+    summary: 'This is the portion of work that runs on the main isolate, which is the frame budget that matters most for Flutter smoothness.',
+    methodology: [
+      'Reported separately from wall time where the benchmark can isolate it cleanly.',
+      'For synchronous libraries like sqlite3, main-isolate time is effectively the same as wall time because all work happens inline.',
+    ],
+    readItAs: [
+      'This is the best metric for “will this jank my UI?”',
+      'A library can have decent wall time but still be bad here if it decodes or materializes too much on the main isolate.',
+    ],
+  },
+  glossaryTail: {
+    title: 'Glossary — p50 / p90',
+    subtitle: 'Median versus tail latency.',
+    summary: 'p50 is the median result — the middle of the distribution. p90 is the slower tail — the point below which 90% of runs finished.',
+    methodology: [
+      'Used mostly on scenario charts where a bursty or reactive workload can have a very different tail than its median.',
+      'Tail metrics help catch regressions that do not move the average much but still make the app feel unpredictable.',
+    ],
+    readItAs: [
+      'If p50 is good but p90 is bad, the common case is fine but the slow-path still hurts.',
+      'For user-facing workloads, stable tail behavior often matters as much as the headline median.',
+    ],
+  },
+  scaleMaps: {
+    title: 'Select → Maps (wall time)',
+    subtitle: 'How long a normal row-materializing query takes as result size grows.',
+    summary: 'This is the default `select()` path returning lazy row views over map-like access. It answers the basic question: if you ask for more rows, how quickly does end-to-end query time scale?',
+    methodology: [
+      'Same SQL shape across peers, measured at multiple result sizes from tiny to large.',
+      'Reports wall-clock time, not just raw SQLite execution, so Dart-side decode and transfer costs are included.',
+      'Best used to compare growth curves, not just the final point.',
+    ],
+    readItAs: [
+      'A flatter curve means less per-row overhead and better scaling.',
+      'If two libraries are close at 100 rows but diverge at 10K, the loser is paying more decode or transfer cost per row.',
+    ],
+  },
+  scaleBytes: {
+    title: 'Select → JSON Bytes (wall time)',
+    subtitle: 'How long it takes to return JSON-ready bytes as results grow.',
+    summary: 'This chart measures the bytes-oriented fast path. For resqlite, `selectBytes()` keeps JSON serialization off the main isolate and avoids per-row Dart object materialization.',
+    methodology: [
+      'Measures end-to-end wall time for the JSON/bytes path across multiple row counts.',
+      'Competes against peer libraries using their idiomatic JSON-serving path rather than a synthetic no-work baseline.',
+    ],
+    readItAs: [
+      'Useful if your app or server wants to send JSON directly rather than iterate rows in Dart.',
+      'Large gaps here usually mean serialization overhead, not raw SQLite cost.',
+    ],
+  },
+  mainMaps: {
+    title: 'Main-Isolate Time — Maps',
+    subtitle: 'What the UI thread actually pays for `select()` results.',
+    summary: 'Wall time can be low while the UI thread still does too much work. This chart isolates the time spent on the calling/main isolate for normal map-like query results.',
+    methodology: [
+      'Measures only main-thread work, not total query latency.',
+      'Sync libraries report main == wall by construction; async libraries can keep this near zero if they offload correctly.',
+    ],
+    readItAs: [
+      'This is the chart to care about if you are worried about dropped frames in Flutter.',
+      'A low main-thread number means result transfer and row access are staying off the UI thread.',
+    ],
+  },
+  mainBytes: {
+    title: 'Main-Isolate Time — Bytes',
+    subtitle: 'UI-thread cost for the JSON-bytes fast path.',
+    summary: 'This shows whether JSON-serving work comes back to the main isolate or stays off-thread. resqlite’s `selectBytes()` is designed to keep this path effectively off the UI thread.',
+    methodology: [
+      'Same workload family as the bytes wall-time chart, but only the main-isolate slice is plotted.',
+      'Particularly relevant for Flutter apps building HTTP responses or large payloads without object materialization.',
+    ],
+    readItAs: [
+      'Near-zero values mean the UI thread stays almost entirely free.',
+      'High values here indicate the library is decoding or building JSON on the main isolate.',
+    ],
+  },
+  schemas: {
+    title: 'Wall Time by Schema Shape',
+    subtitle: 'How different row shapes change query cost at 1K rows.',
+    summary: 'Different schemas stress different parts of the runtime: numeric-heavy rows test boxing and decode, text-heavy rows test allocation and string handling, and wide rows test object-count overhead.',
+    methodology: [
+      'All variants return 1,000 rows but vary the column mix: narrow, wide, text-heavy, numeric-heavy, and nullable.',
+      'Same schema shapes are replayed across peers to show where the representation pays off or falls down.',
+    ],
+    readItAs: [
+      'If a library is good only on narrow rows, this chart exposes it quickly.',
+      'The spread between shapes is often more informative than the absolute winner.',
+    ],
+  },
+  singleInserts: {
+    title: 'Single Inserts (100 sequential)',
+    subtitle: 'Per-write overhead when writes are issued one at a time.',
+    summary: 'This is the simplest write workload: 100 inserts executed sequentially with no batching help. It highlights fixed protocol overhead and transaction management cost.',
+    methodology: [
+      'Runs 100 sequential single-row inserts with no batching or explicit transaction wrapping.',
+      'Useful as a write-floor benchmark rather than a throughput benchmark.',
+    ],
+    readItAs: [
+      'If your app does lots of tiny writes, this chart matters.',
+      'Do not confuse this with bulk-write performance — that is what the batch charts are for.',
+    ],
+  },
+  batchInserts: {
+    title: 'Batch Inserts (wall time)',
+    subtitle: 'Throughput when many writes can be amortized together.',
+    summary: 'This chart measures how efficiently each library handles grouped write workloads. It rewards low per-row overhead and good batching strategy.',
+    methodology: [
+      'Includes 3 batch sizes: 100 rows, 1,000 rows, and 10,000 rows.',
+      'Each point measures one grouped insert workload at that batch size, so you can see whether a library keeps scaling or falls off at larger batches.',
+      'Measures end-to-end wall time, not just the inner SQLite step loop.',
+    ],
+    readItAs: [
+      'A close race here means the libraries are all using SQLite efficiently at scale.',
+      'Big differences are usually protocol or batching overhead, not raw SQL speed.',
+    ],
+  },
+  txWrites: {
+    title: 'Transaction Writes',
+    subtitle: 'Write-heavy work performed inside an open transaction.',
+    summary: 'Some libraries are fast for standalone writes but lose their edge inside a transaction. This chart checks whether batched writes still stay cheap when you move into transactional code.',
+    methodology: [
+      'Measures batched write work inside a transaction at 2 scales: 100 rows and 1,000 rows.',
+      'Includes both transaction-batch APIs and looped transaction writes where the peer exposes them.',
+    ],
+    readItAs: [
+      'Useful if your app groups business logic into transactions instead of fire-and-forget writes.',
+      'Large gaps here often indicate transaction API overhead or poor batching inside the transaction path.',
+    ],
+  },
+  txReads: {
+    title: 'Transaction Reads',
+    subtitle: 'Read latency inside a transaction where uncommitted writes are visible.',
+    summary: 'Transaction reads are a separate workload from ordinary reads because the library has to preserve the right snapshot semantics while still staying fast.',
+    methodology: [
+      'Runs reads through the transaction API instead of the normal top-level query API, at 500-row and 1,000-row result sizes.',
+      'Measures the read side of “write something, then read your own writes” style code.',
+    ],
+    readItAs: [
+      'Important if you do multi-step business logic in one transaction.',
+      'A library that is fast on normal reads can still pay extra here if the transaction API is heavy.',
+    ],
+  },
+  concurrentReads: {
+    title: 'Concurrent Reads (1K rows each)',
+    subtitle: 'How read latency grows when multiple queries overlap.',
+    summary: 'This chart measures total wall time as the number of simultaneous 1K-row queries increases. It exposes whether the library has real read concurrency or just serializes work behind a single lane.',
+    methodology: [
+      'Runs the same 1,000-row query at 1×, 2×, 4×, and 8× concurrency.',
+      'Plots total wall time, so flatter curves mean better parallel read behavior.',
+    ],
+    readItAs: [
+      'If the line climbs sharply, the library is queueing or thrashing under concurrent load.',
+      'This is a better read-concurrency signal than a single-query microbenchmark.',
+    ],
+  },
+  parameterized: {
+    title: 'Parameterized Queries',
+    subtitle: '100 queries × ~500 rows each with changing bind values.',
+    summary: 'This benchmark reuses the same query shape many times while changing parameters. It is mainly about statement caching and repeated query overhead, not point-query throughput.',
+    methodology: [
+      'Runs 100 parameterized queries back-to-back, each returning roughly 500 rows.',
+      'Includes both sqlite3 without statement caching and sqlite3 with an explicitly cached statement to show what caching alone buys.',
+      'Measures the repeated-query path rather than one giant query or one tiny point lookup.',
+    ],
+    readItAs: [
+      'If a library is good at reusing prepared work, it should do well here.',
+      'This chart is not about “queries with placeholders” in the abstract — it is about repeated medium-sized queries where caching matters.',
+    ],
+  },
+  pointQps: {
+    title: 'Point Query Throughput',
+    subtitle: 'Queries per second for single-row primary-key lookups.',
+    summary: 'This is the throughput-floor chart: how many tiny point queries the library can dispatch and complete per second when the SQL work itself is minimal.',
+    methodology: [
+      'Runs a high-volume stream of single-row primary-key lookups and reports queries/sec.',
+      'Higher is better here, unlike the latency charts.',
+      'Useful as a dispatch-overhead sanity check rather than a realistic app mix.',
+    ],
+    readItAs: [
+      'Big wins here usually mean lower per-query protocol overhead.',
+      'Treat this as a floor metric, not a substitute for app-shaped scenario charts.',
+    ],
+  },
+  streamWake: {
+    title: 'Stream Wake-up & Fan-out',
+    subtitle: 'How fast streams initialize, wake up, and avoid wasted work under small fan-out.',
+    summary: 'This group focuses on the stream invalidation engine: initial subscription cost, wake-up latency after writes, and whether mostly-unchanged fan-out stays cheap.',
+    methodology: [
+      'Splits the original streaming bundle into focused wake-up metrics: initial emission, invalidation latency, unchanged fan-out throughput (1 canary + 10 unchanged streams), and 10-stream fan-out.',
+      'All values are wall-clock medians in ms. Lower is better.',
+    ],
+    readItAs: [
+      'Use this to judge the “feel” of the reactive engine: how fast it wakes up and whether common no-op invalidations stay cheap.',
+      'If unchanged fan-out is expensive, the stream engine is doing too much redundant work.',
+    ],
+  },
+  streamChurn: {
+    title: 'Subscription Churn',
+    subtitle: 'The cost of repeatedly creating and tearing down streams.',
+    summary: 'Not every app holds streams forever. This chart isolates the overhead of subscribe/cancel cycles and repeated stream lifecycle management.',
+    methodology: [
+      'Combines two lifecycle-focused tests: stream churn (100 cycles) and stream subscription rate (500 subscribe+cancel cycles).',
+      'Useful for screens that mount/unmount frequently or view models that rebuild reactive queries often.',
+    ],
+    readItAs: [
+      'Large numbers here usually mean stream setup/teardown is heavier than it should be.',
+      'This is separate from invalidation cost while streams stay alive.',
+    ],
+  },
+  streamWriteCost: {
+    title: 'Streaming Write-side Cost',
+    subtitle: 'What writes cost with no active streams versus a large watched stream.',
+    summary: 'Some write paths are cheap until streams exist; others pay almost nothing when there are no listeners but slow down once a large watched result set must settle. This chart shows both.',
+    methodology: [
+      'Includes no-streams write throughput (200 inserts, no active streams) and growing-stream invalidation (batch-insert 100 rows into a watched stream).',
+      'These two metrics answer different questions: the pure no-listener floor and the cost to settle a watched stream after a write burst.',
+    ],
+    readItAs: [
+      'If no-stream writes are already slow, the base protocol is heavy.',
+      'If growing-stream invalidation is slow, the reactive engine is doing too much work after writes land.',
+    ],
+  },
+};
+
+const GROUPED_BAR_LABELS = {
+  'Schema Shapes': {
+    'Narrow (2 cols: id + int)': 'Narrow · 2 cols',
+    'Wide (20 cols: mixed types)': 'Wide · 20 cols',
+    'Text-heavy (4 long TEXT cols)': 'Text-heavy · 4 TEXT',
+    'Numeric-heavy (5 numeric cols)': 'Numeric-heavy · 5 cols',
+    'Nullable (50% NULLs)': 'Nullable · 50% NULL',
+  },
+  'Batch Insert': {
+    '100 rows': '100',
+    '1000 rows': '1K',
+    '10000 rows': '10K',
+  },
+  'Batched Write Inside Transaction': {
+    '100 rows': '100',
+    '1000 rows': '1K',
+  },
+  'Transaction Read': {
+    '500 rows': '500',
+    '1000 rows': '1K',
+  },
+  'Chat Sim': {
+    'Insert message': 'Insert message',
+    'Update conversation': 'Update conversation',
+    'Fetch last-20 messages (JOIN users)': 'Fetch last-20',
+    'Fetch user by PK': 'Fetch user by PK',
+  },
+  'Feed Paging': {
+    'Keyset pagination (20 pages × 50 rows)': 'Keyset pagination',
+    'Reactive feed with 100 concurrent writes': 'Reactive feed',
+  },
+  'Column Granularity': {
+    'Disjoint column writes (SET c = ?)': 'Disjoint writes',
+    'Overlapping column writes (SET a = ?)': 'Overlapping writes',
+  },
+  'Keyed PK Subscriptions': {
+    '50 streams × 200 random-PK writes': '50 streams × 200 writes',
+  },
+  'High-Cardinality Stream Fan-out': {
+    '100 streams × 200 writes': '100 streams × 200 writes',
+  },
+  'Sync Burst': {
+    'Bulk insert: 50000 rows × 500-row chunks': 'Bulk insert',
+    'Merge rounds: 10 × 100 rows': 'Merge rounds',
+    'Stream emissions during burst (COUNT(*))': 'Stream emissions',
+  },
+  'Large Working Set': {
+    'Warm cache (5 rounds)': 'Warm cache',
+    'Cold cache (3 rounds with shrink_memory)': 'Cold cache',
+  },
+};
+
+const GROUPED_BAR_AXIS_TITLES = {
+  'Schema Shapes': 'Schema shape',
+  'Batch Insert': 'Rows inserted',
+  'Batched Write Inside Transaction': 'Rows written',
+  'Transaction Read': 'Rows read',
+  'Chat Sim': 'Operation',
+  'Feed Paging': 'Sub-scenario',
+  'Column Granularity': 'Write pattern',
+  'Keyed PK Subscriptions': 'Workload',
+  'High-Cardinality Stream Fan-out': 'Workload',
+  'Sync Burst': 'Phase',
+  'Large Working Set': 'Cache state',
+};
+
+function shortRowCountLabel(raw) {
+  const label = `${raw ?? ''}`.replace(' rows', '').trim();
+  if (label === '1000') return '1K';
+  if (label === '10000') return '10K';
+  return label;
+}
+
+function chartCard({ title, desc, detailKey, canvasId, size = 'short', focusId = '' }) {
+  return `
+    <div class="card"${focusId ? ` data-focus="${focusId}"` : ''}>
+      <div class="card-head">
+        <h2>${title}</h2>
+        <button class="chart-detail-btn" data-detail="${detailKey}">Full details</button>
+      </div>
+      <p class="desc">${desc}</p>
+      <div class="chart-wrap ${size}"><canvas id="${canvasId}"></canvas></div>
+    </div>
+  `;
+}
+
+function chartCardWithWhy({ title, desc, why = '', detailKey, canvasId, size = 'short', focusId = '' }) {
+  return `
+    <div class="card"${focusId ? ` data-focus="${focusId}"` : ''}>
+      <div class="card-head">
+        <h2>${title}</h2>
+        <button class="chart-detail-btn" data-detail="${detailKey}">Full details</button>
+      </div>
+      <p class="desc">${desc}</p>
+      ${why ? `<p class="why"><strong>Why this matters:</strong> ${why}</p>` : ''}
+      <div class="chart-wrap ${size}"><canvas id="${canvasId}"></canvas></div>
+    </div>
+  `;
+}
+
+function openDetailModal(detailKey) {
+  const detail = CHART_DETAILS[detailKey];
+  if (!detail) return;
+  document.getElementById('detailModalTitle').textContent = detail.title;
+  document.getElementById('detailModalSubtitle').textContent = detail.subtitle || '';
+  document.getElementById('detailModalBody').innerHTML = `
+    <p>${detail.summary}</p>
+    <h3>Methodology</h3>
+    <ul>${(detail.methodology || []).map(line => `<li>${line}</li>`).join('')}</ul>
+    <h3>How To Read It</h3>
+    <ul>${(detail.readItAs || []).map(line => `<li>${line}</li>`).join('')}</ul>
+  `;
+  document.getElementById('detailModalBackdrop').classList.remove('hidden');
+}
+
+function closeDetailModal() {
+  document.getElementById('detailModalBackdrop').classList.add('hidden');
+}
+
 // Returns a {color, short} pair depending on the current view mode. Peer mode
 // uses the library palette (blue/orange/purple); runs and devices modes cycle
 // through a generic palette keyed off the series registry.
@@ -371,7 +869,7 @@ function seriesMeta(name, mode) {
   return seriesRegistry.get(name);
 }
 
-function barOpts(yLabel, { valueLabels = false } = {}) {
+function barOpts(yLabel, { valueLabels = false, xLabel = '' } = {}) {
   return {
     responsive: true, maintainAspectRatio: false,
     layout: { padding: { top: valueLabels ? 16 : 0 } },
@@ -380,7 +878,10 @@ function barOpts(yLabel, { valueLabels = false } = {}) {
       barValueLabels: valueLabels,
     },
     scales: {
-      x: { grid: { display: false } },
+      x: {
+        title: xLabel ? { display: true, text: xLabel } : { display: false },
+        grid: { display: false },
+      },
       y: { title: { display: true, text: yLabel }, grid: { color: '#21262d' }, beginAtZero: true },
     },
   };
@@ -418,6 +919,69 @@ let currentKind = 'micro';   // 'micro' | 'scenarios'
 let currentScenarioId = 'chatSim'; // default scenario; overwritten on dropdown change
 let currentDeviceIdx = 0;
 let runsCount = 3;
+let currentFocus = '';
+
+function loadStateFromUrl(deviceCount) {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get('mode');
+  const kind = params.get('kind');
+  const scenario = params.get('scenario');
+  const focus = params.get('focus');
+  const device = parseInt(params.get('device') || '0', 10);
+  const runs = parseInt(params.get('runs') || '3', 10);
+
+  if (['peer', 'runs', 'devices'].includes(mode)) currentMode = mode;
+  if (['micro', 'scenarios'].includes(kind)) currentKind = kind;
+  if (scenario) currentScenarioId = scenario;
+  if (focus) currentFocus = focus;
+  if (!Number.isNaN(device)) currentDeviceIdx = Math.max(0, Math.min(deviceCount - 1, device));
+  if (!Number.isNaN(runs)) runsCount = Math.max(2, Math.min(10, runs));
+}
+
+function syncUrlState() {
+  const params = new URLSearchParams();
+  params.set('device', String(currentDeviceIdx));
+  params.set('mode', currentMode);
+  params.set('kind', currentKind);
+  if (currentKind === 'scenarios') params.set('scenario', currentScenarioId);
+  if (currentMode === 'runs') params.set('runs', String(runsCount));
+  if (currentFocus) params.set('focus', currentFocus);
+  const next = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState(null, '', next);
+}
+
+function applyFocusTarget() {
+  if (!currentFocus) return;
+  const target = document.querySelector(`[data-focus="${CSS.escape(currentFocus)}"]`);
+  if (!target) return;
+  target.classList.remove('focused');
+  void target.offsetWidth;
+  target.classList.add('focused');
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function ensureRunsModeReady() {
+  if (historyData) return;
+  const runsButton = document.querySelector('#modeTabs button[data-mode="runs"]');
+  if (runsButton) runsButton.textContent = 'Loading…';
+  try {
+    const r = await fetch('../experiments/history.json', { cache: 'no-store' });
+    historyData = await r.json();
+  } catch (e) {
+    historyData = { runs: [] };
+  }
+  if (runsButton) {
+    runsButton.replaceChildren();
+    runsButton.appendChild(document.createTextNode('Last '));
+    const input = document.createElement('input');
+    input.type = 'number'; input.id = 'runsCount';
+    input.min = '2'; input.max = '10'; input.value = String(runsCount);
+    input.addEventListener('click', (ev) => ev.stopPropagation());
+    runsButton.appendChild(input);
+    runsButton.appendChild(document.createTextNode(' runs'));
+    wireRunsInput();
+  }
+}
 
 async function init() {
   try {
@@ -434,6 +998,8 @@ async function init() {
     return;
   }
 
+  loadStateFromUrl(devices.length);
+
   const select = document.getElementById('deviceSelect');
   // Build <option> elements via DOM APIs rather than innerHTML so that
   // device names/dates (sourced from a contributor-editable markdown table)
@@ -447,29 +1013,13 @@ async function init() {
     select.appendChild(option);
   });
   select.addEventListener('change', () => { currentDeviceIdx = +select.value; render(); });
+  select.value = String(currentDeviceIdx);
 
   document.querySelectorAll('#modeTabs button').forEach(btn => {
     btn.addEventListener('click', async () => {
       const mode = btn.dataset.mode;
       if (mode === currentMode) return;
-      if (mode === 'runs' && !historyData) {
-        btn.textContent = 'Loading…';
-        try {
-          const r = await fetch('../experiments/history.json', { cache: 'no-store' });
-          historyData = await r.json();
-        } catch (e) {
-          historyData = { runs: [] };
-        }
-        btn.replaceChildren();
-        btn.appendChild(document.createTextNode('Last '));
-        const input = document.createElement('input');
-        input.type = 'number'; input.id = 'runsCount';
-        input.min = '2'; input.max = '10'; input.value = String(runsCount);
-        input.addEventListener('click', (ev) => ev.stopPropagation());
-        btn.appendChild(input);
-        btn.appendChild(document.createTextNode(' runs'));
-        wireRunsInput();
-      }
+      if (mode === 'runs') await ensureRunsModeReady();
       currentMode = mode;
       document.querySelectorAll('#modeTabs button').forEach(b => b.classList.toggle('active', b === btn));
       render();
@@ -485,6 +1035,20 @@ async function init() {
       document.querySelectorAll('#kindTabs button').forEach(b => b.classList.toggle('active', b === btn));
       render();
     });
+  });
+
+  document.querySelectorAll('.helper-pill').forEach(btn => {
+    btn.addEventListener('click', () => openDetailModal(btn.dataset.detail));
+  });
+
+  if (currentMode === 'runs') {
+    await ensureRunsModeReady();
+  }
+  document.querySelectorAll('#modeTabs button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === currentMode);
+  });
+  document.querySelectorAll('#kindTabs button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.kind === currentKind);
   });
 
   render();
@@ -678,6 +1242,8 @@ function renderView(dev, view) {
   } else {
     renderMicrobenchmarksView(B);
   }
+  syncUrlState();
+  requestAnimationFrame(() => applyFocusTarget());
 }
 
 // ── Microbenchmarks view — the core per-API charts (select, write,
@@ -688,42 +1254,149 @@ function renderMicrobenchmarksView(B) {
 
   // 1. Scaling curves (line charts).
   html += '<h3 class="section-title">Scaling Curves</h3><div class="grid">';
-  html += '<div class="card"><h2>Select &rarr; Maps (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cScaleMaps"></canvas></div></div>';
-  html += '<div class="card"><h2>Select &rarr; JSON Bytes (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cScaleBytes"></canvas></div></div>';
+  html += chartCard({
+    title: 'Select → Maps (wall time)',
+    desc: 'End-to-end `select()` cost as result size grows. Lower is better.',
+    detailKey: 'scaleMaps',
+    canvasId: 'cScaleMaps',
+    size: 'tall',
+    focusId: 'scaleMaps',
+  });
+  html += chartCard({
+    title: 'Select → JSON Bytes (wall time)',
+    desc: 'JSON/bytes path cost as result size grows. Lower is better.',
+    detailKey: 'scaleBytes',
+    canvasId: 'cScaleBytes',
+    size: 'tall',
+    focusId: 'scaleBytes',
+  });
   html += '</div>';
 
   // 2. Main-isolate cost.
   html += '<h3 class="section-title">Main-Isolate Cost</h3><div class="grid">';
-  html += '<div class="card"><h2>Main-Isolate Time &mdash; Maps</h2><p class="desc">Time on the UI thread. Lower is better.</p><div class="chart-wrap short"><canvas id="cMainMaps"></canvas></div></div>';
-  html += '<div class="card"><h2>Main-Isolate Time &mdash; Bytes</h2><p class="desc">resqlite: zero-copy via Isolate.exit.</p><div class="chart-wrap short"><canvas id="cMainBytes"></canvas></div></div>';
+  html += chartCard({
+    title: 'Main-Isolate Time — Maps',
+    desc: 'UI-thread work for normal query results. Lower is better.',
+    detailKey: 'mainMaps',
+    canvasId: 'cMainMaps',
+    focusId: 'mainMaps',
+  });
+  html += chartCard({
+    title: 'Main-Isolate Time — Bytes',
+    desc: 'UI-thread work for the JSON bytes path. Lower is better.',
+    detailKey: 'mainBytes',
+    canvasId: 'cMainBytes',
+    focusId: 'mainBytes',
+  });
   html += '</div>';
 
   // 3. Schema shapes.
   html += '<h3 class="section-title">Schema Shapes (1K rows)</h3><div class="grid full">';
-  html += '<div class="card"><h2>Wall Time by Schema Shape</h2><p class="desc">Lower is better.</p><div class="chart-wrap tall"><canvas id="cSchemas"></canvas></div></div>';
+  html += chartCard({
+    title: 'Wall Time by Schema Shape',
+    desc: 'How row shape changes query cost at a fixed 1K rows. Lower is better.',
+    detailKey: 'schemas',
+    canvasId: 'cSchemas',
+    size: 'tall',
+    focusId: 'schemas',
+  });
   html += '</div>';
 
   // 4. Writes.
   html += '<h3 class="section-title">Write Performance</h3><div class="grid">';
-  html += '<div class="card"><h2>Single Inserts (100 sequential)</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cSingleInserts"></canvas></div></div>';
-  html += '<div class="card"><h2>Batch Inserts (wall time)</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cBatchInserts"></canvas></div></div>';
+  html += chartCard({
+    title: 'Single Inserts (100 sequential)',
+    desc: 'Fixed write-path overhead with no batching help. Lower is better.',
+    detailKey: 'singleInserts',
+    canvasId: 'cSingleInserts',
+    focusId: 'singleInserts',
+  });
+  html += chartCard({
+    title: 'Batch Inserts (wall time)',
+    desc: 'Write throughput once many inserts can be amortized together. Lower is better.',
+    detailKey: 'batchInserts',
+    canvasId: 'cBatchInserts',
+    focusId: 'batchInserts',
+  });
   html += '</div><div class="grid">';
-  html += '<div class="card"><h2>Transaction Writes</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cTxWrites"></canvas></div></div>';
-  html += '<div class="card"><h2>Transaction Reads</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cTxReads"></canvas></div></div>';
+  html += chartCard({
+    title: 'Transaction Writes',
+    desc: 'Write-heavy work performed through the transaction API path.',
+    detailKey: 'txWrites',
+    canvasId: 'cTxWrites',
+    focusId: 'txWrites',
+  });
+  html += chartCard({
+    title: 'Transaction Reads',
+    desc: 'Read latency inside a transaction where uncommitted writes are visible.',
+    detailKey: 'txReads',
+    canvasId: 'cTxReads',
+    focusId: 'txReads',
+  });
   html += '</div>';
 
   // 5. Concurrent & parameterized.
   html += '<h3 class="section-title">Concurrent Reads &amp; Parameterized Queries</h3><div class="grid">';
-  html += '<div class="card"><h2>Concurrent Reads (1K rows each)</h2><p class="desc">Total wall time. Lower is better.</p><div class="chart-wrap short"><canvas id="cConcurrent"></canvas></div></div>';
-  html += '<div class="card"><h2>Parameterized Queries</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cParam"></canvas></div></div>';
+  html += chartCardWithWhy({
+    title: 'Concurrent Reads (1K rows each)',
+    desc: 'Total wall time as 1K-row queries overlap at higher concurrency.',
+    why: 'This is the quickest read-concurrency sanity check: a steep curve means the library is queueing or thrashing instead of reading in parallel.',
+    detailKey: 'concurrentReads',
+    canvasId: 'cConcurrent',
+    focusId: 'concurrentReads',
+  });
+  html += chartCardWithWhy({
+    title: 'Parameterized Queries',
+    desc: '100 repeated parameterized queries (~500 rows each); statement caching matters here.',
+    why: 'If your app issues the same query shape over and over with different bind values, this chart tells you whether caching and repeated-query overhead are under control.',
+    detailKey: 'parameterized',
+    canvasId: 'cParam',
+    focusId: 'parameterized',
+  });
+  html += '</div>';
+
+  // 5b. Throughput floor.
+  html += '<h3 class="section-title">Throughput Floor</h3><div class="grid full">';
+  html += chartCard({
+    title: 'Point Query Throughput',
+    desc: 'Single-row lookup throughput. Higher is better.',
+    detailKey: 'pointQps',
+    canvasId: 'cPointQps',
+    focusId: 'pointQps',
+  });
   html += '</div>';
 
   // 6. Streaming.
   html += '<h3 class="section-title">Streaming &amp; Reactivity</h3><div class="grid">';
-  html += '<div class="card"><h2>Stream Lifecycle</h2><p class="desc">Lower is better.</p><div class="chart-wrap short"><canvas id="cStreaming"></canvas></div></div>';
+  html += chartCard({
+    title: 'Stream Wake-up & Fan-out',
+    desc: 'Initial subscribe cost, wake-up latency, and small-fanout invalidation behavior.',
+    detailKey: 'streamWake',
+    canvasId: 'cStreamWake',
+    focusId: 'streamWake',
+  });
+  html += chartCard({
+    title: 'Subscription Churn',
+    desc: 'Repeated subscribe/cancel cycles and stream lifecycle overhead.',
+    detailKey: 'streamChurn',
+    canvasId: 'cStreamChurn',
+    focusId: 'streamChurn',
+  });
+  html += '</div><div class="grid">';
+  html += chartCard({
+    title: 'Streaming Write-side Cost',
+    desc: 'Write cost with no listeners versus a large watched stream that must settle.',
+    detailKey: 'streamWriteCost',
+    canvasId: 'cStreamWriteCost',
+    focusId: 'streamWriteCost',
+  });
   html += '</div>';
 
   container.innerHTML = html;
+
+  container.querySelectorAll('.chart-detail-btn').forEach(btn => {
+    btn.onclick = () => openDetailModal(btn.dataset.detail);
+  });
 
   // ── Populate charts ──
   buildScaling(B, 'Select \u2192 Maps', 'cScaleMaps');
@@ -737,7 +1410,32 @@ function renderMicrobenchmarksView(B) {
   buildGroupedBar(B, 'Transaction Read', 'cTxReads');
   buildConcurrent(B, 'cConcurrent');
   buildSingleBar(B, 'Parameterized', 'cParam');
-  buildStreaming(B, 'cStreaming');
+  buildPointThroughput(B, 'cPointQps');
+  buildStreamingSubset(B, 'cStreamWake', [
+    'Initial Emission',
+    'Invalidation Latency',
+    'Unchanged Fanout Throughput (1 canary + 10 unchanged streams)',
+    'Fan-out (10 streams)',
+  ], {
+    'Initial Emission': 'Initial emission',
+    'Invalidation Latency': 'Invalidation latency',
+    'Unchanged Fanout Throughput (1 canary + 10 unchanged streams)': 'Unchanged fan-out',
+    'Fan-out (10 streams)': '10-stream fan-out',
+  });
+  buildStreamingSubset(B, 'cStreamChurn', [
+    'Stream Churn (100 cycles)',
+    'Stream Subscription Rate (500 subscribe+cancel cycles)',
+  ], {
+    'Stream Churn (100 cycles)': 'Stream churn',
+    'Stream Subscription Rate (500 subscribe+cancel cycles)': 'Subscribe/cancel rate',
+  });
+  buildStreamingSubset(B, 'cStreamWriteCost', [
+    'No-Streams Write Throughput (200 inserts, no active streams)',
+    'Growing-Stream Invalidation (batch-insert 100 into watched stream)',
+  ], {
+    'No-Streams Write Throughput (200 inserts, no active streams)': 'No-stream writes',
+    'Growing-Stream Invalidation (batch-insert 100 into watched stream)': 'Watched batch insert',
+  });
 }
 
 // ── Scenarios view — realistic app-shaped workloads rather than isolated
@@ -955,6 +1653,7 @@ function renderScenariosView(B) {
   document.getElementById('scenarioSelect').addEventListener('change', (ev) => {
     currentScenarioId = ev.target.value;
     renderScenarioDetail(B);
+    syncUrlState();
   });
   renderScenarioDetail(B);
 }
@@ -974,7 +1673,7 @@ function renderScenarioDetail(B) {
     : '';
 
   let html = '';
-  html += `<div class="card">
+  html += `<div class="card" data-focus="scenario-${scenario.id}">
     <h2 style="font-size: 1.15rem;">${scenario.title}${badge}</h2>
     <p class="desc" style="font-size: 0.88rem; line-height: 1.6; margin-bottom: 1rem;">${scenario.description}</p>
   `;
@@ -1078,7 +1777,7 @@ function collectSeries(sections, valueIndex) {
 function buildScaling(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
-  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+  const labels = sections.map(s => shortRowCountLabel(s.subtitle));
   const libs = collectSeries(sections, 0);
   const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, borderColor: d.color, backgroundColor: d.color + '33',
@@ -1093,7 +1792,7 @@ function buildScaling(B, titleMatch, canvasId) {
 function buildMainIsolate(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
-  const labels = sections.map(s => s.subtitle?.replace(' rows', ''));
+  const labels = sections.map(s => shortRowCountLabel(s.subtitle));
   const libs = collectSeries(sections, 2);
   // Leave missing values as null (not 0) so Chart.js skips the bar and the
   // winner/value-label plugins don't treat "missing" as a genuine zero.
@@ -1102,7 +1801,7 @@ function buildMainIsolate(B, titleMatch, canvasId) {
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar', data: { labels, datasets },
-    options: barOpts('Main-isolate time (ms)', { valueLabels: true }),
+    options: barOpts('Main-isolate time (ms)', { valueLabels: true, xLabel: 'Rows returned' }),
   }));
 }
 
@@ -1110,13 +1809,19 @@ function buildMainIsolate(B, titleMatch, canvasId) {
 function buildGroupedBar(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.key?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
-  const labels = sections.map(s => s.subtitle?.split('(')[0]?.trim() || s.subtitle);
+  const labelMap = GROUPED_BAR_LABELS[titleMatch] || null;
+  const xLabel = GROUPED_BAR_AXIS_TITLES[titleMatch] || '';
+  const labels = sections.map(s => {
+    if (!s.subtitle) return '';
+    if (labelMap && labelMap[s.subtitle]) return labelMap[s.subtitle];
+    return s.subtitle;
+  });
   const libs = collectSeries(sections, 0);
   const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
-    type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)'),
+    type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)', { xLabel }),
   }));
 }
 
@@ -1126,7 +1831,13 @@ function buildGroupedBar(B, titleMatch, canvasId) {
 function buildGroupedBarAt(B, titleMatch, canvasId, valueIndex, yLabel) {
   const sections = B.filter(s => s.key?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
-  const labels = sections.map(s => s.subtitle?.split('(')[0]?.trim() || s.subtitle);
+  const labelMap = GROUPED_BAR_LABELS[titleMatch] || null;
+  const xLabel = GROUPED_BAR_AXIS_TITLES[titleMatch] || '';
+  const labels = sections.map(s => {
+    if (!s.subtitle) return '';
+    if (labelMap && labelMap[s.subtitle]) return labelMap[s.subtitle];
+    return s.subtitle;
+  });
   const libs = collectSeries(sections, valueIndex);
   // Drop series that have no data at this column (e.g. sync peers at main p50
   // where main == wall is already reported under wall p50). Avoids a flat
@@ -1139,12 +1850,12 @@ function buildGroupedBarAt(B, titleMatch, canvasId, valueIndex, yLabel) {
     label: name, data: d.data, backgroundColor: d.color,
   }));
   allCharts.push(new Chart(document.getElementById(canvasId), {
-    type: 'bar', data: { labels, datasets }, options: barOpts(yLabel, { valueLabels: true }),
+    type: 'bar', data: { labels, datasets }, options: barOpts(yLabel, { valueLabels: true, xLabel }),
   }));
 }
 
 // Single-section bar (single inserts, parameterized).
-function buildSingleBar(B, titleMatch, canvasId) {
+function buildSingleBar(B, titleMatch, canvasId, { yLabel = 'Wall time (ms)', higherBetter = false } = {}) {
   const sec = B.find(s => s.key?.includes(titleMatch));
   if (!sec) { renderEmptyCanvas(canvasId); return; }
   const deduped = {};
@@ -1153,7 +1864,9 @@ function buildSingleBar(B, titleMatch, canvasId) {
     const name = meta.short;
     const v = e.values[0];
     if (v == null) continue;
-    if (!deduped[name] || v < deduped[name].v) deduped[name] = { v, color: meta.color };
+    if (!deduped[name] || (higherBetter ? v > deduped[name].v : v < deduped[name].v)) {
+      deduped[name] = { v, color: meta.color };
+    }
   }
   const entries = Object.entries(deduped);
   const labels = entries.map(([name]) => name);
@@ -1162,7 +1875,33 @@ function buildSingleBar(B, titleMatch, canvasId) {
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
-    options: { ...barOpts('Wall time (ms)'), plugins: { legend: { display: false } } },
+    options: { ...barOpts(yLabel), plugins: { legend: { display: false } } },
+  }));
+}
+
+function buildPointThroughput(B, canvasId) {
+  const sec =
+    B.find(s => s.key === 'Point Query Throughput / QPS + MDE') ||
+    B.find(s => s.key === 'Point Query Throughput');
+  if (!sec) { renderEmptyCanvas(canvasId); return; }
+
+  const rows = sec.entries
+    .filter(e => e.values?.[0] != null)
+    .filter(e => currentMode !== 'peer' || !String(e.library).toLowerCase().includes('metric'))
+    .map(e => {
+      const meta = seriesMeta(e.library, currentMode);
+      return { label: meta.short, value: e.values[0], color: meta.color };
+    });
+
+  if (!rows.length) { renderEmptyCanvas(canvasId); return; }
+
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => r.label),
+      datasets: [{ label: 'Queries/sec', data: rows.map(r => r.value), backgroundColor: rows.map(r => r.color) }],
+    },
+    options: { ...barOpts('Queries/sec'), plugins: { legend: { display: false } } },
   }));
 }
 
@@ -1228,11 +1967,15 @@ function buildConcurrent(B, canvasId) {
 }
 
 // Streaming — multiple sub-sections.
-function buildStreaming(B, canvasId) {
-  const sections = B.filter(s => s.title === 'Streaming' && s.subtitle);
+function buildStreamingSubset(B, canvasId, subtitles, labelMap = {}) {
+  const want = new Set(subtitles);
+  const sections = B.filter(s => s.title === 'Streaming' && s.subtitle && want.has(s.subtitle));
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
-  const labels = sections.map(s => s.subtitle);
-  const libs = collectSeries(sections, 0);
+  const ordered = subtitles
+    .map(subtitle => sections.find(s => s.subtitle === subtitle))
+    .filter(Boolean);
+  const labels = ordered.map(s => labelMap[s.subtitle] || s.subtitle);
+  const libs = collectSeries(ordered, 0);
   const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, backgroundColor: d.color,
   }));
@@ -1240,6 +1983,14 @@ function buildStreaming(B, canvasId) {
     type: 'bar', data: { labels, datasets }, options: barOpts('Wall time (ms)'),
   }));
 }
+
+document.getElementById('detailModalClose').onclick = closeDetailModal;
+document.getElementById('detailModalBackdrop').onclick = (e) => {
+  if (e.target.id === 'detailModalBackdrop') closeDetailModal();
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeDetailModal();
+});
 
 init();
 </script>

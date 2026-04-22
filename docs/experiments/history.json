@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-21T16:15:20.553334",
+  "generated": "2026-04-22T11:15:45.432058",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -6342,7 +6342,13 @@
       "hypothesis": "If we write a C function that reads SQLite column values and writes JSON directly into a malloc'd buffer, we can skip all Dart object allocation for the result data. The Uint8List containing the JSON would transfer to the main isolate via Isolate.exit at effectively zero cost (one object to validate).",
       "approach": "`resqlite_query_to_bytes` — a C function that:\n- Calls `sqlite3_step` in a loop\n- Reads each column via `sqlite3_column_text/int64/double/blob`\n- Writes JSON directly: `[{\"col\":\"value\",...},...]`\n- Handles string escaping, number formatting, null literals\n- Returns a malloc'd buffer + length",
       "results": "At 5,000 rows (1MB JSON):\n\n| Path | Wall time |\n|---|---|\n| resqlite `selectBytes()` (C JSON) | **4.35 ms** |\n| sqlite3 package + jsonEncode | 15.02 ms |\n\n**3.5x faster.** Zero Dart objects for result data. Zero main-isolate work.",
-      "reasoning": "The C JSON pipeline is unambiguously the fastest path for producing HTTP response bodies from SQLite queries. No other approach in the Dart ecosystem comes close. This became the `selectBytes()` API."
+      "reasoning": "The C JSON pipeline is unambiguously the fastest path for producing HTTP response bodies from SQLite queries. No other approach in the Dart ecosystem comes close. This became the `selectBytes()` API.",
+      "benchmarkRun": {
+        "id": "baseline-before-authorizer-hooks",
+        "date": "2026-04-06",
+        "timestamp": "2026-04-06T22:05:35",
+        "source": "same-day"
+      }
     },
     {
       "id": "002",
@@ -6355,7 +6361,13 @@
       "hypothesis": "One FFI call replacing 30,000 should save ~0.3-0.6ms from reduced FFI boundary crossing overhead. The binary buffer would then be decoded to maps in Dart.",
       "approach": "`resqlite_query_to_rows` — a C function that packs all rows into a compact binary format:\n```\nHeader: [row_count][col_count][column_names...]\nPer row, per column: [type_tag][value_bytes]\n```\n\nDart decodes this buffer into `List<Map<String, Object?>>` by reading sequentially from a `ByteData` view.",
       "results": "At 5,000 rows:\n\n| Path | Wall time |\n|---|---|\n| resqlite C bulk read → Dart decode | 4.95 ms |\n| resqlite per-cell FFI → maps directly | **4.92 ms** |\n| sqlite3 per-cell FFI → maps | 3.90 ms |\n\nThe binary buffer approach was **not faster** for maps. The C-side encoding saved FFI overhead, but the Dart-side decoding (reading ByteData, utf8.decode per string, Map construction) added it right back. Two passes over the data (encode in C + decode in Dart) was slower than one pass (read via FFI + build maps directly).\n\nAt 20,000 rows, the binary buffer was marginally faster (26.21ms vs 26.61ms), but within noise.",
-      "reasoning": "The double-pass overhead (C encodes → Dart decodes) negates the FFI savings for the maps path. Direct per-cell FFI with one-pass map construction is faster at all practical sizes.\n\nThe binary buffer infrastructure was kept for `selectBytes()` (where C writes JSON directly — no Dart decode needed) and later reused in the ByteBackedResultSet experiment."
+      "reasoning": "The double-pass overhead (C encodes → Dart decodes) negates the FFI savings for the maps path. Direct per-cell FFI with one-pass map construction is faster at all practical sizes.\n\nThe binary buffer infrastructure was kept for `selectBytes()` (where C writes JSON directly — no Dart decode needed) and later reused in the ByteBackedResultSet experiment.",
+      "benchmarkRun": {
+        "id": "after-authorizer-hooks",
+        "date": "2026-04-06",
+        "timestamp": "2026-04-06T22:40:34",
+        "source": "same-day"
+      }
     },
     {
       "id": "003",
@@ -6485,7 +6497,13 @@
       "hypothesis": null,
       "approach": "### Approach A: All results via SendPort.send (persistent workers)\n\nWorkers stay alive, all results go through `SendPort.send()` deep copy.\n\n**Results at 5000 rows:**\n\n| Metric | One-off isolates | Persistent pool (SendPort) | Change |\n|---|---|---|---|\n| select_5k_wall | 3008 μs | 5961 μs | **+98% worse** |\n| param_100q_wall | 27130 μs | 51943 μs | **+91% worse** |\n\n**Why it failed:** `SendPort.send()` must serialize the entire object graph (maps with strings), copy to the receiver's heap, and deserialize. This serialization far exceeds `Isolate.exit()`'s validation walk. At 5000 rows, the copy cost is ~3ms — double the total query time with `Isolate.exit()`.\n\n### Approach B: Hybrid — SendPort for small, Isolate.exit for large (sacrificial workers)\n\nWorkers use `SendPort.send()` for sm...",
       "results": null,
-      "reasoning": "Three approaches tried, all worse than or equal to one-off isolates:\n- Pure SendPort: 98% slower at 5k rows\n- Hybrid sacrificial: equivalent at large sizes, inconclusive at small\n- Optimized hybrid: 22% slower on rapid-fire single-row lookups\n\nThe one-off `Isolate.spawn` + `Isolate.exit` architecture is optimal for resqlite's read path across all result sizes.\n\n**Key lesson:** Dart's `Isolate.exit()` ownership transfer is fundamentally cheaper than `SendPort.send()` serialization for complex object graphs. The `Isolate.spawn` cost (~70μs) is a fixed overhead that is always less than the `SendPort.send()` copy cost for any result with strings. Persistent worker pools only make sense when results are trivial primitives (ints, bools) that serialize cheaply."
+      "reasoning": "Three approaches tried, all worse than or equal to one-off isolates:\n- Pure SendPort: 98% slower at 5k rows\n- Hybrid sacrificial: equivalent at large sizes, inconclusive at small\n- Optimized hybrid: 22% slower on rapid-fire single-row lookups\n\nThe one-off `Isolate.spawn` + `Isolate.exit` architecture is optimal for resqlite's read path across all result sizes.\n\n**Key lesson:** Dart's `Isolate.exit()` ownership transfer is fundamentally cheaper than `SendPort.send()` serialization for complex object graphs. The `Isolate.spawn` cost (~70μs) is a fixed overhead that is always less than the `SendPort.send()` copy cost for any result with strings. Persistent worker pools only make sense when results are trivial primitives (ints, bools) that serialize cheaply.",
+      "benchmarkRun": {
+        "id": "after-overnight-experiments",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T09:08:41",
+        "source": "same-day"
+      }
     },
     {
       "id": "012",
@@ -6498,7 +6516,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "### 1. sqlite_async Architecture Analysis\n\nsqlite_async (v0.14.0-wip.0) uses a persistent `IsolateWorker` pool. The read path for `getAll()` is:\n\n```\ngetAll(sql, params)\n  -> readLock()\n    -> _useConnection(writer: false)\n      -> pool.reader()             // lease a connection from native pool\n      -> _takeIsolateWorker()      // get an IsolateWorker from queue\n      -> _LeasedContext(inner, worker)\n        -> execute(sql, params)\n          -> _runOnWorker(closure)\n            -> inner.unsafeAccess(conn => {\n                 ptr = conn.unsafePointer.address   // extract raw pointer\n                 worker.run(closure_capturing_ptr)  // send to worker isolate\n               })\n```\n\n**Key design choices:**\n\n- **IsolateWorker sends closures, not data messages:** Instead of sending SQL +...",
-      "reasoning": "**Keep the one-off `Isolate.spawn` + `Isolate.exit` architecture for reads.** Reasons:\n\n1. **Performance is equivalent to sqlite_async's persistent pool** — confirmed by direct benchmark comparison.\n\n2. **Simplicity** — no worker lifecycle management, no respawning, no message protocol, no request serialization.\n\n3. **Natural concurrency** — each query gets its own OS thread, enabling true parallelism on multi-core. Pool workers are single-threaded and process queries sequentially.\n\n4. **Zero-copy for any result size** — `Isolate.exit` transfers ownership of arbitrarily large object graphs with O(n) validation walk but no copying. `SendPort.send` must deep-copy everything, and the cost grows linearly with string content.\n\n5. **The spawn overhead is constant** — ~50us regardless of resul..."
+      "reasoning": "**Keep the one-off `Isolate.spawn` + `Isolate.exit` architecture for reads.** Reasons:\n\n1. **Performance is equivalent to sqlite_async's persistent pool** — confirmed by direct benchmark comparison.\n\n2. **Simplicity** — no worker lifecycle management, no respawning, no message protocol, no request serialization.\n\n3. **Natural concurrency** — each query gets its own OS thread, enabling true parallelism on multi-core. Pool workers are single-threaded and process queries sequentially.\n\n4. **Zero-copy for any result size** — `Isolate.exit` transfers ownership of arbitrarily large object graphs with O(n) validation walk but no copying. `SendPort.send` must deep-copy everything, and the cost grows linearly with string content.\n\n5. **The spawn overhead is constant** — ~50us regardless of resul...",
+      "benchmarkRun": {
+        "id": "after-cleanup",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T17:35:27",
+        "source": "same-day"
+      }
     },
     {
       "id": "013",
@@ -6511,7 +6535,13 @@
       "hypothesis": "Adding `isLeaf: true` to all `@ffi.Native` bindings will reduce per-call overhead by eliminating safepoint checks and thread state transitions on every Dart-to-C call.",
       "approach": "Added `isLeaf: true` to all 33 `@ffi.Native` annotations across three files:\n- `database.dart` — 6 bindings (sqlite3_column_count, sqlite3_column_name, resqlite_stmt_acquire, resqlite_stmt_release, resqlite_step_row, strlen)\n- `resqlite_bindings.dart` — 11 bindings (resqlite_open, resqlite_close, resqlite_exec, resqlite_execute, resqlite_run_batch, resqlite_get_dirty_tables, resqlite_get_read_tables, resqlite_writer_handle, resqlite_free, and helpers)\n- `writer_isolate.dart` — 16 bindings (sqlite3_prepare_v2, sqlite3_bind_*, sqlite3_step, sqlite3_reset, sqlite3_finalize, sqlite3_column_*, sqlite3_changes)",
       "results": "Compared against previous run (after-cleanup baseline):\n\n| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Select Maps 100 rows | 0.32ms | 0.26ms | **-19%** |\n| Schema Narrow (2 cols) | 0.17ms | 0.15ms | **-12%** |\n| Schema Wide (20 cols) | 1.11ms | 1.01ms | -9% |\n| Parameterized (100 × 500 rows) | 19.34ms | 17.77ms | -8% |\n| Select Maps 5000 rows | 2.39ms | 2.21ms | -8% |\n| Batch Insert 10k rows | 4.83ms | 4.52ms | -6% |\n| Select Bytes 1000 rows | 0.78ms | 0.74ms | -5% |\n| Schema Text-heavy | 0.63ms | 0.60ms | -5% |\n\n**0 regressions.** Improvements strongest on small results where FFI overhead is a larger fraction of total time.",
-      "reasoning": "**Accepted.** Zero complexity cost, zero risk, consistent improvement across all benchmarks."
+      "reasoning": "**Accepted.** Zero complexity cost, zero risk, consistent improvement across all benchmarks.",
+      "benchmarkRun": {
+        "id": "final-cleanup",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T18:49:23",
+        "source": "same-day"
+      }
     },
     {
       "id": "014",
@@ -6524,7 +6554,13 @@
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
       "approach": null,
       "results": "### locking_mode=EXCLUSIVE — REJECTED\n\nSetting `PRAGMA locking_mode=EXCLUSIVE` on the writer causes `SQLITE_BUSY` (error 5) on all reader connections. Despite research suggesting WAL mode allows concurrent readers with an exclusive writer, the reality is that EXCLUSIVE locking mode holds the file lock permanently, blocking all other connections.\n\n**This is incompatible with our reader pool architecture.** Reverted immediately.\n\n### BEGIN IMMEDIATE — ACCEPTED\n\nChanged `BEGIN` to `BEGIN IMMEDIATE` in both `resqlite_run_batch` (C) and the writer isolate's pre-allocated transaction strings (Dart). Acquires the write lock upfront instead of deferring to the first write statement. Since our writer is the only connection that writes, the lock is always available.\n\nTheoretically avoids the lock...",
-      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside"
+      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside",
+      "benchmarkRun": {
+        "id": "isLeaf-experiment",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T19:04:21",
+        "source": "same-day"
+      }
     },
     {
       "id": "014",
@@ -6537,7 +6573,13 @@
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
       "approach": null,
       "results": "### locking_mode=EXCLUSIVE — REJECTED\n\nSetting `PRAGMA locking_mode=EXCLUSIVE` on the writer causes `SQLITE_BUSY` (error 5) on all reader connections. Despite research suggesting WAL mode allows concurrent readers with an exclusive writer, the reality is that EXCLUSIVE locking mode holds the file lock permanently, blocking all other connections.\n\n**This is incompatible with our reader pool architecture.** Reverted immediately.\n\n### BEGIN IMMEDIATE — ACCEPTED\n\nChanged `BEGIN` to `BEGIN IMMEDIATE` in both `resqlite_run_batch` (C) and the writer isolate's pre-allocated transaction strings (Dart). Acquires the write lock upfront instead of deferring to the first write statement. Since our writer is the only connection that writes, the lock is always available.\n\nTheoretically avoids the lock...",
-      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside"
+      "reasoning": "- `locking_mode=EXCLUSIVE`: **Rejected** — incompatible with concurrent readers\n- `BEGIN IMMEDIATE`: **Accepted** — correct, no downside\n- Remove `clear_bindings`: **Accepted** — strictly less work, no downside",
+      "benchmarkRun": {
+        "id": "writer-tuning",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T19:14:36",
+        "source": "same-day"
+      }
     },
     {
       "id": "015",
@@ -6550,7 +6592,13 @@
       "hypothesis": "Shrinking `resqlite_cell` from 48 bytes to 16 bytes using a C union would improve cache locality for the per-row cell buffer, especially for wide schemas and large result sets.",
       "approach": "Previous layout (48 bytes):\n```c\ntypedef struct {\n    int type;              // 4 bytes + 4 padding\n    long long int_val;     // 8 bytes\n    double double_val;     // 8 bytes\n    const char* text_ptr;  // 8 bytes\n    int text_len;          // 4 bytes + 4 padding\n    const void* blob_ptr;  // 8 bytes\n} resqlite_cell;\n```\n\nNew layout (16 bytes):\n```c\ntypedef struct {\n    int type;        // 4 bytes\n    int len;         // 4 bytes (text/blob length)\n    union {\n        long long i; // 8 bytes\n        double d;    // 8 bytes\n        const void* p; // 8 bytes (text/blob pointer)\n    };\n} resqlite_cell;\n```\n\nThe Dart side was also simplified — 3 offset constants instead of 7, and all value types read from the same union offset.",
       "results": "Compared against writer-tuning baseline: **0 meaningful wins, 0 meaningful regressions.** All benchmarks within noise.\n\nThe buffer size reduction doesn't show up because even with the old 48-byte layout, a 10-column × 1-row buffer is only 480 bytes — well within L1 cache. The benefit would appear at much larger working sets (50k+ rows × 20+ columns).",
-      "reasoning": "**Accepted** — not for performance (neutral), but for code quality:\n- Simpler C struct (union makes the mutual exclusivity explicit)\n- Fewer Dart offset constants (3 instead of 7)\n- All value types at the same offset (simpler reading loop)\n- 3x less memory allocation per query (nice-to-have)"
+      "reasoning": "**Accepted** — not for performance (neutral), but for code quality:\n- Simpler C struct (union makes the mutual exclusivity explicit)\n- Fewer Dart offset constants (3 instead of 7)\n- All value types at the same offset (simpler reading loop)\n- 3x less memory allocation per query (nice-to-have)",
+      "benchmarkRun": {
+        "id": "cell-buffer-union",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T19:26:19",
+        "source": "same-day"
+      }
     },
     {
       "id": "016",
@@ -6563,7 +6611,13 @@
       "hypothesis": null,
       "approach": "### New compile-time flags (hook/build.dart)\n- `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1` — readers automatically get `synchronous=NORMAL` in WAL mode. Removed the explicit PRAGMA call from `open_connection`.\n- `SQLITE_OMIT_AUTOINIT` — removes the `sqlite3_initialize()` check from every API entry point. Added explicit `sqlite3_initialize()` call in `resqlite_open`.\n- `SQLITE_OMIT_UTF16` — removes dead UTF-16 code paths. We only use UTF-8 via FFI.\n- `SQLITE_LIKE_DOESNT_MATCH_BLOBS` — enables the LIKE optimization fast path.\n\n### sqlite3_prepare_v3 with SQLITE_PREPARE_PERSISTENT\nAll statement preparations in the C layer now use `sqlite3_prepare_v3` with `SQLITE_PREPARE_PERSISTENT`. This tells SQLite to allocate the statement's internal memory from the system allocator instead of the connection's ...",
       "results": "Benchmark comparison: 1 win (transaction -17%), 2 regressions (both noise — parameterized queries affected by system load, all libraries slower; batch 100 rows is 10μs).\n\nThese optimizations target per-API-call overhead that's below the measurement resolution of our benchmark suite. They're correct by construction — less work per call, no behavioral change.",
-      "reasoning": "**Accepted** — correct improvements with no downside. The per-call savings stack with `isLeaf: true` (experiment 013) but are individually too small to measure."
+      "reasoning": "**Accepted** — correct improvements with no downside. The per-call savings stack with `isLeaf: true` (experiment 013) but are individually too small to measure.",
+      "benchmarkRun": {
+        "id": "compile-flags",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T19:32:13",
+        "source": "same-day"
+      }
     },
     {
       "id": "017",
@@ -6576,7 +6630,13 @@
       "hypothesis": "`Dart_PostCObject` uses a completely different code path (`dart_api_message.cc`) that bypasses the `Isolate.exit` validation walk. By building query results as `Dart_CObject` structs in C and posting them directly to a Dart `ReceivePort`, we could eliminate the ~470μs validation walk at 10k rows.",
       "approach": "New C function `resqlite_select_post` that:\n1. Acquires reader from pool\n2. Prepares/caches statement, binds params\n3. Steps rows, building a `Dart_CObject` tree (kInt64/kDouble/kString/kNull per cell)\n4. Posts via `Dart_PostCObject_DL` to a Dart `ReceivePort`\n5. Frees all C-side allocations\n\nVendored Dart SDK headers (`dart_api_dl.h/c`), updated build system, added FFI bindings and `Database.selectPost()` method.",
       "results": "| Rows | Isolate.exit | PostCObject | Delta |\n|---:|---:|---:|:---|\n| 100 | 0.15ms | 0.25ms | **66% slower** |\n| 1000 | 0.41ms | 2.32ms | **459% slower** |\n| 5000 | 1.84ms | 7.31ms | **297% slower** |\n| 10000 | 5.24ms | 17.61ms | **236% slower** |\n\nPostCObject is 2-5x slower at every size.",
-      "reasoning": "**Rejected.** Isolate.exit's validation walk (~10ns per object) is dramatically cheaper than Dart_PostCObject's serialize/deserialize cycle. The shared-heap ownership transfer model is the optimal path for Dart-to-Dart data transfer.\n\nThis confirms that our Isolate.exit + flat list + lazy ResultSet architecture (experiments 008-009) is at the practical performance ceiling for Dart isolate-based data transfer."
+      "reasoning": "**Rejected.** Isolate.exit's validation walk (~10ns per object) is dramatically cheaper than Dart_PostCObject's serialize/deserialize cycle. The shared-heap ownership transfer model is the optimal path for Dart-to-Dart data transfer.\n\nThis confirms that our Isolate.exit + flat list + lazy ResultSet architecture (experiments 008-009) is at the practical performance ceiling for Dart isolate-based data transfer.",
+      "benchmarkRun": {
+        "id": "multi-row-step",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T21:14:20",
+        "source": "same-day"
+      }
     },
     {
       "id": "018",
@@ -6589,7 +6649,13 @@
       "hypothesis": "Stepping 64 rows per FFI call instead of 1 would reduce FFI crossing overhead from 5000 calls to ~78 calls at 5000 rows. At ~50ns saved per call (with isLeaf), that's ~245μs saved.",
       "approach": "New C function `resqlite_step_rows` that:\n1. Steps up to N rows per call (batch size = 64)\n2. Copies text/blob data into a side buffer (since `sqlite3_column_text` pointers are invalidated by the next `sqlite3_step`)\n3. Returns actual row count and a status code (SQLITE_ROW, SQLITE_DONE, or RESQLITE_BUFFER_FULL)\n\nUpdated Dart `_selectOnWorker` and `_selectWithDepsOnWorker` to call `_resqliteStepRows` in a loop, processing all rows in each batch before the next FFI call.",
       "results": "| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Select Maps 100 rows | 0.34ms | 0.28ms | -18% (noise) |\n| Select Maps 5000 rows | 2.40ms | 2.52ms | +5% |\n| Schema Text-heavy | 0.62ms | 0.77ms | **+24% regression** |\n| Schema Nullable | 0.40ms | 0.50ms | **+25% regression** |\n| Parameterized 100×500 | 23.83ms | 19.49ms | -18% (noise — recovering from bad prior run) |\n\nThe text-heavy and nullable regressions are real — the memcpy overhead for string data exceeds the FFI crossing savings.",
-      "reasoning": "**Rejected.** Single-row stepping with direct SQLite pointer access is faster than multi-row stepping with string copies. The FFI crossing cost (~50ns per call with isLeaf) is already low enough that batching doesn't justify the copy overhead."
+      "reasoning": "**Rejected.** Single-row stepping with direct SQLite pointer access is faster than multi-row stepping with string copies. The FFI crossing cost (~50ns per call with isLeaf) is already low enough that batching doesn't justify the copy overhead.",
+      "benchmarkRun": {
+        "id": "post-stream-fix",
+        "date": "2026-04-07",
+        "timestamp": "2026-04-07T22:55:38",
+        "source": "same-day"
+      }
     },
     {
       "id": "019",
@@ -6602,7 +6668,13 @@
       "hypothesis": "A persistent reader pool eliminates the ~80μs isolate spawn overhead per query.\nFor small results, SendPort.send (copy) is cheaper than the spawn cost saved.\nFor large results, the worker sacrifices itself via Isolate.exit (zero-copy)\nand the pool auto-respawns a replacement.",
       "approach": "- New `query_worker.dart` — shared FFI bindings and query execution logic\n- New `reader_pool.dart` — hybrid pool with sacrifice + auto-respawn\n- `database.dart` — adds `selectPool()`, spawns pool on open",
       "results": "| Rows | Isolate.exit | Hybrid Pool | Path | Delta |\n|---:|---:|---:|:---|:---|\n| 1 | 0.11ms | 0.02ms | SendPort | **83% faster** |\n| 10 | 0.13ms | 0.04ms | SendPort | **68% faster** |\n| 50 | 0.12ms | 0.04ms | SendPort | **68% faster** |\n| 100 | 0.12ms | 0.04ms | SendPort | **64% faster** |\n| 500 | 0.24ms | 0.17ms | Sacrifice | **28% faster** |\n| 1000 | 0.40ms | 0.39ms | Sacrifice | tied |\n| 5000 | 1.83ms | 1.76ms | Sacrifice | tied |\n\n**Point query: 45k qps** (was 14k) — beats sqlite_reactive's 37k qps.",
-      "reasoning": null
+      "reasoning": null,
+      "benchmarkRun": {
+        "id": "hybrid-pool-high-threshold",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T11:20:12",
+        "source": "same-day"
+      }
     },
     {
       "id": "020",
@@ -6615,7 +6687,13 @@
       "hypothesis": "Bumping the lookaside allocator from the default 100 small slots to 128 gives\nSQLite's dual-pool architecture (since 3.31.0) more headroom for transient\nallocations during query execution. The SQLite docs claim 10-15% overall speedup\nfrom the lookaside allocator. Increasing slots costs ~4.5KB extra per connection.",
       "approach": "Added compile flag: `SQLITE_DEFAULT_LOOKASIDE=1200,128`",
       "results": "All benchmarks neutral. No wins, no regressions. The lookaside allocator was\nalready active at default settings — bumping from 100 to 128 small slots didn't\nproduce a measurable difference in our workload.",
-      "reasoning": "**Accepted** — zero runtime cost, zero code complexity, and the SQLite docs\nrecommend tuning this. The improvement may be more visible in workloads with\ncomplex expressions or many transient allocations per query (JOINs, subqueries,\nCTEs) which our benchmarks don't heavily exercise."
+      "reasoning": "**Accepted** — zero runtime cost, zero code complexity, and the SQLite docs\nrecommend tuning this. The improvement may be more visible in workloads with\ncomplex expressions or many transient allocations per query (JOINs, subqueries,\nCTEs) which our benchmarks don't heavily exercise.",
+      "benchmarkRun": {
+        "id": "exp020-lookaside",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:39:48",
+        "source": "exact"
+      }
     },
     {
       "id": "021",
@@ -6628,7 +6706,13 @@
       "hypothesis": "Pre-allocating 128 page cache slots per connection at startup (instead of the\ndefault ~20) avoids incremental malloc pressure during the first few queries.\nWith 2-4 readers + 1 writer, each connection does startup page cache growth\nthat this flag batches into a single contiguous allocation.",
       "approach": "Added compile flag: `SQLITE_DEFAULT_PCACHE_INITSZ=128`\n\n(Applied on top of experiment 020 — cumulative.)",
       "results": "| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Wide schema 1000 rows | 1.13ms | 1.01ms | -11% |\n| Select Maps 5000 rows | 2.60ms | 2.25ms | -13% |\n| All others | — | — | Neutral |\n\n2 wins, 0 regressions, 15 neutral.",
-      "reasoning": "**Accepted** — slight positive trend on larger result sets. Zero code complexity,\nminimal memory cost (~512KB total across all connections at 4KB pages). The\nimprovement likely comes from fewer reallocs during page cache warm-up in the\nbenchmark's per-test Database.open cycle."
+      "reasoning": "**Accepted** — slight positive trend on larger result sets. Zero code complexity,\nminimal memory cost (~512KB total across all connections at 4KB pages). The\nimprovement likely comes from fewer reallocs during page cache warm-up in the\nbenchmark's per-test Database.open cycle.",
+      "benchmarkRun": {
+        "id": "exp021-pcache",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:40:43",
+        "source": "exact"
+      }
     },
     {
       "id": "022",
@@ -6641,7 +6725,13 @@
       "hypothesis": "Raising WAL autocheckpoint from the default 1000 pages (~4MB) to 10000 pages\n(~40MB) on the writer reduces checkpoint frequency, avoiding fsync-heavy\nlatency spikes during write bursts. Disabling autocheckpoint on readers\n(set to 0) prevents readers from accidentally triggering checkpoints.\nAdding journal_size_limit=64MB caps WAL file growth.",
       "approach": "In `open_connection()`:\n- Readers: `PRAGMA wal_autocheckpoint = 0`\n- Writer: `PRAGMA wal_autocheckpoint = 10000`\n- Writer: `PRAGMA journal_size_limit = 67108864`",
       "results": "Mixed in microbenchmarks — 2 wins, 2 regressions, 13 neutral. All within noise.\n\nThis is expected: the autocheckpoint change affects tail latency and write burst\nbehavior, not steady-state throughput. The default 1000-page threshold means a\ncheckpoint (with fsync) fires every ~4MB of WAL writes. At 10000 pages, the\ncheckpoint fires 10x less often. The benefit shows up as fewer p99 latency spikes\nin production workloads, not in median microbenchmark numbers.",
-      "reasoning": "**Accepted** — the changes are correctness and reliability improvements:\n- Readers never trigger checkpoints (prevents reader-writer contention)\n- Writer checkpoints less frequently (smoother write latency)\n- WAL file size is bounded (prevents disk space surprises)\n\nThese are standard production SQLite tuning recommendations from the SQLite docs\nand PowerSync's optimization guide. No code complexity added."
+      "reasoning": "**Accepted** — the changes are correctness and reliability improvements:\n- Readers never trigger checkpoints (prevents reader-writer contention)\n- Writer checkpoints less frequently (smoother write latency)\n- WAL file size is bounded (prevents disk space surprises)\n\nThese are standard production SQLite tuning recommendations from the SQLite docs\nand PowerSync's optimization guide. No code complexity added.",
+      "benchmarkRun": {
+        "id": "exp022-wal-tuning",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:41:46",
+        "source": "exact"
+      }
     },
     {
       "id": "023",
@@ -6654,7 +6744,13 @@
       "hypothesis": "`snprintf(num, sizeof(num), \"%lld\", value)` parses the format string on every\ncall. A hand-rolled int64-to-string avoids format parsing overhead. With\n5000 rows × 2 integer columns = 10K calls per selectBytes query, the overhead\nadds up.",
       "approach": "Added `fast_i64_to_str()` — simple digit extraction loop with negative handling\n(avoids UB on LLONG_MIN). Used in `write_json_to_buf()` for SQLITE_INTEGER.",
       "results": "| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| selectBytes 100 rows | 0.08ms | 0.07ms | -12% |\n| select Maps 100 rows | 0.35ms | 0.30ms | -14% |\n| Single inserts | 2.13ms | 1.78ms | -16% |\n\n3 wins, 1 regression (noise — interactive tx 0.05→0.06ms), 13 neutral.\n\nThe selectBytes improvement at 100 rows is genuine — at that size, JSON\nserialization cost is a significant fraction of total wall time. The select\nMaps improvement is likely noise (itoa doesn't affect the Maps path).",
-      "reasoning": "**Accepted** — measurable win on the selectBytes hot path. The implementation\nis simple (30 lines), correct (handles negatives and LLONG_MIN), and has\nno downside."
+      "reasoning": "**Accepted** — measurable win on the selectBytes hot path. The implementation\nis simple (30 lines), correct (handles negatives and LLONG_MIN), and has\nno downside.",
+      "benchmarkRun": {
+        "id": "exp023-fast-itoa",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:43:05",
+        "source": "exact"
+      }
     },
     {
       "id": "024",
@@ -6667,7 +6763,13 @@
       "hypothesis": "Starting the JSON output buffer at 4KB causes 2-3 reallocs (each a full memcpy)\nfor typical results. 16KB covers most results in a single allocation.",
       "approach": "Changed `buf_init(&b, 4096)` to `buf_init(&b, 16384)` in `resqlite_query_bytes()`.",
       "results": "All neutral — 1 win (narrow schema, likely noise), 1 regression (select 100 rows,\nlikely noise), 15 neutral. No clear signal.\n\nThe lack of signal suggests that realloc overhead at 4KB was already negligible —\nthe doubling strategy means even a 100KB result only reallocs 5 times (4→8→16→32→\n64→128KB), and `realloc` on modern allocators is often a no-op for small sizes\n(the allocator has slack space).",
-      "reasoning": "**Accepted** — no measurable impact but 16KB is a more sensible initial size for\na JSON serializer that typically produces 10-100KB results. The 12KB extra initial\nallocation is negligible (freed immediately after the query)."
+      "reasoning": "**Accepted** — no measurable impact but 16KB is a more sensible initial size for\na JSON serializer that typically produces 10-100KB results. The 12KB extra initial\nallocation is negligible (freed immediately after the query).",
+      "benchmarkRun": {
+        "id": "exp024-buf-16k",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:44:18",
+        "source": "exact"
+      }
     },
     {
       "id": "025",
@@ -6680,7 +6782,13 @@
       "hypothesis": "SQLite recommends `PRAGMA optimize` to refresh planner statistics and opportunistically\nrun lightweight analysis. If planner quality is holding back app-shaped reads, running\n`PRAGMA optimize=0x10002` after schema + seed setup should improve joins, parameterized\nqueries, or medium/large reads.",
       "approach": "Added a benchmark-only helper that ran:\n\n```sql\nPRAGMA optimize=0x10002\n```\n\nafter resqlite schema creation and seeding in the package-local read-heavy suites.\n\nThis was intentionally benchmark-scoped, not product code, because resqlite does not\ncurrently have a clean schema-settled lifecycle hook.",
       "results": "Benchmark run:\n- Baseline: `2026-04-08T17-14-06-exp025-baseline.md`\n- Optimize: `2026-04-08T17-15-42-exp025-optimize.md`\n\nHeadline comparison versus the clean baseline:\n\n| Benchmark | Baseline | Optimize | Delta |\n|---|---:|---:|---:|\n| Select Maps 100 rows | 0.36ms | 0.40ms | +11% |\n| Select Maps 1000 rows | 0.40ms | 0.44ms | +10% |\n| Select Maps 5000 rows | 2.27ms | 2.39ms | +5% |\n| Parameterized queries | 15.41ms | 15.30ms | -1% |\n| Interactive transaction | 0.06ms | 0.05ms | -17% |\n\nPackage benchmark summary versus baseline:\n- 2 wins\n- 1 regression\n- 14 neutral\n\nThe one clear regression was the 100-row maps case. The few wins were either tiny\nor in workloads that are noisy enough that a single run is not persuasive.",
-      "reasoning": "**Rejected** as a performance optimization.\n\nThis does not mean `PRAGMA optimize` is wrong in production. It likely still belongs\nin an application lifecycle with real long-lived datasets and skewed query plans.\nBut within resqlite's current benchmark suite, it did not produce a compelling or\nreliable speedup, so it is not worth adding complexity just for benchmark wins."
+      "reasoning": "**Rejected** as a performance optimization.\n\nThis does not mean `PRAGMA optimize` is wrong in production. It likely still belongs\nin an application lifecycle with real long-lived datasets and skewed query plans.\nBut within resqlite's current benchmark suite, it did not produce a compelling or\nreliable speedup, so it is not worth adding complexity just for benchmark wins.",
+      "benchmarkRun": {
+        "id": "pool-all-reads",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T11:31:54",
+        "source": "same-day"
+      }
     },
     {
       "id": "026",
@@ -6693,7 +6801,13 @@
       "hypothesis": "Before attempting a process-global page cache or more aggressive memory tuning, we\nshould check whether sqlite is actually under page-cache or lookaside pressure in\nresqlite's hot paths.\n\nIf cache miss rates are high, cache spill happens, or lookaside misses show up in\nmeaningful volume, then a deeper page-cache experiment might be justified.",
       "approach": "Added an experiment-only aggregate probe:\n\n- native helper: `resqlite_db_status_total(...)`\n- Dart binding: `getDbStatusTotal(...)`\n- benchmark script: `benchmark/experiments/db_status_probe.dart`\n\nThe probe sums `sqlite3_db_status()` across the writer and idle readers, then runs\nfour representative workloads:\n\n1. point lookups\n2. parameterized page reads\n3. large result reads\n4. write burst",
       "results": "Probe output:\n\n| Workload | Cache hit rate | Cache spill | Lookaside misses |\n|---|---:|---:|---:|\n| Point lookups | 100.0% (2002 / 1) | 0 | 0 / 0 |\n| Parameterized page reads | 99.9% (7991 / 9) | 0 | 0 / 0 |\n| Large result reads | 100.0% (80 / 0) | 0 | 0 / 0 |\n| Write burst | 100.0% (6002 / 0) | 0 | 0 / 0 |\n\nAdditional observations:\n- aggregate cache usage sat around `3.08-3.35 MiB`\n- lookaside highwater reached `175`, but there were zero size/full misses\n- no cache spill occurred in any workload",
-      "reasoning": "**Rejected** as a tuning direction for now.\n\nThe probe says the current configuration is already warm and healthy:\n- near-perfect cache hit rates after warmup\n- zero spill\n- zero lookaside miss pressure\n\nThat means a process-global page-cache experiment would be solving a problem we do\nnot currently have. The measurement tooling was still useful, but the optimization\nit was meant to justify is not warranted by the data."
+      "reasoning": "**Rejected** as a tuning direction for now.\n\nThe probe says the current configuration is already warm and healthy:\n- near-perfect cache hit rates after warmup\n- zero spill\n- zero lookaside miss pressure\n\nThat means a process-global page-cache experiment would be solving a problem we do\nnot currently have. The measurement tooling was still useful, but the optimization\nit was meant to justify is not warranted by the data.",
+      "benchmarkRun": {
+        "id": "final-cleanup",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T12:38:04",
+        "source": "same-day"
+      }
     },
     {
       "id": "027",
@@ -6706,7 +6820,13 @@
       "hypothesis": "`tx.select()` inside interactive transactions still prepares statements on the\nwriter connection each time. Reusing the writer-side statement cache for those\ntransaction reads should reduce interactive transaction overhead and improve the\nmixed read/write path.",
       "approach": "Added a first-pass writer-connection cache path for transaction reads:\n\n- native helpers to acquire/release cached writer statements\n- FFI bindings for that acquire/release path\n- `write_worker.dart` `_handleQuery(...)` switched from ad hoc prepare/reset to\n  the writer statement cache\n\nThis was intentionally a narrow experiment: reuse the cached statement, but do not\nyet rebuild the transaction read path around the faster batched reader machinery.",
       "results": "Benchmark run:\n- `2026-04-08T17-18-09-exp027-tx-writer-cache.md`\n\nRelevant outcomes:\n\n| Benchmark | Result |\n|---|---|\n| Interactive transaction | `0.05ms` (no meaningful change) |\n| Parameterized queries | `14.49ms` (small win, likely noise) |\n| Single inserts | `3.15ms` (large regression vs neighboring runs) |\n\nPackage benchmark summary versus the prior run:\n- 3 wins\n- 1 regression\n- 13 neutral\n\nThe key target metric, interactive transaction cost, did not move in a meaningful\nway. The large single-insert regression was likely noise or unrelated runtime\nvariation, but it makes the run less persuasive rather than more.",
-      "reasoning": "**Rejected** in this form.\n\nThis tells us that transaction-read prepare overhead is not the dominant bottleneck\nin the current interactive transaction benchmark. A fuller rewrite that reuses the\nsame cached + batched row path as the dedicated readers may still be interesting,\nbut this smaller writer-cache-only version is not enough to justify merging."
+      "reasoning": "**Rejected** in this form.\n\nThis tells us that transaction-read prepare overhead is not the dominant bottleneck\nin the current interactive transaction benchmark. A fuller rewrite that reuses the\nsame cached + batched row path as the dedicated readers may still be interesting,\nbut this smaller writer-cache-only version is not enough to justify merging.",
+      "benchmarkRun": {
+        "id": "c-fixes",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T13:24:31",
+        "source": "same-day"
+      }
     },
     {
       "id": "028",
@@ -6719,7 +6839,13 @@
       "hypothesis": "The current bind path allocates native memory for text/blob params in Dart, then\nasks SQLite to copy those same bytes again via `SQLITE_TRANSIENT`. If we keep the\nparam buffers alive until the statement is reset/released, SQLite can bind against\nthem as `SQLITE_STATIC` and avoid the second copy.\n\nThis should mostly help:\n- small and medium parameterized reads\n- repeated query shapes\n- larger batch writes with many bound values",
       "approach": "Two coordinated changes:\n\n1. In native `bind_params(...)`, switched text/blob binds from `SQLITE_TRANSIENT`\n   to `SQLITE_STATIC`.\n2. In `read_worker.dart`, delayed `freeParams(...)` until after the statement is\n   released so the bound memory stays valid for the lifetime of the query.",
       "results": "Benchmark runs:\n- Baseline: `2026-04-08T17-14-06-exp025-baseline.md`\n- Static bind: `2026-04-08T17-19-23-exp028-static-bind.md`\n\nBaseline vs static-bind highlights:\n\n| Benchmark | Baseline | Static bind | Delta |\n|---|---:|---:|---:|\n| Select Maps 100 rows | 0.36ms | 0.30ms | -17% |\n| Select Maps 1000 rows | 0.40ms | 0.40ms | 0% |\n| Select Maps 5000 rows | 2.27ms | 2.09ms | -8% |\n| Select Bytes 5000 rows | 3.16ms | 3.01ms | -5% |\n| Parameterized queries | 15.41ms | 14.81ms | -4% |\n| Batch insert 10000 | 4.74ms | 4.57ms | -4% |\n| Single inserts | 1.85ms | 1.86ms | neutral |\n| Interactive transaction | 0.06ms | 0.05ms | small win / likely noise |\n\nThe auto-generated comparison in the run file shows only two formal wins because\nits threshold is ±10%, but the broader pattern is consistently...",
-      "reasoning": "**Accepted**.\n\nThis is the most convincing of the parameter-path experiments:\n- small read win is real\n- parameterized queries improved\n- large batch write cost also trended slightly down\n- no obvious reliability issue surfaced in the benchmark run\n\nThe code change landed with additional regression coverage for repeated cached\ntext/blob parameter binds in `database_test.dart`. The broader full-suite benchmark\nrun is noisier than this targeted experiment, so this should still be understood as\n\"targeted workload win, broad-suite neutral-to-noisy\" rather than a universal speedup."
+      "reasoning": "**Accepted**.\n\nThis is the most convincing of the parameter-path experiments:\n- small read win is real\n- parameterized queries improved\n- large batch write cost also trended slightly down\n- no obvious reliability issue surfaced in the benchmark run\n\nThe code change landed with additional regression coverage for repeated cached\ntext/blob parameter binds in `database_test.dart`. The broader full-suite benchmark\nrun is noisier than this targeted experiment, so this should still be understood as\n\"targeted workload win, broad-suite neutral-to-noisy\" rather than a universal speedup.",
+      "benchmarkRun": {
+        "id": "final",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T14:44:58",
+        "source": "same-day"
+      }
     },
     {
       "id": "029",
@@ -6732,7 +6858,13 @@
       "hypothesis": "The current writer policy uses:\n\n- `wal_autocheckpoint = 10000`\n- `journal_size_limit = 64MB`\n\nThat is a good default, but it still leaves checkpoint timing entirely to SQLite.\nIf checkpoints happen at unlucky commit boundaries, burst workloads can still see\ntail-latency spikes.\n\nA coarse manual policy might do better:\n- disable autocheckpoint on the writer\n- run `PRAGMA wal_checkpoint(PASSIVE)` periodically during the burst\n\nIf even that crude policy improves p95/p99 write latency, a built-in smarter\ncheckpoint scheduler becomes worth considering.",
       "approach": "Added an experiment-only benchmark:\n\n- `benchmark/experiments/checkpoint_policy.dart`\n\nIt compares two policies on a burst of 6000 single-row inserts with an 8KB text\npayload:\n\n1. **Baseline**: legacy SQLite autocheckpoint (`wal_autocheckpoint=10000`)\n2. **Manual**: `wal_autocheckpoint=0` plus `PRAGMA wal_checkpoint(PASSIVE)` every\n   500 writes\n\nMeasured:\n- write p50 / p95 / p99 / max\n- periodic read p95 during the burst\n- checkpoint p95 for the manual policy\n- final `PRAGMA wal_checkpoint(NOOP)` state",
       "results": "| Policy | Write p50 | Write p95 | Write p99 | Write max | Read p95 | Checkpoint p95 | WAL noop |\n|---|---:|---:|---:|---:|---:|---:|---|\n| baseline-autocheckpoint-10000 | 0.06ms | 0.12ms | 0.22ms | 53.60ms | 0.24ms | n/a | `busy=0 log=4752 ckpt=0` |\n| manual-passive-every-500 | 0.05ms | 0.08ms | 0.12ms | 9.27ms | 0.19ms | 11.26ms | `busy=0 log=2062 ckpt=2062` |\n\nThis is the first checkpoint-oriented experiment with clearly non-noisy signal:\n- lower p95\n- lower p99\n- dramatically lower max write latency\n- slightly better concurrent read latency during the burst\n\nThe trade-off is explicit checkpoint work (`11.26ms` p95 on checkpoint calls), but\nthat work is happening at predictable intervals instead of surfacing as a 53ms\nwrite outlier.",
-      "reasoning": "**Accepted**.\n\nThis does not justify shipping `PRAGMA wal_checkpoint(PASSIVE)` calls from the\nDart layer as-is. The adopted implementation instead moved checkpoint scheduling\ninto the writer connection via a lower-level WAL hook.\n\nCompared with the earlier `wal_autocheckpoint` tuning experiment, this is the\nfirst result that makes the scheduler itself look worth deeper implementation."
+      "reasoning": "**Accepted**.\n\nThis does not justify shipping `PRAGMA wal_checkpoint(PASSIVE)` calls from the\nDart layer as-is. The adopted implementation instead moved checkpoint scheduling\ninto the writer connection via a lower-level WAL hook.\n\nCompared with the earlier `wal_autocheckpoint` tuning experiment, this is the\nfirst result that makes the scheduler itself look worth deeper implementation.",
+      "benchmarkRun": {
+        "id": "with-streaming",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T15:43:57",
+        "source": "same-day"
+      }
     },
     {
       "id": "030",
@@ -6745,7 +6877,13 @@
       "hypothesis": "Each Dart pool worker is assigned a fixed C reader index at spawn time. The worker\npasses this index directly to new `resqlite_stmt_acquire_on()` and `resqlite_query_bytes()`\nvariants that skip the C pool mutex entirely. Since the Dart pool's busy tracking\nalready guarantees one-worker-per-reader, the C mutex is redundant overhead.\n\nThe old path per query:\n1. `acquire_reader()` — C mutex lock, scan for idle reader, mark in-use, unlock\n2. Execute query\n3. `release_reader()` — C mutex lock, mark available, unlock\n\nThe new path:\n1. `resqlite_stmt_acquire_on(db, reader_id, ...)` — direct array index, no mutex\n2. Execute query\n3. No release needed",
       "approach": "- Added `resqlite_stmt_acquire_on()` in C — takes a fixed reader_id, skips pool mutex\n- Changed `resqlite_query_bytes()` to take reader_id instead of acquiring from pool\n- Updated Dart worker entrypoint to receive reader_id at spawn time\n- Updated `_executeQueryImpl` to use `_resqliteStmtAcquireOn`\n- Each `_WorkerSlot` stores its reader index and passes it to the worker",
       "results": "3-run comparison (head-to-head verifier benchmark):\n\n| Metric | Before (3 runs) | After (3 runs) |\n|---|---|---|\n| Point query | 37-50K qps | **42-51K qps** |\n| CRUD ops/s | 18-23K | 18-23K (identical) |\n| Read under write | 0.30-0.41ms | 0.30-0.48ms (identical) |\n\nInitial single-run comparison showed apparent CRUD and read-under-write regressions,\nbut 3-run verification proved these were JIT/thermal warm-up artifacts — both metrics\nmatched exactly by the third run on both branches.",
-      "reasoning": "**Accepted** — eliminates two C mutex round-trips per query. Point query throughput\nimproved ~40% (30.5K → ~50K qps), closing the gap with sqlite_reactive. No impact\non writes, large reads, or streaming. Zero code complexity increase — just a new\nC function and passing an index instead of acquiring from a pool."
+      "reasoning": "**Accepted** — eliminates two C mutex round-trips per query. Point query throughput\nimproved ~40% (30.5K → ~50K qps), closing the gap with sqlite_reactive. No impact\non writes, large reads, or streaming. Zero code complexity increase — just a new\nC function and passing an index instead of acquiring from a pool.",
+      "benchmarkRun": {
+        "id": "exp030-adopted",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T17:36:27",
+        "source": "exact"
+      }
     },
     {
       "id": "031",
@@ -6758,7 +6896,13 @@
       "hypothesis": "SQLite's JSON1 extension can trade many bound parameters for one JSON payload.\nThat could help `resqlite` in two places where host-side overhead still matters:\n\n- large structured batch inserts\n- large `IN (...)` reads\n\nThe most important question was not just \"is JSON1 fast?\", but:\n\n1. does it beat the existing bind path when JSON encoding is included?\n2. does it only help when the payload is already available as JSON?",
       "approach": "Added a targeted experiment script:\n\n- [json1_bulk_shapes.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/json1_bulk_shapes.dart)\n\nIt measures three variants for each workload:\n\n1. current bind-heavy baseline\n2. JSON1 with `jsonEncode(...)` inside the measured path\n3. JSON1 with a pre-encoded payload\n\nWorkloads:\n\n- insert 5000 customer rows\n- read 1000 ids\n- read 5000 ids\n\nThe JSON1 shapes use `json_each(?)`:\n\n```sql\nWITH rows AS (\n  SELECT\n    json_extract(value, '$[0]') AS name,\n    json_extract(value, '$[1]') AS email\n  FROM json_each(?)\n)\nINSERT INTO customers(name, email)\nSELECT name, email FROM rows\n```\n\nand:\n\n```sql\nSELECT id, name, email\nFROM customers\nWHERE id IN (SELECT value FROM json_each(?))\nORDER BY id\n```",
       "results": "Two process-level runs showed the same overall pattern even though the insert\nbaseline was noisier than the read cases.\n\n### Run 1\n\n| Workload | Baseline | JSON1 + encode | JSON1 + pre-encoded |\n|---|---:|---:|---:|\n| Insert 5000 rows | 3.49ms | 4.22ms | 2.87ms |\n| Read 1000 ids | 0.60ms | 0.76ms | 0.39ms |\n| Read 5000 ids | 1.78ms | 2.19ms | 2.00ms |\n\n### Run 2\n\n| Workload | Baseline | JSON1 + encode | JSON1 + pre-encoded |\n|---|---:|---:|---:|\n| Insert 5000 rows | 8.30ms | 4.30ms | 3.10ms |\n| Read 1000 ids | 0.81ms | 0.67ms | 0.42ms |\n| Read 5000 ids | 2.78ms | 2.37ms | 2.20ms |\n\n### Interpretation\n\nThe directional signal is clearer than the raw numbers:\n\n- **Pre-encoded JSON can be competitive or better**.\n  - strongest on insert and 1000-id reads\n- **Encoding inside the measured pat...",
-      "reasoning": "**Rejected** as a default `resqlite` runtime optimization.\n\nReasons:\n\n- not a clear general-purpose win\n- too workload-specific\n- the best results depend on already having a JSON payload\n- baking this into the runtime would add complexity for something that is\n  better expressed at the query layer"
+      "reasoning": "**Rejected** as a default `resqlite` runtime optimization.\n\nReasons:\n\n- not a clear general-purpose win\n- too workload-specific\n- the best results depend on already having a JSON payload\n- baking this into the runtime would add complexity for something that is\n  better expressed at the query layer",
+      "benchmarkRun": {
+        "id": "sealed-requests",
+        "date": "2026-04-08",
+        "timestamp": "2026-04-08T22:23:23",
+        "source": "same-day"
+      }
     },
     {
       "id": "032",
@@ -6771,7 +6915,13 @@
       "hypothesis": "Keep the transport shape exactly as-is, but override the hot `Map` members on\n`Row` so they operate directly on the flat values list instead of going through\ngeneric `MapMixin` behavior.\n\nThis should improve main-isolate row consumption without hurting the isolate\ntransfer story that makes `ResultSet` fast in the first place.",
       "approach": "In `lib/src/row.dart`:\n\n- override `containsKey`\n- override `containsValue`\n- override `length`, `isEmpty`, `isNotEmpty`\n- override `values`\n- override `entries`\n- override `forEach`\n- add lightweight custom iterables for `values` and `entries`\n\nImportantly:\n\n- `ResultSet` shape did not change\n- `RowSchema` shape did not change\n- `row.keys` still uses schema names directly",
       "results": "This is a clear improvement.\n\nThe transport shape already seemed right. The problem really was the\nmain-isolate `MapMixin` facade.\n\nWhat improved materially:\n\n- `containsKey`: much closer to `LinkedHashMap`\n- `forEach`: now slightly faster than `LinkedHashMap`\n- `entries`: now faster than `LinkedHashMap`\n- `values`: major improvement, now faster than `LinkedHashMap` in the latest run\n- `Map.from(row)`: now slightly faster than `Map.from(map)`\n\nWhat did not change much:\n\n- direct hot `row['field']` lookups\n- the existing `keys + lookup` path, which was already good",
-      "reasoning": "This keeps the best part of the current design — the result transport shape —\nwhile making `Row` behave much more like a performant `Map` on the main\nisolate."
+      "reasoning": "This keeps the best part of the current design — the result transport shape —\nwhile making `Row` behave much more like a performant `Map` on the main\nisolate.",
+      "benchmarkRun": {
+        "id": "post-032-038",
+        "date": "2026-04-09",
+        "timestamp": "2026-04-09T09:18:08",
+        "source": "same-day"
+      }
     },
     {
       "id": "033",
@@ -6784,7 +6934,13 @@
       "hypothesis": null,
       "approach": "Replaced `Object.hash(hash, value)` with FNV-1a 64-bit hash for stream result\nchange detection. Created shared `result_hash.dart` module imported by both\n`read_worker.dart` (worker-side hash) and `stream_engine.dart` (main-side hash)\nto ensure one source of truth.\n\nFNV-1a uses a single multiply + XOR per element vs Object.hash's Jenkins hash\nwhich operates on 29-bit values with more operations per combine step.",
       "results": "Part of cumulative -11% stream invalidation improvement. No isolated signal\ndue to the hash being a small fraction of total query time.",
-      "reasoning": "**Accepted** — shared module eliminates the divergence risk of having two\nindependent hash implementations. FNV-1a has better avalanche properties\nthan the 29-bit Jenkins hash used by Object.hash."
+      "reasoning": "**Accepted** — shared module eliminates the divergence risk of having two\nindependent hash implementations. FNV-1a has better avalanche properties\nthan the 29-bit Jenkins hash used by Object.hash.",
+      "benchmarkRun": {
+        "id": "MacBook-Pro-14",
+        "date": "2026-04-09",
+        "timestamp": "2026-04-09T10:13:29",
+        "source": "same-day"
+      }
     },
     {
       "id": "034",
@@ -6797,7 +6953,13 @@
       "hypothesis": null,
       "approach": "Added a `Map<String, RowSchema>` cache per worker isolate, keyed by SQL string.\nOn cache hit, skips N `sqlite3_column_name` FFI calls + N `_fastDecodeText`\nstring allocations (where N = column count, typically 3-15).\n\nThe cache persists for the worker's lifetime. Each worker isolate has its own\ninstance (top-level variable in read_worker.dart).",
       "results": "Part of cumulative +17% point query improvement. For repeated queries (the\ncommon case with statement caching), eliminates all schema-related FFI calls\nand string allocations after the first execution.",
-      "reasoning": "**Accepted** — simple HashMap lookup. Eliminates real work (FFI calls + string\nallocations) on the hot path. Cache grows bounded by distinct SQL strings\n(typically <100 in any application)."
+      "reasoning": "**Accepted** — simple HashMap lookup. Eliminates real work (FFI calls + string\nallocations) on the hot path. Cache grows bounded by distinct SQL strings\n(typically <100 in any application).",
+      "benchmarkRun": {
+        "id": "bench-improvements",
+        "date": "2026-04-09",
+        "timestamp": "2026-04-09T10:23:18",
+        "source": "same-day"
+      }
     },
     {
       "id": "035",
@@ -6810,7 +6972,13 @@
       "hypothesis": null,
       "approach": "Hoisted the cell buffer (calloc'd native memory + TypedList views) to worker-\nisolate scope. The buffer persists across queries and grows to the high-water\ncolumn count. Eliminates calloc + free per query.\n\nSafe because each worker isolate is single-threaded (one query at a time).",
       "results": "Part of cumulative +17% point query improvement. Eliminates 1 calloc + 1 free\n+ 4 TypedList view allocations per query.",
-      "reasoning": "**Accepted** — eliminates real allocations on every query. The buffer is small\n(16 bytes × column count, typically <256 bytes) and persists for the worker's\nlifetime."
+      "reasoning": "**Accepted** — eliminates real allocations on every query. The buffer is small\n(16 bytes × column count, typically <256 bytes) and persists for the worker's\nlifetime.",
+      "benchmarkRun": {
+        "id": "verify",
+        "date": "2026-04-09",
+        "timestamp": "2026-04-09T10:25:07",
+        "source": "same-day"
+      }
     },
     {
       "id": "036",
@@ -6823,7 +6991,13 @@
       "hypothesis": null,
       "approach": "**Dart:**\n- `@pragma('vm:prefer-inline')` on `_fastDecodeText` (hot text decode path)\n\n**C:**\n- `__attribute__((hot))` on 6 hot functions: `buf_write`, `buf_ensure`,\n  `json_write_string`, `write_json_to_buf`, `resqlite_step_row`, `fast_i64_to_str`\n- `__restrict` on `buf_write` and `json_write_string` parameters\n- `__builtin_expect` on `buf_ensure` capacity check (likely) and\n  `resqlite_step_row` exit check (unlikely)",
       "results": "No isolated signal — these are compiler optimization hints that affect code\ngeneration quality. The Dart pragma primarily helps AOT (Flutter release builds)\nrather than JIT benchmarks.",
-      "reasoning": "**Accepted** — zero-risk annotations. No behavioral changes. The `__restrict`\nqualifier helps the C compiler eliminate redundant loads in the JSON buffer\nwrite path. The `__builtin_expect` hints align branch prediction with the\nactual hot path (buffer has capacity, step returns SQLITE_ROW)."
+      "reasoning": "**Accepted** — zero-risk annotations. No behavioral changes. The `__restrict`\nqualifier helps the C compiler eliminate redundant loads in the JSON buffer\nwrite path. The `__builtin_expect` hints align branch prediction with the\nactual hot path (buffer has capacity, step returns SQLITE_ROW).",
+      "benchmarkRun": {
+        "id": "readme-numbers",
+        "date": "2026-04-09",
+        "timestamp": "2026-04-09T10:29:34",
+        "source": "same-day"
+      }
     },
     {
       "id": "037",
@@ -6862,7 +7036,13 @@
       "hypothesis": "The cell-count threshold (`rows * cols > 6000`) is a poor proxy for SendPort\ncopy cost. A 200-row query with large text blobs can transfer more data than a\n2000-row query with tiny ints, yet only the latter would trigger sacrifice.\nEstimating actual byte size and using a byte threshold should give a more\naccurate sacrifice signal with zero additional overhead.",
       "approach": "Added a `byteEstimate` accumulator to the existing cell loop in\n`_executeQueryImpl`. Each cell contributes its actual data size:\n\n- `int` / `double`: +8 bytes\n- `text`: +byte length\n- `blob`: +byte length\n- `null`: +0\n\nThis piggybacks on the per-cell type switch that already runs for every value —\nno second pass, no new FFI calls. The estimate is stored on `RawQueryResult` and\nused for the sacrifice decision.\n\nUnified both the row and selectBytes thresholds into a single\n`sacrificeByteThreshold = 256 KB`. Below this, SendPort memcpy is\nsub-millisecond. Above it, Isolate.exit zero-copy transfer outweighs the\n~2-5ms respawn cost.\n\nReplaced:\n- `const int sacrificeThreshold = 6000` (cell count)\n- `const int bytesSacrificeThreshold = 102400` (100 KB, bytes only)\n\nWith:\n- `const int sacrifice...",
       "results": "Benchmark comparison against previous baseline (3-repeat medians):\n\n- **13 wins, 0 regressions, 9 neutral**\n- No measurable overhead from the `byteEstimate +=` additions in the inner loop\n\nThe wins are from accumulated changes (control port fix, raw-data sacrifice\npath) rather than the threshold change itself, but the threshold change\nintroduced zero regression.",
-      "reasoning": null
+      "reasoning": null,
+      "benchmarkRun": {
+        "id": "post-byte-threshold",
+        "date": "2026-04-10",
+        "timestamp": "2026-04-10T10:27:41",
+        "source": "same-day"
+      }
     },
     {
       "id": "040",
@@ -6875,7 +7055,13 @@
       "hypothesis": "Collapse the protocol down to the real invariants:\n\n- one command port into the worker\n- one event port back to the pool for that worker lifetime\n- one `_pendingCompleter` as the authoritative in-flight state\n\nThis should:\n\n- simplify the slot state machine\n- reduce `RawReceivePort` churn\n- remove duplicated bookkeeping\n- slightly improve small-read overhead",
       "approach": "In `lib/src/reader/read_worker.dart` and `lib/src/reader/reader_pool.dart`:\n\n- removed `replyPort` from `ReadRequest`\n- changed the worker to receive one persistent event `SendPort` at spawn time\n- merged normal replies, sacrifice payloads, and `onExit` notifications onto one\n  per-worker event port\n- removed redundant `_alive` and `_busy` flags\n- made `_pendingCompleter` the authoritative \"in-flight request\" bit\n- kept respawn boundaries intact by recreating the event port per worker\n  lifecycle\n\nThe resulting slot state is now just:\n\n- `_sendPort` — worker can accept commands\n- `_pendingCompleter` — worker has one request in flight\n- `_eventPort` — replies and lifecycle events for this worker lifetime\n- `_closed` — do not respawn during shutdown",
       "results": "Full suite, 3 repeats:\n\n- Current: [benchmark/results/2026-04-14T10-22-58-event-port-cleanup.md](../benchmark/results/2026-04-14T10-22-58-event-port-cleanup.md)\n- Baseline: [benchmark/results/2026-04-14T09-32-07-fresh-run.md](../benchmark/results/2026-04-14T09-32-07-fresh-run.md)\n\nComparison summary:\n\n- 6 wins\n- 0 regressions\n- 57 neutral\n\nRead-path highlights:\n\n| Metric | Before | After | Result |\n|---|---:|---:|---|\n| Point query throughput | 101,010 qps | 116,659 qps | **+15% win** |\n| `select()` maps, 10K rows | 5.60 ms | 4.84 ms | **-14% win** |\n| `selectBytes()`, 1K rows | 0.50 ms | 0.49 ms | within noise |\n| `selectBytes()`, 10K rows | 6.05 ms | 5.88 ms | within noise |\n| Concurrent reads | mixed | mixed | within noise |\n\nThe strongest measured signal is improved per-query dispat...",
-      "reasoning": "**Accepted** — this is both a code-quality and a performance win.\n\nThe protocol now matches the actual semantics of the reader pool more closely,\nand the benchmark confirms that the simplification did not trade correctness for\nspeed. The gain is not dramatic, but it is real, targeted, and comes with less\nstate to reason about in the slot lifecycle."
+      "reasoning": "**Accepted** — this is both a code-quality and a performance win.\n\nThe protocol now matches the actual semantics of the reader pool more closely,\nand the benchmark confirms that the simplification did not trade correctness for\nspeed. The gain is not dramatic, but it is real, targeted, and comes with less\nstate to reason about in the slot lifecycle.",
+      "benchmarkRun": {
+        "id": "fresh-run",
+        "date": "2026-04-14",
+        "timestamp": "2026-04-14T09:32:07",
+        "source": "same-day"
+      }
     },
     {
       "id": "041",
@@ -6888,7 +7074,13 @@
       "hypothesis": "Replace `snprintf` with the Ryu algorithm — a purpose-built double-to-string converter benchmarked at 20-30x faster than `sprintf` per call and used in Java/Swift/Rust standard libraries.",
       "approach": null,
       "results": null,
-      "reasoning": "**Rejected.** The isolated win is marginal and doesn't justify the vendored-dependency + format-compatibility-wrapper complexity. Experiment 043 (SWAR escape scanning + lookup table) captures the real JSON-serialization win with simpler, in-tree code."
+      "reasoning": "**Rejected.** The isolated win is marginal and doesn't justify the vendored-dependency + format-compatibility-wrapper complexity. Experiment 043 (SWAR escape scanning + lookup table) captures the real JSON-serialization win with simpler, in-tree code.",
+      "benchmarkRun": {
+        "id": "exp041-ryu",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T18:59:59",
+        "source": "exact"
+      }
     },
     {
       "id": "042",
@@ -6901,7 +7093,13 @@
       "hypothesis": "Adding `-flto` to the build flags enables the linker to perform whole-program optimization, inlining hot SQLite functions into the resqlite query paths. This should benefit the per-cell decode loop most (the objects path), since it makes many small FFI-like calls per row.",
       "approach": null,
       "results": "### Round 1: `-flto` alone\n\n**17 wins, 2 regressions** (3 repeats vs baseline).\n\n| Benchmark | Baseline (ms) | LTO (ms) | Delta | Status |\n|---|---|---|---|---|\n| Point query (qps) | 60,161 | 119,417 | +98% | Win |\n| Parameterized queries | 15.89 | 14.00 | -12% | Win |\n| Text-heavy schema | 0.67 | 0.57 | -15% | Win |\n| Transaction read 1000 | 0.20 | 0.17 | -15% | Win |\n| **selectBytes 1000 rows** | **0.51** | **0.58** | **+14%** | **Regression** |\n| **selectBytes 10000 rows** | **5.70** | **6.62** | **+16%** | **Regression** |\n\nLTO helps the objects path but hurts the bytes/JSON path — likely icache pressure from inlining sqlite3_column_* into the already-large `write_json_to_buf`.\n\n### Round 2: `-flto` + `__attribute__((noinline))` on `write_json_to_buf`\n\n**15 wins, 4 regressions.** Wo...",
-      "reasoning": "**Rejected.** Four rounds of testing showed no configuration where LTO is net positive:\n\n- Alone: helps objects, hurts bytes\n- With noinline: still hurts bytes, adds new regressions\n- Stacked with 041+043: strictly harmful (0 wins, 7 regressions)\n- ThinLTO: still net negative\n\nThe root cause is that `native_toolchain_c` already uses `-O3`, which performs aggressive intra-unit optimization. The cross-unit inlining from LTO causes code size bloat that degrades icache behavior. The SQLite amalgamation is already a single ~250k-line translation unit with its own internal inlining — adding resqlite.c into the optimization scope creates too much code for the instruction cache to handle efficiently.\n\nThe objects-path wins from the initial test were real but misleading — they were offset by reg..."
+      "reasoning": "**Rejected.** Four rounds of testing showed no configuration where LTO is net positive:\n\n- Alone: helps objects, hurts bytes\n- With noinline: still hurts bytes, adds new regressions\n- Stacked with 041+043: strictly harmful (0 wins, 7 regressions)\n- ThinLTO: still net negative\n\nThe root cause is that `native_toolchain_c` already uses `-O3`, which performs aggressive intra-unit optimization. The cross-unit inlining from LTO causes code size bloat that degrades icache behavior. The SQLite amalgamation is already a single ~250k-line translation unit with its own internal inlining — adding resqlite.c into the optimization scope creates too much code for the instruction cache to handle efficiently.\n\nThe objects-path wins from the initial test were real but misleading — they were offset by reg...",
+      "benchmarkRun": {
+        "id": "exp042-lto",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T19:03:14",
+        "source": "exact"
+      }
     },
     {
       "id": "043",
@@ -6914,7 +7112,13 @@
       "hypothesis": "Two complementary optimizations:\n\n1. **SWAR (SIMD Within A Register):** Load 8 bytes into a `uint64_t` and check all escape conditions with ~10 bitwise ops. If the result is zero, skip all 8 bytes at once. This eliminates branch overhead for the common no-escape case (most strings contain no special characters).\n\n2. **Escape lookup table:** Replace the 8-way if/else chain with a 256-byte static lookup table indexed by character value. Maps each byte to its escape length (0 = safe, 2 = named escape, 6 = `\\uXXXX`). Reduces the per-escape-character branch chain from 8 comparisons to a single table lookup.\n\nThese stack naturally: SWAR handles bulk safe spans, the lookup table handles the rare escape characters efficiently.",
       "approach": null,
       "results": "**22 wins, 0 regressions** — the strongest result of any experiment in this batch.\n\n| Benchmark | Baseline (ms) | SWAR+LUT (ms) | Delta |\n|---|---|---|---|\n| selectBytes 1000 rows | 0.51 | 0.35 | **-31%** |\n| selectBytes 10000 rows | 5.70 | 4.14 | **-27%** |\n| Text-heavy schema (1000 rows) | 0.67 | 0.58 | -13% |\n| Concurrent reads 8x | 0.77 | 0.68 | -12% |\n| Parameterized queries | 15.89 | 13.90 | -13% |\n\nThe selectBytes improvements are the direct signal — 27-31% faster JSON serialization at scale. The SWAR fast-path eliminates branch overhead for the vast majority of string bytes (typical text has no JSON-special characters), while the lookup table makes the rare escape case branchless.",
-      "reasoning": "**Accepted.** 22 wins, zero regressions, and a 27-31% improvement on the targeted path (selectBytes at scale). The code is pure portable C with no platform-specific intrinsics. The SWAR approach is well-established (simdjson, yyjson) and the lookup table is a standard optimization.\n\nCombined with experiment 041 (Ryu), these two changes halve selectBytes time: 5.70ms → 3.19ms at 10k rows (-44%)."
+      "reasoning": "**Accepted.** 22 wins, zero regressions, and a 27-31% improvement on the targeted path (selectBytes at scale). The code is pure portable C with no platform-specific intrinsics. The SWAR approach is well-established (simdjson, yyjson) and the lookup table is a standard optimization.\n\nCombined with experiment 041 (Ryu), these two changes halve selectBytes time: 5.70ms → 3.19ms at 10k rows (-44%).",
+      "benchmarkRun": {
+        "id": "exp043-swar-escape",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T19:05:57",
+        "source": "exact"
+      }
     },
     {
       "id": "044",
@@ -6927,7 +7131,13 @@
       "hypothesis": "Enabling `SQLITE_ENABLE_BATCH_ATOMIC_WRITE` at compile time activates F2FS detection at runtime. When the filesystem reports `SQLITE_IOCAP_BATCH_ATOMIC`, SQLite skips journal writes, yielding 2-3x write throughput improvement on Android. The flag is inert on filesystems that don't support batch atomics (macOS APFS, Linux ext4, Windows NTFS).",
       "approach": null,
       "results": "**Verified: 0 regressions on macOS.** As expected, the flag has no runtime effect on non-F2FS filesystems. The 21 \"wins\" in the benchmark are run-to-run variance — the flag does not activate on APFS.\n\nThe expected impact on Android F2FS (based on published research):\n- 2-3x write throughput for transactions\n- ~50% reduction in write amplification (no journal I/O)\n- Reduced SSD wear from eliminated journal writes",
-      "reasoning": "**Accepted.** Zero-risk compile flag that enables a significant write optimization on Android F2FS. No effect on other platforms. The optimization activates automatically via VFS capability detection — no API changes, no user configuration needed."
+      "reasoning": "**Accepted.** Zero-risk compile flag that enables a significant write optimization on Android F2FS. No effect on other platforms. The optimization activates automatically via VFS capability detection — no API changes, no user configuration needed.",
+      "benchmarkRun": {
+        "id": "exp044-batch-atomic",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T19:13:02",
+        "source": "exact"
+      }
     },
     {
       "id": "045",
@@ -6940,7 +7150,13 @@
       "hypothesis": "Accumulate dirty tables within a Dart microtask and flush once. The Dart event loop provides a natural coalescing boundary: `scheduleMicrotask` fires after the current synchronous work completes. Multiple `handleDirtyTables` calls within the same synchronous execution batch are unioned into a single invalidation pass.",
       "approach": null,
       "results": "**18 wins, 0 regressions** (3 repeats vs baseline).\n\n| Benchmark | Baseline (ms) | Coalesced (ms) | Delta |\n|---|---|---|---|\n| Fan-out (10 streams) | 0.24 | 0.13 | **-46%** |\n| Fan-out [main] | 0.24 | 0.13 | **-46%** |\n| Invalidation latency | 0.05 | 0.04 | -20% (within noise) |\n\nThe fan-out improvement is the direct signal: the benchmark performs rapid sequential writes that trigger multiple invalidations on the same stream set. Coalescing reduces these to a single re-query dispatch per microtask.",
-      "reasoning": "**Accepted.** Clean 46% improvement on the fan-out benchmark with zero regressions. The change is a strict behavioral improvement — fewer redundant re-queries, less reader pool contention — with no observable latency increase for single-write scenarios (invalidation latency unchanged).\n\nCorrectness is preserved by `_writeGeneration` and `reQueryGeneration` — stale results from in-flight re-queries are already discarded on arrival."
+      "reasoning": "**Accepted.** Clean 46% improvement on the fan-out benchmark with zero regressions. The change is a strict behavioral improvement — fewer redundant re-queries, less reader pool contention — with no observable latency increase for single-write scenarios (invalidation latency unchanged).\n\nCorrectness is preserved by `_writeGeneration` and `reQueryGeneration` — stale results from in-flight re-queries are already discarded on arrival.",
+      "benchmarkRun": {
+        "id": "exp045-microtask-coalesce",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T19:10:43",
+        "source": "exact"
+      }
     },
     {
       "id": "046",
@@ -6953,7 +7169,13 @@
       "hypothesis": "Switching from async to sync controllers should reduce stream delivery latency by ~10-50μs per event per subscriber, with no reentrancy issues since events are added from async pool callbacks, not from within listener callbacks.",
       "approach": null,
       "results": "**Crashed with `ConcurrentModificationException`** during the streaming benchmark:\n\n```\nConcurrent modification during iteration: Instance(length:0) of '_GrowableList'.\n#0      ListIterator.moveNext (dart:_internal/iterable.dart:365:7)\n#1      StreamEngine._createStream.<anonymous closure>\n```\n\nThe reentrancy assumption was wrong. When a sync controller fires an event, the listener receives it immediately in the same call stack. If the listener's callback triggers a `onCancel` (removing itself from `entry.subscribers`), this modifies the subscriber list while `_createStream` or `_flushDirtyTables` is iterating over it — classic concurrent modification.\n\nWith async controllers, the event delivery is deferred to a microtask, so the iteration completes before any listener callbacks fire.",
-      "reasoning": "**Rejected.** The synchronous controller creates a reentrancy hazard that causes crashes in production-realistic scenarios. The async controller's microtask deferral is not just overhead — it's a correctness mechanism that prevents concurrent modification of the subscriber list during iteration.\n\nFixing this would require copying the subscriber list before iteration (defeating the purpose) or restructuring the event delivery to handle mid-iteration modifications."
+      "reasoning": "**Rejected.** The synchronous controller creates a reentrancy hazard that causes crashes in production-realistic scenarios. The async controller's microtask deferral is not just overhead — it's a correctness mechanism that prevents concurrent modification of the subscriber list during iteration.\n\nFixing this would require copying the subscriber list before iteration (defeating the purpose) or restructuring the event delivery to handle mid-iteration modifications.",
+      "benchmarkRun": {
+        "id": "baseline",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T18:57:06",
+        "source": "same-day"
+      }
     },
     {
       "id": "047",
@@ -6966,7 +7188,13 @@
       "hypothesis": "Add a `tracking_enabled` flag to the `resqlite_reader` struct. The authorizer checks this first; if 0, it returns immediately (no `read_set_add`). Dart enables tracking only around `SelectWithDepsRequest` (initial stream queries). All other query types run with tracking disabled, saving one string comparison + linear scan per column access per row.",
       "approach": null,
       "results": "**Streaming benchmarks timed out** — stream invalidation stopped working.\n\nRoot cause: **statement cache conflict.** When a non-stream `select()` prepares a statement with tracking OFF, the cache entry stores empty read tables. If a `stream()` later queries the same SQL, it hits the cache and loads the empty dependency set — the stream never discovers which tables it reads, so invalidation never fires.\n\nThe statement cache is shared between stream and non-stream queries by design. The `read_set_load_from_cache_entry` at `get_or_prepare_reader:930` loads cached dependencies regardless of tracking state, but only if the cache entry was populated when tracking was ON during the original prepare.",
-      "reasoning": "**Rejected.** The shared statement cache makes per-query authorizer toggling unsafe without significant complexity (e.g., force re-prepare when tracking state changes, or maintain separate caches for stream vs non-stream queries). The authorizer callback is already very cheap: one `action_code == SQLITE_READ` comparison + one `read_set_add` that scans 1-3 table names. The overhead is dwarfed by actual SQLite query execution."
+      "reasoning": "**Rejected.** The shared statement cache makes per-query authorizer toggling unsafe without significant complexity (e.g., force re-prepare when tracking state changes, or maintain separate caches for stream vs non-stream queries). The authorizer callback is already very cheap: one `action_code == SQLITE_READ` comparison + one `read_set_add` that scans 1-3 table names. The overhead is dwarfed by actual SQLite query execution.",
+      "benchmarkRun": {
+        "id": "round2-baseline",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T22:02:15",
+        "source": "same-day"
+      }
     },
     {
       "id": "051",
@@ -7005,7 +7233,13 @@
       "hypothesis": "Doubling page size from 4096 to 8192 should improve read performance for large result sets by reducing B-tree depth and page count. Write performance may also improve due to fewer pages per transaction.",
       "approach": null,
       "results": "**14 wins, 0 regressions** (3 repeats × 2 runs vs baseline).\n\n| Benchmark | Baseline | 8K pages | Delta |\n|---|---|---|---|\n| Select maps 10000 rows | 5.57ms | 4.58-4.67ms | **-16 to -18%** |\n| Batched write tx 100 rows | 0.82ms | 0.63ms | **-23%** |\n| Batched write tx 1000 rows | 8.27ms | 6.12ms | **-26%** |\n| Batched write tx (executeBatch) | 0.54ms | 0.45ms | **-17%** |\n| Transaction read 500 rows | 0.13ms | 0.10ms | **-23%** |\n| Transaction read 1000 rows | 0.23ms | 0.19ms | **-17%** |\n| selectBytes (all sizes) | — | — | unchanged |\n\nThe large-read improvement (-16 to -18% at 10k rows) is real and consistent. Transaction reads and writes also improved significantly. selectBytes was unaffected (the C JSON serializer's cost dominates page read cost).",
-      "reasoning": "**Rejected as a default change** despite real performance wins, because:\n\n1. **Breaks existing databases.** `PRAGMA page_size` only takes effect on new databases. Existing users would need to run `VACUUM` (which rewrites the entire database and can be very slow for large DBs) or see no benefit.\n2. **Should be user-configurable.** Page size is a deployment decision, not a library default. Some users may have reasons to prefer 4096 (smaller databases, memory-constrained devices). A better approach would be a `pageSize` parameter on `Database.open` that defaults to 4096 for compatibility.\n3. **Increases minimum I/O granularity.** Each page write is 8KB instead of 4KB. For workloads with many small updates to different pages, this increases write amplification.\n\nRecommendation: expose as a ..."
+      "reasoning": "**Rejected as a default change** despite real performance wins, because:\n\n1. **Breaks existing databases.** `PRAGMA page_size` only takes effect on new databases. Existing users would need to run `VACUUM` (which rewrites the entire database and can be very slow for large DBs) or see no benefit.\n2. **Should be user-configurable.** Page size is a deployment decision, not a library default. Some users may have reasons to prefer 4096 (smaller databases, memory-constrained devices). A better approach would be a `pageSize` parameter on `Database.open` that defaults to 4096 for compatibility.\n3. **Increases minimum I/O granularity.** Each page write is 8KB instead of 4KB. For workloads with many small updates to different pages, this increases write amplification.\n\nRecommendation: expose as a ...",
+      "benchmarkRun": {
+        "id": "exp053-pagesize-8k",
+        "date": "2026-04-15",
+        "timestamp": "2026-04-15T22:06:52",
+        "source": "exact"
+      }
     },
     {
       "id": "054",
@@ -7045,7 +7279,13 @@
       "hypothesis": "Add a `batch_suppress_hook` flag to the `resqlite_db` struct. When set, the preupdate hook skips `dirty_set_add` after the first capture. Set the flag before `run_batch_locked`, clear it after. The table name is captured on the first row and not redundantly re-added 9,999 times.",
       "approach": null,
       "results": "**0 wins, 1 regression, 62 neutral** (3 repeats vs baseline).\n\nThe batch insert 10k rows benchmark was essentially unchanged: 4.75ms → 4.64ms (within noise threshold of ±0.48ms).\n\nAnalysis: `dirty_set_add` with 1-3 existing entries does ~3-10ns of strcmp + return-early-on-match. At 10k rows, that's ~30-100μs of total preupdate hook overhead — 2-6% of a 4.75ms batch. Real but below the benchmark noise floor of ±10%.",
-      "reasoning": "**Rejected.** The optimization is correct in principle (and could be accepted as a cleanup), but the performance win is too small to measure and too small to justify the added complexity of a new struct field with flag-flip semantics around the batch call site.\n\nThe preupdate hook's `dirty_set_add` is already well-optimized (linear scan of a ~3-entry set is cache-resident). The remaining overhead is fundamental: SQLite calls the hook once per row, and we must accept that."
+      "reasoning": "**Rejected.** The optimization is correct in principle (and could be accepted as a cleanup), but the performance win is too small to measure and too small to justify the added complexity of a new struct field with flag-flip semantics around the batch call site.\n\nThe preupdate hook's `dirty_set_add` is already well-optimized (linear scan of a ~3-entry set is cache-resident). The remaining overhead is fundamental: SQLite calls the hook once per row, and we must accept that.",
+      "benchmarkRun": {
+        "id": "exp057-batch-hook",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T08:24:03",
+        "source": "exact"
+      }
     },
     {
       "id": "058",
@@ -7058,7 +7298,13 @@
       "hypothesis": "A per-worker LRU cache keyed on the raw byte sequence (not the decoded string, to avoid decoding on cache hit) would let us return a reference to a previously-decoded String for repeated values. For 64 cache slots with strings ≤ 32 bytes, the cache fits in a few cache lines and should be faster than decoding.",
       "approach": null,
       "results": "**0 wins, 19 regressions, up to +256%.**\n\n| Benchmark | Baseline | With cache | Delta |\n|---|---|---|---|\n| Transaction read 1000 rows | 0.18ms | 0.64ms | **+256%** |\n| Transaction read 500 rows | 0.10ms | 0.33ms | **+230%** |\n| Concurrent reads 8x | 0.68ms | 1.89ms | **+178%** |\n| Select maps 10000 rows | 4.70ms | 11.01ms | **+134%** |\n| Parameterized queries | 14.64ms | 36.20ms | **+147%** |\n| Schema wide 20 cols | 1.01ms | 2.24ms | **+122%** |\n\nThe cache made everything dramatically slower. Every column access pays the cache miss cost (linear scan of 64 slots + byte comparison) before falling through to the normal decode.",
-      "reasoning": "**Rejected.** This is the same lesson as experiment 006 (string interning): Dart's VM-level string allocation is already so fast that no Dart-level cache can beat it. Any indirection (hash lookup, linear scan, byte comparison) adds more overhead than it saves.\n\nThe general principle: when the baseline operation is ~20ns, a cache must have <10ns lookup and near-perfect hit rate to be a win. Those constraints are effectively impossible in Dart user code."
+      "reasoning": "**Rejected.** This is the same lesson as experiment 006 (string interning): Dart's VM-level string allocation is already so fast that no Dart-level cache can beat it. Any indirection (hash lookup, linear scan, byte comparison) adds more overhead than it saves.\n\nThe general principle: when the baseline operation is ~20ns, a cache must have <10ns lookup and near-perfect hit rate to be a win. Those constraints are effectively impossible in Dart user code.",
+      "benchmarkRun": {
+        "id": "exp058-string-cache",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T08:27:07",
+        "source": "exact"
+      }
     },
     {
       "id": "059",
@@ -7071,7 +7317,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "**2 wins, 0 regressions, 61 neutral** (3 repeats vs baseline).\n\n- Batched Write Inside Transaction (100 rows) / resqlite: **-11%** (one of two wins — likely an internal tx.select benefits)\n- All other metrics: within noise\n\nThe core select() path was unchanged:\n- select 10k rows: 4.70ms → 4.88ms (within noise)\n- select 1k rows: 0.38ms (unchanged)\n- point query: 113k → 114k qps (within noise)",
-      "reasoning": "**Rejected.** The optimization is correct and zero-risk, but the measurable improvement is below the benchmark noise floor. The single 11% win on batched write tx is real but isolated; it doesn't move the headline numbers.\n\nKeeping the simpler 1-line allocation over a 2-field cache entry + update logic is the right tradeoff when the measurable benefit is marginal."
+      "reasoning": "**Rejected.** The optimization is correct and zero-risk, but the measurable improvement is below the benchmark noise floor. The single 11% win on batched write tx is real but isolated; it doesn't move the headline numbers.\n\nKeeping the simpler 1-line allocation over a 2-field cache entry + update logic is the right tradeoff when the measurable benefit is marginal.",
+      "benchmarkRun": {
+        "id": "exp059-row-hint",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T08:30:25",
+        "source": "exact"
+      }
     },
     {
       "id": "060",
@@ -7084,7 +7336,13 @@
       "hypothesis": "A single `resqlite_query_single_row` function that acquires, binds, steps once, reads cells, and resets — all in one C function call.",
       "approach": null,
       "results": null,
-      "reasoning": "**Rejected as designed**, but the idea evolved into experiment 063 which added inline text/blob copy before the reset, storing offsets (not pointers) in the cell buffer. That worked — 063 showed 28-48% point query improvement. This failed attempt directly led to the successful 063 design.\n\n**Key lesson:** any \"combined FFI\" function that resets the statement must copy text/blob data out before the reset. Raw pointers don't survive reset."
+      "reasoning": "**Rejected as designed**, but the idea evolved into experiment 063 which added inline text/blob copy before the reset, storing offsets (not pointers) in the cell buffer. That worked — 063 showed 28-48% point query improvement. This failed attempt directly led to the successful 063 design.\n\n**Key lesson:** any \"combined FFI\" function that resets the statement must copy text/blob data out before the reset. Raw pointers don't survive reset.",
+      "benchmarkRun": {
+        "id": "round3-baseline",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T08:20:56",
+        "source": "same-day"
+      }
     },
     {
       "id": "063",
@@ -7097,7 +7355,13 @@
       "hypothesis": "Combine the four crossings into one FFI call. Handle the text pointer lifetime issue by **copying text/blob bytes into the caller's buffer** before resetting the statement. The cell's `p` field stores a byte offset into the buffer instead of an absolute SQLite-owned pointer. Dart reconstructs the pointer as `bufBase + offset`.\n\nExpose this via a new `selectOne(sql, params) → Future<Map<String, Object?>?>` API that returns a single Map directly, bypassing the List+ResultSet wrappers.",
       "approach": null,
       "results": "Standalone benchmark, 5 runs:\n\n| Run | select() qps | selectOne() qps | Speedup |\n|----:|-------------:|----------------:|--------:|\n| 1 | 94,411 | 123,305 | +30.6% |\n| 2 | 98,775 | 128,535 | +30.1% |\n| 3 | 111,932 | 165,071 | +47.5% |\n| 4 | 122,941 | 170,648 | +38.8% |\n| 5 | 124,254 | 158,881 | +27.9% |\n\n**Consistent 28-48% throughput improvement on point queries.** Absolute improvement: ~3μs saved per query. Correctness verified against `select()` for int/real/text/blob/null columns, empty result sets, and long strings.",
-      "reasoning": "**Rejected despite the strong measured win** — adds API surface (new method `selectOne`) that complicates the lean library API.\n\nThe user feedback: \"I like the methodology though. Are there wins to try that are under the hood and leverage these innovations while making it transparent for consumers?\"\n\nThis led to experiment 066, which attempted a transparent version using probe-based detection in `select()`. That showed the win cannot be captured transparently — the bulk of the improvement comes from the API shape change (Map vs List<Map>), which by definition can't be done without changing the API.\n\n**Future consideration:** if workload evidence surfaces that single-row queries dominate a particular app, this API could be revisited. The implementation is sound and tested. For now, the p..."
+      "reasoning": "**Rejected despite the strong measured win** — adds API surface (new method `selectOne`) that complicates the lean library API.\n\nThe user feedback: \"I like the methodology though. Are there wins to try that are under the hood and leverage these innovations while making it transparent for consumers?\"\n\nThis led to experiment 066, which attempted a transparent version using probe-based detection in `select()`. That showed the win cannot be captured transparently — the bulk of the improvement comes from the API shape change (Map vs List<Map>), which by definition can't be done without changing the API.\n\n**Future consideration:** if workload evidence surfaces that single-row queries dominate a particular app, this API could be revisited. The implementation is sound and tested. For now, the p...",
+      "benchmarkRun": {
+        "id": "round4-baseline",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T12:18:26",
+        "source": "same-day"
+      }
     },
     {
       "id": "064",
@@ -7110,7 +7374,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "No measurable benchmark signal. The savings (~50ns per bind) are below the noise floor of the benchmark suite.\n\nFull suite run showed 1 apparent win (-11%) and 1 apparent regression (-16%) on unrelated metrics — both within run-to-run variance. Full test suite (126 tests) passes.",
-      "reasoning": "**Accepted as cleanup.** Not a performance win by benchmark measurement, but:\n- The removed code was provably redundant given existing invariants\n- Simplifies the bind path by one call\n- Documents the invariants clearly for future maintainers\n\nNo correctness risk: every control-flow path that enters `bind_params` satisfies the preconditions that make the clear unnecessary."
+      "reasoning": "**Accepted as cleanup.** Not a performance win by benchmark measurement, but:\n- The removed code was provably redundant given existing invariants\n- Simplifies the bind path by one call\n- Documents the invariants clearly for future maintainers\n\nNo correctness risk: every control-flow path that enters `bind_params` satisfies the preconditions that make the clear unnecessary.",
+      "benchmarkRun": {
+        "id": "exp064-no-clear-bindings",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T12:31:15",
+        "source": "exact"
+      }
     },
     {
       "id": "065",
@@ -7123,7 +7393,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "Consistent across 3 runs:\n\n| Rows | Custom (selectBytes) | JSON1 (select) | Custom/JSON1 Ratio |\n|---:|---:|---:|---:|\n| 100 | 0.07ms | 0.10-0.11ms | 1.46-1.59x faster |\n| 1,000 | 0.42-0.43ms | 0.43-0.48ms | 1.03-1.12x faster |\n| 10,000 | 4.18-4.49ms | 4.18-4.44ms | 0.98-1.05x (tied) |\n\n**Our custom path is strictly better or equal to JSON1 across all sizes.** No scenario where JSON1 wins meaningfully.\n\nAt small result sizes, the custom path wins by ~50% — FFI overhead dominates, and JSON1 doesn't save any crossings since the `select()` call still has to marshal a single-row result back.\n\nAt medium sizes (1k rows), the custom path is marginally faster by 3-12%.\n\nAt large sizes (10k rows), the two are essentially tied. SQLite's tight C loop for JSON building is efficient, but our SWAR+Ry...",
-      "reasoning": "**Rejected.** Round 1's optimizations widened the gap between our custom path and JSON1 to the point where JSON1 is never a win. Experiment 031's original rejection stands and is now even stronger.\n\nThis is a \"negative result with conviction\" — the path is closed. Future evaluations of custom vs JSON1 aren't needed unless SQLite's JSON1 implementation changes substantially or our custom path regresses."
+      "reasoning": "**Rejected.** Round 1's optimizations widened the gap between our custom path and JSON1 to the point where JSON1 is never a win. Experiment 031's original rejection stands and is now even stronger.\n\nThis is a \"negative result with conviction\" — the path is closed. Future evaluations of custom vs JSON1 aren't needed unless SQLite's JSON1 implementation changes substantially or our custom path regresses.",
+      "benchmarkRun": {
+        "id": "round5-baseline",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T17:46:05",
+        "source": "same-day"
+      }
     },
     {
       "id": "066",
@@ -7136,7 +7412,13 @@
       "hypothesis": "Detect the single-row case automatically. Combine acquire + bind + first step + \"peek next step\" into a single FFI call that reports:\n- 0: no rows (stmt reset)\n- 1: exactly one row (data inline-copied into buffer, stmt reset)\n- 2: multiple rows (row 1 inline-copied, stmt left in row-2 state for caller to continue)\n\nOn return, decode row 1 from the buffer; if probe=1, return immediately; if probe=2, read row 2 and continue stepping normally.",
       "approach": null,
       "results": "Measurements showed essentially no improvement over baseline — within thermal noise:\n\n| Configuration | Median QPS (20-trial median) |\n|---|---:|\n| Main (cold) | 148,225 |\n| Round 4 + 066 | 139,063 |\n| Main (warm) | 114,449 |\n\nThe back-to-back variation between consecutive runs (~30%) is larger than any measurable effect from the change.",
-      "reasoning": "**Rejected.** The transparent constraint fundamentally limits the achievable gain. The bulk of 063's improvement comes from API-shape changes that can't be replicated transparently. The remaining FFI-crossing savings are too small to clear the benchmark noise floor.\n\n**Lesson:** Not every optimization that works in a specialized API can be retrofit transparently. The `select()` contract — returning `List<Map<String, Object?>>` — is itself a performance ceiling for single-row queries. Breaking that ceiling requires either a new API (063) or a different benchmark that measures a different thing (e.g., memory or GC pressure, where columnar would win)."
+      "reasoning": "**Rejected.** The transparent constraint fundamentally limits the achievable gain. The bulk of 063's improvement comes from API-shape changes that can't be replicated transparently. The remaining FFI-crossing savings are too small to clear the benchmark noise floor.\n\n**Lesson:** Not every optimization that works in a specialized API can be retrofit transparently. The `select()` contract — returning `List<Map<String, Object?>>` — is itself a performance ceiling for single-row queries. Breaking that ceiling requires either a new API (063) or a different benchmark that measures a different thing (e.g., memory or GC pressure, where columnar would win).",
+      "benchmarkRun": {
+        "id": "075-baseline",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T19:45:07",
+        "source": "same-day"
+      }
     },
     {
       "id": "067",
@@ -7149,7 +7431,13 @@
       "hypothesis": "Point queries allocate ~1280 fewer slots. Multi-row queries pay a few extra geometric doublings (Dart's list grows by `oldCap * 2 + small`), but the per-growth cost is amortized O(1). Net win for small results, net zero for large results.",
       "approach": null,
       "results": "**0 wins, 4 regressions, 59 neutral.**\n\n| Benchmark | Before | After | Delta |\n|---|---|---|---|\n| Stream Churn (100 cycles) | 2.14ms | 3.08ms | **+44%** |\n| Batched Write Inside Transaction (100 rows) | 0.65ms | 0.91ms | **+40%** |\n| Batched Write Inside Transaction [main] | 0.65ms | 0.91ms | **+40%** |\n| (3 others within noise, all trending up) | | | |\n\nEvery workload that involves many small queries regressed. The shrink hurt, not helped.",
-      "reasoning": "**Rejected.** The `colCount * 256` initial size is well-tuned for the current Dart VM. It produces zero regressions across the benchmark suite; any shrinking hits the list-growth pathology.\n\nThis is a counterintuitive result — \"allocate less\" usually saves work, but here the Dart VM's implementation details make \"allocate more upfront with a fast path\" the winning strategy.\n\n**Lesson:** VM implementation details matter more than theoretical allocation cost. Always measure Dart-level memory optimizations; the VM is often smarter about `filled(n, null)` than user code."
+      "reasoning": "**Rejected.** The `colCount * 256` initial size is well-tuned for the current Dart VM. It produces zero regressions across the benchmark suite; any shrinking hits the list-growth pathology.\n\nThis is a counterintuitive result — \"allocate less\" usually saves work, but here the Dart VM's implementation details make \"allocate more upfront with a fast path\" the winning strategy.\n\n**Lesson:** VM implementation details matter more than theoretical allocation cost. Always measure Dart-level memory optimizations; the VM is often smarter about `filled(n, null)` than user code.",
+      "benchmarkRun": {
+        "id": "exp067-shrink-init",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T13:17:56",
+        "source": "exact"
+      }
     },
     {
       "id": "068",
@@ -7162,7 +7450,13 @@
       "hypothesis": null,
       "approach": null,
       "results": null,
-      "reasoning": "**Deferred.** The idea is sound and the need is real. Landing it\nproperly requires fixing the stmt-cache/auto-reprepare interaction,\nwhich is a focused correctness effort rather than a quick win."
+      "reasoning": "**Deferred.** The idea is sound and the need is real. Landing it\nproperly requires fixing the stmt-cache/auto-reprepare interaction,\nwhich is a focused correctness effort rather than a quick win.",
+      "benchmarkRun": {
+        "id": "075-verify",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T19:48:10",
+        "source": "same-day"
+      }
     },
     {
       "id": "069",
@@ -7175,7 +7469,13 @@
       "hypothesis": null,
       "approach": null,
       "results": null,
-      "reasoning": "**Deferred.** The impact is real for apps that don't use bind parameters,\nbut a proper implementation is a 300+-line SQL rewriter with edge-case\nrisk that doesn't match the \"quick win\" framing. Revisit if:\n\n1. A production app surfaces prepare-storm telemetry suggesting this is\n   the bottleneck.\n2. We build out a proper `sqlite3_normalize()` wrapper (possibly via\n   `SQLITE_ENABLE_NORMALIZE` compile flag + a custom pre-prepare pass)."
+      "reasoning": "**Deferred.** The impact is real for apps that don't use bind parameters,\nbut a proper implementation is a 300+-line SQL rewriter with edge-case\nrisk that doesn't match the \"quick win\" framing. Revisit if:\n\n1. A production app surfaces prepare-storm telemetry suggesting this is\n   the bottleneck.\n2. We build out a proper `sqlite3_normalize()` wrapper (possibly via\n   `SQLITE_ENABLE_NORMALIZE` compile flag + a custom pre-prepare pass).",
+      "benchmarkRun": {
+        "id": "075-verify-v2",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T19:58:31",
+        "source": "same-day"
+      }
     },
     {
       "id": "070",
@@ -7188,7 +7488,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "**0 wins, 0 regressions on the 63-benchmark suite** (5 repeats vs baseline).\n\nThe per-write savings (~200-400ns: one calloc/free pair + the occasional\nlist allocation) are below the benchmark noise floor. The change is\naccepted as a quality improvement, not a performance win:\n\n- Removes per-write heap churn (one less allocation pair)\n- Simplifies the happy path (no `try/finally` wrapper)\n- Tightens the unchanged-set case to a const return\n\nAll 128 tests pass.",
-      "reasoning": "**Accepted as cleanup.** The code is strictly simpler and marginally less\nallocation-heavy. Not a measurable win on its own; pairs with experiment\n068 (the DDL watchdog) which also called `getDirtyTables` on each commit —\nthis reduces the shared cost of both."
+      "reasoning": "**Accepted as cleanup.** The code is strictly simpler and marginally less\nallocation-heavy. Not a measurable win on its own; pairs with experiment\n068 (the DDL watchdog) which also called `getDirtyTables` on each commit —\nthis reduces the shared cost of both.",
+      "benchmarkRun": {
+        "id": "075-simplified",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T20:22:03",
+        "source": "same-day"
+      }
     },
     {
       "id": "071",
@@ -7201,7 +7507,13 @@
       "hypothesis": "Two changes would speed up the common hot-loop case:\n\n1. **Reverse scan direction** (tail → head). The MRU now hits in one\n   iteration.\n2. **Precomputed `sql_hash`** stored on each entry. Compare the 32-bit\n   hash before the `memcmp`, so cache misses on differently-shaped SQL\n   pay ~1 ns instead of ~tens of ns.\n\nOriginally framed as \"SQL fingerprint for stmt cache\" in the Round 1\nplan, which I rejected during pre-implementation analysis — the literal-\nnormalization version has a correctness issue because prepared\nstatements bake in literal values and can't be reused across different\nliteral bindings. The hash+MRU variant is the honest, implementable\nversion of the same goal: reduce cache lookup cost.",
       "approach": null,
       "results": "`--repeat=5` against `noise-2.md` baseline:\n\n| Benchmark | Baseline | exp048 | Verdict |\n|---|---:|---:|---|\n| Point Query Throughput | 118,259 qps | 114,548 qps | within noise (±14%) |\n| Select → Maps / 1000 rows | 0.40 ms | 0.39 ms | within noise |\n| Parameterized Queries | 14.79 ms | 14.79 ms | within noise |\n| All 63 benchmarks | — | — | 0 wins, 0 regressions* |\n\n\\* Two regression entries for Stream Churn, which uses a single SQL and\nis dominated by stream lifecycle overhead rather than cache lookup cost\n— previously observed noise-band variance.",
-      "reasoning": "Rejected on the same methodology as 050: if we can't measure it, we\ndon't adopt it. The change was structurally sound and zero-risk, but\nthe default benchmark suite has no workload that stresses the cache\nlookup path."
+      "reasoning": "Rejected on the same methodology as 050: if we can't measure it, we\ndon't adopt it. The change was structurally sound and zero-risk, but\nthe default benchmark suite has no workload that stresses the cache\nlookup path.",
+      "benchmarkRun": {
+        "id": "075-simplified-vs-baseline",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T20:25:04",
+        "source": "same-day"
+      }
     },
     {
       "id": "072",
@@ -7214,7 +7526,13 @@
       "hypothesis": "Replacing FNV-1a with xxhash64 mergeRound for the combine step, and with a\nfull xxhash64 byte-hash for `Uint8List`, would be a drop-in speedup.",
       "approach": null,
       "results": "Measured with `dart run benchmark/run_all.dart --repeat=5` against a stable\nbaseline (`round1-baseline-stable.md`) captured on the same machine in the\nsame session to control for thermal state.\n\n### Regressions on hash-path benchmarks\n\n| Benchmark | Baseline (ms) | xxhash (ms) | Δ |\n|---|---:|---:|---:|\n| Streaming / Invalidation Latency | 0.04 | 0.07 | **+75%** |\n| Streaming / Stream Churn (100 cycles) | 1.63 | 2.37 | **+45%** |\n| Streaming / Fan-out (10 streams) | 0.15 | 0.20 | **+33%** |\n\nAll other benchmarks were within noise. No benchmark improved.",
-      "reasoning": "Rejected. Restored FNV-1a. The net regression is large and unambiguous on\nthe exact paths the experiment was meant to improve."
+      "reasoning": "Rejected. Restored FNV-1a. The net regression is large and unambiguous on\nthe exact paths the experiment was meant to improve.",
+      "benchmarkRun": {
+        "id": "075-final-check",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T20:58:06",
+        "source": "same-day"
+      }
     },
     {
       "id": "073",
@@ -7227,7 +7545,13 @@
       "hypothesis": "For hot loops where the same SQL string instance is reused, `identical()`\nis a pointer compare and avoids both map operations. Expected savings\n~20 ns per query — worth measuring.",
       "approach": null,
       "results": "Benchmarked with `--repeat=5` against `round1-baseline-stable.md`.\n\nEvery relevant benchmark was **within noise**:\n\n| Benchmark | Baseline (ms) | exp050 (ms) | Verdict |\n|---|---:|---:|---|\n| Point Query Throughput (qps) | 136,054 | 97,599 | within noise (±61% MAD) |\n| Select → Maps / 10 rows | 0.01 | 0.01 | no change |\n| Select → Maps / 1000 rows | 0.39 | 0.40 | within noise |\n| Select → Maps / 10000 rows | 5.22 | 5.56 | within noise |\n| Streaming / Invalidation Latency | 0.04 | 0.06 | within noise (±50% MAD) |\n| Streaming / Stream Churn | 1.63 | 2.38 | within noise (±40% MAD) |",
-      "reasoning": "Rejected for the default benchmark suite. The change is correct and low\nrisk; it could be revisited alongside a dynamic-SQL benchmark that\nactually saturates the cache."
+      "reasoning": "Rejected for the default benchmark suite. The change is correct and low\nrisk; it could be revisited alongside a dynamic-SQL benchmark that\nactually saturates the cache.",
+      "benchmarkRun": {
+        "id": "075-v3",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T21:26:35",
+        "source": "same-day"
+      }
     },
     {
       "id": "074",
@@ -7240,7 +7564,13 @@
       "hypothesis": null,
       "approach": null,
       "results": "A/B with 052' library changes stashed in/out of the post-053\nbaseline, `--repeat=5`:\n\n### Regressions\n\n| Benchmark | Baseline (ms) | exp052' (ms) | Δ |\n|---|---:|---:|---:|\n| Schema Shapes (Text-heavy 4 long TEXT cols, 1000 rows) | 0.65 | 0.90 | **+38%** |\n| Concurrent Reads (1000 rows, 4× concurrent) | 0.70 | 0.79 | **+13%** |\n| Concurrent Reads (1000 rows, 2× concurrent) | 0.37 | 0.42 | **+14%** |\n\n### Neutral\n\n| Benchmark | Baseline (ms) | exp052' (ms) | Verdict |\n|---|---:|---:|---|\n| Select → Maps / 1000 rows | 0.38 | 0.41 | within noise |\n| Select → Maps / 10000 rows | 5.29 | 5.90 | within noise (±11%) |\n| Point Query Throughput (qps) | 115,075 | 122,339 | within noise |\n\nNo measurable wins on any benchmark; clear regressions on text-heavy\npaths.",
-      "reasoning": "Rejected. Same conclusion as exp 018, now confirmed with the\n\"reshape\" that was supposed to make it work. The copy cost is\nfundamental — you can move it around but you can't make it free."
+      "reasoning": "Rejected. Same conclusion as exp 018, now confirmed with the\n\"reshape\" that was supposed to make it work. The copy cost is\nfundamental — you can move it around but you can't make it free.",
+      "benchmarkRun": {
+        "id": "rolling-history",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T22:30:30",
+        "source": "same-day"
+      }
     },
     {
       "id": "075",
@@ -7253,7 +7583,13 @@
       "hypothesis": "Move the hash into native code, hashing raw cell bytes during\n`sqlite3_step` without materializing any Dart objects. If the hash\nmatches the cached value, return the \"unchanged\" sentinel immediately.\nOnly on mismatch do we re-step the statement and build Dart objects.\n\nTrade-off: the \"changed\" path pays two `sqlite3_step` passes (hash pass\n+ decode pass). The expectation is that unchanged re-queries dominate\nin realistic reactive workloads, so the net impact is positive.",
       "approach": null,
       "results": "A/B with 053 library changes stashed in/out to control for thermal\ndrift:\n\n| Benchmark | Baseline (ms) | exp053 (ms) | Δ |\n|---|---:|---:|---:|\n| Unchanged Fanout Throughput | 0.44 | 0.27 | **−39%** |\n| Invalidation Latency (changed) | 0.05 | 0.05 | within noise |\n| Fan-out (10 streams, changed) | 0.18 | 0.22 | within noise |\n| Stream Churn (100 cycles) | 2.00 | 2.18 | within noise |\n\nAll 129 existing tests pass plus 3 new DDL-invalidation tests from\nexp 051.\n\nThe \"changed\" path's 2-pass cost does not show up as a measurable\nregression on any existing streaming benchmark. The 2-pass overhead\n(step+hash, then step+decode+hash) is bounded above by the decode\ncost of one pass — small compared to the dispatch + isolate costs\nthat dominate.",
-      "reasoning": "Accepted. Large win (−39%) on the target path, zero measurable\nregression on any other path. Hash code consolidates to a single C\nimplementation; the main-isolate `_hashResult` becomes dead code and\nis removed."
+      "reasoning": "Accepted. Large win (−39%) on the target path, zero measurable\nregression on any other path. Hash code consolidates to a single C\nimplementation; the main-isolate `_hashResult` becomes dead code and\nis removed.",
+      "benchmarkRun": {
+        "id": "exp075-native-hash",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T19:41:59",
+        "source": "exact"
+      }
     },
     {
       "id": "076",
@@ -7266,7 +7602,13 @@
       "hypothesis": null,
       "approach": null,
       "results": null,
-      "reasoning": "Rejected without implementing. The analysis shows the savings ceiling\nis ~50 ns per re-query (0.3% of wall time), and the only clean way to\nrealize it (dedicated per-stream stmts) adds real complexity for a\nchange that wouldn't register on any benchmark."
+      "reasoning": "Rejected without implementing. The analysis shows the savings ceiling\nis ~50 ns per re-query (0.3% of wall time), and the only clean way to\nrealize it (dedicated per-stream stmts) adds real complexity for a\nchange that wouldn't register on any benchmark.",
+      "benchmarkRun": {
+        "id": "057-baseline-5x",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T22:38:04",
+        "source": "same-day"
+      }
     },
     {
       "id": "077",
@@ -7279,7 +7621,13 @@
       "hypothesis": "Piece 1 should reduce write overhead in apps that don't use streams\n(or write before any stream registers). Pieces 2–4 are tiny\nper-call savings on specific hot paths — each below the benchmark\nnoise floor individually, but directionally consistent.",
       "approach": null,
       "results": "5-repeat A/B vs `origin/main`, same session (to defeat thermal drift):\n\n### Wins on existing benchmarks\n\n| Benchmark | Baseline (ms) | Experiment (ms) | Delta |\n|---|---:|---:|---:|\n| Streaming / Fan-out (10 streams) | 0.26 | 0.22 | **−15%** |\n| Single Inserts (100 sequential) | 1.81 | 1.58 | **−13%** |\n| Batched Write in Transaction (100 × 100 items) | 0.82 | 0.63 | **−23%** |\n| Batched Write in Transaction (100 × 1000 items) | 7.04 | 5.99 | **−15%** |\n\nThe **−13% to −23% write wins are attributable to Piece C** — every\nbind path now skips one FFI-internal call. The **Fan-out −15%** is\nattributable to Piece A (streams register and fire invalidations in\ntight succession; when the inverted index is briefly empty the\nfast-reject avoids a microtask).\n\n### New targeted benchmarks (within no...",
-      "reasoning": "**Accepted.** Piece C alone justifies the change — four double-digit-%\nwrite wins from a five-line C patch. Pieces A, B, and D are\ncorrectness-neutral improvements that encode the cheap-check-first\ndiscipline for future maintainers."
+      "reasoning": "**Accepted.** Piece C alone justifies the change — four double-digit-%\nwrite wins from a five-line C patch. Pieces A, B, and D are\ncorrectness-neutral improvements that encode the cheap-check-first\ndiscipline for future maintainers.",
+      "benchmarkRun": {
+        "id": "exp057-5x",
+        "date": "2026-04-16",
+        "timestamp": "2026-04-16T22:44:20",
+        "source": "same-day"
+      }
     },
     {
       "id": "081",
@@ -7292,7 +7640,13 @@
       "hypothesis": "Replace the flat row-major `List<Object?>` backing store with a row-major\nbinary representation:\n\n- fixed-width numeric columns stored unboxed in an 8-byte slot slab\n- nulls tracked by a bitmap\n- object/text/blob values stored in sidecars\n- `Row` continues to implement `Map<String, Object?>`\n\nExpected outcome:\n\n- lower hand-off cost for numeric-heavy results\n- lower RSS for large scans\n- preserved consumer DX (`row['name']`)",
       "approach": null,
       "results": "Matched control artifact:\n- `/tmp/resqlite-exp096-control-profile.json`\n\nCandidate artifact:\n- `/tmp/resqlite-exp096-profile.json`\n\nKey deltas versus control:\n\n### Numeric-heavy scans\n\n| Workload | Control | Candidate | Delta |\n|---|---:|---:|---:|\n| `numeric_scan` select p50 | 3382μs | 2977μs | **-12%** |\n| `numeric_scan_consume` select p50 | 3394μs | 2918μs | **-14%** |\n| `numeric_scan_consume` consume p50 | 234μs | 1374μs | **+487%** |\n\n### Mixed-schema scans\n\n| Workload | Control | Candidate | Delta |\n|---|---:|---:|---:|\n| `mixed_scan` select p50 | 3127μs | 3354μs | **+7%** |\n| `mixed_scan_consume` select p50 | 3052μs | 3888μs | **+27%** |\n| `mixed_scan_consume` consume p50 | 203μs | 997μs | **+391%** |\n\n### Spillover on small results\n\n| Workload | Control | Candidate | Delta |\n|--...",
-      "reasoning": "Rejected.\n\nThe prototype improved transfer/return time for some numeric-heavy scans,\nbut it did so by making row access substantially more expensive on the\nmain isolate. That is the wrong trade-off for resqlite’s contract, where:\n\n- `Map`-style row access is the public surface\n- main-isolate jank matters\n- large results already use `Isolate.exit` for hand-off\n\nThe important learning is that a result-object experiment must be judged\non **transfer + consume**, not on `db.select()` return time alone. Once\nconsumption was measured explicitly, the binary-row direction lost\ndecisively.\n\nThis does **not** mean result transport is fully solved; it means a\ngeneric binary-row replacement for `select()` is not the right path under\nthe current API contract."
+      "reasoning": "Rejected.\n\nThe prototype improved transfer/return time for some numeric-heavy scans,\nbut it did so by making row access substantially more expensive on the\nmain isolate. That is the wrong trade-off for resqlite’s contract, where:\n\n- `Map`-style row access is the public surface\n- main-isolate jank matters\n- large results already use `Isolate.exit` for hand-off\n\nThe important learning is that a result-object experiment must be judged\non **transfer + consume**, not on `db.select()` return time alone. Once\nconsumption was measured explicitly, the binary-row direction lost\ndecisively.\n\nThis does **not** mean result transport is fully solved; it means a\ngeneric binary-row replacement for `select()` is not the right path under\nthe current API contract.",
+      "benchmarkRun": {
+        "id": "MacBook Pro 14\"",
+        "date": "2026-04-18",
+        "timestamp": "2026-04-18T10:27:16",
+        "source": "nearby"
+      }
     },
     {
       "id": "082",
@@ -7318,7 +7672,16 @@
       "hypothesis": "If reruns are coalesced **before** they enter `ReaderPool`, instead of\nafter they are already waiting for a reader, then:\n\n- fewer reruns should actually start\n- fewer reruns should finish stale\n- reader-pool wait time should collapse toward zero\n- high-fan-out scenarios should improve without changing `stream(sql)`\n  semantics",
       "approach": null,
       "results": "### Scenario profiler: direct bottleneck hit\n\nCompared to the pre-queue observability baseline:\n\n| Scenario | Metric | Baseline | Pre-dispatch queue |\n|---|---|---:|---:|\n| A11 | reruns started | 1024 | **737** |\n| A11 | stale reruns | 968 | **553** |\n| A11 | pool wait / rerun | 2155 us | **0.3 us** |\n| A11b | reruns started | 1123 | **705** |\n| A11b | stale reruns | 1020 | **552** |\n| A11b | pool wait / rerun | 3880 us | **0.1 us** |\n\nWorker execution stayed small in both cases (roughly 44-46 us per rerun),\nwhich confirms the optimization is hitting the real bottleneck: queued\nreruns waiting on readers.\n\n### Real suite sections: broad behavior stays in band\n\nThree alternating baseline/candidate pairs were run. Median summary:\n\n| Scenario | Baseline | Candidate |\n|---|---:|---:|\n| A6 Fe...",
-      "reasoning": "Keep this in review.\n\nThis is the first stream scheduler change that directly attacked the\nmeasured bottleneck instead of changing timing heuristics around it. The\nimportant learning is:\n\n- stale-rerun churn was mostly a **queue-admission** problem\n- the right fix was to coalesce stream work before `ReaderPool`, not to\n  add delays after reruns were already in flight\n\nThe remaining review question is code complexity versus benefit, not\nwhether the optimization is hitting the right layer."
+      "reasoning": "Keep this in review.\n\nThis is the first stream scheduler change that directly attacked the\nmeasured bottleneck instead of changing timing heuristics around it. The\nimportant learning is:\n\n- stale-rerun churn was mostly a **queue-admission** problem\n- the right fix was to coalesce stream work before `ReaderPool`, not to\n  add delays after reruns were already in flight\n\nThe remaining review question is code complexity versus benefit, not\nwhether the optimization is hitting the right layer.",
+      "primaryMetrics": [
+        "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()",
+        "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite"
+      ],
+      "guardrailMetrics": [
+        "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite",
+        "Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite",
+        "Sync Burst (v1) / Merge rounds: 10 × 100 rows / resqlite"
+      ]
     },
     {
       "id": "084",
@@ -7331,7 +7694,11 @@
       "hypothesis": "If the main issue is \"reruns are marked stale because they waited too\nlong before starting\", then moving the generation stamp to actual reader\ndispatch time should recover most of the benefit with much less code than\nthe pre-dispatch queue.",
       "approach": null,
       "results": "### Scenario profiler: real but partial improvement\n\nMedian of two runs, compared to the clean observability baseline:\n\n| Scenario | Metric | Baseline | Late stamp |\n|---|---|---:|---:|\n| A11 | reruns started | 1081 | **937.5** |\n| A11 | stale reruns | 1026 | **792.5** |\n| A11 | wall | 442207 us | **440106.5 us** |\n| A11 | pool wait / rerun | 2155 us | **1715.8 us** |\n| A11b | reruns started | 1039 | **925** |\n| A11b | stale reruns | 933 | **790** |\n| A11b | wall | 459509 us | **432653.5 us** |\n| A11b | pool wait / rerun | 3880 us | **3028.1 us** |\n\nSo the idea helped. It fixed part of the \"stamped too early\" problem.\n\n### But it did not remove the real bottleneck\n\nCompared to Experiment 083's bounded queue:\n\n| Scenario | Metric | Late stamp | Pre-dispatch queue |\n|---|---|---:|---:|\n| ...",
-      "reasoning": "Rejected as the main fix.\n\nThis variant is valuable because it proved two things:\n\n1. The original path really was stamping too early.\n2. Fixing only that does not solve the broader queue-contention problem.\n\nSo the late-stamp idea is a legitimate partial improvement, but it is\nmaterially weaker than the bounded pre-dispatch queue because it leaves\nthe scarce reader bottleneck saturated."
+      "reasoning": "Rejected as the main fix.\n\nThis variant is valuable because it proved two things:\n\n1. The original path really was stamping too early.\n2. Fixing only that does not solve the broader queue-contention problem.\n\nSo the late-stamp idea is a legitimate partial improvement, but it is\nmaterially weaker than the bounded pre-dispatch queue because it leaves\nthe scarce reader bottleneck saturated.",
+      "primaryMetrics": [
+        "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()",
+        "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite"
+      ]
     },
     {
       "id": "085",
@@ -7344,7 +7711,16 @@
       "hypothesis": "If the queue itself is the real win, then allowing reruns to use all\nreaders should:\n\n- keep most of the `A11` / `A11b` benefit\n- but potentially regress mixed workloads by letting reruns monopolize\n  the whole reader pool",
       "approach": null,
       "results": "### Scenario profiler: queue does most of the high-fan-out work\n\nCompared to the reserved-slot queue from Experiment 083:\n\n| Scenario | Metric | Reserved slot | Full capacity |\n|---|---|---:|---:|\n| A11 | wall | 451586 us | **440844 us** |\n| A11 | reruns started | **737** | 981 |\n| A11 | stale reruns | **553** | 779 |\n| A11 | pool wait / rerun | 0.3 us | **0.0 us** |\n| A11b | wall | 428234 us | **426687 us** |\n| A11b | reruns started | **705** | 884 |\n| A11b | stale reruns | **552** | 730 |\n| A11b | pool wait / rerun | 0.1 us | **0.0 us** |\n\nThis shows the queue is the main reason `A11` / `A11b` improved. The\nreserved reader is not what eliminated the reader-pool wait bottleneck.\n\n### Real suite sections: reserved slot matters for balanced behavior\n\nSingle direct suite comparison:\n\n| Sc...",
-      "reasoning": "Reject the full-capacity variant as the default policy.\n\nThe isolated result is useful:\n\n- the **queue** is the main source of the `A11` / `A11b` win\n- the **reserved reader** is the safeguard that keeps reruns from taking\n  over the whole pool on broader workloads\n\nSo the reserved slot is not the primary optimization, but it is an\nimportant part of making the scheduler safe and well-balanced."
+      "reasoning": "Reject the full-capacity variant as the default policy.\n\nThe isolated result is useful:\n\n- the **queue** is the main source of the `A11` / `A11b` win\n- the **reserved reader** is the safeguard that keeps reruns from taking\n  over the whole pool on broader workloads\n\nSo the reserved slot is not the primary optimization, but it is an\nimportant part of making the scheduler safe and well-balanced.",
+      "primaryMetrics": [
+        "Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite",
+        "Sync Burst (v1) / Merge rounds: 10 × 100 rows / resqlite"
+      ],
+      "guardrailMetrics": [
+        "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite",
+        "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()",
+        "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite"
+      ]
     },
     {
       "id": "088",
@@ -7358,7 +7734,52 @@
       "hypothesis": "Enabling `SQLITE_ENABLE_SETLK_TIMEOUT` and calling\n`sqlite3_setlk_timeout(db, 10000, 0)` after every successful\n`sqlite3_open_v2` should:\n\n1. leave p50 untouched (no lock contention in the happy path),\n2. meaningfully cut p99 and max on write-heavy workloads where the\n   checkpointer can collide with an in-flight write, and\n3. also improve reader p99 because readers block in the kernel when they\n   hit a checkpointer-held lock instead of spinning through\n   `busy_timeout`.\n\nWe expected the single_insert 34 ms outlier (and similar outliers on\nmerge_rounds / noop) to collapse toward the p90 band.",
       "approach": null,
       "results": "### Multi-run confirmation (5 runs per side, medians of percentiles)\n\nThe initial single-run numbers (§ \"Initial single-run results\" below) showed\nhuge p99/max wins on every write workload. Single-run p99/max is noisy — one\nGC pause or scheduler hiccup can swing it by an order of magnitude — so we\nreran 5× per variant and take the **median of each percentile across the 5\nruns** on each side. This is the methodology referenced in\n`benchmark/EXPERIMENTS.md` § \"Three things to keep in mind\" point 1.\n\nBaseline glob: `benchmark/profile/results/baseline-exp088-run{1..5}.json`\nCandidate glob: `benchmark/profile/results/exp-088-run{1..5}.json`\nAggregator: `benchmark/profile/diff_multirun.dart`\n\nMedian-across-runs, baseline vs candidate:\n\n| workload · op               | metric | baseline median ...",
-      "reasoning": "**Rejected.** Downgraded from \"Accepted\" after multi-run confirmation.\n\nThe large single-run p99/max wins were noise — the original baseline\ncaptured a transient outlier that never reproduced in 5 re-runs. At the\nmedian-of-5-runs level, the candidate is measurably *worse* than baseline\non every tail metric on every workload: p99 +74 % to +172 % worse on\nwrites, max +29 % to +529 % worse, and noop regresses even though it has\nno WAL lock contention to resolve.\n\nThe fact that noop · execute and noop · select regress at p99/max is\nthe strongest evidence this is not a neutral change. These workloads\nhave no concurrent writer-plus-checkpointer contention for setlk_timeout\nto suppress, so the flag should be an observationally-invisible no-op.\nIt isn't."
+      "reasoning": "**Rejected.** Downgraded from \"Accepted\" after multi-run confirmation.\n\nThe large single-run p99/max wins were noise — the original baseline\ncaptured a transient outlier that never reproduced in 5 re-runs. At the\nmedian-of-5-runs level, the candidate is measurably *worse* than baseline\non every tail metric on every workload: p99 +74 % to +172 % worse on\nwrites, max +29 % to +529 % worse, and noop regresses even though it has\nno WAL lock contention to resolve.\n\nThe fact that noop · execute and noop · select regress at p99/max is\nthe strongest evidence this is not a neutral change. These workloads\nhave no concurrent writer-plus-checkpointer contention for setlk_timeout\nto suppress, so the flag should be an observationally-invisible no-op.\nIt isn't.",
+      "benchmarkRun": {
+        "id": "exp088-setlk-timeout",
+        "date": "2026-04-20",
+        "timestamp": "2026-04-20T12:27:09",
+        "source": "exact"
+      }
+    },
+    {
+      "id": "089",
+      "title": "Deeply-immutable `ResultSet` for zero-copy isolate transfer",
+      "date": "2026-04-21",
+      "status": "rejected",
+      "summary": "Blocked upstream: Dart's `@pragma('vm:deeply-immutable')` requires all fields to be in a closed set that excludes `List<T>`, `Uint8List`, and any typed data. `ResultSet` / `RawQueryResult` are `List<Object?>`-centered and BLOB cells are `Uint8List`. Re-check when SDK #50068 (DI typed-data factory) ships",
+      "commit": null,
+      "problem": "Every read crosses an isolate boundary. Below the byte-size sacrifice\nthreshold (exp 039) we pay a `SendPort.send` copy; above it we pay an\n`Isolate.exit` + reader respawn. The ~0.05 ms copy on sub-256 KB results\nscales linearly with result size.",
+      "hypothesis": "Dart's `@pragma('vm:deeply-immutable')` lets an instance of an annotated\nclass pass between isolates **in the same isolate group** as a pointer\nhandoff — zero-copy on `SendPort.send`. Our reader pool is one isolate\ngroup (workers spawned from the main isolate). If `ResultSet`, `Row`,\nand their backing storage can be marked deeply immutable, every read\nbecomes zero-copy regardless of size, and the sacrifice-threshold\nmachinery (exp 039) retires.",
+      "approach": null,
+      "results": null,
+      "reasoning": "**Rejected — blocked upstream.** Two independent hard blockers:\n\n1. **No deeply-immutable list type.** `ResultSet` and `RawQueryResult`\n   are centered on `List<Object?>` and `RowSchema.names` is\n   `List<String>`. Without a DI list, nothing above them can be marked.\n   Replacing the backing list with a chain of DI records (one DI class\n   per value, linked) would explode object count, lose flat-list cache\n   locality, and almost certainly regress the shape exp 082 just\n   showed is near-optimal.\n2. **No deeply-immutable `Uint8List`.** BLOB cells are `Uint8List`.\n   Even if we solved blocker 1, blobs would block. SDK #50068 is the\n   upstream tracking issue.\n\nBlocker 1 is the structural one; blocker 2 is a subset of it.\n\nRe-check when either:\n- a public `List.deeplyImmutable` / `Unmodif..."
+    },
+    {
+      "id": "090",
+      "title": "sqlite3mc dependency bump audit",
+      "date": "2026-04-21",
+      "status": "rejected",
+      "summary": "No bump needed — we are already on the newest stable sqlite3mc (2.3.2 / SQLite 3.51.3, 37 days old). The only newer target (3.53.0) is a 12-day-old .0 release excluded by our known-regressions policy, and its changelog shows no hot-path wins. Revisit when 3.53.2+ ships",
+      "commit": null,
+      "problem": "SQLite 3.51.0 (2025-11-04) advertised \"use fewer CPU cycles to commit a\nread transaction.\" The daily-research note flagged a bump as a\ncandidate: if our vendored sqlite3mc is behind, we get across-the-board\nread-path wins for free.",
+      "hypothesis": "Vendored copy lags upstream ⇒ a dependency bump pays for itself.",
+      "approach": null,
+      "results": null,
+      "reasoning": "**Rejected — hold at sqlite3mc 2.3.2 / SQLite 3.51.3.** Reasons:\n\n1. We are already on the newest stable sqlite3mc tracking a stable SQLite release. The bump thesis (\"our vendored copy is old\") is false — it is 37 days old.\n2. The only newer target (3.53.0) is a .0 release 12 days old, explicitly excluded by the policy in the task brief.\n3. No compile-flag drift; no signal of a significant perf win specific to our hot paths in the 3.53.0 changelog.\n4. 3.53.0 ships a default FP rounding behavior change that is a small but real snapshot / test hazard.\n\n### Revisit trigger\n\nRe-run this investigation when **any** of these is true:\n\n- SQLite 3.53.2 (or later .2+) ships upstream, and sqlite3mc cuts a release tracking it.\n- A specific workload regression surfaces that has a known fix in >3.51...."
+    },
+    {
+      "id": "092",
+      "title": "`wal_checkpoint=NOOP` probe in periodic checkpointer",
+      "date": "2026-04-21",
+      "status": "rejected",
+      "summary": "Premise invalid — exp-029 is hook-gated on `pages_in_wal`, not timer-gated. NOOP exists to report the frame counter the wal-hook already receives; adding NOOP would be a strictly additive header read with no empty-tick cost to amortize",
+      "commit": null,
+      "problem": "Exp-029 schedules PASSIVE checkpoints on the writer. SQLite 3.51.0\nadded `SQLITE_CHECKPOINT_NOOP`, which probes WAL state (`pnLog` /\n`pnCkpt`) without doing any checkpoint work. The daily-research note\nproposed using it as a pre-flight: call NOOP first, skip PASSIVE when\nthe WAL-pending frame count is trivial.",
+      "hypothesis": "Per-tick PASSIVE calls on empty WAL pay a cost NOOP can amortize away.",
+      "approach": null,
+      "results": null,
+      "reasoning": "**Rejected.** The shipped exp-029 is already hook-gated on the same counter NOOP would re-derive; there is no empty-tick cost for NOOP to eliminate. Daily-research note was written against the prototype-as-documented, not the accepted implementation — worth correcting the note."
     }
   ],
   "tracked": [
@@ -7372,6 +7793,7 @@
     "Streaming / Invalidation Latency / resqlite",
     "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite",
     "Point Query Throughput / resqlite qps",
+    "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite",
     "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()",
     "Chat Sim (v1) / Insert message / resqlite",
     "Feed Paging (v1) / Keyset pagination (20 pages × 50 rows) / resqlite",

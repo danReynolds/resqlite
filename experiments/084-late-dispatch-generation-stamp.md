@@ -68,6 +68,11 @@ Compared to Experiment 083's bounded queue:
 The simpler fix still left the real bottleneck alive: reruns were still
 allowed to pile up inside `ReaderPool`.
 
+## Primary Metrics
+
+- Keyed PK Subscriptions (v1)
+- High-Cardinality Stream Fan-out (v1)
+
 ## Decision
 
 Rejected as the main fix.

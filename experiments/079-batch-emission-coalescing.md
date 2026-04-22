@@ -169,6 +169,18 @@ Reject if:
 - The savings don't generalize — if it only helps the Sync Burst
   pattern without helping realistic sync workloads
 
+## Primary Metrics
+
+- Sync Burst (v1) / Stream emissions during burst (COUNT(*))
+
+## Guardrail Metrics
+
+- Feed Paging (v1) / Reactive feed with 100 concurrent writes
+- Keyed PK Subscriptions (v1)
+- High-Cardinality Stream Fan-out (v1)
+- Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks
+- Sync Burst (v1) / Merge rounds: 10 × 100 rows
+
 ## Why not the drift default throttle approach?
 
 Drift's default behavior is NOT to throttle — the stream emits on
