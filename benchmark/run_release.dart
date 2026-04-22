@@ -136,7 +136,8 @@ Future<void> main(List<String> args) async {
 
   final timestamp =
       DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
-  final resultsFile = File('${resultsDir.path}/$timestamp-${options.label}.md');
+  final safeLabel = _sanitizeResultFilenameLabel(options.label);
+  final resultsFile = File('${resultsDir.path}/$timestamp-$safeLabel.md');
   await resultsFile.writeAsString(markdown.toString());
 
   print('');
@@ -826,4 +827,14 @@ Future<void> _ensureDriftCodegenFresh() async {
     );
   }
   print('Drift codegen up-to-date.');
+}
+
+String _sanitizeResultFilenameLabel(String label) {
+  final sanitized =
+      label
+          .replaceAll('"', 'in')
+          .replaceAll(RegExp(r'[<>|*?\r\n:]'), '')
+          .replaceAll(RegExp(r'[\\/]'), '-')
+          .trim();
+  return sanitized.isEmpty ? 'run' : sanitized;
 }
