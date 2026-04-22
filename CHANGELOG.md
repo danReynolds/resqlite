@@ -1,3 +1,7 @@
+## 0.2.0
+
+- Faster streaming fan-out and write-path marshalling. See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/) for current cross-library numbers.
+
 ## 0.1.0
 
 - Initial release.
