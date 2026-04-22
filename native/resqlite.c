@@ -234,18 +234,33 @@ static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
     }
 }
 
-static void read_set_load_from_cache_entry(resqlite_read_set* read_set,
-                                           const resqlite_cached_stmt* entry) {
-    read_set_reset(read_set);
-    for (int i = 0; i < entry->read_table_count; i++) {
-        read_set_add(read_set, entry->read_tables[i]);
-    }
-}
+// Experiment 093: read-table lookup after a query aliases the cache
+// entry's owned table list instead of copying it into a per-reader
+// `read_set` on every query. We stash the entry pointer on the reader
+// via `set_current_read_entry` and serve `resqlite_get_read_tables`
+// from it. The previous design paid a `strdup` + `free` pair per
+// cached table name on every reader query — now the cost is one
+// pointer store.
+//
+// Safety: the returned entry pointer is stable between the
+// `get_or_prepare_reader` call that returned it and the next
+// cache-mutating call on the same reader. Since the reader is
+// acquired exclusively for the duration of a query, and
+// `resqlite_get_read_tables` runs before the reader is released, the
+// pointer is valid whenever it's read.
 
 typedef struct {
     sqlite3* db;
     resqlite_stmt_cache cache;
+    // Authorizer scratch — populated only during `sqlite3_prepare_v3`
+    // on cache miss; drained into `entry->read_tables` immediately.
+    // Not read after prepare completes.
     resqlite_read_set read_tables;
+    // Points at the cache entry owned by the most recent successful
+    // call to `get_or_prepare_reader`. Cleared to NULL on fresh prepare
+    // (so a failure doesn't leave a stale alias) and never read after
+    // the reader is released. See experiment 093.
+    resqlite_cached_stmt* current_read_entry;
     resqlite_buf json_buf;  // persistent buffer for resqlite_query_bytes
     int in_use;
 } resqlite_reader;
@@ -829,16 +844,20 @@ int resqlite_get_read_tables(
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
     if (reader_id < 0 || reader_id >= db->reader_count) return 0;
 
-    resqlite_read_set* rs = &db->readers[reader_id].read_tables;
-    int count = rs->count;
+    // Experiment 093: serve from the cache-entry pointer stashed by
+    // `get_or_prepare_reader`. Aliases into `entry->read_tables` so no
+    // per-query string copy is required. If no query has run yet (or
+    // the last one failed before caching), `current_read_entry` is
+    // NULL and we correctly report zero tables.
+    resqlite_cached_stmt* entry = db->readers[reader_id].current_read_entry;
+    if (!entry) return 0;
+
+    int count = entry->read_table_count;
     if (count > max_tables) count = max_tables;
 
     for (int i = 0; i < count; i++) {
-        out_tables[i] = rs->names[i];
+        out_tables[i] = entry->read_tables[i];
     }
-
-    // Reset active count. Strings stay valid until next query on this reader.
-    read_set_reset(rs);
 
     return count;
 }
@@ -947,7 +966,9 @@ static resqlite_cached_stmt* get_or_prepare_reader(
         stmt_cache_lookup_entry(&reader->cache, sql, sql_len);
     if (entry) {
         sqlite3_reset(entry->stmt);
-        read_set_load_from_cache_entry(&reader->read_tables, entry);
+        // Experiment 093: no copy — just publish the entry pointer so
+        // `resqlite_get_read_tables` can alias `entry->read_tables`.
+        reader->current_read_entry = entry;
         *out_rc = SQLITE_OK;
         return entry;
     }
@@ -955,6 +976,9 @@ static resqlite_cached_stmt* get_or_prepare_reader(
     // The authorizer populates per-reader read tables during prepare.
     // Reset before preparing so this statement captures only its own deps.
     read_set_reset(&reader->read_tables);
+    // Clear the alias so a prepare failure doesn't leave
+    // `resqlite_get_read_tables` pointing at an unrelated entry's deps.
+    reader->current_read_entry = NULL;
 
     sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v3(reader->db, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
@@ -970,6 +994,7 @@ static resqlite_cached_stmt* get_or_prepare_reader(
         return NULL;
     }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
+    reader->current_read_entry = entry;
     *out_rc = SQLITE_OK;
     return entry;
 }
