@@ -82,10 +82,6 @@
       color: var(--muted);
     }
 
-    .badge strong {
-      color: var(--text);
-    }
-
     .cards {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -233,6 +229,18 @@
       border-radius: 10px;
       padding: 1.25rem 0.75rem;
     }
+    a.stat {
+      color: inherit;
+      text-decoration: none;
+      display: block;
+      transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+    }
+    a.stat:hover {
+      text-decoration: none;
+      border-color: rgba(88, 166, 255, 0.45);
+      box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.08);
+      transform: translateY(-1px);
+    }
 
     .stat .num {
       font-size: 1.6rem;
@@ -291,32 +299,32 @@
       Plain SQL. Stream anything. Zero main-isolate jank.</p>
 
     <div class="badges">
-      <span class="badge"><strong>MIT</strong> License</span>
+      <span class="badge">Reactive queries &middot; auto invalidation</span>
       <span class="badge">iOS &middot; Android &middot; macOS &middot; Linux &middot; Windows</span>
-      <span class="badge">Dart 3.10+</span>
+      <span class="badge">Benchmark-driven design</span>
       <span class="badge">No ORM &middot; No codegen</span>
     </div>
   </div>
 
   <div class="stats">
-    <div class="stat">
-      <div class="num">1.8x</div>
+    <a class="stat" href="benchmarks/?mode=peer&kind=micro&focus=scaleMaps">
+      <div class="num" id="statReadSpeedup">—</div>
       <div class="label">faster select()<br>(1K rows)</div>
-    </div>
-    <div class="stat">
-      <div class="num">2.1x</div>
-      <div class="label">faster writes<br>(single inserts)</div>
-    </div>
-    <div class="stat">
-      <div class="num">1 ms</div>
+    </a>
+    <a class="stat" href="benchmarks/?mode=peer&kind=scenarios&scenario=feedPaging&focus=scenario-feedPaging">
+      <div class="num" id="statScenarioSpeedup">—</div>
+      <div class="label">faster reactive feed<br>(100 concurrent writes)</div>
+    </a>
+    <a class="stat" href="benchmarks/?mode=peer&kind=micro&focus=mainMaps">
+      <div class="num" id="statMainCost">—</div>
       <div class="label">main-thread cost<br>(10K row read)</div>
-    </div>
-    <div class="stat">
-      <div class="num">107K</div>
+    </a>
+    <a class="stat" href="benchmarks/?mode=peer&kind=micro&focus=pointQps">
+      <div class="num" id="statPointQps">—</div>
       <div class="label">point queries<br>per second</div>
-    </div>
+    </a>
   </div>
-  <p style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Compared against peer Dart SQLite libraries. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
+  <p id="statsContext" style="color:var(--muted);font-size:0.78rem;text-align:center;margin:-1.5rem 0 2.5rem;">Compared against peer Dart SQLite libraries on the latest published benchmark run. <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a></p>
 
   <div class="cards">
     <a class="card" href="api/resqlite/resqlite-library.html">
@@ -332,7 +340,7 @@
     <a class="card" href="experiments/">
       <span class="icon">&#128300;</span>
       <h2>Experiments</h2>
-      <p>40 optimization experiments with performance-over-time charts. Click any data point to see what changed.</p>
+      <p id="experimentsCardText">Optimization experiments with performance-over-time charts. Click any data point to see what changed.</p>
     </a>
     <a class="card" href="blog/">
       <span class="icon">&#128221;</span>
@@ -448,6 +456,94 @@ db.<span class="fn">stream</span>(
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
       });
     });
+
+    function fmtRatio(value) {
+      if (!(value > 0)) return '—';
+      return `${value.toFixed(1)}x`;
+    }
+
+    function fmtMs(value) {
+      if (!(value >= 0)) return '—';
+      if (value < 0.01) return '<0.01 ms';
+      if (value < 1) return `${value.toFixed(2)} ms`;
+      if (value < 10) return `${value.toFixed(1)} ms`;
+      return `${Math.round(value)} ms`;
+    }
+
+    function fmtQps(value) {
+      if (!(value > 0)) return '—';
+      if (value >= 1000) return `${Math.round(value / 1000)}K`;
+      return `${Math.round(value)}`;
+    }
+
+    function findSection(device, key) {
+      return device?.benchmarks?.find(section => section.key === key) || null;
+    }
+
+    function findEntry(section, predicate) {
+      return section?.entries?.find(entry => predicate(entry.library || '')) || null;
+    }
+
+    function speedupVsNextBest(section, resqliteMatch) {
+      if (!section?.entries?.length) return null;
+      const res = findEntry(section, lib => lib.includes(resqliteMatch));
+      const resValue = res?.values?.[0];
+      if (!(resValue > 0)) return null;
+      const peerValues = section.entries
+        .filter(entry => !entry.library.includes(resqliteMatch))
+        .map(entry => entry.values?.[0])
+        .filter(value => value > 0);
+      if (!peerValues.length) return null;
+      return Math.min(...peerValues) / resValue;
+    }
+
+    async function loadHomepageData() {
+      try {
+        const [devicesResp, historyResp] = await Promise.all([
+          fetch('./benchmarks/devices.json', { cache: 'no-store' }),
+          fetch('./experiments/history.json', { cache: 'no-store' }),
+        ]);
+        if (!devicesResp.ok || !historyResp.ok) return;
+
+        const devicesData = await devicesResp.json();
+        const historyData = await historyResp.json();
+
+        const latestDevice = devicesData?.devices?.[0];
+        if (latestDevice) {
+          const readSection = findSection(latestDevice, 'Select → Maps / 1000 rows');
+          const scenarioSection = findSection(latestDevice, 'Feed Paging (v1) / Reactive feed with 100 concurrent writes');
+          const mainCostSection = findSection(latestDevice, 'Select → Maps / 10000 rows');
+          const qpsSection =
+            findSection(latestDevice, 'Point Query Throughput / QPS + MDE') ||
+            findSection(latestDevice, 'Point Query Throughput');
+
+          const readSpeedup = speedupVsNextBest(readSection, 'resqlite');
+          const scenarioSpeedup = speedupVsNextBest(scenarioSection, 'resqlite');
+          const mainCost = findEntry(mainCostSection, lib => lib.includes('resqlite'))?.values?.[2];
+          const qps =
+            findEntry(qpsSection, lib => lib === 'resqlite' || lib.includes('resqlite qps'))?.values?.[0];
+
+          document.getElementById('statReadSpeedup').textContent = fmtRatio(readSpeedup);
+          document.getElementById('statScenarioSpeedup').textContent = fmtRatio(scenarioSpeedup);
+          document.getElementById('statMainCost').textContent = fmtMs(mainCost);
+          document.getElementById('statPointQps').textContent = fmtQps(qps);
+          document.getElementById('statsContext').innerHTML =
+            `Compared against peer Dart SQLite libraries on the latest published benchmark run (${latestDevice.date} · ${latestDevice.name}). <a href="benchmarks/" style="color:var(--accent)">See full benchmarks &rarr;</a>`;
+        }
+
+        const experiments = Array.isArray(historyData?.experiments) ? historyData.experiments : [];
+        if (experiments.length) {
+          const accepted = experiments.filter(exp => exp.status === 'accepted').length;
+          const rejected = experiments.filter(exp => exp.status === 'rejected').length;
+          document.getElementById('experimentsCardText').textContent =
+            `${experiments.length} optimization experiments (${accepted} accepted, ${rejected} rejected) with performance-over-time charts. Click any data point to see what changed.`;
+        }
+      } catch (err) {
+        console.warn('Failed to load homepage benchmark metadata', err);
+      }
+    }
+
+    loadHomepageData();
   </script>
 
   <footer>

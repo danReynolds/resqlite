@@ -69,6 +69,17 @@ Single direct suite comparison:
 The `A7` regression is the important signal: without a reserved reader,
 reruns can monopolize the pool and sync-burst behavior degrades badly.
 
+## Primary Metrics
+
+- Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks
+- Sync Burst (v1) / Merge rounds: 10 × 100 rows
+
+## Guardrail Metrics
+
+- Feed Paging (v1) / Reactive feed with 100 concurrent writes
+- Keyed PK Subscriptions (v1)
+- High-Cardinality Stream Fan-out (v1)
+
 ## Decision
 
 Reject the full-capacity variant as the default policy.

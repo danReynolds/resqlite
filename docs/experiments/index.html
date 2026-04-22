@@ -60,6 +60,11 @@
     border-bottom: 1px solid var(--border);
     background: var(--card);
     flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
   .chart-tab {
     padding: 0.6rem 1.25rem;
@@ -71,6 +76,7 @@
     background: none;
     border-top: none; border-left: none; border-right: none;
     font-family: inherit;
+    flex: 0 0 auto;
   }
   .chart-tab:hover { color: var(--text); }
   .chart-tab.active {
@@ -163,6 +169,13 @@
     background: rgba(88,166,255,0.08);
     border-left-color: var(--accent);
   }
+  .exp-item.reveal-flash {
+    animation: revealFlash 1.2s ease-out;
+  }
+  @keyframes revealFlash {
+    0% { background: rgba(88,166,255,0.22); border-left-color: var(--accent); }
+    100% { background: transparent; border-left-color: transparent; }
+  }
   .exp-item .item-num {
     font-size: 1rem;
     font-weight: 700;
@@ -207,12 +220,29 @@
     transition: color 0.1s, border-color 0.1s;
   }
   .exp-detail .back-btn:hover { color: var(--text); border-color: var(--muted); }
+  .exp-detail .reveal-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 0.25rem 0.7rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: color 0.1s, border-color 0.1s;
+  }
+  .exp-detail .reveal-btn:hover { color: var(--text); border-color: var(--muted); }
   .exp-detail .detail-top-title {
     font-size: 0.85rem;
     color: var(--muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .exp-detail .detail-top-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 0.5rem;
   }
 
   .exp-detail .detail-content { padding: 1.5rem; }
@@ -232,6 +262,11 @@
   .exp-detail .detail-meta {
     display: flex; gap: 1rem; margin-bottom: 1.25rem;
     font-size: 0.8rem; color: var(--muted);
+  }
+  .exp-detail .detail-run-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin: -0.7rem 0 1.1rem;
   }
   .detail-section { margin-bottom: 1rem; }
   .detail-section h4 {
@@ -274,6 +309,14 @@
     border-radius: 3px;
     font-size: 0.82em;
     font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .metric-delta.good { color: var(--green); }
+  .metric-delta.bad { color: var(--red); }
+  .metric-delta.neutral { color: var(--muted); }
+  .metric-context {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
   }
 
   .badge {
@@ -324,8 +367,9 @@
   <p class="intro">
     resqlite was built through rigorous, benchmark-driven experimentation. This page tracks
     every optimization attempt — accepted and rejected — alongside the performance data
-    from 50 benchmark runs. Select a chart category on the left and click any data point
-    to see the related experiment on the right.
+    behind each decision. Use the headline charts for broad health, the scenario charts
+    for app-shaped workloads, and click any data point to see the experiment and metrics
+    that drove the decision.
   </p>
   <nav>
     <a href="../">&larr; Home</a>
@@ -343,7 +387,8 @@
       <button class="chart-tab" data-panel="panelWrites">Writes</button>
       <button class="chart-tab" data-panel="panelTransactions">Transactions</button>
       <button class="chart-tab" data-panel="panelConcurrency">Concurrency</button>
-      <button class="chart-tab" data-panel="panelStreaming">Streaming</button>
+      <button class="chart-tab" data-panel="panelScenarios">Scenarios</button>
+      <button class="chart-tab" data-panel="panelReactiveMicros">Reactive Micros</button>
       <button class="chart-tab" data-panel="panelThroughput">Throughput</button>
     </div>
 
@@ -371,11 +416,17 @@
       <div class="chart-improvements" id="improvConcurrency"></div>
       <div class="chart-canvas-wrap"><canvas id="chartConcurrency"></canvas></div>
     </div>
-    <div class="chart-panel" id="panelStreaming">
-      <h2>Streaming <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
-      <div class="desc">Invalidation latency, fan-out, and stream churn, wall time (ms)</div>
-      <div class="chart-improvements" id="improvStreaming"></div>
-      <div class="chart-canvas-wrap"><canvas id="chartStreaming"></canvas></div>
+    <div class="chart-panel" id="panelScenarios">
+      <h2>Reactive Scenarios <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">App-shaped reactive workloads: feed updates, sync bursts, keyed subscriptions, and high-cardinality fan-out</div>
+      <div class="chart-improvements" id="improvScenarios"></div>
+      <div class="chart-canvas-wrap"><canvas id="chartScenarios"></canvas></div>
+    </div>
+    <div class="chart-panel" id="panelReactiveMicros">
+      <h2>Reactive Micros <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">Invalidation latency, small-stream fan-out, churn, and unchanged-result suppression</div>
+      <div class="chart-improvements" id="improvReactiveMicros"></div>
+      <div class="chart-canvas-wrap"><canvas id="chartReactiveMicros"></canvas></div>
     </div>
     <div class="chart-panel" id="panelThroughput">
       <h2>Point Query Throughput <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— higher is better</span></h2>
@@ -390,8 +441,8 @@
     <div class="right-col-header">
       <span class="header-text" id="headerText">Loading…</span>
       <div class="filter-bar" id="filterBar">
-        <button class="filter-btn active" data-filter="all">All<span class="count" id="countAll"></span></button>
-        <button class="filter-btn" data-filter="accepted">Accepted<span class="count" id="countAccepted"></span></button>
+        <button class="filter-btn" data-filter="all">All<span class="count" id="countAll"></span></button>
+        <button class="filter-btn active" data-filter="accepted">Accepted<span class="count" id="countAccepted"></span></button>
         <button class="filter-btn" data-filter="rejected">Rejected<span class="count" id="countRejected"></span></button>
       </div>
     </div>
@@ -414,12 +465,41 @@ Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Hel
 let DATA = null;
 const chartInstances = {};
 let selectedExpId = null;
-let currentFilter = 'all'; // 'all' | 'accepted' | 'rejected'
+let currentFilter = 'accepted'; // 'all' | 'accepted' | 'rejected'
+let activePanelId = 'panelReads';
+
+const PANEL_TO_TAB = {
+  panelReads: 'reads',
+  panelWrites: 'writes',
+  panelTransactions: 'transactions',
+  panelConcurrency: 'concurrency',
+  panelScenarios: 'scenarios',
+  panelReactiveMicros: 'reactive-micros',
+  panelThroughput: 'throughput',
+};
+
+const TAB_TO_PANEL = Object.fromEntries(
+  Object.entries(PANEL_TO_TAB).map(([panel, tab]) => [tab, panel])
+);
 
 function filteredExperiments() {
   if (!DATA) return [];
   if (currentFilter === 'all') return DATA.experiments;
   return DATA.experiments.filter(e => e.status === currentFilter);
+}
+
+function sortedExperiments() {
+  const exps = [...filteredExperiments()];
+  exps.sort((a, b) => {
+    const dateA = a.date || '';
+    const dateB = b.date || '';
+    if (dateA !== dateB) return dateB.localeCompare(dateA);
+
+    const numA = parseInt(String(a.id).replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(String(b.id).replace(/\D/g, ''), 10) || 0;
+    return numB - numA;
+  });
+  return exps;
 }
 
 const DISPLAY = {
@@ -433,10 +513,15 @@ const DISPLAY = {
   'Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()': 'tx batch 1K rows',
   'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()': 'parameterized 100q',
   'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x': 'concurrent 4x',
+  'Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite': 'feed reactive (A6)',
+  'Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite': 'sync burst bulk (A7)',
+  'Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()': 'keyed subscriptions (A11)',
+  'High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite': 'fan-out (A11b)',
   'Streaming / Invalidation Latency / resqlite': 'invalidation latency',
   'Streaming / Fan-out (10 streams) / resqlite': 'fan-out 10 streams',
   'Streaming / Stream Churn (100 cycles) / resqlite': 'stream churn 100 cycles',
   'Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite': 'unchanged fanout',
+  'Sync Burst (v1) / Stream emissions during burst (COUNT(*)) / resqlite': 'sync burst emissions',
   'Point Query Throughput / resqlite qps': 'point query qps',
 };
 
@@ -459,7 +544,13 @@ const CHART_GROUPS = {
     'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x',
     'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()',
   ],
-  chartStreaming: [
+  chartScenarios: [
+    'Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite',
+    'Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite',
+    'Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()',
+    'High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite',
+  ],
+  chartReactiveMicros: [
     'Streaming / Invalidation Latency / resqlite',
     'Streaming / Fan-out (10 streams) / resqlite',
     'Streaming / Stream Churn (100 cycles) / resqlite',
@@ -470,34 +561,81 @@ const CHART_GROUPS = {
   ],
 };
 
+function activatePanel(panelId, sync = true) {
+  if (!document.getElementById(panelId)) return;
+  activePanelId = panelId;
+  document.querySelectorAll('.chart-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.panel === panelId);
+  });
+  document.querySelectorAll('.chart-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === panelId);
+  });
+  const chartId = panelId.replace('panel', 'chart');
+  if (chartInstances[chartId]) chartInstances[chartId].resize();
+  if (sync) syncUrlState();
+}
+
+function loadStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const filter = params.get('filter');
+  if (['all', 'accepted', 'rejected'].includes(filter)) {
+    currentFilter = filter;
+  }
+
+  const panelId = TAB_TO_PANEL[params.get('tab')];
+  if (panelId) activePanelId = panelId;
+
+  const expId = params.get('exp');
+  if (expId) selectedExpId = expId;
+}
+
+function syncUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  params.set('filter', currentFilter);
+  params.set('tab', PANEL_TO_TAB[activePanelId] || 'reads');
+  if (selectedExpId) params.set('exp', selectedExpId);
+  else params.delete('exp');
+  const query = params.toString();
+  const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+  window.history.replaceState(null, '', nextUrl);
+}
+
 // ── Tab switching ──
 document.querySelectorAll('.chart-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.chart-panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.panel).classList.add('active');
-    const chartId = tab.dataset.panel.replace('panel', 'chart');
-    if (chartInstances[chartId]) chartInstances[chartId].resize();
-  });
+  tab.addEventListener('click', () => activatePanel(tab.dataset.panel));
 });
 
 // ── Init ──
 async function init() {
   try {
-    const resp = await fetch('./history.json');
+    const resp = await fetch('./history.json', { cache: 'no-store' });
     DATA = await resp.json();
   } catch (e) {
     document.getElementById('expList').innerHTML = '<div class="loading">Failed to load history.json</div>';
     return;
   }
+  loadStateFromUrl();
+  const requestedExp = selectedExpId ? DATA.experiments.find(e => e.id === selectedExpId) : null;
+  if (requestedExp && currentFilter !== 'all' && requestedExp.status !== currentFilter) {
+    currentFilter = requestedExp.status;
+  }
   buildExpRunMappings();
   updateHeaderCounts();
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === currentFilter);
+  });
+  activatePanel(activePanelId, false);
   buildCharts();
   renderExpList();
   updateHeaderText();
   attachListListeners();
   attachFilterListeners();
+  if (requestedExp && filteredExperiments().some(e => e.id === requestedExp.id)) {
+    selectExp(requestedExp.id, { sync: false });
+  } else {
+    selectedExpId = null;
+  }
+  syncUrlState();
 }
 
 function attachFilterListeners() {
@@ -507,16 +645,13 @@ function attachFilterListeners() {
       if (filter === currentFilter) return;
       currentFilter = filter;
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b === btn));
-      // Close any open detail view — it may not be in the new filter.
-      if (selectedExpId) {
-        const exp = DATA.experiments.find(e => e.id === selectedExpId);
-        if (exp && currentFilter !== 'all' && exp.status !== currentFilter) {
-          closeDetail();
-        }
-      }
+      // Reset selection on filter changes so the filtered view always
+      // starts from a consistent list state.
+      closeDetail();
       buildCharts();
       renderExpList();
       updateHeaderText();
+      syncUrlState();
     });
   });
 }
@@ -532,7 +667,7 @@ function updateHeaderText() {
   const n = filteredExperiments().length;
   const label = currentFilter === 'all' ? 'experiments' : `${currentFilter} experiments`;
   document.getElementById('headerText').textContent =
-    `${n} ${label} — hover to highlight, click for details`;
+    `${n} ${label} — newest first, hover to highlight, click for details`;
 }
 
 // ── Charts ──
@@ -633,116 +768,59 @@ function buildCharts() {
       },
     });
 
-    // Chart.js onClick is unreliable with interaction modes — use a direct
-    // canvas click listener with getElementsAtEventForMode instead.
-    canvas.addEventListener('click', (e) => {
+    // Chart.js onClick is unreliable with interaction modes. Use a direct
+    // canvas click handler, but replace it on every rebuild so filter changes
+    // do not accumulate multiple listeners on the same canvas element.
+    canvas.onclick = (e) => {
       const chart = chartInstances[chartId];
       const elements = chart.getElementsAtEventForMode(e, 'index', { intersect: false }, false);
       if (!elements.length) return;
-      const exp = chartExpOrder[elements[0].index];
+      const pointIdx = elements[0].index;
+      const runIdx = chartRunIndices[pointIdx];
+      const exp =
+        chartExpOrder[pointIdx] ||
+        findFilteredExpForRunIndex(runIdx) ||
+        findExpForRunIndex(runIdx);
       if (!exp) return;
+      if (currentFilter !== 'all' && exp.status !== currentFilter) return;
       if (selectedExpId === exp.id) {
         closeDetail();
       } else {
         selectExp(exp.id);
       }
-    });
+    };
 
-    // Compute improvement annotations for this chart.
-    const improvId = chartId.replace('chart', 'improv');
-    const improvEl = document.getElementById(improvId);
-    if (improvEl) {
-      const pills = [];
-      for (const ds of datasets) {
-        // Find first and last non-null values.
-        const nonNull = ds.data.map((v, i) => [v, i]).filter(([v]) => v !== null);
-        if (nonNull.length < 2) continue;
-        const [first] = nonNull[0];
-        const [last] = nonNull[nonNull.length - 1];
-        if (first === 0 && last === 0) continue;
-
-        const isQps = ds.yAxisID === 'yQps';
-        let ratio, improved;
-        if (isQps) {
-          ratio = last / first;
-          improved = last > first;
-        } else {
-          ratio = first / last;
-          improved = last < first;
-        }
-
-        const fmtVal = v => isQps ? Math.round(v).toLocaleString() : v.toFixed(2);
-        const unit = isQps ? ' qps' : ' ms';
-        const ratioStr = ratio >= 1 ? ratio.toFixed(1) + 'x' : (1/ratio).toFixed(1) + 'x';
-
-        if (improved && ratio > 1.05) {
-          pills.push(
-            `<span class="improv-pill">` +
-            `<span class="metric-name">${ds.label}</span> ` +
-            `${fmtVal(first)}${unit} <span class="arrow">\u2192</span> ${fmtVal(last)}${unit} ` +
-            `<strong>(${ratioStr} ${isQps ? 'faster' : 'faster'})</strong>` +
-            `</span>`
-          );
-        }
-      }
-      improvEl.innerHTML = pills.join('');
-    }
   }
+
+  updateChartImprovementPills();
 }
 
 // ── Precomputed experiment ↔ run index mappings ──
-// Spreads experiments across runs on the same date so hovering between
-// experiments on the same day still moves the chart highlight.
+// These are generated into history.json so the page does not need to
+// rediscover heuristic experiment↔run matches on its own.
 const expToRunIndex = {};  // exp.id → run index
 const runToExpId = {};     // run index → exp.id (first match)
+const expToRunSource = {}; // exp.id → exact | same-day | nearby
 
 function buildExpRunMappings() {
-  const runs = DATA.runs;
-  const exps = DATA.experiments;
-
-  // Group experiments by date.
-  const byDate = {};
-  for (const exp of exps) {
-    if (!exp.date) continue;
-    (byDate[exp.date] ??= []).push(exp);
+  const runTimestampToIndex = {};
+  for (let i = 0; i < DATA.runs.length; i++) {
+    if (DATA.runs[i].timestamp) runTimestampToIndex[DATA.runs[i].timestamp] = i;
   }
 
-  // Group run indices by date.
-  const runsByDate = {};
-  for (let i = 0; i < runs.length; i++) {
-    (runsByDate[runs[i].date] ??= []).push(i);
-  }
+  for (const key of Object.keys(expToRunIndex)) delete expToRunIndex[key];
+  for (const key of Object.keys(runToExpId)) delete runToExpId[key];
+  for (const key of Object.keys(expToRunSource)) delete expToRunSource[key];
 
-  // Distribute experiments across runs on the same date.
-  for (const [date, dateExps] of Object.entries(byDate)) {
-    const dateRuns = runsByDate[date];
-    if (!dateRuns || !dateRuns.length) {
-      // No runs on this date — find closest date's runs.
-      let bestDate = null;
-      let bestDist = Infinity;
-      for (const rd of Object.keys(runsByDate)) {
-        const dist = Math.abs(new Date(rd).getTime() - new Date(date).getTime());
-        if (dist < bestDist) { bestDist = dist; bestDate = rd; }
-      }
-      if (bestDate && bestDist < 3 * 86400000) {
-        const fallbackRuns = runsByDate[bestDate];
-        for (let j = 0; j < dateExps.length; j++) {
-          expToRunIndex[dateExps[j].id] = fallbackRuns[Math.min(j, fallbackRuns.length - 1)];
-        }
-      }
-      continue;
-    }
-
-    // Spread: assign each experiment to a proportionally spaced run index.
-    for (let j = 0; j < dateExps.length; j++) {
-      const runIdx = dateRuns[Math.min(Math.floor(j * dateRuns.length / dateExps.length), dateRuns.length - 1)];
-      expToRunIndex[dateExps[j].id] = runIdx;
-    }
-  }
-
-  // Reverse mapping: each run index → first experiment that maps to it.
-  for (const [expId, runIdx] of Object.entries(expToRunIndex)) {
-    if (!(runIdx in runToExpId)) runToExpId[runIdx] = expId;
+  for (const exp of DATA.experiments) {
+    const source = exp.benchmarkRun?.source || 'none';
+    expToRunSource[exp.id] = source;
+    const runTimestamp = exp.benchmarkRun?.timestamp;
+    if (!runTimestamp) continue;
+    const runIdx = runTimestampToIndex[runTimestamp];
+    if (runIdx == null) continue;
+    expToRunIndex[exp.id] = runIdx;
+    if (!(runIdx in runToExpId)) runToExpId[runIdx] = exp.id;
   }
 }
 
@@ -750,20 +828,45 @@ function findRunIndexForExp(exp) {
   return expToRunIndex[exp.id] ?? -1;
 }
 
+function findRunSourceForExp(exp) {
+  return expToRunSource[exp.id] || 'none';
+}
+
+function runSourceNote(source) {
+  if (source === 'same-day') {
+    return 'No dedicated benchmark run is mapped to this experiment. The visible chart point uses a same-day heuristic match and should be treated as directional only.';
+  }
+  if (source === 'nearby') {
+    return 'No dedicated benchmark run is mapped to this experiment. The visible chart point uses a nearby-date heuristic match and should be treated as directional only.';
+  }
+  return 'No dedicated benchmark run is mapped to this experiment.';
+}
+
+function runSourceLabel(source) {
+  if (source === 'exact') return 'exact match';
+  if (source === 'same-day') return 'same-day heuristic';
+  if (source === 'nearby') return 'nearby-date heuristic';
+  return 'unmapped';
+}
+
+function formatBenchmarkRunMeta(exp) {
+  const run = exp.benchmarkRun;
+  if (!run) return 'Benchmark run: no mapped run';
+
+  const parts = ['Benchmark run:'];
+  if (run.id) parts.push(run.id);
+  if (run.date) parts.push(run.date);
+  parts.push(runSourceLabel(run.source));
+  return parts.join(' · ');
+}
+
+function findFilteredExpForRunIndex(runIdx) {
+  return sortedExperiments().find(exp => expToRunIndex[exp.id] === runIdx) || null;
+}
+
 function findExpForRunIndex(idx) {
-  // Direct mapping from the spread distribution.
-  if (runToExpId[idx]) {
-    return DATA.experiments.find(e => e.id === runToExpId[idx]);
-  }
-  // Fallback: find the nearest mapped run index and use its experiment.
-  let bestExpId = null;
-  let bestDist = Infinity;
-  for (const [mappedIdx, expId] of Object.entries(runToExpId)) {
-    const dist = Math.abs(+mappedIdx - idx);
-    if (dist < bestDist) { bestDist = dist; bestExpId = expId; }
-  }
-  if (bestExpId) return DATA.experiments.find(e => e.id === bestExpId);
-  return null;
+  if (!runToExpId[idx]) return null;
+  return DATA.experiments.find(e => e.id === runToExpId[idx]) || null;
 }
 
 // ── Highlight a data point on all charts with vertical line + dim ──
@@ -845,7 +948,7 @@ function highlightChartIndex(runIndex) {
 // ── Experiment list ──
 function renderExpList() {
   const container = document.getElementById('expList');
-  const exps = filteredExperiments();
+  const exps = sortedExperiments();
 
   if (exps.length === 0) {
     container.innerHTML = '<div class="loading">No experiments match this filter.</div>';
@@ -853,7 +956,7 @@ function renderExpList() {
   }
 
   container.innerHTML = exps.map(exp => `
-    <div class="exp-item ${exp.status}" data-id="${exp.id}">
+    <div class="exp-item ${exp.status} ${selectedExpId === exp.id ? 'selected' : ''}" data-id="${exp.id}">
       <div class="item-num">#${exp.id}</div>
       <div class="item-body">
         <h3>${esc(exp.title)}</h3>
@@ -893,13 +996,15 @@ function attachListListeners() {
 }
 
 // ── Select experiment → full detail view ──
-function selectExp(id) {
+function selectExp(id, { sync = true } = {}) {
   const exp = DATA.experiments.find(e => e.id === id);
   if (!exp) return;
 
   selectedExpId = id;
   const rightCol = document.getElementById('rightCol');
   rightCol.classList.add('detail-open');
+  updateChartImprovementPills();
+  renderExpList();
 
   // Highlight on chart.
   const chartIdx = chartExpOrder.findIndex(ex => ex.id === id);
@@ -910,6 +1015,7 @@ function selectExp(id) {
   let html = `<div class="detail-top-bar">`;
   html += `<button class="back-btn" onclick="closeDetail()">&larr; Back</button>`;
   html += `<span class="detail-top-title">${esc(exp.title)}</span>`;
+  html += `<div class="detail-top-actions"><button class="reveal-btn" onclick="showSelectedInList()">Find in list</button></div>`;
   html += `</div>`;
 
   html += `<div class="detail-content">`;
@@ -923,8 +1029,20 @@ function selectExp(id) {
   if (exp.commit) html += `<a href="https://github.com/danReynolds/resqlite/commit/${exp.commit}">${exp.commit.slice(0,7)}</a>`;
   if (exp.archive) html += `<a href="https://github.com/danReynolds/resqlite/compare/main...${encodeURIComponent(exp.archive)}" title="Archived implementation — preserved rejected code, restorable via git cherry-pick">${esc(exp.archive)}</a>`;
   html += `</div>`;
+  html += `<div class="detail-run-meta">${esc(formatBenchmarkRunMeta(exp))}</div>`;
 
   html += `<div class="detail-section"><h4>Impact</h4><p>${esc(exp.summary)}</p></div>`;
+  const runIdx = findRunIndexForExp(exp);
+  const runSource = findRunSourceForExp(exp);
+  if (runSource !== 'exact') {
+    html += `<div class="detail-section"><h4>Benchmark Mapping</h4><p>${esc(runSourceNote(runSource))}</p></div>`;
+  }
+  if (runSource === 'exact' && exp.primaryMetrics?.length) {
+    html += renderMetricImpactSection('Primary Metrics', exp.primaryMetrics, runIdx);
+  }
+  if (runSource === 'exact' && exp.guardrailMetrics?.length) {
+    html += renderMetricImpactSection('Guardrail Metrics', exp.guardrailMetrics, runIdx);
+  }
 
   if (exp.problem) {
     html += `<div class="detail-section"><h4>Problem</h4>${renderMd(exp.problem)}</div>`;
@@ -945,12 +1063,163 @@ function selectExp(id) {
   html += `</div>`; // .detail-content
   detail.innerHTML = html;
   detail.scrollTop = 0;
+  if (sync) syncUrlState();
 }
 
 function closeDetail() {
   document.getElementById('rightCol').classList.remove('detail-open');
   selectedExpId = null;
   highlightChartIndex(-1);
+  updateChartImprovementPills();
+  renderExpList();
+  syncUrlState();
+}
+
+function showSelectedInList() {
+  const id = selectedExpId;
+  if (!id) return;
+  closeDetail();
+  const item = document.querySelector(`.exp-item[data-id="${CSS.escape(id)}"]`);
+  if (!item) return;
+  item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  item.classList.add('reveal-flash');
+  setTimeout(() => item.classList.remove('reveal-flash'), 1200);
+}
+
+function metricUnit(key) {
+  if (key.includes('qps')) return 'qps';
+  if (key.includes('emissions')) return 'count';
+  return 'ms';
+}
+
+function isHigherBetter(key) {
+  return key.includes('qps');
+}
+
+function formatMetricValue(key, value) {
+  if (value == null) return '—';
+  const unit = metricUnit(key);
+  if (unit === 'qps') return `${Math.round(value).toLocaleString()} qps`;
+  if (unit === 'count') return `${Math.round(value).toLocaleString()}`;
+  return `${value.toFixed(2)} ms`;
+}
+
+function formatSignedPercent(pct) {
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function findPreviousRunIndexWithMetric(runIdx, key) {
+  for (let i = runIdx - 1; i >= 0; i--) {
+    if (DATA.runs[i].metrics[key] != null) return i;
+  }
+  return -1;
+}
+
+function renderMetricImpactSection(title, metricKeys, runIdx) {
+  if (runIdx == null || runIdx < 0 || !metricKeys?.length) return '';
+
+  const rows = [];
+  for (const key of metricKeys) {
+    const current = DATA.runs[runIdx].metrics[key];
+    if (current == null) continue;
+
+    const prevIdx = findPreviousRunIndexWithMetric(runIdx, key);
+    const prev = prevIdx >= 0 ? DATA.runs[prevIdx].metrics[key] : null;
+    const label = DISPLAY[key] || key;
+
+    let deltaHtml = '<span class="metric-delta neutral">first measured run</span>';
+    if (prev != null) {
+      const pct = prev == 0 ? null : ((current - prev) / prev) * 100;
+      const improved = isHigherBetter(key) ? current > prev : current < prev;
+      const neutral = current === prev;
+      const klass = neutral ? 'neutral' : (improved ? 'good' : 'bad');
+      const summary = neutral
+        ? 'flat'
+        : (pct == null ? 'changed' : `${formatSignedPercent(pct)} ${improved ? 'better' : 'worse'}`);
+      deltaHtml = `<span class="metric-delta ${klass}">${summary}</span>`;
+    }
+
+    rows.push(
+      `<tr>` +
+      `<td>${esc(label)}</td>` +
+      `<td>${esc(formatMetricValue(key, prev))}</td>` +
+      `<td>${esc(formatMetricValue(key, current))}</td>` +
+      `<td>${deltaHtml}</td>` +
+      `</tr>`
+    );
+  }
+
+  if (!rows.length) return '';
+
+  return (
+    `<div class="detail-section">` +
+    `<h4>${esc(title)}</h4>` +
+    `<p class="metric-context">Compared against the nearest earlier benchmark run carrying each metric.</p>` +
+    `<table>` +
+    `<tr><td>Metric</td><td>Previous</td><td>This experiment</td><td>Delta</td></tr>` +
+    `${rows.join('')}` +
+    `</table>` +
+    `</div>`
+  );
+}
+
+function updateChartImprovementPills() {
+  for (const [chartId, metricKeys] of Object.entries(CHART_GROUPS)) {
+    const improvId = chartId.replace('chart', 'improv');
+    const improvEl = document.getElementById(improvId);
+    if (!improvEl) continue;
+
+    if (!selectedExpId) {
+      improvEl.innerHTML = `<span class="metric-context">Select an experiment to see deltas versus the previous run on these metrics.</span>`;
+      continue;
+    }
+
+    const exp = DATA.experiments.find(e => e.id === selectedExpId);
+    if (!exp) {
+      improvEl.innerHTML = '';
+      continue;
+    }
+
+    const runIdx = findRunIndexForExp(exp);
+    const runSource = findRunSourceForExp(exp);
+    if (runIdx < 0 || runSource !== 'exact') {
+      improvEl.innerHTML = `<span class="metric-context">${esc(runSourceNote(runSource))}</span>`;
+      continue;
+    }
+
+    const pills = [];
+    for (const key of metricKeys) {
+      const current = DATA.runs[runIdx].metrics[key];
+      if (current == null) continue;
+
+      const prevIdx = findPreviousRunIndexWithMetric(runIdx, key);
+      const prev = prevIdx >= 0 ? DATA.runs[prevIdx].metrics[key] : null;
+      if (prev == null) continue;
+
+      const improved = isHigherBetter(key) ? current > prev : current < prev;
+      const neutral = current === prev;
+      const pct = prev === 0 ? null : ((current - prev) / prev) * 100;
+      const deltaClass = neutral ? 'neutral' : (improved ? 'good' : 'bad');
+      const deltaText = neutral
+        ? 'flat'
+        : (pct == null ? 'changed' : `${formatSignedPercent(pct)} ${improved ? 'better' : 'worse'}`);
+
+      pills.push(
+        `<span class="improv-pill">` +
+        `<span class="metric-name">${esc(DISPLAY[key] || key)}</span> ` +
+        `${esc(formatMetricValue(key, prev))} <span class="arrow">\u2192</span> ${esc(formatMetricValue(key, current))} ` +
+        `<strong class="metric-delta ${deltaClass}">(${esc(deltaText)})</strong>` +
+        `</span>`
+      );
+    }
+
+    if (!pills.length) {
+      improvEl.innerHTML = `<span class="metric-context">This experiment has no measured delta on the metrics in this chart.</span>`;
+    } else {
+      improvEl.innerHTML = pills.join('');
+    }
+  }
 }
 
 

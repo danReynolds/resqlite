@@ -86,6 +86,17 @@ Interpretation:
 - `A7` stayed broadly in band, with a small merge-round regression but no
   collapse
 
+## Primary Metrics
+
+- Keyed PK Subscriptions (v1)
+- High-Cardinality Stream Fan-out (v1)
+
+## Guardrail Metrics
+
+- Feed Paging (v1) / Reactive feed with 100 concurrent writes
+- Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks
+- Sync Burst (v1) / Merge rounds: 10 × 100 rows
+
 ## Decision
 
 Keep this in review.
