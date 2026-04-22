@@ -832,7 +832,8 @@ Future<void> _ensureDriftCodegenFresh() async {
 String _sanitizeResultFilenameLabel(String label) {
   final sanitized =
       label
-          .replaceAll(RegExp(r'[\"<>|*?\r\n:]'), '')
+          .replaceAll('"', 'in')
+          .replaceAll(RegExp(r'[<>|*?\r\n:]'), '')
           .replaceAll(RegExp(r'[\\/]'), '-')
           .trim();
   return sanitized.isEmpty ? 'run' : sanitized;
