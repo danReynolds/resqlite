@@ -13,6 +13,9 @@ on:
       - 'benchmark/generate_blog.dart'
       - 'doc/**/*.md'
 
+permissions:
+  contents: write
+
 jobs:
   regenerate:
     name: Regenerate docs

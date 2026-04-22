@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-22T11:15:45.432058",
+  "generated": "2026-04-22T11:33:19.237360",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -5393,10 +5393,10 @@
       }
     },
     {
-      "id": "MacBook Pro 14\"",
+      "id": "MacBook Pro 14in",
       "date": "2026-04-17",
       "timestamp": "2026-04-17T20:39:40",
-      "label": "MacBook Pro 14\"",
+      "label": "MacBook Pro 14in",
       "metrics": {
         "Select → Maps / 10 rows / resqlite select()": 0.012,
         "Select → Maps / 10 rows / resqlite select() [main]": 0.001,
@@ -5576,10 +5576,10 @@
       }
     },
     {
-      "id": "MacBook Pro 14\"",
+      "id": "MacBook Pro 14in",
       "date": "2026-04-17",
       "timestamp": "2026-04-17T21:35:02",
-      "label": "MacBook Pro 14\"",
+      "label": "MacBook Pro 14in",
       "metrics": {
         "Select → Maps / 10 rows / resqlite select()": 0.012,
         "Select → Maps / 10 rows / resqlite select() [main]": 0.001,
@@ -5759,10 +5759,10 @@
       }
     },
     {
-      "id": "MacBook Pro 14\"",
+      "id": "MacBook Pro 14in",
       "date": "2026-04-18",
       "timestamp": "2026-04-18T10:27:16",
-      "label": "MacBook Pro 14\"",
+      "label": "MacBook Pro 14in",
       "metrics": {
         "Select → Maps / 10 rows / resqlite select()": 0.012,
         "Select → Maps / 10 rows / resqlite select() [main]": 0.001,
@@ -7642,7 +7642,7 @@
       "results": "Matched control artifact:\n- `/tmp/resqlite-exp096-control-profile.json`\n\nCandidate artifact:\n- `/tmp/resqlite-exp096-profile.json`\n\nKey deltas versus control:\n\n### Numeric-heavy scans\n\n| Workload | Control | Candidate | Delta |\n|---|---:|---:|---:|\n| `numeric_scan` select p50 | 3382μs | 2977μs | **-12%** |\n| `numeric_scan_consume` select p50 | 3394μs | 2918μs | **-14%** |\n| `numeric_scan_consume` consume p50 | 234μs | 1374μs | **+487%** |\n\n### Mixed-schema scans\n\n| Workload | Control | Candidate | Delta |\n|---|---:|---:|---:|\n| `mixed_scan` select p50 | 3127μs | 3354μs | **+7%** |\n| `mixed_scan_consume` select p50 | 3052μs | 3888μs | **+27%** |\n| `mixed_scan_consume` consume p50 | 203μs | 997μs | **+391%** |\n\n### Spillover on small results\n\n| Workload | Control | Candidate | Delta |\n|--...",
       "reasoning": "Rejected.\n\nThe prototype improved transfer/return time for some numeric-heavy scans,\nbut it did so by making row access substantially more expensive on the\nmain isolate. That is the wrong trade-off for resqlite’s contract, where:\n\n- `Map`-style row access is the public surface\n- main-isolate jank matters\n- large results already use `Isolate.exit` for hand-off\n\nThe important learning is that a result-object experiment must be judged\non **transfer + consume**, not on `db.select()` return time alone. Once\nconsumption was measured explicitly, the binary-row direction lost\ndecisively.\n\nThis does **not** mean result transport is fully solved; it means a\ngeneric binary-row replacement for `select()` is not the right path under\nthe current API contract.",
       "benchmarkRun": {
-        "id": "MacBook Pro 14\"",
+        "id": "MacBook Pro 14in",
         "date": "2026-04-18",
         "timestamp": "2026-04-18T10:27:16",
         "source": "nearby"
