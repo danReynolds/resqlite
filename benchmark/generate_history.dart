@@ -211,8 +211,14 @@ void _attachBenchmarkRunMappings(
                 .where((idx) => !claimedRunIndices.contains(idx))
                 .toList();
         for (var j = 0; j < dateExps.length; j++) {
-          final boundedIndex = j < fallbackRuns.length ? j : fallbackRuns.length - 1;
-          final runIdx = fallbackRuns[boundedIndex];
+          final preferredIndex =
+              j < fallbackRuns.length ? j : fallbackRuns.length - 1;
+          final runIdx = _pickClosestUnclaimedRun(
+            fallbackRuns,
+            preferredIndex,
+            claimedRunIndices,
+          );
+          if (runIdx == null) continue;
           dateExps[j]['benchmarkRun'] = {
             'id': runs[runIdx]['id'],
             'date': runs[runIdx]['date'],
@@ -231,7 +237,12 @@ void _attachBenchmarkRunMappings(
             0,
             dateRuns.length - 1,
           );
-      final runIdx = dateRuns[proportionalIndex];
+      final runIdx = _pickClosestUnclaimedRun(
+        dateRuns,
+        proportionalIndex,
+        claimedRunIndices,
+      );
+      if (runIdx == null) continue;
       dateExps[j]['benchmarkRun'] = {
         'id': runs[runIdx]['id'],
         'date': runs[runIdx]['date'],
@@ -241,6 +252,32 @@ void _attachBenchmarkRunMappings(
       claimedRunIndices.add(runIdx);
     }
   }
+}
+
+int? _pickClosestUnclaimedRun(
+  List<int> candidates,
+  int preferredIndex,
+  Set<int> claimedRunIndices,
+) {
+  if (candidates.isEmpty) return null;
+
+  for (var offset = 0; offset < candidates.length; offset++) {
+    final left = preferredIndex - offset;
+    if (left >= 0) {
+      final candidate = candidates[left];
+      if (!claimedRunIndices.contains(candidate)) return candidate;
+    }
+
+    if (offset == 0) continue;
+
+    final right = preferredIndex + offset;
+    if (right < candidates.length) {
+      final candidate = candidates[right];
+      if (!claimedRunIndices.contains(candidate)) return candidate;
+    }
+  }
+
+  return null;
 }
 
 /// Patterns used to find the curated tracked metrics from all available keys.
