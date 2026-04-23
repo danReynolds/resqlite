@@ -55,9 +55,13 @@ void main() {
     }
 
     final sidecar = loadReleaseArtifactSidecarForMarkdown(resultFile);
-    final benchmarks = sidecar != null
-        ? artifactBenchmarks(sidecar) ?? const <Map<String, Object?>>[]
-        : parseBenchmarkSections(resultFile.readAsStringSync());
+    final benchmarksFromSidecar = sidecar != null
+        ? artifactBenchmarks(sidecar)
+        : null;
+    final benchmarks =
+        benchmarksFromSidecar == null || benchmarksFromSidecar.isEmpty
+        ? parseBenchmarkSections(resultFile.readAsStringSync())
+        : benchmarksFromSidecar;
     final environment = sidecar != null ? artifactEnvironment(sidecar) : null;
 
     (output['devices'] as List).add({

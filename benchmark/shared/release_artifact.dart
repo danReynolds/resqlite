@@ -19,7 +19,7 @@ Map<String, Object?> buildReleaseRunArtifact({
   final streamingColumn = extractStreamingColumnMedians(markdown);
 
   return {
-    'schemaVersion': 1,
+    'schemaVersion': 2,
     'kind': 'release-benchmark-run',
     'generatedAt': generatedAt ?? DateTime.now().toIso8601String(),
     'label': label,
@@ -35,7 +35,6 @@ Map<String, Object?> buildReleaseRunArtifact({
     if (streamingColumn.isNotEmpty)
       'streamingColumnMetrics': _streamingColumnJson(streamingColumn),
     if (aggregates.isNotEmpty) 'repeatAggregates': _aggregatesJson(aggregates),
-    'benchmarks': parseBenchmarkSections(markdown),
   };
 }
 
@@ -156,11 +155,7 @@ Map<String, Object?> _aggregatesJson(Map<String, AggregateStats> aggregates) {
   return {
     for (final entry in aggregates.entries)
       entry.key: {
-        'runs': entry.value.runs,
         'median': entry.value.median,
-        'min': entry.value.min,
-        'max': entry.value.max,
-        'rangePct': entry.value.rangePct,
         'madPct': entry.value.madPct,
         'stability': entry.value.stability,
         'comparisonThresholdPct': entry.value.comparisonThresholdPct,

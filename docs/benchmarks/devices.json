@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-23T11:09:34.507478",
+  "generated": "2026-04-23T11:27:38.131375",
   "devices": [
     {
       "name": "MacBook Pro 14\"",
@@ -2764,6 +2764,250 @@
                 12.2,
                 161.0,
                 0.0
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Memory Comparison vs Previous Run",
+          "title": "Memory Comparison vs Previous Run",
+          "subtitle": null,
+          "entries": [
+            {
+              "library": "Benchmark",
+              "values": [
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Batch insert 10k rows / drift batch()",
+              "values": [
+                0.09,
+                0.89,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Batch insert 10k rows / resqlite executeBatch()",
+              "values": [
+                1.72,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Batch insert 10k rows / sqlite3 executeBatch()",
+              "values": [
+                0.0,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Batch insert 10k rows / sqlite_async executeBatch()",
+              "values": [
+                0.0,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → JSON Bytes / drift + jsonEncode",
+              "values": [
+                0.0,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → JSON Bytes / resqlite + jsonEn...",
+              "values": [
+                0.0,
+                6.22,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → JSON Bytes / resqlite selectBy...",
+              "values": [
+                0.0,
+                0.03,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → JSON Bytes / sqlite3 + jsonEncode",
+              "values": [
+                0.0,
+                3.03,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → JSON Bytes / sqlite_async + js...",
+              "values": [
+                0.0,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → Maps / drift select()",
+              "values": [
+                11.77,
+                1.27,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → Maps / resqlite select()",
+              "values": [
+                0.86,
+                0.42,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → Maps / sqlite3 select()",
+              "values": [
+                3.86,
+                2.41,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Select 10k rows → Maps / sqlite_async select()",
+              "values": [
+                1.0,
+                1.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Streaming fan-out (10 streams × 100 writes) / re...",
+              "values": [
+                0.11,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Memory / Streaming fan-out (10 streams × 100 writes) / sq...",
+              "values": [
+                0.0,
+                0.0,
+                null,
+                null,
+                null
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Streaming (Column Granularity) Comparison",
+          "title": "Streaming (Column Granularity) Comparison",
+          "subtitle": null,
+          "entries": [
+            {
+              "library": "Benchmark",
+              "values": [
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Disjoint column writes (...",
+              "values": [
+                5000.0,
+                5000.0,
+                0.0,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Disjoint column writes (...",
+              "values": [
+                0.0,
+                0.0,
+                0.0,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Disjoint column writes (...",
+              "values": [
+                3250.0,
+                2576.0,
+                -674.0,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Overlapping column write...",
+              "values": [
+                5000.0,
+                5000.0,
+                0.0,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Overlapping column write...",
+              "values": [
+                20.0,
+                450.0,
+                430.0,
+                null,
+                null
+              ]
+            },
+            {
+              "library": "Streaming (Column Granularity) / Overlapping column write...",
+              "values": [
+                3009.0,
+                3127.0,
+                118.0,
+                null,
+                null
               ]
             }
           ]
