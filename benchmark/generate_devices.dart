@@ -20,12 +20,30 @@ void main() {
   }
 
   final content = mdFile.readAsStringSync();
-  final devices = _parseDeviceRegistry(content);
+  final output = buildDevicesData(
+    hardwareResultsMarkdown: content,
+    resultsDir: Directory('benchmark/results'),
+  );
 
+  final devices = (output['devices'] as List?)?.cast<Map<String, Object?>>() ??
+      const <Map<String, Object?>>[];
   if (devices.isEmpty) {
     print('No devices found in HARDWARE_RESULTS.md');
     return;
   }
+
+  outFile.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(output));
+
+  final count = devices.length;
+  print('Wrote ${outFile.path} ($count device(s))');
+}
+
+Map<String, Object?> buildDevicesData({
+  required String hardwareResultsMarkdown,
+  required Directory resultsDir,
+  String? generatedAt,
+}) {
+  final devices = _parseDeviceRegistry(hardwareResultsMarkdown);
 
   // Sort devices most-recent-first so the dashboard defaults to the latest
   // run and history appears in reverse chronological order. Primary key is
@@ -40,12 +58,12 @@ void main() {
 
   // For each device, parse its result file for full cross-library data.
   final output = <String, Object?>{
-    'generated': DateTime.now().toIso8601String(),
+    'generated': generatedAt ?? DateTime.now().toIso8601String(),
     'devices': <Map<String, Object?>>[],
   };
 
   for (final device in devices) {
-    final resultPath = 'benchmark/results/${device['resultFile']}';
+    final resultPath = '${resultsDir.path}/${device['resultFile']}';
     final resultFile = File(resultPath);
     if (!resultFile.existsSync()) {
       print(
@@ -81,10 +99,7 @@ void main() {
     );
   }
 
-  outFile.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(output));
-
-  final count = (output['devices'] as List).length;
-  print('Wrote ${outFile.path} ($count device(s))');
+  return output;
 }
 
 /// Parse the Devices table from HARDWARE_RESULTS.md.

@@ -15,7 +15,28 @@ Future<void> main() async {
   final resultsDir = Directory('benchmark/results');
   final experimentsDir = Directory('experiments');
   final outFile = File('docs/experiments/history.json');
+  final output = buildHistoryData(
+    resultsDir: resultsDir,
+    experimentsDir: experimentsDir,
+  );
 
+  // 4. Write JSON.
+  await outFile.parent.create(recursive: true);
+
+  await outFile.writeAsString(
+    const JsonEncoder.withIndent('  ').convert(output),
+  );
+
+  final tracked = (output['tracked'] as List?)?.cast<String>() ?? const [];
+  print('Wrote ${outFile.path} (${tracked.length} tracked metrics).');
+  print('Tracked: ${tracked.join(', ')}');
+}
+
+Map<String, Object?> buildHistoryData({
+  required Directory resultsDir,
+  required Directory experimentsDir,
+  String? generatedAt,
+}) {
   // 1. Parse all benchmark result files.
   final runs = <Map<String, Object?>>[];
   final mdFiles =
@@ -91,11 +112,8 @@ Future<void> main() async {
   // 3. Resolve the curated metric registry used by the experiments page.
   final catalog = resolveCuratedMetrics(allKeys);
 
-  // 4. Write JSON.
-  await outFile.parent.create(recursive: true);
-
-  final output = {
-    'generated': DateTime.now().toIso8601String(),
+  final output = <String, Object?>{
+    'generated': generatedAt ?? DateTime.now().toIso8601String(),
     'runs': runs,
     'experiments': experiments,
     'tracked': catalog.tracked,
@@ -103,12 +121,7 @@ Future<void> main() async {
     'chartGroups': catalog.chartGroups,
   };
 
-  await outFile.writeAsString(
-    const JsonEncoder.withIndent('  ').convert(output),
-  );
-
-  print('Wrote ${outFile.path} (${catalog.tracked.length} tracked metrics).');
-  print('Tracked: ${catalog.tracked.join(', ')}');
+  return output;
 }
 
 Map<String, Object?> _memoryMetricsJson(Map<String, MemoryMetric> memory) {
