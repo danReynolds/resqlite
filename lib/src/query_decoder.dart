@@ -189,12 +189,18 @@ final class RawQueryResult {
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
 RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
-  final colCount = sqlite3ColumnCount(stmt);
   var schema = schemaCache.remove(sql);
+  final int colCount;
   if (schema != null) {
+    // Cache hit: column count is implicit in the cached names list, so
+    // skip the sqlite3_column_count FFI call. Leaf FFI is cheap but it
+    // fires once per decoded query, and the schema cache hit rate is
+    // effectively 100% on workloads that reuse SQL (the common case).
+    colCount = schema.names.length;
     // LRU promotion: re-insert so this entry moves to the end (most recent).
     schemaCache[sql] = schema;
   } else {
+    colCount = sqlite3ColumnCount(stmt);
     schema = RowSchema(List<String>.generate(colCount, (i) {
       final namePtr = sqlite3ColumnName(stmt, i);
       final nameLen = cStrlen(namePtr.cast());
