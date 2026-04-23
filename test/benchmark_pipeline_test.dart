@@ -162,12 +162,8 @@ void main() {
           environment: const {'runtime': 'dart-vm', 'gitSha': 'deadbeef'},
           generatedAt: '2026-04-23T00:00:00.000Z',
         );
-        (sidecar['metrics']
-                as Map<
-                  String,
-                  Object?
-                >)['Select → Maps / 1000 rows / resqlite select()'] =
-            9.99;
+        final sidecarMetrics = sidecar['metrics'] as Map<String, Object?>;
+        sidecarMetrics['Select → Maps / 1000 rows / resqlite select()'] = 9.99;
         File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
           const JsonEncoder.withIndent('  ').convert(sidecar),
         );

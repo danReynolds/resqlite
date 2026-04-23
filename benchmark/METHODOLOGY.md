@@ -54,7 +54,10 @@ isolate offloading is in play.
   drove merge-round p99 by 57% while p50/p90 were unchanged.
 - **Noise-aware comparison**: `run_release.dart --compare-to=<baseline>` uses
   threshold `max(10%, 3 × current MAD%, current MDE_ci)` with a `±0.02 ms`
-  absolute floor.
+  absolute floor. The comparison is intentionally anchored on current-run
+  uncertainty because historical markdown baselines only guarantee a published
+  median; if both sides have structured repeat artifacts in the future, this can
+  tighten to a two-sided uncertainty check.
   - Stable benchmarks: MAD < 5% → 10% threshold
   - Moderate: 5% ≤ MAD < 15% → 3×MAD threshold
   - Noisy: MAD ≥ 15% → marked noisy; deltas treated conservatively
