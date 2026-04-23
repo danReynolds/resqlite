@@ -1,0 +1,60 @@
+{
+  "generated": "2026-04-23T00:00:00.000Z",
+  "runs": [
+    {
+      "id": "fixture",
+      "date": "2026-04-23",
+      "timestamp": "2026-04-23T11:08:40",
+      "label": "fixture",
+      "environment": {
+        "runtime": "dart-vm",
+        "gitSha": "deadbeef"
+      },
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": 1.23,
+        "Select → Maps / 1000 rows / resqlite select() [main]": 0.12
+      }
+    }
+  ],
+  "experiments": [
+    {
+      "id": "083",
+      "title": "Test Experiment",
+      "date": "2026-04-23",
+      "status": "accepted",
+      "summary": "Synthetic summary",
+      "commit": "deadbee",
+      "problem": "Synthetic benchmark fixture.",
+      "hypothesis": "Structured sidecars should win over markdown parsing.",
+      "approach": null,
+      "results": null,
+      "reasoning": "Accepted for testing.",
+      "primaryMetrics": [
+        "Select → Maps / 1000 rows / resqlite select()"
+      ],
+      "benchmarkRun": {
+        "id": "fixture",
+        "date": "2026-04-23",
+        "timestamp": "2026-04-23T11:08:40",
+        "source": "same-day"
+      }
+    }
+  ],
+  "tracked": [
+    "Select → Maps / 1000 rows / resqlite select()"
+  ],
+  "metricDisplay": {
+    "Select → Maps / 1000 rows / resqlite select()": "select() 1K rows"
+  },
+  "chartGroups": {
+    "chartReads": [
+      "Select → Maps / 1000 rows / resqlite select()"
+    ],
+    "chartWrites": [],
+    "chartTransactions": [],
+    "chartConcurrency": [],
+    "chartScenarios": [],
+    "chartReactiveMicros": [],
+    "chartThroughput": []
+  }
+}

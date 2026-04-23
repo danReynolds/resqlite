@@ -12,6 +12,7 @@ benchmark/suites/*.dart
     │  dart run benchmark/run_release.dart <label>
     ▼
 benchmark/results/YYYY-MM-DDTHH-MM-SS-<label>.md   (per-run markdown)
+benchmark/results/YYYY-MM-DDTHH-MM-SS-<label>.json (summary sidecar)
     │
     ├──► generate_history.dart ──► docs/experiments/history.json
     │                              │
@@ -64,6 +65,64 @@ Rules the parsers enforce:
   `parse_results.dart:51` — its rows are parsed as `| N | wall_med | ...`
   (concurrency number, not library name, in the first cell)
 
+## Structured summary sidecar contract
+
+New release benchmark runs now emit a structured sidecar next to the markdown:
+
+```text
+benchmark/results/YYYY-MM-DDTHH-MM-SS-<label>.md
+benchmark/results/YYYY-MM-DDTHH-MM-SS-<label>.json
+```
+
+This is the current contract:
+
+- The **markdown** file remains the human-readable artifact.
+  It is the narrative report and the legacy compatibility format for older
+  runs that predate sidecars.
+- The **JSON sidecar** is the canonical machine-readable summary for new runs.
+  Generators and dashboards should prefer it when present.
+- The sidecar is intentionally a **summary artifact**, not a raw dump.
+  It should stay compact enough to check in.
+
+Current sidecar fields (`schemaVersion: 3`):
+
+- `kind`: identifies the artifact as a release benchmark run
+- `generatedAt`, `label`, `repeatCount`
+- `environment`: runtime / OS / git provenance
+- `metrics`: flat resqlite median metrics used by `history.json`
+- optional namespaced metrics:
+  - `memoryMetrics`
+  - `sqliteDiagnosticsMetrics`
+  - `streamingColumnMetrics`
+- `repeatAggregates`: compact repeat-run stability summary
+  - `median`
+  - `madPct`
+  - `stability`
+  - `comparisonThresholdPct`
+- `benchmarkSummary`: compact structured benchmark sections used by
+  `devices.json`
+
+Intentionally **not** included in the checked-in summary artifact:
+
+- parsed copies of every markdown section under a `benchmarks` key
+- raw per-repeat sample arrays
+- min/max/range debug stats that are useful for investigation but not
+  needed by dashboards or experiment history
+
+Fallback policy:
+
+- `generate_history.dart` prefers sidecar metrics/environment and falls back
+  to markdown parsing for historical runs with no sidecar
+- `generate_devices.dart` prefers `benchmarkSummary` and falls back to markdown
+  section parsing when the sidecar is missing or predates that field
+
+Practical rule:
+
+- If a change would force machine consumers to scrape markdown again for new
+  runs, that is a regression
+- If a change adds large debug-only payloads to the checked-in sidecar, that is
+  also a regression unless there is a strong reason and a documented schema bump
+
 ## Parser #1 — `generate_history.dart`
 
 **Produces:** `docs/experiments/history.json`
@@ -104,7 +163,8 @@ Rules the parsers enforce:
 
 **Device selection:** reads `benchmark/HARDWARE_RESULTS.md`, which has a
 "## Devices" table mapping device name → canonical result filename. Each
-device's result file is fully parsed into structured `benchmarks` array.
+device prefers the sidecar `benchmarkSummary` when present and only falls
+back to parsing the markdown tables for older runs.
 
 **Extension points:**
 - **Sections skipped** at line 116–120: `Comparison`, `Repeat`,

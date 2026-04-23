@@ -1,0 +1,44 @@
+{
+  "generated": "2026-04-23T00:00:00.000Z",
+  "devices": [
+    {
+      "name": "Fixture Mac",
+      "cpu": "M1",
+      "os": "macOS 26.2",
+      "dart": "3.11",
+      "date": "2026-04-23",
+      "by": "@tester",
+      "environment": {
+        "runtime": "dart-vm",
+        "gitSha": "deadbeef"
+      },
+      "benchmarks": [
+        {
+          "key": "Select → Maps / 1000 rows",
+          "title": "Select → Maps",
+          "subtitle": "1000 rows",
+          "entries": [
+            {
+              "library": "resqlite select()",
+              "values": [
+                1.23,
+                1.5,
+                0.12,
+                0.15
+              ]
+            },
+            {
+              "library": "sqlite3 select()",
+              "values": [
+                2.34,
+                2.8,
+                2.34,
+                2.8
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
