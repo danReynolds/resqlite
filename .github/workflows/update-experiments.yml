@@ -6,8 +6,11 @@ on:
     paths:
       - 'experiments/*.md'
       - 'benchmark/results/*.md'
+      - 'benchmark/results/*.json'
       - 'benchmark/HARDWARE_RESULTS.md'
       - 'benchmark/shared/parse_results.dart'
+      - 'benchmark/shared/release_artifact.dart'
+      - 'benchmark/shared/workload_registry.dart'
       - 'benchmark/generate_history.dart'
       - 'benchmark/generate_devices.dart'
       - 'benchmark/generate_blog.dart'

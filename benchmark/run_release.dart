@@ -18,9 +18,13 @@
 //
 // See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
 import 'dart:io' show Directory, File, Process, exit, stderr;
-import 'dart:math' as math;
 
+import 'dart:convert';
+
+import 'shared/benchmark_environment.dart';
 import 'shared/parse_results.dart';
+import 'shared/release_artifact.dart';
+import 'shared/release_reporting.dart';
 import 'shared/stats.dart' show AggregateStats;
 import 'suites/chat_sim.dart';
 import 'suites/concurrent_reads.dart';
@@ -46,6 +50,9 @@ Future<void> main(List<String> args) async {
   await _ensureDriftCodegenFresh();
   final resultsDir = Directory('benchmark/results');
   final compareFile = _resolveComparisonFile(resultsDir, options.compareToPath);
+  final environment = await collectBenchmarkEnvironment(
+    extra: {'benchmarkMode': 'release', 'includeSlow': options.includeSlow},
+  );
 
   final runMarkdowns = <String>[];
   final runMetrics = <Map<String, double>>[];
@@ -72,16 +79,25 @@ Future<void> main(List<String> args) async {
   }
 
   final representativeMarkdown = runMarkdowns.last;
-  final currentAggregates = _aggregateRunMetrics(runMetrics);
+  final currentAggregates = aggregateRunMetrics(runMetrics);
+  final generatedAt = DateTime.now().toIso8601String();
+  final gitSha = environment['gitSha'] as String?;
+  final gitShaShort = gitSha == null
+      ? '?'
+      : gitSha.substring(0, gitSha.length < 12 ? gitSha.length : 12);
+  final gitLabel =
+      '${environment['gitBranch'] ?? '?'} @ $gitShaShort'
+      '${environment['gitDirty'] == true ? ' (dirty)' : ''}';
 
   final markdown = StringBuffer()
     ..writeln('# resqlite Benchmark Results')
     ..writeln()
-    ..writeln('Generated: ${DateTime.now().toIso8601String()}')
+    ..writeln('Generated: $generatedAt')
     ..writeln()
     ..writeln('Libraries compared:')
     ..writeln(
-        '- **resqlite** — raw FFI + C JSON/binary serialization + Isolate.exit zero-copy')
+      '- **resqlite** — raw FFI + C JSON/binary serialization + Isolate.exit zero-copy',
+    )
     ..writeln('- **sqlite3** — raw FFI, synchronous, per-cell column reads')
     ..writeln('- **sqlite_async** — PowerSync, async connection pool')
     ..writeln()
@@ -89,19 +105,26 @@ Future<void> main(List<String> args) async {
     ..writeln('- Label: `${options.label}`')
     ..writeln('- Repeats: `${options.repeatCount}`')
     ..writeln(
+      '- Runtime: `${environment['runtime'] ?? '?'} / Dart ${environment['dartVersion'] ?? '?'}`',
+    )
+    ..writeln(
+      '- OS: `${environment['os'] ?? '?'} ${environment['osVersion'] ?? ''}`',
+    )
+    ..writeln('- Git: `$gitLabel`')
+    ..writeln(
       '- Comparison baseline: `${compareFile?.path.split('/').last ?? 'none'}`',
     )
     ..writeln()
     ..write(representativeMarkdown);
 
   if (options.repeatCount > 1) {
-    markdown.writeln(_renderRepeatStability(currentAggregates));
+    markdown.writeln(renderRepeatStability(currentAggregates));
   }
 
   if (compareFile != null) {
     final prevContent = compareFile.readAsStringSync();
     final prevName = compareFile.path.split('/').last;
-    final comparison = _generateComparison(
+    final comparison = generateReleaseComparison(
       currentAggregates,
       prevContent,
       prevName,
@@ -109,7 +132,7 @@ Future<void> main(List<String> args) async {
     markdown.writeln(comparison);
     print(comparison);
 
-    final memComparison = _generateMemoryComparison(
+    final memComparison = generateMemoryComparison(
       representativeMarkdown,
       prevContent,
     );
@@ -118,7 +141,7 @@ Future<void> main(List<String> args) async {
       print(memComparison);
     }
 
-    final streamColComparison = _generateStreamingColumnComparison(
+    final streamColComparison = generateStreamingColumnComparison(
       representativeMarkdown,
       prevContent,
     );
@@ -130,18 +153,36 @@ Future<void> main(List<String> args) async {
     markdown.writeln('## Comparison');
     markdown.writeln();
     markdown.writeln(
-        'No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.');
+      'No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.',
+    );
     markdown.writeln();
   }
 
-  final timestamp =
-      DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+  final timestamp = DateTime.now()
+      .toIso8601String()
+      .replaceAll(':', '-')
+      .split('.')
+      .first;
   final safeLabel = _sanitizeResultFilenameLabel(options.label);
   final resultsFile = File('${resultsDir.path}/$timestamp-$safeLabel.md');
+  final jsonFile = File('${resultsDir.path}/$timestamp-$safeLabel.json');
   await resultsFile.writeAsString(markdown.toString());
+  final artifact = buildReleaseRunArtifact(
+    label: options.label,
+    repeatCount: options.repeatCount,
+    markdown: representativeMarkdown,
+    aggregates: currentAggregates,
+    environment: environment,
+    comparisonBaselineFile: compareFile?.path.split('/').last,
+    generatedAt: generatedAt,
+  );
+  await jsonFile.writeAsString(
+    const JsonEncoder.withIndent('  ').convert(artifact),
+  );
 
   print('');
   print('Results saved to: ${resultsFile.path}');
+  print('Structured artifact saved to: ${jsonFile.path}');
 
   if (options.hardwareSummary) {
     _printHardwareSummary(currentAggregates, options.label);
@@ -152,10 +193,7 @@ Future<void> main(List<String> args) async {
   exit(0);
 }
 
-void _printHardwareSummary(
-  Map<String, AggregateStats> metrics,
-  String label,
-) {
+void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
   // Use section-specific prefixes to avoid ambiguity
   // (e.g. 'resqlite select' would match both select() and selectBytes()).
   // The [main] suffix is at the end of the full key, so we need to match
@@ -201,16 +239,19 @@ void _printHardwareSummary(
   print('| $label | [CPU] | [OS] | [Dart] | $date | @[github] |');
   print('');
 
-  void _printTimingRows(
-    String sectionName,
-    List<String> substrings,
-  ) {
-    print('| $label | wall '
-        '| ${substrings.map((s) => _ms(s)).join(' | ')} |');
-    print('| $label | main '
-        '| ${substrings.map((s) => _ms(s, main: true)).join(' | ')} |');
-    print('| $label | worker '
-        '| ${substrings.map(_worker).join(' | ')} |');
+  void _printTimingRows(String sectionName, List<String> substrings) {
+    print(
+      '| $label | wall '
+      '| ${substrings.map((s) => _ms(s)).join(' | ')} |',
+    );
+    print(
+      '| $label | main '
+      '| ${substrings.map((s) => _ms(s, main: true)).join(' | ')} |',
+    );
+    print(
+      '| $label | worker '
+      '| ${substrings.map(_worker).join(' | ')} |',
+    );
   }
 
   print('Select → Maps (ms):');
@@ -244,11 +285,13 @@ void _printHardwareSummary(
   print('');
 
   print('Concurrent Reads (ms):');
-  print('| $label '
-      '| ${_ms("concurrent 1x")} '
-      '| ${_ms("concurrent 2x")} '
-      '| ${_ms("concurrent 4x")} '
-      '| ${_ms("concurrent 8x")} |');
+  print(
+    '| $label '
+    '| ${_ms("concurrent 1x")} '
+    '| ${_ms("concurrent 2x")} '
+    '| ${_ms("concurrent 4x")} '
+    '| ${_ms("concurrent 8x")} |',
+  );
   print('');
 
   print('Transaction (ms):');
@@ -256,9 +299,11 @@ void _printHardwareSummary(
   print('');
 
   print('Stream Reactivity (ms):');
-  print('| $label '
-      '| ${_ms("Invalidation Latency")} '
-      '| ${_ms("Fan-out (10 streams)")} |');
+  print(
+    '| $label '
+    '| ${_ms("Invalidation Latency")} '
+    '| ${_ms("Fan-out (10 streams)")} |',
+  );
 }
 
 Future<String> _runSuiteOnce({required bool includeSlow}) async {
@@ -387,14 +432,18 @@ _RunAllOptions _parseOptions(List<String> args) {
 }
 
 void _printUsageAndExit() {
-  print('Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
-      '[--compare-to=PATH] [--hardware-summary] [--include-slow]');
+  print(
+    'Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
+    '[--compare-to=PATH] [--hardware-summary] [--include-slow]',
+  );
   print('');
   print('  --repeat=N           Run the suite N times (default: 1)');
   print(
-      '  --compare-to=PATH    Compare against a specific baseline results file');
+    '  --compare-to=PATH    Compare against a specific baseline results file',
+  );
   print(
-      '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md');
+    '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md',
+  );
   print('  --include-slow       Also run multi-minute slow workloads');
   print('                       (sync burst, 1GB working set)');
   exit(0);
@@ -415,364 +464,15 @@ File? _resolveComparisonFile(Directory resultsDir, String? explicitPath) {
 File? _findPreviousResults(Directory dir) {
   if (!dir.existsSync()) return null;
 
-  final files = dir
-      .listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('.md') && !f.path.endsWith('.gitkeep'))
-      .toList()
-    ..sort((a, b) => b.path.compareTo(a.path)); // newest first
+  final files =
+      dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.md') && !f.path.endsWith('.gitkeep'))
+          .toList()
+        ..sort((a, b) => b.path.compareTo(a.path)); // newest first
 
   return files.isNotEmpty ? files.first : null;
-}
-
-// extractResqliteMedians() is imported from shared/parse_results.dart.
-
-Map<String, AggregateStats> _aggregateRunMetrics(
-  List<Map<String, double>> runMetrics,
-) {
-  final buckets = <String, List<double>>{};
-  for (final run in runMetrics) {
-    for (final entry in run.entries) {
-      buckets.putIfAbsent(entry.key, () => <double>[]).add(entry.value);
-    }
-  }
-  return {
-    for (final entry in buckets.entries) entry.key: AggregateStats(entry.value),
-  };
-}
-
-String _renderRepeatStability(Map<String, AggregateStats> aggregates) {
-  final buf = StringBuffer();
-  buf.writeln('## Repeat Stability');
-  buf.writeln();
-  buf.writeln(
-      'These rows summarize resqlite wall medians across repeated full-suite runs.');
-  buf.writeln(
-      'Use this section to judge whether small deltas are real or just noise.');
-  buf.writeln();
-  buf.writeln(
-      '| Benchmark | Median (ms) | Min | Max | Range | MAD | Stability |');
-  buf.writeln('|---|---|---|---|---|---|---|');
-
-  final keys = aggregates.keys.toList()..sort();
-  for (final key in keys) {
-    final stats = aggregates[key]!;
-    final shortKey = key.length > 70 ? '${key.substring(0, 67)}...' : key;
-    buf.writeln(
-      '| $shortKey '
-      '| ${stats.median.toStringAsFixed(2)} '
-      '| ${stats.min.toStringAsFixed(2)} '
-      '| ${stats.max.toStringAsFixed(2)} '
-      '| ${stats.rangePct.toStringAsFixed(1)}% '
-      '| ${stats.madPct.toStringAsFixed(1)}% '
-      '| ${stats.stability} |',
-    );
-  }
-  buf.writeln();
-  return buf.toString();
-}
-
-/// Generate a comparison summary between current and previous results.
-String _generateComparison(
-  Map<String, AggregateStats> current,
-  String previousContent,
-  String previousFileName,
-) {
-  final previous = extractResqliteMedians(previousContent);
-
-  if (current.isEmpty || previous.isEmpty) {
-    return '## Comparison\n\nCould not parse results for comparison.\n';
-  }
-
-  final buf = StringBuffer();
-  buf.writeln('## Comparison vs Previous Run');
-  buf.writeln();
-  buf.writeln('Previous: `$previousFileName`');
-  buf.writeln();
-  buf.writeln(
-      '| Benchmark | Previous (ms) | Current med (ms) | Delta | Noise threshold | Stability | Status |');
-  buf.writeln('|---|---|---|---|---|---|---|');
-
-  var wins = 0;
-  var regressions = 0;
-  var neutral = 0;
-
-  final allKeys = current.keys.where(previous.containsKey).toList()..sort();
-
-  for (final key in allKeys) {
-    final prev = previous[key]!;
-    final stats = current[key]!;
-    final curr = stats.median;
-    final delta = curr - prev;
-    final pct = prev > 0 ? (delta / prev * 100) : 0.0;
-    final thresholdPct = stats.comparisonThresholdPct;
-    final thresholdMs = math.max(
-      AggregateStats.minimumComparisonThresholdMs,
-      math.max(prev, curr) * (thresholdPct / 100),
-    );
-
-    // For most metrics lower is better (ms), but for throughput metrics
-    // (qps) higher is better — invert the comparison.
-    final higherIsBetter = key.contains('qps');
-    final improvementDelta = higherIsBetter ? -delta : delta;
-
-    String status;
-    if (improvementDelta < -thresholdMs) {
-      status = '🟢 Win (${pct.toStringAsFixed(0)}%)';
-      wins++;
-    } else if (improvementDelta > thresholdMs) {
-      status =
-          '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
-      regressions++;
-    } else {
-      status = stats.runs.length > 1 ? '⚪ Within noise' : '⚪ Neutral';
-      neutral++;
-    }
-
-    final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;
-    buf.writeln(
-      '| $shortKey '
-      '| ${prev.toStringAsFixed(2)} '
-      '| ${curr.toStringAsFixed(2)} '
-      '| ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} '
-      '| ±${thresholdPct.toStringAsFixed(0)}% / ±${thresholdMs.toStringAsFixed(2)} ms '
-      '| ${stats.stability} '
-      '| $status |',
-    );
-  }
-
-  buf.writeln();
-  buf.writeln(
-      '**Summary:** $wins wins, $regressions regressions, $neutral neutral');
-  buf.writeln();
-  buf.writeln(
-    'Comparison threshold uses `max(10%, 3 × current MAD%)`, '
-    'plus an absolute floor of `±0.02 ms`.',
-  );
-  buf.writeln(
-    'That keeps stable cases sensitive while treating noisy and ultra-fast cases '
-    'more conservatively.',
-  );
-  buf.writeln();
-
-  if (regressions > 0) {
-    buf.writeln(
-        '⚠️ **Regressions detected beyond current-run noise.** Review the flagged benchmarks above.');
-  } else if (wins > 0) {
-    buf.writeln(
-        '✅ **No regressions beyond noise.** $wins benchmarks improved.');
-  } else {
-    buf.writeln('✅ **No changes beyond noise.**');
-  }
-  buf.writeln();
-
-  return buf.toString();
-}
-
-/// Render a memory comparison table. Returns empty if neither the current
-/// nor the previous markdown contains a `## Memory` section.
-///
-/// Threshold: per-benchmark MDE (minimum detectable effect) from the
-/// current run, with a minimum floor of ±0.5 MB. When the current MDE
-/// is absent or unreasonably small, the floor applies. This is the
-/// payoff of Phase 1's bootstrap CI — changes smaller than the actual
-/// per-benchmark noise floor no longer trigger false regressions.
-String _generateMemoryComparison(
-  String currentMarkdown,
-  String previousContent,
-) {
-  final current = extractMemoryMedians(currentMarkdown);
-  final previous = extractMemoryMedians(previousContent);
-
-  if (current.isEmpty && previous.isEmpty) return '';
-
-  final buf = StringBuffer();
-  buf.writeln('## Memory Comparison vs Previous Run');
-  buf.writeln();
-
-  if (current.isEmpty) {
-    buf.writeln('Current run has no `## Memory` section.');
-    buf.writeln();
-    return buf.toString();
-  }
-  if (previous.isEmpty) {
-    buf.writeln(
-      'Previous run has no `## Memory` section — baseline unavailable. '
-      'Current values recorded for next-run comparison.',
-    );
-    buf.writeln();
-    return buf.toString();
-  }
-
-  buf.writeln(
-    '| Benchmark | Prev (MB) | Curr (MB) | Delta | MDE | Status |',
-  );
-  buf.writeln('|---|---|---|---|---|---|');
-
-  const minThresholdMB = 0.5;
-
-  var wins = 0;
-  var regressions = 0;
-  var neutral = 0;
-
-  final keys = current.keys.where(previous.containsKey).toList()..sort();
-  for (final key in keys) {
-    final prev = previous[key]!.rssDeltaMedMB;
-    final currM = current[key]!;
-    final curr = currM.rssDeltaMedMB;
-    final delta = curr - prev;
-    final threshold = math.max(minThresholdMB, currM.mdeMB);
-
-    String status;
-    if (delta < -threshold) {
-      status = '🟢 Win (${delta.toStringAsFixed(2)} MB)';
-      wins++;
-    } else if (delta > threshold) {
-      status = '🔴 Regression (+${delta.toStringAsFixed(2)} MB)';
-      regressions++;
-    } else {
-      status = '⚪ Within MDE';
-      neutral++;
-    }
-
-    final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;
-    buf.writeln(
-      '| $shortKey '
-      '| ${prev.toStringAsFixed(2)} '
-      '| ${curr.toStringAsFixed(2)} '
-      '| ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} MB '
-      '| ±${threshold.toStringAsFixed(2)} MB '
-      '| $status |',
-    );
-  }
-
-  buf.writeln();
-  buf.writeln(
-    '**Memory summary:** $wins wins, $regressions regressions, $neutral neutral',
-  );
-  buf.writeln();
-  buf.writeln(
-    'Threshold uses per-benchmark MDE (95% bootstrap CI half-width on '
-    'the median), with a `±0.5 MB` floor. RSS deltas are still a **lower '
-    'bound** on real allocation change — the VM retains heap pages after '
-    'GC, so sub-MDE wins may be real but invisible here.',
-  );
-  buf.writeln();
-
-  return buf.toString();
-}
-
-/// Render a streaming column-granularity comparison table. Returns empty
-/// if neither run has the section.
-///
-/// Uses absolute re-emit count delta rather than a percentage because
-/// 0 → 5000 is not meaningfully expressed as a ratio. Threshold: ±100
-/// re-emits (catches any material change in invalidation granularity).
-String _generateStreamingColumnComparison(
-  String currentMarkdown,
-  String previousContent,
-) {
-  final current = extractStreamingColumnMedians(currentMarkdown);
-  final previous = extractStreamingColumnMedians(previousContent);
-
-  if (current.isEmpty && previous.isEmpty) return '';
-
-  final buf = StringBuffer();
-  buf.writeln('## Streaming (Column Granularity) Comparison');
-  buf.writeln();
-
-  if (current.isEmpty) {
-    buf.writeln(
-        'Current run has no `## Streaming (Column Granularity)` section.');
-    buf.writeln();
-    return buf.toString();
-  }
-  if (previous.isEmpty) {
-    buf.writeln(
-      'Previous run has no `## Streaming (Column Granularity)` section — '
-      'baseline unavailable. Current values recorded for next-run '
-      'comparison.',
-    );
-    buf.writeln();
-    return buf.toString();
-  }
-
-  buf.writeln(
-    '| Benchmark | Prev re-emits | Curr re-emits | Delta | Threshold | Status |',
-  );
-  buf.writeln('|---|---|---|---|---|---|');
-
-  const reemitThreshold = 100;
-
-  var wins = 0;
-  var regressions = 0;
-  var neutral = 0;
-
-  final keys = current.keys.where(previous.containsKey).toList()..sort();
-  for (final key in keys) {
-    final prev = previous[key]!.reemits;
-    final curr = current[key]!.reemits;
-    final delta = curr - prev;
-
-    // The direction of "win" depends on the workload:
-    //
-    //   * Disjoint subsection: fewer re-emits = tighter column tracking =
-    //     win; more re-emits = tracking regression.
-    //   * Overlapping subsection (control): writes should ALWAYS
-    //     invalidate. Fewer re-emits = invalidation is being silently
-    //     elided = correctness regression, NOT a win. The only good move
-    //     on the overlapping path is no material change.
-    //
-    // Subsection is encoded in the metric key as the middle segment
-    // (e.g. "Streaming (Column Granularity) / Disjoint column writes
-    // (SET c = ?) / resqlite"). Classify from the key.
-    final isOverlapping = key.toLowerCase().contains('overlapping');
-    String status;
-    if (delta.abs() <= reemitThreshold) {
-      status = '⚪ Within noise';
-      neutral++;
-    } else if (isOverlapping) {
-      // Any material change on the control workload is a regression.
-      status = delta < 0
-          ? '🔴 Invalidation elided ($delta) — writes not firing'
-          : '🔴 More re-emits (+$delta)';
-      regressions++;
-    } else {
-      // Disjoint: fewer is better, more is a tracking regression.
-      if (delta < 0) {
-        status = '🟢 Fewer re-emits ($delta)';
-        wins++;
-      } else {
-        status = '🔴 More re-emits (+$delta)';
-        regressions++;
-      }
-    }
-
-    final shortKey = key.length > 60 ? '${key.substring(0, 57)}...' : key;
-    buf.writeln(
-      '| $shortKey '
-      '| $prev '
-      '| $curr '
-      '| ${delta >= 0 ? '+' : ''}$delta '
-      '| ±$reemitThreshold '
-      '| $status |',
-    );
-  }
-
-  buf.writeln();
-  buf.writeln(
-    '**Granularity summary:** $wins fewer-re-emit, $regressions more-re-emit, $neutral neutral',
-  );
-  buf.writeln();
-  buf.writeln(
-    'For **disjoint** workloads, fewer re-emits means tighter dependency '
-    'tracking — a library with column-level tracking approaches zero. '
-    'For **overlapping** workloads, the count should stay stable across '
-    'runs; a drop there means writes are being silently elided.',
-  );
-  buf.writeln();
-
-  return buf.toString();
 }
 
 /// Ensures the drift-generated `*.g.dart` files under `benchmark/drift/`
@@ -830,11 +530,10 @@ Future<void> _ensureDriftCodegenFresh() async {
 }
 
 String _sanitizeResultFilenameLabel(String label) {
-  final sanitized =
-      label
-          .replaceAll('"', 'in')
-          .replaceAll(RegExp(r'[<>|*?\r\n:]'), '')
-          .replaceAll(RegExp(r'[\\/]'), '-')
-          .trim();
+  final sanitized = label
+      .replaceAll('"', 'in')
+      .replaceAll(RegExp(r'[<>|*?\r\n:]'), '')
+      .replaceAll(RegExp(r'[\\/]'), '-')
+      .trim();
   return sanitized.isEmpty ? 'run' : sanitized;
 }

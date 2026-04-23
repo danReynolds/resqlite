@@ -1170,6 +1170,37 @@ function runLabel(run) {
   return date ? `${date} ${label}` : label;
 }
 
+function shortSha(sha) {
+  if (!sha) return '';
+  return sha.slice(0, 12);
+}
+
+function formatEnvironmentSummary(env) {
+  if (!env) return '';
+  const parts = [];
+  if (env.runtime) parts.push(env.runtime);
+  if (env.gitBranch || env.gitSha) {
+    let git = env.gitBranch || 'git';
+    if (env.gitSha) git += ` @ ${shortSha(env.gitSha)}`;
+    if (env.gitDirty) git += ' (dirty)';
+    parts.push(git);
+  }
+  return parts.join(' · ');
+}
+
+function formatDeviceMeta(dev) {
+  const parts = [
+    dev.cpu,
+    dev.os,
+    dev.dart ? `Dart ${dev.dart}` : null,
+    dev.date,
+    dev.by,
+  ].filter(Boolean);
+  const env = formatEnvironmentSummary(dev.environment);
+  if (env) parts.push(env);
+  return parts.join(' · ');
+}
+
 // "Select → Maps / 100 rows / resqlite select() [main]" → {section, subtitle, library, main}
 function parseMetricKey(key) {
   const main = key.endsWith(' [main]');
@@ -1189,8 +1220,7 @@ function parseMetricKey(key) {
 
 function renderView(dev, view) {
   document.getElementById('subtitleText').textContent = view.subtitle;
-  document.getElementById('deviceMeta').textContent =
-    `${dev.cpu} · ${dev.os} · Dart ${dev.dart} · ${dev.date} · ${dev.by}`;
+  document.getElementById('deviceMeta').textContent = formatDeviceMeta(dev);
 
   // Destroy old charts.
   allCharts.forEach(c => c.destroy());

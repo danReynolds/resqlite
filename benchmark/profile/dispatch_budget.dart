@@ -33,6 +33,7 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 
 import 'profile_sample.dart';
+import 'profile_reporting.dart';
 import 'profiled_database.dart';
 import 'workloads.dart';
 
@@ -105,34 +106,31 @@ Future<void> main() async {
       const JsonEncoder.withIndent('  ').convert({
         'generated_at': DateTime.now().toIso8601String(),
         'iterations': measureIterations,
-        'noop_floors': {
-          'reader_us': readerFloor,
-          'writer_us': writerFloor,
-        },
+        'noop_floors': {'reader_us': readerFloor, 'writer_us': writerFloor},
         'workloads': {
           'noop': {
-            'samples': zSamples.map((s) => s.toJson()).toList(),
-            'summary': summarizeSamples(zSamples),
+            ...profileSamplesArtifact(
+              zSamples,
+              readerFloor: null,
+              writerFloor: null,
+            ),
           },
           'single_insert': {
-            'samples': aSamples.map((s) => s.toJson()).toList(),
-            'summary': summarizeSamples(
+            ...profileSamplesArtifact(
               aSamples,
               readerFloor: readerFloor,
               writerFloor: writerFloor,
             ),
           },
           'point_query': {
-            'samples': bSamples.map((s) => s.toJson()).toList(),
-            'summary': summarizeSamples(
+            ...profileSamplesArtifact(
               bSamples,
               readerFloor: readerFloor,
               writerFloor: writerFloor,
             ),
           },
           'merge_rounds': {
-            'samples': cSamples.map((s) => s.toJson()).toList(),
-            'summary': summarizeSamples(
+            ...profileSamplesArtifact(
               cSamples,
               readerFloor: readerFloor,
               writerFloor: writerFloor,
@@ -159,16 +157,7 @@ Future<void> main() async {
 }
 
 void _reportWorkload(String name, List<ProfileSample> samples) {
-  final summary = summarizeSamples(samples);
-  print('${samples.length} samples collected.');
-  for (final entry in summary.entries) {
-    final s = entry.value! as Map<String, Object?>;
-    print('  ${entry.key.padRight(14)} '
-        'count=${s['count']} '
-        'min=${s['min_us']}μs '
-        'median=${s['median_us']}μs '
-        'p90=${s['p90_us']}μs '
-        'p99=${s['p99_us']}μs '
-        'max=${s['max_us']}μs');
-  }
+  print(
+    formatProfileSamplesReport(samples, readerFloor: null, writerFloor: null),
+  );
 }

@@ -108,5 +108,6 @@ jobs:
           name: benchmark-results
           path: |
             benchmark/results/*.md
+            benchmark/results/*.json
             /tmp/h2h.json
           retention-days: 90

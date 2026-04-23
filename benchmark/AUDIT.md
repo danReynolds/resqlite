@@ -79,23 +79,15 @@ Rules the parsers enforce:
 - **Experiments**: parses `experiments/README.md` table rows + reads each
   individual `experiments/NNN-*.md` for date, commit, sections (Problem,
   Hypothesis, What We Built, Results, Decision)
-- **Tracked**: curated list of 9 metric keys for default dashboard display,
-  driven by the hardcoded `_trackedPatterns` array at line 99–109
+- **Tracked**: curated metric registry for default dashboard display,
+  including short labels and chart grouping, resolved via
+  `benchmark/shared/workload_registry.dart`
 
 **Extension points:**
-- `_trackedPatterns` — add a string fragment to track a new metric on the
-  experiments page. Currently:
-  ```
-  '1000 rows / resqlite select()',
-  '1000 rows / resqlite selectBytes()',
-  'Wide (20 cols',
-  'Single Inserts',
-  'Batch Insert (1000 rows)',
-  'Parameterized',
-  'concurrent 4x',
-  'Invalidation Latency',
-  'resqlite qps',
-  ```
+- `curatedMetricDefinitions` in
+  `benchmark/shared/workload_registry.dart` — add a new tracked metric,
+  short display label, and destination chart group for the experiments
+  page
 - `_extractSection()` — whitelist of accepted experiment-doc headings.
   Already covers 10+ variants (Problem, Hypothesis, What We Built, etc.).
 - The `metrics` map extraction in `extractResqliteMedians()` is already
@@ -174,12 +166,14 @@ speedup ratios. New callouts need edits here too.
 timeline: line charts of tracked metrics over time (x-axis = experiment
 number/date, y-axis = ms), plus filterable experiment list.
 
-**Tab structure:** currently has tabs for Reads, Writes, Streaming,
-Transactions, Throughput (based on the `_trackedPatterns` categorization).
+**Tab structure:** Reads, Writes, Transactions, Concurrency, Scenarios,
+Reactive Micros, Throughput. The chart-group assignments now come from
+`history.json` (`chartGroups`), which is generated from
+`benchmark/shared/workload_registry.dart`.
 
-**Changing tracked metrics:** edit `_trackedPatterns` in
-`generate_history.dart`. The experiments dashboard derives tabs from metric
-keywords (specific substring matches in the HTML).
+**Changing tracked metrics:** edit `curatedMetricDefinitions` in
+`benchmark/shared/workload_registry.dart`, then regenerate
+`docs/experiments/history.json`.
 
 ## What changes for planned Phase 1–3 workloads
 
@@ -246,8 +240,8 @@ in `run_release.dart` to opt in.
 Line numbers are approximate — files evolve. Use `grep` to find them
 fresh if the anchors have drifted:
 
-- `_trackedPatterns`: `benchmark/generate_history.dart` — search for
-  `const _trackedPatterns = [`
+- Curated metric registry: `benchmark/shared/workload_registry.dart`
+  — search for `const curatedMetricDefinitions = [`
 - `_extractSection` heading variants: `benchmark/generate_history.dart`
   — search for `String? _extractSection`
 - Skip-sections list: `benchmark/generate_devices.dart` — search for
