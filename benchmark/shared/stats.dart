@@ -8,6 +8,8 @@ import 'dart:math' as math;
 final class AggregateStats {
   static const double minimumComparisonThresholdPct = 10.0;
   static const double minimumComparisonThresholdMs = 0.02;
+  static const double defaultConfidence = 0.95;
+  static const int defaultBootstrapResamples = 2000;
 
   AggregateStats(List<double> values)
       : runs = List<double>.from(values)..sort();
@@ -39,6 +41,46 @@ final class AggregateStats {
 
   double get comparisonThresholdPct =>
       math.max(minimumComparisonThresholdPct, madPct * 3.0);
+
+  ({double low, double high}) medianCI({
+    double confidence = defaultConfidence,
+    int resamples = defaultBootstrapResamples,
+    int? seed,
+  }) =>
+      bootstrapMedianCI(
+        runs,
+        confidence: confidence,
+        resamples: resamples,
+        seed: seed,
+      );
+
+  double ciMdePct({
+    double confidence = defaultConfidence,
+    int resamples = defaultBootstrapResamples,
+    int? seed,
+  }) =>
+      minimumDetectableEffectPct(
+        runs,
+        confidence: confidence,
+        resamples: resamples,
+        seed: seed,
+      );
+
+  double get madMdePct => madBasedDetectableEffectPct(runs);
+
+  double decisionThresholdPct({
+    double confidence = defaultConfidence,
+    int resamples = defaultBootstrapResamples,
+    int? seed,
+  }) =>
+      math.max(
+        comparisonThresholdPct,
+        ciMdePct(
+          confidence: confidence,
+          resamples: resamples,
+          seed: seed,
+        ),
+      );
 }
 
 /// Median of a pre-sorted list. Returns 0 for an empty list.

@@ -53,10 +53,23 @@ isolate offloading is in play.
   preemption) actually hide — exp 083 showed passive WAL checkpoints
   drove merge-round p99 by 57% while p50/p90 were unchanged.
 - **Noise-aware comparison**: `run_release.dart --compare-to=<baseline>` uses
-  threshold `max(10%, 3 × current MAD%)` with a `±0.02 ms` absolute floor.
+  threshold `max(10%, 3 × current MAD%, current MDE_ci)` with a `±0.02 ms`
+  absolute floor. The comparison is intentionally anchored on current-run
+  uncertainty because historical markdown baselines only guarantee a published
+  median; if both sides have structured repeat artifacts in the future, this can
+  tighten to a two-sided uncertainty check.
   - Stable benchmarks: MAD < 5% → 10% threshold
   - Moderate: 5% ≤ MAD < 15% → 3×MAD threshold
   - Noisy: MAD ≥ 15% → marked noisy; deltas treated conservatively
+- **Release repeat context**: repeat summaries now print a 95% bootstrap CI
+  around the repeated-run median plus `MDE_ci` (CI half-width as a % of the
+  median), so a row can be judged by both its MAD-based stability and its
+  bootstrap uncertainty.
+- **Adaptive microbenchmark sampling**: ultra-fast microbenchmarks may choose
+  per-sample work after warmup so each sample lands in a useful timing window.
+  Today this is applied to `Point Query Throughput`, which keeps 15 samples but
+  sizes each sample's query batch count to target about 1 second of total
+  measurement per library.
 - **"Ultra-fast" floor**: benchmarks under 0.1 ms wall have their change
   threshold absolute-floored at 0.02 ms to prevent noise-induced false
   positives.

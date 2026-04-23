@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
+import 'dart:math' as math;
 
 import '../drift/micro_items_db.dart';
 import '../shared/peer.dart';
@@ -17,12 +18,19 @@ Future<String> runPointQueryBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Point Query Throughput');
   markdown.writeln('');
+  final planSummary = summarizeAdaptivePointQueryPlan();
   markdown.writeln(
     'Single-row lookup by primary key in a hot loop. Measures the per-query '
-    'dispatch overhead. Each iteration runs $_queryCount sequential queries '
-    'over $_iterations iterations per library. 95% CI and MDE values derive '
-    'from per-iteration QPS samples via percentile bootstrap (deterministic, '
-    'seed=$_bootstrapSeed).',
+    'dispatch overhead. Each sample runs the same adaptive number of '
+    '$_queryCount-query batches, chosen after warmup so that '
+    '$kPointQuerySampleCount samples target about '
+    '${_pointQueryMeasurementTime.inMilliseconds} ms of total measurement per '
+    'library after warmup. 95% CI and MDE values derive from per-sample QPS '
+    'via percentile bootstrap (deterministic, seed=$_bootstrapSeed).',
+  );
+  markdown.writeln('');
+  markdown.writeln(
+    'Adaptive schedule: `$planSummary` (batch count chosen per library after warmup).',
   );
   markdown.writeln('');
 
@@ -98,9 +106,50 @@ Future<String> runPointQueryBenchmark() async {
 // ---------------------------------------------------------------------------
 
 const _queryCount = 500;
-const _warmupIterations = 50;
-const _iterations = 100;
+const _warmupEstimateSamples = 3;
 const _bootstrapSeed = 0xC10FF1E;
+const kPointQuerySampleCount = 15;
+const Duration _pointQueryWarmupTime = Duration(milliseconds: 500);
+const Duration _pointQueryMeasurementTime = Duration(milliseconds: 1000);
+
+final class AdaptiveMeasurementPlan {
+  const AdaptiveMeasurementPlan({
+    required this.batchesPerSample,
+    required this.sampleCount,
+  });
+
+  final int batchesPerSample;
+  final int sampleCount;
+}
+
+AdaptiveMeasurementPlan planAdaptivePointQueryMeasurement({
+  required double estimatedBatchUs,
+  int sampleCount = kPointQuerySampleCount,
+  Duration measurementTime = _pointQueryMeasurementTime,
+}) {
+  final perSampleTargetUs = measurementTime.inMicroseconds / sampleCount;
+  final rawBatchesPerSample = estimatedBatchUs <= 0
+      ? 1.0
+      : perSampleTargetUs / estimatedBatchUs;
+  final batchesPerSample = math.max(1, rawBatchesPerSample.round());
+  return AdaptiveMeasurementPlan(
+    batchesPerSample: batchesPerSample,
+    sampleCount: sampleCount,
+  );
+}
+
+String summarizeAdaptivePointQueryPlan({
+  int sampleCount = kPointQuerySampleCount,
+  Duration measurementTime = _pointQueryMeasurementTime,
+}) =>
+    '$sampleCount samples, target ${measurementTime.inMilliseconds} ms total';
+
+final class _MeasurementSample {
+  const _MeasurementSample({required this.queryCount, required this.elapsedUs});
+
+  final int queryCount;
+  final int elapsedUs;
+}
 
 class _QpsResult {
   _QpsResult({
@@ -120,14 +169,15 @@ class _QpsResult {
   final double mdeMadPct;
 }
 
-_QpsResult _summarize(List<int> iterationTimingsUs) {
+_QpsResult _summarize(List<_MeasurementSample> samples) {
   // Convert to per-iteration QPS samples, then feed through the bootstrap
   // and MDE helpers. Operating on QPS directly (rather than microseconds)
   // matches how the metric is reported and how the comparison threshold
   // is applied downstream in run_release.
   final qpsSamples = [
-    for (final us in iterationTimingsUs)
-      if (us > 0) _queryCount * 1000000 / us,
+    for (final sample in samples)
+      if (sample.elapsedUs > 0)
+        sample.queryCount * 1000000 / sample.elapsedUs,
   ];
   if (qpsSamples.isEmpty) {
     return _QpsResult(
@@ -161,19 +211,49 @@ _QpsResult _summarize(List<int> iterationTimingsUs) {
 /// shape of result.
 Future<_QpsResult> _measure(BenchmarkPeer peer) async {
   const sql = 'SELECT * FROM items WHERE id = ?';
-  for (var i = 0; i < _warmupIterations * 10; i++) {
-    await peer.select(sql, [i % 1000 + 1]);
-  }
-  final timings = <int>[];
-  for (var iter = 0; iter < _iterations; iter++) {
+  var nextId = 1;
+
+  Future<int> runBatches(int batchCount) async {
     final sw = Stopwatch()..start();
-    for (var i = 0; i < _queryCount; i++) {
-      await peer.select(sql, [i % 1000 + 1]);
+    for (var batch = 0; batch < batchCount; batch++) {
+      for (var i = 0; i < _queryCount; i++) {
+        await peer.select(sql, [nextId]);
+        nextId++;
+        if (nextId > 1000) nextId = 1;
+      }
     }
     sw.stop();
-    timings.add(sw.elapsedMicroseconds);
+    return sw.elapsedMicroseconds;
   }
-  return _summarize(timings);
+
+  final warmup = Stopwatch()..start();
+  var warmupBatches = 1;
+  while (warmup.elapsed < _pointQueryWarmupTime) {
+    await runBatches(warmupBatches);
+    warmupBatches *= 2;
+  }
+
+  final estimateSamples = <double>[];
+  for (var i = 0; i < _warmupEstimateSamples; i++) {
+    final elapsedUs = await runBatches(1);
+    estimateSamples.add(elapsedUs.toDouble());
+  }
+  final estimatedBatchUs = AggregateStats.from(estimateSamples).median;
+  final plan = planAdaptivePointQueryMeasurement(
+    estimatedBatchUs: estimatedBatchUs,
+  );
+
+  final samples = <_MeasurementSample>[];
+  for (var sample = 0; sample < plan.sampleCount; sample++) {
+    final elapsedUs = await runBatches(plan.batchesPerSample);
+    samples.add(
+      _MeasurementSample(
+        queryCount: plan.batchesPerSample * _queryCount,
+        elapsedUs: elapsedUs,
+      ),
+    );
+  }
+  return _summarize(samples);
 }
 
 // Allow running standalone.

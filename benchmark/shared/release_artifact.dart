@@ -110,7 +110,7 @@ List<Map<String, Object?>>? artifactBenchmarks(Map<String, Object?> artifact) {
           'entries': entries,
         });
       }
-      return sections;
+      if (sections.isNotEmpty) return sections;
     }
   }
 
