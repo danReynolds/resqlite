@@ -116,6 +116,17 @@ Fallback policy:
 - `generate_devices.dart` prefers `benchmarkSummary` and falls back to markdown
   section parsing when the sidecar is missing or predates that field
 
+Schema evolution policy:
+
+- Additive fields are preferred.
+- Bumping `schemaVersion` is required when the meaning of an existing field
+  changes or when consumers must branch on the new shape.
+- Backward compatibility we intentionally preserve today:
+  - legacy sidecars with embedded `benchmarks`
+  - slimmed sidecars with no `benchmarkSummary`, via markdown fallback
+- New code should avoid making historical checked-in sidecars unreadable unless
+  there is a strong migration plan and fixture coverage for it.
+
 Practical rule:
 
 - If a change would force machine consumers to scrape markdown again for new
