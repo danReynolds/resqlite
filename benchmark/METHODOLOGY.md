@@ -62,6 +62,11 @@ isolate offloading is in play.
   around the repeated-run median plus `MDE_ci` (CI half-width as a % of the
   median), so a row can be judged by both its MAD-based stability and its
   bootstrap uncertainty.
+- **Adaptive microbenchmark sampling**: ultra-fast microbenchmarks may choose
+  per-sample work after warmup so each sample lands in a useful timing window.
+  Today this is applied to `Point Query Throughput`, which keeps 15 samples but
+  sizes each sample's query batch count to target about 1 second of total
+  measurement per library.
 - **"Ultra-fast" floor**: benchmarks under 0.1 ms wall have their change
   threshold absolute-floored at 0.02 ms to prevent noise-induced false
   positives.
