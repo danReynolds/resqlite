@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'parse_results.dart';
 import 'stats.dart';
 
+const _releaseBootstrapSeed = 0x51A6E11;
+
 Map<String, AggregateStats> aggregateRunMetrics(
   List<Map<String, double>> runMetrics,
 ) {
@@ -29,19 +31,21 @@ String renderRepeatStability(Map<String, AggregateStats> aggregates) {
   );
   buf.writeln();
   buf.writeln(
-    '| Benchmark | Median (ms) | Min | Max | Range | MAD | Stability |',
+    '| Benchmark | Median (ms) | 95% CI (ms) | MDE_ci | Range | MAD | Stability |',
   );
   buf.writeln('|---|---|---|---|---|---|---|');
 
   final keys = aggregates.keys.toList()..sort();
   for (final key in keys) {
     final stats = aggregates[key]!;
+    final ci = stats.medianCI(seed: _releaseBootstrapSeed);
+    final mdeCiPct = stats.ciMdePct(seed: _releaseBootstrapSeed);
     final shortKey = key.length > 70 ? '${key.substring(0, 67)}...' : key;
     buf.writeln(
       '| $shortKey '
       '| ${stats.median.toStringAsFixed(2)} '
-      '| ${stats.min.toStringAsFixed(2)} '
-      '| ${stats.max.toStringAsFixed(2)} '
+      '| ${ci.low.toStringAsFixed(2)}..${ci.high.toStringAsFixed(2)} '
+      '| ${mdeCiPct.toStringAsFixed(1)}% '
       '| ${stats.rangePct.toStringAsFixed(1)}% '
       '| ${stats.madPct.toStringAsFixed(1)}% '
       '| ${stats.stability} |',
@@ -68,9 +72,9 @@ String generateReleaseComparison(
   buf.writeln('Previous: `$previousFileName`');
   buf.writeln();
   buf.writeln(
-    '| Benchmark | Previous (ms) | Current med (ms) | Delta | Noise threshold | Stability | Status |',
+    '| Benchmark | Previous (ms) | Current med (ms) | Delta | Decision threshold | MDE_ci | Stability | Status |',
   );
-  buf.writeln('|---|---|---|---|---|---|---|');
+  buf.writeln('|---|---|---|---|---|---|---|---|');
 
   var wins = 0;
   var regressions = 0;
@@ -84,7 +88,8 @@ String generateReleaseComparison(
     final curr = stats.median;
     final delta = curr - prev;
     final pct = prev > 0 ? (delta / prev * 100) : 0.0;
-    final thresholdPct = stats.comparisonThresholdPct;
+    final mdeCiPct = stats.ciMdePct(seed: _releaseBootstrapSeed);
+    final thresholdPct = stats.decisionThresholdPct(seed: _releaseBootstrapSeed);
     final thresholdMs = math.max(
       AggregateStats.minimumComparisonThresholdMs,
       math.max(prev, curr) * (thresholdPct / 100),
@@ -113,6 +118,7 @@ String generateReleaseComparison(
       '| ${curr.toStringAsFixed(2)} '
       '| ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} '
       '| ±${thresholdPct.toStringAsFixed(0)}% / ±${thresholdMs.toStringAsFixed(2)} ms '
+      '| ${mdeCiPct.toStringAsFixed(1)}% '
       '| ${stats.stability} '
       '| $status |',
     );
@@ -124,10 +130,11 @@ String generateReleaseComparison(
   );
   buf.writeln();
   buf.writeln(
-    'Comparison threshold uses `max(10%, 3 × current MAD%)`, '
+    'Decision threshold uses `max(10%, 3 × current MAD%, current MDE_ci)`, '
     'plus an absolute floor of `±0.02 ms`.',
   );
   buf.writeln(
+    'MDE_ci is the 95% bootstrap-CI half-width around the repeated-run median. '
     'That keeps stable cases sensitive while treating noisy and ultra-fast cases '
     'more conservatively.',
   );

@@ -395,7 +395,7 @@ final class _RunAllOptions {
 
 _RunAllOptions _parseOptions(List<String> args) {
   var label = 'unlabeled';
-  var repeatCount = 1;
+  var repeatCount = 5;
   String? compareToPath;
   var hardwareSummary = false;
   var includeSlow = false;
@@ -437,7 +437,7 @@ void _printUsageAndExit() {
     '[--compare-to=PATH] [--hardware-summary] [--include-slow]',
   );
   print('');
-  print('  --repeat=N           Run the suite N times (default: 1)');
+  print('  --repeat=N           Run the suite N times (default: 5)');
   print(
     '  --compare-to=PATH    Compare against a specific baseline results file',
   );
