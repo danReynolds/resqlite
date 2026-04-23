@@ -39,12 +39,7 @@ void main() {
       final aggregate = repeatAggregates.values.single as Map<String, Object?>;
       expect(
         aggregate.keys,
-        equals({
-          'median',
-          'madPct',
-          'stability',
-          'comparisonThresholdPct',
-        }),
+        equals({'median', 'madPct', 'stability', 'comparisonThresholdPct'}),
       );
 
       final sections = artifactBenchmarks(artifact);
@@ -62,9 +57,9 @@ void main() {
       addTearDown(() => tempDir.delete(recursive: true));
 
       final resultsDir = Directory('${tempDir.path}/results')..createSync();
-        final markdownFile = File(
-          '${resultsDir.path}/2026-04-23T11-08-40-fixture.md',
-        )..writeAsStringSync('# summary only\n');
+      final markdownFile = File(
+        '${resultsDir.path}/2026-04-23T11-08-40-fixture.md',
+      )..writeAsStringSync('# summary only\n');
 
       final sidecar = buildReleaseRunArtifact(
         label: 'fixture',
@@ -74,9 +69,9 @@ void main() {
         environment: const {'runtime': 'dart-vm'},
         generatedAt: '2026-04-23T00:00:00.000Z',
       );
-      File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert(sidecar),
-      );
+      File(
+        markdownFile.path.replaceFirst('.md', '.json'),
+      ).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(sidecar));
 
       final output = generate_devices.buildDevicesData(
         hardwareResultsMarkdown: fixtureHardwareResultsMarkdown(
@@ -130,8 +125,7 @@ void main() {
           generatedAt: '2026-04-23T00:00:00.000Z',
         );
 
-        final devices =
-            output['devices'] as List<Map<String, Object?>>;
+        final devices = output['devices'] as List<Map<String, Object?>>;
         expect(devices, hasLength(1));
         expect(devices.single['environment'], isNotNull);
 
@@ -144,86 +138,101 @@ void main() {
   });
 
   group('generate_history', () {
-    test('prefers sidecar metrics and carries environment into history', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'resqlite_history_test_',
-      );
-      addTearDown(() => tempDir.delete(recursive: true));
+    test(
+      'prefers sidecar metrics and carries environment into history',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'resqlite_history_test_',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
 
-      final resultsDir = Directory('${tempDir.path}/results')..createSync();
-      final experimentsDir = Directory('${tempDir.path}/experiments')
-        ..createSync();
+        final resultsDir = Directory('${tempDir.path}/results')..createSync();
+        final experimentsDir = Directory('${tempDir.path}/experiments')
+          ..createSync();
 
-      final markdownFile = File(
-        '${resultsDir.path}/2026-04-23T11-08-40-fixture.md',
-      )..writeAsStringSync(fixtureBenchmarkMarkdown);
+        final markdownFile = File(
+          '${resultsDir.path}/2026-04-23T11-08-40-fixture.md',
+        )..writeAsStringSync(fixtureBenchmarkMarkdown);
 
-      final sidecar = buildReleaseRunArtifact(
-        label: 'fixture',
-        repeatCount: 3,
-        markdown: fixtureBenchmarkMarkdown,
-        aggregates: const {},
-        environment: const {'runtime': 'dart-vm', 'gitSha': 'deadbeef'},
-        generatedAt: '2026-04-23T00:00:00.000Z',
-      );
-      (sidecar['metrics'] as Map<String, Object?>)
-          ['Select → Maps / 1000 rows / resqlite select()'] = 9.99;
-      File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert(sidecar),
-      );
+        final sidecar = buildReleaseRunArtifact(
+          label: 'fixture',
+          repeatCount: 3,
+          markdown: fixtureBenchmarkMarkdown,
+          aggregates: const {},
+          environment: const {'runtime': 'dart-vm', 'gitSha': 'deadbeef'},
+          generatedAt: '2026-04-23T00:00:00.000Z',
+        );
+        (sidecar['metrics']
+                as Map<
+                  String,
+                  Object?
+                >)['Select → Maps / 1000 rows / resqlite select()'] =
+            9.99;
+        File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
+          const JsonEncoder.withIndent('  ').convert(sidecar),
+        );
 
-      File('${experimentsDir.path}/README.md')
-          .writeAsStringSync(fixtureExperimentsReadmeMarkdown);
+        File(
+          '${experimentsDir.path}/README.md',
+        ).writeAsStringSync(fixtureExperimentsReadmeMarkdown);
 
-      File('${experimentsDir.path}/083-test.md')
-          .writeAsStringSync(fixtureExperimentMarkdown);
+        File(
+          '${experimentsDir.path}/083-test.md',
+        ).writeAsStringSync(fixtureExperimentMarkdown);
 
-      final output = generate_history.buildHistoryData(
-        resultsDir: resultsDir,
-        experimentsDir: experimentsDir,
-        generatedAt: '2026-04-23T00:00:00.000Z',
-      );
+        final output = generate_history.buildHistoryData(
+          resultsDir: resultsDir,
+          experimentsDir: experimentsDir,
+          generatedAt: '2026-04-23T00:00:00.000Z',
+        );
 
-      final runs = output['runs'] as List<Map<String, Object?>>;
-      expect(runs, hasLength(1));
-      final run = runs.single;
-      final metrics = run['metrics'] as Map<String, Object?>;
-      expect(metrics['Select → Maps / 1000 rows / resqlite select()'], 9.99);
-      expect((run['environment'] as Map<String, Object?>)['runtime'], 'dart-vm');
+        final runs = output['runs'] as List<Map<String, Object?>>;
+        expect(runs, hasLength(1));
+        final run = runs.single;
+        final metrics = run['metrics'] as Map<String, Object?>;
+        expect(metrics['Select → Maps / 1000 rows / resqlite select()'], 9.99);
+        expect(
+          (run['environment'] as Map<String, Object?>)['runtime'],
+          'dart-vm',
+        );
 
-      final experiments = output['experiments'] as List<Map<String, Object?>>;
-      final experiment = experiments.single;
-      expect(
-        experiment['primaryMetrics'],
-        equals(['Select → Maps / 1000 rows / resqlite select()']),
-      );
-      expect(
-        (experiment['benchmarkRun'] as Map<String, Object?>)['source'],
-        equals('same-day'),
-      );
-    });
+        final experiments = output['experiments'] as List<Map<String, Object?>>;
+        final experiment = experiments.single;
+        expect(
+          experiment['primaryMetrics'],
+          equals(['Select → Maps / 1000 rows / resqlite select()']),
+        );
+        expect(
+          (experiment['benchmarkRun'] as Map<String, Object?>)['source'],
+          equals('same-day'),
+        );
+      },
+    );
   });
 
   group('workload registry', () {
-    test('curated definitions resolve cleanly and chart groups stay coherent', () {
-      final syntheticKeys = [
-        for (final definition in curatedMetricDefinitions)
-          'Synthetic / ${definition.pattern} / resqlite',
-      ];
+    test(
+      'curated definitions resolve cleanly and chart groups stay coherent',
+      () {
+        final syntheticKeys = [
+          for (final definition in curatedMetricDefinitions)
+            'Synthetic / ${definition.pattern} / resqlite',
+        ];
 
-      final catalog = resolveCuratedMetrics(syntheticKeys);
-      expect(catalog.tracked, hasLength(curatedMetricDefinitions.length));
+        final catalog = resolveCuratedMetrics(syntheticKeys);
+        expect(catalog.tracked, hasLength(curatedMetricDefinitions.length));
 
-      final grouped = <String>{};
-      for (final chartId in experimentChartIds) {
-        expect(catalog.chartGroups, contains(chartId));
-        for (final key in catalog.chartGroups[chartId]!) {
-          expect(grouped.add(key), isTrue, reason: 'metric assigned twice');
-          expect(catalog.metricDisplay[key], isNotNull);
+        final grouped = <String>{};
+        for (final chartId in experimentChartIds) {
+          expect(catalog.chartGroups, contains(chartId));
+          for (final key in catalog.chartGroups[chartId]!) {
+            expect(grouped.add(key), isTrue, reason: 'metric assigned twice');
+            expect(catalog.metricDisplay[key], isNotNull);
+          }
         }
-      }
 
-      expect(grouped, equals(catalog.tracked.toSet()));
-    });
+        expect(grouped, equals(catalog.tracked.toSet()));
+      },
+    );
   });
 }

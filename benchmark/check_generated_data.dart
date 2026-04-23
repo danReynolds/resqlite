@@ -52,6 +52,13 @@ Future<void> _checkJsonFile({
   required List<String> mismatches,
 }) async {
   final currentFile = File(currentPath);
+  if (!currentFile.existsSync()) {
+    throw StateError(
+      'Missing generated docs artifact: $currentPath. '
+      'Re-run the generator and commit the updated file.',
+    );
+  }
+
   final currentText = currentFile.readAsStringSync();
   final currentJson = json.decode(currentText);
   if (currentJson is! Map<String, Object?>) {
@@ -78,12 +85,14 @@ Future<void> _checkJsonFile({
     final normalizedCurrentFile = File(
       '${tempDir.path}/current_${currentFile.uri.pathSegments.last}',
     )..writeAsStringSync(currentComparable);
-    final expectedFile = File('${tempDir.path}/${currentFile.uri.pathSegments.last}')
-      ..writeAsStringSync(expectedText);
-    final diff = await Process.run(
-      'diff',
-      ['-u', normalizedCurrentFile.path, expectedFile.path],
-    );
+    final expectedFile = File(
+      '${tempDir.path}/${currentFile.uri.pathSegments.last}',
+    )..writeAsStringSync(expectedText);
+    final diff = await Process.run('diff', [
+      '-u',
+      normalizedCurrentFile.path,
+      expectedFile.path,
+    ]);
     if ((diff.stdout as String).trim().isNotEmpty) {
       stderr.writeln(diff.stdout);
     } else if ((diff.stderr as String).trim().isNotEmpty) {
