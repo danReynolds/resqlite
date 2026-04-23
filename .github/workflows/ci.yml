@@ -53,6 +53,19 @@ jobs:
       - name: Run tests
         run: dart test --timeout 60s
 
+  benchmark-generated-data:
+    name: Benchmark generated data freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+      - name: Verify generated benchmark docs are current
+        run: dart run benchmark/check_generated_data.dart
+
   benchmark:
     name: Benchmarks (main)
     runs-on: macos-latest
