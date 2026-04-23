@@ -60,15 +60,19 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
 
-import 'profile/profile_sample.dart';
+import 'profile/profile_reporting.dart';
 import 'profile/profiled_database.dart';
 import 'profile/workloads.dart';
+import 'shared/benchmark_environment.dart';
 
 // Memory stabilization churn size. Matches release-mode memory.dart.
 const int _churnSize = 10000;
 
 Future<void> main(List<String> args) async {
   final options = _parseOptions(args);
+  final environment = await collectBenchmarkEnvironment(
+    extra: {'benchmarkMode': 'profile', 'profileModeEnabled': kProfileMode},
+  );
 
   print('resqlite Profile-Mode Benchmark');
   print('================================');
@@ -114,8 +118,11 @@ Future<void> main(List<String> args) async {
       profiled: profiled,
       body: (iter) => workloadSingleInserts(profiled, iter),
     );
-    _reportWorkload(singleInsert,
-        readerFloor: readerFloor, writerFloor: writerFloor);
+    _reportWorkload(
+      singleInsert,
+      readerFloor: readerFloor,
+      writerFloor: writerFloor,
+    );
 
     print('');
     print('=== Workload B: Point Queries ===');
@@ -124,8 +131,11 @@ Future<void> main(List<String> args) async {
       profiled: profiled,
       body: (iter) => workloadPointQuery(profiled, iter),
     );
-    _reportWorkload(pointQuery,
-        readerFloor: readerFloor, writerFloor: writerFloor);
+    _reportWorkload(
+      pointQuery,
+      readerFloor: readerFloor,
+      writerFloor: writerFloor,
+    );
 
     print('');
     print('=== Workload C: Merge Rounds ===');
@@ -134,8 +144,11 @@ Future<void> main(List<String> args) async {
       profiled: profiled,
       body: (iter) => workloadMergeRounds(profiled, iter),
     );
-    _reportWorkload(mergeRounds,
-        readerFloor: readerFloor, writerFloor: writerFloor);
+    _reportWorkload(
+      mergeRounds,
+      readerFloor: readerFloor,
+      writerFloor: writerFloor,
+    );
 
     // Persist the whole thing. diff.dart reads these JSON files.
     final outPath = options.outPath ?? _defaultOutPath();
@@ -145,21 +158,31 @@ Future<void> main(List<String> args) async {
     await File(outPath).writeAsString(
       const JsonEncoder.withIndent('  ').convert({
         'generated_at': DateTime.now().toIso8601String(),
+        'environment': environment,
         'profile_mode_enabled': kProfileMode,
         'iterations': measureIterations,
-        'noop_floors': {
-          'reader_us': readerFloor,
-          'writer_us': writerFloor,
-        },
+        'noop_floors': {'reader_us': readerFloor, 'writer_us': writerFloor},
         'workloads': {
-          'noop': _workloadJson(noop,
-              readerFloor: null, writerFloor: null),
-          'single_insert': _workloadJson(singleInsert,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'point_query': _workloadJson(pointQuery,
-              readerFloor: readerFloor, writerFloor: writerFloor),
-          'merge_rounds': _workloadJson(mergeRounds,
-              readerFloor: readerFloor, writerFloor: writerFloor),
+          'noop': profileWorkloadArtifact(
+            noop,
+            readerFloor: null,
+            writerFloor: null,
+          ),
+          'single_insert': profileWorkloadArtifact(
+            singleInsert,
+            readerFloor: readerFloor,
+            writerFloor: writerFloor,
+          ),
+          'point_query': profileWorkloadArtifact(
+            pointQuery,
+            readerFloor: readerFloor,
+            writerFloor: writerFloor,
+          ),
+          'merge_rounds': profileWorkloadArtifact(
+            mergeRounds,
+            readerFloor: readerFloor,
+            writerFloor: writerFloor,
+          ),
         },
       }),
     );
@@ -185,48 +208,6 @@ Future<void> main(List<String> args) async {
 // Workload execution — captures time + memory together
 // ---------------------------------------------------------------------------
 
-/// Results of running a single workload: time samples, RSS deltas, and
-/// SQLite per-connection memory counters before/after.
-class _WorkloadResult {
-  _WorkloadResult({
-    required this.name,
-    required this.iterations,
-    required this.samples,
-    required this.rssBeforeMB,
-    required this.rssAfterMB,
-    required this.rssPeakMB,
-    required this.diagnosticsBefore,
-    required this.diagnosticsAfter,
-    required this.countersBefore,
-    required this.countersAfter,
-  });
-
-  final String name;
-  final int iterations;
-  final List<ProfileSample> samples;
-  final double rssBeforeMB;
-  final double rssAfterMB;
-  final double rssPeakMB;
-  final Diagnostics diagnosticsBefore;
-  final Diagnostics diagnosticsAfter;
-
-  /// Decoder allocation counters snapshotted immediately before the
-  /// measured iterations began. Null when `kProfileMode` is false —
-  /// the counters don't fire in that mode so before/after would be
-  /// identically zero and meaningless.
-  final Map<String, int>? countersBefore;
-
-  /// Decoder allocation counters snapshotted immediately after.
-  final Map<String, int>? countersAfter;
-
-  double get rssDeltaMB => rssAfterMB - rssBeforeMB;
-
-  Map<String, int>? get counterDelta {
-    if (countersBefore == null || countersAfter == null) return null;
-    return ProfileCounters.diff(countersBefore!, countersAfter!);
-  }
-}
-
 /// Runs a workload with memory stabilization before measurement, then
 /// takes RSS and Diagnostics snapshots around the measured iterations.
 ///
@@ -235,7 +216,7 @@ class _WorkloadResult {
 ///   2. Take RSS + Diagnostics + counter snapshot (baseline).
 ///   3. Run [measureIterations] iterations of [body].
 ///   4. Take RSS + Diagnostics + counter snapshot (post).
-Future<_WorkloadResult> _runWorkload({
+Future<ProfileWorkloadResult> _runWorkload({
   required String name,
   required ProfiledDatabase profiled,
   required Future<void> Function(int iter) body,
@@ -264,7 +245,7 @@ Future<_WorkloadResult> _runWorkload({
   final diagAfter = await profiled.raw.diagnostics();
   final countersAfter = kProfileMode ? ProfileCounters.snapshot() : null;
 
-  return _WorkloadResult(
+  return ProfileWorkloadResult(
     name: name,
     iterations: iterations,
     samples: List.of(profiled.samples),
@@ -307,11 +288,15 @@ _Options _parseOptions(List<String> args) {
     if (arg.startsWith('--out=')) {
       outPath = arg.substring('--out='.length);
     } else if (arg == '--help' || arg == '-h') {
-      print('Usage: dart run -DRESQLITE_PROFILE=true '
-          'benchmark/run_profile.dart [--out=PATH]');
+      print(
+        'Usage: dart run -DRESQLITE_PROFILE=true '
+        'benchmark/run_profile.dart [--out=PATH]',
+      );
       print('');
       print('  --out=PATH   Write rich JSON to PATH. Defaults to');
-      print('               benchmark/profile/results/run_profile_TIMESTAMP.json');
+      print(
+        '               benchmark/profile/results/run_profile_TIMESTAMP.json',
+      );
       print('');
       print('See benchmark/EXPERIMENTS.md for the A/B workflow.');
       exit(0);
@@ -337,86 +322,16 @@ String _defaultOutPath() {
 // ---------------------------------------------------------------------------
 
 /// Render Diagnostics to a JSON-friendly map.
-Map<String, int> _diagnosticsJson(Diagnostics d) => {
-      'sqlite_page_cache_bytes': d.sqlitePageCacheBytes,
-      'sqlite_schema_bytes': d.sqliteSchemaBytes,
-      'sqlite_stmt_bytes': d.sqliteStmtBytes,
-      'wal_bytes': d.walBytes,
-    };
-
-/// Compute Diagnostics delta (after minus before) as a JSON-friendly map.
-Map<String, int> _diagnosticsDelta(Diagnostics before, Diagnostics after) => {
-      'sqlite_page_cache_bytes_delta':
-          after.sqlitePageCacheBytes - before.sqlitePageCacheBytes,
-      'sqlite_schema_bytes_delta':
-          after.sqliteSchemaBytes - before.sqliteSchemaBytes,
-      'sqlite_stmt_bytes_delta':
-          after.sqliteStmtBytes - before.sqliteStmtBytes,
-      'wal_bytes_delta': after.walBytes - before.walBytes,
-    };
-
-Map<String, Object?> _workloadJson(
-  _WorkloadResult r, {
-  required int? readerFloor,
-  required int? writerFloor,
-}) {
-  return {
-    'iterations': r.iterations,
-    'samples': r.samples.map((s) => s.toJson()).toList(),
-    'summary': summarizeSamples(r.samples,
-        readerFloor: readerFloor, writerFloor: writerFloor),
-    'memory': {
-      'rss_before_mb': double.parse(r.rssBeforeMB.toStringAsFixed(3)),
-      'rss_after_mb': double.parse(r.rssAfterMB.toStringAsFixed(3)),
-      'rss_peak_mb': double.parse(r.rssPeakMB.toStringAsFixed(3)),
-      'rss_delta_mb': double.parse(r.rssDeltaMB.toStringAsFixed(3)),
-      'diagnostics_before': _diagnosticsJson(r.diagnosticsBefore),
-      'diagnostics_after': _diagnosticsJson(r.diagnosticsAfter),
-      'diagnostics_delta':
-          _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter),
-      // Profile counters. Only populated when kProfileMode is compiled
-      // in (otherwise the counters never fire).
-      if (r.counterDelta != null) 'profile_counters_delta': r.counterDelta,
-    },
-  };
-}
-
 void _reportWorkload(
-  _WorkloadResult r, {
+  ProfileWorkloadResult r, {
   required int? readerFloor,
   required int? writerFloor,
 }) {
-  final summary = summarizeSamples(r.samples,
-      readerFloor: readerFloor, writerFloor: writerFloor);
-  print('${r.samples.length} samples collected.');
-  for (final entry in summary.entries) {
-    final s = entry.value! as Map<String, Object?>;
-    final workPart = s.containsKey('work_us_median')
-        ? ' work=${s['work_us_median']}μs'
-        : '';
-    print('  ${entry.key.padRight(14)} '
-        'count=${s['count']} '
-        'min=${s['min_us']}μs '
-        'p50=${s['median_us']}μs '
-        'p90=${s['p90_us']}μs '
-        'p99=${s['p99_us']}μs '
-        'max=${s['max_us']}μs'
-        '$workPart');
-  }
-  final delta = _diagnosticsDelta(r.diagnosticsBefore, r.diagnosticsAfter);
-  print('  memory:        '
-      'rss Δ=${r.rssDeltaMB.toStringAsFixed(2)} MB  '
-      'rss peak=${r.rssPeakMB.toStringAsFixed(2)} MB  '
-      'page cache Δ=${delta['sqlite_page_cache_bytes_delta']} B  '
-      'stmt Δ=${delta['sqlite_stmt_bytes_delta']} B  '
-      'wal Δ=${delta['wal_bytes_delta']} B');
-  final cdelta = r.counterDelta;
-  if (cdelta != null) {
-    final nonZero = cdelta.entries.where((e) => e.value != 0).toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    if (nonZero.isNotEmpty) {
-      print('  counters:      '
-          '${nonZero.map((e) => '${e.key}=${e.value}').join('  ')}');
-    }
-  }
+  print(
+    formatProfileWorkloadReport(
+      r,
+      readerFloor: readerFloor,
+      writerFloor: writerFloor,
+    ),
+  );
 }

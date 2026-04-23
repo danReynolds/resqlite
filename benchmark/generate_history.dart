@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'shared/parse_results.dart';
+import 'shared/release_artifact.dart';
+import 'shared/workload_registry.dart';
 
 /// Generates `docs/experiments/history.json` from benchmark results and
 /// experiment markdown files.
@@ -29,48 +31,35 @@ Future<void> main() async {
     final meta = parseFilenameMetadata(basename);
     if (meta == null) continue;
 
-    final content = file.readAsStringSync();
-    final metrics = extractResqliteMedians(content);
+    final sidecar = loadReleaseArtifactSidecarForMarkdown(file);
+    final content = sidecar == null ? file.readAsStringSync() : null;
+    final metrics = sidecar != null
+        ? artifactMetrics(sidecar)
+        : extractResqliteMedians(content!);
     if (metrics.isEmpty) {
       print('  Skipping $basename (no resqlite metrics found)');
       continue;
     }
 
-    // Memory metrics come from a separate section of the markdown and
-    // are optional (older results have no `## Memory` block). Captured
-    // under a distinct namespace so chart code can treat them separately.
-    final memory = extractMemoryMedians(content);
-    final memoryJson = {
-      for (final entry in memory.entries)
-        entry.key: {
-          'rssDeltaMedMB': entry.value.rssDeltaMedMB,
-          'rssDeltaP90MB': entry.value.rssDeltaP90MB,
-          'ciLowMB': entry.value.ciLowMB,
-          'ciHighMB': entry.value.ciHighMB,
-          'mdeMB': entry.value.mdeMB,
-        },
-    };
-    final sqliteDiagnostics = extractSqliteDiagnosticsMedians(content);
-    final sqliteDiagnosticsJson = {
-      for (final entry in sqliteDiagnostics.entries)
-        entry.key: {
-          'sqliteTotalKiB': entry.value.sqliteTotalKiB,
-          'pageCacheKiB': entry.value.pageCacheKiB,
-          'schemaKiB': entry.value.schemaKiB,
-          'stmtKiB': entry.value.stmtKiB,
-          'walKiB': entry.value.walKiB,
-          'readersBusy': entry.value.readersBusy,
-        },
-    };
+    final memoryJson = sidecar != null
+        ? artifactMemoryMetrics(sidecar)
+        : _memoryMetricsJson(extractMemoryMedians(content!));
+    final environment = sidecar != null ? artifactEnvironment(sidecar) : null;
+    final sqliteDiagnosticsJson = sidecar != null
+        ? artifactSqliteDiagnosticsMetrics(sidecar)
+        : _sqliteDiagnosticsJson(extractSqliteDiagnosticsMedians(content!));
 
     runs.add({
       'id': meta.label,
       'date': meta.date,
       'timestamp': meta.timestamp,
       'label': meta.label,
+      if (environment != null && environment.isNotEmpty)
+        'environment': environment,
       'metrics': metrics,
-      if (memoryJson.isNotEmpty) 'memoryMetrics': memoryJson,
-      if (sqliteDiagnosticsJson.isNotEmpty)
+      if (memoryJson != null && memoryJson.isNotEmpty)
+        'memoryMetrics': memoryJson,
+      if (sqliteDiagnosticsJson != null && sqliteDiagnosticsJson.isNotEmpty)
         'sqliteDiagnosticsMetrics': sqliteDiagnosticsJson,
     });
   }
@@ -99,19 +88,8 @@ Future<void> main() async {
 
   _attachBenchmarkRunMappings(experiments, runs);
 
-  // 3. Build the tracked metrics list — curated keys for default chart display.
-  final tracked = <String>[];
-
-  // Find the best matching key for each desired metric.
-  for (final pattern in _trackedPatterns) {
-    final match = allKeys.firstWhere(
-      (k) => k.contains(pattern),
-      orElse: () => '',
-    );
-    if (match.isNotEmpty && !match.endsWith('[main]')) {
-      tracked.add(match);
-    }
-  }
+  // 3. Resolve the curated metric registry used by the experiments page.
+  final catalog = resolveCuratedMetrics(allKeys);
 
   // 4. Write JSON.
   await outFile.parent.create(recursive: true);
@@ -120,15 +98,46 @@ Future<void> main() async {
     'generated': DateTime.now().toIso8601String(),
     'runs': runs,
     'experiments': experiments,
-    'tracked': tracked,
+    'tracked': catalog.tracked,
+    'metricDisplay': catalog.metricDisplay,
+    'chartGroups': catalog.chartGroups,
   };
 
   await outFile.writeAsString(
     const JsonEncoder.withIndent('  ').convert(output),
   );
 
-  print('Wrote ${outFile.path} (${tracked.length} tracked metrics).');
-  print('Tracked: ${tracked.join(', ')}');
+  print('Wrote ${outFile.path} (${catalog.tracked.length} tracked metrics).');
+  print('Tracked: ${catalog.tracked.join(', ')}');
+}
+
+Map<String, Object?> _memoryMetricsJson(Map<String, MemoryMetric> memory) {
+  return {
+    for (final entry in memory.entries)
+      entry.key: {
+        'rssDeltaMedMB': entry.value.rssDeltaMedMB,
+        'rssDeltaP90MB': entry.value.rssDeltaP90MB,
+        'ciLowMB': entry.value.ciLowMB,
+        'ciHighMB': entry.value.ciHighMB,
+        'mdeMB': entry.value.mdeMB,
+      },
+  };
+}
+
+Map<String, Object?> _sqliteDiagnosticsJson(
+  Map<String, SqliteDiagnosticsMetric> sqliteDiagnostics,
+) {
+  return {
+    for (final entry in sqliteDiagnostics.entries)
+      entry.key: {
+        'sqliteTotalKiB': entry.value.sqliteTotalKiB,
+        'pageCacheKiB': entry.value.pageCacheKiB,
+        'schemaKiB': entry.value.schemaKiB,
+        'stmtKiB': entry.value.stmtKiB,
+        'walKiB': entry.value.walKiB,
+        'readersBusy': entry.value.readersBusy,
+      },
+  };
 }
 
 void _attachBenchmarkRunMappings(
@@ -180,19 +189,17 @@ void _attachBenchmarkRunMappings(
   for (final entry in byDate.entries) {
     final date = entry.key;
     final dateExps = entry.value;
-    final dateRuns =
-        (runsByDate[date] ?? const <int>[])
-            .where((idx) => !claimedRunIndices.contains(idx))
-            .toList();
+    final dateRuns = (runsByDate[date] ?? const <int>[])
+        .where((idx) => !claimedRunIndices.contains(idx))
+        .toList();
 
     if (dateRuns.isEmpty) {
       String? bestDate;
       var bestDist = double.infinity;
       for (final rd in runsByDate.keys) {
-        final candidateRuns =
-            runsByDate[rd]!
-                .where((idx) => !claimedRunIndices.contains(idx))
-                .toList();
+        final candidateRuns = runsByDate[rd]!
+            .where((idx) => !claimedRunIndices.contains(idx))
+            .toList();
         if (candidateRuns.isEmpty) continue;
         final dist =
             (DateTime.parse(rd).millisecondsSinceEpoch -
@@ -206,13 +213,13 @@ void _attachBenchmarkRunMappings(
       }
 
       if (bestDate != null && bestDist < 3 * 86400000) {
-        final fallbackRuns =
-            runsByDate[bestDate]!
-                .where((idx) => !claimedRunIndices.contains(idx))
-                .toList();
+        final fallbackRuns = runsByDate[bestDate]!
+            .where((idx) => !claimedRunIndices.contains(idx))
+            .toList();
         for (var j = 0; j < dateExps.length; j++) {
-          final preferredIndex =
-              j < fallbackRuns.length ? j : fallbackRuns.length - 1;
+          final preferredIndex = j < fallbackRuns.length
+              ? j
+              : fallbackRuns.length - 1;
           final runIdx = _pickClosestUnclaimedRun(
             fallbackRuns,
             preferredIndex,
@@ -232,11 +239,9 @@ void _attachBenchmarkRunMappings(
     }
 
     for (var j = 0; j < dateExps.length; j++) {
-      final proportionalIndex =
-          (j * dateRuns.length / dateExps.length).floor().clamp(
-            0,
-            dateRuns.length - 1,
-          );
+      final proportionalIndex = (j * dateRuns.length / dateExps.length)
+          .floor()
+          .clamp(0, dateRuns.length - 1);
       final runIdx = _pickClosestUnclaimedRun(
         dateRuns,
         proportionalIndex,
@@ -279,43 +284,6 @@ int? _pickClosestUnclaimedRun(
 
   return null;
 }
-
-/// Patterns used to find the curated tracked metrics from all available keys.
-const _trackedPatterns = [
-  '1000 rows / resqlite select()',
-  '1000 rows / resqlite selectBytes()',
-  'Wide (20 cols',
-  'Single Inserts',
-  'Batch Insert (1000 rows)',
-  'Parameterized',
-  'concurrent 4x',
-  'Invalidation Latency',
-  // Experiment 075 target: reactive streams where every re-query's
-  // result is unchanged. First benchmark that specifically exercises
-  // the worker-side hash short-circuit path.
-  'Unchanged Fanout Throughput',
-  'resqlite qps',
-  // Scenario-level trajectories (Track A Phase 1+).
-  'Reactive feed with 100 concurrent writes',
-  'Keyed PK Subscriptions',
-  // Chat Sim emits 4 op-type subsections; pattern matches "Chat Sim"
-  // generically — the generator picks up the first match, which will
-  // be the 'Insert message' op. For the full per-op picture, readers
-  // consult the dashboard scenarios tab.
-  'Chat Sim',
-  // Feed Paging emits 2 subsections; this matches the first one
-  // (Keyset pagination).
-  'Feed Paging',
-  // A11b regression guard for the PR #17 coalescing fix. Matches the
-  // wall-time column for resqlite at 100 streams × 200 writes.
-  'High-Cardinality Stream Fan-out',
-  // A7 bulk insert (opt-in via --include-slow); pattern matches the
-  // bulk-insert subsection specifically.
-  'Sync Burst',
-  // A9 (opt-in via --include-slow); pattern matches the warm-cache
-  // subsection (the first reported variant).
-  'Large Working Set',
-];
 
 /// Parse experiment entries from the README.md table rows and individual files.
 List<Map<String, Object?>> _parseExperimentsReadme(

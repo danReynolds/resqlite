@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'shared/release_artifact.dart';
+
 /// Parses `benchmark/HARDWARE_RESULTS.md` device registry and extracts
 /// full cross-library benchmark data from referenced result files into
 /// `docs/benchmarks/devices.json`.
@@ -46,12 +48,17 @@ void main() {
     final resultPath = 'benchmark/results/${device['resultFile']}';
     final resultFile = File(resultPath);
     if (!resultFile.existsSync()) {
-      print('  Warning: ${device['name']} references missing file: $resultPath');
+      print(
+        '  Warning: ${device['name']} references missing file: $resultPath',
+      );
       continue;
     }
 
-    final resultContent = resultFile.readAsStringSync();
-    final benchmarks = _parseResultFile(resultContent);
+    final sidecar = loadReleaseArtifactSidecarForMarkdown(resultFile);
+    final benchmarks = sidecar != null
+        ? artifactBenchmarks(sidecar) ?? const <Map<String, Object?>>[]
+        : parseBenchmarkSections(resultFile.readAsStringSync());
+    final environment = sidecar != null ? artifactEnvironment(sidecar) : null;
 
     (output['devices'] as List).add({
       'name': device['name'],
@@ -60,15 +67,17 @@ void main() {
       'dart': device['dart'],
       'date': device['date'],
       'by': device['by'],
+      if (environment != null && environment.isNotEmpty)
+        'environment': environment,
       'benchmarks': benchmarks,
     });
 
-    print('  ${device['name']}: ${benchmarks.length} benchmark sections parsed');
+    print(
+      '  ${device['name']}: ${benchmarks.length} benchmark sections parsed',
+    );
   }
 
-  outFile.writeAsStringSync(
-    const JsonEncoder.withIndent('  ').convert(output),
-  );
+  outFile.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(output));
 
   final count = (output['devices'] as List).length;
   print('Wrote ${outFile.path} ($count device(s))');
@@ -90,8 +99,11 @@ List<Map<String, String>> _parseDeviceRegistry(String content) {
     if (!inDevices || !line.startsWith('|')) continue;
     if (line.contains('---') || line.contains('Device')) continue;
 
-    final cells =
-        line.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final cells = line
+        .split('|')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
     if (cells.length >= 7) {
       devices.add({
         'name': cells[0],
@@ -106,83 +118,4 @@ List<Map<String, String>> _parseDeviceRegistry(String content) {
   }
 
   return devices;
-}
-
-/// Parse a full benchmark result .md file into structured cross-library data.
-///
-/// Returns a list of benchmark sections, each with a title and data for
-/// all three libraries.
-List<Map<String, Object?>> _parseResultFile(String content) {
-  final sections = <Map<String, Object?>>[];
-  final lines = content.split('\n');
-
-  String? currentSection;
-  String? currentSubsection;
-
-  for (final line in lines) {
-    if (line.startsWith('## ')) {
-      currentSection = line.substring(3).trim();
-      currentSubsection = null;
-      // Skip non-benchmark sections.
-      if (currentSection.startsWith('Comparison') ||
-          currentSection.startsWith('Repeat') ||
-          currentSection.startsWith('resqlite Benchmark')) {
-        currentSection = null;
-      }
-      continue;
-    }
-    if (line.startsWith('### ')) {
-      currentSubsection = line.substring(4).trim();
-      continue;
-    }
-
-    if (currentSection == null) continue;
-
-    // Parse table data rows (start with |, not separator rows).
-    if (!line.startsWith('|') || line.contains('---')) continue;
-
-    final cells =
-        line.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-    if (cells.length < 2) continue;
-
-    // Skip header rows.
-    final firstCell = cells[0].toLowerCase();
-    if (firstCell == 'library' || firstCell == 'rows' ||
-        firstCell == 'concurrency' || firstCell == 'n') continue;
-
-    final sectionKey = currentSubsection != null
-        ? '$currentSection / $currentSubsection'
-        : currentSection;
-
-    // Find or create section.
-    var section = sections.firstWhere(
-      (s) => s['key'] == sectionKey,
-      orElse: () {
-        final s = <String, Object?>{
-          'key': sectionKey,
-          'title': currentSection,
-          'subtitle': currentSubsection,
-          'entries': <Map<String, Object?>>[],
-        };
-        sections.add(s);
-        return s;
-      },
-    );
-
-    final entries = section['entries'] as List<Map<String, Object?>>;
-    final library = cells[0];
-
-    // Parse numeric values from remaining cells.
-    final values = <double?>[];
-    for (var i = 1; i < cells.length; i++) {
-      values.add(double.tryParse(cells[i]));
-    }
-
-    entries.add({
-      'library': library,
-      'values': values,
-    });
-  }
-
-  return sections;
 }

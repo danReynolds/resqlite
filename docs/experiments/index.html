@@ -502,64 +502,12 @@ function sortedExperiments() {
   return exps;
 }
 
-const DISPLAY = {
-  'Select \u2192 Maps / 1000 rows / resqlite select()': 'select() 1K rows',
-  'Select \u2192 JSON Bytes / 1000 rows / resqlite selectBytes()': 'selectBytes() 1K rows',
-  'Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite': 'schema wide 20 cols',
-  'Write Performance / Single Inserts (100 sequential) / resqlite execute()': 'single inserts (100)',
-  'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()': 'batch insert 1K',
-  'Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()': 'interactive tx',
-  'Write Performance / Transaction Read (1000 rows) / resqlite tx.select()': 'tx read 1K rows',
-  'Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()': 'tx batch 1K rows',
-  'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()': 'parameterized 100q',
-  'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x': 'concurrent 4x',
-  'Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite': 'feed reactive (A6)',
-  'Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite': 'sync burst bulk (A7)',
-  'Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()': 'keyed subscriptions (A11)',
-  'High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite': 'fan-out (A11b)',
-  'Streaming / Invalidation Latency / resqlite': 'invalidation latency',
-  'Streaming / Fan-out (10 streams) / resqlite': 'fan-out 10 streams',
-  'Streaming / Stream Churn (100 cycles) / resqlite': 'stream churn 100 cycles',
-  'Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite': 'unchanged fanout',
-  'Sync Burst (v1) / Stream emissions during burst (COUNT(*)) / resqlite': 'sync burst emissions',
-  'Point Query Throughput / resqlite qps': 'point query qps',
-};
+let METRIC_DISPLAY = {};
+let CHART_GROUPS = {};
 
-const CHART_GROUPS = {
-  chartReads: [
-    'Select \u2192 Maps / 1000 rows / resqlite select()',
-    'Select \u2192 JSON Bytes / 1000 rows / resqlite selectBytes()',
-    'Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite',
-  ],
-  chartWrites: [
-    'Write Performance / Single Inserts (100 sequential) / resqlite execute()',
-    'Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()',
-  ],
-  chartTransactions: [
-    'Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()',
-    'Write Performance / Transaction Read (1000 rows) / resqlite tx.select()',
-    'Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()',
-  ],
-  chartConcurrency: [
-    'Concurrent Reads (1000 rows per query) / resqlite concurrent 4x',
-    'Parameterized Queries / 100 queries \u00d7 ~500 rows each / resqlite select()',
-  ],
-  chartScenarios: [
-    'Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite',
-    'Sync Burst (v1) / Bulk insert: 50000 rows × 500-row chunks / resqlite',
-    'Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()',
-    'High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite',
-  ],
-  chartReactiveMicros: [
-    'Streaming / Invalidation Latency / resqlite',
-    'Streaming / Fan-out (10 streams) / resqlite',
-    'Streaming / Stream Churn (100 cycles) / resqlite',
-    'Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite',
-  ],
-  chartThroughput: [
-    'Point Query Throughput / resqlite qps',
-  ],
-};
+function displayNameForMetric(key) {
+  return METRIC_DISPLAY[key] || key;
+}
 
 function activatePanel(panelId, sync = true) {
   if (!document.getElementById(panelId)) return;
@@ -614,6 +562,8 @@ async function init() {
     document.getElementById('expList').innerHTML = '<div class="loading">Failed to load history.json</div>';
     return;
   }
+  METRIC_DISPLAY = DATA.metricDisplay || {};
+  CHART_GROUPS = DATA.chartGroups || {};
   loadStateFromUrl();
   const requestedExp = selectedExpId ? DATA.experiments.find(e => e.id === selectedExpId) : null;
   if (requestedExp && currentFilter !== 'all' && requestedExp.status !== currentFilter) {
@@ -710,7 +660,7 @@ function buildCharts() {
     const datasets = metricKeys.map((key, ki) => {
       const isQps = key.includes('qps');
       return {
-        label: DISPLAY[key] || key,
+        label: displayNameForMetric(key),
         data: chartRunIndices.map(ri => runs[ri].metrics[key] ?? null),
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
@@ -849,6 +799,32 @@ function runSourceLabel(source) {
   return 'unmapped';
 }
 
+function shortSha(sha) {
+  if (!sha) return '';
+  return sha.slice(0, 12);
+}
+
+function findMappedRun(exp) {
+  const ts = exp?.benchmarkRun?.timestamp;
+  if (!ts) return null;
+  return (DATA.runs || []).find(run => run.timestamp === ts) || null;
+}
+
+function formatRunEnvironmentSummary(env) {
+  if (!env) return '';
+  const parts = [];
+  if (env.runtime) parts.push(env.runtime);
+  if (env.dartVersion) parts.push(`Dart ${env.dartVersion}`);
+  if (env.os) parts.push(env.osVersion ? `${env.os} ${env.osVersion}` : env.os);
+  if (env.gitBranch || env.gitSha) {
+    let git = env.gitBranch || 'git';
+    if (env.gitSha) git += ` @ ${shortSha(env.gitSha)}`;
+    if (env.gitDirty) git += ' (dirty)';
+    parts.push(git);
+  }
+  return parts.join(' · ');
+}
+
 function formatBenchmarkRunMeta(exp) {
   const run = exp.benchmarkRun;
   if (!run) return 'Benchmark run: no mapped run';
@@ -856,6 +832,9 @@ function formatBenchmarkRunMeta(exp) {
   const parts = ['Benchmark run:'];
   if (run.id) parts.push(run.id);
   if (run.date) parts.push(run.date);
+  const mappedRun = findMappedRun(exp);
+  const env = formatRunEnvironmentSummary(mappedRun?.environment);
+  if (env) parts.push(env);
   parts.push(runSourceLabel(run.source));
   return parts.join(' · ');
 }
@@ -1126,7 +1105,7 @@ function renderMetricImpactSection(title, metricKeys, runIdx) {
 
     const prevIdx = findPreviousRunIndexWithMetric(runIdx, key);
     const prev = prevIdx >= 0 ? DATA.runs[prevIdx].metrics[key] : null;
-    const label = DISPLAY[key] || key;
+    const label = displayNameForMetric(key);
 
     let deltaHtml = '<span class="metric-delta neutral">first measured run</span>';
     if (prev != null) {
@@ -1207,7 +1186,7 @@ function updateChartImprovementPills() {
 
       pills.push(
         `<span class="improv-pill">` +
-        `<span class="metric-name">${esc(DISPLAY[key] || key)}</span> ` +
+        `<span class="metric-name">${esc(displayNameForMetric(key))}</span> ` +
         `${esc(formatMetricValue(key, prev))} <span class="arrow">\u2192</span> ${esc(formatMetricValue(key, current))} ` +
         `<strong class="metric-delta ${deltaClass}">(${esc(deltaText)})</strong>` +
         `</span>`
