@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-23T11:29:04.077621",
+  "generated": "2026-04-23T11:51:15.890956",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -7392,7 +7392,7 @@
         "Memory / Select 10k rows → Maps / resqlite select()": {
           "rssDeltaMedMB": 0.42,
           "rssDeltaP90MB": 5.31,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 2.75,
           "mdeMB": 1.38
         },
@@ -7404,74 +7404,74 @@
           "mdeMB": 2.91
         },
         "Memory / Select 10k rows → Maps / sqlite_async select()": {
-          "rssDeltaMedMB": 1.0,
+          "rssDeltaMedMB": 1,
           "rssDeltaP90MB": 3.36,
-          "ciLowMB": 1.0,
+          "ciLowMB": 1,
           "ciHighMB": 1.09,
           "mdeMB": 0.05
         },
         "Memory / Select 10k rows → Maps / drift select()": {
           "rssDeltaMedMB": 1.27,
           "rssDeltaP90MB": 19.86,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 9.25,
           "mdeMB": 4.63
         },
         "Memory / Select 10k rows → JSON Bytes / resqlite selectBytes()": {
           "rssDeltaMedMB": 0.03,
           "rssDeltaP90MB": 8.02,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 7.45,
           "mdeMB": 3.73
         },
         "Memory / Select 10k rows → JSON Bytes / resqlite + jsonEncode": {
           "rssDeltaMedMB": 6.22,
           "rssDeltaP90MB": 55.73,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 30.98,
           "mdeMB": 15.49
         },
         "Memory / Select 10k rows → JSON Bytes / sqlite3 + jsonEncode": {
           "rssDeltaMedMB": 3.03,
           "rssDeltaP90MB": 40.64,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 31.5,
           "mdeMB": 15.75
         },
         "Memory / Select 10k rows → JSON Bytes / sqlite_async + jsonEncode": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 40.2,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 16.95,
           "mdeMB": 8.48
         },
         "Memory / Select 10k rows → JSON Bytes / drift + jsonEncode": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 49.22,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 21.25,
           "mdeMB": 10.63
         },
         "Memory / Batch insert 10k rows / resqlite executeBatch()": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 17.38,
-          "ciLowMB": 0.0,
-          "ciHighMB": 0.0,
-          "mdeMB": 0.0
+          "ciLowMB": 0,
+          "ciHighMB": 0,
+          "mdeMB": 0
         },
         "Memory / Batch insert 10k rows / sqlite3 executeBatch()": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 0.64,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 0.02,
           "mdeMB": 0.01
         },
         "Memory / Batch insert 10k rows / sqlite_async executeBatch()": {
-          "rssDeltaMedMB": 0.0,
-          "rssDeltaP90MB": 0.0,
-          "ciLowMB": 0.0,
-          "ciHighMB": 0.0,
-          "mdeMB": 0.0
+          "rssDeltaMedMB": 0,
+          "rssDeltaP90MB": 0,
+          "ciLowMB": 0,
+          "ciHighMB": 0,
+          "mdeMB": 0
         },
         "Memory / Batch insert 10k rows / drift batch()": {
           "rssDeltaMedMB": 0.89,
@@ -7481,43 +7481,43 @@
           "mdeMB": 2.2
         },
         "Memory / Streaming fan-out (10 streams × 100 writes) / resqlite stream()": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 0.14,
-          "ciLowMB": 0.0,
+          "ciLowMB": 0,
           "ciHighMB": 0.08,
           "mdeMB": 0.04
         },
         "Memory / Streaming fan-out (10 streams × 100 writes) / sqlite_async watch()": {
-          "rssDeltaMedMB": 0.0,
+          "rssDeltaMedMB": 0,
           "rssDeltaP90MB": 0.13,
-          "ciLowMB": 0.0,
-          "ciHighMB": 0.0,
-          "mdeMB": 0.0
+          "ciLowMB": 0,
+          "ciHighMB": 0,
+          "mdeMB": 0
         }
       },
       "sqliteDiagnosticsMetrics": {
         "SQLite Diagnostics / Warm read working set (20000 rows + 2000 point lookups) / resqlite": {
-          "sqliteTotalKiB": 3207.0,
+          "sqliteTotalKiB": 3207,
           "pageCacheKiB": 3189.5,
           "schemaKiB": 5.3,
           "stmtKiB": 12.2,
-          "walKiB": 2048.0,
+          "walKiB": 2048,
           "readersBusy": 0
         },
         "SQLite Diagnostics / Statement cache footprint (48 distinct SELECT texts) / resqlite": {
-          "sqliteTotalKiB": 3300.0,
+          "sqliteTotalKiB": 3300,
           "pageCacheKiB": 3189.5,
           "schemaKiB": 5.3,
           "stmtKiB": 105.2,
-          "walKiB": 2048.0,
+          "walKiB": 2048,
           "readersBusy": 0
         },
         "SQLite Diagnostics / WAL after write burst (1000 inserted rows) / resqlite": {
           "sqliteTotalKiB": 257.5,
-          "pageCacheKiB": 240.0,
+          "pageCacheKiB": 240,
           "schemaKiB": 5.3,
           "stmtKiB": 12.2,
-          "walKiB": 161.0,
+          "walKiB": 161,
           "readersBusy": 0
         }
       }

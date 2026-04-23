@@ -13,7 +13,7 @@ import '../benchmark/shared/workload_registry.dart';
 
 void main() {
   group('release sidecar summary artifact', () {
-    test('stores compact repeat aggregates and no parsed benchmark copy', () {
+    test('stores compact repeat aggregates and benchmark summary', () {
       final artifact = buildReleaseRunArtifact(
         label: 'fixture',
         repeatCount: 3,
@@ -29,8 +29,9 @@ void main() {
         generatedAt: '2026-04-23T00:00:00.000Z',
       );
 
-      expect(artifact['schemaVersion'], equals(2));
+      expect(artifact['schemaVersion'], equals(3));
       expect(artifact.containsKey('benchmarks'), isFalse);
+      expect(artifact.containsKey('benchmarkSummary'), isTrue);
 
       final repeatAggregates =
           artifact['repeatAggregates'] as Map<String, Object?>;
@@ -44,10 +45,56 @@ void main() {
           'comparisonThresholdPct',
         }),
       );
+
+      final sections = artifactBenchmarks(artifact);
+      expect(sections, isNotNull);
+      expect(sections, hasLength(1));
+      expect(sections!.single['title'], equals('Select → Maps'));
     });
   });
 
   group('generate_devices', () {
+    test('uses benchmark summary from sidecar when present', () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_devices_sidecar_test_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final resultsDir = Directory('${tempDir.path}/results')..createSync();
+      final markdownFile = File(
+        '${resultsDir.path}/2026-04-23T11-08-40-fixture.md',
+      )..writeAsStringSync('# summary only\n');
+
+      final sidecar = buildReleaseRunArtifact(
+        label: 'fixture',
+        repeatCount: 3,
+        markdown: _fixtureBenchmarkMarkdown,
+        aggregates: const {},
+        environment: const {'runtime': 'dart-vm'},
+        generatedAt: '2026-04-23T00:00:00.000Z',
+      );
+      File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
+        const JsonEncoder.withIndent('  ').convert(sidecar),
+      );
+
+      final output = generate_devices.buildDevicesData(
+        hardwareResultsMarkdown: _fixtureHardwareResultsMarkdown(
+          resultFile: '2026-04-23T11-08-40-fixture.md',
+        ),
+        resultsDir: resultsDir,
+        generatedAt: '2026-04-23T00:00:00.000Z',
+      );
+
+      final devices = output['devices'] as List<Map<String, Object?>>;
+      expect(devices, hasLength(1));
+      expect(devices.single['environment'], isNotNull);
+
+      final benchmarks =
+          devices.single['benchmarks'] as List<Map<String, Object?>>;
+      expect(benchmarks, isNotEmpty);
+      expect(benchmarks.single['title'], equals('Select → Maps'));
+    });
+
     test(
       'falls back to markdown benchmark parsing when sidecar omits benchmark tables',
       () async {
@@ -69,6 +116,7 @@ void main() {
           environment: const {'runtime': 'dart-vm'},
           generatedAt: '2026-04-23T00:00:00.000Z',
         );
+        sidecar.remove('benchmarkSummary');
         File(markdownFile.path.replaceFirst('.md', '.json')).writeAsStringSync(
           const JsonEncoder.withIndent('  ').convert(sidecar),
         );

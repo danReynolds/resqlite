@@ -17,9 +17,10 @@ Map<String, Object?> buildReleaseRunArtifact({
   final memory = extractMemoryMedians(markdown);
   final sqliteDiagnostics = extractSqliteDiagnosticsMedians(markdown);
   final streamingColumn = extractStreamingColumnMedians(markdown);
+  final benchmarkSummary = _benchmarkSummaryJson(parseBenchmarkSections(markdown));
 
   return {
-    'schemaVersion': 2,
+    'schemaVersion': 3,
     'kind': 'release-benchmark-run',
     'generatedAt': generatedAt ?? DateTime.now().toIso8601String(),
     'label': label,
@@ -35,6 +36,7 @@ Map<String, Object?> buildReleaseRunArtifact({
     if (streamingColumn.isNotEmpty)
       'streamingColumnMetrics': _streamingColumnJson(streamingColumn),
     if (aggregates.isNotEmpty) 'repeatAggregates': _aggregatesJson(aggregates),
+    if (benchmarkSummary.isNotEmpty) 'benchmarkSummary': benchmarkSummary,
   };
 }
 
@@ -68,6 +70,50 @@ Map<String, Object?>? artifactSqliteDiagnosticsMetrics(
 }
 
 List<Map<String, Object?>>? artifactBenchmarks(Map<String, Object?> artifact) {
+  final summary = artifact['benchmarkSummary'];
+  if (summary is Map) {
+    final sectionsValue = summary['sections'];
+    if (sectionsValue is List) {
+      final sections = <Map<String, Object?>>[];
+      for (final section in sectionsValue) {
+        if (section is! Map) continue;
+        final title = section['title']?.toString();
+        if (title == null || title.isEmpty) continue;
+        final subtitle = section['subtitle']?.toString();
+        final entriesValue = section['entries'];
+        final entries = <Map<String, Object?>>[];
+        if (entriesValue is List) {
+          for (final rawEntry in entriesValue) {
+            if (rawEntry is List && rawEntry.length == 2) {
+              final library = rawEntry[0]?.toString();
+              final values = rawEntry[1];
+              if (library == null || values is! List) continue;
+              entries.add({
+                'library': library,
+                'values': [
+                  for (final value in values)
+                    if (value == null)
+                      null
+                    else
+                      (value as num).toDouble(),
+                ],
+              });
+            }
+          }
+        }
+        sections.add({
+          'key': subtitle != null && subtitle.isNotEmpty
+              ? '$title / $subtitle'
+              : title,
+          'title': title,
+          'subtitle': subtitle,
+          'entries': entries,
+        });
+      }
+      return sections;
+    }
+  }
+
   final value = artifact['benchmarks'];
   if (value is! List) return null;
   return [
@@ -160,6 +206,23 @@ Map<String, Object?> _aggregatesJson(Map<String, AggregateStats> aggregates) {
         'stability': entry.value.stability,
         'comparisonThresholdPct': entry.value.comparisonThresholdPct,
       },
+  };
+}
+
+Map<String, Object?> _benchmarkSummaryJson(List<Map<String, Object?>> sections) {
+  return {
+    'sections': [
+      for (final section in sections)
+        {
+          'title': section['title'],
+          if (section['subtitle'] case final subtitle?)
+            if (subtitle.toString().isNotEmpty) 'subtitle': subtitle,
+          'entries': [
+            for (final entry in (section['entries'] as List<Map<String, Object?>>))
+              [entry['library'], entry['values']],
+          ],
+        },
+    ],
   };
 }
 
