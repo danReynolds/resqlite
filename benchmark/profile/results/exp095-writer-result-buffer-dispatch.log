@@ -1,0 +1,30 @@
+Running build hooks...Running build hooks...
+=== Workload Z: Noop Baseline (SELECT 1) ===
+20000 samples collected.
+  select         count=10000 min=2μs p50=6μs p90=20μs p99=80μs max=3010μs
+  execute        count=10000 min=6μs p50=10μs p90=23μs p99=102μs max=2146μs
+  → reader dispatch floor ≈ 6 μs / round-trip
+  → writer dispatch floor ≈ 10 μs / round-trip
+
+=== Workload A: Single Inserts (100 sequential) ===
+10000 samples collected.
+  execute        count=10000 min=11μs p50=15μs p90=20μs p99=52μs max=1780μs
+
+=== Workload B: Point Queries (500 hot-loop) ===
+50000 samples collected.
+  select         count=50000 min=4μs p50=7μs p90=10μs p99=28μs max=670μs
+
+=== Workload C: Merge Rounds (10 × 100 rows) ===
+1000 samples collected.
+  executeBatch   count=1000 min=88μs p50=106μs p90=121μs p99=252μs max=717μs
+
+Results written to: benchmark/profile/results/dispatch_budget_2026-04-23T19-11-58.json
+
+For the cross-isolate breakdown, rerun under
+  dart --observe --profile-period=100 \
+    -DRESQLITE_PROFILE=true benchmark/profile/dispatch_budget.dart
+and capture the timeline in DevTools Performance tab. Look for
+`writer.handle.*` and `reader.handle.*` spans.
+
+To diff this against another run:
+  dart run benchmark/profile/diff.dart <baseline.json> benchmark/profile/results/dispatch_budget_2026-04-23T19-11-58.json
