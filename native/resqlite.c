@@ -98,6 +98,22 @@ typedef struct {
     int param_count;
     char* read_tables[RESQLITE_MAX_READ_TABLES];
     int read_table_count;
+    // Precomputed JSON per-column prefixes for resqlite_query_bytes:
+    // `json_prefix_buf` holds the concatenated, escape-scanned, quoted,
+    // colon-terminated column-name bytes for every output column
+    // (e.g. for a 3-col query (id,name,price) the buffer contains
+    //   "id":"name":"price":
+    // ). `json_prefix_offsets` has `col_count + 1` entries, with a
+    // sentinel at the end, so prefix i lives in
+    //   [json_prefix_buf + offsets[i], json_prefix_buf + offsets[i+1])
+    // Written once per stmt (lazily on first resqlite_query_bytes call),
+    // reused on every subsequent row and every subsequent query
+    // execution. Skips the SWAR+LUT json_write_string call on
+    // invariant column names and collapses 3-4 buf_write calls per
+    // column per row into a single buf_write.
+    char* json_prefix_buf;
+    int* json_prefix_offsets;
+    int json_prefix_col_count;
 } resqlite_cached_stmt;
 
 typedef struct {
@@ -143,6 +159,8 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
         for (int i = 0; i < c->entries[0].read_table_count; i++) {
             free(c->entries[0].read_tables[i]);
         }
+        free(c->entries[0].json_prefix_buf);
+        free(c->entries[0].json_prefix_offsets);
         memmove(&c->entries[0], &c->entries[1],
                 (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
         c->count = STMT_CACHE_MAX - 1;
@@ -158,6 +176,9 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
     c->entries[c->count].param_count = sqlite3_bind_parameter_count(stmt);
     c->entries[c->count].read_table_count = 0;
     memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
+    c->entries[c->count].json_prefix_buf = NULL;
+    c->entries[c->count].json_prefix_offsets = NULL;
+    c->entries[c->count].json_prefix_col_count = 0;
     c->count++;
     return &c->entries[c->count - 1];
 }
@@ -169,6 +190,8 @@ static void stmt_cache_clear(resqlite_stmt_cache* c) {
         for (int j = 0; j < c->entries[i].read_table_count; j++) {
             free(c->entries[i].read_tables[j]);
         }
+        free(c->entries[i].json_prefix_buf);
+        free(c->entries[i].json_prefix_offsets);
     }
     c->count = 0;
 }
@@ -1299,37 +1322,91 @@ __attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, co
     return buf_write_char(b, '"');
 }
 
+// Build cached JSON per-column prefixes on the cached stmt entry
+// (experiment 098). Populates `entry->json_prefix_buf` +
+// `entry->json_prefix_offsets` with the pre-escaped, quoted,
+// colon-terminated column name for every output column. One flat
+// buffer + one int array (col_count + 1 offsets, last is the total
+// length sentinel) means the per-row emit loop can replace a
+// json_write_string call per column per row with a single buf_write
+// of the cached bytes.
+//
+// On allocation failure or a json_write_string failure, frees any
+// partial state and returns SQLITE_NOMEM — the caller falls back to
+// the uncached per-row path.
+static int stmt_build_json_col_prefixes(resqlite_cached_stmt* entry,
+                                         int col_count) {
+    resqlite_buf tmp;
+    if (buf_init(&tmp, 128) != 0) return SQLITE_NOMEM;
+
+    int* offsets = (int*)malloc((size_t)(col_count + 1) * sizeof(int));
+    if (!offsets) {
+        free(tmp.data);
+        return SQLITE_NOMEM;
+    }
+
+    for (int i = 0; i < col_count; i++) {
+        offsets[i] = tmp.len;
+        const char* name = sqlite3_column_name(entry->stmt, i);
+        if (!name) {
+            free(tmp.data);
+            free(offsets);
+            return SQLITE_NOMEM;
+        }
+        int name_len = (int)strlen(name);
+        if (json_write_string(&tmp, name, name_len) != 0 ||
+            buf_write_char(&tmp, ':') != 0) {
+            free(tmp.data);
+            free(offsets);
+            return SQLITE_NOMEM;
+        }
+    }
+    offsets[col_count] = tmp.len;
+
+    entry->json_prefix_buf = (char*)tmp.data;
+    entry->json_prefix_offsets = offsets;
+    entry->json_prefix_col_count = col_count;
+    return SQLITE_OK;
+}
+
 // Macro to bail out of write_json_to_buf on OOM without leaking.
 #define JSON_CHECK(expr) do { if ((expr) != 0) { rc = SQLITE_NOMEM; goto cleanup; } } while (0)
 
-__attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
+__attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt,
+                                                   resqlite_cached_stmt* entry,
+                                                   resqlite_buf* b) {
     int col_count = sqlite3_column_count(stmt);
-
-    // Stack-allocate for typical column counts (<=64), heap for larger.
-    const char* _col_names_stack[64];
-    int _col_name_lens_stack[64];
-    const char** col_names = (col_count <= 64) ? _col_names_stack : NULL;
-    int* col_name_lens = (col_count <= 64) ? _col_name_lens_stack : NULL;
-    int col_names_init = 0;
     int row_index = 0;
     int rc;
 
+    // Per-stmt JSON column prefix cache (experiment 098). Built lazily
+    // on the first query that actually emits rows — we only pay the
+    // build cost when we know we'll amortize it over the emit loop.
+    // If the cached col_count disagrees with the live stmt (e.g. a
+    // PRAGMA that changes schema between executions), rebuild.
+    const char* json_prefix_buf = entry->json_prefix_buf;
+    const int* json_prefix_offsets = entry->json_prefix_offsets;
+    int prefixes_ready =
+        (json_prefix_buf != NULL) &&
+        (entry->json_prefix_col_count == col_count);
+
     JSON_CHECK(buf_write_char(b, '['));
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        if (!col_names_init) {
-            if (col_count > 64) {
-                col_names = (const char**)malloc(col_count * sizeof(const char*));
-                col_name_lens = (int*)malloc(col_count * sizeof(int));
-                if (!col_names || !col_name_lens) {
-                    rc = SQLITE_NOMEM;
-                    goto cleanup;
-                }
+        if (!prefixes_ready) {
+            // Drop any stale cache from a prior col_count.
+            free(entry->json_prefix_buf);
+            free(entry->json_prefix_offsets);
+            entry->json_prefix_buf = NULL;
+            entry->json_prefix_offsets = NULL;
+            entry->json_prefix_col_count = 0;
+            int build_rc = stmt_build_json_col_prefixes(entry, col_count);
+            if (build_rc != SQLITE_OK) {
+                rc = build_rc;
+                goto cleanup;
             }
-            col_names_init = 1;
-            for (int i = 0; i < col_count; i++) {
-                col_names[i] = sqlite3_column_name(stmt, i);
-                col_name_lens[i] = (int)strlen(col_names[i]);
-            }
+            json_prefix_buf = entry->json_prefix_buf;
+            json_prefix_offsets = entry->json_prefix_offsets;
+            prefixes_ready = 1;
         }
 
         if (row_index > 0) JSON_CHECK(buf_write_char(b, ','));
@@ -1338,8 +1415,9 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
         for (int i = 0; i < col_count; i++) {
             if (i > 0) JSON_CHECK(buf_write_char(b, ','));
 
-            JSON_CHECK(json_write_string(b, col_names[i], col_name_lens[i]));
-            JSON_CHECK(buf_write_char(b, ':'));
+            int pfx_off = json_prefix_offsets[i];
+            int pfx_len = json_prefix_offsets[i + 1] - pfx_off;
+            JSON_CHECK(buf_write(b, json_prefix_buf + pfx_off, pfx_len));
 
             int type = sqlite3_column_type(stmt, i);
             switch (type) {
@@ -1390,10 +1468,6 @@ __attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_b
 
 cleanup:
     sqlite3_reset(stmt);
-    if (col_count > 64) {
-        free(col_names);
-        free(col_name_lens);
-    }
 
     if (rc == SQLITE_NOMEM) return rc;
     if (rc != SQLITE_DONE) return rc;
@@ -1445,7 +1519,7 @@ int resqlite_query_bytes(
     // Use persistent reader buffer — reset, no malloc/free per query.
     reader->json_buf.len = 0;
 
-    rc = write_json_to_buf(stmt, &reader->json_buf);
+    rc = write_json_to_buf(stmt, entry, &reader->json_buf);
 
     if (rc != SQLITE_OK) {
         *out_buf = NULL;
