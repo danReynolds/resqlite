@@ -299,11 +299,9 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
           byteEstimate += 8;
-          break;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
           byteEstimate += 8;
-          break;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
@@ -316,7 +314,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               textLen,
             );
           }
-          break;
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
@@ -328,10 +325,8 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             );
           }
-          break;
         default:
           values[writeIdx++] = null;
-          break;
       }
     }
     rc = resqliteStepRow(stmt, colCount, buf);
@@ -376,11 +371,9 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
           byteEstimate += 8;
-          break;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
           byteEstimate += 8;
-          break;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
@@ -393,7 +386,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               textLen,
             );
           }
-          break;
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
@@ -405,10 +397,8 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             );
           }
-          break;
         default:
           values[writeIdx++] = null;
-          break;
       }
     }
     rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
