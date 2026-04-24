@@ -13,6 +13,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'exceptions.dart';
 import 'row.dart';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,18 @@ external int resqliteQueryHash(
   ffi.Pointer<ffi.Int> outRowCount,
 );
 
+@ffi.Native<ffi.Pointer<ffi.Void> Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'sqlite3_db_handle',
+  isLeaf: true,
+)
+external ffi.Pointer<ffi.Void> sqlite3DbHandle(ffi.Pointer<ffi.Void> stmt);
+
+@ffi.Native<ffi.Pointer<Utf8> Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'sqlite3_errmsg',
+  isLeaf: true,
+)
+external ffi.Pointer<Utf8> sqlite3Errmsg(ffi.Pointer<ffi.Void> db);
+
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'strlen',
   isLeaf: true,
@@ -89,6 +102,7 @@ external int cStrlen(ffi.Pointer<ffi.Void> s);
 // ---------------------------------------------------------------------------
 
 const int sqliteRow = 100;
+const int sqliteDone = 101;
 const int sqliteInteger = 1;
 const int sqliteFloat = 2;
 const int sqliteText = 3;
@@ -167,6 +181,14 @@ final ffi.Pointer<ffi.Uint64> initialHashSlot = calloc<ffi.Uint64>(1);
 int _finishInitialHash(int hash, int rowCount) {
   if (rowCount == 0) return 0;
   return ((hash ^ rowCount) * _fnvPrime) & _fnvMask;
+}
+
+Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
+  final db = sqlite3DbHandle(stmt);
+  final message = db == ffi.nullptr
+      ? 'sqlite3_step failed with code $rc'
+      : sqlite3Errmsg(db).toDartString();
+  throw ResqliteQueryException(message, sql: sql, sqliteCode: rc);
 }
 
 /// Per-worker schema cache with LRU eviction. Column names for the same SQL
@@ -262,7 +284,8 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   var rowCount = 0;
   var byteEstimate = 0;
 
-  while (resqliteStepRow(stmt, colCount, buf) == sqliteRow) {
+  var rc = resqliteStepRow(stmt, colCount, buf);
+  while (rc == sqliteRow) {
     rowCount++;
     if (writeIdx + colCount > values.length) {
       values.length = values.length * 2;
@@ -276,9 +299,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
           byteEstimate += 8;
+          break;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
           byteEstimate += 8;
+          break;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
@@ -291,6 +316,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               textLen,
             );
           }
+          break;
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
@@ -302,11 +328,15 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             );
           }
+          break;
         default:
           values[writeIdx++] = null;
+          break;
       }
     }
+    rc = resqliteStepRow(stmt, colCount, buf);
   }
+  if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
   return RawQueryResult(values, schema, rowCount, byteEstimate);
@@ -331,8 +361,8 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   var byteEstimate = 0;
   initialHashSlot.value = _fnvOffsetBasis;
 
-  while (resqliteStepRowHash(stmt, colCount, buf, initialHashSlot) ==
-      sqliteRow) {
+  var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
+  while (rc == sqliteRow) {
     rowCount++;
     if (writeIdx + colCount > values.length) {
       values.length = values.length * 2;
@@ -346,9 +376,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
           byteEstimate += 8;
+          break;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
           byteEstimate += 8;
+          break;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
@@ -361,6 +393,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               textLen,
             );
           }
+          break;
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
@@ -372,11 +405,15 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             );
           }
+          break;
         default:
           values[writeIdx++] = null;
+          break;
       }
     }
+    rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
   }
+  if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
   final raw = RawQueryResult(values, schema, rowCount, byteEstimate);
