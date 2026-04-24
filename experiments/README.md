@@ -110,6 +110,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [094](094-dirty-read-string-reuse.md) | Dirty/read table string reuse | Focused dispatch was effectively flat and the full suite produced no wins; native branch/lifetime complexity is not justified |
 | [095](095-writer-result-buffer.md) | Persistent writer result buffer | The removable 16-byte calloc/free pair did not produce reliable write-path wins |
 | [096](096-direct-batch-param-encoding.md) | Direct batch parameter encoding | Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code |
+| [098](098-json-col-prefix-cache.md) | Per-stmt JSON column-prefix cache | Structurally sound but benchmark-invisible — SWAR already makes short column-name writes near-free and selectBytes is memcpy-bound. Same class as exp 059/093 |
 
 ## Conventions
 
