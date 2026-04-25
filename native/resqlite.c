@@ -658,6 +658,34 @@ int resqlite_tx_rollback(resqlite_db* db) {
     return rc;
 }
 
+static int run_depth_tx_sql(resqlite_db* db, const char* prefix, int depth) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire) ||
+        depth < 0) {
+        return SQLITE_MISUSE;
+    }
+
+    char sql[48];
+    int n = snprintf(sql, sizeof(sql), "%s s%d", prefix, depth);
+    if (n <= 0 || n >= (int)sizeof(sql)) return SQLITE_MISUSE;
+
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+int resqlite_tx_savepoint(resqlite_db* db, int depth) {
+    return run_depth_tx_sql(db, "SAVEPOINT", depth);
+}
+
+int resqlite_tx_release(resqlite_db* db, int depth) {
+    return run_depth_tx_sql(db, "RELEASE", depth);
+}
+
+int resqlite_tx_rollback_to(resqlite_db* db, int depth) {
+    return run_depth_tx_sql(db, "ROLLBACK TO", depth);
+}
+
 // Returns the cached entry (which carries both the stmt pointer and
 // the pre-computed param_count). Callers that only need the stmt read
 // `entry->stmt`; bind_params callers pass `entry->param_count` as the

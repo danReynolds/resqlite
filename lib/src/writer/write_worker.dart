@@ -121,9 +121,7 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
 /// Passed to per-request handlers so each handler is a small, self-contained
 /// function that can be reasoned about in isolation.
 final class _WriterState {
-  _WriterState({
-    required this.dbHandle,
-  });
+  _WriterState({required this.dbHandle});
 
   /// Native SQLite connection handle. Shared with the main isolate via
   /// `dbHandle.address` — the writer isolate owns all access.
@@ -281,18 +279,13 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
       );
     }
   } else {
-    final sp = 'SAVEPOINT s${state.txDepth}'.toNativeUtf8();
-    try {
-      final rc = resqliteExec(state.dbHandle, sp);
-      if (rc != 0) {
-        throw ResqliteTransactionException(
-          resqliteErrmsg(state.dbHandle).toDartString(),
-          operation: 'savepoint',
-          sqliteCode: rc,
-        );
-      }
-    } finally {
-      calloc.free(sp);
+    final rc = resqliteTxSavepoint(state.dbHandle, state.txDepth);
+    if (rc != 0) {
+      throw ResqliteTransactionException(
+        resqliteErrmsg(state.dbHandle).toDartString(),
+        operation: 'savepoint',
+        sqliteCode: rc,
+      );
     }
   }
   state.txDepth++;
@@ -327,9 +320,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
   } else {
-    final sp = 'RELEASE s$newDepth'.toNativeUtf8();
-    final rc = resqliteExec(state.dbHandle, sp);
-    calloc.free(sp);
+    final rc = resqliteTxRelease(state.dbHandle, newDepth);
     if (rc != 0) {
       final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
       // RELEASE failed — the savepoint is still live in SQLite.
@@ -348,12 +339,8 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // error and can make its recovery decision at the enclosing scope.
       // Errors from the cleanup itself are swallowed — we are already
       // returning an error and cannot surface two.
-      final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
-      final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
-      resqliteExec(state.dbHandle, rollbackSp);
-      resqliteExec(state.dbHandle, releaseSp);
-      calloc.free(rollbackSp);
-      calloc.free(releaseSp);
+      resqliteTxRollbackTo(state.dbHandle, newDepth);
+      resqliteTxRelease(state.dbHandle, newDepth);
       state.txDepth = newDepth;
       throw ResqliteTransactionException(
         errMsg,
@@ -390,12 +377,8 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   } else {
     // ROLLBACK TO undoes changes since the savepoint; RELEASE then
     // removes the savepoint from SQLite's stack.
-    final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
-    final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
-    final rc1 = resqliteExec(state.dbHandle, rollbackSp);
-    final rc2 = resqliteExec(state.dbHandle, releaseSp);
-    calloc.free(rollbackSp);
-    calloc.free(releaseSp);
+    final rc1 = resqliteTxRollbackTo(state.dbHandle, newDepth);
+    final rc2 = resqliteTxRelease(state.dbHandle, newDepth);
     state.txDepth = newDepth;
     if (rc1 != 0) {
       throw ResqliteTransactionException(

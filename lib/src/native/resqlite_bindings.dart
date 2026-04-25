@@ -61,6 +61,24 @@ external int resqliteTxCommit(ffi.Pointer<ffi.Void> db);
 )
 external int resqliteTxRollback(ffi.Pointer<ffi.Void> db);
 
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
+  symbol: 'resqlite_tx_savepoint',
+  isLeaf: true,
+)
+external int resqliteTxSavepoint(ffi.Pointer<ffi.Void> db, int depth);
+
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
+  symbol: 'resqlite_tx_release',
+  isLeaf: true,
+)
+external int resqliteTxRelease(ffi.Pointer<ffi.Void> db, int depth);
+
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
+  symbol: 'resqlite_tx_rollback_to',
+  isLeaf: true,
+)
+external int resqliteTxRollbackTo(ffi.Pointer<ffi.Void> db, int depth);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,

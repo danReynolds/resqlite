@@ -67,6 +67,9 @@ int resqlite_exec(resqlite_db* db, const char* sql);
 int resqlite_tx_begin_immediate(resqlite_db* db);
 int resqlite_tx_commit(resqlite_db* db);
 int resqlite_tx_rollback(resqlite_db* db);
+int resqlite_tx_savepoint(resqlite_db* db, int depth);
+int resqlite_tx_release(resqlite_db* db, int depth);
+int resqlite_tx_rollback_to(resqlite_db* db, int depth);
 
 // Execute a write statement. Returns result info.
 // Supports both parameterized (param_count > 0) and unparameterized
