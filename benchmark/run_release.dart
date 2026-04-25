@@ -33,6 +33,7 @@ import 'suites/feed_paging.dart';
 import 'suites/high_cardinality_fanout.dart';
 import 'suites/keyed_pk_subscriptions.dart';
 import 'suites/large_working_set.dart';
+import 'suites/many_streams_writer_throughput.dart';
 import 'suites/memory.dart';
 import 'suites/parameterized.dart';
 import 'suites/point_query.dart';
@@ -361,11 +362,14 @@ Future<String> _runSuiteOnce({required bool includeSlow}) async {
   // multiple minutes each. Register here so they append to the
   // standard suite output when enabled.
   if (includeSlow) {
-    print('[slow 1/2] Sync Burst (A7)...');
+    print('[slow 1/3] Sync Burst (A7)...');
     markdown.write(await runSyncBurstBenchmark());
 
-    print('[slow 2/2] Large Working Set (A9)...');
+    print('[slow 2/3] Large Working Set (A9)...');
     markdown.write(await runLargeWorkingSetBenchmark());
+
+    print('[slow 3/3] Many-Streams Writer Throughput (A11c)...');
+    markdown.write(await runManyStreamsWriterThroughputBenchmark());
   }
 
   return markdown.toString();
@@ -445,7 +449,8 @@ void _printUsageAndExit() {
     '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md',
   );
   print('  --include-slow       Also run multi-minute slow workloads');
-  print('                       (sync burst, 1GB working set)');
+  print('                       (sync burst, 1GB working set,');
+  print('                       many-streams writer throughput)');
   exit(0);
 }
 
