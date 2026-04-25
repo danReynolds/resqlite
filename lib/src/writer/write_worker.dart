@@ -279,7 +279,11 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
       );
     }
   } else {
-    final rc = resqliteTxSavepoint(state.dbHandle, state.txDepth);
+    final rc = resqliteTxDepthControl(
+      state.dbHandle,
+      resqliteTxSavepoint,
+      state.txDepth,
+    );
     if (rc != 0) {
       throw ResqliteTransactionException(
         resqliteErrmsg(state.dbHandle).toDartString(),
@@ -320,7 +324,11 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     msg.replyPort.send(BatchResponse(getDirtyTables(state.dbHandle)));
   } else {
-    final rc = resqliteTxRelease(state.dbHandle, newDepth);
+    final rc = resqliteTxDepthControl(
+      state.dbHandle,
+      resqliteTxRelease,
+      newDepth,
+    );
     if (rc != 0) {
       final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
       // RELEASE failed — the savepoint is still live in SQLite.
@@ -339,8 +347,8 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // error and can make its recovery decision at the enclosing scope.
       // Errors from the cleanup itself are swallowed — we are already
       // returning an error and cannot surface two.
-      resqliteTxRollbackTo(state.dbHandle, newDepth);
-      resqliteTxRelease(state.dbHandle, newDepth);
+      resqliteTxDepthControl(state.dbHandle, resqliteTxRollbackTo, newDepth);
+      resqliteTxDepthControl(state.dbHandle, resqliteTxRelease, newDepth);
       state.txDepth = newDepth;
       throw ResqliteTransactionException(
         errMsg,
@@ -377,8 +385,16 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   } else {
     // ROLLBACK TO undoes changes since the savepoint; RELEASE then
     // removes the savepoint from SQLite's stack.
-    final rc1 = resqliteTxRollbackTo(state.dbHandle, newDepth);
-    final rc2 = resqliteTxRelease(state.dbHandle, newDepth);
+    final rc1 = resqliteTxDepthControl(
+      state.dbHandle,
+      resqliteTxRollbackTo,
+      newDepth,
+    );
+    final rc2 = resqliteTxDepthControl(
+      state.dbHandle,
+      resqliteTxRelease,
+      newDepth,
+    );
     state.txDepth = newDepth;
     if (rc1 != 0) {
       throw ResqliteTransactionException(

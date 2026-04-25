@@ -658,10 +658,25 @@ int resqlite_tx_rollback(resqlite_db* db) {
     return rc;
 }
 
-static int run_depth_tx_sql(resqlite_db* db, const char* prefix, int depth) {
+int resqlite_tx_depth_control(resqlite_db* db, int op, int depth) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire) ||
         depth < 0) {
         return SQLITE_MISUSE;
+    }
+
+    const char* prefix = NULL;
+    switch (op) {
+        case RESQLITE_TX_SAVEPOINT:
+            prefix = "SAVEPOINT";
+            break;
+        case RESQLITE_TX_RELEASE:
+            prefix = "RELEASE";
+            break;
+        case RESQLITE_TX_ROLLBACK_TO:
+            prefix = "ROLLBACK TO";
+            break;
+        default:
+            return SQLITE_MISUSE;
     }
 
     char sql[48];
@@ -672,18 +687,6 @@ static int run_depth_tx_sql(resqlite_db* db, const char* prefix, int depth) {
     int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
-}
-
-int resqlite_tx_savepoint(resqlite_db* db, int depth) {
-    return run_depth_tx_sql(db, "SAVEPOINT", depth);
-}
-
-int resqlite_tx_release(resqlite_db* db, int depth) {
-    return run_depth_tx_sql(db, "RELEASE", depth);
-}
-
-int resqlite_tx_rollback_to(resqlite_db* db, int depth) {
-    return run_depth_tx_sql(db, "ROLLBACK TO", depth);
 }
 
 // Returns the cached entry (which carries both the stmt pointer and
