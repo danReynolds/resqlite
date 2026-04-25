@@ -62,6 +62,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | # | Experiment | Why Rejected |
 |---|---|---|
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |
+| [105](105-reader-pool-sizing.md) | Raise reader pool worker cap (4→8) | Regressed A11c writer throughput by ~31% under N=50 stream fan-out; the profile's reader-pool serialization bottleneck was actually throttling completion-side microtask churn. Cap=4 is correctly tuned. |
 | [100](100-bounded-stream-requery-scheduler.md) | Bounded stream re-query scheduler | Did not improve unrelated reads during fan-out and regressed high-cardinality stream fan-out by 103% |
 | [025](025-pragma-optimize.md) | `PRAGMA optimize` | Right idea in principle, but no compelling or reliable benchmark win in the current suite |
 | [026](026-db-status-probe.md) | `sqlite3_db_status()` probe | Near-perfect cache hit rates and zero spill mean a page-cache experiment is not justified |
