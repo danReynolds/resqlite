@@ -52,6 +52,7 @@ merged into the codebase.
 | # | Experiment | Impact | PR |
 |---|---|---|---|
 | [083](083-stream-rerun-pre-dispatch-queue.md) | Stream rerun pre-dispatch queue | Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission | [#25](https://github.com/danReynolds/resqlite/pull/25) |
+| [097](097-one-pass-initial-stream-hash.md) | One-pass initial stream decode and hash | 14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay |  |
 
 ## Rejected
 
@@ -107,6 +108,9 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [090](090-sqlite3mc-bump-audit.md) | sqlite3mc dependency bump audit | No bump needed — we are already on the newest stable sqlite3mc (2.3.2 / SQLite 3.51.3, 37 days old). The only newer target (3.53.0) is a 12-day-old .0 release excluded by our known-regressions policy, and its changelog shows no hot-path wins. Revisit when 3.53.2+ ships |
 | [092](092-wal-checkpoint-noop.md) | `wal_checkpoint=NOOP` probe in periodic checkpointer | Premise invalid — exp-029 is hook-gated on `pages_in_wal`, not timer-gated. NOOP exists to report the frame counter the wal-hook already receives; adding NOOP would be a strictly additive header read with no empty-tick cost to amortize |
 | [093](093-alias-cache-entry-read-tables.md) | Alias cache entry's read tables instead of copying | Below the measurement floor — savings ceiling was one `strdup`/`free` pair per cached table name per reader query (~hundreds of ns on a 1–3 table query). Work medians unchanged in 3-run A/B; tail regressions pattern-matched run-to-run variance (`noop` regressed as much as `point_query`, but `noop` never touches the changed path). Same class as exp 076 |
+| [094](094-dirty-read-string-reuse.md) | Dirty/read table string reuse | Focused dispatch was effectively flat and the full suite produced no wins; native branch/lifetime complexity is not justified |
+| [095](095-writer-result-buffer.md) | Persistent writer result buffer | The removable 16-byte calloc/free pair did not produce reliable write-path wins |
+| [096](096-direct-batch-param-encoding.md) | Direct batch parameter encoding | Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code |
 
 ## Conventions
 

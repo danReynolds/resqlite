@@ -2,6 +2,7 @@
 #define RESQLITE_H
 
 #include "../third_party/sqlite3mc/sqlite3.h"
+#include <stdint.h>
 
 // ---------------------------------------------------------------------------
 // Connection pool with per-connection statement caches
@@ -192,6 +193,13 @@ int resqlite_step_row(
     sqlite3_stmt* stmt,
     int col_count,
     resqlite_cell* cells
+);
+
+int resqlite_step_row_hash(
+    sqlite3_stmt* stmt,
+    int col_count,
+    resqlite_cell* cells,
+    uint64_t* hash
 );
 
 // Step-to-completion + hash all cells. Resets the statement at both
