@@ -319,6 +319,15 @@ struct resqlite_db {
     resqlite_stmt_cache writer_cache;
     sqlite3_mutex* writer_mutex;
 
+    // Persistently prepared transaction-control statements (experiment 101).
+    // The writer fires these on every transaction boundary; preparing them
+    // once eliminates the prepare+step+finalize cost of `sqlite3_exec` for
+    // each call. Held outside writer_cache so they never compete with user
+    // statements for cache slots.
+    sqlite3_stmt* tx_begin_stmt;
+    sqlite3_stmt* tx_commit_stmt;
+    sqlite3_stmt* tx_rollback_stmt;
+
     // Dirty tables accumulated by the preupdate hook.
     resqlite_dirty_set dirty_tables;
     int writer_checkpoint_running;
@@ -509,6 +518,17 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
+    // Pre-prepare transaction-control stmts (experiment 101). These are
+    // hot-path statements fired on every transaction boundary, so we
+    // prepare them once and re-use via sqlite3_reset + sqlite3_step
+    // instead of paying sqlite3_exec's prepare+step+finalize each call.
+    sqlite3_prepare_v3(writer, "BEGIN IMMEDIATE", -1,
+                       SQLITE_PREPARE_PERSISTENT, &db->tx_begin_stmt, NULL);
+    sqlite3_prepare_v3(writer, "COMMIT", -1,
+                       SQLITE_PREPARE_PERSISTENT, &db->tx_commit_stmt, NULL);
+    sqlite3_prepare_v3(writer, "ROLLBACK", -1,
+                       SQLITE_PREPARE_PERSISTENT, &db->tx_rollback_stmt, NULL);
+
     // Install preupdate hook on writer for dirty table tracking.
     sqlite3_preupdate_hook(writer, preupdate_hook, db);
     sqlite3_wal_hook(writer, writer_wal_hook, db);
@@ -560,6 +580,9 @@ void resqlite_close(resqlite_db* db) {
     // Close writer.
     sqlite3_mutex_enter(db->writer_mutex);
     stmt_cache_clear(&db->writer_cache);
+    if (db->tx_begin_stmt) sqlite3_finalize(db->tx_begin_stmt);
+    if (db->tx_commit_stmt) sqlite3_finalize(db->tx_commit_stmt);
+    if (db->tx_rollback_stmt) sqlite3_finalize(db->tx_rollback_stmt);
     dirty_set_free(&db->dirty_tables);
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
@@ -588,6 +611,49 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
     }
     sqlite3_mutex_enter(db->writer_mutex);
     int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+// Run one of the cached transaction-control statements on the writer
+// (experiment 101). Caller is responsible for any required mutex.
+// SQLite returns SQLITE_DONE on a successful no-result step; we
+// translate that to SQLITE_OK so callers can use a single == 0 check.
+static int run_cached_tx_stmt(sqlite3_stmt* stmt) {
+    if (!stmt) return SQLITE_MISUSE;
+    sqlite3_reset(stmt);
+    int rc = sqlite3_step(stmt);
+    sqlite3_reset(stmt);
+    if (rc == SQLITE_DONE || rc == SQLITE_ROW) return SQLITE_OK;
+    return rc;
+}
+
+int resqlite_tx_begin_immediate(resqlite_db* db) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = run_cached_tx_stmt(db->tx_begin_stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+int resqlite_tx_commit(resqlite_db* db) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = run_cached_tx_stmt(db->tx_commit_stmt);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+int resqlite_tx_rollback(resqlite_db* db) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+    int rc = run_cached_tx_stmt(db->tx_rollback_stmt);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
 }
@@ -761,8 +827,10 @@ int resqlite_run_batch(
     sqlite3_mutex_enter(db->writer_mutex);
 
     // BEGIN IMMEDIATE acquires the write lock upfront, avoiding the
-    // lock-upgrade path since we know we're writing.
-    int rc = sqlite3_exec(db->writer, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+    // lock-upgrade path since we know we're writing. The cached
+    // prepared stmt skips sqlite3_exec's per-call prepare+finalize
+    // (experiment 101).
+    int rc = run_cached_tx_stmt(db->tx_begin_stmt);
     if (rc != SQLITE_OK) {
         sqlite3_mutex_leave(db->writer_mutex);
         return rc;
@@ -770,9 +838,9 @@ int resqlite_run_batch(
 
     rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
     if (rc != SQLITE_OK) {
-        sqlite3_exec(db->writer, "ROLLBACK", NULL, NULL, NULL);
+        run_cached_tx_stmt(db->tx_rollback_stmt);
     } else {
-        rc = sqlite3_exec(db->writer, "COMMIT", NULL, NULL, NULL);
+        rc = run_cached_tx_stmt(db->tx_commit_stmt);
     }
 
     sqlite3_mutex_leave(db->writer_mutex);

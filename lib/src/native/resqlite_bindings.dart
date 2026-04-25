@@ -40,6 +40,27 @@ external ffi.Pointer<Utf8> resqliteErrmsg(ffi.Pointer<ffi.Void> db);
 )
 external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
+// Transaction-control fast path: pre-prepared BEGIN IMMEDIATE / COMMIT /
+// ROLLBACK stmts in C, run via sqlite3_reset + sqlite3_step instead of
+// sqlite3_exec's prepare+step+finalize per call (experiment 101).
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_tx_begin_immediate',
+  isLeaf: true,
+)
+external int resqliteTxBeginImmediate(ffi.Pointer<ffi.Void> db);
+
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_tx_commit',
+  isLeaf: true,
+)
+external int resqliteTxCommit(ffi.Pointer<ffi.Void> db);
+
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_tx_rollback',
+  isLeaf: true,
+)
+external int resqliteTxRollback(ffi.Pointer<ffi.Void> db);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,

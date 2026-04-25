@@ -57,6 +57,17 @@ typedef struct {
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 
+// Transaction-control fast path (experiment 101).
+//
+// These run pre-prepared `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` stmts
+// via sqlite3_reset + sqlite3_step, skipping sqlite3_exec's per-call
+// prepare+finalize. Each call takes the writer mutex for the duration
+// of the step, matching `resqlite_exec`'s locking discipline. Return
+// SQLITE_OK on success or an SQLite error code.
+int resqlite_tx_begin_immediate(resqlite_db* db);
+int resqlite_tx_commit(resqlite_db* db);
+int resqlite_tx_rollback(resqlite_db* db);
+
 // Execute a write statement. Returns result info.
 // Supports both parameterized (param_count > 0) and unparameterized
 // (param_count == 0) writes. For unparameterized calls, automatically

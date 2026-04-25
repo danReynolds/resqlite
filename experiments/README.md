@@ -43,6 +43,7 @@ Experiments that proved their value and were merged into the codebase.
 | [070](070-zero-row-change-shortcircuit.md) | Zero-row-change short-circuit + persistent dirty buffer | Removes per-write calloc/free pair and short-circuits empty dirty set to a const empty list |  |
 | [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 | [077](077-cheap-check-first-sweep.md) | Cheap-check-first sweep (four small wins) | **−13 % to −23 % on write benchmarks** from cached `sqlite3_bind_parameter_count`; pairs with three correctness-neutral fast-rejects on invalidation, hash, and subscription paths |  |
+| [101](101-tx-stmt-cache.md) | Cached BEGIN/COMMIT/ROLLBACK statements | **−13 % to −14 %** on Batched-Write-Inside-Transaction and Growing-Stream Invalidation by replacing `sqlite3_exec`'s per-call prepare+finalize with three persistently prepared transaction-control stmts |  |
 
 ## In Review
 
@@ -111,6 +112,8 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [094](094-dirty-read-string-reuse.md) | Dirty/read table string reuse | Focused dispatch was effectively flat and the full suite produced no wins; native branch/lifetime complexity is not justified |
 | [095](095-writer-result-buffer.md) | Persistent writer result buffer | The removable 16-byte calloc/free pair did not produce reliable write-path wins |
 | [096](096-direct-batch-param-encoding.md) | Direct batch parameter encoding | Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code |
+| [099](099-fnv-8byte-bytestream.md) | 8-byte-chunked FNV for byte-stream cells | Structurally sound (folds 8 bytes per multiply on the long-text hash path) but benchmark-invisible — current streaming workloads carry only short cells (≤ 3–8 bytes) that bypass the new main loop. Same class as exp 071. Revisit when a long-text streaming benchmark exists |
+| [102](102-savepoint-string-cache.md) | Cached SAVEPOINT/RELEASE/ROLLBACK TO strings on `_WriterState` | Theoretically removes per-nested-tx `toNativeUtf8` + `calloc.free` pair, but the benchmark suite has no nested-transaction workload — no directly attributable signal, only run-to-run drift on unrelated read paths. Pattern-matches exp 095. Revisit if a deeply-nested-tx benchmark exists |
 
 ## Conventions
 
