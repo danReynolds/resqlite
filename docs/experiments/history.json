@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-25T21:34:17.941141",
+  "generated": "2026-04-25T19:30:03.590173",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -12268,6 +12268,20 @@
         "timestamp": "2026-04-25T08:41:54",
         "source": "exact"
       }
+    },
+    {
+      "id": "103",
+      "title": "Native nested transaction depth control",
+      "date": "2026-04-25",
+      "status": "rejected",
+      "summary": "Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified",
+      "commit": null,
+      "archive": "archive/exp-103",
+      "problem": "Experiment 101 accepted cached prepared statements for the top-level\ntransaction controls:\n\n- `BEGIN IMMEDIATE`\n- `COMMIT`\n- `ROLLBACK`\n\nIt intentionally left nested transaction controls alone because their SQL is\ndepth-dependent:\n\n- `SAVEPOINT sN`\n- `RELEASE sN`\n- `ROLLBACK TO sN`\n\nExperiment 102 tried caching the Dart-side native strings for those savepoint\nstatements, but the standard benchmark suite had no nested-transaction workload,\nso there was no attributable signal.\n\nThis follow-up adds a focused nested-transaction benchmark and tests whether\nmoving depth-based transaction control into C is worth the complexity.",
+      "hypothesis": "The savepoint path pays fixed per-boundary costs in Dart:\n\n- string interpolation for `sN`\n- UTF-8 encoding\n- native allocation/free for the SQL string\n- generic `resqliteExec(...)` call path\n\nA C helper can build the SQL into a stack buffer and execute it directly:\n\n```c\nresqlite_tx_depth_control(db, RESQLITE_TX_SAVEPOINT, depth);\nresqlite_tx_depth_control(db, RESQLITE_TX_RELEASE, depth);\nresqlite_tx_depth_control(db, RESQLITE_TX_ROLLBACK_TO, depth);\n```\n\nThat should remove Dart allocation/encoding work while preserving the existing\nSQLite semantics.",
+      "approach": "Two passes were tested.\n\nFirst pass:\n\n- added three native functions:\n  - `resqlite_tx_savepoint(db, depth)`\n  - `resqlite_tx_release(db, depth)`\n  - `resqlite_tx_rollback_to(db, depth)`\n- each function used `snprintf(...)` into a stack buffer and then\n  `sqlite3_exec(...)`\n- replaced the nested branches in `_handleBegin`, `_handleCommit`, and\n  `_handleRollback`\n\nSecond pass:\n\n- collapsed the native surface to one generic helper:\n  - `resqlite_tx_depth_control(db, op, depth)`\n- added op constants instead of three Dart FFI bindings\n- added a manual SQL builder to avoid `snprintf(...)` overhead\n- broadened the focused benchmark to separate empty nesting overhead from\n  nested writes\n\nFocused benchmark:\n\n```bash\ndart run benchmark/experiments/nested_tx_control.dart \\\n  --repeats=15 \\\n  --...",
+      "results": "Validation:\n\n- `dart analyze native/resqlite.c native/resqlite.h lib/src/native/resqlite_bindings.dart lib/src/writer/write_worker.dart benchmark/experiments/nested_tx_control.dart`\n- `dart test test/transaction_test.dart`\n\nBoth passed in an external validation worktree with a fresh native build.\n\nThe second-pass `snprintf(...)` version had some encouraging intermediate\nresults:\n\n| Case | Baseline | Candidate | Result |\n|---|---:|---:|---:|\n| empty commit | 28.196 ms | 21.930 ms | 22.2% faster |\n| empty rollback | 36.974 ms | 31.082 ms | 15.9% faster |\n| write commit | 42.291 ms | 34.488 ms | 18.5% faster |\n| write rollback | 51.191 ms | 46.075 ms | 10.0% faster |\n\nBut larger-cycle and reversed-order runs weakened the signal:\n\n| Case | Baseline | Candidate | Result |\n|---|---:|---:|---:...",
+      "reasoning": "Rejected.\n\nThe first measurable signal came from a new focused nested-transaction benchmark,\nwhich was useful, but the optimization itself does not clear the bar.\n\nThe best-case result is a small savepoint-only improvement. Once the benchmark\nincludes realistic nested work, the effect drops into noise or regresses. The\nmanual SQL builder also made the native code more specialized without producing\na stable win.\n\nThe added complexity is not justified:\n\n- extra internal native API surface\n- duplicated transaction-control path\n- more C code around a niche nested-transaction workload\n- no expected impact on the standard release suite\n\nThe implementation is archived at `archive/exp-103` in case a future workload\nshows deeply nested transactions as a real bottleneck. For now, exp 101 remains\n..."
     }
   ],
   "tracked": [
