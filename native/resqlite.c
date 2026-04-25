@@ -658,6 +658,32 @@ int resqlite_tx_rollback(resqlite_db* db) {
     return rc;
 }
 
+static int write_depth_tx_sql(
+    char* sql, int cap, const char* prefix, int prefix_len, int depth
+) {
+    if (depth < 0 || prefix_len + 3 >= cap) return 0;
+
+    memcpy(sql, prefix, prefix_len);
+    int pos = prefix_len;
+    sql[pos++] = ' ';
+    sql[pos++] = 's';
+
+    char digits[10];
+    int digit_count = 0;
+    unsigned int value = (unsigned int)depth;
+    do {
+        digits[digit_count++] = (char)('0' + (value % 10));
+        value /= 10;
+    } while (value != 0 && digit_count < (int)sizeof(digits));
+
+    if (value != 0 || pos + digit_count >= cap) return 0;
+    while (digit_count > 0) {
+        sql[pos++] = digits[--digit_count];
+    }
+    sql[pos] = '\0';
+    return pos;
+}
+
 int resqlite_tx_depth_control(resqlite_db* db, int op, int depth) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire) ||
         depth < 0) {
@@ -665,23 +691,28 @@ int resqlite_tx_depth_control(resqlite_db* db, int op, int depth) {
     }
 
     const char* prefix = NULL;
+    int prefix_len = 0;
     switch (op) {
         case RESQLITE_TX_SAVEPOINT:
             prefix = "SAVEPOINT";
+            prefix_len = 9;
             break;
         case RESQLITE_TX_RELEASE:
             prefix = "RELEASE";
+            prefix_len = 7;
             break;
         case RESQLITE_TX_ROLLBACK_TO:
             prefix = "ROLLBACK TO";
+            prefix_len = 11;
             break;
         default:
             return SQLITE_MISUSE;
     }
 
     char sql[48];
-    int n = snprintf(sql, sizeof(sql), "%s s%d", prefix, depth);
-    if (n <= 0 || n >= (int)sizeof(sql)) return SQLITE_MISUSE;
+    if (write_depth_tx_sql(sql, (int)sizeof(sql), prefix, prefix_len, depth) <= 0) {
+        return SQLITE_MISUSE;
+    }
 
     sqlite3_mutex_enter(db->writer_mutex);
     int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
