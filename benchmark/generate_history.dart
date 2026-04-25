@@ -158,11 +158,18 @@ void _attachBenchmarkRunMappings(
   List<Map<String, Object?>> runs,
 ) {
   final claimedRunIndices = <int>{};
+  final skipRunMappingIds = <String>{};
+  for (final exp in experiments) {
+    if (exp.remove('_skipBenchmarkRunMapping') == true) {
+      skipRunMappingIds.add(exp['id'] as String);
+    }
+  }
 
   // First pass: exact explicit experiment-id matches in the run label,
   // e.g. experiment 088 -> run id "exp088-setlk-timeout".
   for (final exp in experiments) {
     final expNum = (exp['id'] as String).toLowerCase();
+    if (skipRunMappingIds.contains(expNum)) continue;
     final exactPatterns = ['exp$expNum', 'exp-$expNum'];
     int matchedIdx = -1;
     for (var idx = 0; idx < runs.length; idx++) {
@@ -186,6 +193,7 @@ void _attachBenchmarkRunMappings(
 
   final byDate = <String, List<Map<String, Object?>>>{};
   for (final exp in experiments) {
+    if (skipRunMappingIds.contains(exp['id'] as String)) continue;
     if (exp['benchmarkRun'] != null) continue;
     final date = exp['date'] as String? ?? '';
     if (date.isEmpty) continue;
@@ -350,6 +358,10 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})',
       ).firstMatch(content);
       date = dateMatch?.group(1);
+      final benchmarkRunMatch = RegExp(
+        r'\*\*Benchmark Run:\*\*\s*None\b',
+        caseSensitive: false,
+      ).firstMatch(content);
       final commitMatch = RegExp(
         r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]',
       ).firstMatch(content);
@@ -412,6 +424,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         'status': currentStatus,
         'summary': impact,
         'commit': commit,
+        if (benchmarkRunMatch != null) '_skipBenchmarkRunMapping': true,
         if (archive != null) 'archive': archive,
         'problem': problem,
         'hypothesis': hypothesis,
