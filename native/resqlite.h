@@ -194,13 +194,6 @@ int resqlite_step_row(
     resqlite_cell* cells
 );
 
-int resqlite_step_row_hash(
-    sqlite3_stmt* stmt,
-    int col_count,
-    resqlite_cell* cells,
-    unsigned long long* hash
-);
-
 // Step-to-completion + hash all cells. Resets the statement at both
 // ends, so the caller can invoke this on a freshly-bound stmt OR on
 // one that was just drained by decodeQuery — either way works.

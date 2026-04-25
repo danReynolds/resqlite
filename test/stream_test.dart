@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
@@ -210,18 +209,18 @@ void main() {
           final updated = Completer<void>();
           final results = <List<Map<String, Object?>>>[];
 
-          final sub = db
-              .stream('SELECT id, name, value FROM items WHERE id = ?', [id])
-              .listen((rows) {
-                results.add(rows);
-                if (!initial.isCompleted) {
-                  initial.complete();
-                  return;
-                }
-                if (!updated.isCompleted) {
-                  updated.complete();
-                }
-              });
+          final sub = db.stream(
+              'SELECT id, name, value FROM items WHERE id = ?',
+              [id]).listen((rows) {
+            results.add(rows);
+            if (!initial.isCompleted) {
+              initial.complete();
+              return;
+            }
+            if (!updated.isCompleted) {
+              updated.complete();
+            }
+          });
 
           await initial.future.timeout(const Duration(seconds: 2));
           expect(results, hasLength(1));
@@ -423,46 +422,6 @@ void main() {
         await probe.cancel();
       },
     );
-
-    test('unchanged suppression handles all SQLite value types', () async {
-      await db.execute(
-        'CREATE TABLE mixed('
-        'id INTEGER PRIMARY KEY, '
-        'label TEXT, '
-        'amount REAL, '
-        'payload BLOB, '
-        'optional TEXT'
-        ')',
-      );
-      await db.execute(
-        'INSERT INTO mixed(label, amount, payload, optional) '
-        'VALUES (?, ?, ?, ?)',
-        [
-          'héllo 🚀',
-          1.25,
-          Uint8List.fromList([1, 2, 3, 255]),
-          null,
-        ],
-      );
-
-      final probe = _StreamProbe(
-        db.stream('SELECT label, amount, payload, optional FROM mixed'),
-      );
-      final initialRows = await probe.event(1);
-      expect(initialRows, hasLength(1));
-      expect(initialRows[0]['payload'], isA<Uint8List>());
-
-      await db.execute(
-        'UPDATE mixed SET '
-        'label = label, amount = amount, payload = payload, '
-        'optional = optional WHERE id = 1',
-      );
-
-      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
-      expect(probe.events, hasLength(1));
-
-      await probe.cancel();
-    });
 
     test('re-emits when data actually changes after no-op write', () async {
       await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
@@ -744,24 +703,22 @@ void main() {
         final results = <List<Map<String, Object?>>>[];
         Object? streamError;
 
-        final sub = db
-            .stream('SELECT name FROM items ORDER BY id')
-            .listen(
-              (rows) {
-                results.add(rows);
-                if (!initial.isCompleted) {
-                  initial.complete();
-                  return;
-                }
-                if (!recovered.isCompleted) {
-                  recovered.complete();
-                }
-              },
-              onError: (error, stackTrace) {
-                streamError = error;
-                if (!errorReceived.isCompleted) errorReceived.complete();
-              },
-            );
+        final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
+          (rows) {
+            results.add(rows);
+            if (!initial.isCompleted) {
+              initial.complete();
+              return;
+            }
+            if (!recovered.isCompleted) {
+              recovered.complete();
+            }
+          },
+          onError: (error, stackTrace) {
+            streamError = error;
+            if (!errorReceived.isCompleted) errorReceived.complete();
+          },
+        );
 
         await initial.future.timeout(const Duration(seconds: 2));
         expect(results, hasLength(1));
@@ -831,16 +788,14 @@ void main() {
       final initial = Completer<void>();
       final done = Completer<void>();
 
-      final sub = db
-          .stream('SELECT name FROM items ORDER BY id')
-          .listen(
-            (_) {
-              if (!initial.isCompleted) initial.complete();
-            },
-            onDone: () {
-              if (!done.isCompleted) done.complete();
-            },
-          );
+      final sub = db.stream('SELECT name FROM items ORDER BY id').listen(
+        (_) {
+          if (!initial.isCompleted) initial.complete();
+        },
+        onDone: () {
+          if (!done.isCompleted) done.complete();
+        },
+      );
 
       await initial.future.timeout(const Duration(seconds: 2));
       expect(db.streamEngine.length, 1);

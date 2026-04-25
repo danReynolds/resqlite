@@ -1637,61 +1637,6 @@ long long resqlite_query_hash(
     return (long long)h;
 }
 
-__attribute__((hot)) int resqlite_step_row_hash(
-    sqlite3_stmt* stmt,
-    int col_count,
-    resqlite_cell* cells,
-    unsigned long long* hash
-) {
-    int rc = sqlite3_step(stmt);
-    if (__builtin_expect(rc != SQLITE_ROW, 0)) return rc;
-
-    uint64_t h = (uint64_t)(*hash);
-    for (int i = 0; i < col_count; i++) {
-        int type = sqlite3_column_type(stmt, i);
-        cells[i].type = type;
-        h = fnv_combine_u64(h, (uint64_t)type);
-        switch (type) {
-            case SQLITE_INTEGER: {
-                sqlite3_int64 v = sqlite3_column_int64(stmt, i);
-                cells[i].i = v;
-                h = fnv_combine_u64(h, (uint64_t)v);
-                break;
-            }
-            case SQLITE_FLOAT: {
-                double d = sqlite3_column_double(stmt, i);
-                uint64_t bits; memcpy(&bits, &d, 8);
-                cells[i].d = d;
-                h = fnv_combine_u64(h, bits);
-                break;
-            }
-            case SQLITE_TEXT: {
-                const unsigned char* p = sqlite3_column_text(stmt, i);
-                int len = sqlite3_column_bytes(stmt, i);
-                cells[i].p = p;
-                cells[i].len = len;
-                h = fnv_combine_u64(h, (uint64_t)len);
-                h = fnv_combine_bytes(h, p, len);
-                break;
-            }
-            case SQLITE_BLOB: {
-                const void* p = sqlite3_column_blob(stmt, i);
-                int len = sqlite3_column_bytes(stmt, i);
-                cells[i].p = p;
-                cells[i].len = len;
-                h = fnv_combine_u64(h, (uint64_t)len);
-                h = fnv_combine_bytes(h, p, len);
-                break;
-            }
-            default:
-                // SQLITE_NULL or unknown.
-                break;
-        }
-    }
-    *hash = (unsigned long long)h;
-    return SQLITE_ROW;
-}
-
 void resqlite_free(void* ptr) {
     free(ptr);
 }

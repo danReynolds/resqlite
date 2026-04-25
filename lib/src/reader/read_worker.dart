@@ -290,9 +290,12 @@ Uint8List executeQueryBytes(
   String sql,
   List<Object?> parameters,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
-  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
+  final raw = decodeQuery(stmt, sql);
+  // Pass -1 to opt out of the row-count short-circuit: on the
+  // initial query we don't have a baseline count to compare against.
+  final (hash, rowCount) = callQueryHash(stmt, -1);
   final readTables = getReadTables(dbHandle, readerId);
-  return (raw, readTables, hash, raw.rowCount);
+  return (raw, readTables, hash, rowCount);
 });
 
 /// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
