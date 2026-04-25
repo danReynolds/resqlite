@@ -319,6 +319,8 @@ List<Map<String, Object?>> _parseExperimentsReadme(
   for (final line in lines) {
     if (line.startsWith('## Accepted')) {
       currentStatus = 'accepted';
+    } else if (line.startsWith('## In Review')) {
+      currentStatus = 'in_review';
     } else if (line.startsWith('## Rejected')) {
       currentStatus = 'rejected';
     }
@@ -366,6 +368,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
       hypothesis = _extractSection(content, 'Hypothesis');
       // Try all known heading variants for implementation.
       final built =
+          _extractSection(content, 'Approach') ??
           _extractSection(content, 'What We Built') ??
           _extractSection(content, 'What We Tested') ??
           _extractSection(content, 'What Changed') ??
