@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-25T13:37:01.710590",
+  "generated": "2026-04-25T17:00:42.339386",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -11577,11 +11577,12 @@
       "status": "rejected",
       "summary": "Structurally sound (folds 8 bytes per multiply on the long-text hash path) but benchmark-invisible — current streaming workloads carry only short cells (≤ 3–8 bytes) that bypass the new main loop. Same class as exp 071. Revisit when a long-text streaming benchmark exists",
       "commit": null,
+      "archive": "archive/exp-099",
       "problem": "`fnv_combine_bytes` in [native/resqlite.c](../native/resqlite.c) hashes TEXT\nand BLOB cell payloads one byte at a time during stream change detection\n(`resqlite_query_hash`, exp 075). For long string columns the per-byte\nxor + multiply chain is the dominant cost of the unchanged-fanout\nfast-path: with N input bytes we pay N FNV rounds.\n\nThe integer-cell path already folds 8 bytes per multiply (it XORs the\nfull `int64` directly into the accumulator). The byte-stream path was\nthe only one still in the per-byte regime.",
-      "hypothesis": "Switching `fnv_combine_bytes` to a SWAR-style 8-bytes-per-multiply main\nloop with a per-byte tail should reduce the cost of unchanged hash\nwalks proportional to text-cell length, with no semantic change for\nshort cells and a measurable win on long-text streams.\n\nThe hash crosses no isolate boundary and never persists — `lastResultHash`\nlives only in `StreamEntry` in-memory. So a hash-bit-pattern change is\nsafe: producer (initial query) and consumer (selectIfChanged) are always\nthe same algorithm version inside one process lifetime.",
+      "hypothesis": "Switching `fnv_combine_bytes` to a SWAR-style 8-bytes-per-multiply main\nloop with a per-byte tail should reduce the cost of unchanged hash\nwalks proportional to text-cell length, with no semantic change for\nshort cells and a measurable win on long-text streams.\n\nThe hash is not persisted — `lastResultHash` lives only in `StreamEntry`\nin-memory — and is only produced and compared within the same process\nlifetime, even if it is sent between isolates. So a hash-bit-pattern\nchange is safe: producer (initial query) and consumer (`selectIfChanged`)\nare always the same algorithm version inside one process lifetime.",
       "approach": null,
       "results": "Artifact: [`benchmark/results/2026-04-25T07-21-19-exp099-fnv-8byte.md`](../benchmark/results/2026-04-25T07-21-19-exp099-fnv-8byte.md)\n\nBaseline: `2026-04-23T19-38-11-exp097-one-pass-initial-stream-hash.md`\n\nThe change is benchmark-invisible on this suite:\n\n| Workload | Baseline (ms) | Experiment (ms) | Status |\n|---|---:|---:|---|\n| Streaming / Unchanged Fanout Throughput | 0.19 | 0.25 | ⚪ Within noise (±37% / ±0.20 ms MDE) |\n| Streaming / Fan-out (10 streams) | 0.20 | 0.25 | ⚪ Within noise (±54% MDE) |\n| Streaming / Initial Emission | 0.03 | 0.03 | ⚪ Within noise |\n| Streaming / Invalidation Latency | 0.04 | 0.05 | ⚪ Within noise |\n\nSuite-level: **6 wins, 4 regressions, 143 neutral** — every flagged\ndelta sits inside its noise envelope. The two flagged Column-Granularity\ndeltas (`Overl...",
-      "reasoning": "Rejected. The optimization is correct and would help long-text streams,\nbut the present benchmark suite has no workload that lights it up, so\nthere is no signal to commit against. Revisit when a long-text streaming\nbenchmark exists, or as part of a broader hash-throughput effort.",
+      "reasoning": "Rejected. The optimization is correct and would help long-text streams,\nbut the present benchmark suite has no workload that lights it up, so\nthere is no signal to commit against. Revisit when a long-text streaming\nbenchmark exists, or as part of a broader hash-throughput effort.\n\nThe rejected implementation is preserved at `archive/exp-099`; main keeps\nthe original per-byte FNV fold.",
       "benchmarkRun": {
         "id": "exp099-fnv-8byte",
         "date": "2026-04-25",

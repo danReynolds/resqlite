@@ -2,6 +2,7 @@
 
 **Date:** 2026-04-25
 **Status:** Rejected
+**Archive:** [`archive/exp-099`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-099)
 
 ## Problem
 
@@ -22,10 +23,11 @@ loop with a per-byte tail should reduce the cost of unchanged hash
 walks proportional to text-cell length, with no semantic change for
 short cells and a measurable win on long-text streams.
 
-The hash crosses no isolate boundary and never persists — `lastResultHash`
-lives only in `StreamEntry` in-memory. So a hash-bit-pattern change is
-safe: producer (initial query) and consumer (selectIfChanged) are always
-the same algorithm version inside one process lifetime.
+The hash is not persisted — `lastResultHash` lives only in `StreamEntry`
+in-memory — and is only produced and compared within the same process
+lifetime, even if it is sent between isolates. So a hash-bit-pattern
+change is safe: producer (initial query) and consumer (`selectIfChanged`)
+are always the same algorithm version inside one process lifetime.
 
 ## Approach
 
@@ -94,10 +96,9 @@ exercise the 8-byte main loop:
 For the hash path, the inputs are short enough that the new main loop
 is structurally never entered, and the tail loop is identical to the
 old code. There is no measurable win to bank, and adding the chunked
-path costs ~10 lines of C plus an `endianness-dependent hash`
-documentation line for any future maintainer (the bit pattern depends
-on host byte order, which is fine for in-process use but needs to be
-called out if someone ever tries to persist the hash).
+path costs extra C plus a host-byte-order dependency in the hash bit
+pattern. That dependency is fine for in-process change detection, but it
+would need to be documented if this implementation is ever revived.
 
 This is the same class of "structurally sound but unmeasurable on
 current workloads" rejection as exp 071 (MRU-first stmt cache scan).
@@ -111,3 +112,6 @@ Rejected. The optimization is correct and would help long-text streams,
 but the present benchmark suite has no workload that lights it up, so
 there is no signal to commit against. Revisit when a long-text streaming
 benchmark exists, or as part of a broader hash-throughput effort.
+
+The rejected implementation is preserved at `archive/exp-099`; main keeps
+the original per-byte FNV fold.
