@@ -135,6 +135,55 @@ void main() {
         expect(benchmarks.single['title'], equals('Select → Maps'));
       },
     );
+
+    test('parses in-review experiments and Approach sections', () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_history_in_review_test_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final resultsDir = Directory('${tempDir.path}/results')..createSync();
+      final experimentsDir = Directory('${tempDir.path}/experiments')
+        ..createSync();
+
+      File('${experimentsDir.path}/README.md').writeAsStringSync('''
+## In Review
+
+| # | Experiment | Impact | PR |
+|---|---|---|---|
+| [100](100-test.md) | Test In Review | Still being evaluated | |
+''');
+
+      File('${experimentsDir.path}/100-test.md').writeAsStringSync('''
+# Experiment 100: Test In Review
+
+**Date:** 2026-04-25
+**Status:** In Review
+
+## Problem
+Synthetic in-review fixture.
+
+## Approach
+Scheduler details should be extracted.
+
+## Decision
+Keep in review.
+''');
+
+      final output = generate_history.buildHistoryData(
+        resultsDir: resultsDir,
+        experimentsDir: experimentsDir,
+        generatedAt: '2026-04-25T00:00:00.000Z',
+      );
+
+      final experiments = output['experiments'] as List<Map<String, Object?>>;
+      final experiment = experiments.single;
+      expect(experiment['status'], equals('in_review'));
+      expect(
+        experiment['approach'],
+        equals('Scheduler details should be extracted.'),
+      );
+    });
   });
 
   group('generate_history', () {

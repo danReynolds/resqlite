@@ -182,6 +182,7 @@
     color: var(--muted);
   }
   .exp-item.accepted .item-num { color: var(--green); }
+  .exp-item.in_review .item-num { color: var(--accent); }
   .exp-item .item-body h3 { font-size: 0.85rem; font-weight: 500; margin-bottom: 0.1rem; }
   .exp-item .item-body .item-summary {
     font-size: 0.75rem; color: var(--muted);
@@ -257,6 +258,7 @@
     font-weight: 700;
   }
   .exp-detail .detail-num.accepted { color: var(--green); }
+  .exp-detail .detail-num.in_review { color: var(--accent); }
   .exp-detail .detail-num.rejected { color: var(--muted); }
   .exp-detail .detail-title { font-size: 1.15rem; font-weight: 600; }
   .exp-detail .detail-meta {
@@ -329,6 +331,7 @@
     letter-spacing: 0.03em;
   }
   .badge.accepted { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.in_review { background: rgba(88,166,255,0.15); color: var(--accent); }
   .badge.rejected { background: rgba(248,81,73,0.15); color: var(--red); }
 
   .chart-improvements {
@@ -366,7 +369,7 @@
   <h1>Experiments &amp; Performance Over Time</h1>
   <p class="intro">
     resqlite was built through rigorous, benchmark-driven experimentation. This page tracks
-    every optimization attempt — accepted and rejected — alongside the performance data
+    every optimization attempt — accepted, in review, and rejected — alongside the performance data
     behind each decision. Use the headline charts for broad health, the scenario charts
     for app-shaped workloads, and click any data point to see the experiment and metrics
     that drove the decision.
@@ -443,6 +446,7 @@
       <div class="filter-bar" id="filterBar">
         <button class="filter-btn" data-filter="all">All<span class="count" id="countAll"></span></button>
         <button class="filter-btn active" data-filter="accepted">Accepted<span class="count" id="countAccepted"></span></button>
+        <button class="filter-btn" data-filter="in_review">In Review<span class="count" id="countInReview"></span></button>
         <button class="filter-btn" data-filter="rejected">Rejected<span class="count" id="countRejected"></span></button>
       </div>
     </div>
@@ -465,7 +469,7 @@ Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Hel
 let DATA = null;
 const chartInstances = {};
 let selectedExpId = null;
-let currentFilter = 'accepted'; // 'all' | 'accepted' | 'rejected'
+let currentFilter = 'accepted'; // 'all' | 'accepted' | 'in_review' | 'rejected'
 let activePanelId = 'panelReads';
 
 const PANEL_TO_TAB = {
@@ -505,6 +509,11 @@ function sortedExperiments() {
 let METRIC_DISPLAY = {};
 let CHART_GROUPS = {};
 
+function statusLabel(status) {
+  if (status === 'in_review') return 'in review';
+  return status;
+}
+
 function displayNameForMetric(key) {
   return METRIC_DISPLAY[key] || key;
 }
@@ -526,7 +535,7 @@ function activatePanel(panelId, sync = true) {
 function loadStateFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const filter = params.get('filter');
-  if (['all', 'accepted', 'rejected'].includes(filter)) {
+  if (['all', 'accepted', 'in_review', 'rejected'].includes(filter)) {
     currentFilter = filter;
   }
 
@@ -610,12 +619,13 @@ function updateHeaderCounts() {
   const exps = DATA.experiments;
   document.getElementById('countAll').textContent = `(${exps.length})`;
   document.getElementById('countAccepted').textContent = `(${exps.filter(e => e.status === 'accepted').length})`;
+  document.getElementById('countInReview').textContent = `(${exps.filter(e => e.status === 'in_review').length})`;
   document.getElementById('countRejected').textContent = `(${exps.filter(e => e.status === 'rejected').length})`;
 }
 
 function updateHeaderText() {
   const n = filteredExperiments().length;
-  const label = currentFilter === 'all' ? 'experiments' : `${currentFilter} experiments`;
+  const label = currentFilter === 'all' ? 'experiments' : `${statusLabel(currentFilter)} experiments`;
   document.getElementById('headerText').textContent =
     `${n} ${label} — newest first, hover to highlight, click for details`;
 }
@@ -942,7 +952,7 @@ function renderExpList() {
         <div class="item-summary">${esc(exp.summary)}</div>
       </div>
       <div class="item-meta">
-        <span class="badge ${exp.status}">${exp.status}</span><br>
+        <span class="badge ${exp.status}">${statusLabel(exp.status)}</span><br>
         ${exp.date || ''}
       </div>
     </div>
@@ -1003,7 +1013,7 @@ function selectExp(id, { sync = true } = {}) {
   html += `<span class="detail-title">${esc(exp.title)}</span>`;
   html += `</div>`;
   html += `<div class="detail-meta">`;
-  html += `<span class="badge ${exp.status}">${exp.status}</span>`;
+  html += `<span class="badge ${exp.status}">${statusLabel(exp.status)}</span>`;
   if (exp.date) html += `<span>${exp.date}</span>`;
   if (exp.commit) html += `<a href="https://github.com/danReynolds/resqlite/commit/${exp.commit}">${exp.commit.slice(0,7)}</a>`;
   if (exp.archive) html += `<a href="https://github.com/danReynolds/resqlite/compare/main...${encodeURIComponent(exp.archive)}" title="Archived implementation — preserved rejected code, restorable via git cherry-pick">${esc(exp.archive)}</a>`;
@@ -1036,7 +1046,12 @@ function selectExp(id, { sync = true } = {}) {
     html += `<div class="detail-section"><h4>Results</h4>${renderMd(exp.results)}</div>`;
   }
   if (exp.reasoning) {
-    html += `<div class="detail-section"><h4>${exp.status === 'accepted' ? 'Why Accepted' : 'Why Rejected'}</h4>${renderMd(exp.reasoning)}</div>`;
+    const reasoningTitle = exp.status === 'accepted'
+      ? 'Why Accepted'
+      : exp.status === 'rejected'
+        ? 'Why Rejected'
+        : 'Decision';
+    html += `<div class="detail-section"><h4>${reasoningTitle}</h4>${renderMd(exp.reasoning)}</div>`;
   }
 
   html += `</div>`; // .detail-content

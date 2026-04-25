@@ -21,5 +21,6 @@ Current experiments:
 - [pool_size.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/pool_size.dart)
 - [pool_vs_exit.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/pool_vs_exit.dart)
 - [row_map_facade.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/row_map_facade.dart)
+- [stream_scheduler.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/stream_scheduler.dart)
 
 Use these when tuning internals, not when producing the headline package comparison.
