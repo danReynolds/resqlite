@@ -1641,12 +1641,12 @@ __attribute__((hot)) int resqlite_step_row_hash(
     sqlite3_stmt* stmt,
     int col_count,
     resqlite_cell* cells,
-    uint64_t* hash
+    unsigned long long* hash
 ) {
     int rc = sqlite3_step(stmt);
     if (__builtin_expect(rc != SQLITE_ROW, 0)) return rc;
 
-    uint64_t h = *hash;
+    uint64_t h = (uint64_t)(*hash);
     for (int i = 0; i < col_count; i++) {
         int type = sqlite3_column_type(stmt, i);
         cells[i].type = type;
@@ -1688,7 +1688,7 @@ __attribute__((hot)) int resqlite_step_row_hash(
                 break;
         }
     }
-    *hash = h;
+    *hash = (unsigned long long)h;
     return SQLITE_ROW;
 }
 
