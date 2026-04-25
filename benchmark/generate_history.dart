@@ -168,8 +168,9 @@ void _attachBenchmarkRunMappings(
   // First pass: exact explicit experiment-id matches in the run label,
   // e.g. experiment 088 -> run id "exp088-setlk-timeout".
   for (final exp in experiments) {
-    final expNum = (exp['id'] as String).toLowerCase();
-    if (skipRunMappingIds.contains(expNum)) continue;
+    final expId = exp['id'] as String;
+    if (skipRunMappingIds.contains(expId)) continue;
+    final expNum = expId.toLowerCase();
     final exactPatterns = ['exp$expNum', 'exp-$expNum'];
     int matchedIdx = -1;
     for (var idx = 0; idx < runs.length; idx++) {
