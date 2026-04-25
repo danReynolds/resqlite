@@ -1522,9 +1522,28 @@ static inline uint64_t fnv_combine_u64(uint64_t h, uint64_t v) {
 }
 
 // Fold a byte buffer into the running hash.
+//
+// Bulk path: read 8 bytes at a time via memcpy (alignment-safe), XOR the
+// whole 64-bit word into h, then one multiply. This breaks FNV-1a's
+// per-byte avalanche but trades it for an 8x reduction in multiply count
+// — which is the bottleneck on text/blob byte streams. The hash never
+// crosses an isolate boundary or persists, so a quality trade-off that
+// keeps full 64-bit sensitivity to any byte-level change is fine for the
+// internal change-detection use case.
+//
+// Tail path: bytes that don't fill a full 8-byte word fall through to
+// classic per-byte FNV-1a so short strings still get good diffusion.
 static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
     const unsigned char* b = (const unsigned char*)p;
-    for (int i = 0; i < len; i++) {
+    int i = 0;
+    while (i + 8 <= len) {
+        uint64_t word;
+        memcpy(&word, b + i, 8);
+        h ^= word;
+        h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
+        i += 8;
+    }
+    for (; i < len; i++) {
         h ^= (uint64_t)b[i];
         h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
     }
