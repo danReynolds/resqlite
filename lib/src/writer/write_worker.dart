@@ -123,20 +123,11 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
 final class _WriterState {
   _WriterState({
     required this.dbHandle,
-    required this.beginSql,
-    required this.commitSql,
-    required this.rollbackSql,
   });
 
   /// Native SQLite connection handle. Shared with the main isolate via
   /// `dbHandle.address` — the writer isolate owns all access.
   final ffi.Pointer<ffi.Void> dbHandle;
-
-  /// Pre-allocated native strings reused across every transaction so we
-  /// don't pay a `toNativeUtf8` + free per `BEGIN`/`COMMIT`/`ROLLBACK`.
-  final ffi.Pointer<Utf8> beginSql;
-  final ffi.Pointer<Utf8> commitSql;
-  final ffi.Pointer<Utf8> rollbackSql;
 
   /// Transaction nesting depth.
   ///
@@ -158,9 +149,6 @@ void writerEntrypoint(List<Object> args) {
 
   final state = _WriterState(
     dbHandle: ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
-    beginSql: 'BEGIN IMMEDIATE'.toNativeUtf8(),
-    commitSql: 'COMMIT'.toNativeUtf8(),
-    rollbackSql: 'ROLLBACK'.toNativeUtf8(),
   );
   final receivePort = RawReceivePort();
 
@@ -284,7 +272,7 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   // propagates — _runTransaction on the main isolate will never have
   // entered its body, so there is nothing to roll back.
   if (state.txDepth == 0) {
-    final rc = resqliteExec(state.dbHandle, state.beginSql);
+    final rc = resqliteTxBeginImmediate(state.dbHandle);
     if (rc != 0) {
       throw ResqliteTransactionException(
         resqliteErrmsg(state.dbHandle).toDartString(),
@@ -317,7 +305,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // longer active. The next request sees a predictable state.
   final newDepth = state.txDepth - 1;
   if (newDepth == 0) {
-    final rc = resqliteExec(state.dbHandle, state.commitSql);
+    final rc = resqliteTxCommit(state.dbHandle);
     if (rc != 0) {
       // Capture the error message BEFORE any further sqlite calls — the
       // errmsg pointer is only stable until the next call.
@@ -326,7 +314,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // back, but behavior depends on the error (deferred FK, I/O, etc.).
       // Issue a best-effort ROLLBACK and ignore its return — it may
       // legitimately fail with "no transaction active".
-      resqliteExec(state.dbHandle, state.rollbackSql);
+      resqliteTxRollback(state.dbHandle);
       // Drop any tables dirtied by the aborted transaction.
       getDirtyTables(state.dbHandle);
       state.txDepth = newDepth;
@@ -387,7 +375,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   // SQLite reports a rollback failure.
   final newDepth = state.txDepth - 1;
   if (newDepth == 0) {
-    final rc = resqliteExec(state.dbHandle, state.rollbackSql);
+    final rc = resqliteTxRollback(state.dbHandle);
     // Clear the dirty set — rolled-back changes don't count for stream
     // invalidation, even if SQLite reported a rollback error.
     getDirtyTables(state.dbHandle);
