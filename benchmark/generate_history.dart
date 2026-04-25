@@ -161,7 +161,7 @@ void _attachBenchmarkRunMappings(
   final skipRunMappingIds = <String>{};
   for (final exp in experiments) {
     if (exp.remove('_skipBenchmarkRunMapping') == true) {
-      skipRunMappingIds.add(exp['id'] as String);
+      skipRunMappingIds.add((exp['id'] as String).toLowerCase());
     }
   }
 
