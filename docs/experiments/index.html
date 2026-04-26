@@ -671,7 +671,13 @@ function buildCharts() {
       const isQps = key.includes('qps');
       return {
         label: displayNameForMetric(key),
-        data: chartRunIndices.map(ri => runs[ri].metrics[key] ?? null),
+        // Runs flagged as noisy (single-sample or with an elevated sqlite3
+        // control envelope) appear as gaps so they don't pull the line
+        // through transient machine-load spikes. The underlying numbers
+        // are still in DATA.runs and visible in the experiment side panel.
+        data: chartRunIndices.map(ri =>
+          runs[ri].noisy ? null : (runs[ri].metrics[key] ?? null)
+        ),
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,

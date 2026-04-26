@@ -13,7 +13,8 @@
       "metrics": {
         "Select → Maps / 1000 rows / resqlite select()": 1.23,
         "Select → Maps / 1000 rows / resqlite select() [main]": 0.12
-      }
+      },
+      "repeatCount": 3
     }
   ],
   "experiments": [

@@ -53,10 +53,13 @@ Map<String, Object?> buildHistoryData({
     if (meta == null) continue;
 
     final sidecar = loadReleaseArtifactSidecarForMarkdown(file);
-    final content = sidecar == null ? file.readAsStringSync() : null;
+    // Markdown is needed both as the fallback metric source AND for fields
+    // (Repeats, sqlite3 control numbers) that aren't always promoted into
+    // the sidecar JSON, so read it once for both code paths.
+    final content = file.readAsStringSync();
     final metrics = sidecar != null
         ? artifactMetrics(sidecar)
-        : extractResqliteMedians(content!);
+        : extractResqliteMedians(content);
     if (metrics.isEmpty) {
       print('  Skipping $basename (no resqlite metrics found)');
       continue;
@@ -64,11 +67,22 @@ Map<String, Object?> buildHistoryData({
 
     final memoryJson = sidecar != null
         ? artifactMemoryMetrics(sidecar)
-        : _memoryMetricsJson(extractMemoryMedians(content!));
+        : _memoryMetricsJson(extractMemoryMedians(content));
     final environment = sidecar != null ? artifactEnvironment(sidecar) : null;
     final sqliteDiagnosticsJson = sidecar != null
         ? artifactSqliteDiagnosticsMetrics(sidecar)
-        : _sqliteDiagnosticsJson(extractSqliteDiagnosticsMedians(content!));
+        : _sqliteDiagnosticsJson(extractSqliteDiagnosticsMedians(content));
+
+    final repeatCount = sidecar != null
+        ? (artifactRepeatCount(sidecar) ?? extractRepeatCount(content))
+        : extractRepeatCount(content);
+    final sqlite3Si = sidecar != null
+        ? artifactSqlite3SingleInsertWall(sidecar)
+        : extractSqlite3SingleInsertWall(content);
+    final noiseReason = _classifyNoise(
+      repeatCount: repeatCount,
+      sqlite3Si: sqlite3Si,
+    );
 
     runs.add({
       'id': meta.label,
@@ -82,6 +96,12 @@ Map<String, Object?> buildHistoryData({
         'memoryMetrics': memoryJson,
       if (sqliteDiagnosticsJson != null && sqliteDiagnosticsJson.isNotEmpty)
         'sqliteDiagnosticsMetrics': sqliteDiagnosticsJson,
+      if (repeatCount != null) 'repeatCount': repeatCount,
+      if (sqlite3Si.medianMs != null)
+        'sqlite3SingleInsertMedianMs': sqlite3Si.medianMs,
+      if (sqlite3Si.p90Ms != null) 'sqlite3SingleInsertP90Ms': sqlite3Si.p90Ms,
+      if (noiseReason != null) 'noisy': true,
+      if (noiseReason != null) 'noisyReason': noiseReason,
     });
   }
 
@@ -122,6 +142,53 @@ Map<String, Object?> buildHistoryData({
   };
 
   return output;
+}
+
+/// Decide whether a release-mode benchmark run is too noisy to chart on
+/// the experiments timeline. Returns a human-readable reason string when
+/// the run is noisy, or `null` when the run is clean enough to plot.
+///
+/// Two layered checks:
+///
+///  1. **Single-sample runs** (`Repeats: 1`) — the released methodology
+///     publishes 5-sample medians. Single-sample numbers are kept on disk
+///     for historical and comparison-baseline purposes, but they are not
+///     statistically authoritative and have produced the bulk of the
+///     visible chart spikes (entire 04-09 morning cluster + exp088).
+///
+///  2. **sqlite3 control elevated** — sqlite3 is the unchanged peer in
+///     the `Single Inserts (100 sequential)` workload. If its wall-time
+///     numbers in a given run sit far outside the typical envelope (~1–6
+///     ms median, ~2–15 ms p90 on the recorded hardware), every library
+///     in that run measured during background load and the resqlite
+///     numbers are not comparable to neighbouring runs. Catches the
+///     `readme-numbers` (sqlite3 13.76 ms median) and `state-check-verify`
+///     (sqlite3 p90 118 ms) anomalies even though both have multi-sample
+///     repeats.
+///
+/// Thresholds are intentionally loose (8 ms median / 30 ms p90) — a 2×
+/// margin above the worst clean run we've seen — so the gate fires only
+/// on clear-cut machine-load anomalies, not on hardware variation.
+String? _classifyNoise({
+  required int? repeatCount,
+  required Sqlite3SingleInsertWall sqlite3Si,
+}) {
+  if (repeatCount == 1) {
+    return 'single-sample run (Repeats: 1) — not statistically authoritative';
+  }
+  final med = sqlite3Si.medianMs;
+  if (med != null && med > 8.0) {
+    return 'sqlite3 control elevated '
+        '(single-insert wall median ${med.toStringAsFixed(2)} ms) — '
+        'background load suspected';
+  }
+  final p90 = sqlite3Si.p90Ms;
+  if (p90 != null && p90 > 30.0) {
+    return 'sqlite3 control p90 elevated '
+        '(single-insert wall p90 ${p90.toStringAsFixed(1)} ms) — '
+        'background load suspected';
+  }
+  return null;
 }
 
 Map<String, Object?> _memoryMetricsJson(Map<String, MemoryMetric> memory) {

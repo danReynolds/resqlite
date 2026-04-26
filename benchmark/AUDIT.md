@@ -355,6 +355,11 @@ fresh if the anchors have drifted:
   today. When we add a second, the dashboard selector already supports it.
 - **No noise bars on dashboard charts.** The `--repeat=5` p90 values exist
   in the markdown and JSON but aren't visualized. Worth a follow-up.
+  *(Partially mitigated:* `generate_history.dart` flags runs as `noisy`
+  when `Repeats: 1` or when sqlite3's single-insert control is elevated,
+  and both the experiments timeline and the public benchmarks "Last N
+  runs" mode skip those runs. The original methodology gap — showing
+  per-run uncertainty inline — is still open.*)*
 - **Callouts are hardcoded.** Moving them to config (a JSON block in
   `SCOPE.md` or similar) would keep them fresh as workloads evolve.
 - **No "methodology" link** on the benchmarks page. Phase 4.1 addresses
