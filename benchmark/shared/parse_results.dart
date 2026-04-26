@@ -343,6 +343,62 @@ Map<String, StreamingColumnMetric> extractStreamingColumnMedians(
   return results;
 }
 
+/// Parse the repeat count from a benchmark result markdown's run-settings
+/// block. Returns `null` if the file predates the run-settings header (very
+/// early results) or the value is unparseable.
+int? extractRepeatCount(String content) {
+  final match = RegExp(
+    r'^-\s*Repeats:\s*`?(\d+)`?',
+    multiLine: true,
+  ).firstMatch(content);
+  if (match == null) return null;
+  return int.tryParse(match.group(1)!);
+}
+
+/// Wall-clock single-insert numbers for the `sqlite3` peer. Used as a
+/// "control" signal to detect machine-load anomalies — when sqlite3's
+/// timings are elevated relative to its usual envelope, the resqlite
+/// numbers from the same run cannot be trusted to reflect the change
+/// under test.
+class Sqlite3SingleInsertWall {
+  const Sqlite3SingleInsertWall({this.medianMs, this.p90Ms});
+
+  final double? medianMs;
+  final double? p90Ms;
+
+  bool get isEmpty => medianMs == null && p90Ms == null;
+}
+
+/// Extract sqlite3's `Single Inserts (100 sequential)` wall median + p90
+/// from a benchmark result markdown. Returns an empty record if the
+/// section or row is not present.
+Sqlite3SingleInsertWall extractSqlite3SingleInsertWall(String content) {
+  final lines = content.split('\n');
+  var inSection = false;
+  for (final line in lines) {
+    if (line.startsWith('### Single Inserts (100 sequential)')) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && (line.startsWith('### ') || line.startsWith('## '))) {
+      break;
+    }
+    if (!inSection) continue;
+    if (!line.startsWith('| sqlite3 execute()')) continue;
+    final parts = line
+        .split('|')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.length < 3) continue;
+    return Sqlite3SingleInsertWall(
+      medianMs: double.tryParse(parts[1]),
+      p90Ms: double.tryParse(parts[2]),
+    );
+  }
+  return const Sqlite3SingleInsertWall();
+}
+
 /// Parse metadata from a benchmark result filename.
 ///
 /// Handles formats like:

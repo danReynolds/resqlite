@@ -255,6 +255,114 @@ Keep in review.
     );
   });
 
+  group('generate_history noise classification', () {
+    String runMarkdown({
+      required String label,
+      required int repeats,
+      required double sqlite3Median,
+      required double sqlite3P90,
+    }) {
+      return '''
+# resqlite Benchmark Results
+
+Run settings:
+- Label: `$label`
+- Repeats: `$repeats`
+
+## Select → Maps
+
+### 1000 rows
+
+| Library | Wall med | Wall p90 | Main med | Main p90 |
+|---|---|---|---|---|
+| resqlite select() | 1.00 | 1.10 | 0.10 | 0.12 |
+
+## Write Performance
+
+### Single Inserts (100 sequential)
+
+| Library | Wall med | Wall p90 | Main med | Main p90 |
+|---|---|---|---|---|
+| resqlite execute() | 1.50 | 2.50 | 1.50 | 2.50 |
+| sqlite3 execute() | $sqlite3Median | $sqlite3P90 | $sqlite3Median | $sqlite3P90 |
+''';
+    }
+
+    test('flags single-sample, sqlite3-elevated, and sqlite3-p90 runs', () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_noise_test_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final resultsDir = Directory('${tempDir.path}/results')..createSync();
+      final experimentsDir = Directory('${tempDir.path}/experiments')
+        ..createSync();
+
+      // 1. Clean run — 5 repeats, sqlite3 envelope normal.
+      File('${resultsDir.path}/2026-04-23T10-00-00-clean.md')
+          .writeAsStringSync(runMarkdown(
+        label: 'clean',
+        repeats: 5,
+        sqlite3Median: 5.0,
+        sqlite3P90: 7.0,
+      ));
+      // 2. Single-sample run — should be flagged regardless of sqlite3 numbers.
+      File('${resultsDir.path}/2026-04-23T11-00-00-single.md')
+          .writeAsStringSync(runMarkdown(
+        label: 'single',
+        repeats: 1,
+        sqlite3Median: 4.5,
+        sqlite3P90: 6.0,
+      ));
+      // 3. Multi-sample but sqlite3 median elevated — flagged via control gate.
+      File('${resultsDir.path}/2026-04-23T12-00-00-loaded-median.md')
+          .writeAsStringSync(runMarkdown(
+        label: 'loaded-median',
+        repeats: 5,
+        sqlite3Median: 13.0,
+        sqlite3P90: 20.0,
+      ));
+      // 4. Multi-sample but sqlite3 p90 catastrophic — flagged via p90 gate.
+      File('${resultsDir.path}/2026-04-23T13-00-00-loaded-p90.md')
+          .writeAsStringSync(runMarkdown(
+        label: 'loaded-p90',
+        repeats: 5,
+        sqlite3Median: 6.0,
+        sqlite3P90: 100.0,
+      ));
+
+      final output = generate_history.buildHistoryData(
+        resultsDir: resultsDir,
+        experimentsDir: experimentsDir,
+        generatedAt: '2026-04-23T00:00:00.000Z',
+      );
+
+      final runs = output['runs'] as List<Map<String, Object?>>;
+      final byLabel = {for (final r in runs) r['label'] as String: r};
+
+      expect(byLabel['clean']!.containsKey('noisy'), isFalse);
+      expect(byLabel['clean']!['repeatCount'], equals(5));
+
+      expect(byLabel['single']!['noisy'], isTrue);
+      expect(
+        byLabel['single']!['noisyReason'] as String,
+        contains('single-sample run'),
+      );
+
+      expect(byLabel['loaded-median']!['noisy'], isTrue);
+      expect(
+        byLabel['loaded-median']!['noisyReason'] as String,
+        contains('sqlite3 control elevated'),
+      );
+
+      expect(byLabel['loaded-p90']!['noisy'], isTrue);
+      expect(
+        byLabel['loaded-p90']!['noisyReason'] as String,
+        contains('p90 elevated'),
+      );
+    });
+  });
+
   group('workload registry', () {
     test(
       'curated definitions resolve cleanly and chart groups stay coherent',

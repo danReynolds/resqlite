@@ -1126,7 +1126,15 @@ function buildDevicesView(devices) {
 // history.json has flat metric keys of the form "<section> / <subtitle> / <library>[ [main]]".
 // We stitch wall/main values back into 4-tuples the chart builders expect.
 function buildRunsView(history, n, peerBenchmarks) {
-  const runs = (history?.runs ?? []).slice().sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')).slice(0, n);
+  // Skip runs flagged as noisy by generate_history.dart (single-sample
+  // runs, or runs whose sqlite3 control was elevated enough to indicate
+  // background load) so the "Last N runs" comparison reflects clean
+  // measurements instead of being dragged by transient anomalies.
+  const runs = (history?.runs ?? [])
+      .filter(r => !r.noisy)
+      .slice()
+      .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
+      .slice(0, n);
   const sections = new Map(); // key -> { key, title, subtitle, entries: [{library, values}] }
 
   for (const run of runs) {

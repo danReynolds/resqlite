@@ -69,6 +69,44 @@ Map<String, Object?>? artifactSqliteDiagnosticsMetrics(
   return value is Map<String, Object?> ? value : null;
 }
 
+int? artifactRepeatCount(Map<String, Object?> artifact) {
+  final value = artifact['repeatCount'];
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
+/// Read sqlite3's `Single Inserts (100 sequential)` wall numbers out of a
+/// release-run sidecar's `benchmarkSummary` payload.
+Sqlite3SingleInsertWall artifactSqlite3SingleInsertWall(
+  Map<String, Object?> artifact,
+) {
+  final summary = artifact['benchmarkSummary'];
+  if (summary is! Map) return const Sqlite3SingleInsertWall();
+  final sectionsValue = summary['sections'];
+  if (sectionsValue is! List) return const Sqlite3SingleInsertWall();
+  for (final section in sectionsValue) {
+    if (section is! Map) continue;
+    if (section['title'] != 'Write Performance') continue;
+    if (section['subtitle'] != 'Single Inserts (100 sequential)') continue;
+    final entries = section['entries'];
+    if (entries is! List) continue;
+    for (final entry in entries) {
+      if (entry is! List || entry.length != 2) continue;
+      if (entry[0] != 'sqlite3 execute()') continue;
+      final values = entry[1];
+      if (values is! List || values.isEmpty) continue;
+      final med = values.isNotEmpty ? values[0] : null;
+      final p90 = values.length > 1 ? values[1] : null;
+      return Sqlite3SingleInsertWall(
+        medianMs: med is num ? med.toDouble() : null,
+        p90Ms: p90 is num ? p90.toDouble() : null,
+      );
+    }
+  }
+  return const Sqlite3SingleInsertWall();
+}
+
 List<Map<String, Object?>>? artifactBenchmarks(Map<String, Object?> artifact) {
   final summary = artifact['benchmarkSummary'];
   if (summary is Map) {

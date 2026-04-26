@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-25T23:55:19.663458",
+  "generated": "2026-04-25T20:21:34.961102",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -45,7 +45,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.55,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.7,
+      "sqlite3SingleInsertP90Ms": 9.36
     },
     {
       "id": "after-authorizer-hooks",
@@ -91,7 +93,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.77,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.19,
+      "sqlite3SingleInsertP90Ms": 5.62
     },
     {
       "id": "after-overnight-experiments",
@@ -137,7 +141,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.85,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 4.99,
+      "sqlite3SingleInsertP90Ms": 5.43
     },
     {
       "id": "after-cleanup",
@@ -183,7 +189,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.73,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.07,
+      "sqlite3SingleInsertP90Ms": 6.05
     },
     {
       "id": "final-cleanup",
@@ -229,7 +237,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.83,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 4.91,
+      "sqlite3SingleInsertP90Ms": 5.71
     },
     {
       "id": "isLeaf-experiment",
@@ -275,7 +285,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.52,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.04,
+      "sqlite3SingleInsertP90Ms": 5.24
     },
     {
       "id": "writer-tuning",
@@ -321,7 +333,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 5.28,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.48,
+      "sqlite3SingleInsertP90Ms": 6.22
     },
     {
       "id": "cell-buffer-union",
@@ -367,7 +381,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.92,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 6.11,
+      "sqlite3SingleInsertP90Ms": 6.57
     },
     {
       "id": "compile-flags",
@@ -413,7 +429,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 5.09,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.5,
+      "sqlite3SingleInsertP90Ms": 6.3
     },
     {
       "id": "multi-row-step",
@@ -459,7 +477,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.94,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.07,
+      "sqlite3SingleInsertP90Ms": 5.86
     },
     {
       "id": "post-stream-fix",
@@ -505,7 +525,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.38,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 4.78,
+      "sqlite3SingleInsertP90Ms": 5.35
     },
     {
       "id": "hybrid-pool-high-threshold",
@@ -551,7 +573,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.56,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.16,
+      "sqlite3SingleInsertP90Ms": 6.38
     },
     {
       "id": "pool-all-reads",
@@ -597,7 +621,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 5.07,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.75,
+      "sqlite3SingleInsertP90Ms": 6.56
     },
     {
       "id": "pool-final",
@@ -643,7 +669,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.79,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 6.72,
+      "sqlite3SingleInsertP90Ms": 7.61
     },
     {
       "id": "final-cleanup",
@@ -689,7 +717,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 6.02,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.07,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.07
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 7.2,
+      "sqlite3SingleInsertP90Ms": 10.15
     },
     {
       "id": "c-fixes",
@@ -735,7 +765,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.67,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 6.0,
+      "sqlite3SingleInsertP90Ms": 6.88
     },
     {
       "id": "exp-baseline",
@@ -781,7 +813,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.82,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.07,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.07
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 7.67,
+      "sqlite3SingleInsertP90Ms": 8.15
     },
     {
       "id": "exp020-lookaside",
@@ -827,7 +861,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.91,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.63,
+      "sqlite3SingleInsertP90Ms": 7.39
     },
     {
       "id": "exp021-pcache",
@@ -873,7 +909,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.59,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.85,
+      "sqlite3SingleInsertP90Ms": 6.2
     },
     {
       "id": "exp022-wal-tuning",
@@ -919,7 +957,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.94,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 6.79,
+      "sqlite3SingleInsertP90Ms": 7.46
     },
     {
       "id": "exp023-fast-itoa",
@@ -965,7 +1005,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.75,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.79,
+      "sqlite3SingleInsertP90Ms": 6.26
     },
     {
       "id": "exp024-buf-16k",
@@ -1011,7 +1053,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.9,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.06,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.06
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 7.26,
+      "sqlite3SingleInsertP90Ms": 8.69
     },
     {
       "id": "final",
@@ -1057,7 +1101,9 @@
         "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.79,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.05,
         "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.05
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.99,
+      "sqlite3SingleInsertP90Ms": 6.52
     },
     {
       "id": "with-streaming",
@@ -1111,7 +1157,9 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.19,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.2,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.2
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 5.14,
+      "sqlite3SingleInsertP90Ms": 5.99
     },
     {
       "id": "exp030-adopted",
@@ -1165,7 +1213,9 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 4.51,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 4.51
-      }
+      },
+      "sqlite3SingleInsertMedianMs": 7.03,
+      "sqlite3SingleInsertP90Ms": 7.98
     },
     {
       "id": "dedicated-readers-merged",
@@ -1219,7 +1269,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 3.99,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 3.99
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 5.75,
+      "sqlite3SingleInsertP90Ms": 6.79,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "sealed-requests",
@@ -1273,7 +1328,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.83,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.83
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 5.55,
+      "sqlite3SingleInsertP90Ms": 7.0,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "sealed-5x",
@@ -1327,7 +1387,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.58,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.58
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 5.42,
+      "sqlite3SingleInsertP90Ms": 6.0
     },
     {
       "id": "post-032-038",
@@ -1381,7 +1444,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.57,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.57
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 5.93,
+      "sqlite3SingleInsertP90Ms": 6.95
     },
     {
       "id": "MacBook-Pro-14",
@@ -1435,7 +1501,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.24,
         "Streaming / Stream Churn (100 cycles) / resqlite": 3.71,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 3.71
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 4.76,
+      "sqlite3SingleInsertP90Ms": 7.7,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "bench-improvements",
@@ -1490,7 +1561,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.31,
         "Streaming / Stream Churn (100 cycles) / resqlite": 4.24,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 4.24
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 8.3,
+      "sqlite3SingleInsertP90Ms": 15.31,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "verify",
@@ -1545,7 +1621,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.39,
         "Streaming / Stream Churn (100 cycles) / resqlite": 7.14,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 7.14
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 9.28,
+      "sqlite3SingleInsertP90Ms": 18.58,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "readme-numbers",
@@ -1600,7 +1681,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.34,
         "Streaming / Stream Churn (100 cycles) / resqlite": 3.71,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 3.71
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 13.76,
+      "sqlite3SingleInsertP90Ms": 31.27,
+      "noisy": true,
+      "noisyReason": "sqlite3 control elevated (single-insert wall median 13.76 ms) — background load suspected"
     },
     {
       "id": "post-byte-threshold",
@@ -1655,7 +1741,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.88,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.88
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.45,
+      "sqlite3SingleInsertP90Ms": 6.67
     },
     {
       "id": "post-writer-unify",
@@ -1710,7 +1799,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.15,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.85,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.85
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.63,
+      "sqlite3SingleInsertP90Ms": 5.64
     },
     {
       "id": "post-writer-unify",
@@ -1765,7 +1857,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.13,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.72,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.72
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.94,
+      "sqlite3SingleInsertP90Ms": 6.22
     },
     {
       "id": "post-cleanup",
@@ -1820,7 +1915,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.16,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.77,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.77
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.41,
+      "sqlite3SingleInsertP90Ms": 6.38
     },
     {
       "id": "post-writer-unify-final",
@@ -1879,7 +1977,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.64,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.64
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.79,
+      "sqlite3SingleInsertP90Ms": 6.27
     },
     {
       "id": "fresh-run",
@@ -1938,7 +2039,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.34,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.34
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.65,
+      "sqlite3SingleInsertP90Ms": 5.8
     },
     {
       "id": "main-baseline",
@@ -1997,7 +2101,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.15,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.98,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.98
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.35,
+      "sqlite3SingleInsertP90Ms": 5.42
     },
     {
       "id": "pr-branch",
@@ -2064,7 +2171,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.19,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.24,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.24
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.81,
+      "sqlite3SingleInsertP90Ms": 5.13
     },
     {
       "id": "pr-branch-v2",
@@ -2131,7 +2241,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.17,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.9,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.9
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 4.07,
+      "sqlite3SingleInsertP90Ms": 5.95,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "codex-pr-check",
@@ -2198,7 +2313,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.55,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.55
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.55,
+      "sqlite3SingleInsertP90Ms": 5.98
     },
     {
       "id": "post-fixes",
@@ -2265,7 +2383,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.24,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.24
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.79,
+      "sqlite3SingleInsertP90Ms": 6.07
     },
     {
       "id": "MacBook Pro 14in",
@@ -2336,7 +2457,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.75,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.75
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.26,
+      "sqlite3SingleInsertP90Ms": 6.33
     },
     {
       "id": "fresh-run",
@@ -2407,7 +2531,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.71,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.71
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.2,
+      "sqlite3SingleInsertP90Ms": 6.35
     },
     {
       "id": "event-port-cleanup",
@@ -2478,7 +2605,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.06,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.06
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.38,
+      "sqlite3SingleInsertP90Ms": 9.24
     },
     {
       "id": "worker-port-identity-guard",
@@ -2549,7 +2679,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 4.43,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 4.43
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.94,
+      "sqlite3SingleInsertP90Ms": 6.18
     },
     {
       "id": "stream-rerun",
@@ -2620,7 +2753,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.99,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.99
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.42,
+      "sqlite3SingleInsertP90Ms": 4.96
     },
     {
       "id": "churn-order-fix",
@@ -2691,7 +2827,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.15,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.79,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.79
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 5.31,
+      "sqlite3SingleInsertP90Ms": 7.04
     },
     {
       "id": "baseline",
@@ -2762,7 +2901,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.24,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.41,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.41
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 7.67,
+      "sqlite3SingleInsertP90Ms": 12.88
     },
     {
       "id": "exp041-ryu",
@@ -2833,7 +2975,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.05,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.05
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.81,
+      "sqlite3SingleInsertP90Ms": 6.11
     },
     {
       "id": "exp042-lto",
@@ -2904,7 +3049,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.45,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.45
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.67,
+      "sqlite3SingleInsertP90Ms": 5.99
     },
     {
       "id": "exp043-swar-escape",
@@ -2975,7 +3123,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.13,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.25,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.25
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.28,
+      "sqlite3SingleInsertP90Ms": 4.67
     },
     {
       "id": "exp045-microtask-coalesce",
@@ -3046,7 +3197,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.13,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.94,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.94
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.41,
+      "sqlite3SingleInsertP90Ms": 5.11
     },
     {
       "id": "exp044-batch-atomic",
@@ -3117,7 +3271,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.14,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.54,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.54
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.45,
+      "sqlite3SingleInsertP90Ms": 4.98
     },
     {
       "id": "round2-baseline",
@@ -3188,7 +3345,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.27,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.49,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.49
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.52,
+      "sqlite3SingleInsertP90Ms": 7.05
     },
     {
       "id": "exp053-pagesize-8k",
@@ -3259,7 +3419,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.15,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.35,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.35
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.62,
+      "sqlite3SingleInsertP90Ms": 9.21
     },
     {
       "id": "round3-baseline",
@@ -3330,7 +3493,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.83,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.83
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.7,
+      "sqlite3SingleInsertP90Ms": 5.81
     },
     {
       "id": "exp057-batch-hook",
@@ -3401,7 +3567,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.16,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.85,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.85
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.5,
+      "sqlite3SingleInsertP90Ms": 5.11
     },
     {
       "id": "exp058-string-cache",
@@ -3472,7 +3641,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.79,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.79
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.18,
+      "sqlite3SingleInsertP90Ms": 8.15
     },
     {
       "id": "exp059-row-hint",
@@ -3543,7 +3715,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.19,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.99,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.99
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.65,
+      "sqlite3SingleInsertP90Ms": 5.74
     },
     {
       "id": "round4-baseline",
@@ -3614,7 +3789,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.17,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.78,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.78
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.54,
+      "sqlite3SingleInsertP90Ms": 7.11
     },
     {
       "id": "exp064-no-clear-bindings",
@@ -3685,7 +3863,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.16,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.14,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.14
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.96,
+      "sqlite3SingleInsertP90Ms": 6.71
     },
     {
       "id": "exp067-shrink-init",
@@ -3756,7 +3937,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.18,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.11,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.11
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.6,
+      "sqlite3SingleInsertP90Ms": 6.25
     },
     {
       "id": "round5-baseline",
@@ -3827,7 +4011,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.17,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.41,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.41
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.8,
+      "sqlite3SingleInsertP90Ms": 5.62
     },
     {
       "id": "round5-aggregate",
@@ -3898,7 +4085,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.16,
         "Streaming / Stream Churn (100 cycles) / resqlite": 1.67,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 1.67
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 4.67,
+      "sqlite3SingleInsertP90Ms": 9.53
     },
     {
       "id": "exp075-native-hash",
@@ -3971,7 +4161,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.52,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.52
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.88,
+      "sqlite3SingleInsertP90Ms": 5.54
     },
     {
       "id": "075-baseline",
@@ -4044,7 +4237,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.48,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.48
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.79,
+      "sqlite3SingleInsertP90Ms": 6.17
     },
     {
       "id": "075-verify",
@@ -4117,7 +4313,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.25,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.12,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.12
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 4.8,
+      "sqlite3SingleInsertP90Ms": 7.29
     },
     {
       "id": "075-verify-v2",
@@ -4190,7 +4389,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.22,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.51,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.51
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 4.52,
+      "sqlite3SingleInsertP90Ms": 7.32
     },
     {
       "id": "075-complex",
@@ -4263,7 +4465,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.3,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.3
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.72,
+      "sqlite3SingleInsertP90Ms": 6.96
     },
     {
       "id": "075-simplified",
@@ -4336,7 +4541,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.21,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.54,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.54
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.72,
+      "sqlite3SingleInsertP90Ms": 6.79
     },
     {
       "id": "075-simplified-vs-baseline",
@@ -4409,7 +4617,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.22,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.34,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.34
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 4.13,
+      "sqlite3SingleInsertP90Ms": 7.28
     },
     {
       "id": "075-further-simplified",
@@ -4482,7 +4693,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.22,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.37,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.37
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.67,
+      "sqlite3SingleInsertP90Ms": 5.82
     },
     {
       "id": "075-final-check",
@@ -4555,7 +4769,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.2,
         "Streaming / Stream Churn (100 cycles) / resqlite": 3.06,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 3.06
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.77,
+      "sqlite3SingleInsertP90Ms": 5.87
     },
     {
       "id": "075-v3",
@@ -4628,7 +4845,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.22,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.56,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.56
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.99,
+      "sqlite3SingleInsertP90Ms": 6.21
     },
     {
       "id": "rolling-history",
@@ -4699,7 +4919,10 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.22,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.02,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.02
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 4.14,
+      "sqlite3SingleInsertP90Ms": 6.28
     },
     {
       "id": "077-080-baseline",
@@ -4857,7 +5080,10 @@
           "ciHighMB": 0.0,
           "mdeMB": 0.0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.82,
+      "sqlite3SingleInsertP90Ms": 6.39
     },
     {
       "id": "057-baseline-5x",
@@ -5009,7 +5235,10 @@
           "ciHighMB": 0.02,
           "mdeMB": 0.01
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 4.09,
+      "sqlite3SingleInsertP90Ms": 6.63
     },
     {
       "id": "exp057-5x",
@@ -5161,7 +5390,10 @@
           "ciHighMB": 0.06,
           "mdeMB": 0.03
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.92,
+      "sqlite3SingleInsertP90Ms": 6.67
     },
     {
       "id": "077-080-exp-v2",
@@ -5319,7 +5551,10 @@
           "ciHighMB": 0.02,
           "mdeMB": 0.01
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 3.47,
+      "sqlite3SingleInsertP90Ms": 5.78
     },
     {
       "id": "precision-fix",
@@ -5390,7 +5625,12 @@
         "Streaming / Fan-out (10 streams) / resqlite [main]": 0.181,
         "Streaming / Stream Churn (100 cycles) / resqlite": 2.744,
         "Streaming / Stream Churn (100 cycles) / resqlite [main]": 2.744
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 6.017,
+      "sqlite3SingleInsertP90Ms": 11.353,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "MacBook Pro 14in",
@@ -5573,7 +5813,10 @@
           "ciHighMB": 0.13,
           "mdeMB": 0.06
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.81,
+      "sqlite3SingleInsertP90Ms": 5.855
     },
     {
       "id": "MacBook Pro 14in",
@@ -5756,7 +5999,10 @@
           "ciHighMB": 0.5,
           "mdeMB": 0.25
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 3.502,
+      "sqlite3SingleInsertP90Ms": 7.996
     },
     {
       "id": "MacBook Pro 14in",
@@ -6033,7 +6279,10 @@
           "ciHighMB": 0.0,
           "mdeMB": 0.0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 0.89,
+      "sqlite3SingleInsertP90Ms": 1.682
     },
     {
       "id": "exp088-setlk-timeout",
@@ -6327,7 +6576,12 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 2.256,
+      "sqlite3SingleInsertP90Ms": 6.614,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "exp093-alias-read-tables",
@@ -6621,7 +6875,12 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 1,
+      "sqlite3SingleInsertMedianMs": 1.003,
+      "sqlite3SingleInsertP90Ms": 2.426,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     },
     {
       "id": "state-check-2026-04-22",
@@ -6915,7 +7174,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 1.029,
+      "sqlite3SingleInsertP90Ms": 1.68
     },
     {
       "id": "state-check-verify",
@@ -7209,7 +7471,12 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 9.392,
+      "sqlite3SingleInsertP90Ms": 118.393,
+      "noisy": true,
+      "noisyReason": "sqlite3 control elevated (single-insert wall median 9.39 ms) — background load suspected"
     },
     {
       "id": "MacBook Pro 14in",
@@ -7520,7 +7787,10 @@
           "walKiB": 161,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.591,
+      "sqlite3SingleInsertP90Ms": 2.919
     },
     {
       "id": "internal-perf-review",
@@ -7831,7 +8101,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 0.984,
+      "sqlite3SingleInsertP90Ms": 1.626
     },
     {
       "id": "exp094-dirty-read-string-reuse",
@@ -8142,7 +8415,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.245,
+      "sqlite3SingleInsertP90Ms": 3.073
     },
     {
       "id": "exp095-writer-result-buffer",
@@ -8453,7 +8729,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.066,
+      "sqlite3SingleInsertP90Ms": 2.332
     },
     {
       "id": "exp096-direct-batch-param-encoding",
@@ -8764,7 +9043,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.883,
+      "sqlite3SingleInsertP90Ms": 2.961
     },
     {
       "id": "exp097-one-pass-initial-stream-hash",
@@ -9075,7 +9357,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.072,
+      "sqlite3SingleInsertP90Ms": 4.25
     },
     {
       "id": "exp099-fnv-8byte",
@@ -9386,7 +9671,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 2.105,
+      "sqlite3SingleInsertP90Ms": 3.29
     },
     {
       "id": "exp101-tx-stmt-cache",
@@ -9697,7 +9985,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 0.932,
+      "sqlite3SingleInsertP90Ms": 1.576
     },
     {
       "id": "exp102-savepoint-cache",
@@ -10008,7 +10299,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 5,
+      "sqlite3SingleInsertMedianMs": 1.127,
+      "sqlite3SingleInsertP90Ms": 1.827
     },
     {
       "id": "exp100-bounded-stream-scheduler",
@@ -10319,7 +10613,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 0.965,
+      "sqlite3SingleInsertP90Ms": 1.708
     },
     {
       "id": "baseline-for-exp100",
@@ -10630,7 +10927,10 @@
           "walKiB": 161.0,
           "readersBusy": 0
         }
-      }
+      },
+      "repeatCount": 3,
+      "sqlite3SingleInsertMedianMs": 1.174,
+      "sqlite3SingleInsertP90Ms": 2.263
     }
   ],
   "experiments": [
