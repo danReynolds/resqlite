@@ -50,10 +50,33 @@ class ProfileCounters {
   /// queries with different column counts.
   static int cellsDecoded = 0;
 
+  /// Cumulative wall-clock microseconds spent inside the synchronous
+  /// body of `StreamEngine.invalidate` — `_tableIndex` lookup,
+  /// per-entry [_writeAffectsEntry] intersection check, dirty/in-flight
+  /// scheduling, and `_flushQueue` kickoff. Incremented per write when
+  /// at least one stream is registered. Used by the A11c profile
+  /// harness to isolate writer-side fanout cost from the reader-pool
+  /// drain time captured in `yield_us`.
+  static int invalidateUs = 0;
+  static int invalidateCount = 0;
+
+  /// Cumulative wall-clock microseconds spent specifically inside
+  /// `StreamEngine._writeAffectsEntry` — the per-entry column-set
+  /// intersection probe added in exp 106. Sum across every entry
+  /// visited per invalidate. Lets the harness compute average
+  /// per-watcher intersection cost as `intersectionUs /
+  /// intersectionEntries`.
+  static int intersectionUs = 0;
+  static int intersectionEntries = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
         'rows_decoded': rowsDecoded,
         'cells_decoded': cellsDecoded,
+        'invalidate_us': invalidateUs,
+        'invalidate_count': invalidateCount,
+        'intersection_us': intersectionUs,
+        'intersection_entries': intersectionEntries,
       };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -74,5 +97,9 @@ class ProfileCounters {
   static void reset() {
     rowsDecoded = 0;
     cellsDecoded = 0;
+    invalidateUs = 0;
+    invalidateCount = 0;
+    intersectionUs = 0;
+    intersectionEntries = 0;
   }
 }
