@@ -475,13 +475,16 @@ Future<_IterResult> _singleIteration(
       await Future<void>.delayed(Duration.zero);
       await Future<void>.delayed(Duration.zero);
     }
-    // Wait for any trailing in-flight emissions to settle before
-    // stopping the wall clock — but only briefly, because we're
-    // measuring writer throughput, not steady-state listener drain.
+    wallSw.stop();
+    // Drain any trailing in-flight emissions for the emission count, but
+    // only after the wall clock is already stopped — including the drain
+    // in the timed window bakes ~100 µs/write of fixed-cost padding into
+    // the throughput denominator and hides per-write changes (the bug
+    // that masked exp 107's true −67 % per-write reduction as a +51 %
+    // w/s suite delta).
     if (streamCount > 0) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
-    wallSw.stop();
 
     final wallUs = wallSw.elapsedMicroseconds;
     final listenerDelta = listenerUs - baselineListenerUs;
