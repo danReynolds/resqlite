@@ -189,6 +189,40 @@ final class StreamEngine {
 
     final pool = await _pool;
     while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
+      // Experiment 107: cross-stream re-query batching.
+      //
+      // When the dirty queue exceeds the pool width by a wide margin,
+      // the per-entry path would otherwise cost the writer's microtask
+      // drain `ceil(N / W)` sequential pool round-trips. A batched
+      // dispatch ships the whole queue to one worker for a single
+      // round-trip and frees the rest of the pool for unrelated reads.
+      //
+      // Threshold heuristic: only batch when queue length is large
+      // enough that the parallel per-entry path would need many
+      // sequential rounds AND each per-entry round-trip dominates the
+      // C-side hash work. Empirically (initial benchmark sweep):
+      //   - 11 streams × 1000-row hashes → C work dominates,
+      //     batching serialises and *regresses* (Unchanged Fanout).
+      //   - 50 streams × ~100-row hashes → IPC dominates, batching
+      //     wins (A11c overlap).
+      // Pick a threshold that catches the latter shape while leaving
+      // small-to-mid fan-out on the parallel path: a queue size of at
+      // least `workerCount * 8 + 1` (33 for cap=4) reliably means the
+      // per-entry parallel drain would burn ≥ 8 round-trips per worker.
+      // This keeps Unchanged Fanout (11 entries) and similar mid-cardinality
+      // streaming workloads on today's parallel dispatch.
+      final batchThreshold = pool.workerCount * 8 + 1;
+      if (_requeryQueue.length >= batchThreshold) {
+        final batch = List<StreamEntry>.of(_requeryQueue);
+        _requeryQueue.clear();
+        _requeryBatch(batch);
+        // _requeryBatch holds one worker for the duration of the batch.
+        // The remaining workers stay free for unrelated reads; if more
+        // entries are added to `_requeryQueue` mid-batch they'll be
+        // picked up by the post-batch `_flushQueue()` call.
+        return;
+      }
+
       final entry = _requeryQueue.first;
       _requeryQueue.remove(entry);
       _requery(entry);
@@ -286,6 +320,83 @@ final class StreamEngine {
     });
 
     return subscriberStream;
+  }
+
+  /// Experiment 107 — batched re-query of multiple stream entries.
+  ///
+  /// All [entries] share one pool worker for one round-trip. The worker
+  /// runs `executeQueryIfChanged` per entry and returns aligned
+  /// `(rows?, hash, count)` tuples. Per-entry dirty/cancellation/error
+  /// handling mirrors [_requery] so the public observable contract
+  /// (one re-query per dirty mark, late-mark forces re-queue, errors
+  /// propagate to subscribers) is unchanged.
+  Future<void> _requeryBatch(List<StreamEntry> entries) async {
+    // Mark every batched entry in-flight synchronously so concurrent
+    // invalidations can see the in-flight state and queue the entry
+    // for a follow-up requery rather than scheduling a duplicate.
+    for (final entry in entries) {
+      entry.inFlight = true;
+      entry.dirty = false;
+    }
+
+    try {
+      final pool = await _pool;
+      final batchInputs = List<(String, List<Object?>, int, int)>.generate(
+        entries.length,
+        (i) {
+          final entry = entries[i];
+          return (
+            entry.sql,
+            entry.params,
+            entry.lastResultHash,
+            entry.lastRowCount,
+          );
+        },
+        growable: false,
+      );
+      final results = await pool.selectBatchIfChanged(batchInputs);
+
+      for (var i = 0; i < entries.length; i++) {
+        final entry = entries[i];
+        final (rows, newHash, newRowCount) = results[i];
+
+        // Skip cancelled entries: `_remove` empties `subscribers` so
+        // there's nothing to emit to and nothing to requeue.
+        if (entry.subscribers.isEmpty) continue;
+
+        // If the entry was re-marked dirty mid-batch (a write landed
+        // while the batch was in flight) requeue it so the next flush
+        // re-runs the query. The intermediate result is discarded.
+        if (entry.dirty) {
+          _requeryQueue.add(entry);
+          continue;
+        }
+
+        // Hash + row-count match — no change to emit.
+        if (rows == null) continue;
+
+        entry.lastResultHash = newHash;
+        entry.lastRowCount = newRowCount;
+        entry.lastResult = rows;
+        entry.emit(rows);
+      }
+    } catch (e, st) {
+      // A batch-level failure (worker crash, FFI error before per-entry
+      // dispatch) propagates to every entry's subscribers. Per-entry
+      // SQL errors land here as well — they're rare, and matching the
+      // single-stream path means subscribers see the error rather than
+      // a silent stall.
+      for (final entry in entries) {
+        for (final sub in entry.subscribers) {
+          if (!sub.isClosed) sub.addError(e, st);
+        }
+      }
+    } finally {
+      for (final entry in entries) {
+        entry.inFlight = false;
+      }
+      _flushQueue();
+    }
   }
 
   /// Re-query a single stream on the reader pool.

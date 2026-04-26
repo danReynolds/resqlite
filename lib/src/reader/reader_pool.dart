@@ -40,6 +40,13 @@ final class ReaderPool {
 
   bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
 
+  /// Number of workers in the pool. Used by [StreamEngine] to gate
+  /// experiment 107's batched re-query dispatch — when the dirty queue
+  /// exceeds the pool width, the per-entry path needs at least 2 round
+  /// trips per worker, so a single batched round-trip becomes the
+  /// cheaper option for the writer's microtask drain.
+  int get workerCount => _workers.length;
+
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
     final pool = ReaderPool._([]);
     final slots = List.generate(
@@ -120,6 +127,25 @@ final class ReaderPool {
       SelectIfChangedRequest(sql, parameters, lastResultHash, lastRowCount),
     );
     return result as (List<Map<String, Object?>>?, int, int);
+  }
+
+  /// Experiment 107 — batch a list of stream re-queries onto a single
+  /// worker. The reply is a list of `(rows?, hash, rowCount)` tuples
+  /// aligned 1:1 to `entries`. `rows` is null per entry when its hash
+  /// (and row count) match the supplied baselines.
+  ///
+  /// Workers must be available on the pool — caller is expected to gate
+  /// on [hasAvailableWorker] before invoking, mirroring the per-entry
+  /// path. Holds exactly one worker for the whole batch (the rest stay
+  /// free for other reads).
+  Future<List<(List<Map<String, Object?>>?, int, int)>> selectBatchIfChanged(
+    List<(String, List<Object?>, int, int)> entries,
+  ) async {
+    final result = await _dispatch(SelectBatchIfChangedRequest(entries));
+    final batch = result as List<(Object?, int, int)>;
+    return batch
+        .map((e) => (e.$1 as List<Map<String, Object?>>?, e.$2, e.$3))
+        .toList(growable: false);
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {

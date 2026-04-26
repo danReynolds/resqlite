@@ -63,6 +63,27 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
+/// Experiment 107 — cross-stream re-query batching.
+///
+/// Bundle of N stream re-queries, all serviced by ONE worker in a single
+/// pool round-trip. Each entry carries its own SQL, params, and last-known
+/// hash/row-count baselines so the worker can run the standard two-pass
+/// `executeQueryIfChanged` per entry.
+///
+/// The worker reply is a `List<(rows?, hash, count)>` aligned to the
+/// input order — the caller maps them back to stream entries.
+///
+/// This bundle bypasses `ReadRequest.sql` / `parameters`; those fields are
+/// per-entry and stored on `entries`. The base class fields are seeded with
+/// dummy values to satisfy the sealed `ReadRequest` contract.
+final class SelectBatchIfChangedRequest extends ReadRequest {
+  SelectBatchIfChangedRequest(this.entries) : super('', const []);
+
+  /// Per-entry tuples: `(sql, parameters, lastResultHash, lastRowCount)`.
+  /// Reply elements are aligned 1:1 to this list's index.
+  final List<(String, List<Object?>, int, int)> entries;
+}
+
 /// Byte-size threshold for sacrifice. If the estimated transfer size of
 /// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
 /// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
@@ -164,6 +185,45 @@ void readerEntrypoint(List<Object> args) {
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
+
+        case SelectBatchIfChangedRequest(:final entries):
+          // Experiment 107: batched stream re-query.
+          //
+          // Run `executeQueryIfChanged` over every entry on this single
+          // worker, then reply once with the full result list. Each entry
+          // pays the standard two-pass cost (hash → decode-on-mismatch);
+          // the savings come from collapsing N pool round-trips into one.
+          //
+          // Sacrifice fires only when the cumulative result payload exceeds
+          // the threshold — typical A11c overlap workloads produce all-null
+          // replies (hash matches), well under the limit.
+          final batchResults = List<(Object?, int, int)>.filled(
+            entries.length,
+            (null, 0, 0),
+            growable: false,
+          );
+          var batchEstimatedBytes = 0;
+          for (var i = 0; i < entries.length; i++) {
+            final (sql, parameters, lastHash, lastCount) = entries[i];
+            final (newHash, newRowCount, raw) = executeQueryIfChanged(
+              dbHandleAddr,
+              readerId,
+              sql,
+              parameters,
+              lastHash,
+              lastCount,
+            );
+            batchResults[i] = (
+              raw == null ? null : _toRows(raw),
+              newHash,
+              newRowCount,
+            );
+            if (raw != null) {
+              batchEstimatedBytes += raw.estimatedBytes;
+            }
+          }
+          sacrifice = batchEstimatedBytes > sacrificeByteThreshold;
+          result = batchResults;
       }
 
       if (sacrifice) {
