@@ -127,7 +127,10 @@ that has no relationship to the change.
 
 ## Decision
 
-Rejected.
+Rejected. Code change reverted on the main branch; the
+implementation is preserved at the [`archive/exp-104`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-104)
+tag for re-evaluation if a future benchmark surfaces a
+`selectBytes`-dominated workload at the noise floor.
 
 The targeted `selectBytes` benchmarks across four row-count tiers
 do not move; the one isolated win and the one isolated regression
@@ -146,9 +149,7 @@ time and indistinguishable from drift in a 5-repeat release run.
 The implementation is small (~10 LoC) and zero-risk, but per the
 project's "if we can't measure it, we don't adopt it" rule
 (established in exp 050, reaffirmed in 071/093/095), it does not
-clear the bar for inclusion. The slim commit is preserved at
-`archive/exp-104` for re-evaluation if a future benchmark surfaces
-a `selectBytes`-dominated workload at the noise floor.
+clear the bar for inclusion.
 
 ## Related
 
