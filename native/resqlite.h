@@ -135,6 +135,38 @@ int resqlite_get_read_tables(
     int max_tables
 );
 
+// ---------------------------------------------------------------------------
+// Column dependency tracking (experiment 106)
+// ---------------------------------------------------------------------------
+
+// Hard cap matches the C-side `RESQLITE_MAX_DEP_COLUMNS`. Sets larger than
+// this are silently truncated; callers should size their buffers to match.
+#define RESQLITE_MAX_DEP_COLUMNS 64
+
+// Get the set of "table.column" pairs read by the most recent query on
+// the given reader. Each entry is one C string of the form `"table.col"`.
+// Cleared after reading. Strings are owned by the reader (live on the
+// cached stmt entry) — the caller must copy before the next query on
+// this reader.
+int resqlite_get_read_columns(
+    resqlite_db* db,
+    int reader_id,
+    const char** out_columns,
+    int max_columns
+);
+
+// Get the set of "table.column" pairs modified by writer activity since
+// the last drain. Mirrors `resqlite_get_dirty_tables` semantics — the
+// strings live until the next dirty-set update, so callers should copy
+// before further writer activity. INSERT and DELETE writes leave a
+// `"table.*"` wildcard sentinel (column information is unavailable from
+// the SQLite authorizer for those actions).
+int resqlite_get_dirty_columns(
+    resqlite_db* db,
+    const char** out_columns,
+    int max_columns
+);
+
 int resqlite_db_status_total(
     resqlite_db* db,
     int op,

@@ -115,11 +115,24 @@ void readerEntrypoint(List<Object> args) {
         case SelectWithDepsRequest(:final sql, :final parameters):
           // Initial stream query produces hash + row-count baselines
           // (exp 075 + 077) so future selectIfChanged calls can
-          // short-circuit on unchanged state.
-          final (raw, readTables, initialHash, initialRowCount) =
-              executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
+          // short-circuit on unchanged state. Experiment 106 piggybacks
+          // a per-table column-dependency map on the same call so the
+          // stream engine can perform writer-side dispatch elision.
+          final (
+            raw,
+            readTables,
+            readColumns,
+            initialHash,
+            initialRowCount,
+          ) = executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = (_toRows(raw), readTables, initialHash, initialRowCount);
+          result = (
+            _toRows(raw),
+            readTables,
+            readColumns,
+            initialHash,
+            initialRowCount,
+          );
 
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes = executeQueryBytes(
@@ -281,18 +294,25 @@ Uint8List executeQueryBytes(
 
 /// Execute a stream's initial query.
 ///
-/// Returns the rows, the authorizer-captured read tables, the C-computed
-/// baseline hash (exp 075), and the row count (exp 077 — cached so
-/// subsequent selectIfChanged calls can short-circuit on count mismatch).
-(RawQueryResult, List<String>, int, int) executeQueryWithDeps(
+/// Returns the rows, the authorizer-captured read tables, the per-table
+/// column dependencies (experiment 106), the C-computed baseline hash
+/// (exp 075), and the row count (exp 077 — cached so subsequent
+/// selectIfChanged calls can short-circuit on count mismatch).
+(RawQueryResult, List<String>, Map<String, Set<String>?>, int, int)
+executeQueryWithDeps(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
   final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
+  // getReadColumns must run before getReadTables — the table getter
+  // resets the per-reader read-set, but the column set is independent
+  // and the call order doesn't matter for correctness. We drain both
+  // before returning so the next query on this reader sees fresh state.
+  final readColumns = getReadColumns(dbHandle, readerId);
   final readTables = getReadTables(dbHandle, readerId);
-  return (raw, readTables, hash, raw.rowCount);
+  return (raw, readTables, readColumns, hash, raw.rowCount);
 });
 
 /// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
