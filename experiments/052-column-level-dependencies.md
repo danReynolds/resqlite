@@ -1,7 +1,13 @@
 # Experiment 052: Column-level dependency tracking
 
 **Date:** 2026-04-15
-**Status:** Deferred (architectural fit valid, benchmark cannot measure)
+**Status:** Deferred → superseded by [exp 106](106-column-level-deps.md) (Accepted, 2026-04-25)
+
+**Follow-up:** [exp 106](106-column-level-deps.md) implemented this design once
+the [A11c Many-Streams Writer Throughput](../benchmark/suites/many_streams_writer_throughput.dart)
+benchmark in PR #39 made the dispatch-elision win measurable. Result:
+**+82 %** A11c disjoint writer throughput (3,956 → 7,201 w/s) with
+overlap unchanged.
 
 ## Problem
 

@@ -346,6 +346,37 @@ external int resqliteGetReadTables(
   int maxTables,
 );
 
+// Experiment 106: column-level dependency tracking. The C layer captures
+// "table.column" pairs alongside table dependencies; these bindings drain
+// them on the same cadence as the table-level FFI.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Int,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_get_read_columns', isLeaf: true)
+external int resqliteGetReadColumns(
+  ffi.Pointer<ffi.Void> db,
+  int readerId,
+  ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
+  int maxColumns,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_get_dirty_columns', isLeaf: true)
+external int resqliteGetDirtyColumns(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
+  int maxColumns,
+);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
@@ -384,6 +415,78 @@ List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
     tables[i] = _readTablesBuf[i].toDartString();
   }
   return tables;
+}
+
+// Experiment 106: per-worker persistent buffer for column pointer
+// marshalling — both read and dirty column drains reuse this slot
+// because the calls are serialised by their respective mutexes
+// (per-reader for reads, writer mutex for dirties) and each call drains
+// the C-side set, so we never have two live drains overlapping.
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnsBuf = calloc<ffi.Pointer<Utf8>>(
+  64,
+);
+
+/// Drain the per-reader read-column set into a Dart map of
+/// `table -> Set<column>`. Wildcards (`"table.*"`) collapse the table to
+/// `null` in the returned map, signalling "any column matters".
+///
+/// Zero-entry short-circuit returns a `const {}` to avoid allocations on
+/// the hot streaming path.
+Map<String, Set<String>?> getReadColumns(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
+  final count = resqliteGetReadColumns(dbHandle, readerId, _columnsBuf, 64);
+  if (count == 0) return const <String, Set<String>?>{};
+  final out = <String, Set<String>?>{};
+  for (var i = 0; i < count; i++) {
+    final raw = _columnsBuf[i].toDartString();
+    final dot = raw.indexOf('.');
+    if (dot < 0) continue;
+    final table = raw.substring(0, dot);
+    final col = raw.substring(dot + 1);
+    if (col == '*') {
+      out[table] = null;
+      continue;
+    }
+    final existing = out[table];
+    if (existing == null && out.containsKey(table)) {
+      // Wildcard already present — keep it.
+      continue;
+    }
+    final set = existing ?? <String>{};
+    set.add(col);
+    out[table] = set;
+  }
+  return out;
+}
+
+/// Drain the writer's dirty-column accumulator. Same `table.column`
+/// encoding as [getReadColumns]; wildcards collapse to `null` to signal
+/// "all columns of this table are dirty".
+Map<String, Set<String>?> getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
+  final count = resqliteGetDirtyColumns(dbHandle, _columnsBuf, 64);
+  if (count == 0) return const <String, Set<String>?>{};
+  final out = <String, Set<String>?>{};
+  for (var i = 0; i < count; i++) {
+    final raw = _columnsBuf[i].toDartString();
+    final dot = raw.indexOf('.');
+    if (dot < 0) continue;
+    final table = raw.substring(0, dot);
+    final col = raw.substring(dot + 1);
+    if (col == '*') {
+      out[table] = null;
+      continue;
+    }
+    final existing = out[table];
+    if (existing == null && out.containsKey(table)) {
+      continue;
+    }
+    final set = existing ?? <String>{};
+    set.add(col);
+    out[table] = set;
+  }
+  return out;
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle

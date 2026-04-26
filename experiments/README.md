@@ -44,6 +44,7 @@ Experiments that proved their value and were merged into the codebase.
 | [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 | [077](077-cheap-check-first-sweep.md) | Cheap-check-first sweep (four small wins) | **−13 % to −23 % on write benchmarks** from cached `sqlite3_bind_parameter_count`; pairs with three correctness-neutral fast-rejects on invalidation, hash, and subscription paths |  |
 | [101](101-tx-stmt-cache.md) | Cached BEGIN/COMMIT/ROLLBACK statements | **−13 % to −14 %** on Batched-Write-Inside-Transaction and Growing-Stream Invalidation by replacing `sqlite3_exec`'s per-call prepare+finalize with three persistently prepared transaction-control stmts |  |
+| [106](106-column-level-deps.md) | Column-level dependency tracking (re-attempt of 052 under A11c) | **+82 %** on A11c disjoint writer throughput (3,956 → 7,201 w/s); overlap unchanged (4,477 → 4,581 w/s); overlap/disjoint ratio drops 1.132 → 0.636, the direct signature of writer-side dispatch elision |  |
 
 ## In Review
 

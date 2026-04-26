@@ -56,8 +56,22 @@ final class StreamEngine {
     return _createStream(key, sql, parameters);
   }
 
-  /// Invalidate all streams dependent on the given tables, scheduling them for requery.
-  Future<void> invalidate(List<String>? dirtyTables) async {
+  /// Invalidate all streams dependent on the given tables, scheduling them
+  /// for requery.
+  ///
+  /// Experiment 106: when [dirtyColumns] is provided, perform a per-table
+  /// column-intersection check before scheduling the requery. A stream
+  /// only re-runs if its read-column set intersects the writer's modified
+  /// column set for at least one shared table. The check degrades to
+  /// today's table-only behaviour when either side is unknown — a `null`
+  /// entry in `dirtyColumns` (writer-side wildcard for INSERT/DELETE) or
+  /// a missing entry in the stream's `columnDependencies` (e.g. legacy
+  /// streams created before this experiment landed) both force the
+  /// re-query.
+  Future<void> invalidate(
+    List<String>? dirtyTables, [
+    Map<String, Set<String>?>? dirtyColumns,
+  ]) async {
     if (_entries.isEmpty || dirtyTables == null || dirtyTables.isEmpty) {
       return;
     }
@@ -77,6 +91,17 @@ final class StreamEngine {
     }
 
     for (final entry in dirtyEntries) {
+      // Experiment 106: column-level dispatch elision. Skip the per-stream
+      // requery when we know the modified columns can't change the
+      // result. This is the writer-side complement to exp 075's hash
+      // short-circuit — the hash short-circuit pays the requery cost and
+      // suppresses the emission; the column elision skips the requery
+      // itself.
+      if (dirtyColumns != null &&
+          !_writeAffectsEntry(entry, dirtyTables, dirtyColumns)) {
+        continue;
+      }
+
       entry.dirty = true;
 
       // Don't schedule dirty entries for requery if they are *already in-flight*
@@ -89,6 +114,45 @@ final class StreamEngine {
     }
 
     _flushQueue();
+  }
+
+  /// Return `true` when at least one table in [dirtyTables] is in
+  /// [entry]'s dependency set AND the writer's modified columns intersect
+  /// the entry's read columns for that table (or either side carries a
+  /// wildcard, forcing the re-query).
+  static bool _writeAffectsEntry(
+    StreamEntry entry,
+    List<String> dirtyTables,
+    Map<String, Set<String>?> dirtyColumns,
+  ) {
+    final entryDeps = entry.dependencies;
+    final entryCols = entry.columnDependencies;
+    for (final table in dirtyTables) {
+      if (!entryDeps.contains(table)) continue;
+
+      // Writer-side wildcard: INSERT / DELETE / untagged writes — every
+      // stream watching this table must re-query because rows may have
+      // appeared or disappeared.
+      final writerCols = dirtyColumns[table];
+      if (writerCols == null) {
+        if (dirtyColumns.containsKey(table)) return true;
+        // Table-only invalidation with no column info available — fall
+        // back to today's behaviour and re-query.
+        return true;
+      }
+
+      // Reader-side wildcard or missing column data: degrade safely —
+      // re-query the stream.
+      final readerCols = entryCols[table];
+      if (readerCols == null) return true;
+
+      // Both sides have concrete column sets. Skip the re-query only
+      // when they are disjoint.
+      for (final c in writerCols) {
+        if (readerCols.contains(c)) return true;
+      }
+    }
+    return false;
   }
 
   Future<void> _flushQueue() async {
@@ -155,8 +219,13 @@ final class StreamEngine {
           return;
         }
 
-        final (initialRows, initialTables, initialHash, initialRowCount) =
-            result;
+        final (
+          initialRows,
+          initialTables,
+          initialColumns,
+          initialHash,
+          initialRowCount,
+        ) = result;
 
         // Index the entry's table dependencies after its initial query completes.
         for (final table in initialTables) {
@@ -167,6 +236,9 @@ final class StreamEngine {
         entry.lastResultHash = initialHash;
         entry.lastRowCount = initialRowCount;
         entry.dependencies = initialTables.toSet();
+        // Experiment 106: persist the per-table read-column map for the
+        // dispatch elision check on subsequent invalidations.
+        entry.columnDependencies = initialColumns;
 
         // If an invalidation occurred while performing the entry's initial query then the entry
         // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
@@ -288,6 +360,7 @@ final class StreamEntry {
     required this.sql,
     required this.params,
     this.dependencies = const {},
+    this.columnDependencies = const {},
   });
 
   /// Hash key identifying this stream (derived from SQL + params).
@@ -301,6 +374,15 @@ final class StreamEntry {
 
   /// The table dependencies of the query.
   Set<String> dependencies;
+
+  /// Experiment 106: per-table column dependencies. The authorizer
+  /// captures every column referenced in the query (SELECT projection
+  /// columns plus WHERE / ORDER BY / etc. — everything that can affect
+  /// the result). A `null` entry for a table means "any column" and
+  /// forces the writer-side dispatch path to re-query unconditionally
+  /// for that table. An absent entry behaves the same as `null` per the
+  /// elision contract in [StreamEngine.invalidate].
+  Map<String, Set<String>?> columnDependencies;
 
   /// Per-subscriber buffered controllers. Each subscriber gets their own
   /// non-broadcast StreamController that buffers events, eliminating the

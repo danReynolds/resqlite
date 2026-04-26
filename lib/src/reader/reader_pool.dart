@@ -69,19 +69,33 @@ final class ReaderPool {
     return result as List<Map<String, Object?>>;
   }
 
-  /// Execute a query and capture read dependencies (table names).
+  /// Execute a query and capture read dependencies (table names + per-
+  /// table column sets).
   ///
   /// Also returns the C-computed hash (exp 075) and row count (exp 077)
   /// of the initial result so later [selectIfChanged] calls have both
-  /// baselines to short-circuit against.
-  Future<(List<Map<String, Object?>>, List<String>, int, int)> selectWithDeps(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    final result = await _dispatch(
-      SelectWithDepsRequest(sql, parameters),
-    );
-    return result as (List<Map<String, Object?>>, List<String>, int, int);
+  /// baselines to short-circuit against. Experiment 106 adds the
+  /// per-table column map; a `null` value for a table means "any column
+  /// modification matters" (e.g. SELECT *).
+  Future<
+    (
+      List<Map<String, Object?>>,
+      List<String>,
+      Map<String, Set<String>?>,
+      int,
+      int,
+    )
+  >
+  selectWithDeps(String sql, [List<Object?> parameters = const []]) async {
+    final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
+    return result
+        as (
+          List<Map<String, Object?>>,
+          List<String>,
+          Map<String, Set<String>?>,
+          int,
+          int,
+        );
   }
 
   /// Execute a query returning JSON-encoded bytes.
