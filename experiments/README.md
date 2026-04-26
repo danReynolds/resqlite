@@ -61,6 +61,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [108](108-selectbytes-out-slots.md) | Persistent selectBytes out-parameter slots | Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |
 | [100](100-bounded-stream-requery-scheduler.md) | Bounded stream re-query scheduler | Did not improve unrelated reads during fan-out and regressed high-cardinality stream fan-out by 103% |
 | [025](025-pragma-optimize.md) | `PRAGMA optimize` | Right idea in principle, but no compelling or reliable benchmark win in the current suite |
