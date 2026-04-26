@@ -1,6 +1,8 @@
 import 'dart:collection';
 import 'dart:async';
 
+import 'profile_counters.dart';
+import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 
 /// Stream engine — reactive query lifecycle.
@@ -76,6 +78,12 @@ final class StreamEngine {
       return;
     }
 
+    // Profile-mode instrumentation: time the synchronous body of this
+    // method (everything except the awaited `_pool` future inside
+    // `_flushQueue`) and the per-entry intersection probe separately.
+    // Tree-shaken in release builds.
+    final invalidateSw = kProfileMode ? (Stopwatch()..start()) : null;
+
     // Pending entries have not resolved dependencies yet, so any table write
     // could affect their eventual result.
     for (final entry in _pendingEntries) {
@@ -90,6 +98,8 @@ final class StreamEngine {
       }
     }
 
+    final intersectionSw = kProfileMode ? Stopwatch() : null;
+    var intersectionEntries = 0;
     for (final entry in dirtyEntries) {
       // Experiment 106: column-level dispatch elision. Skip the per-stream
       // requery when we know the modified columns can't change the
@@ -97,9 +107,18 @@ final class StreamEngine {
       // short-circuit — the hash short-circuit pays the requery cost and
       // suppresses the emission; the column elision skips the requery
       // itself.
-      if (dirtyColumns != null &&
-          !_writeAffectsEntry(entry, dirtyTables, dirtyColumns)) {
-        continue;
+      if (dirtyColumns != null) {
+        if (kProfileMode) {
+          intersectionEntries++;
+          intersectionSw!.start();
+        }
+        final affects = _writeAffectsEntry(entry, dirtyTables, dirtyColumns);
+        if (kProfileMode) {
+          intersectionSw!.stop();
+        }
+        if (!affects) {
+          continue;
+        }
       }
 
       entry.dirty = true;
@@ -114,6 +133,14 @@ final class StreamEngine {
     }
 
     _flushQueue();
+
+    if (kProfileMode) {
+      invalidateSw!.stop();
+      ProfileCounters.invalidateUs += invalidateSw.elapsedMicroseconds;
+      ProfileCounters.invalidateCount++;
+      ProfileCounters.intersectionUs += intersectionSw!.elapsedMicroseconds;
+      ProfileCounters.intersectionEntries += intersectionEntries;
+    }
   }
 
   /// Return `true` when at least one table in [dirtyTables] is in

@@ -41,6 +41,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
 
 // Workload constants — match suite when reasonable, but cut iterations
@@ -63,6 +64,9 @@ class _Sample {
     required this.writerUs,
     required this.yieldUs,
     required this.totalUs,
+    required this.invalidateUs,
+    required this.intersectionUs,
+    required this.intersectionEntries,
   });
 
   final String scenario;
@@ -72,6 +76,19 @@ class _Sample {
   final int yieldUs;
   final int totalUs;
 
+  /// Microseconds spent inside the synchronous body of
+  /// `StreamEngine.invalidate` for this write. Subset of `writerUs`
+  /// (which also includes the writer-isolate round-trip and reply
+  /// microtask). Zero in the baseline scenario (no streams).
+  final int invalidateUs;
+
+  /// Microseconds spent specifically in the per-entry
+  /// `_writeAffectsEntry` intersection probe for this write. Subset of
+  /// `invalidateUs`. Sum across `intersectionEntries` per-watcher
+  /// probes; per-watcher cost is `intersectionUs / intersectionEntries`.
+  final int intersectionUs;
+  final int intersectionEntries;
+
   Map<String, Object?> toJson() => {
         'scenario': scenario,
         'iter': iter,
@@ -79,6 +96,9 @@ class _Sample {
         'writer_us': writerUs,
         'yield_us': yieldUs,
         'total_us': totalUs,
+        'invalidate_us': invalidateUs,
+        'intersection_us': intersectionUs,
+        'intersection_entries': intersectionEntries,
       };
 }
 
@@ -288,11 +308,24 @@ Future<List<_Sample>> _runScenario(
           ..reset()
           ..start();
 
+        // Snapshot ProfileCounters before the write. The synchronous
+        // body of StreamEngine.invalidate runs *inside* db.execute()
+        // before the future resolves, so the counter delta is captured
+        // entirely between these two snapshots.
+        final invalUsBefore = ProfileCounters.invalidateUs;
+        final isectUsBefore = ProfileCounters.intersectionUs;
+        final isectEntriesBefore = ProfileCounters.intersectionEntries;
+
         writerSw
           ..reset()
           ..start();
         await db.execute(updateSql, [valueFor(w), w % _rowCount]);
         writerSw.stop();
+
+        final invalUs = ProfileCounters.invalidateUs - invalUsBefore;
+        final isectUs = ProfileCounters.intersectionUs - isectUsBefore;
+        final isectEntries =
+            ProfileCounters.intersectionEntries - isectEntriesBefore;
 
         yieldSw
           ..reset()
@@ -311,6 +344,9 @@ Future<List<_Sample>> _runScenario(
             writerUs: writerSw.elapsedMicroseconds,
             yieldUs: yieldSw.elapsedMicroseconds,
             totalUs: totalSw.elapsedMicroseconds,
+            invalidateUs: invalUs,
+            intersectionUs: isectUs,
+            intersectionEntries: isectEntries,
           ));
         }
       }
@@ -354,8 +390,8 @@ String _aggregate(List<_Sample> samples) {
       'dispatches and listener microtasks settle.');
   buf.writeln();
   buf.writeln('| scenario | n | writer_us p50/p90/p99 | yield_us p50/p90/p99 '
-      '| total_us p50/p90/p99 | writes/sec (1e6/total_us median) |');
-  buf.writeln('|---|---:|---|---|---|---:|');
+      '| total_us p50/p90/p99 | invalidate_us p50 | isect_us p50 / per-watch | writes/sec |');
+  buf.writeln('|---|---:|---|---|---|---:|---:|---:|');
   // Default ordering for the standard 3-scenario run; scaling mode
   // sorts numerically below.
   final standard = ['baseline', 'disjoint', 'overlap'];
@@ -377,10 +413,22 @@ String _aggregate(List<_Sample> samples) {
     final w = _stats(list.map((s) => s.writerUs).toList());
     final y = _stats(list.map((s) => s.yieldUs).toList());
     final t = _stats(list.map((s) => s.totalUs).toList());
+    final inv = _stats(list.map((s) => s.invalidateUs).toList());
+    final isect = _stats(list.map((s) => s.intersectionUs).toList());
+    // Per-watcher mean isolated from total intersection time / total
+    // intersection-entries probed. Avoids /0 when no streams or no
+    // dirtyColumns metadata.
+    final isectTotal = list.fold<int>(0, (a, b) => a + b.intersectionUs);
+    final entriesTotal =
+        list.fold<int>(0, (a, b) => a + b.intersectionEntries);
+    final perWatch = entriesTotal == 0
+        ? '—'
+        : (isectTotal / entriesTotal).toStringAsFixed(2);
     final wps = t.p50 == 0 ? 0 : (1e6 / t.p50);
     buf.writeln('| $scenario | ${list.length} | ${w.p50}/${w.p90}/${w.p99} '
         '| ${y.p50}/${y.p90}/${y.p99} | ${t.p50}/${t.p90}/${t.p99} '
-        '| ${wps.toStringAsFixed(0)} |');
+        '| ${inv.p50} | ${isect.p50} / $perWatch | '
+        '${wps.toStringAsFixed(0)} |');
   }
   buf.writeln();
 
