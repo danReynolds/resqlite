@@ -571,6 +571,13 @@ external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 
 typedef NativeBuffer = ({ffi.Pointer<ffi.Uint8> ptr, int length});
 
+/// Per-isolate scratch slots for `resqlite_query_bytes` out-parameters.
+/// Reader workers process one message at a time, so these can be reused across
+/// every selectBytes call instead of allocating two tiny native boxes per query.
+final ffi.Pointer<ffi.Pointer<ffi.Uint8>> _queryBytesOutBuf =
+    calloc<ffi.Pointer<ffi.Uint8>>();
+final ffi.Pointer<ffi.Int> _queryBytesOutLen = calloc<ffi.Int>();
+
 NativeBuffer queryBytes(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
@@ -579,20 +586,20 @@ NativeBuffer queryBytes(
 ) {
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(params);
-  final pBuf = calloc<ffi.Pointer<ffi.Uint8>>();
-  final pLen = calloc<ffi.Int>();
   try {
+    _queryBytesOutBuf.value = ffi.nullptr;
+    _queryBytesOutLen.value = 0;
     final rc = resqliteQueryBytes(
       dbHandle,
       readerId,
       sqlNative,
       paramsNative,
       params.length,
-      pBuf,
-      pLen,
+      _queryBytesOutBuf,
+      _queryBytesOutLen,
     );
     if (rc != 0) {
-      // Don't free pBuf — it points to the reader's persistent json_buf,
+      // Don't free outBuf — it points to the reader's persistent json_buf,
       // which is owned by the C connection pool. The C code sets it to
       // NULL on error anyway, but even if it didn't, freeing it would
       // corrupt the reader's buffer for future queries.
@@ -603,10 +610,8 @@ NativeBuffer queryBytes(
         sqliteCode: rc,
       );
     }
-    return (ptr: pBuf.value, length: pLen.value);
+    return (ptr: _queryBytesOutBuf.value, length: _queryBytesOutLen.value);
   } finally {
     freeParams(paramsNative, params);
-    calloc.free(pBuf);
-    calloc.free(pLen);
   }
 }
