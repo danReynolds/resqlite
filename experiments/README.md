@@ -61,6 +61,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [104](104-querybytes-persistent-slots.md) | Persistent `pBuf` / `pLen` slots for `queryBytes` | Read-path twin of exp 095. The four `selectBytes` size tiers in `Select → JSON Bytes` were all flat within noise; one isolated `Scaling/5000 rows` -15% wasn't corroborated by the matching tiers. Pattern-matches the exp 095 / 093 noise-floor class |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |
 | [100](100-bounded-stream-requery-scheduler.md) | Bounded stream re-query scheduler | Did not improve unrelated reads during fan-out and regressed high-cardinality stream fan-out by 103% |
 | [025](025-pragma-optimize.md) | `PRAGMA optimize` | Right idea in principle, but no compelling or reliable benchmark win in the current suite |

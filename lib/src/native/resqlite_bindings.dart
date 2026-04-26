@@ -571,6 +571,18 @@ external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 
 typedef NativeBuffer = ({ffi.Pointer<ffi.Uint8> ptr, int length});
 
+/// Per-isolate persistent out-parameter slots for [resqliteQueryBytes].
+///
+/// `resqlite_query_bytes` writes its result into two out-parameters:
+/// the json buffer pointer and its byte length. Each reader/writer
+/// isolate is single-threaded and serializes its `queryBytes` calls,
+/// so a single 16-byte pair of native slots can be reused across every
+/// call instead of paying a calloc + free pair per query (read-path
+/// twin of exp 095).
+final ffi.Pointer<ffi.Pointer<ffi.Uint8>> _queryBytesPBuf =
+    calloc<ffi.Pointer<ffi.Uint8>>();
+final ffi.Pointer<ffi.Int> _queryBytesPLen = calloc<ffi.Int>();
+
 NativeBuffer queryBytes(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
@@ -579,8 +591,6 @@ NativeBuffer queryBytes(
 ) {
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(params);
-  final pBuf = calloc<ffi.Pointer<ffi.Uint8>>();
-  final pLen = calloc<ffi.Int>();
   try {
     final rc = resqliteQueryBytes(
       dbHandle,
@@ -588,14 +598,14 @@ NativeBuffer queryBytes(
       sqlNative,
       paramsNative,
       params.length,
-      pBuf,
-      pLen,
+      _queryBytesPBuf,
+      _queryBytesPLen,
     );
     if (rc != 0) {
-      // Don't free pBuf — it points to the reader's persistent json_buf,
-      // which is owned by the C connection pool. The C code sets it to
-      // NULL on error anyway, but even if it didn't, freeing it would
-      // corrupt the reader's buffer for future queries.
+      // Don't free _queryBytesPBuf — it points to the reader's persistent
+      // json_buf, which is owned by the C connection pool. The C code sets
+      // it to NULL on error anyway, but even if it didn't, freeing it
+      // would corrupt the reader's buffer for future queries.
       throw ResqliteQueryException(
         'resqlite_query_bytes failed with code $rc',
         sql: sql,
@@ -603,10 +613,8 @@ NativeBuffer queryBytes(
         sqliteCode: rc,
       );
     }
-    return (ptr: pBuf.value, length: pLen.value);
+    return (ptr: _queryBytesPBuf.value, length: _queryBytesPLen.value);
   } finally {
     freeParams(paramsNative, params);
-    calloc.free(pBuf);
-    calloc.free(pLen);
   }
 }
