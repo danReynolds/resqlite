@@ -215,6 +215,9 @@ final class StreamEngine {
       if (_requeryQueue.length >= batchThreshold) {
         final batch = List<StreamEntry>.of(_requeryQueue);
         _requeryQueue.clear();
+        if (kProfileMode) {
+          ProfileCounters.batchDispatchCount++;
+        }
         _requeryBatch(batch);
         // _requeryBatch holds one worker for the duration of the batch.
         // The remaining workers stay free for unrelated reads; if more
@@ -225,6 +228,9 @@ final class StreamEngine {
 
       final entry = _requeryQueue.first;
       _requeryQueue.remove(entry);
+      if (kProfileMode) {
+        ProfileCounters.perEntryDispatchCount++;
+      }
       _requery(entry);
     }
   }

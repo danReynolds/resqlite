@@ -67,6 +67,8 @@ class _Sample {
     required this.invalidateUs,
     required this.intersectionUs,
     required this.intersectionEntries,
+    required this.batchDispatchCount,
+    required this.perEntryDispatchCount,
   });
 
   final String scenario;
@@ -89,6 +91,18 @@ class _Sample {
   final int intersectionUs;
   final int intersectionEntries;
 
+  /// Experiment 107 follow-up: number of batched-dispatch IPCs fired
+  /// during this write's `_flushQueue` drain. On A11c overlap (50
+  /// streams ≥ 33-entry threshold) the expectation is exactly 1.
+  /// Disjoint should be 0 (column elision empties the queue).
+  final int batchDispatchCount;
+
+  /// Experiment 107 follow-up: number of per-entry dispatch IPCs fired
+  /// during this write's `_flushQueue` drain. Should be 0 on A11c
+  /// overlap post-exp-107; would be 50 if batching threshold was
+  /// raised above queue length.
+  final int perEntryDispatchCount;
+
   Map<String, Object?> toJson() => {
         'scenario': scenario,
         'iter': iter,
@@ -99,6 +113,8 @@ class _Sample {
         'invalidate_us': invalidateUs,
         'intersection_us': intersectionUs,
         'intersection_entries': intersectionEntries,
+        'batch_dispatch_count': batchDispatchCount,
+        'per_entry_dispatch_count': perEntryDispatchCount,
       };
 }
 
@@ -311,10 +327,17 @@ Future<List<_Sample>> _runScenario(
         // Snapshot ProfileCounters before the write. The synchronous
         // body of StreamEngine.invalidate runs *inside* db.execute()
         // before the future resolves, so the counter delta is captured
-        // entirely between these two snapshots.
+        // entirely between these two snapshots. The dispatch-count
+        // counters increment during `_flushQueue` which fires inside
+        // db.execute() (synchronous prefix) and during the post-write
+        // microtask drain (when async _flushQueue continuations run).
+        // We snapshot before the write and read after the yields so
+        // both sides of the dispatch are captured.
         final invalUsBefore = ProfileCounters.invalidateUs;
         final isectUsBefore = ProfileCounters.intersectionUs;
         final isectEntriesBefore = ProfileCounters.intersectionEntries;
+        final batchCountBefore = ProfileCounters.batchDispatchCount;
+        final perEntryCountBefore = ProfileCounters.perEntryDispatchCount;
 
         writerSw
           ..reset()
@@ -334,6 +357,13 @@ Future<List<_Sample>> _runScenario(
         await Future<void>.delayed(Duration.zero);
         yieldSw.stop();
 
+        // Read dispatch counts AFTER the yields — _flushQueue is async
+        // and the dispatch decisions land inside the microtask drain.
+        final batchCount =
+            ProfileCounters.batchDispatchCount - batchCountBefore;
+        final perEntryCount =
+            ProfileCounters.perEntryDispatchCount - perEntryCountBefore;
+
         totalSw.stop();
 
         if (!isWarmup) {
@@ -347,6 +377,8 @@ Future<List<_Sample>> _runScenario(
             invalidateUs: invalUs,
             intersectionUs: isectUs,
             intersectionEntries: isectEntries,
+            batchDispatchCount: batchCount,
+            perEntryDispatchCount: perEntryCount,
           ));
         }
       }
@@ -390,8 +422,9 @@ String _aggregate(List<_Sample> samples) {
       'dispatches and listener microtasks settle.');
   buf.writeln();
   buf.writeln('| scenario | n | writer_us p50/p90/p99 | yield_us p50/p90/p99 '
-      '| total_us p50/p90/p99 | invalidate_us p50 | isect_us p50 / per-watch | writes/sec |');
-  buf.writeln('|---|---:|---|---|---|---:|---:|---:|');
+      '| total_us p50/p90/p99 | invalidate_us p50 | isect_us p50 / per-watch '
+      '| batch/perEntry/write | writes/sec |');
+  buf.writeln('|---|---:|---|---|---|---:|---:|---:|---:|');
   // Default ordering for the standard 3-scenario run; scaling mode
   // sorts numerically below.
   final standard = ['baseline', 'disjoint', 'overlap'];
@@ -425,9 +458,16 @@ String _aggregate(List<_Sample> samples) {
         ? '—'
         : (isectTotal / entriesTotal).toStringAsFixed(2);
     final wps = t.p50 == 0 ? 0 : (1e6 / t.p50);
+    final batchTotal =
+        list.fold<int>(0, (a, b) => a + b.batchDispatchCount);
+    final perEntryTotal =
+        list.fold<int>(0, (a, b) => a + b.perEntryDispatchCount);
+    final batchPerWrite = (batchTotal / list.length).toStringAsFixed(2);
+    final perEntryPerWrite = (perEntryTotal / list.length).toStringAsFixed(2);
     buf.writeln('| $scenario | ${list.length} | ${w.p50}/${w.p90}/${w.p99} '
         '| ${y.p50}/${y.p90}/${y.p99} | ${t.p50}/${t.p90}/${t.p99} '
-        '| ${inv.p50} | ${isect.p50} / $perWatch | '
+        '| ${inv.p50} | ${isect.p50} / $perWatch '
+        '| $batchPerWrite / $perEntryPerWrite | '
         '${wps.toStringAsFixed(0)} |');
   }
   buf.writeln();

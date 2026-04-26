@@ -69,6 +69,19 @@ class ProfileCounters {
   static int intersectionUs = 0;
   static int intersectionEntries = 0;
 
+  /// Experiment 107 follow-up: count of `_flushQueue` iterations that
+  /// took the batched dispatch path (`_requeryBatch`, one IPC for the
+  /// whole queue). Increment exactly once per `_requeryBatch` call.
+  static int batchDispatchCount = 0;
+
+  /// Experiment 107 follow-up: count of `_flushQueue` iterations that
+  /// took the per-entry dispatch path (`_requery` for a single entry).
+  /// Increment once per `_requery` call kicked from `_flushQueue`. The
+  /// post-exp-107 expectation on A11c overlap (50 streams) is that
+  /// batching dominates: the queue length 50 ≥ 33 threshold so one
+  /// batched IPC fires per write; per-entry count should be ~0.
+  static int perEntryDispatchCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
         'rows_decoded': rowsDecoded,
@@ -77,6 +90,8 @@ class ProfileCounters {
         'invalidate_count': invalidateCount,
         'intersection_us': intersectionUs,
         'intersection_entries': intersectionEntries,
+        'batch_dispatch_count': batchDispatchCount,
+        'per_entry_dispatch_count': perEntryDispatchCount,
       };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -101,5 +116,7 @@ class ProfileCounters {
     invalidateCount = 0;
     intersectionUs = 0;
     intersectionEntries = 0;
+    batchDispatchCount = 0;
+    perEntryDispatchCount = 0;
   }
 }
