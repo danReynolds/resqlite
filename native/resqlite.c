@@ -537,27 +537,48 @@ typedef struct {
     char* names[RESQLITE_MAX_DIRTY_TABLES];
     int count;
     int allocated;
+    // Experiment 106 polish: 1 by default; 0 after any overflow / OOM
+    // / strdup failure during a write cycle. The FFI getter
+    // `resqlite_get_dirty_tables` returns -1 (unknown sentinel) when
+    // this flag is 0 — every active stream then invalidates, since
+    // we can't trust the partial dirty-table list to identify which
+    // streams should fire.
+    int reliable;
 } resqlite_dirty_set;
 
 static void dirty_set_init(resqlite_dirty_set* s) {
     s->count = 0;
     s->allocated = 0;
+    s->reliable = 1;
 }
 
 static void dirty_set_add(resqlite_dirty_set* s, const char* table_name) {
     if (!table_name) return;
+    if (!s->reliable) return;
 
     // Check for duplicate.
     for (int i = 0; i < s->count; i++) {
         if (strcmp(s->names[i], table_name) == 0) return;
     }
 
-    if (s->count >= RESQLITE_MAX_DIRTY_TABLES) return;  // overflow protection
+    if (s->count >= RESQLITE_MAX_DIRTY_TABLES) {
+        s->reliable = 0;
+        return;
+    }
     // Free old string in this slot if one exists from a previous cycle.
     if (s->count < s->allocated) {
         free(s->names[s->count]);
+        s->names[s->count] = NULL;
     }
-    s->names[s->count] = strdup(table_name);
+    char* dup = strdup(table_name);
+    if (!dup) {
+        // strdup OOM. Mark unreliable; do NOT increment count past
+        // a failed strdup (the existing bug — names[count] would be
+        // NULL on subsequent dedup scans).
+        s->reliable = 0;
+        return;
+    }
+    s->names[s->count] = dup;
     s->count++;
     if (s->count > s->allocated) s->allocated = s->count;
 }
@@ -566,6 +587,7 @@ static void dirty_set_reset(resqlite_dirty_set* s) {
     // Reset active count. Strings stay valid (Dart reads them after
     // resqlite_get_dirty_tables returns pointers). Freed on next add or close.
     s->count = 0;
+    s->reliable = 1;
 }
 
 static void dirty_set_free(resqlite_dirty_set* s) {
@@ -1279,12 +1301,25 @@ int resqlite_run_batch_nested(
     return rc;
 }
 
+// Polish (post-2026-04): returns -1 when the dirty-table set is
+// unreliable (overflow / OOM during the write cycle). Zero would mean
+// "no tables dirty" — invalidations would be silently missed; the
+// negative sentinel forces the StreamEngine to invalidate every
+// active entry.
 int resqlite_get_dirty_tables(
     resqlite_db* db,
     const char** out_tables,
     int max_tables
 ) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+    int reliable = db->dirty_tables.reliable;
+    if (!reliable) {
+        // Reset before returning — caller has been signalled, future
+        // writes start with a fresh reliability flag.
+        dirty_set_reset(&db->dirty_tables);
+        return -1;
+    }
+
     int count = db->dirty_tables.count;
     if (count > max_tables) count = max_tables;
 
