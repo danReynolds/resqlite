@@ -224,6 +224,8 @@ const _exportedSymbols = [
   'resqlite_run_batch_nested',
   'resqlite_get_dirty_tables',
   'resqlite_get_read_tables',
+  'resqlite_get_dirty_columns',
+  'resqlite_get_read_columns',
   'resqlite_db_status_total',
   'resqlite_writer_handle',
   'resqlite_stmt_acquire',
