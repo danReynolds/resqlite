@@ -63,6 +63,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [111](111-sql-len-passthrough-analysis.md) | SQL byte-length passthrough — pre-implementation analysis | Per-call `strlen(sql)` removal across every C entry point is ~3–6 ns/query (≤ 0.07 % of dispatch wall) — sits below the same noise floor that already rejected exps 071, 094, 095, 102, 108. Reopen if a workload arrives with long auto-generated SQL strings (1+ KB) or a second compounding per-call C-side saving lands first |
 | [108](108-selectbytes-out-slots.md) | Persistent selectBytes out-parameter slots | Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |
 | [105](105-reader-pool-sizing.md) | Raise reader pool worker cap (4→8) | Regressed A11c writer throughput by ~31% under N=50 stream fan-out; the profile's reader-pool serialization bottleneck was actually throttling completion-side microtask churn. Cap=4 is correctly tuned. |

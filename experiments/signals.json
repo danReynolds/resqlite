@@ -273,6 +273,18 @@
         "watch normal short-cell streaming metrics for platform-specific regressions",
         "use the long-text unchanged-fanout benchmark before trying future hash-loop variants"
       ]
+    },
+    "111": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "C-entry strlen-skip alone is below the dispatch noise floor on the current suite — it only landed in exp 109 when paired with per-text/blob calloc removal",
+        "Pre-implementation rejection is the right shape here; the savings ceiling is bounded tightly enough that an empirical run would be guaranteed-flat"
+      ],
+      "nextSignals": [
+        "a workload with long auto-generated SQL strings (kB-scale WHERE / IN expansions) where strlen rises into single-digit per-call %",
+        "a second structurally independent C-side per-call saving on the same entry points so the strlen-skip can compound"
+      ]
     }
   }
 }

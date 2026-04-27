@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-27T21:15:08.708345",
+  "generated": "2026-04-27T17:59:24.428309",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -15252,6 +15252,25 @@
         "date": "2026-04-27",
         "timestamp": "2026-04-27T15:46:01",
         "source": "exact"
+      }
+    },
+    {
+      "id": "111",
+      "title": "SQL byte-length passthrough — pre-implementation analysis",
+      "date": "2026-04-27",
+      "status": "rejected",
+      "summary": "Per-call `strlen(sql)` removal across every C entry point is ~3–6 ns/query (≤ 0.07 % of dispatch wall) — sits below the same noise floor that already rejected exps 071, 094, 095, 102, 108. Reopen if a workload arrives with long auto-generated SQL strings (1+ KB) or a second compounding per-call C-side saving lands first",
+      "commit": null,
+      "problem": "Every public C entry point that takes a SQL string calls `strlen(sql)` to\nsize the cache lookup and `sqlite3_prepare_v3` call. Today's call sites\n(`native/resqlite.c`):\n\n| Entry point | Line | Hot path? |\n|---|---:|---|\n| `resqlite_execute` | 715 | every `db.execute()` write |\n| `run_batch_locked` lookup | 778 | every batched write |\n| `run_batch_locked` insert | 788 | only on first prep of a unique SQL |\n| `resqlite_stmt_acquire` | 1119 | pool path (rarely used since exp 030) |\n| `resqlite_stmt_acquire_on` | 1161 | every reader query (point queries, selects, streams) |\n| `resqlite_stmt_acquire_writer` | 1186 | every transaction read |\n| `resqlite_query_bytes` | 1497 | every `selectBytes()` call |\n\nDart already knows the byte length when it loads the cached UTF-8 buffer\nin `lib/src/nati...",
+      "hypothesis": "Skipping a `strlen(sql)` per query call across every read and write\nentry point should remove visible per-call work, especially on the\n~9 µs point-query and ~10 µs writer-dispatch floors identified by\n[exp 080](080-dispatch-budget.md).",
+      "approach": null,
+      "results": null,
+      "reasoning": "**Rejected without implementing.** The savings ceiling (3–6 ns per\nquery × every entry point) sits below the demonstrated noise floor of\nthe release suite, and the only realistic way to raise it above the\nfloor is to compound with another marginal optimization that hits the\nsame noise wall on its own (see exps 071, 094, 095, 102, 108).\n\nThis is the same shape as [exp 076](076-prebound-stmt-cache-analysis.md):\na structurally sensible \"remove a small repeated computation\" change\nwhose target cost is below the suite's measurement floor before\nimplementation begins.",
+      "benchmarkRun": {
+        "id": "baseline-for-exp109",
+        "date": "2026-04-27",
+        "timestamp": "2026-04-27T07:29:26",
+        "source": "same-day"
       }
     }
   ],
