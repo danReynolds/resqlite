@@ -510,23 +510,35 @@ His next message was sharper. Our suggested fix — defer the Flutter lifecycle 
 
 We tried building a standalone reproduction to make the VM team's investigation easier. We spawned a minimal Flutter app that opened a VM service connection to itself and flooded `addBreakpointWithScriptUri` calls during isolate spawning. 150+ launches, no deadlock. The timing window in our real app was opened by heavyweight FFI startup work (SQLCipher initialization, multi-connection setup) that gave the IDE time to send breakpoint requests during the spawn window. A minimal app spawns and finishes too fast.
 
+### The Catch We Missed
+
+The trail looked cold. Then Martin Kustermann, another Dart VM engineer, read the call path more carefully and spotted what we'd missed: `AcquiredQueues`.
+
+We'd checked `HandleMessages` and correctly concluded that *it* releases `MessageHandler::monitor_` before running message work. But there's a second place the same monitor gets acquired — `Service::InvokeMethod` takes it via an `AcquiredQueues` scope so the service can dump the message queue as part of the `GetStack` reply. That scope was active on Thread 40797896 the entire time we were staring at it.
+
+With the monitor already held, the thread runs Dart code (`MessageQueue::PrintJSON` triggers JIT compilation), which finishes inside a `~NoReloadScope` destructor, which sees another thread is requesting a safepoint, which posts an OOB "check-in for reload" message to its own port. That post acquires `PortMap::mutex_`, then tries to acquire the destination's `MessageHandler::monitor_` — the same one this thread already owns.
+
+**A thread trying to lock a mutex it already holds.** That was the deadlock.
+
+mraleph confirmed Martin's catch — "ah-ha! I have somehow overlooked the existence of `AcquiredQueues`" — and within hours had a fix up. The cleanest path turned out to be simpler than the diagnosis: nobody actually consumes the message-queue dump in the `GetStack` reply (Observatory used it; DevTools doesn't). [dart-lang/sdk@53ac68e](https://github.com/dart-lang/sdk/commit/53ac68e2dd750d988c676cce0ae79b385d1efeec) makes the VM always return an empty array for that field, removing the lock-and-then-run-Dart pattern entirely. The Flutter issue closed six days after we filed it, retitled to *"Dart vm-service GetStack method can deadlock by trying to lock the same MessageHandler monitor recursively."*
+
 ### What We Took Away
 
-The deadlock is debug-mode only. Release builds have no VM service, no breakpoint setting, no `kCheckForReload` path. We re-enabled merged threads and accepted occasional debug-mode freezes as the cost of working with bleeding-edge Flutter on macOS. The bug remains open upstream.
+The deadlock was debug-mode only — release builds have no VM service, no breakpoint setting, no `kCheckForReload` path — and now it's fixed. We re-enabled merged threads. A specific class of intermittent macOS Flutter freeze that's been hitting people on the bleeding edge of merged threading is gone from the next Dart SDK roll.
 
 A few things from this investigation worth remembering next time something inexplicable hangs:
 
 **The pinwheel was the most important clue.** Async hangs leave the event loop alive — animations keep playing, timers fire, the cursor responds. A black screen with a beachball means the main thread is synchronously stuck. That distinction completely changed what we were looking for.
 
-**`sample <pid>` is a superpower for hung macOS processes.** When the Dart VM is dead, no Flutter or Dart-level tooling works. But every Mac has `sample` built in. It dumped 21 thread stacks in a hundred milliseconds and showed exactly what was happening at the C/Objective-C layer.
+**`sample <pid>` is a superpower for hung macOS processes.** When the Dart VM is dead, no Flutter or Dart-level tooling works. But every Mac has `sample` built in. It dumped 21 thread stacks in a hundred milliseconds and showed exactly what was happening at the C/Objective-C layer. That output was also what made the upstream conversation possible — without it, there was nothing for the VM team to reason about.
 
 **Push back when an explanation doesn't fit the pattern.** "Why don't sqflite, drift, and sqlite_async have this same hot-reload guard?" was a one-line question that saved hours. If your fix would imply that every comparable library has the same bug, your fix is probably wrong.
 
-**Verify load-bearing claims.** Our first analysis described a four-thread circular dependency. One of the four edges turned out not to exist — the Dart VM team had specifically designed against it years ago. Independent verification of each step caught the mistake before we filed an embarrassing report.
+**Verify load-bearing claims, but know what you can't see.** We checked `HandleMessages` and correctly concluded the mutex *should* be free along that path. We just didn't realize there was another path — the `AcquiredQueues` scope in `Service::InvokeMethod` — taking the same lock somewhere else. Even careful verification has blind spots when you don't know which file to read. The cure isn't more rigor on what you have; it's pairing your analysis with someone who has different blind spots.
 
-**Be honest about your gaps.** mraleph asked who held the mutex. We could have hand-waved. Saying "we don't know, here's why we couldn't determine it from a thread sample" preserved trust and let him direct attention to where real evidence was. A precise bug report with acknowledged unknowns is more useful than a confident misdiagnosis.
+**An incomplete-but-honest report can still ship a fix.** We never identified the actual lock holder — that was Martin's catch, made in minutes of source reading because he had `AcquiredQueues` in his head. But the thread sample we provided, plus our explicit admission of "we don't know who holds this," was the artifact that let him make the catch at all. A confident misdiagnosis would have sent the conversation in the wrong direction. The framing that worked was: here is hard evidence, here is what we could rule out, here is exactly the gap we couldn't close. Then trust the experts to close it.
 
-**Sometimes the bug isn't in your library.** Six hours of debugging later, the answer was a Dart VM debugger lock-ordering issue that Flutter's merged-thread mode escalates into a visible UI freeze. The right action was a bug report, not a code change. Knowing when to stop digging into your own code is its own skill.
+**Sometimes the bug isn't in your library — and reporting it carefully is real work.** Six hours of debugging later, the root cause was a recursive self-lock in the Dart VM service's stack-dumping code, escalated into a visible UI freeze by Flutter's merged-thread mode. The right action was a bug report, not a code change. Knowing when to stop digging into your own code is its own skill, and the report itself is the deliverable when you cross that line.
 
 ## What We'd Tell Our Past Selves
 
