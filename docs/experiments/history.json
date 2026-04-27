@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-27T16:55:06.351227",
+  "generated": "2026-04-27T20:58:14.026425",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -15248,9 +15248,9 @@
       "results": "Artifacts:\n\n- `benchmark/results/2026-04-27T15-42-56-baseline-for-exp110-long-text.md`\n- `benchmark/results/2026-04-27T15-42-56-baseline-for-exp110-long-text.json`\n- `benchmark/results/2026-04-27T15-46-01-exp110-fnv-8byte-long-text.md`\n- `benchmark/results/2026-04-27T15-46-01-exp110-fnv-8byte-long-text.json`\n\nTarget workload:\n\n| Benchmark | Baseline | 8-byte FNV | Delta |\n|---|---:|---:|---:|\n| Long-Text Unchanged Fanout median | 10.328 ms | 2.435 ms | -76% |\n| Long-Text Unchanged Fanout p90 | 15.035 ms | 3.871 ms | -74% |\n\nThe full one-pass release comparison reported **20 wins, 11 regressions, 124\nneutral**. The broad suite deltas were noisy in both directions, which is normal\nfor single-repeat release runs. The targeted long-text result is far outside the\nthreshold and matches the ex...",
       "reasoning": "Keep in review.\n\nThe experiment is accepted for PR review: the revised process did exactly what\nit was designed to do. It kept the prior rejected idea available without forcing\nit, identified the missing benchmark as the next useful step, and then let the\nnew evidence turn experiment 099's implementation from \"structurally sound but\nunmeasurable\" into a clear targeted win.\n\nThe main caution is methodological: the single-run full-suite comparison should\nnot be over-read. The acceptance signal is the new long-text benchmark plus\ntargeted correctness coverage; CI and review should still watch for unexpected\nplatform-specific fallout from the host-byte-order hash bit pattern.",
       "benchmarkRun": {
-        "id": "baseline-for-exp110-long-text",
+        "id": "exp110-fnv-8byte-long-text",
         "date": "2026-04-27",
-        "timestamp": "2026-04-27T15:42:56",
+        "timestamp": "2026-04-27T15:46:01",
         "source": "exact"
       }
     }
