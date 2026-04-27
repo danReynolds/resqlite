@@ -269,9 +269,12 @@ static void read_set_add(resqlite_read_set* s, const char* table_name) {
 }
 
 static void read_set_reset(resqlite_read_set* s) {
-    // Reset active count. Strings stay valid (Dart reads them after
-    // resqlite_get_read_tables returns pointers). They'll be freed
-    // on the next read_set_add when their slots are reused.
+    // Per-prepare scratch reset. After each prepare, the authorizer's
+    // captured tables are copied into the cached stmt entry's
+    // read_tables[] (via stmt_cache_entry_set_read_tables) and Dart
+    // serves from there via resqlite_get_read_tables — not from this
+    // scratch directly. Allocated slots stay around to amortise strdup
+    // across prepares; reliable resets to 1 for the next capture.
     s->count = 0;
     s->reliable = 1;
 }
@@ -456,49 +459,6 @@ static void stmt_cache_entry_set_dep_columns(resqlite_cached_stmt* entry,
     }
 }
 
-// `*_load_from_cache_entry` helpers were used to rehydrate per-reader
-// scratch sets on cache hits; experiment 106 reads directly from the
-// cached entry instead, so these helpers are unused. Kept around (under
-// `__attribute__((unused))`) only because tests in
-// `test/reader_pool_test.dart` previously poked at the rehydration
-// path; they tree-shake out at link time when no caller references them.
-__attribute__((unused))
-static void read_set_load_from_cache_entry(resqlite_read_set* read_set,
-                                           const resqlite_cached_stmt* entry) {
-    read_set_reset(read_set);
-    // Polish: an unreliable cache entry must produce an unreliable
-    // scratch set. Otherwise re-hydration would silently launder the
-    // overflow bit into a reliable-looking partial copy.
-    if (!entry->read_tables_reliable) {
-        read_set->reliable = 0;
-        return;
-    }
-    for (int i = 0; i < entry->read_table_count; i++) {
-        read_set_add(read_set, entry->read_tables[i]);
-    }
-}
-
-__attribute__((unused))
-static void column_set_load_from_cache_entry(resqlite_column_set* col_set,
-                                             const resqlite_cached_stmt* entry) {
-    column_set_reset(col_set);
-    if (!entry->dep_columns_reliable) {
-        col_set->reliable = 0;
-        return;
-    }
-    for (int i = 0; i < entry->dep_column_count; i++) {
-        const char* full = entry->dep_columns[i];
-        const char* dot = strchr(full, '.');
-        if (!dot) continue;
-        int t_len = (int)(dot - full);
-        char tbuf[128];
-        if (t_len >= (int)sizeof(tbuf)) continue;
-        memcpy(tbuf, full, t_len);
-        tbuf[t_len] = '\0';
-        column_set_add(col_set, tbuf, dot + 1);
-    }
-}
-
 // Authorizer context — bundles the read set (table+column captures) into
 // one user_data pointer so the same callback can be installed on writer
 // and readers without branching on connection identity. The authorizer
@@ -524,10 +484,10 @@ typedef struct {
     // hot path).
     resqlite_column_set read_columns;
     // Pointer to the cache entry of the most recent acquire on this
-    // reader. Cleared on every reset; set by `get_or_prepare_reader`
-    // and consumed by `resqlite_get_read_columns` /
-    // `resqlite_get_read_tables` so the FFI getters don't pay a per-
-    // call rehydrate from cache → scratch (experiment 106 perf path).
+    // reader. Cleared on reset; set by `get_or_prepare_reader`. The
+    // FFI getters (`resqlite_get_read_columns`, `_read_tables`) serve
+    // directly from this entry's `read_tables` / `dep_columns` arrays,
+    // so the read hot path pays no per-call strdup-into-scratch cost.
     resqlite_cached_stmt* last_entry;
     resqlite_authz_ctx authz_ctx;
     resqlite_buf json_buf;  // persistent buffer for resqlite_query_bytes
