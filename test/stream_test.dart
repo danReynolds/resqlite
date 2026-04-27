@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+// ignore: implementation_imports
+import 'package:resqlite/src/native/resqlite_bindings.dart' show TableDependencySet;
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
