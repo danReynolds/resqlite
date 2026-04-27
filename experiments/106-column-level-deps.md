@@ -245,3 +245,121 @@ benchmark was added to PR #39 to make visible.
   names, so this case is already handled — but if SQLite ever emits a
   `SQLITE_READ` with a NULL column (compile-flag dependent), the
   reader-side wildcard path picks it up.
+
+## Polish (post-2026-04)
+
+Two rounds of design review on the original commit (PR #42) surfaced
+three correctness gaps and three code-quality gaps in the column-level
+tracking code. The polish landed as a stacked branch
+(`exp-106-polish`); the design plan is at
+`.claude/plans/exp-106-polish-design.md` (v4) and the rationale below
+summarises what changed and why.
+
+### Gaps fixed
+
+* **C1 — silent overflow at 64 columns.**
+  `column_set_add` returned without signal when the cap was hit;
+  writers that touched a column past the cap had it silently dropped
+  from `dirty_columns`, and readers' `dep_columns` truncated their
+  projection set. The intersection check then saw "disjoint" and
+  silently elided dispatch — a stuck stream.
+* **C2 — silent failures in `column_set_compose` / `strdup`.**
+  An OOM-fallback path in `column_set_compose` returned `-1` and the
+  caller no-oped. `stmt_cache_entry_set_dep_columns` incremented
+  `dep_column_count` even when `strdup` returned NULL, leaving a NULL
+  entry that subsequent dedup scans would dereference.
+* **C3 — same silent failures in `read_set_add` and `dirty_set_add`.**
+  Worse than C1: a stream whose `read_set` overflowed got *zero*
+  table dependencies (the cap-truncated set had no overflow signal);
+  it never invalidated. A writer whose `dirty_set` overflowed
+  reported an under-set of dirty tables; real invalidations were
+  silently missed.
+* **C4 — no reliability signal at the FFI boundary.**
+  Even if the C side knew a set was unreliable, the Dart side
+  couldn't tell — both unreliable and reliable-empty returned 0.
+
+The fix is a uniform reliability discipline: each set carries an
+`int reliable` flag, init 1, set to 0 on first overflow / OOM /
+strdup failure during a capture cycle. Add functions become no-ops
+once unreliable. Cache entries inherit reliability from the source
+sets. The asymmetric FFI boundary is the load-bearing piece:
+
+* **column getters** (`resqlite_get_read_columns`,
+  `resqlite_get_dirty_columns`) return 0 on unreliable. Zero entries
+  is interpreted by `_writeAffectsEntry` as "absent column map for
+  this table" and falls through to table-level re-query.
+* **table getters** (`resqlite_get_read_tables`,
+  `resqlite_get_dirty_tables`) return -1 on unreliable. Zero would
+  mean "no deps" / "no dirty tables" — both result in stuck streams;
+  -1 is the explicit unknown sentinel that forces the Dart side to
+  route into the `_allTableEntries` bucket (subscribe path) or
+  invalidate every active entry (write path).
+
+The Dart layer captures the asymmetry in two types:
+`TableDependencySet` (`.known(tables)` vs `.all()`) at the FFI
+boundary, and `_allTableEntries` at the StreamEngine level. The
+contract is documented at the top of `lib/src/stream_engine.dart`:
+*tables = correctness, columns = optimization*. The dispatch
+elision policy is extracted into a `@visibleForTesting`
+`ColumnInvalidationPolicy.affects` so direct unit tests can prove
+the dispatch decision regardless of result-change-detection
+confounds.
+
+### Trigger / FK cascade verification (Phase 0)
+
+The polish design hinged on whether SQLite's authorizer captures
+column writes from triggers and FK cascades at the calling stmt's
+prepare time. Three black-box tests were written *first*
+(`test/stream_trigger_cascade_test.dart`) to discover this:
+
+1. Cross-table `AFTER UPDATE` trigger.
+2. Same-table `AFTER UPDATE OF col_a` trigger writing `col_b`. The
+   dangerous case — preupdate-hook merge can only see the calling
+   stmt's `dep_columns`, so unless the authorizer captured `col_b`
+   at prepare time, the trigger-induced write is silently lost.
+3. FK `ON DELETE CASCADE` from parent to child.
+
+All three pass on the original exp-106 implementation. SQLite's
+authorizer fires `SQLITE_UPDATE` events during prepare for every
+column the calling stmt's bytecode could write (including those
+generated from compiled trigger bodies and FK cascade actions). The
+captured set is the correct dependency set; no additional
+"trigger-touched stmt → unreliable column" fallback is needed. The
+tests are locked in as regression protection.
+
+### Performance check
+
+Three workloads, vs `main` (the cap=4 baseline before exp 106):
+
+| Workload | Main | Polish | Δ |
+|---|---|---|---|
+| A11c disjoint w/s | 4044 | 6976 | **+72.5 %** |
+| A11c overlap w/s | 4431 | 4513 | +1.9 % (noise) |
+| A11c overlap/disjoint ratio | 1.095 | 0.647 | -41 % (elision proof) |
+| Schema Wide wall median | 1.153 ms | 0.934 ms | -19 % |
+| Schema Numeric wall median | 0.364 ms | 0.330 ms | -9 % |
+| Schema Nullable wall median | 0.386 ms | 0.319 ms | -17 % |
+| A11b wall median | 245.51 ms | 241.86 ms | -1.5 % (noise) |
+
+The +72.5 % on A11c disjoint is within run-to-run noise of the
++82 % originally reported for the unpolished exp 106 code (single-
+iteration runs; the doc's three-iteration medians were tighter).
+Crucially, the overlap/disjoint ratio drops to 0.647 — the
+dispatch-elision signature — confirming the column elision still
+works on the reliable path. Schema-shape reads stay flat or
+improved (no read-path regression). A11b high-cardinality fan-out
+stays flat.
+
+### Out of scope
+
+* **Schema watchdog / DDL invalidation.** A pre-existing hazard
+  tracked by deferred [exp 068](068-ddl-schema-watchdog.md): when
+  `ALTER TABLE` adds or drops columns, cached `dep_columns` strings
+  go stale, but the cache is keyed on SQL text so the next prepare
+  hits the cache and re-uses stale metadata. exp 106 inherits but
+  does not introduce this. Documented here so future revisitors
+  don't re-discover it as new.
+* **OOM fault injection in tests.** The reliability path is
+  exercised by overflow tests; without a native fault-injection
+  harness, simulating `strdup` returning NULL is not worth the
+  infrastructure investment.
