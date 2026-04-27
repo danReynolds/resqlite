@@ -361,6 +361,62 @@ Two more experiments closed the gap between "fast" and "fastest."
 
 The full experiment log — every accepted optimization and every rejected dead end — is available on the [experiments page](https://danreynolds.github.io/resqlite/experiments/), with interactive charts showing how each metric evolved over time.
 
+## Act Three: After the Headlines
+
+107K qps is a nice round number to wrap a blog post on, but it's a strange place for a library to actually be. The architectural budget was spent — connection pool, persistent workers, flat-list ResultSet, dedicated readers. Anywhere we looked at the read path, we'd already touched it. So we started looking elsewhere: the streaming engine, the write path, and the C internals we'd previously left alone.
+
+### The Streaming Engine, Revisited
+
+The reactive layer worked, but it was naive about repeated work. A single write that touched a popular table would re-query every subscriber, even if the resulting rows were identical to the last emission. For Flutter UIs with many widgets watching the same data, that's a lot of pointless decode work.
+
+**Microtask invalidation coalescing (experiment 045)** was the easy win. Multiple writes inside the same synchronous block — common when an app applies a server sync — used to fire one re-query batch per write. We accumulated dirty tables across the microtask boundary and dispatched once at the end. Fan-out workloads dropped 46%.
+
+The harder win was **native-buffered hashing (experiment 075)**. We moved query result hashing into C as `resqlite_query_hash`, called inline during the read loop on the worker. If the hash matches the last emitted hash for that subscriber, we skip the Dart decode entirely and signal "no change" to the main isolate with a single integer. Unchanged-fanout workloads — a canary write plus 10 watchers seeing identical results — improved 39%.
+
+This led directly to **the cheap-check-first sweep (experiment 077)**: four small fast-rejects strung together. Skip work if no streams are registered. Stop hash folding the moment row counts diverge. Cache the bind-parameter count instead of recomputing. Reuse a persistent buffer for the dirty-table list. Each was below the noise floor on its own; together they were 13–23% across write benchmarks. None of them were clever — they were just things we hadn't bothered to do before because the read path was the only thing we were measuring.
+
+### The Allocation Hunt
+
+A pattern emerged across the next dozen experiments: build it once at startup, reuse it forever. Per-call `calloc`/`free` had been quietly costing us hundreds of nanoseconds on every hot path.
+
+**Persistent dirty buffer (experiment 070)** allocated a 512-byte FFI scratch space at worker init instead of per write. **Cached transaction statements (experiment 101)** prepared `BEGIN`, `COMMIT`, and `ROLLBACK` once at `resqlite_open` instead of re-parsing them per transaction — SQLite's `sqlite3_exec` rebuilds the AST and bytecode every call, and that adds up. 13–14% on transaction-heavy benchmarks. **Inline-packed parameter buffer (experiment 109)** went further: instead of allocating native memory for each text or blob bind, the bytes pack inline at the tail of the persistent param buffer, with explicit length passed to SQLite (skipping its internal `strlen`). 10–16% on text-INSERT workloads.
+
+None of these are exciting individually. The pattern is. After enough rounds of "remove the per-call allocation," you start to see them everywhere — and most of them have been hiding in plain sight since experiment 008.
+
+### Two Rejections Worth Naming
+
+Not every plausible idea worked, and two of the rejections in this stretch were instructive enough to remember.
+
+**The hash optimization that wasn't running (experiment 099).** We added an 8-byte main loop to the FNV byte hasher — fold 8 bytes per multiply instead of 1, a textbook win for long inputs. It measured flat. The cause wasn't the implementation; the streaming benchmarks at the time only carried cells of 5–8 bytes (column names like `item_5`, ID strings, short metadata). The new main loop literally never executed. Before declaring an optimization dead, verify the workload exercises the path it targets.
+
+We later built [the long-text streaming benchmark (experiment 110)](https://github.com/danReynolds/resqlite/pull/54) specifically to give this kind of work somewhere to land.
+
+**More workers, more problems (experiment 105).** The reader pool sizes itself at `clamp(numProcessors - 1, 2, 4)`. We tried raising it to 8 on the theory that fan-out workloads were starving for parallelism. Writer throughput regressed about 31%. Profiling showed the bottleneck wasn't reader availability — it was completion-side microtask churn on the main isolate. Per-write wall closely matched `pool_round_trip × ⌈N/pool_size⌉ + ~30 µs flat`, which means adding workers only helps when there are enough concurrent reads to fill them. On writer-shaped fan-out, the extra workers cost more in scheduling than they saved in latency.
+
+The takeaway is one we keep relearning: the architecture that's right at one scale becomes the bottleneck at the next. Pool sizing tuned for read concurrency wasn't the right size for write fan-out, and the symptom looked nothing like the cause.
+
+### Process Catches Up With The Code
+
+By experiment 100, the project had a problem that had nothing to do with code. We'd run enough experiments that "what should I try next" was a non-trivial question. Some directions had clear next signals (exp 099 *needed* a long-text benchmark before another hash-loop change was worth attempting). Others looked active but had been quietly exhausted. Others were genuinely speculative but indistinguishable from the exhausted ones to a fresh runner.
+
+The fix wasn't a doc — it was a structured machine-readable map. [`experiments/signals.json`](https://github.com/danReynolds/resqlite/blob/main/experiments/signals.json) now carries per-direction state, evidence pointers, and explicit `nextSignals` actions attached to rejections. A CI validator (`benchmark/check_experiment_signals.dart`) closes the gap between "outcome class" and "what was actually written" so the data stays honest. The journal you're partway through reading sits next to it, holding the lessons that don't fit a structured field. And [`RUNNER_INSTRUCTIONS.md`](https://github.com/danReynolds/resqlite/blob/main/experiments/RUNNER_INSTRUCTIONS.md) is the playbook for any agent or human who picks up the next experiment cold.
+
+The whole system was dogfooded by experiment 110, which both *resolved* exp 099's `nextSignals` ("representative long-text streaming benchmark") and *exposed* a hole in the validator's outcomeClass enum — a hole the same PR closed. That's the loop working as designed: process improvements arrive as outputs of running the process, not as separate planning work.
+
+### The Numbers, Three Months Later
+
+The same M1 Pro, the same benchmark suite, after experiments 041–110:
+
+| Metric | Then (exp 040) | Now (exp 110) |
+|---|---:|---:|
+| Point query | 107K qps | 107K qps |
+| Unchanged-fanout (10 watchers) | baseline | −39% |
+| Fan-out invalidation (10 streams, batched) | baseline | −46% |
+| Transaction-bracketed batch (1k rows) | baseline | −13% |
+| Text-parameter inserts | baseline | −10–16% |
+
+The headline ceiling didn't move — it was already at the floor of what the architecture allows. What moved is everything around it: the streaming engine wastes much less work, the write path allocates less per call, and the project now has a process that turns rejections into next experiments instead of dead ends.
+
 ## What We'd Tell Our Past Selves
 
 **Measure main-isolate time separately from wall time.** A library can look fast on wall time while putting all the work on the thread that renders your UI. These are different metrics and you need to optimize for both, but main-isolate time is what your users actually feel.
