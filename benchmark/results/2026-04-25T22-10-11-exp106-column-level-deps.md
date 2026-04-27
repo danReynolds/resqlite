@@ -1223,5 +1223,3 @@ Threshold uses per-benchmark MDE (95% bootstrap CI half-width on the median), wi
 **Granularity summary:** 0 fewer-re-emit, 1 more-re-emit, 5 neutral
 
 For **disjoint** workloads, fewer re-emits means tighter dependency tracking — a library with column-level tracking approaches zero. For **overlapping** workloads, the count should stay stable across runs; a drop there means writes are being silently elided.
-
-

@@ -92,7 +92,6 @@ static int buf_write_str(resqlite_buf* b, const char* s, int len) {
 // dedup / intersection paths without introducing a nested data structure.
 // `"table.*"` is the wildcard used for INSERT/DELETE writes and for
 // authorizer events that arrive without a column name (triggers, views).
-#define RESQLITE_MAX_DEP_COLUMNS 64
 
 typedef struct {
     char* sql;
@@ -893,10 +892,9 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     // Experiment 106: install authorizer on the writer to capture which
     // columns each prepared DML stmt could modify. The authorizer fires
     // inside `sqlite3_prepare_v3`; we drain `writer_authz_scratch` into
-    // the cached stmt entry as soon as prepare returns. Reads on the
-    // writer connection (e.g. transaction-scoped selects) also feed the
-    // scratch column set — harmless because the writer authorizer has
-    // `track_writes` set and only writes are merged into dirty_columns.
+    // the cached stmt entry as soon as prepare returns. With
+    // `track_writes` set on the writer, SQLITE_READ events are ignored;
+    // read dependencies are captured by the reader authorizers below.
     db->writer_authz_ctx.tables = NULL;
     db->writer_authz_ctx.columns = &db->writer_authz_scratch;
     db->writer_authz_ctx.track_writes = 1;

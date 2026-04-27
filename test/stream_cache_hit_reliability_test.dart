@@ -16,7 +16,6 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
-const int _capColumns = 64;
 const int _capReadTables = 64;
 
 final class _EventWaiter<T> {

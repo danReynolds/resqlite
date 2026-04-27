@@ -29,11 +29,10 @@ import 'reader/reader_pool.dart';
 // never to a skipped one.
 //
 // At the FFI boundary the C-side reliability flags propagate through
-// `TableDependencySet.all()` (table side) and a `null`-keyed entry in
-// the column map (column side). The asymmetry is load-bearing: a
-// table fall-through invalidates every stream, a column fall-through
-// only forces re-query for the streams that already share dirty
-// tables.
+// `TableDependencySet.all()` (table side) and a `null` column-set value
+// for a table (column side). The asymmetry is load-bearing: a table
+// fall-through invalidates every stream, a column fall-through only
+// forces re-query for streams that already share dirty tables.
 
 /// Stream engine — reactive query lifecycle.
 ///

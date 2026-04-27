@@ -309,10 +309,9 @@ executeQueryWithDeps(
   List<Object?> parameters,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
   final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
-  // getReadColumns must run before getReadTables — the table getter
-  // resets the per-reader read-set, but the column set is independent
-  // and the call order doesn't matter for correctness. We drain both
-  // before returning so the next query on this reader sees fresh state.
+  // Collect both dependency views for this query before returning. Both
+  // getters serve metadata from the reader's most recent cached stmt entry,
+  // so there is no ordering dependency between them.
   final readColumns = getReadColumns(dbHandle, readerId);
   final readTables = getReadTables(dbHandle, readerId);
   return (raw, readTables, readColumns, hash, raw.rowCount);
