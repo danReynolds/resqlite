@@ -12,8 +12,8 @@ void main() {
   // Define post order and metadata.
   final sources = [
     (
-      path: 'doc/story.md',
-      slug: 'story',
+      path: 'experiments/MILESTONES.md',
+      slug: 'milestones',
       category: 'Engineering Story',
     ),
     (
