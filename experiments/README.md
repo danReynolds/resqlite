@@ -55,6 +55,7 @@ merged into the codebase.
 |---|---|---|---|
 | [083](083-stream-rerun-pre-dispatch-queue.md) | Stream rerun pre-dispatch queue | Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission | [#25](https://github.com/danReynolds/resqlite/pull/25) |
 | [097](097-one-pass-initial-stream-hash.md) | One-pass initial stream decode and hash | 14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay |  |
+| [110](110-long-text-fnv-8byte.md) | Long-text stream hash benchmark + 8-byte FNV | Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing | [#53](https://github.com/danReynolds/resqlite/pull/53) |
 
 ## Rejected
 
