@@ -120,6 +120,11 @@ const curatedMetricDefinitions = [
     chartId: 'chartScenarios',
   ),
   CuratedMetricDefinition(
+    pattern: 'Many-Streams Writer Throughput',
+    displayName: 'writer fanout (A11c)',
+    chartId: 'chartScenarios',
+  ),
+  CuratedMetricDefinition(
     pattern: 'Invalidation Latency',
     displayName: 'invalidation latency',
     chartId: 'chartReactiveMicros',
