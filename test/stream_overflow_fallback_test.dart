@@ -217,11 +217,15 @@ void main() {
     test(
       'transaction with > RESQLITE_MAX_DIRTY_TABLES dirty tables invalidates streams on each',
       () async {
-        // Stream watches table tA, writer modifies enough other tables
-        // in one transaction to overflow dirty_set, AND modifies tA at
-        // the end. With the polish, dirty_set.reliable flips to 0 once
-        // the overflow happens; getDirtyTables returns -1; StreamEngine
-        // invalidates everything (which includes our stream).
+        // Stream watches d68 — a table dirtied AFTER the cap is exceeded.
+        // A pre-polish implementation that simply kept the first 64 dirty
+        // tables would NOT include d68 in getDirtyTables, so the stream
+        // would not invalidate and this test would fail. The polish flips
+        // dirty_set.reliable to 0 when the cap is exceeded, getDirtyTables
+        // returns -1, StreamEngine invalidates everything (including our
+        // stream watching d68). Choosing a post-overflow table is what
+        // makes this test exercise the unreliable-dirty-set fallback
+        // rather than the lucky truncation case.
         //
         // Build N+5 separate tables.
         const dirtyTableCount = _capDirtyTables + 5; // 69
@@ -229,15 +233,16 @@ void main() {
           await db.execute('CREATE TABLE d$i(id INTEGER PRIMARY KEY)');
         }
 
-        final probe = _StreamProbe(db.stream('SELECT id FROM d0 ORDER BY id'));
+        // Watch d68 — past the dirty-set cap of 64.
+        final probe = _StreamProbe(db.stream('SELECT id FROM d68 ORDER BY id'));
         await probe.event(1);
 
         await db.transaction((tx) async {
-          // First, dirty all N+5 tables. Order matters — d0 is the one
-          // the stream watches; we need the overflow to engage AFTER
-          // we've already dirtied d0 to ensure the test exercises the
-          // unreliable-dirty-set fallback rather than the lucky case
-          // where d0 is dirty before overflow.
+          // Dirty d0..d68 in order. d0..d63 fill dirty_set; the insert to
+          // d64 trips overflow → reliable = 0. Inserts to d64..d68 still
+          // happen (the table writes go through), but their presence in
+          // dirty_set is no longer required — the unreliable flag forces
+          // invalidate-all on the Dart side.
           for (var i = 0; i < dirtyTableCount; i++) {
             await tx.execute('INSERT INTO d$i(id) VALUES (?)', [1]);
           }
