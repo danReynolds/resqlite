@@ -317,8 +317,17 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
 ///
 /// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
 /// the `List<String>` allocation and return a shared `const <String>[]`.
+///
+/// Polish (post-2026-04): a negative count is the "unknown" sentinel
+/// returned when the C-side dirty-table set overflowed / OOMed during
+/// the write — interpreted by the StreamEngine as "every active stream
+/// must invalidate". Phase 2a wraps this in a typed
+/// [TableDependencySet]; for now the binding still returns
+/// `List<String>` but the negative-count branch produces the singleton
+/// `_unknownTables` sentinel that callers can identify by reference.
 List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  if (count < 0) return unknownTablesSentinel;
   if (count == 0) return const <String>[];
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
@@ -326,6 +335,15 @@ List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   }
   return tables;
 }
+
+/// Sentinel returned by [getReadTables] / [getDirtyTables] when the
+/// C-side reliability flag was tripped (overflow / OOM). The contents
+/// are intentionally invalid — callers identify it by `identical(...)`
+/// and route the result through the StreamEngine's "all tables"
+/// fallback bucket. Phase 2a replaces this with a typed wrapper.
+final List<String> unknownTablesSentinel = List<String>.unmodifiable(
+  const <String>[],
+);
 
 // ---------------------------------------------------------------------------
 // Read dependency tracking
@@ -407,8 +425,16 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
 ///
 /// Zero-table short-circuit: if the count is 0, skip the `List<String>`
 /// allocation and return a shared `const <String>[]`.
+///
+/// Polish (post-2026-04): a negative count is the "unknown" sentinel —
+/// the C-side `read_tables_reliable` flag flipped during prepare, so
+/// the stream's true table dependencies are not known. Returns
+/// [unknownTablesSentinel] (identifiable by `identical(...)`); the
+/// StreamEngine routes such streams into the "all tables" fallback
+/// bucket so every write invalidates them.
 List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
   final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
+  if (count < 0) return unknownTablesSentinel;
   if (count == 0) return const <String>[];
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {

@@ -223,25 +223,47 @@ typedef struct resqlite_read_set_s {
     char* names[RESQLITE_MAX_READ_TABLES];
     int count;      // number of active entries
     int allocated;  // number of slots with strdup'd strings (>= count)
+    // Experiment 106 polish: 1 by default; 0 after any overflow / OOM
+    // / strdup failure. The FFI table getter returns -1 (the unknown
+    // sentinel) when the cached entry inherits this state, forcing
+    // the StreamEngine into its "all tables" fallback bucket. The
+    // table side gets a sentinel — not a zero — because zero means
+    // "no deps" / "no dirty tables", which would silently stick
+    // streams that depend on overflowed tables.
+    int reliable;
 } resqlite_read_set;
 
 static void read_set_init(resqlite_read_set* s) {
     s->count = 0;
     s->allocated = 0;
+    s->reliable = 1;
 }
 
 static void read_set_add(resqlite_read_set* s, const char* table_name) {
     if (!table_name) return;
+    if (!s->reliable) return;
     // Deduplicate.
     for (int i = 0; i < s->count; i++) {
         if (strcmp(s->names[i], table_name) == 0) return;
     }
-    if (s->count >= RESQLITE_MAX_READ_TABLES) return;
+    if (s->count >= RESQLITE_MAX_READ_TABLES) {
+        s->reliable = 0;
+        return;
+    }
     // Free old string in this slot if one exists from a previous cycle.
     if (s->count < s->allocated) {
         free(s->names[s->count]);
+        s->names[s->count] = NULL;
     }
-    s->names[s->count] = strdup(table_name);
+    char* dup = strdup(table_name);
+    if (!dup) {
+        // strdup OOM. Mark unreliable and DO NOT increment count
+        // past a failed strdup — the previous bug left names[count]
+        // NULL for later derefs.
+        s->reliable = 0;
+        return;
+    }
+    s->names[s->count] = dup;
     s->count++;
     if (s->count > s->allocated) s->allocated = s->count;
 }
@@ -251,6 +273,7 @@ static void read_set_reset(resqlite_read_set* s) {
     // resqlite_get_read_tables returns pointers). They'll be freed
     // on the next read_set_add when their slots are reused.
     s->count = 0;
+    s->reliable = 1;
 }
 
 static void read_set_free(resqlite_read_set* s) {
@@ -386,10 +409,12 @@ static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
         entry->read_tables[i] = NULL;
     }
     entry->read_table_count = 0;
-    // Experiment 106 polish: read_set reliability is wired up in the
-    // Phase 1b commit. For now, the existing strdup-NULL bug is fixed
-    // here defensively — never increment the count past a failed strdup.
-    entry->read_tables_reliable = 1;
+    // Experiment 106 polish: source set reliability caps the entry's.
+    // If unreliable, drop entries and mark the cache entry too — the
+    // FFI getter will return -1 (the unknown sentinel) so StreamEngine
+    // routes the stream into the all-tables bucket.
+    entry->read_tables_reliable = read_tables->reliable;
+    if (!read_tables->reliable) return;
 
     for (int i = 0; i < read_tables->count && i < RESQLITE_MAX_READ_TABLES; i++) {
         char* dup = strdup(read_tables->names[i]);
@@ -1275,6 +1300,11 @@ int resqlite_get_dirty_tables(
     return count;
 }
 
+// Polish (post-2026-04): returns -1 when the cached entry's read-table
+// dependencies are unreliable (overflow / OOM during prepare). Zero
+// would mean "stream has no table deps" → silent stuck stream; the
+// negative sentinel forces the Dart-side StreamEngine to route the
+// stream into the "all tables" bucket where every write invalidates it.
 int resqlite_get_read_tables(
     resqlite_db* db,
     int reader_id,
@@ -1293,6 +1323,7 @@ int resqlite_get_read_tables(
     // unchanged.
     resqlite_cached_stmt* entry = reader->last_entry;
     if (!entry) return 0;
+    if (!entry->read_tables_reliable) return -1;
     int count = entry->read_table_count;
     if (count > max_tables) count = max_tables;
     for (int i = 0; i < count; i++) {
