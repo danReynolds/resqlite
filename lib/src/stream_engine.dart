@@ -1,10 +1,39 @@
 import 'dart:collection';
 import 'dart:async';
 
-import 'native/resqlite_bindings.dart' show TableDependencySet;
+import 'package:meta/meta.dart';
+
+import 'native/resqlite_bindings.dart'
+    show ColumnDependencyMap, TableDependencySet;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+
+// ---------------------------------------------------------------------------
+// Stream dependency tracking contract (experiment 106 polish)
+// ---------------------------------------------------------------------------
+//
+// Stream dependency tracking is layered:
+//
+//   * Table dependencies are the correctness source of truth.
+//     A stream watches a known set of tables, or — if tracking is
+//     unavailable for any reason — every table.
+//   * Column dependencies are an optimization layer that can elide
+//     re-query dispatch when a write provably touches no projected
+//     column. Column information is precise or absent. Absent column
+//     information always falls back to table-level re-query for the
+//     known dirty tables.
+//
+// Every uncertainty (overflow, OOM, missing metadata, triggers /
+// cascades, virtual tables) routes to a more conservative re-query,
+// never to a skipped one.
+//
+// At the FFI boundary the C-side reliability flags propagate through
+// `TableDependencySet.all()` (table side) and a `null`-keyed entry in
+// the column map (column side). The asymmetry is load-bearing: a
+// table fall-through invalidates every stream, a column fall-through
+// only forces re-query for the streams that already share dirty
+// tables.
 
 /// Stream engine — reactive query lifecycle.
 ///
@@ -213,40 +242,18 @@ final class StreamEngine {
   /// [entry]'s dependency set AND the writer's modified columns intersect
   /// the entry's read columns for that table (or either side carries a
   /// wildcard, forcing the re-query).
+  ///
+  /// Delegates to [ColumnInvalidationPolicy.affects] which is also the
+  /// load-bearing test surface for direct unit coverage of the elision
+  /// policy. Black-box "stream emits / doesn't emit" cannot prove
+  /// elision because exp 075's hash short-circuit can suppress
+  /// emission after a re-query.
   static bool _writeAffectsEntry(
     StreamEntry entry,
     List<String> dirtyTables,
-    Map<String, Set<String>?> dirtyColumns,
-  ) {
-    final entryDeps = entry.dependencies;
-    final entryCols = entry.columnDependencies;
-    for (final table in dirtyTables) {
-      if (!entryDeps.contains(table)) continue;
-
-      // Writer-side wildcard: INSERT / DELETE / untagged writes — every
-      // stream watching this table must re-query because rows may have
-      // appeared or disappeared.
-      final writerCols = dirtyColumns[table];
-      if (writerCols == null) {
-        if (dirtyColumns.containsKey(table)) return true;
-        // Table-only invalidation with no column info available — fall
-        // back to today's behaviour and re-query.
-        return true;
-      }
-
-      // Reader-side wildcard or missing column data: degrade safely —
-      // re-query the stream.
-      final readerCols = entryCols[table];
-      if (readerCols == null) return true;
-
-      // Both sides have concrete column sets. Skip the re-query only
-      // when they are disjoint.
-      for (final c in writerCols) {
-        if (readerCols.contains(c)) return true;
-      }
-    }
-    return false;
-  }
+    ColumnDependencyMap dirtyColumns,
+  ) =>
+      ColumnInvalidationPolicy.affects(entry, dirtyTables, dirtyColumns);
 
   Future<void> _flushQueue() async {
     if (_requeryQueue.isEmpty) {
@@ -543,4 +550,72 @@ final class StreamEntry {
 /// Compute a stable hash key for a stream query.
 int _streamKey(String sql, List<Object?> params) {
   return Object.hash(sql, Object.hashAll(params));
+}
+
+/// Column-level dispatch elision policy (experiment 106 polish).
+///
+/// Encapsulates the per-entry "should this write invalidate this
+/// stream?" decision. Exposed via [@visibleForTesting] so direct unit
+/// tests can prove the dispatch policy without going through black-box
+/// emission counts (which can be confounded by exp 075's hash
+/// short-circuit suppressing emissions for unchanged results).
+///
+/// The policy is the writer-side complement to the result-change
+/// detection: hash short-circuit pays the re-query cost and suppresses
+/// the emission; column elision skips the re-query itself when the
+/// dirty columns provably can't intersect the stream's read columns
+/// for any shared table.
+@visibleForTesting
+class ColumnInvalidationPolicy {
+  const ColumnInvalidationPolicy._();
+
+  /// Return `true` when at least one table in [dirtyTables] is in
+  /// [entry]'s dependency set AND the writer's modified columns
+  /// intersect the entry's read columns for that table (or either side
+  /// carries a wildcard, forcing the re-query).
+  ///
+  /// Contract:
+  ///   * disjoint concrete sets → `false` (elide dispatch)
+  ///   * overlapping concrete sets → `true`
+  ///   * writer-side `null` (wildcard for INSERT/DELETE) → `true`
+  ///   * reader-side `null` (or absent) for the dirty table → `true`
+  ///   * dirty table absent from column map (table-only) → `true`
+  ///   * dirty table not in entry's deps → continue scanning
+  ///
+  /// Every uncertainty routes to `true` (re-query). Elision only
+  /// happens on the proven-disjoint path.
+  static bool affects(
+    StreamEntry entry,
+    List<String> dirtyTables,
+    ColumnDependencyMap dirtyColumns,
+  ) {
+    final entryDeps = entry.dependencies;
+    final entryCols = entry.columnDependencies;
+    for (final table in dirtyTables) {
+      if (!entryDeps.contains(table)) continue;
+
+      // Writer-side wildcard: INSERT / DELETE / untagged writes — every
+      // stream watching this table must re-query because rows may have
+      // appeared or disappeared.
+      final writerCols = dirtyColumns[table];
+      if (writerCols == null) {
+        if (dirtyColumns.containsKey(table)) return true;
+        // Table-only invalidation with no column info available — fall
+        // back to today's behaviour and re-query.
+        return true;
+      }
+
+      // Reader-side wildcard or missing column data: degrade safely —
+      // re-query the stream.
+      final readerCols = entryCols[table];
+      if (readerCols == null) return true;
+
+      // Both sides have concrete column sets. Skip the re-query only
+      // when they are disjoint.
+      for (final c in writerCols) {
+        if (readerCols.contains(c)) return true;
+      }
+    }
+    return false;
+  }
 }
