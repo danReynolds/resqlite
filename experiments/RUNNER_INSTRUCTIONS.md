@@ -16,7 +16,13 @@ Before choosing an experiment, read:
 
 - [`README.md`](README.md) — the experiment table and templates
 - [`signals.json`](signals.json) — the canonical per-direction research map
-- [`JOURNAL.md`](JOURNAL.md) — transferable lessons from prior experiments
+- [`JOURNAL.md`](JOURNAL.md) — the runner's notebook. Read this carefully:
+  it carries the transferable lessons from prior runs, but also surprises,
+  hunches, external changes, and "that wasn't what I expected" notes that
+  the structured maps don't surface. Skim it for anything relevant to the
+  direction you're considering before committing — a previous runner may
+  have already flagged the trap you're about to walk into, or pointed at
+  the workload that would make your idea worth running.
 - [`MILESTONES.md`](MILESTONES.md) — the curated narrative arc, for context on
   how the current state was reached
 - recent individual experiment writeups relevant to the area you are considering
