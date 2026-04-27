@@ -65,6 +65,8 @@ jobs:
         run: dart pub get
       - name: Verify generated benchmark docs are current
         run: dart run benchmark/check_generated_data.dart
+      - name: Verify experiment research map is valid
+        run: dart run benchmark/check_experiment_signals.dart
 
   benchmark:
     name: Benchmarks (main)
