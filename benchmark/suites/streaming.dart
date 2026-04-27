@@ -25,7 +25,9 @@ Future<String> runStreamingBenchmark() async {
     // -----------------------------------------------------------------
     // Setup
     // -----------------------------------------------------------------
-    final resqliteDb = await resqlite.Database.open('${tempDir.path}/resqlite.db');
+    final resqliteDb = await resqlite.Database.open(
+      '${tempDir.path}/resqlite.db',
+    );
     final asyncDb = sqlite_async.SqliteDatabase(
       path: '${tempDir.path}/async.db',
     );
@@ -38,7 +40,9 @@ Future<String> runStreamingBenchmark() async {
     // numbers remain historically comparable. The unchanged-fanout
     // benchmark below inserts an additional 900 rows *locally* so its
     // result size is big enough for the decode-skip win to clear noise.
-    final seedParams = [for (var i = 0; i < 100; i++) ['item_$i', i]];
+    final seedParams = [
+      for (var i = 0; i < 100; i++) ['item_$i', i],
+    ];
 
     await resqliteDb.execute(createSql);
     await resqliteDb.executeBatch(seedSql, seedParams);
@@ -53,8 +57,7 @@ Future<String> runStreamingBenchmark() async {
       for (var i = 0; i < defaultWarmup; i++) {
         await resqliteDb.stream('SELECT * FROM items ORDER BY id').first;
         await asyncDb
-            .watch('SELECT * FROM items ORDER BY id',
-                throttle: Duration.zero)
+            .watch('SELECT * FROM items ORDER BY id', throttle: Duration.zero)
             .first;
       }
 
@@ -71,22 +74,22 @@ Future<String> runStreamingBenchmark() async {
       for (var i = 0; i < defaultIterations; i++) {
         final sw = Stopwatch()..start();
         await asyncDb
-            .watch('SELECT * FROM items ORDER BY id',
-                throttle: Duration.zero)
+            .watch('SELECT * FROM items ORDER BY id', throttle: Duration.zero)
             .first;
         sw.stop();
         asyncTiming.wallUs.add(sw.elapsedMicroseconds);
         asyncTiming.mainUs.add(sw.elapsedMicroseconds);
       }
 
-      markdown.write(markdownTable('Initial Emission', [sqTiming, asyncTiming]));
+      markdown.write(
+        markdownTable('Initial Emission', [sqTiming, asyncTiming]),
+      );
     }
 
     // -----------------------------------------------------------------
     // 2. Invalidation latency (write → re-emission)
     // -----------------------------------------------------------------
     {
-
       var counter = 1000;
 
       // resqlite
@@ -142,7 +145,9 @@ Future<String> runStreamingBenchmark() async {
         await sub.cancel();
       }
 
-      markdown.write(markdownTable('Invalidation Latency', [sqTiming, asyncTiming]));
+      markdown.write(
+        markdownTable('Invalidation Latency', [sqTiming, asyncTiming]),
+      );
     }
 
     // -----------------------------------------------------------------
@@ -207,13 +212,14 @@ Future<String> runStreamingBenchmark() async {
         for (var s = 0; s < fanoutCount; s++) {
           final sub = resqliteDb
               .stream(
-            'SELECT id, name, value, $s as sid FROM items '
-            'WHERE id <= 1000 ORDER BY id',
-          )
+                'SELECT id, name, value, $s as sid FROM items '
+                'WHERE id <= 1000 ORDER BY id',
+              )
               .listen((_) {
-            unchangedEmissions[s]++;
-            if (!unchangedReady[s].isCompleted) unchangedReady[s].complete();
-          });
+                unchangedEmissions[s]++;
+                if (!unchangedReady[s].isCompleted)
+                  unchangedReady[s].complete();
+              });
           unchangedSubs.add(sub);
         }
 
@@ -234,7 +240,8 @@ Future<String> runStreamingBenchmark() async {
           for (var s = 0; s < fanoutCount; s++) {
             if (unchangedEmissions[s] != before[s]) {
               throw StateError(
-                  'Unchanged stream $s emitted for an unchanged result!');
+                'Unchanged stream $s emitted for an unchanged result!',
+              );
             }
           }
         }
@@ -273,8 +280,9 @@ Future<String> runStreamingBenchmark() async {
                 throttle: Duration.zero,
               )
               .listen((_) {
-            if (!unchangedReady[s].isCompleted) unchangedReady[s].complete();
-          });
+                if (!unchangedReady[s].isCompleted)
+                  unchangedReady[s].complete();
+              });
           unchangedSubs.add(sub);
         }
 
@@ -296,17 +304,137 @@ Future<String> runStreamingBenchmark() async {
         }
       }
 
-      markdown.write(markdownTable(
-        'Unchanged Fanout Throughput (1 canary + 10 unchanged streams)',
-        [sqTiming, asyncTiming],
-      ));
+      markdown.write(
+        markdownTable(
+          'Unchanged Fanout Throughput (1 canary + 10 unchanged streams)',
+          [sqTiming, asyncTiming],
+        ),
+      );
+    }
+
+    // -----------------------------------------------------------------
+    // 2c. Long-text unchanged fanout — experiment 099/110 target
+    //
+    // The standard unchanged-fanout workload uses short TEXT cells, so
+    // `resqlite_query_hash` never spends meaningful time in its byte-stream
+    // fold loop. This focused workload keeps the result unchanged for
+    // several long-text streams and uses one changed long-text barrier
+    // stream to wait until the fanout wave has actually drained.
+    // -----------------------------------------------------------------
+    {
+      const unchangedStreamCount = 8;
+      const rowCount = 256;
+      const textBytes = 4096;
+      var counter = 100000;
+
+      final tmp = await Directory.systemTemp.createTemp(
+        'bench_long_text_stream_',
+      );
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        const createLongSql =
+            'CREATE TABLE long_items('
+            'id INTEGER PRIMARY KEY, '
+            'body TEXT NOT NULL, '
+            'marker INTEGER NOT NULL)';
+        const insertLongSql =
+            'INSERT INTO long_items(id, body, marker) VALUES (?, ?, ?)';
+
+        await db.execute(createLongSql);
+        await db.executeBatch(insertLongSql, [
+          for (var i = 0; i < rowCount; i++)
+            [i, _longTextPayload(textBytes, i), i],
+        ]);
+
+        final timing = BenchmarkTiming('resqlite');
+        final unchangedSubs = <StreamSubscription>[];
+        final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+        final unchangedReady = <Completer<void>>[
+          for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+        ];
+
+        for (var s = 0; s < unchangedStreamCount; s++) {
+          final sub = db
+              .stream(
+                'SELECT id, body, $s as sid FROM long_items '
+                'WHERE id < $rowCount ORDER BY id',
+              )
+              .listen((_) {
+                unchangedEmissions[s]++;
+                if (!unchangedReady[s].isCompleted)
+                  unchangedReady[s].complete();
+              });
+          unchangedSubs.add(sub);
+        }
+
+        // Registered after the unchanged streams. It changes on each insert
+        // and serves as a practical barrier for the preceding hash-only
+        // re-query wave.
+        final barrierStream = db.stream(
+          'SELECT id, body FROM long_items ORDER BY id',
+        );
+        final barrierReady = Completer<void>();
+        Completer<void>? waitBarrier;
+        final barrierSub = barrierStream.listen((_) {
+          if (!barrierReady.isCompleted) {
+            barrierReady.complete();
+          } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+            waitBarrier.complete();
+          }
+        });
+
+        await Future.wait(
+          unchangedReady.map((c) => c.future),
+        ).timeout(const Duration(seconds: 10));
+        await barrierReady.future.timeout(const Duration(seconds: 10));
+
+        for (var i = 0; i < defaultIterations; i++) {
+          waitBarrier = Completer<void>();
+          final before = List<int>.from(unchangedEmissions);
+
+          final sw = Stopwatch()..start();
+          await db.execute(insertLongSql, [
+            counter,
+            _longTextPayload(textBytes, counter),
+            i,
+          ]);
+          counter++;
+          await waitBarrier.future.timeout(const Duration(seconds: 10));
+          sw.stop();
+          timing.wallUs.add(sw.elapsedMicroseconds);
+          timing.mainUs.add(sw.elapsedMicroseconds);
+
+          for (var s = 0; s < unchangedStreamCount; s++) {
+            if (unchangedEmissions[s] != before[s]) {
+              throw StateError(
+                'Long-text unchanged stream $s emitted for an unchanged result.',
+              );
+            }
+          }
+        }
+
+        await barrierSub.cancel();
+        for (final sub in unchangedSubs) {
+          await sub.cancel();
+        }
+        await db.close();
+
+        markdown.write(
+          markdownTable(
+            'Long-Text Unchanged Fanout '
+            '(8 unchanged streams, 256 rows x 4KB TEXT)',
+            [timing],
+          ),
+        );
+      } finally {
+        await tmp.delete(recursive: true);
+      }
     }
 
     // -----------------------------------------------------------------
     // 3. Fan-out (10 streams, one write invalidates all)
     // -----------------------------------------------------------------
     {
-
       const streamCount = 10;
       var counter = 5000;
 
@@ -327,20 +455,24 @@ Future<String> runStreamingBenchmark() async {
           final stream = resqliteDb.stream(
             "SELECT COUNT(*) as cnt, '$s' as sid FROM items",
           );
-          subs.add(stream.listen((_) {
-            emitCount++;
-            if (emitCount == 1 && !initialC.isCompleted) initialC.complete();
-            if (emitCount >= 2 && !reEmitC.isCompleted) reEmitC.complete();
-          }));
+          subs.add(
+            stream.listen((_) {
+              emitCount++;
+              if (emitCount == 1 && !initialC.isCompleted) initialC.complete();
+              if (emitCount >= 2 && !reEmitC.isCompleted) reEmitC.complete();
+            }),
+          );
         }
 
-        await Future.wait(initialCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await Future.wait(
+          initialCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
 
         final sw = Stopwatch()..start();
         await resqliteDb.execute(seedSql, ['fan_${counter++}', iter]);
-        await Future.wait(reEmitCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await Future.wait(
+          reEmitCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
         sw.stop();
         sqTiming.wallUs.add(sw.elapsedMicroseconds);
         sqTiming.mainUs.add(sw.elapsedMicroseconds);
@@ -368,20 +500,24 @@ Future<String> runStreamingBenchmark() async {
             "SELECT COUNT(*) as cnt, '$s' as sid FROM items",
             throttle: Duration.zero,
           );
-          subs.add(stream.listen((_) {
-            emitCount++;
-            if (emitCount == 1 && !initialC.isCompleted) initialC.complete();
-            if (emitCount >= 2 && !reEmitC.isCompleted) reEmitC.complete();
-          }));
+          subs.add(
+            stream.listen((_) {
+              emitCount++;
+              if (emitCount == 1 && !initialC.isCompleted) initialC.complete();
+              if (emitCount >= 2 && !reEmitC.isCompleted) reEmitC.complete();
+            }),
+          );
         }
 
-        await Future.wait(initialCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await Future.wait(
+          initialCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
 
         final sw = Stopwatch()..start();
         await asyncDb.execute(seedSql, ['fan_${counter++}', iter]);
-        await Future.wait(reEmitCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await Future.wait(
+          reEmitCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
         sw.stop();
         asyncTiming.wallUs.add(sw.elapsedMicroseconds);
         asyncTiming.mainUs.add(sw.elapsedMicroseconds);
@@ -391,14 +527,15 @@ Future<String> runStreamingBenchmark() async {
         }
       }
 
-      markdown.write(markdownTable('Fan-out (10 streams)', [sqTiming, asyncTiming]));
+      markdown.write(
+        markdownTable('Fan-out (10 streams)', [sqTiming, asyncTiming]),
+      );
     }
 
     // -----------------------------------------------------------------
     // 4. Stream churn (subscribe/unsubscribe cycles)
     // -----------------------------------------------------------------
     {
-
       const cycles = 100;
 
       // Warmup.
@@ -426,8 +563,10 @@ Future<String> runStreamingBenchmark() async {
         final sw = Stopwatch()..start();
         for (var i = 0; i < cycles; i++) {
           await asyncDb
-              .watch('SELECT COUNT(*) as cnt FROM items',
-                  throttle: Duration.zero)
+              .watch(
+                'SELECT COUNT(*) as cnt FROM items',
+                throttle: Duration.zero,
+              )
               .first;
         }
         sw.stop();
@@ -435,7 +574,9 @@ Future<String> runStreamingBenchmark() async {
         asyncTiming.mainUs.add(sw.elapsedMicroseconds);
       }
 
-      markdown.write(markdownTable('Stream Churn (100 cycles)', [sqTiming, asyncTiming]));
+      markdown.write(
+        markdownTable('Stream Churn (100 cycles)', [sqTiming, asyncTiming]),
+      );
       markdown.writeln('');
     }
 
@@ -499,10 +640,12 @@ Future<String> runStreamingBenchmark() async {
         }
         await async.close();
 
-        markdown.write(markdownTable(
-          'No-Streams Write Throughput (200 inserts, no active streams)',
-          [timing, asyncTiming],
-        ));
+        markdown.write(
+          markdownTable(
+            'No-Streams Write Throughput (200 inserts, no active streams)',
+            [timing, asyncTiming],
+          ),
+        );
         markdown.writeln('');
       } finally {
         await tmp.delete(recursive: true);
@@ -580,10 +723,12 @@ Future<String> runStreamingBenchmark() async {
         await sub.cancel();
         await db.close();
 
-        markdown.write(markdownTable(
-          'Growing-Stream Invalidation (batch-insert 100 into watched stream)',
-          [timing],
-        ));
+        markdown.write(
+          markdownTable(
+            'Growing-Stream Invalidation (batch-insert 100 into watched stream)',
+            [timing],
+          ),
+        );
         markdown.writeln('');
       } finally {
         await tmp.delete(recursive: true);
@@ -630,10 +775,12 @@ Future<String> runStreamingBenchmark() async {
 
         await db.close();
 
-        markdown.write(markdownTable(
-          'Stream Subscription Rate (500 subscribe+cancel cycles)',
-          [timing],
-        ));
+        markdown.write(
+          markdownTable(
+            'Stream Subscription Rate (500 subscribe+cancel cycles)',
+            [timing],
+          ),
+        );
         markdown.writeln('');
       } finally {
         await tmp.delete(recursive: true);
@@ -649,3 +796,12 @@ Future<String> runStreamingBenchmark() async {
   return markdown.toString();
 }
 
+String _longTextPayload(int targetBytes, int seed) {
+  final prefix = 'seed_$seed:';
+  const chunk = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  final buffer = StringBuffer(prefix);
+  while (buffer.length < targetBytes) {
+    buffer.write(chunk);
+  }
+  return buffer.toString().substring(0, targetBytes);
+}

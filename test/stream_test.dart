@@ -464,6 +464,31 @@ void main() {
       await probe.cancel();
     });
 
+    test('long text hash detects changes after chunk boundary', () async {
+      await db.execute(
+        'CREATE TABLE long_text(id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
+      );
+      final original = '${'a' * 32}${'b' * 32}${'c' * 32}';
+      final changed = '${'a' * 32}${'z' * 32}${'c' * 32}';
+
+      await db.execute('INSERT INTO long_text(body) VALUES (?)', [original]);
+
+      final probe = _StreamProbe(
+        db.stream('SELECT body FROM long_text ORDER BY id'),
+      );
+      final initialRows = await probe.event(1);
+      expect(initialRows.single['body'], original);
+
+      await db.execute('UPDATE long_text SET body = body WHERE id = 1');
+      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
+
+      await db.execute('UPDATE long_text SET body = ? WHERE id = 1', [changed]);
+      final changedRows = await probe.event(2);
+      expect(changedRows.single['body'], changed);
+
+      await probe.cancel();
+    });
+
     test('re-emits when data actually changes after no-op write', () async {
       await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
         'alice',

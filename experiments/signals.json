@@ -60,25 +60,25 @@
     },
     {
       "id": "long-text-stream-hashing",
-      "status": "measurement-needed",
+      "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, but byte-stream hash-loop experiments are invisible when stream workloads carry only short cells.",
-      "evidence": ["033", "075", "099"],
+      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark. Chunked byte-stream folding produced a large targeted win; further variants need a new profile signal or a broader long-payload workload.",
+      "evidence": ["033", "075", "099", "110"],
       "interestingIf": [
-        "a representative long-text stream benchmark makes hash cost visible",
+        "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
         "the workload includes unchanged fan-out with larger text payloads",
-        "a profile shows hashing or text scanning as a meaningful stream rerun cost"
+        "a hash-loop variant improves the long-text benchmark without hurting short-cell streams"
       ],
       "openQuestions": [
         "What text sizes appear in realistic stream workloads?",
-        "Does the long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
+        "Does the remaining long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
       ],
       "adjacentIdeas": [
-        "long-text stream benchmark",
+        "long-text stream benchmark tuning",
         "hash loop variants",
         "unchanged fan-out with larger payloads"
       ],
-      "notesForExperimenters": "Build or improve the benchmark before spending much implementation effort on another hash-loop change."
+      "notesForExperimenters": "Use the long-text unchanged-fanout benchmark before trying another hash-loop change. The direction is no longer blocked on measurement, but the obvious 8-byte fold has already been tried."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -151,7 +151,7 @@
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
       "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment.",
-      "evidence": ["055", "088", "099", "102", "108"],
+      "evidence": ["055", "088", "099", "102", "108", "110"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -260,6 +260,18 @@
       ],
       "nextSignals": [
         "look for larger ownership/layout changes rather than tiny scratch-object reuse"
+      ]
+    },
+    "110": {
+      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The missing long-text unchanged-fanout benchmark was the blocker for evaluating byte-stream hash-loop work",
+        "The archived 8-byte FNV byte fold becomes a clear win once the workload carries 4KB TEXT cells"
+      ],
+      "nextSignals": [
+        "watch normal short-cell streaming metrics for platform-specific regressions",
+        "use the long-text unchanged-fanout benchmark before trying future hash-loop variants"
       ]
     }
   }
