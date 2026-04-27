@@ -419,13 +419,17 @@ The headline ceiling didn't move — it was already at the floor of what the arc
 
 ## The Hang That Wasn't Ours
 
-While Act Three was happening on the benchmarks, we were dogfooding resqlite in a real Flutter app. Roughly one in five cold launches on macOS would freeze. Logs always stopped at the same line — `Migrate DB started` — and never resumed. `_migrate` does three things: read `PRAGMA user_version`, run schema DDL on a fresh database, write the new version. Thousands of successful runs, then sometimes, nothing.
+Every library that ships long enough eventually does something inexplicable. resqlite's turn came on a Wednesday. The Flutter app we were dogfooding it in started freezing on cold launch — about one in five tries — black screen, beachball, logs that always stopped in the same place: `Migrate DB started`. After that, nothing. Force-quit, relaunch, sometimes work, sometimes not.
 
-The first instinct was hot reload — a stale `Database` singleton, orphan isolates, the new writer's `BEGIN IMMEDIATE` blocked on a connection from the previous run. We added a close-before-reopen guard, then asked: do `sqflite`, `drift`, and `sqlite_async` carry this same guard? They don't. Either the entire ecosystem is wrong on hot reload or we were. Hot reload doesn't re-run `main()`; hot restart resets the VM. There is no scenario where two `Database` instances exist. We reverted the guard. The freeze was on cold launch anyway.
+`_migrate` does almost nothing. It reads `PRAGMA user_version`, runs schema DDL on a fresh database, writes the new version. We had thousands of clean runs in the bag. And then, intermittently, just a hush.
 
-### The Trace
+The first guess was the most boring guess: hot reload. Maybe Flutter was leaving an old `Database` singleton around, the writer connection from the previous run still holding `BEGIN IMMEDIATE`, the new writer parking on a SQLite busy timeout that would never tick down. We wrote a close-before-reopen guard, were about to commit it, and then asked the question that saved us: would `sqflite`, `drift`, and `sqlite_async` need this same guard? Because if the answer was yes, the entire ecosystem was broken and it had been for years.
 
-The first call into the reader pool was `db.select('PRAGMA user_version')`. We instrumented every transition — `Isolate.spawn` start, spawn resolve, entrypoint enter, SendPort handshake — and reproduced:
+It wasn't. They don't carry it. Hot reload doesn't re-run `main()`. Hot restart resets the VM. There's no scenario where two `Database` instances exist. And — looking back at the actual logs — the hang was on cold launch anyway, where neither concept applies. We deleted the guard with mild embarrassment and went back to staring at `Migrate DB started`.
+
+### Wait, what's the VM doing?
+
+The first call into the reader pool from migration is `db.select('PRAGMA user_version')`. We littered the worker spawn with prints — start of `Isolate.spawn`, resolve of `Isolate.spawn`, entrypoint enter, SendPort handshake — and got the next reproduction back:
 
 ```
 [ReaderPool] reader 0: Isolate.spawn done, awaiting SendPort...
@@ -434,9 +438,17 @@ The first call into the reader pool was `db.select('PRAGMA user_version')`. We i
 [ReaderPool] reader 3: Isolate.spawn done, awaiting SendPort...
 ```
 
-All four `Isolate.spawn` futures resolved. The VM reported the isolates as created. Not one entrypoint executed. A `Timer.periodic` we added on the main isolate never fired either, which moved the diagnosis off the async path entirely: the event loop itself was not running. The main thread was synchronously stuck below Dart.
+Four spawn futures resolved. The VM said *yep, isolates created.* And then nothing. Not one entrypoint executed. Not one print from inside an isolate. We checked our prints, double-checked our prints, ran it again. Same thing.
 
-When the VM is dead the VM service is dead, DevTools is dead, and `print` from any isolate goes nowhere. macOS ships `sample(1)`. Pointed at the hung process, it dumped 21 thread stacks. The main thread:
+So we added a `Timer.periodic` on the main isolate to confirm the event loop was at least alive. It wasn't. The timer never fired. Whatever was happening, it wasn't async. The main thread had stopped processing events entirely. We were looking at a synchronous freeze, somewhere below Dart, in code we couldn't see from Dart.
+
+### The cool part
+
+Here's the thing about a dead Dart VM: you can't debug it with anything that talks to the Dart VM. DevTools is dead. The VM service's WebSocket accepts your connection and then sits there like a stunned fish. `print` from any isolate goes to a queue that nobody is draining. You can stare at the process from inside Dart all day and learn nothing.
+
+Then someone said: macOS has `sample(1)`. It's been there forever. It snapshots every thread's call stack, in C, with no help from the runtime. It does not care that your VM is dead.
+
+We pointed it at the hung process and got back the kind of stack trace you don't usually get to see:
 
 ```
 dart::SafepointHandler::ExitSafepointLocked
@@ -444,7 +456,7 @@ dart::SafepointHandler::ExitSafepointLocked
     → _pthread_cond_wait
 ```
 
-The chain that woke that thread up:
+The Dart VM's safepoint handler. On the main thread. Parked on a condition variable. *We were inside the Dart VM, looking at a piece of plumbing nobody is supposed to look at, watching it not move.* And then, reading further up the stack, we got to see what had even called into the VM in the first place:
 
 ```
 CGSDatagramReadStream::dispatchMainQueueDatagrams
@@ -455,13 +467,15 @@ CGSDatagramReadStream::dispatchMainQueueDatagrams
           → Thread::ExitSafepoint           ← BLOCKED
 ```
 
-A window-server `didChangeOcclusionState` notification — fired when the window first appears, so always present at cold launch — landed on the main thread, Flutter dispatched it inline as a lifecycle platform message, and `Dart_EnterIsolate` parked on a safepoint operation that never completed.
+A window-server datagram. macOS sending the app a `didChangeOcclusionState` — fired the moment a window first becomes visible, which is to say, every cold launch, every time. Flutter's lifecycle handler caught it on the main thread and dispatched it inline as a Dart platform message. `Dart_EnterIsolate` saw a safepoint operation in progress, parked to wait for it, and never came back.
 
-### The Clean Theory That Wasn't
+That stack was the moment the chapter shifted. We were chasing a database hang. We were now reading a Dart VM trace and a Flutter engine trace and a CoreGraphicsServices trace, all in one process, all in one frozen instant. None of it was our code. We hadn't written any of these lines. But the symptom was sitting on top of our library.
 
-Flutter 3.33+ merges the platform and UI threads on macOS, so system notifications and Dart code share a thread. If the VM is in a safepoint and a notification arrives on that thread, the lifecycle handler tries to re-enter the isolate, can't, deadlocks. Toggling `FLTEnableMergedPlatformUIThread = false` made the freeze go away. The story closed cleanly. We started drafting the bug.
+### The clean theory that wasn't
 
-It survived about an hour. Three research agents reading the VM source in parallel surfaced a problem with it: the full `sample` had a four-thread tangle inside the DartWorker pool that had nothing to do with `Isolate.spawn`.
+There was an obvious story to tell, and it was almost true. Flutter 3.33+ merges the platform thread and the UI thread on macOS — same OS thread runs the Cocoa run loop and the Dart VM. So a system notification arriving on that thread runs the lifecycle handler *on the same thread the VM is on*. If the VM is mid-safepoint, the handler tries to re-enter the isolate, can't, deadlocks. We added `FLTEnableMergedPlatformUIThread = false` to `Info.plist` and the freeze went away. We had a theory, a fix, and a workaround. We were ready to file the bug.
+
+The theory survived about an hour. We sent three research agents into the Dart VM and Flutter engine source in parallel — and what came back didn't fit. The full `sample` had a four-thread tangle inside the DartWorker pool that had nothing to do with `Isolate.spawn`:
 
 | Thread | Holds | Waiting for |
 |---|---|---|
@@ -470,37 +484,53 @@ It survived about an hour. Three research agents reading the VM source in parall
 | DartWorker C, D | (in `HandleMessages`) | Safepoint to complete |
 | Main thread | — | Safepoint to complete |
 
-The safepoint owner was `Debugger::RunWithStoppedDeoptimizedWorld` — the VM debugger setting a breakpoint on behalf of the IDE. Because the run was via `flutter run`, the IDE was attached to the VM service and syncing breakpoints exactly during cold-launch isolate startup. Merged threads weren't the bug; they were the amplifier. Without them the main thread renders and the user sees a working UI, but those four worker threads are still wedged, the VM service is unresponsive, and no breakpoint will ever land.
+The thread holding the safepoint wasn't doing isolate setup. It was running `Debugger::RunWithStoppedDeoptimizedWorld` — the VM debugger, setting a breakpoint on behalf of the IDE attached to our `flutter run`. The IDE sends breakpoint sync requests during cold launch. They go through the VM service. They request a safepoint. The safepoint can't complete. Everyone parks. Including, if you're unlucky enough to be in merged-thread mode, the main thread.
 
-The four-thread cycle wanted verification. Most of it dissolved on the read. `MessageHandler::HandleMessages` explicitly releases `monitor_` (`ml->Exit()`) before calling `HandleMessage`, with an inline comment confirming the release is intentional to avoid this exact deadlock class. So DartWorker C and D do not hold the monitor while parking. The mutex DartWorker B was blocked on should have been free, and no thread in our sample of 21 visibly held it. We could rule out everything except the only thing that mattered.
+Suddenly merged threads weren't the cause. They were the amplifier. The four-thread deadlock was happening anyway, on every reproduction; merged threads were just what dragged the main thread into it and turned a silent VM stall into a beach-balling app. Without them, the UI would render and the user would see a working app — but the debugger would still be wedged, the VM service would still be unresponsive, and breakpoints would silently stop working.
 
-We filed [flutter/flutter#185156](https://github.com/flutter/flutter/issues/185156) with the thread dump and a frank "we cannot identify the lock holder from sample output." Vyacheslav Egorov (mraleph) responded the same day with the same question, and pushed back on our suggested fix — deferring the Flutter lifecycle dispatch — which would only have unblocked the main thread while the worker-pool deadlock remained intact. He asked for a repro. We tried: a Flutter app self-connecting to its own VM service, flooding `addBreakpointWithScriptUri` calls during isolate spawning. 150 launches, no deadlock. The original timing window depended on heavy FFI startup (SQLCipher init, multi-connection setup) that the minimal app finished too fast to hit.
+We re-read everything. Most of our cycle dissolved on closer inspection. `MessageHandler::HandleMessages` *explicitly* releases its monitor (`ml->Exit()`) before invoking message work, with an inline comment confirming the release is intentional to avoid this exact deadlock. So DartWorker C and D weren't holding the monitor at all. The mutex DartWorker B was blocked on should have been free. None of our 21 sampled threads were holding it. We could rule out everything except the only thing that mattered.
 
-### The Actual Bug
+That was as far as we could get. We had hard evidence, a clear story for what was happening above the lock, and an honest gap where the lock holder should be.
 
-Then Martin Kustermann read the call path with the right file open and named what we'd missed: `AcquiredQueues`.
+### Filing it anyway
 
-We'd checked `MessageHandler::HandleMessages` and confirmed it releases the monitor before invoking message work. We had not checked the other place the same monitor is acquired. `Service::InvokeMethod`, while servicing a `GetStack` request, takes the monitor via an `AcquiredQueues` scope so the service can dump the message queue into the JSON reply ([service.cc:1758](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/service.cc#L1758)). That scope was live on DartWorker B for the entire trace.
+We wrote it up: the full thread dump, the merged-thread amplifier story, the four-thread tangle, the mutex we couldn't pin a holder on, our best guess at a fix, and an explicit "we cannot identify the actual lock holder from sample output." We hit submit on [flutter/flutter#185156](https://github.com/flutter/flutter/issues/185156) at the end of a long debugging day, half expecting it to languish.
 
-What follows is one of the more obscene call chains we've read:
+Vyacheslav Egorov — mraleph, who has been writing the Dart VM since approximately forever — replied within hours. He led with our open question (*"who is holding the mutex that `MessageHandler::PostMessage` is trying to grab?"*) and then, gently but firmly, told us our suggested fix made no sense: deferring the Flutter lifecycle dispatch would only unblock the main thread; the four-thread DartWorker deadlock would still be there. He was right. The "fix" we'd shipped to the issue would have shifted a beach-balling app to a silently broken debugger.
 
-1. `Service::InvokeMethod` enters `AcquiredQueues` — takes `MessageHandler::monitor_`.
-2. `MessageQueue::PrintJSON` runs, formatting the queue. Touching message contents triggers JIT compilation ([message.cc:235](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/message.cc#L235) → [dart_entry.cc:728](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/dart_entry.cc#L728)).
+He asked for a repro. We tried. We built a Flutter app that opened a VM service connection back to *itself* and used `vm_service` to flood `addBreakpointWithScriptUri` calls during isolate spawning, sustaining 130+ overlapping breakpoint sets. 150 launches, no deadlock. The original timing window had been opened by heavyweight FFI startup work — SQLCipher initializing, multi-connection setup, ~880ms of activity that gave the IDE time to send breakpoint requests during the spawn window. The minimal app finished too fast to ever land in that window. We told mraleph we couldn't repro and waited for the issue to go cold.
+
+### The catch
+
+Then Martin Kustermann showed up.
+
+He had read the call path with the right file open and named what we'd missed in one syllable: `AcquiredQueues`.
+
+We'd checked `MessageHandler::HandleMessages` — the path message-handler threads take when they're processing their queue — and found the deliberate release. We had not checked the *other* place the same monitor is acquired. `Service::InvokeMethod`, while servicing a `GetStack` request, takes the monitor inside an `AcquiredQueues` scope so the service can dump the message queue into the JSON reply ([service.cc:1758](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/service.cc#L1758)). That scope was open on DartWorker B for the entire trace. We'd been staring at it the whole time without recognizing it.
+
+What follows is the funniest call chain we've ever read:
+
+1. `Service::InvokeMethod` enters `AcquiredQueues`. It takes `MessageHandler::monitor_`.
+2. `MessageQueue::PrintJSON` runs, formatting the queue contents for the reply. Touching some message types triggers JIT compilation ([message.cc:235](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/message.cc#L235) → [dart_entry.cc:728](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/dart_entry.cc#L728)).
 3. Compilation runs inside a `NoReloadScope`, which suppresses hot-reload safepoints during the work.
-4. The destructor `~NoReloadScope` notices another thread (the debugger setting its breakpoint) has requested a reload-class safepoint while reload was suppressed, and posts the isolate an OOB "check in for reload" message — to itself ([thread.cc:1752](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/thread.cc#L1752)).
-5. `PortMap::PostMessage` acquires `PortMap::mutex_`, then calls `MessageHandler::PostMessage`, which goes to acquire — this thread's own `MessageHandler::monitor_`, the one held since step 1.
+4. The destructor `~NoReloadScope` notices another thread (the debugger, setting its breakpoint!) had requested a reload-class safepoint while reload was suppressed. So the destructor posts the isolate an OOB "check in for reload" message — to itself, the same isolate ([thread.cc:1752](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/thread.cc#L1752)).
+5. `PortMap::PostMessage` acquires `PortMap::mutex_`. Then it calls `MessageHandler::PostMessage`, which goes to acquire — the very same `MessageHandler::monitor_` we took in step 1. The one we still hold.
 
-`pthread_mutex_firstfit` is not recursive. The thread blocks waiting for itself. The debugger waits for that thread to park. Every other Dart worker that touches the port map waits for the safepoint or `PortMap::mutex_`. The merged-thread mode pulls the main thread in via the lifecycle notification. The whole VM stops.
+`pthread_mutex_firstfit` is not recursive. The thread blocks waiting for itself.
+
+Once that one thread is wedged, the rest of the deadlock falls into place: the debugger waits for that thread to park, every other Dart worker that touches the port map waits for the safepoint or `PortMap::mutex_`, and merged threads pull in the main thread via `didChangeOcclusionState`. The whole VM stops, in lockstep, behind one thread holding a single mutex it forgot it was holding.
 
 mraleph's response: *"ah-ha! Nice catch — I have somehow overlooked the existence of `AcquiredQueues`."*
 
-### The Fix
+### The fix
 
-The diagnosis admits several plausible fixes — make the monitor recursive, drop and re-acquire across the JIT step, restructure `~NoReloadScope` so it doesn't post during destruction. The fix that shipped is more interesting. mraleph audited who consumes the message-queue dump in the `GetStack` reply: Observatory used to, DevTools never has. So [dart-lang/sdk@53ac68e](https://github.com/dart-lang/sdk/commit/53ac68e2dd750d988c676cce0ae79b385d1efeec) deprecates `Stack.messages`, makes the VM always return an empty array, and the lock-then-run-Dart pattern that produced the recursive acquisition no longer exists. The Flutter issue closed six days after we filed it, retitled *"Dart vm-service GetStack method can deadlock by trying to lock the same MessageHandler monitor recursively."*
+There were several obvious ways to break the cycle. Make the monitor recursive. Drop and re-acquire across the JIT step. Restructure `~NoReloadScope` so it doesn't post during destruction. The fix that actually shipped is sneakier and better.
 
-The shape of the fix is worth noticing. The bug had been latent in the VM since the `GetStack` queue dump was written; merged threads on macOS just made the symptom user-visible by recruiting the main thread. Removing an unused feature retired both the deadlock and a small bestiary of unstated invariants ("don't call into Dart while holding the queue lock," "don't post during reload-scope teardown") that nobody had explicitly written down. Subtractive fixes for recursive-lock bugs are rare and worth admiring.
+mraleph audited who consumes the message-queue dump in the `GetStack` reply. The answer was: nobody. Observatory used to. DevTools never has. So [dart-lang/sdk@53ac68e](https://github.com/dart-lang/sdk/commit/53ac68e2dd750d988c676cce0ae79b385d1efeec) deprecates `Stack.messages`, makes the VM always return an empty array for that field, and removes the lock-then-run-Dart pattern that produced the recursive acquisition. The bug that started with us beach-balling on cold launch and ended with a five-step recursive self-lock is fixed by *deleting the feature that asks for it.* The Flutter issue closed six days after we filed it, retitled with cheerful precision: *"Dart vm-service GetStack method can deadlock by trying to lock the same MessageHandler monitor recursively."*
 
-What we contributed is in the negative space. We never identified `AcquiredQueues`, and we'd already shipped one wrong proposed fix. The artifact that mattered was a 21-thread `sample` dump plus a precise inventory of what we'd ruled out and what we couldn't see — enough for an expert with the right files open to close the gap in fifteen minutes. A confident misdiagnosis would have steered the conversation away from the file Martin actually needed to read. The interesting half of the report wasn't the analysis; it was the part that admitted where the analysis ran out.
+The shape of the fix is the part we keep coming back to. The bug had been latent in the VM since the `GetStack` queue dump was first written. Merged threads on macOS were what made it user-visible — by recruiting the main thread, they turned a silent VM-internal stall into a beach-ball. Pulling the feature retired both the deadlock and a small bestiary of unstated invariants ("don't call into Dart while holding the queue lock," "don't post during reload-scope teardown") that nobody had written down because nobody had needed to until now. Subtractive fixes for recursive-lock bugs are rare. This one was a particularly clean one.
+
+Our share of the credit is, in honesty, in the negative space. We never identified `AcquiredQueues`. We shipped one wrong proposed fix on the way. What we contributed was a 21-thread `sample` dump and a careful list of what we'd ruled out and what we couldn't see — enough scaffolding that an expert with the right files open could finish the puzzle in fifteen minutes. It turns out that's a perfectly fine way to help fix a Dart VM bug.
 
 ## What We'd Tell Our Past Selves
 
