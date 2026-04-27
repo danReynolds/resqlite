@@ -1,9 +1,13 @@
 # Journal
 
 A researcher's notebook of durable insights from Resqlite performance work.
-Each entry is a lesson that earned its place by surviving more than one
-experiment — write here only when you have learned something a future runner
-shouldn't have to rediscover.
+Most experiment runs should leave at least one entry behind: a transferable
+lesson, a surprise during measurement, a finding that didn't fit the
+experiment writeup, an external change worth flagging for future runners, a
+hunch that deserves a future experiment, or a "huh, that wasn't what I
+expected" moment. Free-form is fine — a paragraph, a short list, a single
+sentence with a link. Keep it short enough that the next reader actually
+reads it.
 
 This file sits between two others:
 
@@ -105,16 +109,25 @@ path before it is worth running.*
 
 ## How to add to this file
 
-Add an entry when an experiment surfaces a transferable lesson — something a
-future runner could reapply to a different direction, or could waste time
-relearning. Each entry should:
+Most runs should add at least one entry. The journal is a notebook — the
+bar is "would I want to read this if I were the next runner?", not "is
+this a polished theorem?".
+
+For a **transferable lesson** (the highest-value entry type):
 
 - Lead with the lesson, not the experiment
 - Cite the experiment(s) where it was learned
 - End with a *Reapplies* note describing when the lesson kicks in
-- Be short enough that the next reader actually reads it
 
-Don't add entries for facts already captured in `signals.json` (that file
-covers per-direction state, not transferable lessons). Don't add process
-guidance (that lives in `RUNNER_INSTRUCTIONS.md`). Don't add narrative
-milestones (those live in `MILESTONES.md`).
+For **shorter notes** (surprises, hunches, external changes, things that
+didn't fit the experiment writeup): a paragraph or a sentence with a link
+is enough. No fixed structure. If the note grows into a transferable
+lesson over time, edit it into that shape.
+
+Don't add entries for facts already captured in `signals.json` (that
+file covers per-direction state). Don't add process guidance (that
+lives in `RUNNER_INSTRUCTIONS.md`). Don't add narrative milestones
+(those live in `MILESTONES.md`). When in doubt about which file a
+piece of information belongs in, the journal is the right default —
+it's easier to move a note into structured state later than to
+re-derive a lost observation.

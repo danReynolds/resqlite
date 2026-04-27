@@ -72,16 +72,56 @@ When finished:
   reopen if Y" record.
 - update [`signals.json`](signals.json) if the run changes how future agents
   should interpret an area.
-- add to [`JOURNAL.md`](JOURNAL.md) only when the run surfaced a *transferable*
-  lesson — something a future runner could reapply to a different direction or
-  could waste time relearning. Per-direction state goes in `signals.json`, not
-  the journal.
+- add to [`JOURNAL.md`](JOURNAL.md). The journal is the runner's notebook —
+  most runs should leave at least one entry behind. Things worth jotting:
+  surprises during measurement, a finding that didn't fit the experiment
+  writeup, an external change worth flagging for future runners, a hunch
+  that deserves a future experiment, a small breakthrough about how a
+  subsystem actually behaves, a "huh, that wasn't what I expected" moment.
+  Free-form is fine — a paragraph, a short list, a single sentence with a
+  link. Keep entries short enough that the next reader actually reads them,
+  cite the experiment(s) involved, and end transferable lessons with a
+  *Reapplies* note. Per-direction state still belongs in `signals.json`,
+  not the journal; narrative milestones still belong in `MILESTONES.md`,
+  not the journal.
 - do not edit [`MILESTONES.md`](MILESTONES.md) as part of an experiment run.
   That file is updated on maintainer request, not per experiment.
 - regenerate docs/check generated data as needed
 - run focused validation plus the relevant repo checks
 - open a PR, watch CI/review, and address actionable feedback
 
-The final summary should clearly state what was tried, what happened, whether
-each idea was accepted/rejected/deferred, and what future experimenters should
+## PR description
+
+The PR body is a *summary of the experiment markdown for someone who
+hasn't read it yet*, not a checklist of process metadata. It should be
+readable on its own and roughly mirror the structure of the writeup:
+
+- **Hypothesis / question** the experiment was answering, in one or two
+  sentences.
+- **What was changed** — a brief implementation summary (or, for a
+  pre-implementation rejection, a brief audit summary). Link to the
+  files / functions touched. Skip if the markdown writeup is short
+  enough that the reader will just open it.
+- **Notable benchmark deltas** in a markdown table, with the workload,
+  baseline, candidate, and delta columns. Call out wins, regressions,
+  and any noisy control metrics. For pre-implementation rejections,
+  substitute the cost framing or audit table that justified the
+  decision.
+- **Conclusion** — accepted / rejected / deferred / in-review, plus the
+  one-line reason.
+- **Takeaways and reopen triggers** — what future runners should learn
+  or watch for. This is the same content as the experiment markdown's
+  *Future Notes* and the `signals.json` `nextSignals`, restated for the
+  reviewer.
+- **Test plan** — the validation actually run, plus anything the
+  reviewer should sanity-check.
+
+A PR that reads like a stripped-down version of the markdown is
+correct. A PR that reads like a list of files touched + a CI status
+report is not — the reviewer should not have to open the markdown to
+learn what the experiment was about.
+
+The final summary in your run output (separate from the PR body)
+should clearly state what was tried, what happened, whether each idea
+was accepted/rejected/deferred, and what future experimenters should
 learn from the run.
