@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-27T19:37:14.448544",
+  "generated": "2026-04-27T14:17:55.765744",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -14554,9 +14554,9 @@
       "results": "The hypothesis was wrong: **raising the pool cap regresses A11c\nsubstantially**, and lowering it would help A11c at the cost of\nread concurrency. The 5–6× fan-out drop is *not* dominated by\nreader-pool serialization the way the profile predicted.\n\n### A11c standalone sweep (3 runs each, post-warmup median, M1 Pro)\n\n| Cap | baseline w/s | disjoint w/s | overlap w/s | Disjoint vs cap=4 |\n|---:|---:|---:|---:|---:|\n| 1   | 14.1k–22.4k | 6.3k–6.5k | 6.5k–6.9k | **+57 %** |\n| 2   | 17.3k–22.2k | 5.4k–5.7k | 5.9k–6.0k | **+42 %** |\n| 4 *(current)* | 19.6k–27.3k | 3.7k–4.0k | 4.2k–4.4k | baseline |\n| 8   | 19.3k–23.5k | 2.7k–2.9k | 2.8k–2.8k | **−31 %** |\n| 16  | 26.1k       | 2.4k       | 2.6k       | **−40 %** |\n\nThe relationship is **monotonically inverse**: more readers → fewer\nA11c writes...",
       "reasoning": "Reject.\n\nRecommendation to the maintainer: **do not tag** `archive/exp-105`.\nThe implementation is a one-line change; preserving it adds nothing.\nThe valuable artifact is this writeup — the cap-vs-A11c sweep and\nthe suite-wide regression cascade revising the profile's\ninterpretation.",
       "benchmarkRun": {
-        "id": "baseline-for-exp105",
+        "id": "exp105-reader-pool-8",
         "date": "2026-04-25",
-        "timestamp": "2026-04-25T19:43:21",
+        "timestamp": "2026-04-25T19:47:54",
         "source": "exact"
       }
     },
@@ -14593,9 +14593,9 @@
       "results": "Artifacts:\n\n- Baseline: [`benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md`](../benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md)\n- Candidate: [`benchmark/results/2026-04-27T07-40-26-exp109-inline-param-buffer.md`](../benchmark/results/2026-04-27T07-40-26-exp109-inline-param-buffer.md)\n\nCommand:\n\n```text\ndart run benchmark/run_release.dart exp109-inline-param-buffer --repeat=5 \\\n  --compare-to=benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md\n```\n\n**Suite-level: 15 wins, 0 regressions, 138 neutral.**\n\nThe wins concentrate on bind-heavy paths exactly where the change\nshould matter — text-param INSERT workloads:\n\n| Benchmark | Baseline ms | Candidate ms | Delta | Status |\n|---|---:|---:|---:|---|\n| Write Performance / Single Inserts (100 sequential) | 1....",
       "reasoning": "**Accepted.**\n\nThe bind-heavy paths show consistent ~10-16% wall-clock wins with\nzero regressions and no memory flags. The wins are exactly where the\nhypothesis predicted — `executeWrite` and `executeBatchWrite` paths\nthat bind text params on every call. The changes are localized to\ntwo functions (`allocateParams` / `freeParams`) in\n`lib/src/native/resqlite_bindings.dart`, do not change any FFI\ncontract, and rely on the same single-FFI-exchange ownership\ninvariant that exp 028 already established for SQLITE_STATIC binds.\n\nThis breaks the recent string of micro-allocation rejections (94, 95,\n96, 102, 108) by combining two compounding effects in a single change:\nfewer native allocations *and* a `strlen` skip per text bind. Either\nin isolation would have been at the noise floor; together t...",
       "benchmarkRun": {
-        "id": "baseline-for-exp109",
+        "id": "exp109-inline-param-buffer",
         "date": "2026-04-27",
-        "timestamp": "2026-04-27T07:29:26",
+        "timestamp": "2026-04-27T07:40:26",
         "source": "exact"
       }
     }

@@ -234,6 +234,11 @@ void _attachBenchmarkRunMappings(
 
   // First pass: exact explicit experiment-id matches in the run label,
   // e.g. experiment 088 -> run id "exp088-setlk-timeout".
+  //
+  // Match only when the run id *starts with* expNNN. A `contains` check
+  // would also match `baseline-for-expNNN` siblings, which then compete
+  // by iteration order and can claim the slot first — pointing the chart
+  // at the pre-change baseline instead of the candidate.
   for (final exp in experiments) {
     final expId = exp['id'] as String;
     if (skipRunMappingIds.contains(expId)) continue;
@@ -243,7 +248,7 @@ void _attachBenchmarkRunMappings(
     for (var idx = 0; idx < runs.length; idx++) {
       if (claimedRunIndices.contains(idx)) continue;
       final id = (runs[idx]['id'] as String? ?? '').toLowerCase();
-      if (exactPatterns.any(id.contains)) {
+      if (exactPatterns.any(id.startsWith)) {
         matchedIdx = idx;
         break;
       }
