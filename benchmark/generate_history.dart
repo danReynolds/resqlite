@@ -128,6 +128,7 @@ Map<String, Object?> buildHistoryData({
   print('Parsed ${experiments.length} experiments.');
 
   _attachBenchmarkRunMappings(experiments, runs);
+  _assertAcceptedExperimentsLinkToCandidates(experiments, runs);
 
   // 3. Resolve the curated metric registry used by the experiments page.
   final catalog = resolveCuratedMetrics(allKeys);
@@ -234,6 +235,13 @@ void _attachBenchmarkRunMappings(
 
   // First pass: exact explicit experiment-id matches in the run label,
   // e.g. experiment 088 -> run id "exp088-setlk-timeout".
+  //
+  // Match only when the run id *starts with* expNNN. A `contains` check
+  // would also match `baseline-for-expNNN` siblings, which then compete
+  // by iteration order and can claim the slot first — pointing the chart
+  // at the pre-change baseline instead of the candidate. (Structural
+  // exclusion via `comparisonBaselineFile` graphs over-excludes because
+  // a run can be both a candidate and a baseline for a later A/B.)
   for (final exp in experiments) {
     final expId = exp['id'] as String;
     if (skipRunMappingIds.contains(expId)) continue;
@@ -243,7 +251,7 @@ void _attachBenchmarkRunMappings(
     for (var idx = 0; idx < runs.length; idx++) {
       if (claimedRunIndices.contains(idx)) continue;
       final id = (runs[idx]['id'] as String? ?? '').toLowerCase();
-      if (exactPatterns.any(id.contains)) {
+      if (exactPatterns.any(id.startsWith)) {
         matchedIdx = idx;
         break;
       }
@@ -346,6 +354,53 @@ void _attachBenchmarkRunMappings(
       claimedRunIndices.add(runIdx);
     }
   }
+}
+
+/// Catch the case where an Accepted experiment's chart slot points at
+/// a baseline-shaped run *while* a better-shaped candidate also exists
+/// in the run list. That's the "linker grabbed the wrong file" failure
+/// (which produced the exp-109 chart mixup) — the right data is sitting
+/// right next to the wrong choice.
+///
+/// Stays silent when only a baseline-shaped run exists for the date
+/// (legacy experiments predating the per-experiment-result-file
+/// convention, where the baseline is genuinely the only data point).
+void _assertAcceptedExperimentsLinkToCandidates(
+  List<Map<String, Object?>> experiments,
+  List<Map<String, Object?>> runs,
+) {
+  final issues = <String>[];
+  final baselinePattern = RegExp(r'(^|[-_])(baseline|pre)([-_]|$)');
+  for (final exp in experiments) {
+    if (exp['status'] != 'accepted') continue;
+    final run = exp['benchmarkRun'];
+    if (run is! Map) continue;
+    final runId = (run['id'] as String? ?? '').toLowerCase();
+    if (runId.isEmpty) continue;
+    if (!baselinePattern.hasMatch(runId)) continue;
+
+    final expNum = (exp['id'] as String).toLowerCase();
+    final betterCandidate = runs.any((r) {
+      final id = (r['id'] as String? ?? '').toLowerCase();
+      return id.startsWith('exp$expNum') || id.startsWith('exp-$expNum');
+    });
+    if (!betterCandidate) continue;
+
+    issues.add(
+      '  exp ${exp['id']} (${exp['title']}) -> $runId '
+      '— linker picked a baseline-shaped run even though a candidate '
+      '(exp$expNum-*) exists',
+    );
+  }
+  if (issues.isEmpty) return;
+  stderr.writeln(
+    'Accepted experiments are linked to a baseline run when a candidate '
+    'is available:\n'
+    '${issues.join('\n')}\n'
+    'This is usually the experiment->run linker picking the wrong file. '
+    'Inspect `_attachBenchmarkRunMappings` in benchmark/generate_history.dart.',
+  );
+  exit(1);
 }
 
 int? _pickClosestUnclaimedRun(
