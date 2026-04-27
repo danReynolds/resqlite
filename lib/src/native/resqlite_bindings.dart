@@ -471,18 +471,23 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnsBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
 
-/// Drain the per-reader read-column set into a Dart map of
-/// `table -> Set<column>`. Wildcards (`"table.*"`) collapse the table to
-/// `null` in the returned map, signalling "any column matters".
+/// Per-table dirty / read column dependency map.
 ///
-/// Zero-entry short-circuit returns a `const {}` to avoid allocations on
-/// the hot streaming path.
-Map<String, Set<String>?> getReadColumns(
-  ffi.Pointer<ffi.Void> dbHandle,
-  int readerId,
-) {
-  final count = resqliteGetReadColumns(dbHandle, readerId, _columnsBuf, 64);
-  if (count == 0) return const <String, Set<String>?>{};
+/// `null` for a given table means "any column matters" — emitted by the
+/// writer authorizer for INSERT / DELETE (where SQLite does not surface
+/// a column name) and by the reader path when an authorizer event
+/// fires without a column (triggers, views).
+typedef ColumnDependencyMap = Map<String, Set<String>?>;
+
+/// Decode `count` `"table.column"` pointers from [_columnsBuf] into a
+/// per-table column map. Wildcards (`"table.*"`) collapse the table to
+/// `null`, signalling "any column matters".
+///
+/// Shared between [getReadColumns] and [getDirtyColumns] — both decoders
+/// are otherwise identical, the only difference is which FFI getter
+/// produced the count + pointer fill.
+ColumnDependencyMap _decodeColumnMap(int count) {
+  if (count <= 0) return const <String, Set<String>?>{};
   final out = <String, Set<String>?>{};
   for (var i = 0; i < count; i++) {
     final raw = _columnsBuf[i].toDartString();
@@ -506,32 +511,26 @@ Map<String, Set<String>?> getReadColumns(
   return out;
 }
 
+/// Drain the per-reader read-column set into a Dart map of
+/// `table -> Set<column>`. Wildcards (`"table.*"`) collapse the table to
+/// `null` in the returned map, signalling "any column matters".
+///
+/// Zero-entry short-circuit returns a `const {}` to avoid allocations on
+/// the hot streaming path.
+ColumnDependencyMap getReadColumns(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
+  final count = resqliteGetReadColumns(dbHandle, readerId, _columnsBuf, 64);
+  return _decodeColumnMap(count);
+}
+
 /// Drain the writer's dirty-column accumulator. Same `table.column`
 /// encoding as [getReadColumns]; wildcards collapse to `null` to signal
 /// "all columns of this table are dirty".
-Map<String, Set<String>?> getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
+ColumnDependencyMap getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyColumns(dbHandle, _columnsBuf, 64);
-  if (count == 0) return const <String, Set<String>?>{};
-  final out = <String, Set<String>?>{};
-  for (var i = 0; i < count; i++) {
-    final raw = _columnsBuf[i].toDartString();
-    final dot = raw.indexOf('.');
-    if (dot < 0) continue;
-    final table = raw.substring(0, dot);
-    final col = raw.substring(dot + 1);
-    if (col == '*') {
-      out[table] = null;
-      continue;
-    }
-    final existing = out[table];
-    if (existing == null && out.containsKey(table)) {
-      continue;
-    }
-    final set = existing ?? <String>{};
-    set.add(col);
-    out[table] = set;
-  }
-  return out;
+  return _decodeColumnMap(count);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle
