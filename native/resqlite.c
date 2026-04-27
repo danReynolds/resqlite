@@ -106,8 +106,8 @@ typedef struct {
     int read_table_count;
     // Experiment 106 polish: 1 if `read_tables[]` is the complete
     // dependency set captured by the authorizer; 0 if any read_set_add
-    // during prepare overflowed / OOMed / strdup-failed, or if the
-    // strdup loop in `stmt_cache_entry_set_read_tables` itself failed.
+    // during prepare overflowed / OOMed / strdup-failed, or if copying
+    // the captured set into this cache entry failed.
     // When 0, `resqlite_get_read_tables` returns -1 (the unknown
     // sentinel) so the StreamEngine routes the stream into its
     // global "all tables" bucket.
@@ -120,8 +120,8 @@ typedef struct {
     char* dep_columns[RESQLITE_MAX_DEP_COLUMNS];
     int dep_column_count;
     // Experiment 106 polish: 1 if `dep_columns[]` is the complete
-    // dependency set; 0 on any column_set_add / strdup failure during
-    // prepare. When 0, the column getters return 0 entries — falling
+    // dependency set; 0 on any capture/copy failure. When 0, the
+    // column getters return 0 entries — falling
     // through `_writeAffectsEntry`'s "table missing from column map"
     // branch into table-level re-query.
     int dep_columns_reliable;
@@ -135,6 +135,145 @@ typedef struct {
 static void stmt_cache_init(resqlite_stmt_cache* c) {
     c->count = 0;
     memset(c->entries, 0, sizeof(c->entries));
+}
+
+// ---------------------------------------------------------------------------
+// Bounded string-set helpers
+// ---------------------------------------------------------------------------
+//
+// Dependency tracking uses fixed-size, linear-scan sets because the hot
+// cases are tiny (usually single-digit table/column counts) and the cap is
+// part of the correctness contract: overflow marks the set unreliable so
+// higher layers fall back conservatively instead of silently truncating.
+
+static void bounded_string_set_init(int* count, int* allocated, int* reliable) {
+    *count = 0;
+    *allocated = 0;
+    *reliable = 1;
+}
+
+static void bounded_string_set_reset(int* count, int* reliable) {
+    *count = 0;
+    *reliable = 1;
+}
+
+static void bounded_string_set_free(char** names, int* count, int* allocated) {
+    for (int i = 0; i < *allocated; i++) {
+        free(names[i]);
+        names[i] = NULL;
+    }
+    *count = 0;
+    *allocated = 0;
+}
+
+static void bounded_string_set_add(
+    char** names,
+    int capacity,
+    int* count,
+    int* allocated,
+    int* reliable,
+    const char* value,
+    int owns_value
+) {
+    if (!value) {
+        if (owns_value) free((void*)value);
+        return;
+    }
+    if (!*reliable) {
+        if (owns_value) free((void*)value);
+        return;
+    }
+
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(names[i], value) == 0) {
+            if (owns_value) free((void*)value);
+            return;
+        }
+    }
+
+    if (*count >= capacity) {
+        *reliable = 0;
+        if (owns_value) free((void*)value);
+        return;
+    }
+
+    if (*count < *allocated) {
+        free(names[*count]);
+        names[*count] = NULL;
+    }
+
+    char* stored = owns_value ? (char*)value : strdup(value);
+    if (!stored) {
+        *reliable = 0;
+        return;
+    }
+
+    names[*count] = stored;
+    (*count)++;
+    if (*count > *allocated) *allocated = *count;
+}
+
+static void cached_string_array_clear(char** names, int* count) {
+    for (int i = 0; i < *count; i++) {
+        free(names[i]);
+        names[i] = NULL;
+    }
+    *count = 0;
+}
+
+static int cached_string_array_copy(
+    char** dest,
+    int capacity,
+    int* dest_count,
+    char* const* src,
+    int src_count
+) {
+    *dest_count = 0;
+    if (src_count > capacity) return -1;
+
+    for (int i = 0; i < src_count; i++) {
+        if (!src[i]) {
+            cached_string_array_clear(dest, dest_count);
+            return -1;
+        }
+        char* dup = strdup(src[i]);
+        if (!dup) {
+            cached_string_array_clear(dest, dest_count);
+            return -1;
+        }
+        dest[*dest_count] = dup;
+        (*dest_count)++;
+    }
+    return 0;
+}
+
+static void stmt_cache_entry_clear_read_tables(resqlite_cached_stmt* entry) {
+    cached_string_array_clear(entry->read_tables, &entry->read_table_count);
+}
+
+static void stmt_cache_entry_clear_dep_columns(resqlite_cached_stmt* entry) {
+    cached_string_array_clear(entry->dep_columns, &entry->dep_column_count);
+}
+
+static void stmt_cache_entry_dispose(resqlite_cached_stmt* entry) {
+    if (entry->stmt) sqlite3_finalize(entry->stmt);
+    free(entry->sql);
+    stmt_cache_entry_clear_read_tables(entry);
+    stmt_cache_entry_clear_dep_columns(entry);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static void stmt_cache_entry_init(resqlite_cached_stmt* entry,
+                                  char* sql_copy,
+                                  int sql_len,
+                                  sqlite3_stmt* stmt) {
+    memset(entry, 0, sizeof(*entry));
+    entry->sql = sql_copy;
+    entry->sql_len = sql_len;
+    entry->stmt = stmt;
+    entry->param_count = sqlite3_bind_parameter_count(stmt);
+    entry->read_tables_reliable = 1;
+    entry->dep_columns_reliable = 1;
 }
 
 static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
@@ -165,14 +304,7 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
                                               int sql_len,
                                               sqlite3_stmt* stmt) {
     if (c->count >= STMT_CACHE_MAX) {
-        sqlite3_finalize(c->entries[0].stmt);
-        free(c->entries[0].sql);
-        for (int i = 0; i < c->entries[0].read_table_count; i++) {
-            free(c->entries[0].read_tables[i]);
-        }
-        for (int i = 0; i < c->entries[0].dep_column_count; i++) {
-            free(c->entries[0].dep_columns[i]);
-        }
+        stmt_cache_entry_dispose(&c->entries[0]);
         memmove(&c->entries[0], &c->entries[1],
                 (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
         c->count = STMT_CACHE_MAX - 1;
@@ -182,33 +314,14 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
     memcpy(sql_copy, sql, sql_len);
     sql_copy[sql_len] = '\0';
 
-    c->entries[c->count].sql = sql_copy;
-    c->entries[c->count].sql_len = sql_len;
-    c->entries[c->count].stmt = stmt;
-    c->entries[c->count].param_count = sqlite3_bind_parameter_count(stmt);
-    c->entries[c->count].read_table_count = 0;
-    memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
-    // Experiment 106 polish: default reliability flags to 1; the
-    // cache-copy paths overwrite them based on the source set's
-    // reliability before the entry is consumed.
-    c->entries[c->count].read_tables_reliable = 1;
-    c->entries[c->count].dep_column_count = 0;
-    memset(c->entries[c->count].dep_columns, 0, sizeof(c->entries[c->count].dep_columns));
-    c->entries[c->count].dep_columns_reliable = 1;
+    stmt_cache_entry_init(&c->entries[c->count], sql_copy, sql_len, stmt);
     c->count++;
     return &c->entries[c->count - 1];
 }
 
 static void stmt_cache_clear(resqlite_stmt_cache* c) {
     for (int i = 0; i < c->count; i++) {
-        sqlite3_finalize(c->entries[i].stmt);
-        free(c->entries[i].sql);
-        for (int j = 0; j < c->entries[i].read_table_count; j++) {
-            free(c->entries[i].read_tables[j]);
-        }
-        for (int j = 0; j < c->entries[i].dep_column_count; j++) {
-            free(c->entries[i].dep_columns[j]);
-        }
+        stmt_cache_entry_dispose(&c->entries[i]);
     }
     c->count = 0;
 }
@@ -233,38 +346,13 @@ typedef struct resqlite_read_set_s {
 } resqlite_read_set;
 
 static void read_set_init(resqlite_read_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
+    bounded_string_set_init(&s->count, &s->allocated, &s->reliable);
 }
 
 static void read_set_add(resqlite_read_set* s, const char* table_name) {
-    if (!table_name) return;
-    if (!s->reliable) return;
-    // Deduplicate.
-    for (int i = 0; i < s->count; i++) {
-        if (strcmp(s->names[i], table_name) == 0) return;
-    }
-    if (s->count >= RESQLITE_MAX_READ_TABLES) {
-        s->reliable = 0;
-        return;
-    }
-    // Free old string in this slot if one exists from a previous cycle.
-    if (s->count < s->allocated) {
-        free(s->names[s->count]);
-        s->names[s->count] = NULL;
-    }
-    char* dup = strdup(table_name);
-    if (!dup) {
-        // strdup OOM. Mark unreliable and DO NOT increment count
-        // past a failed strdup — the previous bug left names[count]
-        // NULL for later derefs.
-        s->reliable = 0;
-        return;
-    }
-    s->names[s->count] = dup;
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
+    bounded_string_set_add(s->names, RESQLITE_MAX_READ_TABLES,
+                           &s->count, &s->allocated, &s->reliable,
+                           table_name, 0);
 }
 
 static void read_set_reset(resqlite_read_set* s) {
@@ -274,16 +362,11 @@ static void read_set_reset(resqlite_read_set* s) {
     // serves from there via resqlite_get_read_tables — not from this
     // scratch directly. Allocated slots stay around to amortise strdup
     // across prepares; reliable resets to 1 for the next capture.
-    s->count = 0;
-    s->reliable = 1;
+    bounded_string_set_reset(&s->count, &s->reliable);
 }
 
 static void read_set_free(resqlite_read_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        free(s->names[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
+    bounded_string_set_free(s->names, &s->count, &s->allocated);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,9 +398,7 @@ typedef struct resqlite_column_set_s {
 } resqlite_column_set;
 
 static void column_set_init(resqlite_column_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
+    bounded_string_set_init(&s->count, &s->allocated, &s->reliable);
 }
 
 // Build "table.column" or "table.*" into a stack buffer; falls back to
@@ -358,59 +439,22 @@ static void column_set_add(resqlite_column_set* s, const char* table,
         return;
     }
     int key_on_heap = (key != stack);
-    // Deduplicate by exact "table.column" match.
-    for (int i = 0; i < s->count; i++) {
-        if (strcmp(s->names[i], key) == 0) {
-            if (key_on_heap) free(key);
-            return;
-        }
-    }
-    if (s->count >= RESQLITE_MAX_DEP_COLUMNS) {
-        s->reliable = 0;
-        if (key_on_heap) free(key);
-        return;
-    }
-    if (s->count < s->allocated) {
-        free(s->names[s->count]);
-        s->names[s->count] = NULL;
-    }
-    if (key_on_heap) {
-        s->names[s->count] = key;
-    } else {
-        char* dup = strdup(key);
-        if (!dup) {
-            // strdup OOM. Mark unreliable and DO NOT increment count
-            // (the existing bug fix — leaving names[count] NULL would
-            // crash the dedup pass on the next add cycle).
-            s->reliable = 0;
-            return;
-        }
-        s->names[s->count] = dup;
-    }
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
+    bounded_string_set_add(s->names, RESQLITE_MAX_DEP_COLUMNS,
+                           &s->count, &s->allocated, &s->reliable,
+                           key, key_on_heap);
 }
 
 static void column_set_reset(resqlite_column_set* s) {
-    s->count = 0;
-    s->reliable = 1;
+    bounded_string_set_reset(&s->count, &s->reliable);
 }
 
 static void column_set_free(resqlite_column_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        free(s->names[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
+    bounded_string_set_free(s->names, &s->count, &s->allocated);
 }
 
 static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
                                              const resqlite_read_set* read_tables) {
-    for (int i = 0; i < entry->read_table_count; i++) {
-        free(entry->read_tables[i]);
-        entry->read_tables[i] = NULL;
-    }
-    entry->read_table_count = 0;
+    stmt_cache_entry_clear_read_tables(entry);
     // Experiment 106 polish: source set reliability caps the entry's.
     // If unreliable, drop entries and mark the cache entry too — the
     // FFI getter will return -1 (the unknown sentinel) so StreamEngine
@@ -418,43 +462,29 @@ static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
     entry->read_tables_reliable = read_tables->reliable;
     if (!read_tables->reliable) return;
 
-    for (int i = 0; i < read_tables->count && i < RESQLITE_MAX_READ_TABLES; i++) {
-        char* dup = strdup(read_tables->names[i]);
-        if (!dup) {
-            entry->read_tables_reliable = 0;
-            return;
-        }
-        entry->read_tables[entry->read_table_count] = dup;
-        entry->read_table_count++;
+    if (cached_string_array_copy(entry->read_tables, RESQLITE_MAX_READ_TABLES,
+                                 &entry->read_table_count,
+                                 (char* const*)read_tables->names,
+                                 read_tables->count) != 0) {
+        entry->read_tables_reliable = 0;
     }
 }
 
 static void stmt_cache_entry_set_dep_columns(resqlite_cached_stmt* entry,
                                              const resqlite_column_set* cols) {
-    for (int i = 0; i < entry->dep_column_count; i++) {
-        free(entry->dep_columns[i]);
-        entry->dep_columns[i] = NULL;
-    }
-    entry->dep_column_count = 0;
+    stmt_cache_entry_clear_dep_columns(entry);
     // Experiment 106 polish: the source set's reliability is the cap.
-    // If it's already 0, the strdup loop below stops at zero entries —
-    // dispatching consumers see "0 columns + reliable = 0" and route
-    // to the conservative re-query path.
+    // If it is already 0, the cache entry exposes no column metadata
+    // and dispatching consumers route to the conservative re-query path.
     entry->dep_columns_reliable = cols->reliable;
 
     if (!cols->reliable) return;
 
-    for (int i = 0; i < cols->count && i < RESQLITE_MAX_DEP_COLUMNS; i++) {
-        char* dup = strdup(cols->names[i]);
-        if (!dup) {
-            // strdup OOM during cache copy. Mark unreliable and stop;
-            // do NOT increment count past the partial copy (the
-            // existing bug that left names[count] NULL for later derefs).
-            entry->dep_columns_reliable = 0;
-            return;
-        }
-        entry->dep_columns[entry->dep_column_count] = dup;
-        entry->dep_column_count++;
+    if (cached_string_array_copy(entry->dep_columns, RESQLITE_MAX_DEP_COLUMNS,
+                                 &entry->dep_column_count,
+                                 (char* const*)cols->names,
+                                 cols->count) != 0) {
+        entry->dep_columns_reliable = 0;
     }
 }
 
@@ -517,55 +547,27 @@ typedef struct {
 } resqlite_dirty_set;
 
 static void dirty_set_init(resqlite_dirty_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
+    bounded_string_set_init(&s->count, &s->allocated, &s->reliable);
 }
 
 static void dirty_set_add(resqlite_dirty_set* s, const char* table_name) {
-    if (!table_name) return;
-    if (!s->reliable) return;
-
-    // Check for duplicate.
-    for (int i = 0; i < s->count; i++) {
-        if (strcmp(s->names[i], table_name) == 0) return;
-    }
-
-    if (s->count >= RESQLITE_MAX_DIRTY_TABLES) {
+    if (!table_name) {
         s->reliable = 0;
         return;
     }
-    // Free old string in this slot if one exists from a previous cycle.
-    if (s->count < s->allocated) {
-        free(s->names[s->count]);
-        s->names[s->count] = NULL;
-    }
-    char* dup = strdup(table_name);
-    if (!dup) {
-        // strdup OOM. Mark unreliable; do NOT increment count past
-        // a failed strdup (the existing bug — names[count] would be
-        // NULL on subsequent dedup scans).
-        s->reliable = 0;
-        return;
-    }
-    s->names[s->count] = dup;
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
+    bounded_string_set_add(s->names, RESQLITE_MAX_DIRTY_TABLES,
+                           &s->count, &s->allocated, &s->reliable,
+                           table_name, 0);
 }
 
 static void dirty_set_reset(resqlite_dirty_set* s) {
     // Reset active count. Strings stay valid (Dart reads them after
     // resqlite_get_dirty_tables returns pointers). Freed on next add or close.
-    s->count = 0;
-    s->reliable = 1;
+    bounded_string_set_reset(&s->count, &s->reliable);
 }
 
 static void dirty_set_free(resqlite_dirty_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        free(s->names[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
+    bounded_string_set_free(s->names, &s->count, &s->allocated);
 }
 
 // ---------------------------------------------------------------------------
@@ -682,8 +684,53 @@ static int authorizer_callback(
 }
 
 // ---------------------------------------------------------------------------
-// Preupdate hook callback — records dirty tables
+// Preupdate hook callback — records dirty tables/columns
 // ---------------------------------------------------------------------------
+
+static int dep_column_belongs_to_table(const char* dep_column,
+                                       const char* table_name,
+                                       int table_name_len,
+                                       const char** out_column) {
+    if (!dep_column) return 0;
+
+    const char* dot = strchr(dep_column, '.');
+    if (!dot) return 0;
+
+    int table_len = (int)(dot - dep_column);
+    if (table_name_len != table_len) return 0;
+    if (memcmp(dep_column, table_name, table_len) != 0) return 0;
+
+    *out_column = dot + 1;
+    return 1;
+}
+
+static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
+                                              const char* table_name) {
+    if (!table_name) {
+        sdb->dirty_columns.reliable = 0;
+        return;
+    }
+
+    resqlite_cached_stmt* entry = sdb->writer_active_entry;
+    if (!entry) {
+        column_set_add(&sdb->dirty_columns, table_name, "*");
+        return;
+    }
+
+    if (!entry->dep_columns_reliable) {
+        sdb->dirty_columns.reliable = 0;
+        return;
+    }
+
+    int table_name_len = (int)strlen(table_name);
+    for (int i = 0; i < entry->dep_column_count; i++) {
+        const char* column = NULL;
+        if (dep_column_belongs_to_table(entry->dep_columns[i], table_name,
+                                        table_name_len, &column)) {
+            column_set_add(&sdb->dirty_columns, table_name, column);
+        }
+    }
+}
 
 static void preupdate_hook(
     void* user_data,
@@ -697,43 +744,7 @@ static void preupdate_hook(
     (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
     dirty_set_add(&sdb->dirty_tables, table_name);
-
-    // Experiment 106: merge the active stmt's pre-captured column set into
-    // the global dirty_columns set on each per-row hook firing. Calling
-    // column_set_add for the same key is dedup'd (linear scan), so the
-    // per-row cost after the first hit is bounded. Falls back to a
-    // wildcard "*" entry when the active stmt is unknown — e.g. trigger
-    // bodies, cascading FKs, or sqlite3_exec paths where the writer hasn't
-    // tagged an entry — so dispatch elision degrades gracefully to today's
-    // table-only behaviour rather than incorrectly skipping a re-query.
-    if (sdb->writer_active_entry != NULL) {
-        resqlite_cached_stmt* entry = sdb->writer_active_entry;
-        // Polish: if the stmt's cached dep_columns are unreliable
-        // (overflow / OOM during prepare), the dirty set inherits the
-        // unreliability — we don't know which columns this stmt
-        // modifies, so dispatching consumers must fall back to table-
-        // level re-query.
-        if (!entry->dep_columns_reliable) {
-            sdb->dirty_columns.reliable = 0;
-            return;
-        }
-        for (int i = 0; i < entry->dep_column_count; i++) {
-            const char* full = entry->dep_columns[i];
-            const char* dot = strchr(full, '.');
-            if (!dot) continue;
-            int t_len = (int)(dot - full);
-            // Only merge entries for THIS table — a single DML stmt can
-            // only modify one table, but a cached stmt may capture multiple
-            // (e.g. trigger-driven) authorizer events. Filter so we don't
-            // pollute the dirty set with unrelated table.column pairs.
-            if ((int)strlen(table_name) == t_len &&
-                memcmp(full, table_name, t_len) == 0) {
-                column_set_add(&sdb->dirty_columns, table_name, dot + 1);
-            }
-        }
-    } else {
-        column_set_add(&sdb->dirty_columns, table_name, "*");
-    }
+    dirty_columns_add_for_active_stmt(sdb, table_name);
 }
 
 static int writer_wal_hook(
