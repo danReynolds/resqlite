@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-27T01:38:32.342588",
+  "generated": "2026-04-27T06:20:49.909412",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -13950,6 +13950,25 @@
         "date": "2026-04-26",
         "timestamp": "2026-04-26T06:40:07",
         "source": "exact"
+      }
+    },
+    {
+      "id": "109",
+      "title": "Parameter buffer allocation sweep",
+      "date": "2026-04-27",
+      "status": "rejected",
+      "summary": "Known-length text binds, reusable parameter `ByteData` views, and persistent `selectBytes()` out slots were flat or regressed; remaining parameter marshalling allocations are below the performance floor",
+      "commit": null,
+      "problem": "The current hot paths are already narrow after the accepted statement-cache,\nstatic-bind, row-decode, transaction-control, and stream-hash experiments. The\nlatest external research pass did not reveal a large new public API or SQLite\nfeature that cleanly maps to resqlite without expanding the API:\n\n- Dart 3.10 stabilized build hooks, which resqlite already uses through\n  `hook/build.dart`. Dart 3.11 adds no new language features and focuses on\n  tooling responsiveness, not runtime FFI/database primitives.\n- Dart FFI `isLeaf` remains the key low-level call-overhead tool, and resqlite\n  already annotates the short native calls that qualify.\n- SQLite 3.53.0 adds planner work, `sqlite3_carray_bind_v2`,\n  `SQLITE_UTF8_ZT`, and `SQLITE_DBCONFIG_FP_DIGITS`, but the embedded\n  sqlite3mc copy is...",
+      "hypothesis": "Three small ideas looked plausible:\n\n1. **Known-length text binds.** `allocateParams` currently writes text params as\n   native UTF-8 plus `len = -1`, so `sqlite3_bind_text()` scans to the first\n   zero terminator. SQLite's bind docs specify that the fourth argument is byte\n   length and negative length means terminator scan. Passing the UTF-8 byte\n   length already known during Dart encoding might remove SQLite's `strlen`.\n2. **Persistent `selectBytes()` out slots.** `queryBytes` allocates two tiny\n   out-parameters (`unsigned char**`, `int*`) for every call even though the\n   reader worker handles one request at a time.\n3. **Reusable parameter `ByteData` view.** `request_cache.dart` already reuses\n   the native parameter struct buffer, but `allocateParams` and `freeParams`\n   recreate...",
+      "approach": "### Pass 1: known-length text binds + `selectBytes()` scratch slots\n\nImplemented:\n\n- a Dart UTF-8 helper that returned native pointer plus byte length\n- text param struct length set to the encoded byte count instead of `-1`\n- persistent reader-isolate out slots for `resqlite_query_bytes`\n- a regression test proving embedded NUL text params round-trip instead of\n  truncating at the first zero byte\n\nThis pass was reverted after measurement. The embedded-NUL behavior is a real\ncorrectness improvement, but it is not a performance win and changes historical\ntext binding semantics. It should be revisited as a correctness fix, not hidden\ninside a performance PR.\n\n### Pass 2: reusable parameter `ByteData` views\n\nReverted the text-length change and tested a narrower allocation optimization:\n\n- `...",
+      "results": "Validation while the candidate code was present:\n\n```bash\ndart test test/database_test.dart\ndart analyze\n```\n\nBoth passed.\n\n### Profile-mode A/B\n\nFinal measured candidate: reusable parameter `ByteData` view. Baseline runs came\nfrom a clean worktree at `3f88e24`; candidate runs came from the experiment\nbranch. Three runs per side were compared with\n`benchmark/profile/diff_multirun.dart`.\n\nKey rows from\n[`benchmark/profile/results/exp109-param-view-multirun.md`](../benchmark/profile/results/exp109-param-view-multirun.md):\n\n| Workload | Metric | Baseline | Candidate | Delta |\n|---|---:|---:|---:|---:|\n| merge_rounds executeBatch | p50 | 100 us | 103 us | +3.0% |\n| merge_rounds executeBatch | work | 91 us | 94 us | +3.3% |\n| merge_rounds executeBatch | p90 | 112 us | 124 us | +10.7% |\n| sin...",
+      "reasoning": "Rejected. All implementation changes were reverted.\n\nThe useful result is negative: the remaining Dart-side parameter buffer view\nallocations and `selectBytes()` out-param allocations are not meaningful\nperformance targets. Known-length text binds are also not a performance win in\nthe current harness; if embedded NUL support matters, handle that separately as\na behavior/correctness change with explicit compatibility notes.\n\nFuture rounds should avoid more sub-allocation sweeps in this area unless a\nmemory profiler points directly at these objects. Better targets are still the\nlarger costs called out in earlier experiments: dispatch/message scheduling,\nlong-text stream hashing with a benchmark that actually carries long text, and\nworkload-specific SQLite planner/version audits once SQLit...",
+      "benchmarkRun": {
+        "id": "baseline-for-exp100",
+        "date": "2026-04-25",
+        "timestamp": "2026-04-25T14:06:42",
+        "source": "nearby"
       }
     }
   ],

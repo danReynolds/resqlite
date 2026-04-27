@@ -61,6 +61,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [109](109-param-buffer-sweep.md) | Parameter buffer allocation sweep | Known-length text binds, reusable parameter `ByteData` views, and persistent `selectBytes()` out slots were flat or regressed; remaining parameter marshalling allocations are below the performance floor |
 | [108](108-selectbytes-out-slots.md) | Persistent selectBytes out-parameter slots | Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |
 | [105](105-reader-pool-sizing.md) | Raise reader pool worker cap (4→8) | Regressed A11c writer throughput by ~31% under N=50 stream fan-out; the profile's reader-pool serialization bottleneck was actually throttling completion-side microtask churn. Cap=4 is correctly tuned. |
