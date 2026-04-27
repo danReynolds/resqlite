@@ -10,6 +10,13 @@
 
 typedef struct resqlite_db resqlite_db;
 
+// Dependency getters return this sentinel when table-level metadata is
+// unavailable. Callers must treat it as "unknown dependencies" and choose the
+// conservative all-tables invalidation path. Column metadata uses a different
+// fallback: 0 column entries means "no precise column optimization available"
+// while table metadata remains the correctness source.
+#define RESQLITE_DEPENDENCY_COUNT_UNKNOWN (-1)
+
 // ---------------------------------------------------------------------------
 // Parameter types for binding
 // ---------------------------------------------------------------------------
@@ -114,10 +121,11 @@ int resqlite_run_batch_nested(
 // Returns:
 //   * `>= 0` — count of dirty table names written to out_tables; the
 //     dirty set is cleared after reading.
-//   * `-1`   — the dirty set is unreliable (overflow / OOM during the
-//     transaction). Caller must treat this as "all tables potentially
-//     dirty" and invalidate every dependent stream. The dirty set is
-//     reset before returning so the next transaction starts fresh.
+//   * `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` — the dirty set is unreliable
+//     (overflow / OOM during the transaction). Caller must treat this as
+//     "all tables potentially dirty" and invalidate every dependent stream.
+//     The dirty set is reset before returning so the next transaction starts
+//     fresh.
 // Strings are owned by the dirty set (freed on next add or close);
 // callers must copy before further writer activity.
 int resqlite_get_dirty_tables(
@@ -141,9 +149,9 @@ int resqlite_get_dirty_tables(
 //   * `>= 0` — count of table names written to out_tables. Caller must
 //     copy strings before the next query on this reader (cache
 //     eviction may free the entry's storage).
-//   * `-1`   — the cached entry's read-table set is unreliable (the
-//     authorizer overflowed `RESQLITE_MAX_READ_TABLES` or hit OOM
-//     during prepare). Caller must treat this as "depends on every
+//   * `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` — the cached entry's read-table
+//     set is unreliable (the authorizer overflowed `RESQLITE_MAX_READ_TABLES`
+//     or hit OOM during prepare). Caller must treat this as "depends on every
 //     table" and route the stream into the all-tables bucket.
 //   * `0`    — no entry yet (no query has been prepared on this
 //     reader).
@@ -166,14 +174,13 @@ int resqlite_get_read_tables(
 // known dirty tables.
 #define RESQLITE_MAX_DEP_COLUMNS 64
 
-// Get the set of "table.column" pairs read by the most recent prepared
-// statement on the given reader. Served directly from the cached stmt
-// entry's `dep_columns`. Each entry is one C string of the form
-// `"table.col"`.
+// Get the table/column pairs read by the most recent prepared statement on
+// the given reader. Served directly from the cached stmt entry's structured
+// dependency pairs.
 //
 // Returns:
-//   * `>= 0` — count of pairs written to out_columns. Caller must copy
-//     strings before the next query on this reader.
+//   * `>= 0` — count of pairs written to out_tables/out_columns. Caller must
+//     copy strings before the next query on this reader.
 //   * `0`    — either no entry yet, OR the cached entry's column set is
 //     unreliable (overflow / OOM during prepare). In both cases the
 //     Dart side treats the (known) read tables as "any column matters"
@@ -183,28 +190,29 @@ int resqlite_get_read_tables(
 int resqlite_get_read_columns(
     resqlite_db* db,
     int reader_id,
+    const char** out_tables,
     const char** out_columns,
     int max_columns
 );
 
-// Get the set of "table.column" pairs modified by writer activity since
-// the last drain. Strings live until the next dirty-set update; callers
-// must copy before further writer activity. The dirty set is reset
-// after reading.
+// Get the table/column pairs modified by writer activity since the last
+// drain. Strings live until the next dirty-set update; callers must copy
+// before further writer activity. The dirty set is reset after reading.
 //
-// INSERT and DELETE writes leave a `"table.*"` wildcard sentinel
-// (column information is unavailable from the SQLite authorizer for
-// those actions).
+// INSERT and DELETE writes leave a `"*"` wildcard column sentinel (column
+// information is unavailable from the SQLite authorizer for those actions).
 //
 // Returns:
-//   * `>= 0` — count of pairs written to out_columns.
+//   * `>= 0` — count of pairs written to out_tables/out_columns.
 //   * `0`    — either no writes since the last drain, OR the column
 //     set's `reliable` flag was cleared during capture (overflow /
 //     OOM). In the unreliable case the corresponding `dirty_tables`
-//     getter still reports the dirty tables (or returns -1 itself if
-//     it overflowed); Dart falls back to table-level invalidation.
+//     getter still reports the dirty tables (or returns
+//     RESQLITE_DEPENDENCY_COUNT_UNKNOWN itself if it overflowed); Dart falls
+//     back to table-level invalidation.
 int resqlite_get_dirty_columns(
     resqlite_db* db,
+    const char** out_tables,
     const char** out_columns,
     int max_columns
 );

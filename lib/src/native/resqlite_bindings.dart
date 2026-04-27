@@ -314,9 +314,12 @@ void executeNestedBatchWrite(
 final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
+/// Mirrors `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` in `native/resqlite.h`.
+const _dependencyCountUnknown = -1;
+
 /// Polish (post-2026-04): the C-side reliability flag's table-getter
 /// return convention is encoded here once. A non-negative count is the
-/// known dependency list; a negative count is the "unknown" sentinel
+/// known dependency list; [_dependencyCountUnknown] is the unknown sentinel
 /// returned when the C set overflowed / OOMed during prepare or the
 /// preupdate hook merge.
 ///
@@ -347,13 +350,13 @@ final class TableDependencySet {
 /// the `List<String>` allocation and return a [TableDependencySet.known]
 /// with a const-empty backing list.
 ///
-/// Polish (post-2026-04): a negative count is the "unknown" sentinel
+/// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel
 /// returned when the C-side dirty-table set overflowed / OOMed during
 /// the write — interpreted by the StreamEngine as "every active stream
 /// must invalidate".
 TableDependencySet getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
-  if (count < 0) return const TableDependencySet.all();
+  if (count == _dependencyCountUnknown) return const TableDependencySet.all();
   if (count == 0) return const TableDependencySet.known(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
@@ -382,12 +385,13 @@ external int resqliteGetReadTables(
 );
 
 // Experiment 106: column-level dependency tracking. The C layer captures
-// "table.column" pairs alongside table dependencies; these bindings drain
-// them on the same cadence as the table-level FFI.
+// structured table/column pairs alongside table dependencies; these bindings
+// fetch them on the same cadence as the table-level FFI.
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
     ffi.Int,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Int,
   )
@@ -395,6 +399,7 @@ external int resqliteGetReadTables(
 external int resqliteGetReadColumns(
   ffi.Pointer<ffi.Void> db,
   int readerId,
+  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
   ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
   int maxColumns,
 );
@@ -403,11 +408,13 @@ external int resqliteGetReadColumns(
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
     ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Int,
   )
 >(symbol: 'resqlite_get_dirty_columns', isLeaf: true)
 external int resqliteGetDirtyColumns(
   ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
   ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
   int maxColumns,
 );
@@ -437,14 +444,17 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
 
-/// Get the set of tables read by the last query on the given reader.
-/// Clears after reading.
+/// Get the set of tables read by the most recent acquired statement on the
+/// given reader.
+///
+/// Repeated calls return metadata from the same cached statement entry until
+/// the reader runs another query or the entry is evicted.
 ///
 /// Zero-table short-circuit: if the count is 0, skip the `List<String>`
 /// allocation and return a [TableDependencySet.known] with a
 /// const-empty backing list.
 ///
-/// Polish (post-2026-04): a negative count is the "unknown" sentinel —
+/// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel —
 /// the C-side `read_tables_reliable` flag flipped during prepare, so
 /// the stream's true table dependencies are not known. Returns
 /// [TableDependencySet.all]; the StreamEngine routes such streams into
@@ -454,7 +464,7 @@ TableDependencySet getReadTables(
   int readerId,
 ) {
   final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
-  if (count < 0) return const TableDependencySet.all();
+  if (count == _dependencyCountUnknown) return const TableDependencySet.all();
   if (count == 0) return const TableDependencySet.known(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
@@ -463,14 +473,14 @@ TableDependencySet getReadTables(
   return TableDependencySet.known(tables);
 }
 
-// Experiment 106: per-worker persistent buffer for column pointer
-// marshalling — both read and dirty column drains reuse this slot
-// because the calls are serialised by their respective mutexes
-// (per-reader for reads, writer mutex for dirties) and each call drains
-// the C-side set, so we never have two live drains overlapping.
-final ffi.Pointer<ffi.Pointer<Utf8>> _columnsBuf = calloc<ffi.Pointer<Utf8>>(
+// Experiment 106: per-worker persistent buffers for column pointer
+// marshalling. The C layer returns parallel table/column arrays so names with
+// dots do not need escaping or ad-hoc parsing in Dart.
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
+    calloc<ffi.Pointer<Utf8>>(64);
 
 /// Per-table dirty / read column dependency map.
 ///
@@ -480,9 +490,9 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnsBuf = calloc<ffi.Pointer<Utf8>>(
 /// fires without a column (triggers, views).
 typedef ColumnDependencyMap = Map<String, Set<String>?>;
 
-/// Decode `count` `"table.column"` pointers from [_columnsBuf] into a
-/// per-table column map. Wildcards (`"table.*"`) collapse the table to
-/// `null`, signalling "any column matters".
+/// Decode `count` parallel table/column pointers into a per-table column map.
+/// Wildcard columns (`"*"`) collapse the table to `null`, signalling "any
+/// column matters".
 ///
 /// Shared between [getReadColumns] and [getDirtyColumns] — both decoders
 /// are otherwise identical, the only difference is which FFI getter
@@ -491,11 +501,8 @@ ColumnDependencyMap _decodeColumnMap(int count) {
   if (count <= 0) return const <String, Set<String>?>{};
   final out = <String, Set<String>?>{};
   for (var i = 0; i < count; i++) {
-    final raw = _columnsBuf[i].toDartString();
-    final dot = raw.indexOf('.');
-    if (dot < 0) continue;
-    final table = raw.substring(0, dot);
-    final col = raw.substring(dot + 1);
+    final table = _columnTablesBuf[i].toDartString();
+    final col = _columnNamesBuf[i].toDartString();
     if (col == '*') {
       out[table] = null;
       continue;
@@ -512,9 +519,12 @@ ColumnDependencyMap _decodeColumnMap(int count) {
   return out;
 }
 
-/// Drain the per-reader read-column set into a Dart map of
-/// `table -> Set<column>`. Wildcards (`"table.*"`) collapse the table to
-/// `null` in the returned map, signalling "any column matters".
+/// Get the per-reader read-column metadata as a Dart map of
+/// `table -> Set<column>`. Wildcards collapse the table to `null` in the
+/// returned map, signalling "any column matters".
+///
+/// Repeated calls return metadata from the most recent acquired statement until
+/// the reader runs another query or the entry is evicted.
 ///
 /// Zero-entry short-circuit returns a `const {}` to avoid allocations on
 /// the hot streaming path.
@@ -522,15 +532,25 @@ ColumnDependencyMap getReadColumns(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
 ) {
-  final count = resqliteGetReadColumns(dbHandle, readerId, _columnsBuf, 64);
+  final count = resqliteGetReadColumns(
+    dbHandle,
+    readerId,
+    _columnTablesBuf,
+    _columnNamesBuf,
+    64,
+  );
   return _decodeColumnMap(count);
 }
 
-/// Drain the writer's dirty-column accumulator. Same `table.column`
-/// encoding as [getReadColumns]; wildcards collapse to `null` to signal
-/// "all columns of this table are dirty".
+/// Drain the writer's dirty-column accumulator. Wildcards collapse to `null`
+/// to signal "all columns of this table are dirty".
 ColumnDependencyMap getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
-  final count = resqliteGetDirtyColumns(dbHandle, _columnsBuf, 64);
+  final count = resqliteGetDirtyColumns(
+    dbHandle,
+    _columnTablesBuf,
+    _columnNamesBuf,
+    64,
+  );
   return _decodeColumnMap(count);
 }
 

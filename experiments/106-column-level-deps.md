@@ -54,11 +54,11 @@ authorizer hook already fires `SQLITE_READ` events at prepare time with
 both the table name (arg1) and column name (arg2); we were ignoring
 arg2. The change extends the authorizer's user_data to a
 `resqlite_authz_ctx { tables, columns, track_writes }` struct so the
-reader's per-stmt cache stores both the table list and a `"table.column"`
-column set. SELECT *, JOIN, subquery, view, and CTE queries all flow
-through `SQLITE_READ` so they all get column-level tracking automatically
-— the authorizer fires for every column SQLite needs to evaluate
-(projection, WHERE, ORDER BY, etc.).
+reader's per-stmt cache stores both the table list and a structured
+table/column dependency set. SELECT *, JOIN, subquery, view, and CTE
+queries all flow through `SQLITE_READ` so they all get column-level
+tracking automatically — the authorizer fires for every column SQLite
+needs to evaluate (projection, WHERE, ORDER BY, etc.).
 
 **2. Writer side — per-stmt modified columns.** The same authorizer
 context, with `track_writes=1`, captures `SQLITE_UPDATE` events (table +
@@ -107,6 +107,9 @@ fidelity.
   per-stmt `dep_columns` cache, writer authorizer install,
   `writer_active_entry` tagging, preupdate-hook column merging,
   `resqlite_get_read_columns` / `resqlite_get_dirty_columns` exports.
+- `native/resqlite_deps.c`, `native/resqlite_deps.h` — bounded
+  dependency-set primitives shared by read tables, dirty tables, and
+  structured table/column pairs.
 - `native/resqlite.h` — public FFI surface for the two new getters and
   `RESQLITE_MAX_DEP_COLUMNS = 64`.
 - `lib/src/native/resqlite_bindings.dart` — `getReadColumns()` and
@@ -295,6 +298,13 @@ sets. The asymmetric FFI boundary is the load-bearing piece:
   route into the `_allTableEntries` bucket (subscribe path) or
   invalidate every active entry (write path).
 
+A follow-up cleanup split the dependency tracking primitives out of
+`native/resqlite.c` into `native/resqlite_deps.{c,h}` and changed
+column metadata from packed `"table.column"` strings to structured
+table/column pairs backed by one compact allocation. This removes
+delimiter parsing at the FFI boundary and preserves table or column
+names that contain dots.
+
 The Dart layer captures the asymmetry in two types:
 `TableDependencySet` (`.known(tables)` vs `.all()`) at the FFI
 boundary, and `_allTableEntries` at the StreamEngine level. The
@@ -354,12 +364,13 @@ stays flat.
 
 * **Schema watchdog / DDL invalidation.** A pre-existing hazard
   tracked by deferred [exp 068](068-ddl-schema-watchdog.md): when
-  `ALTER TABLE` adds or drops columns, cached `dep_columns` strings
-  go stale, but the cache is keyed on SQL text so the next prepare
-  hits the cache and re-uses stale metadata. exp 106 inherits but
-  does not introduce this. Documented here so future revisitors
-  don't re-discover it as new.
-* **OOM fault injection in tests.** The reliability path is
-  exercised by overflow tests; without a native fault-injection
-  harness, simulating `strdup` returning NULL is not worth the
-  infrastructure investment.
+  `ALTER TABLE` adds or drops columns, cached column metadata goes
+  stale, but the cache is keyed on SQL text so the next prepare hits
+  the cache and re-uses stale metadata. exp 106 inherits but does
+  not introduce this. Documented here so future revisitors don't
+  re-discover it as new.
+* **Full SQLite-level OOM simulation.** The expanded cleanup added a
+  small C-side fault-injection harness for the dependency primitives,
+  so overflow and allocation-failure paths are covered directly.
+  Simulating allocation failure across SQLite itself remains out of
+  scope.

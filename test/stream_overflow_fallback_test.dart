@@ -221,8 +221,9 @@ void main() {
         // tables would NOT include d68 in getDirtyTables, so the stream
         // would not invalidate and this test would fail. The polish flips
         // dirty_set.reliable to 0 when the cap is exceeded, getDirtyTables
-        // returns -1, StreamEngine invalidates everything (including our
-        // stream watching d68). Choosing a post-overflow table is what
+        // returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN, and StreamEngine
+        // invalidates everything (including our stream watching d68).
+        // Choosing a post-overflow table is what
         // makes this test exercise the unreliable-dirty-set fallback
         // rather than the lucky truncation case.
         //
