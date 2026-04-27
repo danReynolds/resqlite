@@ -1,6 +1,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:convert' show utf8;
 import 'dart:ffi' as ffi;
 import 'dart:typed_data';
 
@@ -474,16 +475,55 @@ List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
 
 const int _paramStructSize = 24;
 
+/// Pack params into a single buffer: `[struct0..N][text/blob bytes]`.
+///
+/// Text and blob bytes live inline at the tail of the same buffer that
+/// holds the param structs, so a query with N text params requires one
+/// native allocation total instead of `1 + N`. The `text.data` /
+/// `blob.data` pointers in each struct are addresses *inside* the buffer.
+///
+/// Two side benefits:
+///
+/// 1. The actual UTF-8 byte length is written to `text.len` instead of
+///    `-1`, so `sqlite3_bind_text` skips its internal `strlen` walk.
+/// 2. Inline bytes don't need null termination — `bind_text` reads
+///    exactly `len` bytes when `len >= 0`.
+///
+/// The reader/writer worker that calls this is single-threaded and
+/// owns the bound stmt for the whole FFI exchange (acquire → step* →
+/// reset all happen before the buffer is reused), so SQLITE_STATIC
+/// pointers into the buffer remain valid for as long as SQLite needs
+/// them. Buffers larger than `_maxReusableParamBufBytes` fall back to
+/// a per-call calloc — still one allocation instead of `1 + N`.
 ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
-  final byteCount = _paramStructSize * params.length;
-  final buf = allocateReusableParamStructBuf(byteCount);
-  final view = buf.cast<ffi.Uint8>().asTypedList(
-    _paramStructSize * params.length,
-  );
-  final byteData = ByteData.sublistView(view);
+  // Pass 1: encode strings up front so we know their byte lengths
+  // before sizing the buffer. We hold onto the encoded bytes (rather
+  // than re-encoding in pass 2) because Dart `utf8.encode` is the same
+  // work that `String.toNativeUtf8` did internally on the old path.
+  List<Uint8List?>? encodedStrings;
+  var extraBytes = 0;
+  for (var i = 0; i < params.length; i++) {
+    final value = params[i];
+    if (value is String) {
+      encodedStrings ??= List<Uint8List?>.filled(params.length, null);
+      final bytes = utf8.encode(value);
+      encodedStrings[i] = bytes;
+      extraBytes += bytes.length;
+    } else if (value is Uint8List) {
+      extraBytes += value.length;
+    }
+  }
 
+  final structsBytes = _paramStructSize * params.length;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
   for (var i = 0; i < params.length; i++) {
     final offset = i * _paramStructSize;
     final value = params[i];
@@ -497,16 +537,18 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
       byteData.setInt32(offset, 2, Endian.little);
       byteData.setFloat64(offset + 8, value, Endian.little);
     } else if (value is String) {
-      final encoded = value.toNativeUtf8();
+      final bytes = encodedStrings![i]!;
+      view.setRange(dataOffset, dataOffset + bytes.length, bytes);
       byteData.setInt32(offset, 3, Endian.little);
-      byteData.setInt64(offset + 8, encoded.address, Endian.little);
-      byteData.setInt32(offset + 16, -1, Endian.little);
+      byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+      byteData.setInt32(offset + 16, bytes.length, Endian.little);
+      dataOffset += bytes.length;
     } else if (value is Uint8List) {
-      final blob = calloc<ffi.Uint8>(value.length);
-      blob.asTypedList(value.length).setAll(0, value);
+      view.setRange(dataOffset, dataOffset + value.length, value);
       byteData.setInt32(offset, 4, Endian.little);
-      byteData.setInt64(offset + 8, blob.address, Endian.little);
+      byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
       byteData.setInt32(offset + 16, value.length, Endian.little);
+      dataOffset += value.length;
     } else {
       byteData.setInt32(offset, 0, Endian.little);
     }
@@ -517,20 +559,6 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
 
 void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> params) {
   if (buf == ffi.nullptr) return;
-
-  final view = buf.asTypedList(_paramStructSize * params.length);
-  final byteData = ByteData.sublistView(view);
-
-  for (var i = 0; i < params.length; i++) {
-    final offset = i * _paramStructSize;
-    final type = byteData.getInt32(offset, Endian.little);
-    if (type == 3 || type == 4) {
-      final ptr = ffi.Pointer<ffi.Void>.fromAddress(
-        byteData.getInt64(offset + 8, Endian.little),
-      );
-      calloc.free(ptr);
-    }
-  }
   freeReusableParamStructBuf(buf);
 }
 
