@@ -105,6 +105,14 @@ typedef struct {
     int param_count;
     char* read_tables[RESQLITE_MAX_READ_TABLES];
     int read_table_count;
+    // Experiment 106 polish: 1 if `read_tables[]` is the complete
+    // dependency set captured by the authorizer; 0 if any read_set_add
+    // during prepare overflowed / OOMed / strdup-failed, or if the
+    // strdup loop in `stmt_cache_entry_set_read_tables` itself failed.
+    // When 0, `resqlite_get_read_tables` returns -1 (the unknown
+    // sentinel) so the StreamEngine routes the stream into its
+    // global "all tables" bucket.
+    int read_tables_reliable;
     // Experiment 106: per-stmt column dependencies (reader: SELECT/WHERE
     // columns from authorizer SQLITE_READ events; writer: SET columns
     // from authorizer SQLITE_UPDATE events). Each entry is "table.column".
@@ -112,6 +120,12 @@ typedef struct {
     // authorizer fires SQLITE_INSERT / SQLITE_DELETE without a column.
     char* dep_columns[RESQLITE_MAX_DEP_COLUMNS];
     int dep_column_count;
+    // Experiment 106 polish: 1 if `dep_columns[]` is the complete
+    // dependency set; 0 on any column_set_add / strdup failure during
+    // prepare. When 0, the column getters return 0 entries — falling
+    // through `_writeAffectsEntry`'s "table missing from column map"
+    // branch into table-level re-query.
+    int dep_columns_reliable;
 } resqlite_cached_stmt;
 
 typedef struct {
@@ -175,8 +189,13 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
     c->entries[c->count].param_count = sqlite3_bind_parameter_count(stmt);
     c->entries[c->count].read_table_count = 0;
     memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
+    // Experiment 106 polish: default reliability flags to 1; the
+    // cache-copy paths overwrite them based on the source set's
+    // reliability before the entry is consumed.
+    c->entries[c->count].read_tables_reliable = 1;
     c->entries[c->count].dep_column_count = 0;
     memset(c->entries[c->count].dep_columns, 0, sizeof(c->entries[c->count].dep_columns));
+    c->entries[c->count].dep_columns_reliable = 1;
     c->count++;
     return &c->entries[c->count - 1];
 }
@@ -260,11 +279,20 @@ typedef struct resqlite_column_set_s {
     char* names[RESQLITE_MAX_DEP_COLUMNS];
     int count;
     int allocated;
+    // Experiment 106 polish: 1 by default; flipped to 0 on the first
+    // overflow / OOM / strdup failure during a capture cycle. After
+    // that, *_add becomes a no-op and the FFI getters return a
+    // wildcard-equivalent sentinel (column getters: 0 entries; table
+    // getters: -1) so dispatch always falls back to a more
+    // conservative re-query rather than silently dropping a write.
+    // `*_reset` re-initialises this flag to 1 on every cycle.
+    int reliable;
 } resqlite_column_set;
 
 static void column_set_init(resqlite_column_set* s) {
     s->count = 0;
     s->allocated = 0;
+    s->reliable = 1;
 }
 
 // Build "table.column" or "table.*" into a stack buffer; falls back to
@@ -296,9 +324,12 @@ static int column_set_compose(const char* table, const char* column,
 
 static void column_set_add(resqlite_column_set* s, const char* table,
                            const char* column) {
+    if (!s->reliable) return;  // already unreliable; no-op
     char stack[256];
     char* key = NULL;
     if (column_set_compose(table, column, stack, sizeof(stack), &key) != 0) {
+        // OOM in the heap-fallback path of column_set_compose.
+        s->reliable = 0;
         return;
     }
     int key_on_heap = (key != stack);
@@ -310,16 +341,26 @@ static void column_set_add(resqlite_column_set* s, const char* table,
         }
     }
     if (s->count >= RESQLITE_MAX_DEP_COLUMNS) {
+        s->reliable = 0;
         if (key_on_heap) free(key);
         return;
     }
     if (s->count < s->allocated) {
         free(s->names[s->count]);
+        s->names[s->count] = NULL;
     }
     if (key_on_heap) {
         s->names[s->count] = key;
     } else {
-        s->names[s->count] = strdup(key);
+        char* dup = strdup(key);
+        if (!dup) {
+            // strdup OOM. Mark unreliable and DO NOT increment count
+            // (the existing bug fix — leaving names[count] NULL would
+            // crash the dedup pass on the next add cycle).
+            s->reliable = 0;
+            return;
+        }
+        s->names[s->count] = dup;
     }
     s->count++;
     if (s->count > s->allocated) s->allocated = s->count;
@@ -327,6 +368,7 @@ static void column_set_add(resqlite_column_set* s, const char* table,
 
 static void column_set_reset(resqlite_column_set* s) {
     s->count = 0;
+    s->reliable = 1;
 }
 
 static void column_set_free(resqlite_column_set* s) {
@@ -344,9 +386,18 @@ static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
         entry->read_tables[i] = NULL;
     }
     entry->read_table_count = 0;
+    // Experiment 106 polish: read_set reliability is wired up in the
+    // Phase 1b commit. For now, the existing strdup-NULL bug is fixed
+    // here defensively — never increment the count past a failed strdup.
+    entry->read_tables_reliable = 1;
 
     for (int i = 0; i < read_tables->count && i < RESQLITE_MAX_READ_TABLES; i++) {
-        entry->read_tables[i] = strdup(read_tables->names[i]);
+        char* dup = strdup(read_tables->names[i]);
+        if (!dup) {
+            entry->read_tables_reliable = 0;
+            return;
+        }
+        entry->read_tables[entry->read_table_count] = dup;
         entry->read_table_count++;
     }
 }
@@ -358,9 +409,24 @@ static void stmt_cache_entry_set_dep_columns(resqlite_cached_stmt* entry,
         entry->dep_columns[i] = NULL;
     }
     entry->dep_column_count = 0;
+    // Experiment 106 polish: the source set's reliability is the cap.
+    // If it's already 0, the strdup loop below stops at zero entries —
+    // dispatching consumers see "0 columns + reliable = 0" and route
+    // to the conservative re-query path.
+    entry->dep_columns_reliable = cols->reliable;
+
+    if (!cols->reliable) return;
 
     for (int i = 0; i < cols->count && i < RESQLITE_MAX_DEP_COLUMNS; i++) {
-        entry->dep_columns[i] = strdup(cols->names[i]);
+        char* dup = strdup(cols->names[i]);
+        if (!dup) {
+            // strdup OOM during cache copy. Mark unreliable and stop;
+            // do NOT increment count past the partial copy (the
+            // existing bug that left names[count] NULL for later derefs).
+            entry->dep_columns_reliable = 0;
+            return;
+        }
+        entry->dep_columns[entry->dep_column_count] = dup;
         entry->dep_column_count++;
     }
 }
@@ -625,6 +691,15 @@ static void preupdate_hook(
     // table-only behaviour rather than incorrectly skipping a re-query.
     if (sdb->writer_active_entry != NULL) {
         resqlite_cached_stmt* entry = sdb->writer_active_entry;
+        // Polish: if the stmt's cached dep_columns are unreliable
+        // (overflow / OOM during prepare), the dirty set inherits the
+        // unreliability — we don't know which columns this stmt
+        // modifies, so dispatching consumers must fall back to table-
+        // level re-query.
+        if (!entry->dep_columns_reliable) {
+            sdb->dirty_columns.reliable = 0;
+            return;
+        }
         for (int i = 0; i < entry->dep_column_count; i++) {
             const char* full = entry->dep_columns[i];
             const char* dot = strchr(full, '.');
@@ -1230,6 +1305,13 @@ int resqlite_get_read_tables(
 // on this reader. Each entry is a "table.column" string owned by the
 // cached stmt entry; the caller MUST copy them before issuing the next
 // query on this reader.
+//
+// Polish (post-2026-04): when the cached entry's column dependencies
+// are unreliable (overflow / OOM during prepare), this returns 0 so
+// the StreamEngine's "table absent from column map" branch falls
+// through to a conservative table-level re-query. Zero is the load-
+// bearing signal — table dependencies are still reliable on the same
+// path; the column elision optimisation simply opts out for this stmt.
 int resqlite_get_read_columns(
     resqlite_db* db,
     int reader_id,
@@ -1242,6 +1324,7 @@ int resqlite_get_read_columns(
     resqlite_reader* reader = &db->readers[reader_id];
     resqlite_cached_stmt* entry = reader->last_entry;
     if (!entry) return 0;
+    if (!entry->dep_columns_reliable) return 0;
     int count = entry->dep_column_count;
     if (count > max_columns) count = max_columns;
     for (int i = 0; i < count; i++) {
@@ -1255,6 +1338,11 @@ int resqlite_get_read_columns(
 // `resqlite_get_dirty_tables`, the strings stay valid until the next
 // `column_set_add` reuses their slot — caller must copy before further
 // writer activity.
+//
+// Polish (post-2026-04): when the dirty-columns set is unreliable
+// (overflow / OOM during preupdate hook merge), returns 0 so the
+// StreamEngine sees "no precise column metadata" and falls back to
+// dispatching on the (still-reliable) dirty table set.
 int resqlite_get_dirty_columns(
     resqlite_db* db,
     const char** out_columns,
@@ -1262,7 +1350,8 @@ int resqlite_get_dirty_columns(
 ) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
 
-    int count = db->dirty_columns.count;
+    int reliable = db->dirty_columns.reliable;
+    int count = reliable ? db->dirty_columns.count : 0;
     if (count > max_columns) count = max_columns;
 
     for (int i = 0; i < count; i++) {
