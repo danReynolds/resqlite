@@ -80,6 +80,29 @@ can't see it.
 benchmark line that will move under the change, the next experiment is probably
 the benchmark, not the change.*
 
+### Per-call cost removals need a compounding effect to clear the dispatch floor
+
+The recent run of micro-allocation and micro-computation rejections — exps
+[071](071-stmt-cache-mru-scan.md),
+[094](094-dirty-read-string-reuse.md),
+[095](095-writer-result-buffer.md),
+[102](102-savepoint-string-cache.md),
+[108](108-selectbytes-out-slots.md), and the pre-implementation
+[111](111-sql-len-passthrough-analysis.md) — all targeted a single
+~tens-of-nanoseconds per-call saving on a hot path. None registered. The
+one acceptance in the same family, [exp 109](109-inline-param-buffer.md),
+landed because it combined *two* independent effects on the same path
+(per-text/blob `calloc` removal **plus** SQLite-internal `strlen` skip).
+The dispatch noise floor on the release suite swallows a single small
+saving even when it is structurally clean and applied across every entry
+point.
+
+*Reapplies whenever a candidate is "remove this small repeated thing." If
+the per-call ceiling is bounded at sub-percent of the [exp 080](080-dispatch-budget.md)
+dispatch wall, the experiment is either a pre-implementation rejection
+(like exp 076 / 111) or it needs a second compounding lever on the same
+path before it is worth running.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
