@@ -466,6 +466,13 @@ __attribute__((unused))
 static void read_set_load_from_cache_entry(resqlite_read_set* read_set,
                                            const resqlite_cached_stmt* entry) {
     read_set_reset(read_set);
+    // Polish: an unreliable cache entry must produce an unreliable
+    // scratch set. Otherwise re-hydration would silently launder the
+    // overflow bit into a reliable-looking partial copy.
+    if (!entry->read_tables_reliable) {
+        read_set->reliable = 0;
+        return;
+    }
     for (int i = 0; i < entry->read_table_count; i++) {
         read_set_add(read_set, entry->read_tables[i]);
     }
@@ -475,6 +482,10 @@ __attribute__((unused))
 static void column_set_load_from_cache_entry(resqlite_column_set* col_set,
                                              const resqlite_cached_stmt* entry) {
     column_set_reset(col_set);
+    if (!entry->dep_columns_reliable) {
+        col_set->reliable = 0;
+        return;
+    }
     for (int i = 0; i < entry->dep_column_count; i++) {
         const char* full = entry->dep_columns[i];
         const char* dot = strchr(full, '.');
