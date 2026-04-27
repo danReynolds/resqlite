@@ -133,8 +133,8 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 Scheduled experimenters should use
 [`RUNNER_INSTRUCTIONS.md`](RUNNER_INSTRUCTIONS.md) as the copyable instruction
 block for recurring experiment systems. Those instructions point runners at
-this README, [`FINDINGS.md`](FINDINGS.md), and [`signals.json`](signals.json)
-before choosing work.
+this README, [`signals.json`](signals.json), [`JOURNAL.md`](JOURNAL.md), and
+[`MILESTONES.md`](MILESTONES.md) before choosing work.
 
 `signals.json` is the canonical research map. These files are steering context,
 not an allowed list. They should make prior work easy to understand without
@@ -148,8 +148,10 @@ or watch:
 
 - update the experiment writeup with the record of what happened
 - update `signals.json` with machine-readable direction context
-- update `FINDINGS.md` only for process-level guidance that belongs outside the
-  canonical direction map
+- add to `JOURNAL.md` only when the run surfaced a transferable lesson a
+  future runner could reapply elsewhere
+- leave `MILESTONES.md` alone — it is updated on maintainer request, not per
+  experiment
 
 ### Standard Template
 

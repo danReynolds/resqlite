@@ -348,76 +348,79 @@ Future<String> runStreamingBenchmark() async {
 
         final timing = BenchmarkTiming('resqlite');
         final unchangedSubs = <StreamSubscription>[];
-        final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
-        final unchangedReady = <Completer<void>>[
-          for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
-        ];
-
-        for (var s = 0; s < unchangedStreamCount; s++) {
-          final sub = db
-              .stream(
-                'SELECT id, body, $s as sid FROM long_items '
-                'WHERE id < $rowCount ORDER BY id',
-              )
-              .listen((_) {
-                unchangedEmissions[s]++;
-                if (!unchangedReady[s].isCompleted)
-                  unchangedReady[s].complete();
-              });
-          unchangedSubs.add(sub);
-        }
-
-        // Registered after the unchanged streams. It changes on each insert
-        // and serves as a practical barrier for the preceding hash-only
-        // re-query wave.
-        final barrierStream = db.stream(
-          'SELECT id, body FROM long_items ORDER BY id',
-        );
-        final barrierReady = Completer<void>();
-        Completer<void>? waitBarrier;
-        final barrierSub = barrierStream.listen((_) {
-          if (!barrierReady.isCompleted) {
-            barrierReady.complete();
-          } else if (waitBarrier != null && !waitBarrier.isCompleted) {
-            waitBarrier.complete();
-          }
-        });
-
-        await Future.wait(
-          unchangedReady.map((c) => c.future),
-        ).timeout(const Duration(seconds: 10));
-        await barrierReady.future.timeout(const Duration(seconds: 10));
-
-        for (var i = 0; i < defaultIterations; i++) {
-          waitBarrier = Completer<void>();
-          final before = List<int>.from(unchangedEmissions);
-
-          final sw = Stopwatch()..start();
-          await db.execute(insertLongSql, [
-            counter,
-            _longTextPayload(textBytes, counter),
-            i,
-          ]);
-          counter++;
-          await waitBarrier.future.timeout(const Duration(seconds: 10));
-          sw.stop();
-          timing.wallUs.add(sw.elapsedMicroseconds);
-          timing.mainUs.add(sw.elapsedMicroseconds);
+        StreamSubscription? barrierSub;
+        try {
+          final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+          final unchangedReady = <Completer<void>>[
+            for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+          ];
 
           for (var s = 0; s < unchangedStreamCount; s++) {
-            if (unchangedEmissions[s] != before[s]) {
-              throw StateError(
-                'Long-text unchanged stream $s emitted for an unchanged result.',
-              );
+            final sub = db
+                .stream(
+                  'SELECT id, body, $s as sid FROM long_items '
+                  'WHERE id < $rowCount ORDER BY id',
+                )
+                .listen((_) {
+                  unchangedEmissions[s]++;
+                  if (!unchangedReady[s].isCompleted)
+                    unchangedReady[s].complete();
+                });
+            unchangedSubs.add(sub);
+          }
+
+          // Registered after the unchanged streams. It changes on each insert
+          // and serves as a practical barrier for the preceding hash-only
+          // re-query wave.
+          final barrierStream = db.stream(
+            'SELECT id, body FROM long_items ORDER BY id',
+          );
+          final barrierReady = Completer<void>();
+          Completer<void>? waitBarrier;
+          barrierSub = barrierStream.listen((_) {
+            if (!barrierReady.isCompleted) {
+              barrierReady.complete();
+            } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+              waitBarrier.complete();
+            }
+          });
+
+          await Future.wait(
+            unchangedReady.map((c) => c.future),
+          ).timeout(const Duration(seconds: 10));
+          await barrierReady.future.timeout(const Duration(seconds: 10));
+
+          for (var i = 0; i < defaultIterations; i++) {
+            waitBarrier = Completer<void>();
+            final before = List<int>.from(unchangedEmissions);
+
+            final sw = Stopwatch()..start();
+            await db.execute(insertLongSql, [
+              counter,
+              _longTextPayload(textBytes, counter),
+              i,
+            ]);
+            counter++;
+            await waitBarrier.future.timeout(const Duration(seconds: 10));
+            sw.stop();
+            timing.wallUs.add(sw.elapsedMicroseconds);
+            timing.mainUs.add(sw.elapsedMicroseconds);
+
+            for (var s = 0; s < unchangedStreamCount; s++) {
+              if (unchangedEmissions[s] != before[s]) {
+                throw StateError(
+                  'Long-text unchanged stream $s emitted for an unchanged result.',
+                );
+              }
             }
           }
+        } finally {
+          await barrierSub?.cancel();
+          for (final sub in unchangedSubs) {
+            await sub.cancel();
+          }
+          await db.close();
         }
-
-        await barrierSub.cancel();
-        for (final sub in unchangedSubs) {
-          await sub.cancel();
-        }
-        await db.close();
 
         markdown.write(
           markdownTable(
