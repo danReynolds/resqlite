@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Machine-readable research map for scheduled experimenters. This is context, not an allowed list.",
+  "coverage": {
+    "experimentEntriesRequiredFrom": 110,
+    "directionFieldRequiredFrom": 110
+  },
+  "statusDefinitions": {
+    "active": "Good current candidate space. A runner may still choose another direction, but this area has enough current evidence to justify more work.",
+    "watch": "Worth revisiting when external/runtime/library/workload context changes. This is a watch note, not a prohibition.",
+    "measurement-needed": "The next useful step is likely a benchmark, trace, profiler run, or other measurement that exposes the suspected cost.",
+    "low-current-signal": "Recent attempts produced weak signal under current evidence. A novel implementation, workload, or measurement can still make the area interesting.",
+    "speculative": "A lightly evidenced or new direction that may be worth a bounded pass.",
+    "settled": "Mostly background context. Reopen when there is a clear new fact or workload."
+  },
+  "directions": [
+    {
+      "id": "stream-rerun-dispatch",
+      "status": "active",
+      "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions.",
+      "evidence": ["045", "075", "083", "084", "085", "100", "105"],
+      "interestingIf": [
+        "a change reduces duplicate reruns before reader-pool admission",
+        "a trace shows completion-side churn dominating a many-stream workload",
+        "a scheduler policy improves fan-out without harming unrelated reads"
+      ],
+      "openQuestions": [
+        "Can rerun dispatch be observed with enough detail to separate queue wait from decode and delivery work?",
+        "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?"
+      ],
+      "adjacentIdeas": [
+        "rerun tracing",
+        "many-stream writer throughput",
+        "reader completion batching"
+      ],
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out."
+    },
+    {
+      "id": "parameter-encoding-and-binding",
+      "status": "active",
+      "subsystems": ["ffi", "params", "writer", "allocation"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation or repeated SQLite work. Smaller Dart-side allocation cleanups and duplicated encoding paths have usually measured flat or regressed.",
+      "evidence": ["028", "076", "077", "095", "096", "109"],
+      "interestingIf": [
+        "the idea changes ownership/layout enough to remove native allocation or copying",
+        "a benchmark shows parameter encoding as a material part of write wall time",
+        "the approach preserves the lean API and avoids duplicate encoding logic"
+      ],
+      "openQuestions": [
+        "Are there remaining parameter shapes where SQLite bind work, not Dart dispatch, dominates?",
+        "Can correctness improvements such as embedded-NUL text handling be evaluated separately from performance?"
+      ],
+      "adjacentIdeas": [
+        "inline buffer layout",
+        "batch parameter shape",
+        "SQLite bind semantics"
+      ],
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern."
+    },
+    {
+      "id": "long-text-stream-hashing",
+      "status": "measurement-needed",
+      "subsystems": ["streaming", "hashing", "text"],
+      "currentRead": "Native hashing is valuable, but byte-stream hash-loop experiments are invisible when stream workloads carry only short cells.",
+      "evidence": ["033", "075", "099"],
+      "interestingIf": [
+        "a representative long-text stream benchmark makes hash cost visible",
+        "the workload includes unchanged fan-out with larger text payloads",
+        "a profile shows hashing or text scanning as a meaningful stream rerun cost"
+      ],
+      "openQuestions": [
+        "What text sizes appear in realistic stream workloads?",
+        "Does the long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
+      ],
+      "adjacentIdeas": [
+        "long-text stream benchmark",
+        "hash loop variants",
+        "unchanged fan-out with larger payloads"
+      ],
+      "notesForExperimenters": "Build or improve the benchmark before spending much implementation effort on another hash-loop change."
+    },
+    {
+      "id": "sqlite-version-and-build-config",
+      "status": "watch",
+      "subsystems": ["sqlite", "sqlite3mc", "build", "planner"],
+      "currentRead": "SQLite compile/config changes have produced real wins, but version bumps need audit discipline because planner and text-format behavior can shift under the library.",
+      "evidence": ["016", "020", "021", "044", "090"],
+      "interestingIf": [
+        "sqlite3mc tracks a stable SQLite point release with relevant planner or C API changes",
+        "a platform-specific storage feature maps cleanly to resqlite defaults",
+        "peer libraries report repeatable wins from a SQLite configuration resqlite does not use"
+      ],
+      "openQuestions": [
+        "Which SQLite release changes affect resqlite's custom JSON/worker architecture rather than only generic SQL workloads?",
+        "Can any build option improve one target platform without harming others?"
+      ],
+      "adjacentIdeas": [
+        "sqlite3mc bump audit",
+        "planner regression check",
+        "compile flag sweep"
+      ],
+      "notesForExperimenters": "Treat this as audit-first. A version bump is interesting when the changelog and current workload both suggest a plausible resqlite-specific win."
+    },
+    {
+      "id": "transaction-control-paths",
+      "status": "watch",
+      "subsystems": ["writer", "transactions", "sqlite"],
+      "currentRead": "Cached top-level transaction control statements won. Nested transaction string/native helpers have not shown enough signal without a workload that stresses nesting.",
+      "evidence": ["027", "101", "102", "103"],
+      "interestingIf": [
+        "a real workload or benchmark uses deep nested transactions",
+        "the implementation shares the accepted top-level transaction machinery",
+        "the change reduces prepare/string work without adding much native API surface"
+      ],
+      "openQuestions": [
+        "How often do realistic resqlite users nest transactions deeply?",
+        "Can nested control be optimized without specialized C helpers for every operation?"
+      ],
+      "adjacentIdeas": [
+        "nested transaction benchmark",
+        "savepoint naming",
+        "transaction statement reuse"
+      ],
+      "notesForExperimenters": "A nested-transaction benchmark would make this area much easier to reason about."
+    },
+    {
+      "id": "result-transfer-shape",
+      "status": "watch",
+      "subsystems": ["results", "isolate-transfer", "api-shape"],
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured.",
+      "evidence": ["008", "063", "066", "081", "082", "089"],
+      "interestingIf": [
+        "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
+        "a change preserves the lean API while removing end-to-end work",
+        "a benchmark measures full consumer cost, not just transfer or decode setup"
+      ],
+      "openQuestions": [
+        "Can a transparent internal shape change preserve Map-like ergonomics without moving decode cost to the consumer?",
+        "Will future Dart transfer semantics reopen zero-copy result transport?"
+      ],
+      "adjacentIdeas": [
+        "Dart runtime watch",
+        "full-consumption benchmark",
+        "single-row contract analysis"
+      ],
+      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal."
+    },
+    {
+      "id": "measurement-system",
+      "status": "active",
+      "subsystems": ["benchmarking", "profiling", "methodology"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment.",
+      "evidence": ["055", "088", "099", "102", "108"],
+      "interestingIf": [
+        "a profiler or focused benchmark exposes a cost hidden by the release suite",
+        "a control metric can identify noisy runs before results are trusted",
+        "the measurement makes an entire class of ideas easier to evaluate"
+      ],
+      "openQuestions": [
+        "Which allocation-oriented ideas need memory/RSS acceptance criteria?",
+        "Which stream workloads are missing from the current suite?"
+      ],
+      "adjacentIdeas": [
+        "memory profiling harness",
+        "dispatch tracing",
+        "targeted workload generation"
+      ],
+      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck."
+    }
+  ],
+  "experiments": {
+    "088": {
+      "directions": ["measurement-system"],
+      "outcomeClass": "rejected_after_noise_check",
+      "changedBeliefs": [
+        "Single-run tail wins need confirmation against control metrics before acceptance"
+      ],
+      "nextSignals": [
+        "concurrent-reader lock-contention harness",
+        "shorter lock timeout sweep only with a workload that shows lock wait"
+      ]
+    },
+    "090": {
+      "directions": ["sqlite-version-and-build-config"],
+      "outcomeClass": "watch",
+      "changedBeliefs": [
+        "sqlite3mc version bumps should wait for safer point releases when the newest SQLite release is a fresh .0"
+      ],
+      "nextSignals": [
+        "sqlite3mc release tracking a stable SQLite point release",
+        "planner/API changes that map to resqlite hot paths"
+      ]
+    },
+    "099": {
+      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "outcomeClass": "benchmark_gap",
+      "changedBeliefs": [
+        "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable"
+      ],
+      "nextSignals": [
+        "representative long-text streaming benchmark"
+      ]
+    },
+    "100": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "rejected_regression",
+      "changedBeliefs": [
+        "Bounded rerun scheduling can harm high-cardinality stream fan-out even if it looks attractive for unrelated reads"
+      ],
+      "nextSignals": [
+        "better separation of unrelated read latency from fan-out throughput"
+      ]
+    },
+    "101": {
+      "directions": ["transaction-control-paths"],
+      "outcomeClass": "accepted",
+      "changedBeliefs": [
+        "Top-level transaction control still had removable SQLite prepare/finalize work"
+      ],
+      "nextSignals": [
+        "nested transaction benchmark before revisiting savepoint control"
+      ]
+    },
+    "103": {
+      "directions": ["transaction-control-paths"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "Native nested transaction helpers add complexity without a stable realistic-workload win"
+      ],
+      "nextSignals": [
+        "realistic deeply nested transaction workload"
+      ]
+    },
+    "105": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "rejected_regression",
+      "changedBeliefs": [
+        "Increasing reader worker count can worsen writer throughput by increasing completion-side microtask churn"
+      ],
+      "nextSignals": [
+        "queueing trace around completion and writer throughput"
+      ]
+    },
+    "108": {
+      "directions": ["measurement-system"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "Persistent selectBytes out-parameter slots are below the current benchmark and RSS signal"
+      ],
+      "nextSignals": [
+        "profile evidence before retrying tiny scratch allocation changes"
+      ]
+    },
+    "109": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "accepted",
+      "changedBeliefs": [
+        "Parameter encoding still has worthwhile headroom when the change removes per-text/blob native allocations and SQLite strlen work"
+      ],
+      "nextSignals": [
+        "look for larger ownership/layout changes rather than tiny scratch-object reuse"
+      ]
+    }
+  }
+}

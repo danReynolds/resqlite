@@ -127,6 +127,29 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 - **Status:** `Accepted` (merged into codebase), `In Review` (promising but not merged), or `Rejected` (abandoned, with explanation)
 - **Commit:** Git hash of the implementing commit (added to header of each accepted experiment)
 
+### Research Map
+
+Scheduled experimenters should use
+[`RUNNER_INSTRUCTIONS.md`](RUNNER_INSTRUCTIONS.md) as the copyable instruction
+block for recurring experiment systems. Those instructions point runners at
+this README, [`FINDINGS.md`](FINDINGS.md), and [`signals.json`](signals.json)
+before choosing work.
+
+`signals.json` is the canonical research map. These files are steering context,
+not an allowed list. They should make prior work easy to understand without
+preventing creative experiments outside the current map. A strong new
+experiment can follow an active direction, revisit an area that recently looked
+weak, or open a new direction entirely. The important thing is to explain why
+the attempt is worth a bounded pass in light of prior work.
+
+When an experiment changes what future work should try, de-emphasize, measure,
+or watch:
+
+- update the experiment writeup with the record of what happened
+- update `signals.json` with machine-readable direction context
+- update `FINDINGS.md` only for process-level guidance that belongs outside the
+  canonical direction map
+
 ### Standard Template
 
 Use these exact headings so the experiments page can extract content automatically:
@@ -136,6 +159,7 @@ Use these exact headings so the experiments page can extract content automatical
 
 **Date:** 2026-04-14
 **Status:** Accepted / Rejected
+**Direction:** `direction-id`
 **Commit:** [`abc1234`](https://github.com/danReynolds/resqlite/commit/abc1234)
 **Archive:** [`archive/exp-NNN`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-NNN)
 
@@ -158,6 +182,11 @@ Benchmark measurements. Use markdown tables for comparisons.
 ## Decision
 
 Why accepted or rejected. Trade-offs considered.
+
+## Future Notes
+
+Optional. Short notes for future experimenters: adjacent prior work, what would
+make the area interesting again, or what to measure before revisiting.
 ```
 
 Header fields:
