@@ -44,6 +44,7 @@ Experiments that proved their value and were merged into the codebase.
 | [075](075-native-hash-selectifchanged.md) | Native-buffered hash for `selectIfChanged` | **−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged |  |
 | [077](077-cheap-check-first-sweep.md) | Cheap-check-first sweep (four small wins) | **−13 % to −23 % on write benchmarks** from cached `sqlite3_bind_parameter_count`; pairs with three correctness-neutral fast-rejects on invalidation, hash, and subscription paths |  |
 | [101](101-tx-stmt-cache.md) | Cached BEGIN/COMMIT/ROLLBACK statements | **−13 % to −14 %** on Batched-Write-Inside-Transaction and Growing-Stream Invalidation by replacing `sqlite3_exec`'s per-call prepare+finalize with three persistently prepared transaction-control stmts |  |
+| [109](109-inline-param-buffer.md) | Inline-packed parameter buffer | **−10 % to −16 %** on text-param INSERT workloads (Single Inserts, Batch Insert, No-Streams Write Throughput) by collapsing per-text/blob `calloc` into the reusable param-struct buffer and passing actual UTF-8 byte length so `sqlite3_bind_text` skips its internal `strlen` |  |
 
 ## In Review
 
