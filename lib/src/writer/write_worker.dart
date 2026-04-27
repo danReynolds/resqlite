@@ -76,10 +76,17 @@ final class CloseRequest extends WriterRequest {
 // ---------------------------------------------------------------------------
 
 /// Response to [ExecuteRequest]. Includes dirty tables for stream invalidation.
+///
+/// Polish (post-2026-04): `dirtyTables` is now a [TableDependencySet]
+/// rather than a plain `List<String>?` — `null` still means "no dirty
+/// info to publish yet (inside a transaction)", `.known(...)` is the
+/// concrete dirty list, and `.all()` is the unknown sentinel from the
+/// C-side reliability flag (overflow / OOM during the write cycle)
+/// that forces every active stream to invalidate.
 final class ExecuteResponse {
   const ExecuteResponse(this.result, this.dirtyTables, this.dirtyColumns);
   final WriteResult result;
-  final List<String>? dirtyTables;
+  final TableDependencySet? dirtyTables;
   // Experiment 106: per-table dirty-column map. `null` for a given table
   // means "all columns dirty" (INSERT / DELETE / preupdate hook fired
   // outside a tagged stmt). Absent map entries mean the table itself
@@ -96,7 +103,7 @@ final class QueryResponse {
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
   const BatchResponse(this.dirtyTables, this.dirtyColumns);
-  final List<String>? dirtyTables;
+  final TableDependencySet? dirtyTables;
   final Map<String, Set<String>?>? dirtyColumns;
 }
 

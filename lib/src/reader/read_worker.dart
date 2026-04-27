@@ -294,11 +294,14 @@ Uint8List executeQueryBytes(
 
 /// Execute a stream's initial query.
 ///
-/// Returns the rows, the authorizer-captured read tables, the per-table
-/// column dependencies (experiment 106), the C-computed baseline hash
-/// (exp 075), and the row count (exp 077 — cached so subsequent
-/// selectIfChanged calls can short-circuit on count mismatch).
-(RawQueryResult, List<String>, Map<String, Set<String>?>, int, int)
+/// Returns the rows, the authorizer-captured read tables (typed —
+/// either `.known(tables)` or `.all()` when the C-side reliability
+/// flag was tripped during prepare, see [TableDependencySet]), the
+/// per-table column dependencies (experiment 106), the C-computed
+/// baseline hash (exp 075), and the row count (exp 077 — cached so
+/// subsequent selectIfChanged calls can short-circuit on count
+/// mismatch).
+(RawQueryResult, TableDependencySet, Map<String, Set<String>?>, int, int)
 executeQueryWithDeps(
   int handleAddr,
   int readerId,

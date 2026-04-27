@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:async';
 
+import 'native/resqlite_bindings.dart' show TableDependencySet;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
@@ -24,6 +25,15 @@ final class StreamEngine {
 
   /// Index of tables to the set of stream entries that depend on that table.
   final Map<String, Set<StreamEntry>> _tableIndex = {};
+
+  /// Polish (post-2026-04): bucket of stream entries whose table
+  /// dependencies could not be captured reliably during the initial
+  /// query (read_set overflow / OOM at prepare). Every write — both
+  /// `.known(...)` and `.all()` — invalidates every entry in this
+  /// bucket. Column elision is skipped for these entries because we
+  /// don't know which tables they depend on, so columns are
+  /// meaningless. Empty in the steady-state common case.
+  final Set<StreamEntry> _allTableEntries = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
   final LinkedHashSet<StreamEntry> _requeryQueue = LinkedHashSet<StreamEntry>();
@@ -70,11 +80,22 @@ final class StreamEngine {
   /// a missing entry in the stream's `columnDependencies` (e.g. legacy
   /// streams created before this experiment landed) both force the
   /// re-query.
+  ///
+  /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencySet];
+  /// `null` still means "nothing to invalidate" (e.g. inside a
+  /// transaction where the writer hasn't published yet), `.known([])`
+  /// is "no dirty tables this cycle", and `.all()` is the C-side
+  /// reliability sentinel that forces every active stream — even the
+  /// "all tables" bucket — to invalidate, bypassing the column elision
+  /// short-circuit entirely.
   Future<void> invalidate(
-    List<String>? dirtyTables, [
+    TableDependencySet? dirtyTables, [
     Map<String, Set<String>?>? dirtyColumns,
   ]) async {
-    if (_entries.isEmpty || dirtyTables == null || dirtyTables.isEmpty) {
+    if (_entries.isEmpty || dirtyTables == null) {
+      return;
+    }
+    if (!dirtyTables.all && dirtyTables.tables.isEmpty) {
       return;
     }
 
@@ -92,7 +113,44 @@ final class StreamEngine {
 
     final dirtyEntries = <StreamEntry>{};
 
-    for (final table in dirtyTables) {
+    if (dirtyTables.all) {
+      // Polish: writer-side reliability tripped — the dirty-table set
+      // overflowed / OOMed and we don't know which tables changed.
+      // Invalidate every active entry (both `_tableIndex` watchers and
+      // the all-tables bucket) and bypass the column-elision check
+      // entirely; the check would dereference `dirtyColumns[table]` for
+      // tables we can't enumerate, and there's no benefit to elision
+      // when we don't know the dirty set.
+      dirtyEntries.addAll(_allTableEntries);
+      for (final entries in _tableIndex.values) {
+        dirtyEntries.addAll(entries);
+      }
+      for (final entry in dirtyEntries) {
+        entry.dirty = true;
+        if (!entry.inFlight) {
+          _requeryQueue.add(entry);
+        }
+      }
+      _flushQueue();
+      if (kProfileMode) {
+        invalidateSw!.stop();
+        ProfileCounters.invalidateUs += invalidateSw.elapsedMicroseconds;
+        ProfileCounters.invalidateCount++;
+      }
+      return;
+    }
+
+    final dirtyTableList = dirtyTables.tables;
+
+    // Reader-side "all tables" entries (their own read_set was unreliable
+    // when the stream was registered) get invalidated on every write,
+    // regardless of which concrete tables are dirty. They bypass the
+    // column elision check because their column dependencies are known
+    // to be unreliable too — and even if they were reliable, we have
+    // no entry-level table set to intersect against.
+    dirtyEntries.addAll(_allTableEntries);
+
+    for (final table in dirtyTableList) {
       if (_tableIndex[table] case Set<StreamEntry> entries) {
         dirtyEntries.addAll(entries);
       }
@@ -101,18 +159,26 @@ final class StreamEngine {
     final intersectionSw = kProfileMode ? Stopwatch() : null;
     var intersectionEntries = 0;
     for (final entry in dirtyEntries) {
+      // Polish: all-tables-bucket entries skip column elision — their
+      // `columnDependencies` map carries no useful info because the
+      // table side was unreliable when the stream was registered.
+      final isAllTablesEntry = _allTableEntries.contains(entry);
       // Experiment 106: column-level dispatch elision. Skip the per-stream
       // requery when we know the modified columns can't change the
       // result. This is the writer-side complement to exp 075's hash
       // short-circuit — the hash short-circuit pays the requery cost and
       // suppresses the emission; the column elision skips the requery
       // itself.
-      if (dirtyColumns != null) {
+      if (dirtyColumns != null && !isAllTablesEntry) {
         if (kProfileMode) {
           intersectionEntries++;
           intersectionSw!.start();
         }
-        final affects = _writeAffectsEntry(entry, dirtyTables, dirtyColumns);
+        final affects = _writeAffectsEntry(
+          entry,
+          dirtyTableList,
+          dirtyColumns,
+        );
         if (kProfileMode) {
           intersectionSw!.stop();
         }
@@ -209,6 +275,7 @@ final class StreamEngine {
 
     _entries.clear();
     _tableIndex.clear();
+    _allTableEntries.clear();
     _requeryQueue.clear();
   }
 
@@ -254,18 +321,30 @@ final class StreamEngine {
           initialRowCount,
         ) = result;
 
-        // Index the entry's table dependencies after its initial query completes.
-        for (final table in initialTables) {
-          (_tableIndex[table] ??= {}).add(entry);
+        if (initialTables.all) {
+          // Polish: read_set was unreliable for this stream's initial
+          // query — every write must invalidate it. The all-tables
+          // bucket short-circuits column elision for this entry too,
+          // since the columns map is meaningless without knowing the
+          // tables.
+          _allTableEntries.add(entry);
+          entry.dependencies = const <String>{};
+          entry.columnDependencies = const <String, Set<String>?>{};
+        } else {
+          // Index the entry's table dependencies after its initial query
+          // completes.
+          for (final table in initialTables.tables) {
+            (_tableIndex[table] ??= {}).add(entry);
+          }
+          entry.dependencies = initialTables.tables.toSet();
+          // Experiment 106: persist the per-table read-column map for the
+          // dispatch elision check on subsequent invalidations.
+          entry.columnDependencies = initialColumns;
         }
 
         entry.lastResult = initialRows;
         entry.lastResultHash = initialHash;
         entry.lastRowCount = initialRowCount;
-        entry.dependencies = initialTables.toSet();
-        // Experiment 106: persist the per-table read-column map for the
-        // dispatch elision check on subsequent invalidations.
-        entry.columnDependencies = initialColumns;
 
         // If an invalidation occurred while performing the entry's initial query then the entry
         // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
@@ -367,6 +446,9 @@ final class StreamEngine {
     for (final table in entry.dependencies) {
       _tableIndex[table]?.remove(entry);
     }
+    // Polish: drop from the all-tables bucket too. No-op if the entry
+    // was never registered there; the membership check is O(1).
+    _allTableEntries.remove(entry);
 
     // Close any remaining subscriber controllers.
     for (final sub in entry.subscribers) {

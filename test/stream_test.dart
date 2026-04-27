@@ -769,7 +769,9 @@ void main() {
 
         // Break the query by renaming the column it selects.
         await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-        db.streamEngine.invalidate(['items']);
+        db.streamEngine.invalidate(
+          const TableDependencySet.known(<String>['items']),
+        );
 
         // Error should be delivered to onError, not swallowed.
         await errorReceived.future.timeout(const Duration(seconds: 2));

@@ -9,6 +9,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../exceptions.dart';
+import '../native/resqlite_bindings.dart' show TableDependencySet;
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -80,7 +81,7 @@ final class ReaderPool {
   Future<
     (
       List<Map<String, Object?>>,
-      List<String>,
+      TableDependencySet,
       Map<String, Set<String>?>,
       int,
       int,
@@ -91,7 +92,7 @@ final class ReaderPool {
     return result
         as (
           List<Map<String, Object?>>,
-          List<String>,
+          TableDependencySet,
           Map<String, Set<String>?>,
           int,
           int,

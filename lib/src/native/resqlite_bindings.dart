@@ -313,37 +313,53 @@ void executeNestedBatchWrite(
 final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
+/// Polish (post-2026-04): the C-side reliability flag's table-getter
+/// return convention is encoded here once. A non-negative count is the
+/// known dependency list; a negative count is the "unknown" sentinel
+/// returned when the C set overflowed / OOMed during prepare or the
+/// preupdate hook merge.
+///
+/// Returned by [getReadTables] and [getDirtyTables]. The StreamEngine
+/// branches subscribe-side and invalidate-side on `.all`:
+///   * `.known(tables)` → use the `_tableIndex` per existing behavior.
+///   * `.all()` → route into the global `_allTableEntries` bucket
+///     (subscribe) or invalidate every active entry (invalidate).
+final class TableDependencySet {
+  /// Concrete list of tables — column elision can apply per [tables].
+  const TableDependencySet.known(this.tables) : all = false;
+
+  /// Unknown dependency set — fall back to the all-tables bucket.
+  const TableDependencySet.all() : tables = const <String>[], all = true;
+
+  /// The known table dependencies. Empty when [all] is true.
+  final List<String> tables;
+
+  /// `true` when the C-side set was unreliable; treat as "every table".
+  final bool all;
+
+  bool get isEmpty => !all && tables.isEmpty;
+}
+
 /// Read and clear the dirty tables set from the C connection.
 ///
 /// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
-/// the `List<String>` allocation and return a shared `const <String>[]`.
+/// the `List<String>` allocation and return a [TableDependencySet.known]
+/// with a const-empty backing list.
 ///
 /// Polish (post-2026-04): a negative count is the "unknown" sentinel
 /// returned when the C-side dirty-table set overflowed / OOMed during
 /// the write — interpreted by the StreamEngine as "every active stream
-/// must invalidate". Phase 2a wraps this in a typed
-/// [TableDependencySet]; for now the binding still returns
-/// `List<String>` but the negative-count branch produces the singleton
-/// `_unknownTables` sentinel that callers can identify by reference.
-List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
+/// must invalidate".
+TableDependencySet getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
-  if (count < 0) return unknownTablesSentinel;
-  if (count == 0) return const <String>[];
+  if (count < 0) return const TableDependencySet.all();
+  if (count == 0) return const TableDependencySet.known(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _dirtyTablesBuf[i].toDartString();
   }
-  return tables;
+  return TableDependencySet.known(tables);
 }
-
-/// Sentinel returned by [getReadTables] / [getDirtyTables] when the
-/// C-side reliability flag was tripped (overflow / OOM). The contents
-/// are intentionally invalid — callers identify it by `identical(...)`
-/// and route the result through the StreamEngine's "all tables"
-/// fallback bucket. Phase 2a replaces this with a typed wrapper.
-final List<String> unknownTablesSentinel = List<String>.unmodifiable(
-  const <String>[],
-);
 
 // ---------------------------------------------------------------------------
 // Read dependency tracking
@@ -424,23 +440,26 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
 /// Clears after reading.
 ///
 /// Zero-table short-circuit: if the count is 0, skip the `List<String>`
-/// allocation and return a shared `const <String>[]`.
+/// allocation and return a [TableDependencySet.known] with a
+/// const-empty backing list.
 ///
 /// Polish (post-2026-04): a negative count is the "unknown" sentinel —
 /// the C-side `read_tables_reliable` flag flipped during prepare, so
 /// the stream's true table dependencies are not known. Returns
-/// [unknownTablesSentinel] (identifiable by `identical(...)`); the
-/// StreamEngine routes such streams into the "all tables" fallback
-/// bucket so every write invalidates them.
-List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
+/// [TableDependencySet.all]; the StreamEngine routes such streams into
+/// the "all tables" fallback bucket so every write invalidates them.
+TableDependencySet getReadTables(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
   final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
-  if (count < 0) return unknownTablesSentinel;
-  if (count == 0) return const <String>[];
+  if (count < 0) return const TableDependencySet.all();
+  if (count == 0) return const TableDependencySet.known(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _readTablesBuf[i].toDartString();
   }
-  return tables;
+  return TableDependencySet.known(tables);
 }
 
 // Experiment 106: per-worker persistent buffer for column pointer
