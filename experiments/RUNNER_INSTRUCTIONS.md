@@ -14,9 +14,11 @@ better.
 
 Before choosing an experiment, read:
 
-- [`README.md`](README.md)
-- [`FINDINGS.md`](FINDINGS.md)
-- [`signals.json`](signals.json)
+- [`README.md`](README.md) — the experiment table and templates
+- [`signals.json`](signals.json) — the canonical per-direction research map
+- [`JOURNAL.md`](JOURNAL.md) — transferable lessons from prior experiments
+- [`MILESTONES.md`](MILESTONES.md) — the curated narrative arc, for context on
+  how the current state was reached
 - recent individual experiment writeups relevant to the area you are considering
 
 `signals.json` is the canonical research map. Treat it as context, not an
@@ -62,11 +64,20 @@ writeup should make the reasoning clear.
 
 When finished:
 
-- write or update the experiment record
+- write or update the experiment record. Keep markdown human-readable;
+  machine-oriented direction metadata belongs in `signals.json`. For rejected
+  experiments, the writeup should explain why the direction looked plausible,
+  what was measured, and what would make the area interesting again — a
+  "rejected, no signal" record is worth less than a "rejected because X, would
+  reopen if Y" record.
 - update [`signals.json`](signals.json) if the run changes how future agents
-  should interpret an area
-- update [`FINDINGS.md`](FINDINGS.md) only for process-level guidance that
-  belongs outside the canonical direction map
+  should interpret an area.
+- add to [`JOURNAL.md`](JOURNAL.md) only when the run surfaced a *transferable*
+  lesson — something a future runner could reapply to a different direction or
+  could waste time relearning. Per-direction state goes in `signals.json`, not
+  the journal.
+- do not edit [`MILESTONES.md`](MILESTONES.md) as part of an experiment run.
+  That file is updated on maintainer request, not per experiment.
 - regenerate docs/check generated data as needed
 - run focused validation plus the relevant repo checks
 - open a PR, watch CI/review, and address actionable feedback
