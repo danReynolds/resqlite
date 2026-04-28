@@ -402,6 +402,116 @@ Future<String> runWritesBenchmark() async {
       await resqliteDb.close();
       await asyncDb.close();
     }
+
+    // -----------------------------------------------------------------
+    // Nested transactions (savepoints).
+    //
+    // Stresses the SAVEPOINT / RELEASE / ROLLBACK TO code path that
+    // exp 102 (cached savepoint strings) and exp 103 (native nested-tx
+    // depth control) targeted but couldn't measure for lack of a
+    // workload. Two shapes:
+    //
+    //   - Shallow fan-out: 50 sequential nested savepoints inside one
+    //     outer transaction, each inserting one row and releasing.
+    //     Hits SAVEPOINT s1 / RELEASE s1 in a tight loop — the worst
+    //     case for the per-call `'SAVEPOINT sN'.toNativeUtf8()` +
+    //     `calloc.free` pair, since the same depth fires 50× per
+    //     iteration.
+    //
+    //   - Deep chain: 5 levels of nesting deep with the insert at the
+    //     innermost level, then unwind. Hits each of s1..s5 once per
+    //     iteration — the worst case for unique-depth savepoint
+    //     strings.
+    //
+    // Resqlite-only (no peer) — sqlite_async's nested transaction
+    // semantics don't map cleanly enough for an apples-to-apples
+    // single-row picture, and the goal here is a baseline for
+    // resqlite-vs-resqlite experiment comparisons in the
+    // transaction-control-paths direction (see
+    // experiments/signals.json).
+    // -----------------------------------------------------------------
+    {
+      final resqliteDb = await resqlite.Database.open(
+        '${tempDir.path}/resqlite_nested_tx.db',
+      );
+      try {
+        const createSql =
+            'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)';
+        const insertSql = 'INSERT INTO t(value) VALUES (?)';
+        await resqliteDb.execute(createSql);
+
+        // ---- Shallow fan-out: 50 sequential nested savepoints. ----
+        const fanout = 50;
+
+        Future<void> runShallowFanout() async {
+          await resqliteDb.transaction((tx) async {
+            for (var i = 0; i < fanout; i++) {
+              await tx.transaction((inner) async {
+                await inner.execute(insertSql, [i]);
+              });
+            }
+          });
+        }
+
+        for (var i = 0; i < defaultWarmup; i++) {
+          await runShallowFanout();
+        }
+        await resqliteDb.execute('DELETE FROM t');
+
+        final tFanout = BenchmarkTiming(
+          'resqlite nested transaction() x$fanout',
+        );
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final sw = Stopwatch()..start();
+          await runShallowFanout();
+          sw.stop();
+          tFanout.recordWallOnly(sw.elapsedMicroseconds);
+          await resqliteDb.execute('DELETE FROM t');
+        }
+
+        // ---- Deep chain: 5-level nesting with one insert at depth 5. ----
+        const depth = 5;
+
+        Future<void> runDeepNest(resqlite.Transaction tx, int remaining) async {
+          if (remaining == 0) {
+            await tx.execute(insertSql, [remaining]);
+            return;
+          }
+          await tx.transaction((inner) => runDeepNest(inner, remaining - 1));
+        }
+
+        Future<void> runDeepNestOuter() async {
+          await resqliteDb.transaction((tx) => runDeepNest(tx, depth));
+        }
+
+        for (var i = 0; i < defaultWarmup; i++) {
+          await runDeepNestOuter();
+        }
+        await resqliteDb.execute('DELETE FROM t');
+
+        final tDeep = BenchmarkTiming(
+          'resqlite nested transaction() depth=$depth',
+        );
+        for (var iter = 0; iter < defaultIterations; iter++) {
+          final sw = Stopwatch()..start();
+          await runDeepNestOuter();
+          sw.stop();
+          tDeep.recordWallOnly(sw.elapsedMicroseconds);
+          await resqliteDb.execute('DELETE FROM t');
+        }
+
+        printComparisonTable(
+          '=== Nested Transactions (savepoints) ===',
+          [tFanout, tDeep],
+        );
+        markdown.write(markdownTable(
+          'Nested Transactions (savepoints)',
+          [tFanout, tDeep],
+        ));
+      } finally {
+        await resqliteDb.close();
+      }
+    }
   } finally {
     await tempDir.delete(recursive: true);
   }
