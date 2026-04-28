@@ -14,6 +14,7 @@ compiled in (gated behind `-DRESQLITE_PROFILE=true`).
 
 Current experiments:
 
+- [batch_param_flatten.dart](batch_param_flatten.dart)
 - [checkpoint_policy.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/checkpoint_policy.dart)
 - [db_status_probe.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/db_status_probe.dart)
 - [ffi_overhead.dart](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments/ffi_overhead.dart)
