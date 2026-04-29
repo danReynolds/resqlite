@@ -1,6 +1,6 @@
-# Experiment 111: SQL byte-length passthrough — rejected during design
+# Experiment 112: SQL byte-length passthrough — rejected during design
 
-**Date:** 2026-04-27T21:57:00
+**Date:** 2026-04-29
 **Status:** Rejected (not implemented — analysis showed no measurable headroom)
 **Direction:** `parameter-encoding-and-binding`
 
