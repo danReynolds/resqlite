@@ -84,6 +84,23 @@ can't see it.
 benchmark line that will move under the change, the next experiment is probably
 the benchmark, not the change.*
 
+### Filling a measurement gap can still produce a rejection — and that's a stronger result
+
+When a prior experiment was rejected for "no workload to measure," it's
+tempting to treat building the workload as a setup step before the eventual
+acceptance. [Exp 111](111-nested-tx-benchmark-savepoint-cache.md) added the
+missing nested-transaction benchmark that exp 102 and exp 103 had both pointed
+at, then re-ran exp 102's archived savepoint string cache against it. The
+shallow fan-out shape — 50 SAVEPOINTs/iteration, the worst case achievable
+through the public API — moved -9 %, below the ±17 % decision threshold. The
+benchmark is the lasting contribution; the implementation rejection now rests
+on direct worst-case-workload evidence rather than the absence of evidence.
+
+*Reapplies whenever a "blocked on missing measurement" rejection is being
+revisited. Frame the experiment so the new measurement is the deliverable
+regardless of the implementation outcome — and budget for the implementation
+to fail more confidently than before.*
+
 ### Per-call cost removals need a compounding effect to clear the dispatch floor
 
 The recent run of micro-allocation and micro-computation rejections — exps
@@ -91,8 +108,9 @@ The recent run of micro-allocation and micro-computation rejections — exps
 [094](094-dirty-read-string-reuse.md),
 [095](095-writer-result-buffer.md),
 [102](102-savepoint-string-cache.md),
-[108](108-selectbytes-out-slots.md), and the pre-implementation
-[111](111-sql-len-passthrough-analysis.md) — all targeted a single
+[108](108-selectbytes-out-slots.md), the savepoint-cache half of
+[111](111-nested-tx-benchmark-savepoint-cache.md), and the pre-implementation
+[112](112-sql-len-passthrough-analysis.md) — all targeted a single
 ~tens-of-nanoseconds per-call saving on a hot path. None registered. The
 one acceptance in the same family, [exp 109](109-inline-param-buffer.md),
 landed because it combined *two* independent effects on the same path
@@ -104,7 +122,7 @@ point.
 *Reapplies whenever a candidate is "remove this small repeated thing." If
 the per-call ceiling is bounded at sub-percent of the [exp 080](080-dispatch-budget.md)
 dispatch wall, the experiment is either a pre-implementation rejection
-(like exp 076 / 111) or it needs a second compounding lever on the same
+(like exp 076 / 112) or it needs a second compounding lever on the same
 path before it is worth running.*
 
 ## How to add to this file
