@@ -9,7 +9,8 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../exceptions.dart';
-import '../native/resqlite_bindings.dart' show TableDependencies;
+import '../native/resqlite_bindings.dart'
+    show ColumnDependencies, ColumnDependencyMap, TableDependencies;
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -76,13 +77,13 @@ final class ReaderPool {
   /// Also returns the C-computed hash (exp 075) and row count (exp 077)
   /// of the initial result so later [selectIfChanged] calls have both
   /// baselines to short-circuit against. Experiment 106 adds the
-  /// per-table column map; a `null` value for a table means "any column
-  /// modification matters" (e.g. SELECT *).
+  /// per-table column map; [ColumnDependencies.all] for a table means
+  /// "any column modification matters" (e.g. SELECT *).
   Future<
     (
       List<Map<String, Object?>>,
       TableDependencies,
-      Map<String, Set<String>?>,
+      ColumnDependencyMap,
       int,
       int,
     )
@@ -93,7 +94,7 @@ final class ReaderPool {
         as (
           List<Map<String, Object?>>,
           TableDependencies,
-          Map<String, Set<String>?>,
+          ColumnDependencyMap,
           int,
           int,
         );

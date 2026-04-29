@@ -10,11 +10,13 @@
 // Direct tests on the policy helper prove the dispatch-side decision
 // regardless of result-change-detection confounds.
 import 'package:resqlite/src/stream_engine.dart';
+import 'package:resqlite/src/native/resqlite_bindings.dart'
+    show ColumnDependencies, ColumnDependencyMap;
 import 'package:test/test.dart';
 
 StreamEntry _entryWith({
   required Set<String> dependencies,
-  required Map<String, Set<String>?> columnDependencies,
+  required ColumnDependencyMap columnDependencies,
 }) {
   final entry = StreamEntry(key: 0, sql: '<unused>', params: const []);
   entry.dependencies = dependencies;
@@ -28,14 +30,14 @@ void main() {
       final entry = _entryWith(
         dependencies: {'users'},
         columnDependencies: {
-          'users': {'name'},
+          'users': ColumnDependencies.fixed({'name'}),
         },
       );
       final result = ColumnInvalidationPolicy.affects(
         entry,
         const ['users'],
         {
-          'users': {'email'},
+          'users': ColumnDependencies.fixed({'email'}),
         },
       );
       expect(result, isFalse);
@@ -45,67 +47,66 @@ void main() {
       final entry = _entryWith(
         dependencies: {'users'},
         columnDependencies: {
-          'users': {'name', 'email'},
+          'users': ColumnDependencies.fixed({'name', 'email'}),
         },
       );
       final result = ColumnInvalidationPolicy.affects(
         entry,
         const ['users'],
         {
-          'users': {'email', 'phone'},
+          'users': ColumnDependencies.fixed({'email', 'phone'}),
         },
       );
       expect(result, isTrue);
     });
 
-    test('writer-side wildcard (null) for a watched table → true', () {
+    test('writer-side wildcard for a watched table → true', () {
       final entry = _entryWith(
         dependencies: {'users'},
         columnDependencies: {
-          'users': {'name'},
+          'users': ColumnDependencies.fixed({'name'}),
         },
       );
       final result = ColumnInvalidationPolicy.affects(
         entry,
         const ['users'],
-        const <String, Set<String>?>{'users': null},
+        const <String, ColumnDependencies>{'users': ColumnDependencies.all},
       );
       expect(result, isTrue);
     });
 
-    test('reader-side wildcard (null) for a dirty table → true', () {
+    test('reader-side wildcard for a dirty table → true', () {
       final entry = _entryWith(
         dependencies: {'users'},
-        columnDependencies: const <String, Set<String>?>{'users': null},
+        columnDependencies: const <String, ColumnDependencies>{
+          'users': ColumnDependencies.all,
+        },
       );
       final result = ColumnInvalidationPolicy.affects(
         entry,
         const ['users'],
         {
-          'users': {'email'},
+          'users': ColumnDependencies.fixed({'email'}),
         },
       );
       expect(result, isTrue);
     });
 
-    test(
-      'dirty table absent from column map (table-only) → true',
-      () {
-        final entry = _entryWith(
-          dependencies: {'users'},
-          columnDependencies: {
-            'users': {'name'},
-          },
-        );
-        final result = ColumnInvalidationPolicy.affects(
-          entry,
-          const ['users'],
-          // Empty column map — the dirty table has no entry, table-only fallback.
-          const <String, Set<String>?>{},
-        );
-        expect(result, isTrue);
-      },
-    );
+    test('dirty table absent from column map (table-only) → true', () {
+      final entry = _entryWith(
+        dependencies: {'users'},
+        columnDependencies: {
+          'users': ColumnDependencies.fixed({'name'}),
+        },
+      );
+      final result = ColumnInvalidationPolicy.affects(
+        entry,
+        const ['users'],
+        // Empty column map — the dirty table has no entry, table-only fallback.
+        const <String, ColumnDependencies>{},
+      );
+      expect(result, isTrue);
+    });
 
     test(
       'reader-side missing entry for the dirty table → true (degrade safely)',
@@ -113,13 +114,13 @@ void main() {
         final entry = _entryWith(
           dependencies: {'users'},
           // No column entry for `users` at all — degrade safely.
-          columnDependencies: const <String, Set<String>?>{},
+          columnDependencies: const <String, ColumnDependencies>{},
         );
         final result = ColumnInvalidationPolicy.affects(
           entry,
           const ['users'],
           {
-            'users': {'email'},
+            'users': ColumnDependencies.fixed({'email'}),
           },
         );
         expect(result, isTrue);
@@ -131,14 +132,14 @@ void main() {
       final entry = _entryWith(
         dependencies: {'users'},
         columnDependencies: {
-          'users': {'name'},
+          'users': ColumnDependencies.fixed({'name'}),
         },
       );
       final result = ColumnInvalidationPolicy.affects(
         entry,
         const ['posts'],
         {
-          'posts': {'title'},
+          'posts': ColumnDependencies.fixed({'title'}),
         },
       );
       expect(result, isFalse);
@@ -150,8 +151,8 @@ void main() {
         final entry = _entryWith(
           dependencies: {'users', 'posts'},
           columnDependencies: {
-            'users': {'name'},
-            'posts': {'title'},
+            'users': ColumnDependencies.fixed({'name'}),
+            'posts': ColumnDependencies.fixed({'title'}),
           },
         );
         final result = ColumnInvalidationPolicy.affects(
@@ -159,34 +160,31 @@ void main() {
           const ['users', 'posts'],
           {
             // users disjoint, posts overlapping
-            'users': {'email'},
-            'posts': {'title', 'body'},
+            'users': ColumnDependencies.fixed({'email'}),
+            'posts': ColumnDependencies.fixed({'title', 'body'}),
           },
         );
         expect(result, isTrue);
       },
     );
 
-    test(
-      'mixed dirty list — both disjoint → false (true elision)',
-      () {
-        final entry = _entryWith(
-          dependencies: {'users', 'posts'},
-          columnDependencies: {
-            'users': {'name'},
-            'posts': {'title'},
-          },
-        );
-        final result = ColumnInvalidationPolicy.affects(
-          entry,
-          const ['users', 'posts'],
-          {
-            'users': {'email'},
-            'posts': {'body'},
-          },
-        );
-        expect(result, isFalse);
-      },
-    );
+    test('mixed dirty list — both disjoint → false (true elision)', () {
+      final entry = _entryWith(
+        dependencies: {'users', 'posts'},
+        columnDependencies: {
+          'users': ColumnDependencies.fixed({'name'}),
+          'posts': ColumnDependencies.fixed({'title'}),
+        },
+      );
+      final result = ColumnInvalidationPolicy.affects(
+        entry,
+        const ['users', 'posts'],
+        {
+          'users': ColumnDependencies.fixed({'email'}),
+          'posts': ColumnDependencies.fixed({'body'}),
+        },
+      );
+      expect(result, isFalse);
+    });
   });
 }

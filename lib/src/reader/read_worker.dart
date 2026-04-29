@@ -296,7 +296,7 @@ Uint8List executeQueryBytes(
 /// baseline hash (exp 075), and the row count (exp 077 — cached so
 /// subsequent selectIfChanged calls can short-circuit on count
 /// mismatch).
-(RawQueryResult, TableDependencies, Map<String, Set<String>?>, int, int)
+(RawQueryResult, TableDependencies, ColumnDependencyMap, int, int)
 executeQueryWithDeps(
   int handleAddr,
   int readerId,

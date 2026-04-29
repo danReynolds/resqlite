@@ -5,8 +5,11 @@ import 'package:meta/meta.dart';
 
 import 'native/resqlite_bindings.dart'
     show
+        AllColumnDependencies,
         AllTableDependencies,
         ColumnDependencyMap,
+        ColumnDependencies,
+        FixedColumnDependencies,
         FixedTableDependencies,
         TableDependencies;
 import 'profile_counters.dart';
@@ -33,10 +36,10 @@ import 'reader/reader_pool.dart';
 // never to a skipped one.
 //
 // At the FFI boundary the C-side reliability flags propagate through
-// `TableDependencies.all` (table side) and a `null` column-set value
-// for a table (column side). The asymmetry is load-bearing: a table
-// fall-through invalidates every stream, a column fall-through only
-// forces re-query for streams that already share dirty tables.
+// `TableDependencies.all` (table side) and `ColumnDependencies.all`
+// (column side). The asymmetry is load-bearing: a table fall-through
+// invalidates every stream, while a column fall-through only forces
+// re-query for streams that already share dirty tables.
 
 /// Stream engine — reactive query lifecycle.
 ///
@@ -107,11 +110,11 @@ final class StreamEngine {
   /// column-intersection check before scheduling the requery. A stream
   /// only re-runs if its read-column set intersects the writer's modified
   /// column set for at least one shared table. The check degrades to
-  /// today's table-only behaviour when either side is unknown — a `null`
-  /// entry in `dirtyColumns` (writer-side wildcard for INSERT/DELETE) or
-  /// a missing entry in the stream's `columnDependencies` (e.g. legacy
-  /// streams created before this experiment landed) both force the
-  /// re-query.
+  /// today's table-only behaviour when either side is unknown —
+  /// `ColumnDependencies.all` in `dirtyColumns` (writer-side wildcard
+  /// for INSERT/DELETE) or a missing entry in the stream's
+  /// `columnDependencies` (e.g. legacy streams created before this
+  /// experiment landed) both force the re-query.
   ///
   /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencies];
   /// `null` still means "nothing to invalidate" (e.g. inside a
@@ -123,7 +126,7 @@ final class StreamEngine {
   /// short-circuit entirely.
   Future<void> invalidate(
     TableDependencies? dirtyTables, [
-    Map<String, Set<String>?>? dirtyColumns,
+    ColumnDependencyMap? dirtyColumns,
   ]) async {
     if (_entries.isEmpty || dirtyTables == null) {
       return;
@@ -340,7 +343,7 @@ final class StreamEngine {
             // tables.
             _allTableEntries.add(entry);
             entry.dependencies = const <String>{};
-            entry.columnDependencies = const <String, Set<String>?>{};
+            entry.columnDependencies = const <String, ColumnDependencies>{};
           case FixedTableDependencies(:final tables):
             // Index the entry's table dependencies after its initial query
             // completes.
@@ -498,11 +501,11 @@ final class StreamEntry {
   /// Experiment 106: per-table column dependencies. The authorizer
   /// captures every column referenced in the query (SELECT projection
   /// columns plus WHERE / ORDER BY / etc. — everything that can affect
-  /// the result). A `null` entry for a table means "any column" and
-  /// forces the writer-side dispatch path to re-query unconditionally
-  /// for that table. An absent entry behaves the same as `null` per the
-  /// elision contract in [StreamEngine.invalidate].
-  Map<String, Set<String>?> columnDependencies;
+  /// the result). [ColumnDependencies.all] for a table means "any column"
+  /// and forces the writer-side dispatch path to re-query unconditionally
+  /// for that table. An absent entry behaves the same way per the elision
+  /// contract in [StreamEngine.invalidate].
+  ColumnDependencyMap columnDependencies;
 
   /// Per-subscriber buffered controllers. Each subscriber gets their own
   /// non-broadcast StreamController that buffers events, eliminating the
@@ -581,8 +584,8 @@ class ColumnInvalidationPolicy {
   /// Contract:
   ///   * disjoint concrete sets → `false` (elide dispatch)
   ///   * overlapping concrete sets → `true`
-  ///   * writer-side `null` (wildcard for INSERT/DELETE) → `true`
-  ///   * reader-side `null` (or absent) for the dirty table → `true`
+  ///   * writer-side `ColumnDependencies.all` (INSERT/DELETE) → `true`
+  ///   * reader-side `ColumnDependencies.all` or absent dirty table → `true`
   ///   * dirty table absent from column map (table-only) → `true`
   ///   * dirty table not in entry's deps → continue scanning
   ///
@@ -601,17 +604,22 @@ class ColumnInvalidationPolicy {
       // Writer-side wildcard: INSERT / DELETE / untagged writes — every
       // stream watching this table must re-query because rows may have
       // appeared or disappeared.
-      final writerCols = dirtyColumns[table];
-      if (writerCols == null) {
-        if (dirtyColumns.containsKey(table)) return true;
+      final writerCols = switch (dirtyColumns[table]) {
+        AllColumnDependencies() => null,
+        FixedColumnDependencies(:final columns) => columns,
         // Table-only invalidation with no column info available — fall
         // back to today's behaviour and re-query.
-        return true;
-      }
+        null => null,
+      };
+      if (writerCols == null) return true;
 
       // Reader-side wildcard or missing column data: degrade safely —
       // re-query the stream.
-      final readerCols = entryCols[table];
+      final readerCols = switch (entryCols[table]) {
+        AllColumnDependencies() => null,
+        FixedColumnDependencies(:final columns) => columns,
+        null => null,
+      };
       if (readerCols == null) return true;
 
       // Both sides have concrete column sets. Skip the re-query only

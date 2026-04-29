@@ -63,7 +63,7 @@ needs to evaluate (projection, WHERE, ORDER BY, etc.).
 **2. Writer side — per-stmt modified columns.** The same authorizer
 context, with `track_writes=1`, captures `SQLITE_UPDATE` events (table +
 column being SET) at writer prepare time. INSERT and DELETE arrive
-without a column from SQLite, so they emit a `"table.*"` wildcard
+without a column from SQLite, so they emit a structured wildcard column
 sentinel meaning "any column dirty for this table" — the dispatch path
 then degrades to today's table-only behaviour for those writes.
 
@@ -84,10 +84,16 @@ scheduling a stream for re-query:
 // Pseudo-code from lib/src/stream_engine.dart:_writeAffectsEntry
 for (final table in dirtyTables) {
   if (!entryDeps.contains(table)) continue;
-  final writerCols = dirtyColumns[table];
-  if (writerCols == null) return true;       // wildcard — re-query
-  final readerCols = entryCols[table];
-  if (readerCols == null) return true;       // unknown read cols — re-query
+  final writerCols = switch (dirtyColumns[table]) {
+    FixedColumnDependencies(:final columns) => columns,
+    _ => null,
+  };
+  if (writerCols == null) return true;       // wildcard / unknown — re-query
+  final readerCols = switch (entryCols[table]) {
+    FixedColumnDependencies(:final columns) => columns,
+    _ => null,
+  };
+  if (readerCols == null) return true;       // wildcard / unknown — re-query
   for (final c in writerCols) {              // both concrete: intersect
     if (readerCols.contains(c)) return true;
   }
@@ -113,8 +119,9 @@ fidelity.
 - `native/resqlite.h` — public FFI surface for the two new getters and
   `RESQLITE_MAX_DEP_COLUMNS = 64`.
 - `lib/src/native/resqlite_bindings.dart` — `getReadColumns()` and
-  `getDirtyColumns()` returning `Map<String, Set<String>?>` (null per
-  table = wildcard).
+  `getDirtyColumns()` returning `ColumnDependencyMap`
+  (`Map<String, ColumnDependencies>`, with `ColumnDependencies.all`
+  per table = wildcard).
 - `lib/src/reader/read_worker.dart` — `executeQueryWithDeps` now returns
   the column map alongside table list.
 - `lib/src/reader/reader_pool.dart` — `selectWithDeps` tuple shape
@@ -232,7 +239,7 @@ benchmark was added to PR #39 to make visible.
 
 ## Notes for follow-ups
 
-- **All-cols sentinel for INSERT/DELETE** is conservative — it forces a
+- **Wildcard column sentinel for INSERT/DELETE** is conservative — it forces a
   re-query for any stream watching the inserted/deleted table, even if
   the WHERE clause means no row could enter or exit that stream's
   result. Tighter handling would need preupdate-hook per-column diffing
@@ -305,10 +312,13 @@ table/column pairs backed by one compact allocation. This removes
 delimiter parsing at the FFI boundary and preserves table or column
 names that contain dots.
 
-The Dart layer captures the asymmetry in two types:
+The Dart layer captures the dependency sentinels in matching types:
 `TableDependencies` (`TableDependencies.fixed(tables)` vs
-`TableDependencies.all`) at the FFI boundary, and `_allTableEntries`
-at the StreamEngine level. The
+`TableDependencies.all`) for the table correctness layer, and
+`ColumnDependencies` (`ColumnDependencies.fixed(columns)` vs
+`ColumnDependencies.all`) for the per-table column optimization
+layer. `_allTableEntries` remains the StreamEngine-level bucket for
+streams with unknown table dependencies. The
 contract is documented at the top of `lib/src/stream_engine.dart`:
 *tables = correctness, columns = optimization*. The dispatch
 elision policy is extracted into a `@visibleForTesting`

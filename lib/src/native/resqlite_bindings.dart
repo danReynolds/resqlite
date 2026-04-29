@@ -487,45 +487,68 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
 /// Per-table dirty / read column dependency map.
+typedef ColumnDependencyMap = Map<String, ColumnDependencies>;
+
+/// Column dependency set for one known table.
 ///
-/// `null` for a given table means "any column matters" — emitted by the
-/// writer authorizer for INSERT / DELETE (where SQLite does not surface
-/// a column name) and by the reader path when an authorizer event
-/// fires without a column (triggers, views).
-typedef ColumnDependencyMap = Map<String, Set<String>?>;
+/// The native layer uses `"*"` as a compact transport sentinel for "all
+/// columns". Dart decodes that immediately into [ColumnDependencies.all] so
+/// the stream policy does not rely on nullable map values.
+sealed class ColumnDependencies {
+  const ColumnDependencies._();
+
+  /// Concrete set of columns — column elision can apply by intersection.
+  const factory ColumnDependencies.fixed(Set<String> columns) =
+      FixedColumnDependencies;
+
+  /// Unknown / all columns — fall back to table-level invalidation.
+  static const all = AllColumnDependencies._();
+}
+
+/// Known, bounded column dependency set for one table.
+final class FixedColumnDependencies extends ColumnDependencies {
+  const FixedColumnDependencies(this.columns) : super._();
+
+  final Set<String> columns;
+}
+
+/// Sentinel for "any column may matter" within a known table.
+final class AllColumnDependencies extends ColumnDependencies {
+  const AllColumnDependencies._() : super._();
+}
 
 /// Decode `count` parallel table/column pointers into a per-table column map.
-/// Wildcard columns (`"*"`) collapse the table to `null`, signalling "any
-/// column matters".
+/// Wildcard columns (`"*"`) collapse the table to [ColumnDependencies.all].
 ///
 /// Shared between [getReadColumns] and [getDirtyColumns] — both decoders
 /// are otherwise identical, the only difference is which FFI getter
 /// produced the count + pointer fill.
 ColumnDependencyMap _decodeColumnMap(int count) {
-  if (count <= 0) return const <String, Set<String>?>{};
-  final out = <String, Set<String>?>{};
+  if (count <= 0) return const <String, ColumnDependencies>{};
+  final out = <String, ColumnDependencies>{};
   for (var i = 0; i < count; i++) {
     final table = _columnTablesBuf[i].toDartString();
     final col = _columnNamesBuf[i].toDartString();
     if (col == '*') {
-      out[table] = null;
+      out[table] = ColumnDependencies.all;
       continue;
     }
-    final existing = out[table];
-    if (existing == null && out.containsKey(table)) {
-      // Wildcard already present — keep it.
-      continue;
+    switch (out[table]) {
+      case AllColumnDependencies():
+        // Wildcard already present — keep it.
+        continue;
+      case FixedColumnDependencies(:final columns):
+        columns.add(col);
+      case null:
+        out[table] = ColumnDependencies.fixed(<String>{col});
     }
-    final set = existing ?? <String>{};
-    set.add(col);
-    out[table] = set;
   }
   return out;
 }
 
 /// Get the per-reader read-column metadata as a Dart map of
-/// `table -> Set<column>`. Wildcards collapse the table to `null` in the
-/// returned map, signalling "any column matters".
+/// `table -> ColumnDependencies`. Wildcards collapse the table to
+/// [ColumnDependencies.all], signalling "any column matters".
 ///
 /// Repeated calls return metadata from the most recent acquired statement until
 /// the reader runs another query or the entry is evicted.
@@ -546,8 +569,8 @@ ColumnDependencyMap getReadColumns(
   return _decodeColumnMap(count);
 }
 
-/// Drain the writer's dirty-column accumulator. Wildcards collapse to `null`
-/// to signal "all columns of this table are dirty".
+/// Drain the writer's dirty-column accumulator. Wildcards collapse to
+/// [ColumnDependencies.all] to signal "all columns of this table are dirty".
 ColumnDependencyMap getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyColumns(
     dbHandle,

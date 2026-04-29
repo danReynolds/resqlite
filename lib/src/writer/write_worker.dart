@@ -88,11 +88,11 @@ final class ExecuteResponse {
   const ExecuteResponse(this.result, this.dirtyTables, this.dirtyColumns);
   final WriteResult result;
   final TableDependencies? dirtyTables;
-  // Experiment 106: per-table dirty-column map. `null` for a given table
-  // means "all columns dirty" (INSERT / DELETE / preupdate hook fired
-  // outside a tagged stmt). Absent map entries mean the table itself
-  // wasn't dirtied.
-  final Map<String, Set<String>?>? dirtyColumns;
+  // Experiment 106: per-table dirty-column map.
+  // `ColumnDependencies.all` for a table means "all columns dirty"
+  // (INSERT / DELETE / preupdate hook fired outside a tagged stmt).
+  // Absent map entries mean the table itself wasn't dirtied.
+  final ColumnDependencyMap? dirtyColumns;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -105,7 +105,7 @@ final class QueryResponse {
 final class BatchResponse {
   const BatchResponse(this.dirtyTables, this.dirtyColumns);
   final TableDependencies? dirtyTables;
-  final Map<String, Set<String>?>? dirtyColumns;
+  final ColumnDependencyMap? dirtyColumns;
 }
 
 // ---------------------------------------------------------------------------
