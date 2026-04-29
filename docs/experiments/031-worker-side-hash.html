@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 031: Worker-Side Result Hash for Stream Re-queries — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted</span>
+    <p class="story-byline">Apr 8, 2026 · Accepted</p>
+<h1>Experiment 031: Worker-Side Result Hash for Stream Re-queries</h1>
+<p><strong>Date:</strong> 2026-04-08</p>
+<p><strong>Status:</strong> Accepted</p>
+<h2>Hypothesis</h2>
+<p>Stream re-queries transfer the full ResultSet from worker to main, then hash it</p>
+<p>on the main isolate for change detection. For unchanged results (common in fanout</p>
+<p>scenarios where many streams watch tables not directly affected by a write), this</p>
+<p>wastes both SendPort transfer cost and main-isolate hash computation time.</p>
+<p>Moving the hash to the worker avoids both: unchanged results send only a hash</p>
+<p>(single int) instead of a full ResultSet, and the main isolate skips hashing</p>
+<p>entirely.</p>
+<h2>Design</h2>
+<p>New <code>QueryType.selectIfChanged</code>:</p>
+<ul>
+<li>Request includes <code>lastResultHash</code> as a 5th element</li>
+<li>Worker executes query, hashes the raw flat values list, compares</li>
+<li>If unchanged: sends <code>[hash, false]</code> — no ResultSet transfer</li>
+<li>If changed: sends <code>[[ResultSet, newHash], false]</code> — includes new hash</li>
+</ul>
+<p>Pool adds <code>selectIfChanged()</code> that returns <code>(rows?, newHash)</code>.</p>
+<p>StreamEngine's <code>_reQuery</code> uses this instead of <code>select()</code> + <code>_emitResult</code>.</p>
+<p>The <code>hashRawResult()</code> function hashes the flat values list directly, producing</p>
+<p>the same hash as <code>_hashResult</code> (which iterates via Row.values → MapMixin).</p>
+<h2>Results</h2>
+<p>3-run comparison:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>Before</th>
+<th>After (best of 3)</th>
+<th>sqlite_reactive</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>Fanout shared (25 watchers)</strong></td>
+<td>0.48ms</td>
+<td><strong>0.32ms</strong> (-33%)</td>
+<td>0.37ms</td>
+</tr>
+<tr>
+<td>Fanout unique (25 queries)</td>
+<td>0.94ms</td>
+<td>0.84ms (~noise)</td>
+<td>0.58ms</td>
+</tr>
+<tr>
+<td>Invalidation latency</td>
+<td>0.11ms</td>
+<td>0.11ms (unchanged)</td>
+<td>0.38ms</td>
+</tr>
+</tbody></table></div>
+
+<p>The shared fanout improvement is clear: with 25 watchers on the same query, only</p>
+<p>one re-query runs. If the result is unchanged (common), the worker sends a 1-int</p>
+<p>hash instead of a full ResultSet with 25 subscribers iterating it.</p>
+<p>The unique fanout improvement is marginal because each of 25 different queries</p>
+<p>still needs to execute and transfer results. The bottleneck there is serial</p>
+<p>dispatch through 4 workers, not hash computation.</p>
+<h2>Decision</h2>
+<p><strong>Accepted</strong> — shared fanout now beats sqlite_reactive (0.32ms vs 0.37ms).</p>
+<p>Clean implementation, no downside (worker already has the flat values list,</p>
+<p>hashing it is trivial).</p>
+
+  </article>
+</div>
+</body>
+</html>

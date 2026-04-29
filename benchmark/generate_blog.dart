@@ -1,79 +1,311 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
 
-/// Converts markdown files from `doc/` into styled HTML pages
-/// in `docs/blog/`, plus an index page.
+/// Converts markdown files from `doc/` into styled HTML pages in `docs/blog/`.
+///
+/// Architecture/deep-dive posts are rendered into `docs/blog/*.html`.
+/// Project stories are rendered into `docs/blog/stories/*.html`, with a
+/// chronological timeline at `docs/blog/stories/index.html`.
+/// Experiment markdown files are rendered into `docs/experiments/*.html`, while
+/// the existing interactive experiment dashboard remains at
+/// `docs/experiments/index.html`.
 ///
 /// Usage:
 ///   dart run benchmark/generate_blog.dart
 void main() {
-  final posts = <Map<String, String>>[];
-
-  // Define post order and metadata.
-  final sources = [
-    (
-      path: 'experiments/MILESTONES.md',
-      slug: 'milestones',
-      category: 'Engineering Story',
-    ),
-    (
+  final posts = [
+    _loadPost(
       path: 'doc/arch/architecture.md',
       slug: 'architecture',
       category: 'Architecture',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/reading.md',
       slug: 'reading',
       category: 'Deep Dive',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/writing.md',
       slug: 'writing',
       category: 'Deep Dive',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/streaming.md',
       slug: 'streaming',
       category: 'Deep Dive',
     ),
-  ];
+  ].whereType<BlogPost>().toList();
 
-  for (final source in sources) {
-    final file = File(source.path);
-    if (!file.existsSync()) {
-      print('  Skipping ${source.path} (not found)');
-      continue;
-    }
-    final content = file.readAsStringSync();
-    final title = _extractTitle(content);
-    final description = _extractDescription(content);
+  final stories = _loadStories(Directory('doc/stories'));
+  final experiments = _loadExperiments(Directory('experiments'));
 
-    posts.add({
-      'slug': source.slug,
-      'title': title,
-      'category': source.category,
-      'description': description,
-      'content': content,
-    });
+  final outDir = Directory('docs/blog')..createSync(recursive: true);
+  final storyOutDir = Directory('${outDir.path}/stories')
+    ..createSync(recursive: true);
+  final experimentOutDir = Directory('docs/experiments')
+    ..createSync(recursive: true);
+
+  // Remove generated story HTML that may no longer correspond to a source file.
+  for (final file in storyOutDir.listSync().whereType<File>()) {
+    if (file.path.endsWith('.html')) file.deleteSync();
   }
 
-  // Write individual post pages.
-  final outDir = Directory('docs/blog');
-  outDir.createSync(recursive: true);
+  // Remove generated experiment article pages. Keep the hand-authored
+  // interactive dashboard at index.html.
+  for (final file in experimentOutDir.listSync().whereType<File>()) {
+    final name = file.uri.pathSegments.last;
+    if (name.endsWith('.html') && name != 'index.html') file.deleteSync();
+  }
+
+  // Remove the old milestone page. Stories are the canonical narrative surface.
+  final oldMilestones = File('${outDir.path}/milestones.html');
+  if (oldMilestones.existsSync()) oldMilestones.deleteSync();
 
   for (final post in posts) {
-    final html = _renderPost(post, posts);
-    File('${outDir.path}/${post['slug']}.html')
-        .writeAsStringSync(html);
-    print('  ${post['slug']}.html — ${post['title']}');
+    File(
+      '${outDir.path}/${post.slug}.html',
+    ).writeAsStringSync(_renderPost(post, PostKind.blog));
+    print('  ${post.slug}.html - ${post.title}');
   }
 
-  // Write index page.
-  File('${outDir.path}/index.html')
-      .writeAsStringSync(_renderIndex(posts));
-  print('  index.html — Blog index');
+  for (final story in stories) {
+    File(
+      '${storyOutDir.path}/${story.slug}.html',
+    ).writeAsStringSync(_renderPost(story, PostKind.story));
+    print('  stories/${story.slug}.html - ${story.title}');
+  }
 
-  print('Wrote ${posts.length} posts + index to docs/blog/');
+  for (final experiment in experiments) {
+    File(
+      '${experimentOutDir.path}/${experiment.slug}.html',
+    ).writeAsStringSync(_renderPost(experiment, PostKind.experiment));
+    print('  experiments/${experiment.slug}.html - ${experiment.title}');
+  }
+
+  File(
+    '${storyOutDir.path}/index.html',
+  ).writeAsStringSync(_renderStoryIndex(stories));
+  print('  stories/index.html - Stories timeline');
+
+  File('${outDir.path}/index.html').writeAsStringSync(_renderBlogIndex(posts));
+  print('  index.html - Blog index');
+
+  print(
+    'Wrote ${posts.length} posts + ${stories.length} stories + '
+    '${experiments.length} experiments to docs/',
+  );
+}
+
+enum PostKind { blog, story, experiment }
+
+class BlogPost {
+  BlogPost({
+    required this.slug,
+    required this.title,
+    required this.category,
+    required this.description,
+    required this.content,
+    this.date,
+    this.tags = const [],
+    this.tone = 'green',
+    this.meta = const {},
+  });
+
+  final String slug;
+  final String title;
+  final String category;
+  final String description;
+  final String content;
+  final DateTime? date;
+  final List<String> tags;
+  final String tone;
+  final Map<String, String> meta;
+}
+
+BlogPost? _loadPost({
+  required String path,
+  required String slug,
+  required String category,
+}) {
+  final file = File(path);
+  if (!file.existsSync()) {
+    print('  Skipping $path (not found)');
+    return null;
+  }
+
+  final content = file.readAsStringSync();
+  return BlogPost(
+    slug: slug,
+    title: _extractTitle(content),
+    category: category,
+    description: _extractDescription(content),
+    content: content,
+  );
+}
+
+List<BlogPost> _loadStories(Directory dir) {
+  if (!dir.existsSync()) return const [];
+
+  final stories = <BlogPost>[];
+  for (final file in dir.listSync().whereType<File>()) {
+    if (!file.path.endsWith('.md')) continue;
+    final raw = file.readAsStringSync();
+    final parsed = _splitFrontMatter(raw);
+    final meta = parsed.meta;
+    final content = parsed.content;
+    final filename = file.uri.pathSegments.last;
+    final fallbackSlug = filename.substring(0, filename.length - 3);
+    final slug = meta['slug']?.trim().isNotEmpty == true
+        ? meta['slug']!.trim()
+        : fallbackSlug;
+    final dateText = meta['date']?.trim();
+    final date =
+        dateText == null || dateText.isEmpty ? null : DateTime.parse(dateText);
+
+    stories.add(
+      BlogPost(
+        slug: slug,
+        title: meta['title']?.trim().isNotEmpty == true
+            ? meta['title']!.trim()
+            : _extractTitle(content),
+        category: 'Project Story',
+        description: meta['summary']?.trim().isNotEmpty == true
+            ? meta['summary']!.trim()
+            : _extractDescription(content),
+        content: content,
+        date: date,
+        tags: _parseTags(meta['tags']),
+        tone: meta['tone']?.trim().isNotEmpty == true
+            ? meta['tone']!.trim()
+            : 'green',
+      ),
+    );
+  }
+
+  stories.sort((a, b) {
+    final ad = a.date ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final bd = b.date ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final byDate = ad.compareTo(bd);
+    if (byDate != 0) return byDate;
+    return a.slug.compareTo(b.slug);
+  });
+  return stories;
+}
+
+List<BlogPost> _loadExperiments(Directory dir) {
+  if (!dir.existsSync()) return const [];
+
+  final experiments = <BlogPost>[];
+  for (final file in dir.listSync().whereType<File>()) {
+    final filename = file.uri.pathSegments.last;
+    if (!_isExperimentMarkdown(filename)) continue;
+
+    final content = file.readAsStringSync();
+    final meta = _extractExperimentMeta(content);
+    final status = meta['Status'] ?? 'Experiment';
+    experiments.add(
+      BlogPost(
+        slug: filename.substring(0, filename.length - 3),
+        title: _extractTitle(content),
+        category: status,
+        description: _extractExperimentDescription(content),
+        content: content,
+        date: _parseExperimentDate(meta['Date']),
+        tags: status == 'Experiment' ? const [] : [status],
+        tone: _experimentTone(status),
+        meta: meta,
+      ),
+    );
+  }
+
+  experiments.sort((a, b) {
+    final an = _experimentNumber(a.slug);
+    final bn = _experimentNumber(b.slug);
+    if (an != bn) return an.compareTo(bn);
+    return a.slug.compareTo(b.slug);
+  });
+  return experiments;
+}
+
+bool _isExperimentMarkdown(String filename) =>
+    RegExp(r'^\d{3}[a-z]?-.+\.md$').hasMatch(filename);
+
+int _experimentNumber(String slug) {
+  final match = RegExp(r'^(\d+)').firstMatch(slug);
+  return match == null ? 999999 : int.parse(match.group(1)!);
+}
+
+Map<String, String> _extractExperimentMeta(String content) {
+  final meta = <String, String>{};
+  for (final line in content.split('\n')) {
+    final match = RegExp(r'^\*\*([^:*]+):\*\*\s*(.+)$').firstMatch(line.trim());
+    if (match != null) {
+      meta[match.group(1)!.trim()] = match.group(2)!.trim();
+    }
+  }
+  return meta;
+}
+
+DateTime? _parseExperimentDate(String? value) {
+  if (value == null || value.isEmpty) return null;
+  return DateTime.tryParse(value);
+}
+
+String _experimentTone(String status) {
+  final normalized = status.toLowerCase();
+  if (normalized.contains('accepted')) return 'green';
+  if (normalized.contains('rejected')) return 'rose';
+  if (normalized.contains('review')) return 'amber';
+  if (normalized.contains('deferred')) return 'violet';
+  return 'amber';
+}
+
+String _extractExperimentDescription(String content) {
+  final lines = content.split('\n');
+  final start = lines.indexWhere(
+    (line) => RegExp(r'^##\s+(Problem|Hypothesis|Background)').hasMatch(line),
+  );
+  if (start == -1) return _extractDescription(content);
+
+  for (var i = start + 1; i < lines.length; i++) {
+    final line = lines[i].trim();
+    if (line.isEmpty || line.startsWith('**')) continue;
+    if (line.startsWith('#')) break;
+    return line.length > 200 ? '${line.substring(0, 197)}...' : line;
+  }
+  return _extractDescription(content);
+}
+
+({Map<String, String> meta, String content}) _splitFrontMatter(String raw) {
+  final lines = raw.split('\n');
+  if (lines.isEmpty || lines.first.trim() != '---') {
+    return (meta: const {}, content: raw);
+  }
+
+  final meta = <String, String>{};
+  var end = -1;
+  for (var i = 1; i < lines.length; i++) {
+    if (lines[i].trim() == '---') {
+      end = i;
+      break;
+    }
+    final match = RegExp(r'^([A-Za-z0-9_-]+):\s*(.*)$').firstMatch(lines[i]);
+    if (match != null) {
+      meta[match.group(1)!] = match.group(2)!.trim();
+    }
+  }
+
+  if (end == -1) return (meta: const {}, content: raw);
+  return (meta: meta, content: lines.skip(end + 1).join('\n').trimLeft());
+}
+
+List<String> _parseTags(String? tags) {
+  if (tags == null || tags.trim().isEmpty) return const [];
+  return tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .where((tag) => tag.isNotEmpty)
+      .toList();
 }
 
 String _extractTitle(String content) {
@@ -87,12 +319,10 @@ String _extractDescription(String content) {
   final lines = content.split('\n');
   for (var i = 0; i < lines.length; i++) {
     if (lines[i].startsWith('# ')) {
-      // Take the first non-empty paragraph after the title.
       for (var j = i + 1; j < lines.length; j++) {
         final line = lines[j].trim();
         if (line.isEmpty) continue;
         if (line.startsWith('#')) break;
-        // Truncate long descriptions.
         return line.length > 200 ? '${line.substring(0, 197)}...' : line;
       }
     }
@@ -100,20 +330,30 @@ String _extractDescription(String content) {
   return '';
 }
 
-String _renderIndex(List<Map<String, String>> posts) {
-  final cards = posts.map((p) => '''
-    <a class="post-card" href="${p['slug']}.html">
-      <span class="post-category">${_esc(p['category']!)}</span>
-      <h2>${_esc(p['title']!)}</h2>
-      <p>${_esc(p['description']!)}</p>
-    </a>''').join('\n');
+String _renderBlogIndex(List<BlogPost> posts) {
+  final cards = [
+    '''
+    <a class="post-card" href="stories/index.html">
+      <span class="post-category">Project Stories</span>
+      <h2>The Chronological History of resqlite</h2>
+      <p>An annotated timeline of the design decisions behind resqlite: object graphs, flat-list rows, reader-pool tradeoffs, stream invalidation, write serialization, and a Dart VM hang.</p>
+    </a>''',
+    ...posts.map(
+      (p) => '''
+    <a class="post-card" href="${p.slug}.html">
+      <span class="post-category">${_esc(p.category)}</span>
+      <h2>${_esc(p.title)}</h2>
+      <p>${_esc(p.description)}</p>
+    </a>''',
+    ),
+  ].join('\n');
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Blog — Architecture &amp; Engineering</title>
+<title>resqlite Blog - Stories &amp; Architecture</title>
 <style>
 ${_sharedCss()}
   .post-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
@@ -134,13 +374,13 @@ ${_sharedCss()}
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="../">&larr; Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="../index.html">&larr; Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
     <a href="../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
-  <h1>Architecture &amp; Engineering</h1>
-  <p class="subtitle">Technical deep-dives into how resqlite works and why it's fast.</p>
+  <h1>Stories &amp; Architecture</h1>
+  <p class="subtitle">The chronological engineering history of resqlite, plus technical deep-dives into how the library works.</p>
   <div class="post-list">
 $cards
   </div>
@@ -149,44 +389,220 @@ $cards
 </html>''';
 }
 
-String _renderPost(
-  Map<String, String> post,
-  List<Map<String, String>> allPosts,
-) {
-  final content = post['content']!;
-  final htmlBody = _markdownToHtml(content);
+String _renderStoryIndex(List<BlogPost> stories) {
+  final entries = stories.map(_renderStoryTimelineEntry).join('\n');
+  final leadTitle = stories.isEmpty ? 'Stories' : _esc(stories.first.title);
+  final leadDescription = stories.isEmpty
+      ? 'Project stories will appear here as markdown posts are added.'
+      : _inline(stories.first.description);
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${_esc(post['title']!)} — resqlite</title>
+<title>resqlite Stories - Project Timeline</title>
 <style>
-${_sharedCss()}
-${_articleCss()}
+${_storyIndexCss()}
 </style>
 </head>
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="./">&larr; All Posts</a>
-    <a href="../">Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="../index.html">&larr; Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
+
+  <header class="hero">
+    <div>
+      <span class="eyebrow">Project Stories</span>
+      <h1>The chronological history of resqlite.</h1>
+      <p class="subtitle">The public docs explain what the library does. The experiment log records every measurement. These stories explain the design decisions that changed the project, with enough context to read any entry on its own.</p>
+    </div>
+    <a class="lead-card" href="${stories.isEmpty ? '../index.html' : '${stories.first.slug}.html'}">
+      <span class="label">Start here</span>
+      <h2>$leadTitle</h2>
+      <p>$leadDescription</p>
+    </a>
+  </header>
+
+  <section class="stats" aria-label="Project story highlights">
+    <div class="stat">
+      <strong>${stories.length}</strong>
+      <span>chronological stories split from the original project narrative</span>
+    </div>
+    <div class="stat">
+      <strong>0.47 ms</strong>
+      <span>main-isolate time for 5,000-row map reads in the early benchmark set</span>
+    </div>
+    <div class="stat">
+      <strong>116K</strong>
+      <span>point queries per second measured after the reader event-port cleanup</span>
+    </div>
+    <div class="stat">
+      <strong>6 days</strong>
+      <span>from filing the Flutter hang to the Dart VM fix landing upstream</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="timeline-title">
+    <div class="section-heading">
+      <h2 id="timeline-title">Timeline</h2>
+      <a href="../../experiments/index.html">Open the experiment log &rarr;</a>
+    </div>
+
+    <div class="timeline">
+$entries
+    </div>
+  </section>
+
+  <section class="lower-links" aria-label="Related documentation">
+    <a class="link-card" href="../../experiments/index.html">
+      <h3>Experiment Log</h3>
+      <p>The complete lab notebook: accepted ideas, rejected ideas, benchmark links, and reasoning.</p>
+    </a>
+    <a class="link-card" href="../../benchmarks/index.html">
+      <h3>Benchmark Dashboard</h3>
+      <p>Interactive charts for peer comparisons, run history, devices, and scenario workloads.</p>
+    </a>
+    <a class="link-card" href="../architecture.html">
+      <h3>Architecture</h3>
+      <p>The system-level view of readers, writers, native handles, and streaming behavior.</p>
+    </a>
+  </section>
+</div>
+</body>
+</html>''';
+}
+
+String _renderStoryTimelineEntry(BlogPost story) {
+  final tags = story.tags
+      .map((tag) => '<span class="tag">${_esc(tag)}</span>')
+      .join('\n              ');
+  return '''
+      <article class="story-entry" data-tone="${_escAttr(story.tone)}">
+        <div class="story-date">
+          <strong>${_storyMonthDay(story.date)}</strong>
+          ${story.date?.year ?? ''}
+        </div>
+        <a class="story-card" href="${story.slug}.html">
+          <div>
+            <h3>${_esc(story.title)}</h3>
+            <p>${_inline(story.description)}</p>
+            <div class="story-meta">
+              $tags
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>''';
+}
+
+String _renderPost(BlogPost post, PostKind kind) {
+  final htmlBody = _markdownToHtml(post.content, kind);
+  final isStory = kind == PostKind.story;
+  final isExperiment = kind == PostKind.experiment;
+  final nav = switch (kind) {
+    PostKind.story => '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>''',
+    PostKind.experiment => '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>''',
+    PostKind.blog => '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Posts</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
+  </nav>''',
+  };
+  final meta = isStory
+      ? '    <p class="story-byline">${_esc(_longDate(post.date))}${post.tags.isEmpty ? '' : ' · ${post.tags.map(_esc).join(' · ')}'}</p>\n'
+      : isExperiment
+          ? _renderExperimentMeta(post)
+          : '';
+  final body = isStory || isExperiment ? '$meta$htmlBody' : '    $htmlBody';
+  final extraCss = isStory || isExperiment ? _storyBylineCss() : '';
+
+  return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${_esc(post.title)} — resqlite</title>
+<style>
+${_sharedCss()}
+${_articleCss()}$extraCss
+</style>
+</head>
+<body>
+<div class="page-wrap">
+$nav
   <article class="post">
-    <span class="post-category">${_esc(post['category']!)}</span>
-    $htmlBody
+    <span class="post-category">${_esc(post.category)}</span>
+$body
   </article>
 </div>
 </body>
 </html>''';
 }
 
+String _renderExperimentMeta(BlogPost post) {
+  final fields = <String>[
+    if (post.date != null) _longDate(post.date),
+    if (post.meta['Status'] case final status?) status,
+    if (post.meta['Direction'] case final direction?) direction,
+  ].where((field) => field.trim().isNotEmpty).toList();
+
+  if (fields.isEmpty) return '';
+  return '    <p class="story-byline">${fields.map(_inline).join(' · ')}</p>\n';
+}
+
+String _storyMonthDay(DateTime? date) {
+  if (date == null) return '';
+  return '${_month(date.month)} ${date.day.toString().padLeft(2, '0')}';
+}
+
+String _longDate(DateTime? date) {
+  if (date == null) return '';
+  return '${_month(date.month)} ${date.day}, ${date.year}';
+}
+
+String _month(int month) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return months[month - 1];
+}
+
 /// Convert markdown to HTML. Handles headings, paragraphs, code blocks,
 /// inline code, bold, lists, tables, and horizontal rules.
-String _markdownToHtml(String md) {
+String _markdownToHtml(String md, PostKind kind) {
   final lines = md.split('\n');
   final buf = StringBuffer();
   var inCodeBlock = false;
@@ -194,23 +610,25 @@ String _markdownToHtml(String md) {
   var listType = '';
   final tableRows = <String>[];
 
-  void _flushTable() {
+  void flushTable() {
     if (tableRows.isEmpty) return;
-    buf.writeln(_renderTable(tableRows));
+    buf.writeln(_renderTable(tableRows, kind));
     tableRows.clear();
   }
 
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
 
-    // Code blocks.
     if (line.startsWith('```')) {
-      _flushTable();
+      flushTable();
       if (inCodeBlock) {
         buf.writeln('</code></pre>');
         inCodeBlock = false;
       } else {
-        if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+        if (inList) {
+          buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+          inList = false;
+        }
         final lang = line.substring(3).trim();
         buf.writeln('<pre><code class="lang-$lang">');
         inCodeBlock = true;
@@ -224,103 +642,106 @@ String _markdownToHtml(String md) {
 
     final trimmed = line.trim();
 
-    // Table rows: collect and render as a batch.
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
       tableRows.add(trimmed);
       continue;
     }
-    _flushTable();
+    flushTable();
 
-    // Blank line — close list if open.
     if (trimmed.isEmpty) {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
       continue;
     }
 
-    // Headings.
     if (trimmed.startsWith('######')) {
-      buf.writeln('<h6>${_inline(trimmed.substring(6).trim())}</h6>');
+      buf.writeln('<h6>${_inline(trimmed.substring(6).trim(), kind)}</h6>');
     } else if (trimmed.startsWith('#####')) {
-      buf.writeln('<h5>${_inline(trimmed.substring(5).trim())}</h5>');
+      buf.writeln('<h5>${_inline(trimmed.substring(5).trim(), kind)}</h5>');
     } else if (trimmed.startsWith('####')) {
-      buf.writeln('<h4>${_inline(trimmed.substring(4).trim())}</h4>');
+      buf.writeln('<h4>${_inline(trimmed.substring(4).trim(), kind)}</h4>');
     } else if (trimmed.startsWith('###')) {
-      buf.writeln('<h3>${_inline(trimmed.substring(3).trim())}</h3>');
+      buf.writeln('<h3>${_inline(trimmed.substring(3).trim(), kind)}</h3>');
     } else if (trimmed.startsWith('##')) {
-      buf.writeln('<h2>${_inline(trimmed.substring(2).trim())}</h2>');
+      buf.writeln('<h2>${_inline(trimmed.substring(2).trim(), kind)}</h2>');
     } else if (trimmed.startsWith('# ')) {
-      buf.writeln('<h1>${_inline(trimmed.substring(2).trim())}</h1>');
-    }
-    // Horizontal rule.
-    else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
+      buf.writeln('<h1>${_inline(trimmed.substring(2).trim(), kind)}</h1>');
+    } else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
       buf.writeln('<hr>');
-    }
-    // Unordered list.
-    else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
-      if (!inList) { buf.writeln('<ul>'); inList = true; listType = 'ul'; }
-      buf.writeln('<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''))}</li>');
-    }
-    // Ordered list.
-    else if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
-      if (!inList) { buf.writeln('<ol>'); inList = true; listType = 'ol'; }
-      buf.writeln('<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''))}</li>');
-    }
-    // Paragraph.
-    else {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
-      buf.writeln('<p>${_inline(trimmed)}</p>');
+    } else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
+      if (!inList) {
+        buf.writeln('<ul>');
+        inList = true;
+        listType = 'ul';
+      }
+      buf.writeln(
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''), kind)}</li>',
+      );
+    } else if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
+      if (!inList) {
+        buf.writeln('<ol>');
+        inList = true;
+        listType = 'ol';
+      }
+      buf.writeln(
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''), kind)}</li>',
+      );
+    } else {
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
+      buf.writeln('<p>${_inline(trimmed, kind)}</p>');
     }
   }
-  _flushTable();
+  flushTable();
   if (inList) buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
   if (inCodeBlock) buf.writeln('</code></pre>');
 
   return buf.toString();
 }
 
-/// Render a markdown table as a styled HTML table with winner highlighting.
-/// For numeric columns, the best value (lowest, or highest for qps/ops) gets
-/// a green highlight.
-String _renderTable(List<String> rows) {
+String _renderTable(List<String> rows, PostKind kind) {
   if (rows.isEmpty) return '';
 
-  // Parse cells from each row.
   List<String> parseCells(String row) =>
       row.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
-  // Skip separator rows (|---|---|).
-  final dataRows = rows
-      .where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r))
-      .toList();
+  final dataRows =
+      rows.where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r)).toList();
   if (dataRows.isEmpty) return '';
 
   final headerCells = parseCells(dataRows[0]);
   final bodyRows = dataRows.skip(1).map(parseCells).toList();
 
-  // Detect which columns are numeric (for winner highlighting).
   final numericCols = <int>{};
   for (final row in bodyRows) {
     for (var c = 0; c < row.length; c++) {
+      final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
+      if (_isDimensionColumn(header)) continue;
       final val = row[c].replaceAll(RegExp(r'[*`]'), '');
       if (double.tryParse(val) != null) numericCols.add(c);
     }
   }
 
-  // For each numeric column, find the best value.
-  // "Best" = lowest, unless column header contains qps/ops/throughput.
   final colBest = <int, double>{};
   for (final c in numericCols) {
     final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
-    final higherIsBetter = header.contains('qps') || header.contains('ops') ||
+    final higherIsBetter = header.contains('qps') ||
+        header.contains('ops') ||
         header.contains('throughput');
     double? best;
     for (final row in bodyRows) {
       if (c >= row.length) continue;
       final val = double.tryParse(row[c].replaceAll(RegExp(r'[*`]'), ''));
       if (val == null) continue;
-      if (best == null ||
-          (higherIsBetter ? val > best : val < best)) {
+      if (best == null || (higherIsBetter ? val > best : val < best)) {
         best = val;
       }
     }
@@ -329,15 +750,12 @@ String _renderTable(List<String> rows) {
 
   final buf = StringBuffer();
   buf.writeln('<div class="table-wrap"><table class="bench-table">');
-
-  // Header.
   buf.writeln('<thead><tr>');
   for (final cell in headerCells) {
-    buf.writeln('<th>${_inline(cell)}</th>');
+    buf.writeln('<th>${_inline(cell, kind)}</th>');
   }
   buf.writeln('</tr></thead>');
 
-  // Body rows.
   buf.writeln('<tbody>');
   for (final row in bodyRows) {
     buf.writeln('<tr>');
@@ -347,7 +765,7 @@ String _renderTable(List<String> rows) {
       final val = double.tryParse(clean);
       final isBest = val != null && colBest[c] == val && bodyRows.length > 1;
       final cls = isBest ? ' class="winner"' : '';
-      buf.writeln('<td$cls>${_inline(raw)}</td>');
+      buf.writeln('<td$cls>${_inline(raw, kind)}</td>');
     }
     buf.writeln('</tr>');
   }
@@ -356,30 +774,126 @@ String _renderTable(List<String> rows) {
   return buf.toString();
 }
 
-/// Inline formatting: bold, italic, code, links.
-String _inline(String s) {
+bool _isDimensionColumn(String header) {
+  final normalized = header.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  return normalized == 'row' ||
+      normalized == 'rows' ||
+      normalized == 'size' ||
+      normalized == 'scenario' ||
+      normalized == 'workload' ||
+      normalized == 'path' ||
+      normalized == 'phase' ||
+      normalized == 'metric' ||
+      normalized == 'implementation';
+}
+
+String _inline(String s, [PostKind kind = PostKind.blog]) {
   var out = _esc(s);
-  // Links: [text](url)
   out = out.replaceAllMapped(
     RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
-    (m) => '<a href="${m.group(2)}">${m.group(1)}</a>',
+    (m) => '<a href="${_htmlHref(m.group(2)!, kind)}">${m.group(1)}</a>',
   );
-  // Bold: **text**
   out = out.replaceAllMapped(
     RegExp(r'\*\*([^*]+)\*\*'),
     (m) => '<strong>${m.group(1)}</strong>',
   );
-  // Italic: *text* (but not inside bold)
   out = out.replaceAllMapped(
     RegExp(r'(?<!\*)\*([^*]+)\*(?!\*)'),
     (m) => '<em>${m.group(1)}</em>',
   );
-  // Inline code: `text`
   out = out.replaceAllMapped(
     RegExp(r'`([^`]+)`'),
     (m) => '<code>${m.group(1)}</code>',
   );
   return out;
+}
+
+String _htmlHref(String href, PostKind kind) {
+  if (href.startsWith('http:') ||
+      href.startsWith('https:') ||
+      href.startsWith('mailto:') ||
+      href.startsWith('#')) {
+    return _escAttr(href);
+  }
+
+  final hashIndex = href.indexOf('#');
+  final path = hashIndex == -1 ? href : href.substring(0, hashIndex);
+  final anchor = hashIndex == -1 ? '' : href.substring(hashIndex);
+
+  if (path == '../../experiments/' || path == '../../../experiments/') {
+    return _escAttr('${_experimentsPrefix(kind)}index.html$anchor');
+  }
+
+  if (path.endsWith('.md')) {
+    final filename = path.split('/').last;
+    final slug = filename.substring(0, filename.length - 3);
+    if (_isExperimentMarkdown(filename)) {
+      return _escAttr('${_experimentsPrefix(kind)}$slug.html$anchor');
+    }
+    if (kind == PostKind.blog && path.startsWith('./')) {
+      return _escAttr('${path.substring(2, path.length - 3)}.html$anchor');
+    }
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+  if (path.endsWith('.json')) {
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+
+  if (kind == PostKind.experiment && _looksLikeRepoFile(path)) {
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+
+  if (path.endsWith('/')) return _escAttr('${path}index.html$anchor');
+  return _escAttr(href);
+}
+
+bool _looksLikeRepoFile(String path) {
+  if (path.startsWith('/')) return true;
+  if (path.startsWith('../') || path.startsWith('./')) return true;
+  return RegExp(r'^[A-Za-z0-9_.-]+\.[A-Za-z0-9]+$').hasMatch(path);
+}
+
+String _experimentsPrefix(PostKind kind) {
+  return switch (kind) {
+    PostKind.story => '../../experiments/',
+    PostKind.blog => '../experiments/',
+    PostKind.experiment => '',
+  };
+}
+
+String _githubSourceHref(String path, PostKind kind, String anchor) {
+  const base = 'https://github.com/danReynolds/resqlite/blob/main/';
+  final repoPath = _repoRelativePath(path, kind);
+  return '$base$repoPath$anchor';
+}
+
+String _repoRelativePath(String path, PostKind kind) {
+  if (path.startsWith('/')) {
+    const markers = ['/packages/resqlite/', '/resqlite/'];
+    for (final marker in markers) {
+      final index = path.indexOf(marker);
+      if (index != -1) return path.substring(index + marker.length);
+    }
+    return path.split('/').last;
+  }
+
+  final parts = <String>[
+    ...switch (kind) {
+      PostKind.story => ['doc', 'stories'],
+      PostKind.blog => ['doc', 'arch'],
+      PostKind.experiment => ['experiments'],
+    },
+  ];
+
+  for (final part in path.split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+    } else {
+      parts.add(part);
+    }
+  }
+  return parts.join('/');
 }
 
 String _esc(String s) {
@@ -389,6 +903,8 @@ String _esc(String s) {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
 }
+
+String _escAttr(String s) => _esc(s).replaceAll("'", '&#39;');
 
 String _sharedCss() => '''
   :root {
@@ -459,4 +975,322 @@ String _articleCss() => '''
   .bench-table tr:last-child td { border-bottom: none; }
   .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
   .bench-table .winner { color: #3fb950; font-weight: 600; }
+''';
+
+String _storyBylineCss() => '''
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+''';
+
+String _storyIndexCss() => '''
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #111722;
+    --panel-hover: rgba(88, 166, 255, 0.07);
+    --border: #30363d;
+    --border-strong: #46515f;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --rose: #ff7b72;
+    --violet: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: none; }
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .page-wrap {
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  .top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .top-nav a { color: var(--accent); }
+  .top-nav a:hover { text-decoration: underline; }
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+    padding: 2rem 0 1.5rem;
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--border);
+  }
+  .eyebrow {
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    color: var(--green);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  h1 {
+    max-width: 900px;
+    margin-bottom: 1rem;
+    font-size: 3.05rem;
+    line-height: 1.05;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    max-width: 780px;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .lead-card {
+    display: block;
+    max-width: 640px;
+    padding: 0.4rem 0 0.4rem 1rem;
+    background: transparent;
+    border-left: 4px solid var(--accent);
+    transition: border-color 0.15s;
+  }
+  .lead-card:hover {
+    border-left-color: var(--green);
+  }
+  .lead-card .label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: var(--amber);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .lead-card h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+    line-height: 1.3;
+  }
+  .lead-card p {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    margin: 1.5rem 0 2rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stat {
+    padding: 1rem;
+    border-right: 1px solid var(--border);
+  }
+  .stat:last-child {
+    border-right: none;
+  }
+  .stat strong {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text);
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+  .stat span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-heading h2 {
+    color: var(--text);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-heading a {
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+  .section-heading a:hover { text-decoration: underline; }
+  .timeline {
+    display: grid;
+    gap: 0;
+    padding-bottom: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .story-entry {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 1.5rem;
+    padding: 1.15rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .story-date {
+    padding-top: 0.2rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: left;
+  }
+  .story-date strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .story-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .story-card:hover {
+    background: var(--panel-hover);
+  }
+  .story-card:hover h3 {
+    color: var(--accent);
+  }
+  .story-card h3 {
+    margin-bottom: 0.45rem;
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+  .story-card p {
+    max-width: 760px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .story-card code {
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+  }
+  .story-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    padding: 0 0.45rem;
+    color: var(--muted);
+    background: rgba(139, 148, 158, 0.08);
+    border: 1px solid rgba(139, 148, 158, 0.2);
+    border-radius: 4px;
+    font-size: 0.72rem;
+  }
+  .story-action {
+    align-self: start;
+    justify-self: end;
+    padding-top: 0.1rem;
+    color: var(--accent);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  .story-entry[data-tone="green"] .story-date strong { color: var(--green); }
+  .story-entry[data-tone="amber"] .story-date strong { color: var(--amber); }
+  .story-entry[data-tone="rose"] .story-date strong { color: var(--rose); }
+  .story-entry[data-tone="violet"] .story-date strong { color: var(--violet); }
+  .lower-links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--accent);
+  }
+  .link-card {
+    display: block;
+    padding: 1.1rem;
+    border-right: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .link-card:last-child {
+    border-right: none;
+  }
+  .link-card:hover {
+    background: var(--panel-hover);
+  }
+  .link-card:hover h3 {
+    color: var(--accent);
+  }
+  .link-card h3 {
+    margin-bottom: 0.35rem;
+    font-size: 0.95rem;
+  }
+  .link-card p {
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  @media (max-width: 840px) {
+    .page-wrap { padding: 1.25rem; }
+    .hero { gap: 1.5rem; }
+    h1 { font-size: 3.2rem; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat:nth-child(2) { border-right: none; }
+    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+    .story-card {
+      grid-template-columns: 1fr;
+    }
+    .story-action {
+      justify-self: start;
+    }
+    .story-entry {
+      grid-template-columns: 1fr;
+      gap: 0.55rem;
+    }
+    .story-date {
+      padding-top: 0;
+    }
+    .lower-links { grid-template-columns: 1fr; }
+    .link-card {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .link-card:last-child {
+      border-bottom: none;
+    }
+  }
+  @media (max-width: 520px) {
+    .stats {
+      grid-template-columns: 1fr;
+    }
+    .stat {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat:last-child {
+      border-bottom: none;
+    }
+    h1 {
+      font-size: 2.55rem;
+    }
+  }
 ''';

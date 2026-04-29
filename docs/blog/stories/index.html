@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>resqlite Stories - Project Timeline</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #111722;
+    --panel-hover: rgba(88, 166, 255, 0.07);
+    --border: #30363d;
+    --border-strong: #46515f;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --rose: #ff7b72;
+    --violet: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: none; }
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .page-wrap {
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  .top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .top-nav a { color: var(--accent); }
+  .top-nav a:hover { text-decoration: underline; }
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+    padding: 2rem 0 1.5rem;
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--border);
+  }
+  .eyebrow {
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    color: var(--green);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  h1 {
+    max-width: 900px;
+    margin-bottom: 1rem;
+    font-size: 3.05rem;
+    line-height: 1.05;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    max-width: 780px;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .lead-card {
+    display: block;
+    max-width: 640px;
+    padding: 0.4rem 0 0.4rem 1rem;
+    background: transparent;
+    border-left: 4px solid var(--accent);
+    transition: border-color 0.15s;
+  }
+  .lead-card:hover {
+    border-left-color: var(--green);
+  }
+  .lead-card .label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: var(--amber);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .lead-card h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+    line-height: 1.3;
+  }
+  .lead-card p {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    margin: 1.5rem 0 2rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stat {
+    padding: 1rem;
+    border-right: 1px solid var(--border);
+  }
+  .stat:last-child {
+    border-right: none;
+  }
+  .stat strong {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text);
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+  .stat span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-heading h2 {
+    color: var(--text);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-heading a {
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+  .section-heading a:hover { text-decoration: underline; }
+  .timeline {
+    display: grid;
+    gap: 0;
+    padding-bottom: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .story-entry {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 1.5rem;
+    padding: 1.15rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .story-date {
+    padding-top: 0.2rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: left;
+  }
+  .story-date strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .story-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .story-card:hover {
+    background: var(--panel-hover);
+  }
+  .story-card:hover h3 {
+    color: var(--accent);
+  }
+  .story-card h3 {
+    margin-bottom: 0.45rem;
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+  .story-card p {
+    max-width: 760px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .story-card code {
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+  }
+  .story-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    padding: 0 0.45rem;
+    color: var(--muted);
+    background: rgba(139, 148, 158, 0.08);
+    border: 1px solid rgba(139, 148, 158, 0.2);
+    border-radius: 4px;
+    font-size: 0.72rem;
+  }
+  .story-action {
+    align-self: start;
+    justify-self: end;
+    padding-top: 0.1rem;
+    color: var(--accent);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  .story-entry[data-tone="green"] .story-date strong { color: var(--green); }
+  .story-entry[data-tone="amber"] .story-date strong { color: var(--amber); }
+  .story-entry[data-tone="rose"] .story-date strong { color: var(--rose); }
+  .story-entry[data-tone="violet"] .story-date strong { color: var(--violet); }
+  .lower-links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--accent);
+  }
+  .link-card {
+    display: block;
+    padding: 1.1rem;
+    border-right: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .link-card:last-child {
+    border-right: none;
+  }
+  .link-card:hover {
+    background: var(--panel-hover);
+  }
+  .link-card:hover h3 {
+    color: var(--accent);
+  }
+  .link-card h3 {
+    margin-bottom: 0.35rem;
+    font-size: 0.95rem;
+  }
+  .link-card p {
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  @media (max-width: 840px) {
+    .page-wrap { padding: 1.25rem; }
+    .hero { gap: 1.5rem; }
+    h1 { font-size: 3.2rem; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat:nth-child(2) { border-right: none; }
+    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+    .story-card {
+      grid-template-columns: 1fr;
+    }
+    .story-action {
+      justify-self: start;
+    }
+    .story-entry {
+      grid-template-columns: 1fr;
+      gap: 0.55rem;
+    }
+    .story-date {
+      padding-top: 0;
+    }
+    .lower-links { grid-template-columns: 1fr; }
+    .link-card {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .link-card:last-child {
+      border-bottom: none;
+    }
+  }
+  @media (max-width: 520px) {
+    .stats {
+      grid-template-columns: 1fr;
+    }
+    .stat {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat:last-child {
+      border-bottom: none;
+    }
+    h1 {
+      font-size: 2.55rem;
+    }
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="../index.html">&larr; Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../../api/resqlite/resqlite-library.html">API Docs</a>
+  </nav>
+
+  <header class="hero">
+    <div>
+      <span class="eyebrow">Project Stories</span>
+      <h1>The chronological history of resqlite.</h1>
+      <p class="subtitle">The public docs explain what the library does. The experiment log records every measurement. These stories explain the design decisions that changed the project, with enough context to read any entry on its own.</p>
+    </div>
+    <a class="lead-card" href="2026-04-06-main-isolate.html">
+      <span class="label">Start here</span>
+      <h2>Why resqlite Started</h2>
+      <p>resqlite began as a Flutter SQLite library shaped by one product constraint: keep database work from stealing frame time while preserving ordinary SQLite ergonomics and reactive queries.</p>
+    </a>
+  </header>
+
+  <section class="stats" aria-label="Project story highlights">
+    <div class="stat">
+      <strong>9</strong>
+      <span>chronological stories split from the original project narrative</span>
+    </div>
+    <div class="stat">
+      <strong>0.47 ms</strong>
+      <span>main-isolate time for 5,000-row map reads in the early benchmark set</span>
+    </div>
+    <div class="stat">
+      <strong>116K</strong>
+      <span>point queries per second measured after the reader event-port cleanup</span>
+    </div>
+    <div class="stat">
+      <strong>6 days</strong>
+      <span>from filing the Flutter hang to the Dart VM fix landing upstream</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="timeline-title">
+    <div class="section-heading">
+      <h2 id="timeline-title">Timeline</h2>
+      <a href="../../experiments/index.html">Open the experiment log &rarr;</a>
+    </div>
+
+    <div class="timeline">
+      <article class="story-entry" data-tone="green">
+        <div class="story-date">
+          <strong>Apr 06</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-06-main-isolate.html">
+          <div>
+            <h3>Why resqlite Started</h3>
+            <p>resqlite began as a Flutter SQLite library shaped by one product constraint: keep database work from stealing frame time while preserving ordinary SQLite ergonomics and reactive queries.</p>
+            <div class="story-meta">
+              <span class="tag">main isolate</span>
+              <span class="tag">Flutter</span>
+              <span class="tag">measurement</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="amber">
+        <div class="story-date">
+          <strong>Apr 06</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-06-zero-copy.html">
+          <div>
+            <h3>Understanding Dart Isolate Transfer Costs</h3>
+            <p><code>Isolate.exit()</code> avoided copying rows, but benchmark breakdowns showed that validating a large Dart object graph was still a major cost.</p>
+            <div class="story-meta">
+              <span class="tag">Dart VM</span>
+              <span class="tag">Isolate.exit</span>
+              <span class="tag">object graphs</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="rose">
+        <div class="story-date">
+          <strong>Apr 07</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-07-dead-ends.html">
+          <div>
+            <h3>Result Representations That Did Not Work</h3>
+            <p>Several plausible row-transfer strategies were rejected because they improved the wrong metric or moved expensive work back onto the UI isolate.</p>
+            <div class="story-meta">
+              <span class="tag">rejected ideas</span>
+              <span class="tag">TransferableTypedData</span>
+              <span class="tag">lazy decode</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="green">
+        <div class="story-date">
+          <strong>Apr 08</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-08-flat-list-resultset.html">
+          <div>
+            <h3>Flat-List ResultSet Design</h3>
+            <p>resqlite's row representation changed from per-row <code>LinkedHashMap</code> instances to a shared schema plus one flat value list, reducing transfer-graph size while preserving the map API.</p>
+            <div class="story-meta">
+              <span class="tag">ResultSet</span>
+              <span class="tag">Row facade</span>
+              <span class="tag">read path</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="amber">
+        <div class="story-date">
+          <strong>Apr 10</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-10-reader-pool.html">
+          <div>
+            <h3>Persistent Reader Pool Design</h3>
+            <p>After the row representation improved, small reads were dominated by isolate setup, so resqlite moved to persistent reader workers with a separate large-result transfer path.</p>
+            <div class="story-meta">
+              <span class="tag">reader pool</span>
+              <span class="tag">sacrifice path</span>
+              <span class="tag">point queries</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="green">
+        <div class="story-date">
+          <strong>Apr 12</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-12-stream-engine.html">
+          <div>
+            <h3>Stream Invalidation Becomes a Subsystem</h3>
+            <p>Reactive queries required their own invalidation engine once dependency capture, dirty-table dispatch, deduplication, and stale-result handling became shared concerns.</p>
+            <div class="story-meta">
+              <span class="tag">StreamEngine</span>
+              <span class="tag">result hashing</span>
+              <span class="tag">fanout</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="violet">
+        <div class="story-date">
+          <strong>Apr 16</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-16-write-path.html">
+          <div>
+            <h3>Writer Isolate and Invalidation Data</h3>
+            <p>The persistent writer isolate serialized SQLite mutations, preserved transaction state, and produced the dirty-table data used by reactive queries.</p>
+            <div class="story-meta">
+              <span class="tag">writer isolate</span>
+              <span class="tag">preupdate hook</span>
+              <span class="tag">batch execution</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="amber">
+        <div class="story-date">
+          <strong>Apr 22</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-22-follow-up-optimization.html">
+          <div>
+            <h3>Optimization After the Read Path Stabilized</h3>
+            <p>Once the main read-path architecture was stable, later experiments focused on stream fanout, write-path allocation, benchmark coverage, and reusable research records.</p>
+            <div class="story-meta">
+              <span class="tag">benchmark process</span>
+              <span class="tag">allocation</span>
+              <span class="tag">experiment log</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+      <article class="story-entry" data-tone="rose">
+        <div class="story-date">
+          <strong>Apr 27</strong>
+          2026
+        </div>
+        <a class="story-card" href="2026-04-27-dart-vm-deadlock.html">
+          <div>
+            <h3>Debugging a Dart VM Service Deadlock</h3>
+            <p>A cold-launch freeze first looked like a database migration hang, but native stack sampling showed the process blocked inside a Dart VM service deadlock.</p>
+            <div class="story-meta">
+              <span class="tag">Dart VM</span>
+              <span class="tag">macOS</span>
+              <span class="tag">upstream fix</span>
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>
+    </div>
+  </section>
+
+  <section class="lower-links" aria-label="Related documentation">
+    <a class="link-card" href="../../experiments/index.html">
+      <h3>Experiment Log</h3>
+      <p>The complete lab notebook: accepted ideas, rejected ideas, benchmark links, and reasoning.</p>
+    </a>
+    <a class="link-card" href="../../benchmarks/index.html">
+      <h3>Benchmark Dashboard</h3>
+      <p>Interactive charts for peer comparisons, run history, devices, and scenario workloads.</p>
+    </a>
+    <a class="link-card" href="../architecture.html">
+      <h3>Architecture</h3>
+      <p>The system-level view of readers, writers, native handles, and streaming behavior.</p>
+    </a>
+  </section>
+</div>
+</body>
+</html>

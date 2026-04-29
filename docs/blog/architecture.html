@@ -77,10 +77,10 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="./">&larr; All Posts</a>
-    <a href="../">Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="index.html">&larr; All Posts</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
   </nav>
   <article class="post">
     <span class="post-category">Architecture</span>
@@ -124,7 +124,7 @@
 <p><strong>4. Stream invalidation piggybacks on write responses.</strong></p>
 <p>No separate notification channel. Every write response includes the set of dirty tables. The StreamEngine checks these against active stream dependencies and re-queries affected streams through the reader pool.</p>
 <h2>Subsystems</h2>
-<h3><a href="./reading.md">Reading: select() and selectBytes()</a></h3>
+<h3><a href="reading.html">Reading: select() and selectBytes()</a></h3>
 <p>The read path is where most of the performance engineering lives. Key innovations:</p>
 <ul>
 <li><strong>Persistent reader pool</strong> with hybrid SendPort/Isolate.exit transmission, busy tracking, and automatic respawn</li>
@@ -133,7 +133,7 @@
 <li><strong>Flat value list with lazy ResultSet</strong> — all values in one <code>List&lt;Object?&gt;</code>, <code>Row</code> objects created on-demand. Reduces the <code>Isolate.exit</code> validation graph from ~200k objects to ~3</li>
 <li><strong>C-native JSON serialization</strong> for <code>selectBytes()</code> — zero Dart objects for result data, scan-then-flush string escaping, hand-rolled integer formatting</li>
 </ul>
-<h3><a href="./writing.md">Writing: execute(), executeBatch(), transaction()</a></h3>
+<h3><a href="writing.html">Writing: execute(), executeBatch(), transaction()</a></h3>
 <p>The write path uses a persistent writer isolate that processes messages sequentially. Key design choices:</p>
 <ul>
 <li><strong>Persistent isolate</strong> instead of one-off — avoids the closure sendability footgun and enables interactive transactions</li>
@@ -141,7 +141,7 @@
 <li><strong>Async transaction API</strong> — the callback runs on main (no isolate scope leakage), sends messages to the writer for each operation</li>
 <li><strong>Preupdate hook</strong> on the writer connection tracks dirty tables, accumulated across transaction scope</li>
 </ul>
-<h3><a href="./streaming.md">Streaming: stream()</a></h3>
+<h3><a href="streaming.html">Streaming: stream()</a></h3>
 <p>Reactive queries that re-emit when underlying data changes. Key design choices:</p>
 <ul>
 <li><strong>Authorizer hook</strong> (<code>sqlite3_set_authorizer</code>) on all readers captures read dependencies during query execution — no SQL parsing</li>
@@ -267,10 +267,10 @@ native/
 </code></pre>
 <h2>Related Documents</h2>
 <ul>
-<li><strong><a href="./reading.md">Reading</a></strong> — select(), selectBytes(), reader pool, batch FFI, flat list architecture</li>
-<li><strong><a href="./writing.md">Writing</a></strong> — execute(), executeBatch(), transaction(), writer isolate, C batch runner</li>
-<li><strong><a href="./streaming.md">Streaming</a></strong> — stream(), authorizer hooks, dependency tracking, invalidation, deduplication</li>
-<li><strong><a href="../../experiments/">experiments/</a></strong> — Individual experiment logs with benchmarks and reasoning</li>
+<li><strong><a href="reading.html">Reading</a></strong> — select(), selectBytes(), reader pool, batch FFI, flat list architecture</li>
+<li><strong><a href="writing.html">Writing</a></strong> — execute(), executeBatch(), transaction(), writer isolate, C batch runner</li>
+<li><strong><a href="streaming.html">Streaming</a></strong> — stream(), authorizer hooks, dependency tracking, invalidation, deduplication</li>
+<li><strong><a href="../experiments/index.html">experiments/</a></strong> — Individual experiment logs with benchmarks and reasoning</li>
 </ul>
 
   </article>

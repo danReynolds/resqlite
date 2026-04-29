@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 028: Static Bind for Text and Blob Params — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted</span>
+    <p class="story-byline">Apr 8, 2026 · Accepted</p>
+<h1>Experiment 028: Static Bind for Text and Blob Params</h1>
+<p><strong>Date:</strong> 2026-04-08</p>
+<p><strong>Status:</strong> Accepted</p>
+<p><strong>Commit:</strong> <a href="https://github.com/danReynolds/dune/commit/8822bd2"><code>8822bd2</code></a></p>
+<h2>Hypothesis</h2>
+<p>The current bind path allocates native memory for text/blob params in Dart, then</p>
+<p>asks SQLite to copy those same bytes again via <code>SQLITE_TRANSIENT</code>. If we keep the</p>
+<p>param buffers alive until the statement is reset/released, SQLite can bind against</p>
+<p>them as <code>SQLITE_STATIC</code> and avoid the second copy.</p>
+<p>This should mostly help:</p>
+<ul>
+<li>small and medium parameterized reads</li>
+<li>repeated query shapes</li>
+<li>larger batch writes with many bound values</li>
+</ul>
+<h2>Change</h2>
+<p>Two coordinated changes:</p>
+<ol>
+<li>In native <code>bind_params(...)</code>, switched text/blob binds from <code>SQLITE_TRANSIENT</code></li>
+</ol>
+<p>to <code>SQLITE_STATIC</code>.</p>
+<ol>
+<li>In <code>read_worker.dart</code>, delayed <code>freeParams(...)</code> until after the statement is</li>
+</ol>
+<p>released so the bound memory stays valid for the lifetime of the query.</p>
+<h2>Results</h2>
+<p>Benchmark runs:</p>
+<ul>
+<li>Baseline: <code>2026-04-08T17-14-06-exp025-baseline.md</code></li>
+<li>Static bind: <code>2026-04-08T17-19-23-exp028-static-bind.md</code></li>
+</ul>
+<p>Baseline vs static-bind highlights:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline</th>
+<th>Static bind</th>
+<th>Delta</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Select Maps 100 rows</td>
+<td>0.36ms</td>
+<td>0.30ms</td>
+<td>-17%</td>
+</tr>
+<tr>
+<td>Select Maps 1000 rows</td>
+<td>0.40ms</td>
+<td>0.40ms</td>
+<td>0%</td>
+</tr>
+<tr>
+<td>Select Maps 5000 rows</td>
+<td>2.27ms</td>
+<td>2.09ms</td>
+<td>-8%</td>
+</tr>
+<tr>
+<td>Select Bytes 5000 rows</td>
+<td>3.16ms</td>
+<td>3.01ms</td>
+<td>-5%</td>
+</tr>
+<tr>
+<td>Parameterized queries</td>
+<td>15.41ms</td>
+<td>14.81ms</td>
+<td>-4%</td>
+</tr>
+<tr>
+<td>Batch insert 10000</td>
+<td>4.74ms</td>
+<td>4.57ms</td>
+<td>-4%</td>
+</tr>
+<tr>
+<td>Single inserts</td>
+<td>1.85ms</td>
+<td>1.86ms</td>
+<td>neutral</td>
+</tr>
+<tr>
+<td>Interactive transaction</td>
+<td>0.06ms</td>
+<td>0.05ms</td>
+<td>small win / likely noise</td>
+</tr>
+</tbody></table></div>
+
+<p>The auto-generated comparison in the run file shows only two formal wins because</p>
+<p>its threshold is ±10%, but the broader pattern is consistently favorable on the</p>
+<p>read and parameter-heavy workloads this experiment was targeting.</p>
+<h2>Decision</h2>
+<p><strong>Accepted</strong>.</p>
+<p>This is the most convincing of the parameter-path experiments:</p>
+<ul>
+<li>small read win is real</li>
+<li>parameterized queries improved</li>
+<li>large batch write cost also trended slightly down</li>
+<li>no obvious reliability issue surfaced in the benchmark run</li>
+</ul>
+<p>The code change landed with additional regression coverage for repeated cached</p>
+<p>text/blob parameter binds in <code>database_test.dart</code>. The broader full-suite benchmark</p>
+<p>run is noisier than this targeted experiment, so this should still be understood as</p>
+<p>&quot;targeted workload win, broad-suite neutral-to-noisy&quot; rather than a universal speedup.</p>
+
+  </article>
+</div>
+</body>
+</html>

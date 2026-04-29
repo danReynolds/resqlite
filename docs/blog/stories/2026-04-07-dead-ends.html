@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Result Representations That Did Not Work — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Project Story</span>
+    <p class="story-byline">Apr 7, 2026 · rejected ideas · TransferableTypedData · lazy decode</p>
+<h1>Result Representations That Did Not Work</h1>
+<h2>Problem Statement</h2>
+<p>After the isolate-transfer measurements, resqlite had a clearer target but not yet a design. This was the stage where several plausible ideas had to be made concrete enough to fail.</p>
+<p>The result shape needed to satisfy three constraints at once:</p>
+<ol>
+<li>Keep the transferred object graph small.</li>
+<li>Keep heavy decode and materialization work off the main isolate.</li>
+<li>Preserve a normal row API for callers.</li>
+</ol>
+<p>Several plausible designs met one or two of those constraints, but not all three.</p>
+<h2>Background</h2>
+<p>The tempting direction was &quot;make the transfer smaller.&quot; That was directionally correct, but incomplete. A design that transfers fewer objects can still lose if it makes the main isolate decode strings, build values, or reconstruct rows during normal use. The core project constraint was not &quot;fewest bytes over the port&quot;; it was &quot;least disruptive database API for Flutter rendering.&quot;</p>
+<p>The rejected experiments were useful because they clarified which costs mattered and which costs merely moved around. This became a pattern for the project: rejected work still counted if it narrowed the design space and left behind numbers future experiments could trust.</p>
+<p>Two Dart runtime details are useful context here. <a href="https://api.dart.dev/dart-isolate/TransferableTypedData-class.html"><code>TransferableTypedData</code></a> is designed for efficiently moving byte sequences between isolates, but creating it is still proportional to the number of bytes. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> can move ordinary Dart objects between isolates, but mutable object graphs may be copied and the cost is tied to the graph being sent. These APIs are powerful, but neither removes the need to choose a representation that matches where work should happen.</p>
+<h2>Hypotheses</h2>
+<p>Three hypotheses were tested:</p>
+<ul>
+<li>A Dart binary codec plus <code>TransferableTypedData</code> might beat object transfer while keeping workers alive.</li>
+<li>String interning might reduce the graph that <code>Isolate.exit()</code> has to validate.</li>
+<li>Byte-backed lazy maps might transfer one buffer and decode only what the UI reads.</li>
+</ul>
+<h2>What We Tried</h2>
+<p><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005</a> encoded rows into bytes on the worker, transferred the bytes, and decoded maps afterward. It tested the most obvious &quot;make it bytes&quot; answer.</p>
+<p><a href="../../experiments/006-string-interning.html">Experiment 006</a> deduplicated repeated strings so the graph would contain fewer distinct string objects. It tested whether the current map shape could be kept by shaving off repeated values.</p>
+<p><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b</a> packed rows into a compact byte buffer and exposed each row as a lazy map that decoded values on access. It tested whether row materialization could be delayed instead of eliminated.</p>
+<h2>Results</h2>
+<p>The Dart binary codec was consistently slower than the VM serializer:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>Object transport</th>
+<th>Binary codec</th>
+<th>Result</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>100</td>
+<td>29 us</td>
+<td>240 us</td>
+<td>object 8x faster</td>
+</tr>
+<tr>
+<td>1,000</td>
+<td>166 us</td>
+<td>851 us</td>
+<td>object 5x faster</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td>724 us</td>
+<td>5,088 us</td>
+<td>object 7x faster</td>
+</tr>
+<tr>
+<td>10,000</td>
+<td>1,402 us</td>
+<td>8,304 us</td>
+<td>object 6x faster</td>
+</tr>
+</tbody></table></div>
+
+<p>String interning looked promising in an isolated transfer benchmark, but failed in the full query path:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Implementation (5,000 rows)</th>
+<th>Wall</th>
+<th>vs baseline</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Without value interning</td>
+<td>3.22 ms</td>
+<td>-</td>
+</tr>
+<tr>
+<td>With value interning</td>
+<td>5.30 ms</td>
+<td><strong>64% slower</strong></td>
+</tr>
+</tbody></table></div>
+
+<p>The byte-backed result set showed the core trade-off:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Path (20,000 rows)</th>
+<th>Wall</th>
+<th>Main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Direct maps + <code>Isolate.exit</code></td>
+<td>27.45 ms</td>
+<td><strong>2.12 ms</strong></td>
+</tr>
+<tr>
+<td>Byte-backed full iteration</td>
+<td><strong>11.92 ms</strong></td>
+<td>7.29 ms</td>
+</tr>
+<tr>
+<td>Byte-backed first 20 rows</td>
+<td><strong>4.50 ms</strong></td>
+<td><strong>0.01 ms</strong></td>
+</tr>
+</tbody></table></div>
+
+<p>For partial access, byte-backed rows were excellent. For full access, they moved UTF-8 decode and value materialization onto the main isolate, which violated the original constraint.</p>
+<h2>Outcome</h2>
+<p>The rejected designs narrowed the acceptable shape. The solution could be lazy only if the deferred work was cheap. It could use bytes only if callers did not have to decode them on the UI isolate. It could reduce object count only if it did not add data-shape assumptions such as low-cardinality strings.</p>
+<p>That led directly to the flat-list <code>ResultSet</code>: materialize values on the worker, transfer a compact graph, and defer only lightweight row facade creation. The next accepted design was less exotic than the failed byte-backed versions, but it matched the product constraint better.</p>
+<h2>Related Experiments</h2>
+<ul>
+<li><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005: Dart binary codec with TransferableTypedData</a></li>
+<li><a href="../../experiments/006-string-interning.html">Experiment 006: String interning for Isolate.exit</a></li>
+<li><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b: Byte-backed lazy maps</a></li>
+</ul>
+<h2>Reference Docs</h2>
+<ul>
+<li><a href="https://api.dart.dev/dart-isolate/TransferableTypedData-class.html">Dart <code>TransferableTypedData</code></a></li>
+<li><a href="https://api.dart.dev/dart-isolate/SendPort/send.html">Dart <code>SendPort.send</code></a></li>
+<li><a href="https://api.dart.dev/dart-isolate/Isolate/exit.html">Dart <code>Isolate.exit</code></a></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>

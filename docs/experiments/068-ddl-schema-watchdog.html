@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 068: DDL schema_version watchdog — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Deferred (correctness idea valid, implementation hit a stmt-cache race that needs more design work)</span>
+    <p class="story-byline">Deferred (correctness idea valid, implementation hit a stmt-cache race that needs more design work)</p>
+<h1>Experiment 068: DDL schema_version watchdog</h1>
+<p><strong>Date:</strong> 2026-04-16 (shipped), 2026-04-16 (reverted same day)</p>
+<p><strong>Status:</strong> Deferred (correctness idea valid, implementation hit a stmt-cache race that needs more design work)</p>
+<h2>Problem</h2>
+<p>Active streams cache their read tables at registration time via the authorizer</p>
+<p>hook. When DDL changes the schema — <code>CREATE TABLE</code>, <code>DROP TABLE</code>,</p>
+<p><code>ALTER TABLE</code> — the cached dependencies can go stale:</p>
+<ul>
+<li><code>ALTER TABLE ADD COLUMN</code>: <code>SELECT * FROM t</code> streams return old column</li>
+</ul>
+<p>lists until the first unrelated write re-queries them.</p>
+<ul>
+<li><code>DROP TABLE</code>: streams whose SQL references the dropped table return</li>
+</ul>
+<p>their last cached result forever (or error unpredictably on the next</p>
+<p>invalidation).</p>
+<ul>
+<li><code>ALTER TABLE RENAME</code>: stream read-table mappings still point at the old</li>
+</ul>
+<p>name.</p>
+<p>DDL doesn't fire the preupdate hook, so these changes go unnoticed by the</p>
+<p>existing dirty-table tracking.</p>
+<h2>Approach</h2>
+<p>Cache <code>PRAGMA schema_version</code> on the writer. Read it after each write</p>
+<p>commit; if it moved, broadcast-invalidate every active stream and force</p>
+<p><code>_reDiscover</code> to rebuild dependencies against the new schema.</p>
+<h3>C side</h3>
+<ul>
+<li>Added <code>schema_version_stmt</code> (cached PRAGMA) and <code>last_schema_version</code></li>
+</ul>
+<p>to <code>resqlite_db</code>.</p>
+<ul>
+<li>New FFI <code>resqlite_schema_changed(db)</code> returning 1/0/-1.</li>
+</ul>
+<h3>Dart side</h3>
+<ul>
+<li>Writer responses carry a <code>schemaChanged</code> flag.</li>
+<li><code>StreamEngine.handleSchemaChange()</code> bumps every active entry's</li>
+</ul>
+<p>generation and dispatches <code>_reDiscover</code> — a re-run of the</p>
+<p>initial-query path (<code>selectWithDeps</code>) to recapture dependencies.</p>
+<ul>
+<li><code>Database.execute</code> / <code>executeBatch</code> / commit path all check the flag.</li>
+</ul>
+<p>Two correctness tests were added (<code>ALTER TABLE ADD COLUMN</code>, <code>DROP TABLE</code>)</p>
+<p>and passed locally.</p>
+<h2>Why Reverted</h2>
+<p><strong>CI revealed two failures</strong> that didn't reproduce on the dev machine:</p>
+<ol>
+<li><strong>A pre-existing test</strong> (`re-query failure after initial success</li>
+</ol>
+<p>propagates error and recovers`) timed out. The existing test manually</p>
+<p>triggers <code>handleDirtyTables</code> after a column rename to simulate a</p>
+<p>data write landing on a DDL-affected table. With the watchdog in</p>
+<p>place, both <code>handleSchemaChange</code> (my code) and <code>handleDirtyTables</code></p>
+<p>(the test) dispatch racing re-queries. The generation-check discards</p>
+<p>the older one; on CI's slower scheduling, the surviving path didn't</p>
+<p>complete within the 5-second test timeout.</p>
+<ol>
+<li><strong>A new <code>ALTER TABLE ADD COLUMN</code> test</strong> returned stale data — the</li>
+</ol>
+<p>second row after the new column was added showed <code>null</code> instead of</p>
+<p>the inserted value.</p>
+<p>The root cause for #2 traces to an interaction between our C-level stmt</p>
+<p>cache and SQLite's auto-reprepare:</p>
+<ul>
+<li><code>decodeQuery</code> calls <code>sqlite3_column_count(stmt)</code> <em>before</em> the first</li>
+</ul>
+<p><code>sqlite3_step</code>.</p>
+<ul>
+<li>SQLite auto-reprepares stale cached statements <em>inside</em></li>
+</ul>
+<p><code>sqlite3_step</code>, not before it.</p>
+<ul>
+<li>After DDL, a cached stmt still reports the old column count on</li>
+</ul>
+<p><code>sqlite3_column_count</code> until it's been stepped once.</p>
+<ul>
+<li>We cache the stale count, decode N cells per row, and silently miss</li>
+</ul>
+<p>columns.</p>
+<p>A partial fix (validate <code>schemaCache.names.length == colCount</code> and</p>
+<p>rebuild the Dart-side schema on mismatch) helped locally but wasn't</p>
+<p>enough — the C-level cached stmt itself was still the stale one, and</p>
+<p>the column_count read happens before any step can trigger reprepare.</p>
+<h2>Proper Fix (Future Work)</h2>
+<p>The clean implementation needs to invalidate the C-level stmt cache</p>
+<p>when the schema version changes, not just the Dart-side schema cache.</p>
+<p>Options investigated but not implemented in-session:</p>
+<ol>
+<li><strong>Per-reader schema-version tracking.</strong> Each reader records its</li>
+</ol>
+<p>last-seen schema_version. At the top of every query, compare against</p>
+<p>the writer's current version; if different, clear the reader's own</p>
+<p>stmt cache so the next prepare picks up the new schema cleanly.</p>
+<ol>
+<li><strong>Explicit cache invalidation via a broadcast message.</strong> Writer</li>
+</ol>
+<p>sends a &quot;clear caches&quot; request to every reader isolate on DDL. Needs</p>
+<p>careful coordination with in-flight queries.</p>
+<ol>
+<li><strong>Use <code>sqlite3_stmt_busy</code> + defensive re-prepare.</strong> Mark cached</li>
+</ol>
+<p>stmts stale on DDL, re-prepare lazily on next acquire.</p>
+<p>All three need a deliberate design pass that the &quot;quick win&quot; framing</p>
+<p>didn't support. Reverted to keep the rest of the round shippable and</p>
+<p>CI green.</p>
+<h2>Related</h2>
+<ul>
+<li>Experiment 003 (C-level statement cache) — the caching design we</li>
+</ul>
+<p>need to extend</p>
+<ul>
+<li>Experiment 034 (per-worker schema cache) — the Dart-side cache that</li>
+</ul>
+<p>had its own validation gap</p>
+<ul>
+<li>Team proposal idea #1 (column-level invalidation) and #6 (row-level</li>
+</ul>
+<p>filter invalidation) — both benefit from the same infrastructure</p>
+<p>(reliable DDL invalidation + a stream-granularity benchmark)</p>
+<h2>Decision</h2>
+<p><strong>Deferred.</strong> The idea is sound and the need is real. Landing it</p>
+<p>properly requires fixing the stmt-cache/auto-reprepare interaction,</p>
+<p>which is a focused correctness effort rather than a quick win.</p>
+
+  </article>
+</div>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 064: Drop redundant sqlite3_clear_bindings — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted (cleanup)</span>
+    <p class="story-byline">Apr 16, 2026 · Accepted (cleanup)</p>
+<h1>Experiment 064: Drop redundant sqlite3_clear_bindings</h1>
+<p><strong>Date:</strong> 2026-04-16</p>
+<p><strong>Status:</strong> Accepted (cleanup)</p>
+<h2>Problem</h2>
+<p>The <code>bind_params</code> function in <code>resqlite.c</code> calls <code>sqlite3_clear_bindings</code> before binding each parameter. The comment explained this as defensive code for &quot;reusing a statement with fewer params than the previous call.&quot;</p>
+<p>But examining the full control flow:</p>
+<ol>
+<li><code>bind_params</code> verifies <code>sqlite3_bind_parameter_count(stmt) == param_count</code> and returns <code>SQLITE_RANGE</code> if they differ.</li>
+<li>The function only proceeds to the bind loop if all N slots will be rebound.</li>
+<li>TEXT/BLOB bindings use <code>SQLITE_STATIC</code>, meaning SQLite doesn't copy or own the data — no cleanup needed on clear.</li>
+<li>Cached statements are always reset before <code>bind_params</code> is called (via <code>get_or_prepare_reader</code>).</li>
+</ol>
+<p>Given this, <code>sqlite3_clear_bindings</code> is always redundant — every slot will be overwritten by the subsequent bind loop, and there's no owned data to free.</p>
+<h2>Approach</h2>
+<p>Remove the <code>sqlite3_clear_bindings(stmt)</code> call. Move the param count check earlier so it guards the bind loop. Document why the clear is unnecessary.</p>
+<pre><code class="lang-c">
+static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
+                       int param_count) {
+    int expected = sqlite3_bind_parameter_count(stmt);
+    if (expected != param_count) {
+        (void)sqlite3_bind_null(stmt, expected + 1);
+        return SQLITE_RANGE;
+    }
+    // No clear_bindings needed: we verify param_count above and always
+    // rebind every slot below. SQLITE_STATIC bindings have no owned copy
+    // to free. Cached statements are always reset before this function.
+    for (int i = 0; i &lt; param_count; i++) {
+        // bind slot i+1 with params[i]
+    }
+}
+</code></pre>
+<h2>Results</h2>
+<p>No measurable benchmark signal. The savings (~50ns per bind) are below the noise floor of the benchmark suite.</p>
+<p>Full suite run showed 1 apparent win (-11%) and 1 apparent regression (-16%) on unrelated metrics — both within run-to-run variance. Full test suite (126 tests) passes.</p>
+<h2>Decision</h2>
+<p><strong>Accepted as cleanup.</strong> Not a performance win by benchmark measurement, but:</p>
+<ul>
+<li>The removed code was provably redundant given existing invariants</li>
+<li>Simplifies the bind path by one call</li>
+<li>Documents the invariants clearly for future maintainers</li>
+</ul>
+<p>No correctness risk: every control-flow path that enters <code>bind_params</code> satisfies the preconditions that make the clear unnecessary.</p>
+
+  </article>
+</div>
+</body>
+</html>

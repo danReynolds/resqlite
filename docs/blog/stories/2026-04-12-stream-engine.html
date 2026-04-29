@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stream Invalidation Becomes a Subsystem — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Project Story</span>
+    <p class="story-byline">Apr 12, 2026 · StreamEngine · result hashing · fanout</p>
+<h1>Stream Invalidation Becomes a Subsystem</h1>
+<h2>Problem Statement</h2>
+<p>Fast reads were only half of the library resqlite was trying to become. From the outset, the goal included reactive queries: application code should be able to subscribe to a SQL query and let the database layer decide when that query needed to run again.</p>
+<p>The public <code>stream()</code> API is small: run a query now, then emit again when writes change the data the query depends on. The implementation was not small. It needed to identify dependencies, receive write invalidations, suppress duplicate work, handle stale results, and keep errors from leaving subscribers hanging.</p>
+<p>The problem was no longer &quot;rerun reads after writes.&quot; It was to build a stream engine with explicit correctness and performance rules.</p>
+<h2>Background</h2>
+<p>The first design choice was to use SQLite itself as the source of dependency information. The dependency side uses SQLite's authorizer hook on reader connections. While a stream query runs, SQLite reports table reads. resqlite records those tables instead of maintaining a SQL parser.</p>
+<p>The write side uses SQLite's preupdate hook on the writer connection. A completed write response includes the table names it touched. The stream engine intersects those dirty tables with active stream dependencies and schedules re-queries only where needed.</p>
+<p>The two hooks solve different halves of the problem. <a href="https://www.sqlite.org/c3ref/set_authorizer.html"><code>sqlite3_set_authorizer()</code></a> is invoked while SQLite compiles statements and can reveal which tables a statement reads. The <a href="https://www.sqlite.org/c3ref/preupdate_blobwrite.html">preupdate hook</a> runs around row changes and can identify the tables dirtied by a write. Dart's <a href="https://dart.dev/libraries/async/using-streams">stream API</a> supplies the public subscription model, but the database layer still needs to decide which streams should receive new events and which reruns are stale or redundant.</p>
+<p>That basic loop needed several additional pieces:</p>
+<ul>
+<li>Per-subscriber buffered controllers so broadcast timing did not drop events.</li>
+<li>Generation counters so stale re-query results could not overwrite newer ones.</li>
+<li>Deduplication so identical SQL and params shared one underlying stream entry.</li>
+<li>Error propagation so bad SQL reached subscribers.</li>
+<li>Result-change detection so unchanged results did not emit.</li>
+</ul>
+<h2>Hypothesis</h2>
+<p>Stream work should be reduced before it reaches the main isolate. If an invalidation can be coalesced, rejected, or proven unchanged inside the database/reader machinery, then widgets should not pay for a re-query result that does not change what they render.</p>
+<h2>What We Tried</h2>
+<p>The first stream engine established dependency capture and dirty-table dispatch. That made the API useful, but real applications create fanout: many widgets, overlapping queries, repeated writes, and streams whose results often do not actually change. Later experiments tightened those expensive cases:</p>
+<ul>
+<li><a href="../../experiments/045-microtask-invalidation-coalescing.html">Experiment 045</a> batched multiple synchronous dirty-table reports into one microtask flush.</li>
+<li><a href="../../experiments/075-native-hash-selectifchanged.html">Experiment 075</a> moved unchanged-result hashing into C so unchanged re-queries could skip Dart decode.</li>
+<li><a href="../../experiments/077-cheap-check-first-sweep.html">Experiment 077</a> added cheap fast-rejects before scheduling unnecessary stream work.</li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083</a> moved high-fanout coalescing before <code>ReaderPool</code> admission so stale reruns did not pile up waiting for readers.</li>
+</ul>
+<h2>Results</h2>
+<p>Microtask coalescing directly improved the changed-fanout benchmark:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline</th>
+<th>Coalesced</th>
+<th>Delta</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Fan-out (10 streams)</td>
+<td>0.24 ms</td>
+<td><strong>0.13 ms</strong></td>
+<td>-46%</td>
+</tr>
+<tr>
+<td>Fan-out main-isolate</td>
+<td>0.24 ms</td>
+<td><strong>0.13 ms</strong></td>
+<td>-46%</td>
+</tr>
+<tr>
+<td>Invalidation latency</td>
+<td>0.05 ms</td>
+<td>0.04 ms</td>
+<td>within noise</td>
+</tr>
+</tbody></table></div>
+
+<p>Native unchanged-result hashing targeted a different workload:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline</th>
+<th>Native hash</th>
+<th>Delta</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Unchanged fanout throughput</td>
+<td>0.44 ms</td>
+<td><strong>0.27 ms</strong></td>
+<td>-39%</td>
+</tr>
+<tr>
+<td>Invalidation latency, changed result</td>
+<td>0.05 ms</td>
+<td>0.05 ms</td>
+<td>within noise</td>
+</tr>
+<tr>
+<td>Fan-out, changed result</td>
+<td>0.18 ms</td>
+<td>0.22 ms</td>
+<td>within noise</td>
+</tr>
+</tbody></table></div>
+
+<p>The pre-dispatch queue addressed the high-fanout backlog that ordinary coalescing could not:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Scenario</th>
+<th>Baseline</th>
+<th>Pre-dispatch queue</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>A11 reruns started</td>
+<td>1,024</td>
+<td><strong>737</strong></td>
+</tr>
+<tr>
+<td>A11 stale reruns</td>
+<td class="winner">968</td>
+<td class="winner"><strong>553</strong></td>
+</tr>
+<tr>
+<td>A11 pool wait / rerun</td>
+<td>2,155 us</td>
+<td><strong>0.3 us</strong></td>
+</tr>
+<tr>
+<td>A11b high-card fan-out</td>
+<td>427.35 ms</td>
+<td><strong>229.49 ms</strong></td>
+</tr>
+</tbody></table></div>
+
+<h2>Outcome</h2>
+<p>Streaming became its own subsystem because it had its own failure modes. Correctness depended on dependency capture, generation ordering, and error propagation. Performance depended on doing less work when many streams were invalidated but few results changed.</p>
+<p>The detailed architecture walkthrough is <a href="../streaming.html">How resqlite Makes Queries Reactive</a>. The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine. That naturally made the write path part of the same story, because every useful stream invalidation starts with a correctly serialized mutation.</p>
+<h2>Related Experiments</h2>
+<ul>
+<li><a href="../../experiments/045-microtask-invalidation-coalescing.html">Experiment 045: Microtask invalidation coalescing</a></li>
+<li><a href="../../experiments/075-native-hash-selectifchanged.html">Experiment 075: Native-buffered hash for selectIfChanged</a></li>
+<li><a href="../../experiments/077-cheap-check-first-sweep.html">Experiment 077: Cheap-check-first sweep</a></li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083: Stream rerun pre-dispatch queue</a></li>
+</ul>
+<h2>Reference Docs</h2>
+<ul>
+<li><a href="https://dart.dev/libraries/async/using-streams">Dart streams</a></li>
+<li><a href="https://www.sqlite.org/c3ref/set_authorizer.html">SQLite authorizer callbacks</a></li>
+<li><a href="https://www.sqlite.org/c3ref/preupdate_blobwrite.html">SQLite preupdate hook</a></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>

@@ -9,8 +9,8 @@ This file sits between two others:
 
 - [`signals.json`](signals.json) — the structured, machine-readable research
   map (per-direction state, statuses, dependencies).
-- [`MILESTONES.md`](MILESTONES.md) — the curated, blog-style narrative of how
-  the project has evolved, updated on request rather than per experiment.
+- [`../doc/stories/`](../doc/stories/) — the curated, blog-style narrative of
+  how the project has evolved, updated on request rather than per experiment.
 
 Journal entries cite the experiments they came from and end with a *Reapplies*
 note describing when the lesson kicks in.
@@ -111,4 +111,4 @@ relearning. Each entry should:
 Don't add entries for facts already captured in `signals.json` (that file
 covers per-direction state, not transferable lessons). Don't add process
 guidance (that lives in `RUNNER_INSTRUCTIONS.md`). Don't add narrative
-milestones (those live in `MILESTONES.md`).
+stories (those live in `../doc/stories/`).
