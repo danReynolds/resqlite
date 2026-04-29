@@ -77,10 +77,10 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="./">&larr; All Posts</a>
-    <a href="../">Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="index.html">&larr; All Posts</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
   </nav>
   <article class="post">
     <span class="post-category">Deep Dive</span>
@@ -122,7 +122,7 @@ sqlite3_set_authorizer(rdb, authorizer_callback, &amp;reader-&gt;read_tables);
 <h3>Performance impact</h3>
 <p>The authorizer fires per-table-access during query planning/execution — typically 1-5 calls per query. Each call is a C function that does a <code>strcmp</code> for deduplication and a <code>strdup</code> for new entries. Benchmarks showed <strong>no measurable performance regression</strong> from having the authorizer installed on all readers (see <code>benchmark/results/2026-04-06T22-40-34-after-authorizer-hooks.md</code>).</p>
 <h2>How Dirty Tables Are Tracked</h2>
-<p>The writer connection has a <code>sqlite3_preupdate_hook</code> installed (see <a href="./writing.md">Writing</a>). It fires per-row during INSERT/UPDATE/DELETE, recording the affected table name. The dirty table set is returned with every write response to main.</p>
+<p>The writer connection has a <code>sqlite3_preupdate_hook</code> installed (see <a href="writing.html">Writing</a>). It fires per-row during INSERT/UPDATE/DELETE, recording the affected table name. The dirty table set is returned with every write response to main.</p>
 <p>For transactions, dirty tables accumulate until commit. Rolled-back transactions clear the set without notifying.</p>
 <h2>StreamEngine</h2>
 <p>The <code>StreamEngine</code> (in <code>stream_engine.dart</code>) owns the full reactive query lifecycle. It receives a reference to the reader pool and manages all active streams.</p>

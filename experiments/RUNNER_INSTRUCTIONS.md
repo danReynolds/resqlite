@@ -17,8 +17,8 @@ Before choosing an experiment, read:
 - [`README.md`](README.md) — the experiment table and templates
 - [`signals.json`](signals.json) — the canonical per-direction research map
 - [`JOURNAL.md`](JOURNAL.md) — transferable lessons from prior experiments
-- [`MILESTONES.md`](MILESTONES.md) — the curated narrative arc, for context on
-  how the current state was reached
+- [`../doc/stories/`](../doc/stories/) — the curated narrative arc, for context
+  on how the current state was reached
 - recent individual experiment writeups relevant to the area you are considering
 
 `signals.json` is the canonical research map. Treat it as context, not an
@@ -76,8 +76,8 @@ When finished:
   lesson — something a future runner could reapply to a different direction or
   could waste time relearning. Per-direction state goes in `signals.json`, not
   the journal.
-- do not edit [`MILESTONES.md`](MILESTONES.md) as part of an experiment run.
-  That file is updated on maintainer request, not per experiment.
+- do not edit [`../doc/stories/`](../doc/stories/) as part of an experiment
+  run. Story posts are updated on maintainer request, not per experiment.
 - regenerate docs/check generated data as needed
 - run focused validation plus the relevant repo checks
 - open a PR, watch CI/review, and address actionable feedback

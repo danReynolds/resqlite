@@ -1,79 +1,205 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
 
-/// Converts markdown files from `doc/` into styled HTML pages
-/// in `docs/blog/`, plus an index page.
+/// Converts markdown files from `doc/` into styled HTML pages in `docs/blog/`.
+///
+/// Architecture/deep-dive posts are rendered into `docs/blog/*.html`.
+/// Project stories are rendered into `docs/blog/stories/*.html`, with a
+/// chronological timeline at `docs/blog/stories/index.html`.
 ///
 /// Usage:
 ///   dart run benchmark/generate_blog.dart
 void main() {
-  final posts = <Map<String, String>>[];
-
-  // Define post order and metadata.
-  final sources = [
-    (
-      path: 'experiments/MILESTONES.md',
-      slug: 'milestones',
-      category: 'Engineering Story',
-    ),
-    (
+  final posts = [
+    _loadPost(
       path: 'doc/arch/architecture.md',
       slug: 'architecture',
       category: 'Architecture',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/reading.md',
       slug: 'reading',
       category: 'Deep Dive',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/writing.md',
       slug: 'writing',
       category: 'Deep Dive',
     ),
-    (
+    _loadPost(
       path: 'doc/arch/streaming.md',
       slug: 'streaming',
       category: 'Deep Dive',
     ),
-  ];
+  ].whereType<BlogPost>().toList();
 
-  for (final source in sources) {
-    final file = File(source.path);
-    if (!file.existsSync()) {
-      print('  Skipping ${source.path} (not found)');
-      continue;
-    }
-    final content = file.readAsStringSync();
-    final title = _extractTitle(content);
-    final description = _extractDescription(content);
+  final stories = _loadStories(Directory('doc/stories'));
 
-    posts.add({
-      'slug': source.slug,
-      'title': title,
-      'category': source.category,
-      'description': description,
-      'content': content,
-    });
+  final outDir = Directory('docs/blog')..createSync(recursive: true);
+  final storyOutDir = Directory('${outDir.path}/stories')
+    ..createSync(recursive: true);
+
+  // Remove generated story HTML that may no longer correspond to a source file.
+  for (final file in storyOutDir.listSync().whereType<File>()) {
+    if (file.path.endsWith('.html')) file.deleteSync();
   }
 
-  // Write individual post pages.
-  final outDir = Directory('docs/blog');
-  outDir.createSync(recursive: true);
+  // Remove the old milestone page. Stories are the canonical narrative surface.
+  final oldMilestones = File('${outDir.path}/milestones.html');
+  if (oldMilestones.existsSync()) oldMilestones.deleteSync();
 
   for (final post in posts) {
-    final html = _renderPost(post, posts);
-    File('${outDir.path}/${post['slug']}.html')
-        .writeAsStringSync(html);
-    print('  ${post['slug']}.html — ${post['title']}');
+    File(
+      '${outDir.path}/${post.slug}.html',
+    ).writeAsStringSync(_renderPost(post, PostKind.blog));
+    print('  ${post.slug}.html - ${post.title}');
   }
 
-  // Write index page.
-  File('${outDir.path}/index.html')
-      .writeAsStringSync(_renderIndex(posts));
-  print('  index.html — Blog index');
+  for (final story in stories) {
+    File(
+      '${storyOutDir.path}/${story.slug}.html',
+    ).writeAsStringSync(_renderPost(story, PostKind.story));
+    print('  stories/${story.slug}.html - ${story.title}');
+  }
 
-  print('Wrote ${posts.length} posts + index to docs/blog/');
+  File(
+    '${storyOutDir.path}/index.html',
+  ).writeAsStringSync(_renderStoryIndex(stories));
+  print('  stories/index.html - Stories timeline');
+
+  File('${outDir.path}/index.html').writeAsStringSync(_renderBlogIndex(posts));
+  print('  index.html - Blog index');
+
+  print(
+    'Wrote ${posts.length} posts + ${stories.length} stories to docs/blog/',
+  );
+}
+
+enum PostKind { blog, story }
+
+class BlogPost {
+  BlogPost({
+    required this.slug,
+    required this.title,
+    required this.category,
+    required this.description,
+    required this.content,
+    this.date,
+    this.tags = const [],
+    this.tone = 'green',
+  });
+
+  final String slug;
+  final String title;
+  final String category;
+  final String description;
+  final String content;
+  final DateTime? date;
+  final List<String> tags;
+  final String tone;
+}
+
+BlogPost? _loadPost({
+  required String path,
+  required String slug,
+  required String category,
+}) {
+  final file = File(path);
+  if (!file.existsSync()) {
+    print('  Skipping $path (not found)');
+    return null;
+  }
+
+  final content = file.readAsStringSync();
+  return BlogPost(
+    slug: slug,
+    title: _extractTitle(content),
+    category: category,
+    description: _extractDescription(content),
+    content: content,
+  );
+}
+
+List<BlogPost> _loadStories(Directory dir) {
+  if (!dir.existsSync()) return const [];
+
+  final stories = <BlogPost>[];
+  for (final file in dir.listSync().whereType<File>()) {
+    if (!file.path.endsWith('.md')) continue;
+    final raw = file.readAsStringSync();
+    final parsed = _splitFrontMatter(raw);
+    final meta = parsed.meta;
+    final content = parsed.content;
+    final filename = file.uri.pathSegments.last;
+    final fallbackSlug = filename.substring(0, filename.length - 3);
+    final slug = meta['slug']?.trim().isNotEmpty == true
+        ? meta['slug']!.trim()
+        : fallbackSlug;
+    final dateText = meta['date']?.trim();
+    final date = dateText == null || dateText.isEmpty
+        ? null
+        : DateTime.parse(dateText);
+
+    stories.add(
+      BlogPost(
+        slug: slug,
+        title: meta['title']?.trim().isNotEmpty == true
+            ? meta['title']!.trim()
+            : _extractTitle(content),
+        category: 'Project Story',
+        description: meta['summary']?.trim().isNotEmpty == true
+            ? meta['summary']!.trim()
+            : _extractDescription(content),
+        content: content,
+        date: date,
+        tags: _parseTags(meta['tags']),
+        tone: meta['tone']?.trim().isNotEmpty == true
+            ? meta['tone']!.trim()
+            : 'green',
+      ),
+    );
+  }
+
+  stories.sort((a, b) {
+    final ad = a.date ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final bd = b.date ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final byDate = ad.compareTo(bd);
+    if (byDate != 0) return byDate;
+    return a.slug.compareTo(b.slug);
+  });
+  return stories;
+}
+
+({Map<String, String> meta, String content}) _splitFrontMatter(String raw) {
+  final lines = raw.split('\n');
+  if (lines.isEmpty || lines.first.trim() != '---') {
+    return (meta: const {}, content: raw);
+  }
+
+  final meta = <String, String>{};
+  var end = -1;
+  for (var i = 1; i < lines.length; i++) {
+    if (lines[i].trim() == '---') {
+      end = i;
+      break;
+    }
+    final match = RegExp(r'^([A-Za-z0-9_-]+):\s*(.*)$').firstMatch(lines[i]);
+    if (match != null) {
+      meta[match.group(1)!] = match.group(2)!.trim();
+    }
+  }
+
+  if (end == -1) return (meta: const {}, content: raw);
+  return (meta: meta, content: lines.skip(end + 1).join('\n').trimLeft());
+}
+
+List<String> _parseTags(String? tags) {
+  if (tags == null || tags.trim().isEmpty) return const [];
+  return tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .where((tag) => tag.isNotEmpty)
+      .toList();
 }
 
 String _extractTitle(String content) {
@@ -87,12 +213,10 @@ String _extractDescription(String content) {
   final lines = content.split('\n');
   for (var i = 0; i < lines.length; i++) {
     if (lines[i].startsWith('# ')) {
-      // Take the first non-empty paragraph after the title.
       for (var j = i + 1; j < lines.length; j++) {
         final line = lines[j].trim();
         if (line.isEmpty) continue;
         if (line.startsWith('#')) break;
-        // Truncate long descriptions.
         return line.length > 200 ? '${line.substring(0, 197)}...' : line;
       }
     }
@@ -100,20 +224,31 @@ String _extractDescription(String content) {
   return '';
 }
 
-String _renderIndex(List<Map<String, String>> posts) {
-  final cards = posts.map((p) => '''
-    <a class="post-card" href="${p['slug']}.html">
-      <span class="post-category">${_esc(p['category']!)}</span>
-      <h2>${_esc(p['title']!)}</h2>
-      <p>${_esc(p['description']!)}</p>
-    </a>''').join('\n');
+String _renderBlogIndex(List<BlogPost> posts) {
+  final cards = [
+    '''
+    <a class="post-card" href="stories/index.html">
+      <span class="post-category">Project Stories</span>
+      <h2>The Chronological History of resqlite</h2>
+      <p>An annotated timeline of the design decisions behind resqlite: object graphs, flat-list rows, reader-pool tradeoffs, stream invalidation, write serialization, and a Dart VM hang.</p>
+    </a>''',
+    ...posts.map(
+      (p) =>
+          '''
+    <a class="post-card" href="${p.slug}.html">
+      <span class="post-category">${_esc(p.category)}</span>
+      <h2>${_esc(p.title)}</h2>
+      <p>${_esc(p.description)}</p>
+    </a>''',
+    ),
+  ].join('\n');
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Blog — Architecture &amp; Engineering</title>
+<title>resqlite Blog - Stories &amp; Architecture</title>
 <style>
 ${_sharedCss()}
   .post-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
@@ -134,13 +269,13 @@ ${_sharedCss()}
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="../">&larr; Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="../index.html">&larr; Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
     <a href="../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
-  <h1>Architecture &amp; Engineering</h1>
-  <p class="subtitle">Technical deep-dives into how resqlite works and why it's fast.</p>
+  <h1>Stories &amp; Architecture</h1>
+  <p class="subtitle">The chronological engineering history of resqlite, plus technical deep-dives into how the library works.</p>
   <div class="post-list">
 $cards
   </div>
@@ -149,39 +284,192 @@ $cards
 </html>''';
 }
 
-String _renderPost(
-  Map<String, String> post,
-  List<Map<String, String>> allPosts,
-) {
-  final content = post['content']!;
-  final htmlBody = _markdownToHtml(content);
+String _renderStoryIndex(List<BlogPost> stories) {
+  final entries = stories.map(_renderStoryTimelineEntry).join('\n');
+  final leadTitle = stories.isEmpty ? 'Stories' : _esc(stories.first.title);
+  final leadDescription = stories.isEmpty
+      ? 'Project stories will appear here as markdown posts are added.'
+      : _inline(stories.first.description);
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${_esc(post['title']!)} — resqlite</title>
+<title>resqlite Stories - Project Timeline</title>
 <style>
-${_sharedCss()}
-${_articleCss()}
+${_storyIndexCss()}
 </style>
 </head>
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="./">&larr; All Posts</a>
-    <a href="../">Home</a>
-    <a href="../benchmarks/">Benchmarks</a>
-    <a href="../experiments/">Experiments</a>
+    <a href="../index.html">&larr; Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
+
+  <header class="hero">
+    <div>
+      <span class="eyebrow">Project Stories</span>
+      <h1>The chronological history of resqlite.</h1>
+      <p class="subtitle">The public docs explain what the library does. The experiment log records every measurement. These stories explain the design decisions that changed the project, with enough context to read any entry on its own.</p>
+    </div>
+    <a class="lead-card" href="${stories.isEmpty ? '../index.html' : '${stories.first.slug}.html'}">
+      <span class="label">Start here</span>
+      <h2>$leadTitle</h2>
+      <p>$leadDescription</p>
+    </a>
+  </header>
+
+  <section class="stats" aria-label="Project story highlights">
+    <div class="stat">
+      <strong>${stories.length}</strong>
+      <span>chronological stories split from the original project narrative</span>
+    </div>
+    <div class="stat">
+      <strong>0.47 ms</strong>
+      <span>main-isolate time for 5,000-row map reads in the early benchmark set</span>
+    </div>
+    <div class="stat">
+      <strong>116K</strong>
+      <span>point queries per second measured after the reader event-port cleanup</span>
+    </div>
+    <div class="stat">
+      <strong>6 days</strong>
+      <span>from filing the Flutter hang to the Dart VM fix landing upstream</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="timeline-title">
+    <div class="section-heading">
+      <h2 id="timeline-title">Timeline</h2>
+      <a href="../../experiments/index.html">Open the experiment log &rarr;</a>
+    </div>
+
+    <div class="timeline">
+$entries
+    </div>
+  </section>
+
+  <section class="lower-links" aria-label="Related documentation">
+    <a class="link-card" href="../../experiments/index.html">
+      <h3>Experiment Log</h3>
+      <p>The complete lab notebook: accepted ideas, rejected ideas, benchmark links, and reasoning.</p>
+    </a>
+    <a class="link-card" href="../../benchmarks/index.html">
+      <h3>Benchmark Dashboard</h3>
+      <p>Interactive charts for peer comparisons, run history, devices, and scenario workloads.</p>
+    </a>
+    <a class="link-card" href="../architecture.html">
+      <h3>Architecture</h3>
+      <p>The system-level view of readers, writers, native handles, and streaming behavior.</p>
+    </a>
+  </section>
+</div>
+</body>
+</html>''';
+}
+
+String _renderStoryTimelineEntry(BlogPost story) {
+  final tags = story.tags
+      .map((tag) => '<span class="tag">${_esc(tag)}</span>')
+      .join('\n              ');
+  return '''
+      <article class="story-entry" data-tone="${_escAttr(story.tone)}">
+        <div class="story-date">
+          <strong>${_storyMonthDay(story.date)}</strong>
+          ${story.date?.year ?? ''}
+        </div>
+        <a class="story-card" href="${story.slug}.html">
+          <div>
+            <h3>${_esc(story.title)}</h3>
+            <p>${_inline(story.description)}</p>
+            <div class="story-meta">
+              $tags
+            </div>
+          </div>
+          <span class="story-action">Read story &rarr;</span>
+        </a>
+      </article>''';
+}
+
+String _renderPost(BlogPost post, PostKind kind) {
+  final htmlBody = _markdownToHtml(post.content);
+  final isStory = kind == PostKind.story;
+  final nav = isStory
+      ? '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>'''
+      : '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Posts</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../experiments/index.html">Experiments</a>
+  </nav>''';
+  final meta = isStory
+      ? '    <p class="story-byline">${_esc(_longDate(post.date))}${post.tags.isEmpty ? '' : ' · ${post.tags.map(_esc).join(' · ')}'}</p>\n'
+      : '';
+  final body = isStory ? '$meta$htmlBody' : '    $htmlBody';
+  final extraCss = isStory ? _storyBylineCss() : '';
+
+  return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${_esc(post.title)} — resqlite</title>
+<style>
+${_sharedCss()}
+${_articleCss()}$extraCss
+</style>
+</head>
+<body>
+<div class="page-wrap">
+$nav
   <article class="post">
-    <span class="post-category">${_esc(post['category']!)}</span>
-    $htmlBody
+    <span class="post-category">${_esc(post.category)}</span>
+$body
   </article>
 </div>
 </body>
 </html>''';
+}
+
+String _storyMonthDay(DateTime? date) {
+  if (date == null) return '';
+  return '${_month(date.month)} ${date.day.toString().padLeft(2, '0')}';
+}
+
+String _longDate(DateTime? date) {
+  if (date == null) return '';
+  return '${_month(date.month)} ${date.day}, ${date.year}';
+}
+
+String _month(int month) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return months[month - 1];
 }
 
 /// Convert markdown to HTML. Handles headings, paragraphs, code blocks,
@@ -194,7 +482,7 @@ String _markdownToHtml(String md) {
   var listType = '';
   final tableRows = <String>[];
 
-  void _flushTable() {
+  void flushTable() {
     if (tableRows.isEmpty) return;
     buf.writeln(_renderTable(tableRows));
     tableRows.clear();
@@ -203,14 +491,16 @@ String _markdownToHtml(String md) {
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
 
-    // Code blocks.
     if (line.startsWith('```')) {
-      _flushTable();
+      flushTable();
       if (inCodeBlock) {
         buf.writeln('</code></pre>');
         inCodeBlock = false;
       } else {
-        if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+        if (inList) {
+          buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+          inList = false;
+        }
         final lang = line.substring(3).trim();
         buf.writeln('<pre><code class="lang-$lang">');
         inCodeBlock = true;
@@ -224,21 +514,24 @@ String _markdownToHtml(String md) {
 
     final trimmed = line.trim();
 
-    // Table rows: collect and render as a batch.
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
       tableRows.add(trimmed);
       continue;
     }
-    _flushTable();
+    flushTable();
 
-    // Blank line — close list if open.
     if (trimmed.isEmpty) {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
       continue;
     }
 
-    // Headings.
     if (trimmed.startsWith('######')) {
       buf.writeln('<h6>${_inline(trimmed.substring(6).trim())}</h6>');
     } else if (trimmed.startsWith('#####')) {
@@ -251,45 +544,47 @@ String _markdownToHtml(String md) {
       buf.writeln('<h2>${_inline(trimmed.substring(2).trim())}</h2>');
     } else if (trimmed.startsWith('# ')) {
       buf.writeln('<h1>${_inline(trimmed.substring(2).trim())}</h1>');
-    }
-    // Horizontal rule.
-    else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
+    } else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
       buf.writeln('<hr>');
-    }
-    // Unordered list.
-    else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
-      if (!inList) { buf.writeln('<ul>'); inList = true; listType = 'ul'; }
-      buf.writeln('<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''))}</li>');
-    }
-    // Ordered list.
-    else if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
-      if (!inList) { buf.writeln('<ol>'); inList = true; listType = 'ol'; }
-      buf.writeln('<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''))}</li>');
-    }
-    // Paragraph.
-    else {
-      if (inList) { buf.writeln(listType == 'ol' ? '</ol>' : '</ul>'); inList = false; }
+    } else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
+      if (!inList) {
+        buf.writeln('<ul>');
+        inList = true;
+        listType = 'ul';
+      }
+      buf.writeln(
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''))}</li>',
+      );
+    } else if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
+      if (!inList) {
+        buf.writeln('<ol>');
+        inList = true;
+        listType = 'ol';
+      }
+      buf.writeln(
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''))}</li>',
+      );
+    } else {
+      if (inList) {
+        buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+      }
       buf.writeln('<p>${_inline(trimmed)}</p>');
     }
   }
-  _flushTable();
+  flushTable();
   if (inList) buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
   if (inCodeBlock) buf.writeln('</code></pre>');
 
   return buf.toString();
 }
 
-/// Render a markdown table as a styled HTML table with winner highlighting.
-/// For numeric columns, the best value (lowest, or highest for qps/ops) gets
-/// a green highlight.
 String _renderTable(List<String> rows) {
   if (rows.isEmpty) return '';
 
-  // Parse cells from each row.
   List<String> parseCells(String row) =>
       row.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
-  // Skip separator rows (|---|---|).
   final dataRows = rows
       .where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r))
       .toList();
@@ -298,29 +593,29 @@ String _renderTable(List<String> rows) {
   final headerCells = parseCells(dataRows[0]);
   final bodyRows = dataRows.skip(1).map(parseCells).toList();
 
-  // Detect which columns are numeric (for winner highlighting).
   final numericCols = <int>{};
   for (final row in bodyRows) {
     for (var c = 0; c < row.length; c++) {
+      final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
+      if (_isDimensionColumn(header)) continue;
       final val = row[c].replaceAll(RegExp(r'[*`]'), '');
       if (double.tryParse(val) != null) numericCols.add(c);
     }
   }
 
-  // For each numeric column, find the best value.
-  // "Best" = lowest, unless column header contains qps/ops/throughput.
   final colBest = <int, double>{};
   for (final c in numericCols) {
     final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
-    final higherIsBetter = header.contains('qps') || header.contains('ops') ||
+    final higherIsBetter =
+        header.contains('qps') ||
+        header.contains('ops') ||
         header.contains('throughput');
     double? best;
     for (final row in bodyRows) {
       if (c >= row.length) continue;
       final val = double.tryParse(row[c].replaceAll(RegExp(r'[*`]'), ''));
       if (val == null) continue;
-      if (best == null ||
-          (higherIsBetter ? val > best : val < best)) {
+      if (best == null || (higherIsBetter ? val > best : val < best)) {
         best = val;
       }
     }
@@ -329,15 +624,12 @@ String _renderTable(List<String> rows) {
 
   final buf = StringBuffer();
   buf.writeln('<div class="table-wrap"><table class="bench-table">');
-
-  // Header.
   buf.writeln('<thead><tr>');
   for (final cell in headerCells) {
     buf.writeln('<th>${_inline(cell)}</th>');
   }
   buf.writeln('</tr></thead>');
 
-  // Body rows.
   buf.writeln('<tbody>');
   for (final row in bodyRows) {
     buf.writeln('<tr>');
@@ -356,30 +648,54 @@ String _renderTable(List<String> rows) {
   return buf.toString();
 }
 
-/// Inline formatting: bold, italic, code, links.
+bool _isDimensionColumn(String header) {
+  final normalized = header.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  return normalized == 'row' ||
+      normalized == 'rows' ||
+      normalized == 'size' ||
+      normalized == 'scenario' ||
+      normalized == 'workload' ||
+      normalized == 'path' ||
+      normalized == 'phase' ||
+      normalized == 'metric' ||
+      normalized == 'implementation';
+}
+
 String _inline(String s) {
   var out = _esc(s);
-  // Links: [text](url)
   out = out.replaceAllMapped(
     RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
-    (m) => '<a href="${m.group(2)}">${m.group(1)}</a>',
+    (m) => '<a href="${_htmlHref(m.group(2)!)}">${m.group(1)}</a>',
   );
-  // Bold: **text**
   out = out.replaceAllMapped(
     RegExp(r'\*\*([^*]+)\*\*'),
     (m) => '<strong>${m.group(1)}</strong>',
   );
-  // Italic: *text* (but not inside bold)
   out = out.replaceAllMapped(
     RegExp(r'(?<!\*)\*([^*]+)\*(?!\*)'),
     (m) => '<em>${m.group(1)}</em>',
   );
-  // Inline code: `text`
   out = out.replaceAllMapped(
     RegExp(r'`([^`]+)`'),
     (m) => '<code>${m.group(1)}</code>',
   );
   return out;
+}
+
+String _htmlHref(String href) {
+  if (href.startsWith('http:') ||
+      href.startsWith('https:') ||
+      href.startsWith('mailto:') ||
+      href.startsWith('#')) {
+    return _escAttr(href);
+  }
+
+  if (href == '../../experiments/') return '../experiments/index.html';
+  if (href.startsWith('./') && href.endsWith('.md')) {
+    return _escAttr('${href.substring(2, href.length - 3)}.html');
+  }
+  if (href.endsWith('/')) return _escAttr('${href}index.html');
+  return _escAttr(href);
 }
 
 String _esc(String s) {
@@ -389,6 +705,8 @@ String _esc(String s) {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
 }
+
+String _escAttr(String s) => _esc(s).replaceAll("'", '&#39;');
 
 String _sharedCss() => '''
   :root {
@@ -459,4 +777,310 @@ String _articleCss() => '''
   .bench-table tr:last-child td { border-bottom: none; }
   .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
   .bench-table .winner { color: #3fb950; font-weight: 600; }
+''';
+
+String _storyBylineCss() => '''
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+''';
+
+String _storyIndexCss() => '''
+  :root {
+    --bg: #0d1117;
+    --panel: #131821;
+    --panel-2: #10151d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --rose: #ff7b72;
+    --violet: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: none; }
+  .page-wrap {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  .top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    margin-bottom: 3rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .top-nav a { color: var(--accent); }
+  .top-nav a:hover { text-decoration: underline; }
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 3rem;
+    align-items: end;
+    padding-bottom: 3rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    color: var(--green);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  h1 {
+    max-width: 760px;
+    margin-bottom: 1rem;
+    font-size: clamp(2.4rem, 7vw, 5.25rem);
+    line-height: 0.95;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    max-width: 680px;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .lead-card {
+    display: block;
+    padding: 1.25rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .lead-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .lead-card .label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: var(--amber);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .lead-card h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+    line-height: 1.3;
+  }
+  .lead-card p {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin: 2rem 0 3rem;
+  }
+  .stat {
+    padding: 1rem;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .stat strong {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text);
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+  .stat span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-heading h2 {
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-heading a {
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+  .section-heading a:hover { text-decoration: underline; }
+  .timeline {
+    position: relative;
+    display: grid;
+    gap: 1.25rem;
+    padding-bottom: 2rem;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    top: 0.6rem;
+    bottom: 0;
+    left: 8.75rem;
+    width: 1px;
+    background: var(--border);
+  }
+  .story-entry {
+    position: relative;
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: stretch;
+  }
+  .story-date {
+    padding-top: 1rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: right;
+  }
+  .story-date strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .story-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1.5rem;
+    padding: 1.25rem 1.35rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .story-card::before {
+    content: "";
+    position: absolute;
+    top: 1.35rem;
+    left: -1.82rem;
+    width: 0.78rem;
+    height: 0.78rem;
+    background: var(--accent);
+    border: 3px solid var(--bg);
+    border-radius: 999px;
+  }
+  .story-card:hover {
+    border-color: var(--accent);
+    transform: translateX(3px);
+  }
+  .story-card h3 {
+    margin-bottom: 0.45rem;
+    font-size: 1.15rem;
+    line-height: 1.3;
+  }
+  .story-card p {
+    max-width: 760px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .story-card code {
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+  }
+  .story-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.85rem;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.55rem;
+    padding: 0 0.5rem;
+    color: var(--muted);
+    background: rgba(139, 148, 158, 0.08);
+    border: 1px solid rgba(139, 148, 158, 0.2);
+    border-radius: 999px;
+    font-size: 0.72rem;
+  }
+  .story-action {
+    align-self: center;
+    color: var(--accent);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  .story-entry[data-tone="green"] .story-card::before { background: var(--green); }
+  .story-entry[data-tone="amber"] .story-card::before { background: var(--amber); }
+  .story-entry[data-tone="rose"] .story-card::before { background: var(--rose); }
+  .story-entry[data-tone="violet"] .story-card::before { background: var(--violet); }
+  .lower-links {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .link-card {
+    display: block;
+    padding: 1.1rem;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .link-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .link-card h3 {
+    margin-bottom: 0.35rem;
+    font-size: 0.95rem;
+  }
+  .link-card p {
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  @media (max-width: 840px) {
+    .page-wrap { padding: 1.25rem; }
+    .hero { grid-template-columns: 1fr; gap: 1.5rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .timeline::before { left: 0.4rem; }
+    .story-entry {
+      grid-template-columns: 1fr;
+      gap: 0.55rem;
+      padding-left: 1.85rem;
+    }
+    .story-date {
+      padding-top: 0;
+      text-align: left;
+    }
+    .story-card { grid-template-columns: 1fr; gap: 1rem; }
+    .story-card::before {
+      top: 1.35rem;
+      left: -1.84rem;
+    }
+    .story-action { justify-self: start; }
+    .lower-links { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: 1fr; }
+    h1 { font-size: 2.55rem; }
+  }
 ''';

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flat-List ResultSet Design — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Project Story</span>
+    <p class="story-byline">Apr 8, 2026 · ResultSet · Row facade · read path</p>
+<h1>Flat-List ResultSet Design</h1>
+<h2>Problem Statement</h2>
+<p>The read path no longer looked limited by SQLite execution. Native connection state, statement caching, and mutex reductions had helped, but <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> still produced a large transfer graph. resqlite needed a row representation that preserved the map-like API without paying for one mutable hash map per row.</p>
+<h2>Background</h2>
+<p>Database result rows have a constrained shape:</p>
+<ul>
+<li>Every row in a result has the same columns.</li>
+<li>Rows are immutable after query completion.</li>
+<li>Most access is by column name, iteration, or JSON encoding.</li>
+<li>Column names can be shared across the whole result.</li>
+</ul>
+<p>That shape does not require a full <code>LinkedHashMap</code> for every row. The public API could remain map-like while the storage became specialized for query results.</p>
+<p>The SQLite side of this path is the normal prepared-statement loop: compile SQL with <a href="https://www.sqlite.org/c3ref/prepare.html"><code>sqlite3_prepare_v2()</code> or <code>sqlite3_prepare_v3()</code></a>, call <a href="https://www.sqlite.org/c3ref/step.html"><code>sqlite3_step()</code></a> until it stops returning rows, and read each column with the <a href="https://www.sqlite.org/c3ref/column_blob.html"><code>sqlite3_column_*()</code> family</a>. resqlite was not trying to replace that lifecycle. The question was what Dart shape should be built from those column values before the result crossed isolates.</p>
+<p>That distinction matters for FFI-heavy libraries. SQLite already exposes row values one statement step at a time. A wrapper can either mirror that row shape directly into Dart maps, or it can recognize that column metadata is stable across the result and store values in a representation better suited to transfer and iteration.</p>
+<h2>Hypothesis</h2>
+<p>If values are stored in one flat row-major list and column metadata is shared once, then <code>Isolate.exit()</code> will validate far fewer structural objects. The main isolate can still expose <code>Map&lt;String, Object?&gt;</code> behavior by creating cheap row facades on demand.</p>
+<h2>What We Tried</h2>
+<p><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a> built the representation in three steps:</p>
+<ol>
+<li>Store all row values in one <code>List&lt;Object?&gt;</code>.</li>
+<li>Store column names and the name-to-index map in one shared <code>RowSchema</code>.</li>
+<li>Create lightweight <code>Row</code> objects lazily when callers access <code>result[i]</code>.</li>
+</ol>
+<p>The storage layout is simple:</p>
+<pre><code class="lang-text">
+values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
+</code></pre>
+<p><code>Row</code> implements <code>Map&lt;String, Object?&gt;</code>, but lookup is:</p>
+<ol>
+<li>Find the column index in the shared schema.</li>
+<li>Compute <code>rowOffset + columnIndex</code>.</li>
+<li>Return the value from the flat list.</li>
+</ol>
+<p>Values are still decoded on the worker. The main isolate does not decode UTF-8 or materialize SQLite values; it creates only small facades.</p>
+<h2>Results</h2>
+<p>The 20,000-row benchmark showed the representation change clearly:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Implementation (20,000 rows)</th>
+<th>Wall</th>
+<th>Main</th>
+<th>vs sqlite3</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>LinkedHashMap</code> + <code>Isolate.exit</code></td>
+<td>24.95 ms</td>
+<td>1.57 ms</td>
+<td>+12% slower</td>
+</tr>
+<tr>
+<td>Flat list + eager rows</td>
+<td>19.39 ms</td>
+<td>1.74 ms</td>
+<td>-12% faster</td>
+</tr>
+<tr>
+<td>Flat list + lazy <code>ResultSet</code></td>
+<td><strong>18.03 ms</strong></td>
+<td><strong>2.52 ms</strong></td>
+<td><strong>-13% faster</strong></td>
+</tr>
+<tr>
+<td>sqlite3 baseline</td>
+<td>20.65 ms</td>
+<td>20.65 ms</td>
+<td>-</td>
+</tr>
+</tbody></table></div>
+
+<p>Main-isolate time across sizes confirmed that the design matched the Flutter constraint:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite main</th>
+<th>sqlite3 main</th>
+<th>sqlite_async main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1,000</td>
+<td><strong>0.10 ms</strong></td>
+<td>0.79 ms</td>
+<td>0.17 ms</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td><strong>0.47 ms</strong></td>
+<td>3.90 ms</td>
+<td>0.87 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td><strong>2.52 ms</strong></td>
+<td>20.65 ms</td>
+<td>-</td>
+</tr>
+</tbody></table></div>
+
+<p>The structural object count dropped from hundreds of thousands of map-related objects to a small set of shared containers plus the actual values.</p>
+<h2>Outcome</h2>
+<p>The flat-list <code>ResultSet</code> became the core read-path representation. It kept the caller-facing API ordinary while removing the per-row map infrastructure from the isolate transfer graph.</p>
+<p>The broader engineering lesson was that API shape and storage shape do not have to be the same. resqlite could expose map-like rows without storing rows as maps.</p>
+<h2>Related Experiments</h2>
+<ul>
+<li><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008: Flat value list with lazy ResultSet</a></li>
+<li><a href="../../../experiments/032-row-map-facade.md">Experiment 032: Row Map facade overrides</a></li>
+</ul>
+<h2>Reference Docs</h2>
+<ul>
+<li><a href="https://www.sqlite.org/c3ref/prepare.html">SQLite prepared statements</a></li>
+<li><a href="https://www.sqlite.org/c3ref/step.html">SQLite statement stepping</a></li>
+<li><a href="https://www.sqlite.org/c3ref/column_blob.html">SQLite column access APIs</a></li>
+<li><a href="https://dart.dev/interop/c-interop">Dart C interop with <code>dart:ffi</code></a></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>

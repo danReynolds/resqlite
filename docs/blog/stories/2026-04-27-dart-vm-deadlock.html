@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Debugging a Dart VM Service Deadlock — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; All Stories</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiments</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Project Story</span>
+    <p class="story-byline">Apr 27, 2026 · Dart VM · macOS · upstream fix</p>
+<h1>Debugging a Dart VM Service Deadlock</h1>
+<h2>Problem Statement</h2>
+<p>A Flutter macOS app occasionally froze on cold launch. The last application log line was <code>Migrate DB started</code>, so the first visible suspect was resqlite's migration path. The failure looked like a database hang, but the real problem was that the Dart VM stopped making progress.</p>
+<p>This story is not a performance experiment. It is included because it documents an engineering investigation pattern that mattered for resqlite: when the runtime is stuck, Dart-level observability can become part of the failure surface.</p>
+<h2>Background</h2>
+<p>The migration was simple: read <code>PRAGMA user_version</code>, create schema if needed, and write the new version. It had succeeded many times. Hot-reload state and stale database locks were plausible first theories, but they did not fit cold-launch reproductions.</p>
+<p>The first migration read used the reader pool, so the investigation added logs around worker startup:</p>
+<pre><code class="lang-text">
+[ReaderPool] reader 0: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 1: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 2: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 3: Isolate.spawn done, awaiting SendPort...
+</code></pre>
+<p>The spawn futures resolved, but no worker entrypoint log appeared. A <code>Timer.periodic</code> on the main isolate did not fire either. That ruled out a simple SQLite lock wait: the event loop itself was not advancing.</p>
+<p>Two runtime concepts explain why this investigation left the database layer. Isolates are Dart's independent units of execution and communicate by message passing, but they still run inside one Dart VM process. The <a href="https://dart.googlesource.com/sdk.git/+/refs/tags/3.9.0-2.0.dev/runtime/vm/service/service.md">VM service protocol</a> is the debugging and inspection protocol used by tools; its <code>getStack</code> RPC asks the VM for an isolate stack and message queue. If that machinery participates in the deadlock, Dart-level tools can become unreliable evidence rather than neutral observers.</p>
+<h2>Working Hypotheses</h2>
+<p>The investigation moved through three hypotheses:</p>
+<ol>
+<li>A stale SQLite writer or migration lock blocked the first read.</li>
+<li>The reader-pool workers spawned but could not start because of a resqlite isolate bug.</li>
+<li>The Dart VM or Flutter embedding was blocked below application code.</li>
+</ol>
+<p>The evidence pushed the investigation toward the third hypothesis.</p>
+<h2>What We Tried</h2>
+<p>Dart-level tools were not enough. DevTools and the VM service both depend on a responsive VM. macOS <code>sample(1)</code> snapshots native thread stacks from outside the process runtime, so it became the useful tool.</p>
+<p>The main thread was parked in the Dart VM safepoint handler:</p>
+<pre><code class="lang-text">
+dart::SafepointHandler::ExitSafepointLocked
+  -&gt; ConditionVariable::WaitMicros
+    -&gt; _pthread_cond_wait
+</code></pre>
+<p>Above it was Flutter lifecycle dispatch from a macOS window occlusion notification:</p>
+<pre><code class="lang-text">
+CGSDatagramReadStream::dispatchMainQueueDatagrams
+  -&gt; NSNotificationCenter
+    -&gt; FlutterAppLifecycleRegistrar.handleDidChangeOcclusionState
+      -&gt; FlutterEngine setApplicationState
+        -&gt; Dart_EnterIsolate
+          -&gt; Thread::ExitSafepoint
+</code></pre>
+<p>That shifted the investigation. The database migration was where logs stopped, but the process was blocked in a Dart VM safepoint while Flutter tried to enter the isolate from the main thread.</p>
+<h2>Results</h2>
+<p>The result was a root-cause handoff rather than a resqlite patch:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Observation</th>
+<th>Interpretation</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>4 reader spawn futures resolved</td>
+<td>isolate creation was not the failing step</td>
+</tr>
+<tr>
+<td>0 worker entrypoint logs after spawn</td>
+<td>workers did not begin Dart execution</td>
+</tr>
+<tr>
+<td>0 periodic timer ticks on main isolate</td>
+<td>the main isolate was not processing events</td>
+</tr>
+<tr>
+<td>main thread sampled in VM safepoint wait</td>
+<td>failure was below SQLite and Dart application code</td>
+</tr>
+<tr>
+<td>upstream fix landed 6 days after filing</td>
+<td>root cause was in the Dart VM service path</td>
+</tr>
+</tbody></table></div>
+
+<p>The first theory about Flutter's merged platform/UI thread mode on macOS was incomplete. Merged threads made the failure visible by pulling the main thread into the wait, but the underlying cycle involved Dart worker threads, debugger breakpoint synchronization, VM service requests, safepoints, <code>PortMap::mutex_</code>, and a message handler monitor.</p>
+<p>The missing piece was identified upstream. <code>Service::InvokeMethod</code>, while handling a <code>GetStack</code> request, entered an <code>AcquiredQueues</code> scope that held a message queue monitor. Formatting queued messages could trigger JIT compilation. Leaving that compilation scope could post an out-of-band reload check back to the same isolate, which tried to acquire the same monitor already held by the current thread.</p>
+<p>One thread waited for a monitor it already held. The rest of the VM accumulated behind that self-deadlock.</p>
+<h2>Outcome</h2>
+<p>The Dart SDK fix was subtractive: stop returning the old <code>Stack.messages</code> queue dump from <code>GetStack</code>. DevTools did not use it. Removing that field removed the lock-then-run-Dart path that allowed recursive monitor acquisition.</p>
+<p>resqlite's role was indirect. The project provided the reproducible pressure, the ruled-out database theories, the native sample, and enough thread evidence for VM maintainers to finish the diagnosis.</p>
+<p>The engineering lesson is specific: when the runtime is not making progress, use observability outside the runtime. In this case, a database-looking hang became a VM service deadlock only because the investigation moved below Dart-level tooling.</p>
+<h2>Related Records</h2>
+<p>There is no resqlite experiment file for this story because no resqlite code change was accepted or rejected. The relevant artifact is the native sampling evidence summarized above, and the upstream fix in the Dart VM service implementation.</p>
+<h2>Reference Docs</h2>
+<ul>
+<li><a href="https://dart.dev/language/isolates">Dart isolates</a></li>
+<li><a href="https://dart.googlesource.com/sdk.git/+/refs/tags/3.9.0-2.0.dev/runtime/vm/service/service.md">Dart VM service protocol</a></li>
+<li><a href="https://pub.dev/packages/vm_service">Dart <code>vm_service</code> package</a></li>
+</ul>
+
+  </article>
+</div>
+</body>
+</html>
