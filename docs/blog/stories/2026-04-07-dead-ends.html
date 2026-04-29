@@ -113,9 +113,9 @@
 <li>Byte-backed lazy maps might transfer one buffer and decode only what the UI reads.</li>
 </ul>
 <h2>What We Tried</h2>
-<p><a href="../../../experiments/005-dart-binary-codec-transferable-typed-data.md">Experiment 005</a> encoded rows into bytes on the worker, transferred the bytes, and decoded maps afterward. It tested the most obvious &quot;make it bytes&quot; answer.</p>
-<p><a href="../../../experiments/006-string-interning.md">Experiment 006</a> deduplicated repeated strings so the graph would contain fewer distinct string objects. It tested whether the current map shape could be kept by shaving off repeated values.</p>
-<p><a href="../../../experiments/008b-byte-backed-lazy-maps.md">Experiment 008b</a> packed rows into a compact byte buffer and exposed each row as a lazy map that decoded values on access. It tested whether row materialization could be delayed instead of eliminated.</p>
+<p><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005</a> encoded rows into bytes on the worker, transferred the bytes, and decoded maps afterward. It tested the most obvious &quot;make it bytes&quot; answer.</p>
+<p><a href="../../experiments/006-string-interning.html">Experiment 006</a> deduplicated repeated strings so the graph would contain fewer distinct string objects. It tested whether the current map shape could be kept by shaving off repeated values.</p>
+<p><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b</a> packed rows into a compact byte buffer and exposed each row as a lazy map that decoded values on access. It tested whether row materialization could be delayed instead of eliminated.</p>
 <h2>Results</h2>
 <p>The Dart binary codec was consistently slower than the VM serializer:</p>
 <div class="table-wrap"><table class="bench-table">
@@ -203,9 +203,9 @@
 <p>That led directly to the flat-list <code>ResultSet</code>: materialize values on the worker, transfer a compact graph, and defer only lightweight row facade creation. The next accepted design was less exotic than the failed byte-backed versions, but it matched the product constraint better.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/005-dart-binary-codec-transferable-typed-data.md">Experiment 005: Dart binary codec with TransferableTypedData</a></li>
-<li><a href="../../../experiments/006-string-interning.md">Experiment 006: String interning for Isolate.exit</a></li>
-<li><a href="../../../experiments/008b-byte-backed-lazy-maps.md">Experiment 008b: Byte-backed lazy maps</a></li>
+<li><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005: Dart binary codec with TransferableTypedData</a></li>
+<li><a href="../../experiments/006-string-interning.html">Experiment 006: String interning for Isolate.exit</a></li>
+<li><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b: Byte-backed lazy maps</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

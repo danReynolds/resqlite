@@ -109,7 +109,7 @@
 <h2>Hypothesis</h2>
 <p>If values are stored in one flat row-major list and column metadata is shared once, then <code>Isolate.exit()</code> will validate far fewer structural objects. The main isolate can still expose <code>Map&lt;String, Object?&gt;</code> behavior by creating cheap row facades on demand.</p>
 <h2>What We Tried</h2>
-<p><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a> built the representation in three steps. The design deliberately changed storage first and presentation second:</p>
+<p><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a> built the representation in three steps. The design deliberately changed storage first and presentation second:</p>
 <ol>
 <li>Store all row values in one <code>List&lt;Object?&gt;</code>.</li>
 <li>Store column names and the name-to-index map in one shared <code>RowSchema</code>.</li>
@@ -198,8 +198,8 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
 <p>This was the first major positive turn in the story. With large result transfer under control, the next bottleneck moved to the other end of the size spectrum: tiny reads were still paying too much to create one-off workers.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008: Flat value list with lazy ResultSet</a></li>
-<li><a href="../../../experiments/032-row-map-facade.md">Experiment 032: Row Map facade overrides</a></li>
+<li><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
+<li><a href="../../experiments/032-row-map-facade.html">Experiment 032: Row Map facade overrides</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

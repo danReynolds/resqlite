@@ -104,7 +104,7 @@
 <p>If <code>Isolate.exit()</code> validation walks every reachable heap object, then reducing the number of structural Dart objects should matter more than reducing FFI calls. A result shape with fewer maps should transfer faster even if the logical data is the same.</p>
 <h2>What We Tried</h2>
 <p>The early implementation kept the map representation and measured scaling as result size grew. This was intentionally conservative: before inventing a custom row type, resqlite needed to know whether the normal Dart shape was actually the problem.</p>
-<p>A later phase breakdown, recorded in <a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a>, separated SQLite stepping, Dart object construction, and isolate validation.</p>
+<p>A later phase breakdown, recorded in <a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a>, separated SQLite stepping, Dart object construction, and isolate validation.</p>
 <h2>Results</h2>
 <p>The scaling data showed the gap widening with result size:</p>
 <div class="table-wrap"><table class="bench-table">
@@ -172,8 +172,8 @@
 <p>The next optimization target was therefore not &quot;make FFI faster.&quot; It was: find the smallest Dart object graph that can still present a normal row-map API. That discovery pushed the project into a short but useful run of rejected designs.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008: Flat value list with lazy ResultSet</a></li>
-<li><a href="../../../experiments/012-sendport-vs-spawn-deep-dive.md">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
+<li><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
+<li><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

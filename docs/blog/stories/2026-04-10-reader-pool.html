@@ -97,8 +97,8 @@
 <p>The flat-list <code>ResultSet</code> fixed the large-result transfer problem, but it exposed a different bottleneck on small reads. Every <code>select()</code> still spawned a fresh isolate, ran the query, transferred the result with <code>Isolate.exit()</code>, and terminated.</p>
 <p>For large result sets, isolate setup was a small fraction of total time. For point queries, it dominated. A one-row lookup should not pay the full cost of creating a fresh isolate.</p>
 <h2>Background</h2>
-<p>The first persistent-pool attempt, <a href="../../../experiments/011-persistent-reader-pool.md">Experiment 011</a>, was rejected because it arrived too early. It still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>, so copying maps with repeated column keys erased the benefit of reusing workers.</p>
-<p><a href="../../../experiments/012-sendport-vs-spawn-deep-dive.md">Experiment 012</a> showed the raw trade-off more carefully. A <code>SendPort</code> round trip with no payload was around 6 us, while <code>Isolate.spawn</code> plus <code>Isolate.exit</code> was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.</p>
+<p>The first persistent-pool attempt, <a href="../../experiments/011-persistent-reader-pool.html">Experiment 011</a>, was rejected because it arrived too early. It still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>, so copying maps with repeated column keys erased the benefit of reusing workers.</p>
+<p><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012</a> showed the raw trade-off more carefully. A <code>SendPort</code> round trip with no payload was around 6 us, while <code>Isolate.spawn</code> plus <code>Isolate.exit</code> was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.</p>
 <p>This is the practical difference between a worker pool and a one-shot task helper. Dart isolates communicate by message passing, as described in the <a href="https://dart.dev/language/isolates">Dart isolate guide</a>. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> lets a long-lived worker reply and then accept more work, but ordinary mutable messages may be copied. <a href="https://api.dart.dev/dart-isolate/Isolate/exit.html"><code>Isolate.exit</code></a> can transfer ownership of the final message more efficiently, but only because the sending isolate exits. A pool therefore has to decide when keeping the worker alive is worth copying, and when the result is large enough to sacrifice the worker.</p>
 <p>The flat-list <code>ResultSet</code> changed the economics. A small result was no longer a graph of repeated maps and keys. It was one compact values list plus one shared schema.</p>
 <h2>Hypothesis</h2>
@@ -109,16 +109,16 @@
 </ol>
 <p>This hybrid should remove spawn overhead for small reads without regressing large-result transfer.</p>
 <h2>What We Tried</h2>
-<p><a href="../../../experiments/019-hybrid-reader-pool.md">Experiment 019</a> implemented the hybrid pool. Four reader workers stayed alive. Each query chose a path based on result size:</p>
+<p><a href="../../experiments/019-hybrid-reader-pool.html">Experiment 019</a> implemented the hybrid pool. Four reader workers stayed alive. Each query chose a path based on result size:</p>
 <ul>
 <li>Below the threshold: send the <code>ResultSet</code> over <code>SendPort</code>.</li>
 <li>Above the threshold: call <code>Isolate.exit(replyPort, resultSet)</code>, intentionally killing the worker.</li>
 </ul>
 <p>The pool then evolved through follow-up experiments:</p>
 <ul>
-<li><a href="../../../experiments/030-dedicated-reader-assignment.md">Experiment 030</a> assigned each Dart worker a fixed native reader index, removing the C reader-pool mutex from the hot path.</li>
-<li><a href="../../../experiments/039-byte-size-sacrifice-threshold.md">Experiment 039</a> replaced a cell-count sacrifice threshold with a byte-size estimate.</li>
-<li><a href="../../../experiments/040-reader-slot-event-port-cleanup.md">Experiment 040</a> simplified the worker protocol to one command port, one event port, and one authoritative pending completer.</li>
+<li><a href="../../experiments/030-dedicated-reader-assignment.html">Experiment 030</a> assigned each Dart worker a fixed native reader index, removing the C reader-pool mutex from the hot path.</li>
+<li><a href="../../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039</a> replaced a cell-count sacrifice threshold with a byte-size estimate.</li>
+<li><a href="../../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040</a> simplified the worker protocol to one command port, one event port, and one authoritative pending completer.</li>
 </ul>
 <h2>Results</h2>
 <p>The initial hybrid pool made small reads much faster:</p>
@@ -223,12 +223,12 @@
 <p>At this point resqlite had a plausible read engine. The next challenge was returning to one of the original product goals: making reads reactive without turning every write into an application-level invalidation problem.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/011-persistent-reader-pool.md">Experiment 011: Persistent reader worker pool</a></li>
-<li><a href="../../../experiments/012-sendport-vs-spawn-deep-dive.md">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
-<li><a href="../../../experiments/019-hybrid-reader-pool.md">Experiment 019: Hybrid reader pool</a></li>
-<li><a href="../../../experiments/030-dedicated-reader-assignment.md">Experiment 030: Dedicated reader assignment</a></li>
-<li><a href="../../../experiments/039-byte-size-sacrifice-threshold.md">Experiment 039: Byte-size sacrifice threshold</a></li>
-<li><a href="../../../experiments/040-reader-slot-event-port-cleanup.md">Experiment 040: Reader slot event-port cleanup</a></li>
+<li><a href="../../experiments/011-persistent-reader-pool.html">Experiment 011: Persistent reader worker pool</a></li>
+<li><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
+<li><a href="../../experiments/019-hybrid-reader-pool.html">Experiment 019: Hybrid reader pool</a></li>
+<li><a href="../../experiments/030-dedicated-reader-assignment.html">Experiment 030: Dedicated reader assignment</a></li>
+<li><a href="../../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039: Byte-size sacrifice threshold</a></li>
+<li><a href="../../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040: Reader slot event-port cleanup</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

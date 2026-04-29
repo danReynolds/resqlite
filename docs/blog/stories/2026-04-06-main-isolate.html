@@ -117,7 +117,7 @@ final rows = await Isolate.run(() {
   return db.select('SELECT * FROM items');
 });
 </code></pre>
-<p>That moved SQLite execution away from the caller, but returned <code>List&lt;Map&lt;String, Object?&gt;&gt;</code>. A second path returned one byte buffer instead, matching the direction later captured in <a href="../../../experiments/001-c-native-json-serialization.md">Experiment 001</a>. The point was not that JSON bytes should be the final API. It was a probe: how much of the observed pain came from SQLite execution, and how much came from the shape of the Dart data crossing back?</p>
+<p>That moved SQLite execution away from the caller, but returned <code>List&lt;Map&lt;String, Object?&gt;&gt;</code>. A second path returned one byte buffer instead, matching the direction later captured in <a href="../../experiments/001-c-native-json-serialization.html">Experiment 001</a>. The point was not that JSON bytes should be the final API. It was a probe: how much of the observed pain came from SQLite execution, and how much came from the shape of the Dart data crossing back?</p>
 <h2>Results</h2>
 <p>The important signal was main-isolate time, not just wall time:</p>
 <div class="table-wrap"><table class="bench-table">
@@ -144,7 +144,7 @@ final rows = await Isolate.run(() {
 </tr>
 </tbody></table></div>
 
-<p><a href="../../../experiments/001-c-native-json-serialization.md">Experiment 001</a> measured the same idea on the JSON response path:</p>
+<p><a href="../../experiments/001-c-native-json-serialization.html">Experiment 001</a> measured the same idea on the JSON response path:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
 <th>Path (5,000 rows, about 1 MB JSON)</th>
@@ -167,8 +167,8 @@ final rows = await Isolate.run(() {
 <p>This opening measurement set up the rest of the project. The next stories ask, in order, what the isolate boundary really costs, which result representations fail under that constraint, and what shape finally lets resqlite keep the API ordinary without handing too much work back to the UI isolate.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/001-c-native-json-serialization.md">Experiment 001: C-native JSON serialization</a></li>
-<li><a href="../../../experiments/002-c-binary-buffer-for-maps.md">Experiment 002: C binary buffer for maps</a></li>
+<li><a href="../../experiments/001-c-native-json-serialization.html">Experiment 001: C-native JSON serialization</a></li>
+<li><a href="../../experiments/002-c-binary-buffer-for-maps.html">Experiment 002: C binary buffer for maps</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

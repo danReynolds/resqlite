@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 008: Flat Value List with Lazy ResultSet — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted (the breakthrough)</span>
+    <p class="story-byline">Apr 6, 2026 · Accepted (the breakthrough)</p>
+<h1>Experiment 008: Flat Value List with Lazy ResultSet</h1>
+<p><strong>Date:</strong> 2026-04-06</p>
+<p><strong>Status:</strong> Accepted (the breakthrough)</p>
+<p><strong>Commit:</strong> <a href="https://github.com/danReynolds/dune/commit/a18492c"><code>a18492c</code></a>, <a href="https://github.com/danReynolds/dune/commit/666da73"><code>666da73</code></a></p>
+<h2>Problem</h2>
+<p>At 20,000 rows, the <code>Isolate.exit()</code> validation walk cost 8.44ms — 38% of total <code>select()</code> time. Investigation revealed the Dart VM's <code>MessageValidator</code> walks every heap object in the transfer graph. A <code>LinkedHashMap</code> with 6 entries creates ~8-10 internal objects (hash table buckets, linked list entries, key-value nodes). For 20,000 rows: 160,000-200,000 internal objects to validate.</p>
+<h2>Hypothesis</h2>
+<p>Query result rows are immutable, fixed-schema, and read-only. They don't need <code>LinkedHashMap</code>'s hash table or insertion-order linked list. Replacing them with a simpler structure would reduce the object count in the <code>Isolate.exit</code> graph, cutting validation time.</p>
+<h2>What We Built</h2>
+<p>Three changes, each building on the previous:</p>
+<h3>1. Flat value list</h3>
+<p>All rows' values stored in a single <code>List&lt;Object?&gt;</code>:</p>
+<pre><code class="lang-">
+values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
+</code></pre>
+<h3>2. Lightweight Row class</h3>
+<p><code>Row</code> implements <code>Map&lt;String, Object?&gt;</code> via <code>MapMixin</code>. Looks up column index in a shared <code>RowSchema</code> (one small map for the whole result set), then indexes into the flat list. No per-row hash table.</p>
+<h3>3. Lazy Row creation</h3>
+<p><code>ResultSet</code> creates <code>Row</code> objects on-demand when <code>result[i]</code> is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.</p>
+<p><code>Isolate.exit</code> transfers: 1 ResultSet + 1 RowSchema + 1 List&lt;Object?&gt; + actual values = <strong>~3 structural objects</strong> instead of ~200,000.</p>
+<h2>Results</h2>
+<h3>Progression at 20,000 rows</h3>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Implementation</th>
+<th>Wall</th>
+<th>Main</th>
+<th>vs sqlite3</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>LinkedHashMap + Isolate.exit</td>
+<td>24.95 ms</td>
+<td>1.57 ms</td>
+<td>+12% slower</td>
+</tr>
+<tr>
+<td>Flat list + eager Row wrappers</td>
+<td>19.39 ms</td>
+<td>1.74 ms</td>
+<td>-12% faster</td>
+</tr>
+<tr>
+<td><strong>Flat list + lazy ResultSet</strong></td>
+<td><strong>18.03 ms</strong></td>
+<td><strong>2.52 ms</strong></td>
+<td><strong>-13% faster</strong></td>
+</tr>
+<tr>
+<td>sqlite3 (baseline)</td>
+<td>20.65 ms</td>
+<td>20.65 ms</td>
+<td>—</td>
+</tr>
+</tbody></table></div>
+
+<h3>Main-isolate time across sizes</h3>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Rows</th>
+<th>resqlite main</th>
+<th>sqlite3 main</th>
+<th>sqlite_async main</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>1,000</td>
+<td><strong>0.10 ms</strong></td>
+<td>0.79 ms</td>
+<td>0.17 ms</td>
+</tr>
+<tr>
+<td>5,000</td>
+<td><strong>0.47 ms</strong></td>
+<td>3.90 ms</td>
+<td>0.87 ms</td>
+</tr>
+<tr>
+<td>20,000</td>
+<td><strong>2.52 ms</strong></td>
+<td>20.65 ms</td>
+<td>—</td>
+</tr>
+</tbody></table></div>
+
+<h3>Why the lazy ResultSet doesn't hurt main-isolate time</h3>
+<p>Unlike the ByteBackedResultSet (experiment 008b), the lazy <code>Row</code> creation is trivial — 3 field assignments, no decode work. The values in the flat list are already fully-decoded Dart <code>String</code>/<code>int</code>/<code>double</code> objects built on the worker. Main-isolate time for accessing a row is nanoseconds, not microseconds.</p>
+<h2>Why Accepted</h2>
+<p>This was the single most impactful optimization in the entire project. Reducing the <code>Isolate.exit</code> object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.</p>
+<p><strong>Key lesson:</strong> The number of Dart heap objects matters more than their size for <code>Isolate.exit</code> performance. Data structure choice had more impact than any systems-level optimization.</p>
+
+  </article>
+</div>
+</body>
+</html>

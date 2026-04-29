@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 110: Long-text stream hash benchmark + 8-byte FNV — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">In Review</span>
+    <p class="story-byline">Apr 27, 2026 · In Review · <code>long-text-stream-hashing</code>, <code>measurement-system</code></p>
+<h1>Experiment 110: Long-text stream hash benchmark + 8-byte FNV</h1>
+<p><strong>Date:</strong> 2026-04-27T15:46:01</p>
+<p><strong>Status:</strong> In Review</p>
+<p><strong>Direction:</strong> <code>long-text-stream-hashing</code>, <code>measurement-system</code></p>
+<p><strong>PR:</strong> <a href="https://github.com/danReynolds/resqlite/pull/53">#53</a></p>
+<h2>Problem</h2>
+<p>Experiment 099 found a structurally sound optimization for TEXT/BLOB hashing,</p>
+<p>but rejected it because the benchmark suite did not contain a stream workload</p>
+<p>with long enough cells to exercise the byte-stream hash loop. The new research</p>
+<p>map correctly pointed at this as a measurement-first direction: build the</p>
+<p>missing long-text workload before spending more time on hash-loop variants.</p>
+<p>The current stream unchanged-result fast path still hashes raw SQLite TEXT bytes</p>
+<p>in C before deciding whether to skip Dart decode. SQLite's result-value API</p>
+<p>supports this shape: callers can read UTF-8 text with <code>sqlite3_column_text()</code>,</p>
+<p>then get its byte length with <code>sqlite3_column_bytes()</code>, and the pointer remains</p>
+<p>valid until the statement steps, resets, or finalizes. Recent SQLite release</p>
+<p>notes did not expose a new C API that replaces this local hash loop, and Dart's</p>
+<p>current isolate-transfer tools do not remove the need to avoid decode entirely</p>
+<p>on unchanged stream re-queries.</p>
+<p>Sources checked:</p>
+<ul>
+<li>SQLite result values API: https://www.sqlite.org/c3ref/column_blob.html</li>
+<li>SQLite 3.53.0 release notes: https://www.sqlite.org/changes.html</li>
+<li>Dart isolates: https://dart.dev/language/isolates</li>
+<li><code>TransferableTypedData</code>: https://api.dart.dev/dart-isolate/TransferableTypedData-class.html</li>
+<li>sqlite_async peer streaming context: https://pub.dev/packages/sqlite_async</li>
+</ul>
+<h2>Hypothesis</h2>
+<p>Adding a representative long-text unchanged-fanout benchmark should make the</p>
+<p>hash-loop cost visible. If that happens, reviving experiment 099's 8-byte</p>
+<p>chunked byte fold should produce a large win on the new workload while keeping</p>
+<p>short-cell workloads and public API behavior effectively unchanged.</p>
+<h2>Approach</h2>
+<p>Added a default streaming benchmark:</p>
+<ul>
+<li>8 unchanged streams</li>
+<li>256 rows per unchanged result</li>
+<li>4KB ASCII TEXT cell per row</li>
+<li>one changed long-text barrier stream registered after the unchanged streams</li>
+</ul>
+<p>Each timed iteration inserts a new row outside the unchanged streams'</p>
+<p>predicate. The unchanged streams must not emit; the barrier stream changes and</p>
+<p>emits, giving the benchmark a practical completion signal for the fanout wave.</p>
+<p>Then revived the archived experiment 099 C change in <code>fnv_combine_bytes</code>:</p>
+<pre><code class="lang-c">
+for (; i + 8 &lt;= len; i += 8) {
+    uint64_t word;
+    memcpy(&amp;word, b + i, 8);
+    h ^= word;
+    h = (h * RESQLITE_FNV_PRIME) &amp; RESQLITE_FNV_MASK;
+}
+for (; i &lt; len; i++) {
+    h ^= (uint64_t)b[i];
+    h = (h * RESQLITE_FNV_PRIME) &amp; RESQLITE_FNV_MASK;
+}
+</code></pre>
+<p><code>memcpy(&amp;word, b + i, 8)</code> is the standard unaligned-safe load idiom. The hash</p>
+<p>bit pattern is host-byte-order dependent, but stream hashes are in-memory only:</p>
+<p>the producer and consumer are always the same process and same algorithm</p>
+<p>version.</p>
+<h2>Results</h2>
+<p>Artifacts:</p>
+<ul>
+<li><code>benchmark/results/2026-04-27T15-42-56-baseline-for-exp110-long-text.md</code></li>
+<li><code>benchmark/results/2026-04-27T15-42-56-baseline-for-exp110-long-text.json</code></li>
+<li><code>benchmark/results/2026-04-27T15-46-01-exp110-fnv-8byte-long-text.md</code></li>
+<li><code>benchmark/results/2026-04-27T15-46-01-exp110-fnv-8byte-long-text.json</code></li>
+</ul>
+<p>Target workload:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline</th>
+<th>8-byte FNV</th>
+<th>Delta</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Long-Text Unchanged Fanout median</td>
+<td>10.328 ms</td>
+<td>2.435 ms</td>
+<td>-76%</td>
+</tr>
+<tr>
+<td>Long-Text Unchanged Fanout p90</td>
+<td>15.035 ms</td>
+<td>3.871 ms</td>
+<td>-74%</td>
+</tr>
+</tbody></table></div>
+
+<p>The full one-pass release comparison reported **20 wins, 11 regressions, 124</p>
+<p>neutral**. The broad suite deltas were noisy in both directions, which is normal</p>
+<p>for single-repeat release runs. The targeted long-text result is far outside the</p>
+<p>threshold and matches the exact path changed by the implementation.</p>
+<p>Correctness checks:</p>
+<ul>
+<li><code>dart test test/query_decoder_test.dart test/stream_test.dart --timeout 60s</code></li>
+</ul>
+<p>The stream test suite now includes a long-text case that verifies both sides of</p>
+<p>the hash contract: a no-op long-text update does not emit, and a same-length</p>
+<p>change after the first 8-byte chunk does emit.</p>
+<h2>Decision</h2>
+<p>Keep in review.</p>
+<p>The experiment is accepted for PR review: the revised process did exactly what</p>
+<p>it was designed to do. It kept the prior rejected idea available without forcing</p>
+<p>it, identified the missing benchmark as the next useful step, and then let the</p>
+<p>new evidence turn experiment 099's implementation from &quot;structurally sound but</p>
+<p>unmeasurable&quot; into a clear targeted win.</p>
+<p>The main caution is methodological: the single-run full-suite comparison should</p>
+<p>not be over-read. The acceptance signal is the new long-text benchmark plus</p>
+<p>targeted correctness coverage; CI and review should still watch for unexpected</p>
+<p>platform-specific fallout from the host-byte-order hash bit pattern.</p>
+<h2>Future Notes</h2>
+<p>The long-text stream benchmark is now part of the default release suite and the</p>
+<p>experiment dashboard's curated metrics. Future hash-loop work should compare</p>
+<p>against this benchmark first, then check the normal short-text streaming metrics</p>
+<p>for regressions. Avoid more hashing variants unless they improve this workload</p>
+<p>or a production profile shows a new long-payload shape.</p>
+
+  </article>
+</div>
+</body>
+</html>

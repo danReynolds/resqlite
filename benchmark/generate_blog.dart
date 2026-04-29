@@ -6,6 +6,9 @@ import 'dart:io';
 /// Architecture/deep-dive posts are rendered into `docs/blog/*.html`.
 /// Project stories are rendered into `docs/blog/stories/*.html`, with a
 /// chronological timeline at `docs/blog/stories/index.html`.
+/// Experiment markdown files are rendered into `docs/experiments/*.html`, while
+/// the existing interactive experiment dashboard remains at
+/// `docs/experiments/index.html`.
 ///
 /// Usage:
 ///   dart run benchmark/generate_blog.dart
@@ -34,14 +37,24 @@ void main() {
   ].whereType<BlogPost>().toList();
 
   final stories = _loadStories(Directory('doc/stories'));
+  final experiments = _loadExperiments(Directory('experiments'));
 
   final outDir = Directory('docs/blog')..createSync(recursive: true);
   final storyOutDir = Directory('${outDir.path}/stories')
+    ..createSync(recursive: true);
+  final experimentOutDir = Directory('docs/experiments')
     ..createSync(recursive: true);
 
   // Remove generated story HTML that may no longer correspond to a source file.
   for (final file in storyOutDir.listSync().whereType<File>()) {
     if (file.path.endsWith('.html')) file.deleteSync();
+  }
+
+  // Remove generated experiment article pages. Keep the hand-authored
+  // interactive dashboard at index.html.
+  for (final file in experimentOutDir.listSync().whereType<File>()) {
+    final name = file.uri.pathSegments.last;
+    if (name.endsWith('.html') && name != 'index.html') file.deleteSync();
   }
 
   // Remove the old milestone page. Stories are the canonical narrative surface.
@@ -62,6 +75,13 @@ void main() {
     print('  stories/${story.slug}.html - ${story.title}');
   }
 
+  for (final experiment in experiments) {
+    File(
+      '${experimentOutDir.path}/${experiment.slug}.html',
+    ).writeAsStringSync(_renderPost(experiment, PostKind.experiment));
+    print('  experiments/${experiment.slug}.html - ${experiment.title}');
+  }
+
   File(
     '${storyOutDir.path}/index.html',
   ).writeAsStringSync(_renderStoryIndex(stories));
@@ -71,11 +91,12 @@ void main() {
   print('  index.html - Blog index');
 
   print(
-    'Wrote ${posts.length} posts + ${stories.length} stories to docs/blog/',
+    'Wrote ${posts.length} posts + ${stories.length} stories + '
+    '${experiments.length} experiments to docs/',
   );
 }
 
-enum PostKind { blog, story }
+enum PostKind { blog, story, experiment }
 
 class BlogPost {
   BlogPost({
@@ -87,6 +108,7 @@ class BlogPost {
     this.date,
     this.tags = const [],
     this.tone = 'green',
+    this.meta = const {},
   });
 
   final String slug;
@@ -97,6 +119,7 @@ class BlogPost {
   final DateTime? date;
   final List<String> tags;
   final String tone;
+  final Map<String, String> meta;
 }
 
 BlogPost? _loadPost({
@@ -136,9 +159,8 @@ List<BlogPost> _loadStories(Directory dir) {
         ? meta['slug']!.trim()
         : fallbackSlug;
     final dateText = meta['date']?.trim();
-    final date = dateText == null || dateText.isEmpty
-        ? null
-        : DateTime.parse(dateText);
+    final date =
+        dateText == null || dateText.isEmpty ? null : DateTime.parse(dateText);
 
     stories.add(
       BlogPost(
@@ -168,6 +190,90 @@ List<BlogPost> _loadStories(Directory dir) {
     return a.slug.compareTo(b.slug);
   });
   return stories;
+}
+
+List<BlogPost> _loadExperiments(Directory dir) {
+  if (!dir.existsSync()) return const [];
+
+  final experiments = <BlogPost>[];
+  for (final file in dir.listSync().whereType<File>()) {
+    final filename = file.uri.pathSegments.last;
+    if (!_isExperimentMarkdown(filename)) continue;
+
+    final content = file.readAsStringSync();
+    final meta = _extractExperimentMeta(content);
+    final status = meta['Status'] ?? 'Experiment';
+    experiments.add(
+      BlogPost(
+        slug: filename.substring(0, filename.length - 3),
+        title: _extractTitle(content),
+        category: status,
+        description: _extractExperimentDescription(content),
+        content: content,
+        date: _parseExperimentDate(meta['Date']),
+        tags: status == 'Experiment' ? const [] : [status],
+        tone: _experimentTone(status),
+        meta: meta,
+      ),
+    );
+  }
+
+  experiments.sort((a, b) {
+    final an = _experimentNumber(a.slug);
+    final bn = _experimentNumber(b.slug);
+    if (an != bn) return an.compareTo(bn);
+    return a.slug.compareTo(b.slug);
+  });
+  return experiments;
+}
+
+bool _isExperimentMarkdown(String filename) =>
+    RegExp(r'^\d{3}[a-z]?-.+\.md$').hasMatch(filename);
+
+int _experimentNumber(String slug) {
+  final match = RegExp(r'^(\d+)').firstMatch(slug);
+  return match == null ? 999999 : int.parse(match.group(1)!);
+}
+
+Map<String, String> _extractExperimentMeta(String content) {
+  final meta = <String, String>{};
+  for (final line in content.split('\n')) {
+    final match = RegExp(r'^\*\*([^:*]+):\*\*\s*(.+)$').firstMatch(line.trim());
+    if (match != null) {
+      meta[match.group(1)!.trim()] = match.group(2)!.trim();
+    }
+  }
+  return meta;
+}
+
+DateTime? _parseExperimentDate(String? value) {
+  if (value == null || value.isEmpty) return null;
+  return DateTime.tryParse(value);
+}
+
+String _experimentTone(String status) {
+  final normalized = status.toLowerCase();
+  if (normalized.contains('accepted')) return 'green';
+  if (normalized.contains('rejected')) return 'rose';
+  if (normalized.contains('review')) return 'amber';
+  if (normalized.contains('deferred')) return 'violet';
+  return 'amber';
+}
+
+String _extractExperimentDescription(String content) {
+  final lines = content.split('\n');
+  final start = lines.indexWhere(
+    (line) => RegExp(r'^##\s+(Problem|Hypothesis|Background)').hasMatch(line),
+  );
+  if (start == -1) return _extractDescription(content);
+
+  for (var i = start + 1; i < lines.length; i++) {
+    final line = lines[i].trim();
+    if (line.isEmpty || line.startsWith('**')) continue;
+    if (line.startsWith('#')) break;
+    return line.length > 200 ? '${line.substring(0, 197)}...' : line;
+  }
+  return _extractDescription(content);
 }
 
 ({Map<String, String> meta, String content}) _splitFrontMatter(String raw) {
@@ -233,8 +339,7 @@ String _renderBlogIndex(List<BlogPost> posts) {
       <p>An annotated timeline of the design decisions behind resqlite: object graphs, flat-list rows, reader-pool tradeoffs, stream invalidation, write serialization, and a Dart VM hang.</p>
     </a>''',
     ...posts.map(
-      (p) =>
-          '''
+      (p) => '''
     <a class="post-card" href="${p.slug}.html">
       <span class="post-category">${_esc(p.category)}</span>
       <h2>${_esc(p.title)}</h2>
@@ -397,29 +502,41 @@ String _renderStoryTimelineEntry(BlogPost story) {
 }
 
 String _renderPost(BlogPost post, PostKind kind) {
-  final htmlBody = _markdownToHtml(post.content);
+  final htmlBody = _markdownToHtml(post.content, kind);
   final isStory = kind == PostKind.story;
-  final nav = isStory
-      ? '''
+  final isExperiment = kind == PostKind.experiment;
+  final nav = switch (kind) {
+    PostKind.story => '''
   <nav class="top-nav">
     <a href="index.html">&larr; All Stories</a>
     <a href="../index.html">Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
     <a href="../../experiments/index.html">Experiments</a>
-  </nav>'''
-      : '''
+  </nav>''',
+    PostKind.experiment => '''
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>''',
+    PostKind.blog => '''
   <nav class="top-nav">
     <a href="index.html">&larr; All Posts</a>
     <a href="../index.html">Home</a>
     <a href="../benchmarks/index.html">Benchmarks</a>
     <a href="../experiments/index.html">Experiments</a>
-  </nav>''';
+  </nav>''',
+  };
   final meta = isStory
       ? '    <p class="story-byline">${_esc(_longDate(post.date))}${post.tags.isEmpty ? '' : ' · ${post.tags.map(_esc).join(' · ')}'}</p>\n'
-      : '';
-  final body = isStory ? '$meta$htmlBody' : '    $htmlBody';
-  final extraCss = isStory ? _storyBylineCss() : '';
+      : isExperiment
+          ? _renderExperimentMeta(post)
+          : '';
+  final body = isStory || isExperiment ? '$meta$htmlBody' : '    $htmlBody';
+  final extraCss = isStory || isExperiment ? _storyBylineCss() : '';
 
   return '''<!DOCTYPE html>
 <html lang="en">
@@ -442,6 +559,17 @@ $body
 </div>
 </body>
 </html>''';
+}
+
+String _renderExperimentMeta(BlogPost post) {
+  final fields = <String>[
+    if (post.date != null) _longDate(post.date),
+    if (post.meta['Status'] case final status?) status,
+    if (post.meta['Direction'] case final direction?) direction,
+  ].where((field) => field.trim().isNotEmpty).toList();
+
+  if (fields.isEmpty) return '';
+  return '    <p class="story-byline">${fields.map(_inline).join(' · ')}</p>\n';
 }
 
 String _storyMonthDay(DateTime? date) {
@@ -474,7 +602,7 @@ String _month(int month) {
 
 /// Convert markdown to HTML. Handles headings, paragraphs, code blocks,
 /// inline code, bold, lists, tables, and horizontal rules.
-String _markdownToHtml(String md) {
+String _markdownToHtml(String md, PostKind kind) {
   final lines = md.split('\n');
   final buf = StringBuffer();
   var inCodeBlock = false;
@@ -484,7 +612,7 @@ String _markdownToHtml(String md) {
 
   void flushTable() {
     if (tableRows.isEmpty) return;
-    buf.writeln(_renderTable(tableRows));
+    buf.writeln(_renderTable(tableRows, kind));
     tableRows.clear();
   }
 
@@ -533,17 +661,17 @@ String _markdownToHtml(String md) {
     }
 
     if (trimmed.startsWith('######')) {
-      buf.writeln('<h6>${_inline(trimmed.substring(6).trim())}</h6>');
+      buf.writeln('<h6>${_inline(trimmed.substring(6).trim(), kind)}</h6>');
     } else if (trimmed.startsWith('#####')) {
-      buf.writeln('<h5>${_inline(trimmed.substring(5).trim())}</h5>');
+      buf.writeln('<h5>${_inline(trimmed.substring(5).trim(), kind)}</h5>');
     } else if (trimmed.startsWith('####')) {
-      buf.writeln('<h4>${_inline(trimmed.substring(4).trim())}</h4>');
+      buf.writeln('<h4>${_inline(trimmed.substring(4).trim(), kind)}</h4>');
     } else if (trimmed.startsWith('###')) {
-      buf.writeln('<h3>${_inline(trimmed.substring(3).trim())}</h3>');
+      buf.writeln('<h3>${_inline(trimmed.substring(3).trim(), kind)}</h3>');
     } else if (trimmed.startsWith('##')) {
-      buf.writeln('<h2>${_inline(trimmed.substring(2).trim())}</h2>');
+      buf.writeln('<h2>${_inline(trimmed.substring(2).trim(), kind)}</h2>');
     } else if (trimmed.startsWith('# ')) {
-      buf.writeln('<h1>${_inline(trimmed.substring(2).trim())}</h1>');
+      buf.writeln('<h1>${_inline(trimmed.substring(2).trim(), kind)}</h1>');
     } else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
       buf.writeln('<hr>');
     } else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
@@ -553,7 +681,7 @@ String _markdownToHtml(String md) {
         listType = 'ul';
       }
       buf.writeln(
-        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''))}</li>',
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^[-*]\s+'), ''), kind)}</li>',
       );
     } else if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) {
       if (!inList) {
@@ -562,14 +690,14 @@ String _markdownToHtml(String md) {
         listType = 'ol';
       }
       buf.writeln(
-        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''))}</li>',
+        '<li>${_inline(trimmed.replaceFirst(RegExp(r'^\d+\.\s+'), ''), kind)}</li>',
       );
     } else {
       if (inList) {
         buf.writeln(listType == 'ol' ? '</ol>' : '</ul>');
         inList = false;
       }
-      buf.writeln('<p>${_inline(trimmed)}</p>');
+      buf.writeln('<p>${_inline(trimmed, kind)}</p>');
     }
   }
   flushTable();
@@ -579,15 +707,14 @@ String _markdownToHtml(String md) {
   return buf.toString();
 }
 
-String _renderTable(List<String> rows) {
+String _renderTable(List<String> rows, PostKind kind) {
   if (rows.isEmpty) return '';
 
   List<String> parseCells(String row) =>
       row.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
-  final dataRows = rows
-      .where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r))
-      .toList();
+  final dataRows =
+      rows.where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r)).toList();
   if (dataRows.isEmpty) return '';
 
   final headerCells = parseCells(dataRows[0]);
@@ -606,8 +733,7 @@ String _renderTable(List<String> rows) {
   final colBest = <int, double>{};
   for (final c in numericCols) {
     final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
-    final higherIsBetter =
-        header.contains('qps') ||
+    final higherIsBetter = header.contains('qps') ||
         header.contains('ops') ||
         header.contains('throughput');
     double? best;
@@ -626,7 +752,7 @@ String _renderTable(List<String> rows) {
   buf.writeln('<div class="table-wrap"><table class="bench-table">');
   buf.writeln('<thead><tr>');
   for (final cell in headerCells) {
-    buf.writeln('<th>${_inline(cell)}</th>');
+    buf.writeln('<th>${_inline(cell, kind)}</th>');
   }
   buf.writeln('</tr></thead>');
 
@@ -639,7 +765,7 @@ String _renderTable(List<String> rows) {
       final val = double.tryParse(clean);
       final isBest = val != null && colBest[c] == val && bodyRows.length > 1;
       final cls = isBest ? ' class="winner"' : '';
-      buf.writeln('<td$cls>${_inline(raw)}</td>');
+      buf.writeln('<td$cls>${_inline(raw, kind)}</td>');
     }
     buf.writeln('</tr>');
   }
@@ -661,11 +787,11 @@ bool _isDimensionColumn(String header) {
       normalized == 'implementation';
 }
 
-String _inline(String s) {
+String _inline(String s, [PostKind kind = PostKind.blog]) {
   var out = _esc(s);
   out = out.replaceAllMapped(
     RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
-    (m) => '<a href="${_htmlHref(m.group(2)!)}">${m.group(1)}</a>',
+    (m) => '<a href="${_htmlHref(m.group(2)!, kind)}">${m.group(1)}</a>',
   );
   out = out.replaceAllMapped(
     RegExp(r'\*\*([^*]+)\*\*'),
@@ -682,7 +808,7 @@ String _inline(String s) {
   return out;
 }
 
-String _htmlHref(String href) {
+String _htmlHref(String href, PostKind kind) {
   if (href.startsWith('http:') ||
       href.startsWith('https:') ||
       href.startsWith('mailto:') ||
@@ -690,12 +816,84 @@ String _htmlHref(String href) {
     return _escAttr(href);
   }
 
-  if (href == '../../experiments/') return '../experiments/index.html';
-  if (href.startsWith('./') && href.endsWith('.md')) {
-    return _escAttr('${href.substring(2, href.length - 3)}.html');
+  final hashIndex = href.indexOf('#');
+  final path = hashIndex == -1 ? href : href.substring(0, hashIndex);
+  final anchor = hashIndex == -1 ? '' : href.substring(hashIndex);
+
+  if (path == '../../experiments/' || path == '../../../experiments/') {
+    return _escAttr('${_experimentsPrefix(kind)}index.html$anchor');
   }
-  if (href.endsWith('/')) return _escAttr('${href}index.html');
+
+  if (path.endsWith('.md')) {
+    final filename = path.split('/').last;
+    final slug = filename.substring(0, filename.length - 3);
+    if (_isExperimentMarkdown(filename)) {
+      return _escAttr('${_experimentsPrefix(kind)}$slug.html$anchor');
+    }
+    if (kind == PostKind.blog && path.startsWith('./')) {
+      return _escAttr('${path.substring(2, path.length - 3)}.html$anchor');
+    }
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+  if (path.endsWith('.json')) {
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+
+  if (kind == PostKind.experiment && _looksLikeRepoFile(path)) {
+    return _escAttr(_githubSourceHref(path, kind, anchor));
+  }
+
+  if (path.endsWith('/')) return _escAttr('${path}index.html$anchor');
   return _escAttr(href);
+}
+
+bool _looksLikeRepoFile(String path) {
+  if (path.startsWith('/')) return true;
+  if (path.startsWith('../') || path.startsWith('./')) return true;
+  return RegExp(r'^[A-Za-z0-9_.-]+\.[A-Za-z0-9]+$').hasMatch(path);
+}
+
+String _experimentsPrefix(PostKind kind) {
+  return switch (kind) {
+    PostKind.story => '../../experiments/',
+    PostKind.blog => '../experiments/',
+    PostKind.experiment => '',
+  };
+}
+
+String _githubSourceHref(String path, PostKind kind, String anchor) {
+  const base = 'https://github.com/danReynolds/resqlite/blob/main/';
+  final repoPath = _repoRelativePath(path, kind);
+  return '$base$repoPath$anchor';
+}
+
+String _repoRelativePath(String path, PostKind kind) {
+  if (path.startsWith('/')) {
+    const markers = ['/packages/resqlite/', '/resqlite/'];
+    for (final marker in markers) {
+      final index = path.indexOf(marker);
+      if (index != -1) return path.substring(index + marker.length);
+    }
+    return path.split('/').last;
+  }
+
+  final parts = <String>[
+    ...switch (kind) {
+      PostKind.story => ['doc', 'stories'],
+      PostKind.blog => ['doc', 'arch'],
+      PostKind.experiment => ['experiments'],
+    },
+  ];
+
+  for (final part in path.split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+    } else {
+      parts.add(part);
+    }
+  }
+  return parts.join('/');
 }
 
 String _esc(String s) {

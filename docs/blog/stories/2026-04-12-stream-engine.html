@@ -113,10 +113,10 @@
 <h2>What We Tried</h2>
 <p>The first stream engine established dependency capture and dirty-table dispatch. That made the API useful, but real applications create fanout: many widgets, overlapping queries, repeated writes, and streams whose results often do not actually change. Later experiments tightened those expensive cases:</p>
 <ul>
-<li><a href="../../../experiments/045-microtask-invalidation-coalescing.md">Experiment 045</a> batched multiple synchronous dirty-table reports into one microtask flush.</li>
-<li><a href="../../../experiments/075-native-hash-selectifchanged.md">Experiment 075</a> moved unchanged-result hashing into C so unchanged re-queries could skip Dart decode.</li>
-<li><a href="../../../experiments/077-cheap-check-first-sweep.md">Experiment 077</a> added cheap fast-rejects before scheduling unnecessary stream work.</li>
-<li><a href="../../../experiments/083-stream-rerun-pre-dispatch-queue.md">Experiment 083</a> moved high-fanout coalescing before <code>ReaderPool</code> admission so stale reruns did not pile up waiting for readers.</li>
+<li><a href="../../experiments/045-microtask-invalidation-coalescing.html">Experiment 045</a> batched multiple synchronous dirty-table reports into one microtask flush.</li>
+<li><a href="../../experiments/075-native-hash-selectifchanged.html">Experiment 075</a> moved unchanged-result hashing into C so unchanged re-queries could skip Dart decode.</li>
+<li><a href="../../experiments/077-cheap-check-first-sweep.html">Experiment 077</a> added cheap fast-rejects before scheduling unnecessary stream work.</li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083</a> moved high-fanout coalescing before <code>ReaderPool</code> admission so stale reruns did not pile up waiting for readers.</li>
 </ul>
 <h2>Results</h2>
 <p>Microtask coalescing directly improved the changed-fanout benchmark:</p>
@@ -212,10 +212,10 @@
 <p>The detailed architecture walkthrough is <a href="../streaming.html">How resqlite Makes Queries Reactive</a>. The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine. That naturally made the write path part of the same story, because every useful stream invalidation starts with a correctly serialized mutation.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/045-microtask-invalidation-coalescing.md">Experiment 045: Microtask invalidation coalescing</a></li>
-<li><a href="../../../experiments/075-native-hash-selectifchanged.md">Experiment 075: Native-buffered hash for selectIfChanged</a></li>
-<li><a href="../../../experiments/077-cheap-check-first-sweep.md">Experiment 077: Cheap-check-first sweep</a></li>
-<li><a href="../../../experiments/083-stream-rerun-pre-dispatch-queue.md">Experiment 083: Stream rerun pre-dispatch queue</a></li>
+<li><a href="../../experiments/045-microtask-invalidation-coalescing.html">Experiment 045: Microtask invalidation coalescing</a></li>
+<li><a href="../../experiments/075-native-hash-selectifchanged.html">Experiment 075: Native-buffered hash for selectIfChanged</a></li>
+<li><a href="../../experiments/077-cheap-check-first-sweep.html">Experiment 077: Cheap-check-first sweep</a></li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083: Stream rerun pre-dispatch queue</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>

@@ -99,7 +99,7 @@
 <h2>Background</h2>
 <p>The early project had obvious bottlenecks: main-isolate work, isolate transfer graphs, per-query spawn overhead, and per-row map storage. Later work was different. The remaining opportunities were spread across stream fanout, transaction setup, parameter allocation, memory behavior, and benchmark coverage. The project needed a way to keep learning without accepting every local improvement as a global win.</p>
 <p>That meant each experiment needed a sharper hypothesis and a clearer acceptance bar. A small optimization should not be accepted only because one benchmark moved once. It needed to move the workload it structurally targeted, avoid regressions elsewhere, and leave behind useful evidence even when rejected.</p>
-<p>The repository's benchmark process became part of the design. The <a href="../../../benchmark/METHODOLOGY.md">benchmark methodology</a> separates workload types and measurement concerns, while the <a href="../../../benchmark/EXPERIMENTS.md">experiment index</a> keeps the accepted and rejected records discoverable. This matters because the same micro-optimization can look good in isolation and still be wrong for a stream fanout, transaction, or application-shaped workload.</p>
+<p>The repository's benchmark process became part of the design. The <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/METHODOLOGY.md">benchmark methodology</a> separates workload types and measurement concerns, while the <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/EXPERIMENTS.md">experiment index</a> keeps the accepted and rejected records discoverable. This matters because the same micro-optimization can look good in isolation and still be wrong for a stream fanout, transaction, or application-shaped workload.</p>
 <h2>Hypothesis</h2>
 <p>The highest-value work after the read path stabilized would come from:</p>
 <ol>
@@ -111,13 +111,13 @@
 <p>The experiment log became the primary research artifact. Accepted, rejected, and in-review experiments all kept the same basic shape: problem, hypothesis, implementation approach, results, and decision.</p>
 <p>The later optimization pass included both wins and deliberate rejections:</p>
 <ul>
-<li><a href="../../../experiments/083-stream-rerun-pre-dispatch-queue.md">Experiment 083</a> attacked stream reruns before they entered <code>ReaderPool</code>.</li>
-<li><a href="../../../experiments/095-writer-result-buffer.md">Experiment 095</a> tested a persistent native writer result buffer and rejected it.</li>
-<li><a href="../../../experiments/100-bounded-stream-requery-scheduler.md">Experiment 100</a> tested bounded stream scheduling and rejected it after app-shaped fanout regressed.</li>
-<li><a href="../../../experiments/101-tx-stmt-cache.md">Experiment 101</a> accepted cached transaction-control statements.</li>
-<li><a href="../../../experiments/109-inline-param-buffer.md">Experiment 109</a> accepted inline-packed text/blob parameter storage.</li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083</a> attacked stream reruns before they entered <code>ReaderPool</code>.</li>
+<li><a href="../../experiments/095-writer-result-buffer.html">Experiment 095</a> tested a persistent native writer result buffer and rejected it.</li>
+<li><a href="../../experiments/100-bounded-stream-requery-scheduler.html">Experiment 100</a> tested bounded stream scheduling and rejected it after app-shaped fanout regressed.</li>
+<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101</a> accepted cached transaction-control statements.</li>
+<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109</a> accepted inline-packed text/blob parameter storage.</li>
 </ul>
-<p>The project also added <a href="../../../experiments/signals.json">experiments/signals.json</a>, a machine-readable map of research directions, prior evidence, and what future agents should watch.</p>
+<p>The project also added <a href="https://github.com/danReynolds/resqlite/blob/main/experiments/signals.json">experiments/signals.json</a>, a machine-readable map of research directions, prior evidence, and what future agents should watch.</p>
 <h2>Results</h2>
 <p>The important pattern is visible in the accepted and rejected records:</p>
 <div class="table-wrap"><table class="bench-table">
@@ -167,17 +167,17 @@
 <p>The final story in this sequence is different. It is not about accepting a resqlite optimization. It is about how a real application failure tested whether the project could debug below its own abstractions when the obvious database explanation was wrong.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/083-stream-rerun-pre-dispatch-queue.md">Experiment 083: Stream rerun pre-dispatch queue</a></li>
-<li><a href="../../../experiments/095-writer-result-buffer.md">Experiment 095: Persistent writer result buffer</a></li>
-<li><a href="../../../experiments/100-bounded-stream-requery-scheduler.md">Experiment 100: Bounded stream re-query scheduler</a></li>
-<li><a href="../../../experiments/101-tx-stmt-cache.md">Experiment 101: Cached transaction statements</a></li>
-<li><a href="../../../experiments/109-inline-param-buffer.md">Experiment 109: Inline-packed parameter buffer</a></li>
+<li><a href="../../experiments/083-stream-rerun-pre-dispatch-queue.html">Experiment 083: Stream rerun pre-dispatch queue</a></li>
+<li><a href="../../experiments/095-writer-result-buffer.html">Experiment 095: Persistent writer result buffer</a></li>
+<li><a href="../../experiments/100-bounded-stream-requery-scheduler.html">Experiment 100: Bounded stream re-query scheduler</a></li>
+<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101: Cached transaction statements</a></li>
+<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109: Inline-packed parameter buffer</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>
-<li><a href="../../../benchmark/METHODOLOGY.md">Benchmark methodology</a></li>
-<li><a href="../../../benchmark/EXPERIMENTS.md">Experiment index</a></li>
-<li><a href="../../../experiments/signals.json">Research signals</a></li>
+<li><a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/METHODOLOGY.md">Benchmark methodology</a></li>
+<li><a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/EXPERIMENTS.md">Experiment index</a></li>
+<li><a href="https://github.com/danReynolds/resqlite/blob/main/experiments/signals.json">Research signals</a></li>
 </ul>
 
   </article>

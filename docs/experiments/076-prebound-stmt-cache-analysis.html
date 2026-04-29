@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 076: Pre-bound statement cache — rejected during design — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Rejected (not implemented — analysis showed no measurable headroom)</span>
+    <p class="story-byline">Apr 16, 2026 · Rejected (not implemented — analysis showed no measurable headroom)</p>
+<h1>Experiment 076: Pre-bound statement cache — rejected during design</h1>
+<p><strong>Date:</strong> 2026-04-16</p>
+<p><strong>Status:</strong> Rejected (not implemented — analysis showed no measurable headroom)</p>
+<h2>Original hypothesis</h2>
+<p>Caching bound parameters per-stream would let re-queries skip the</p>
+<p><code>sqlite3_clear_bindings</code> + <code>sqlite3_bind_*</code> loop and go straight to</p>
+<p><code>sqlite3_reset</code> + step. Expected win: a few hundred nanoseconds per</p>
+<p>stream re-query, amplified at high invalidation rates.</p>
+<h2>Why it doesn't work out</h2>
+<h3>Bind is ~1% of a re-query's wall time</h3>
+<p>Hot-path cost breakdown for a typical re-query of</p>
+<p><code>SELECT COUNT(*) FROM items</code> (0 params):</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Stage</th>
+<th>Approx cost</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>main isolate: dispatch to reader pool</td>
+<td>5 µs</td>
+</tr>
+<tr>
+<td>SendPort request</td>
+<td>~2 µs</td>
+</tr>
+<tr>
+<td>FFI <code>stmt_acquire_on</code></td>
+<td>~1 µs</td>
+</tr>
+<tr>
+<td><code>sqlite3_reset</code></td>
+<td>~30 ns</td>
+</tr>
+<tr>
+<td><code>sqlite3_clear_bindings</code></td>
+<td>~30 ns</td>
+</tr>
+<tr>
+<td><code>sqlite3_bind_parameter_count</code></td>
+<td>~20 ns</td>
+</tr>
+<tr>
+<td><code>sqlite3_step</code> loop</td>
+<td>~3 µs</td>
+</tr>
+<tr>
+<td>Cell decode into Dart</td>
+<td>~2 µs</td>
+</tr>
+<tr>
+<td>Hash fold (exp 075)</td>
+<td>~200 ns</td>
+</tr>
+<tr>
+<td>SendPort reply</td>
+<td>~2 µs</td>
+</tr>
+<tr>
+<td>main isolate: emit</td>
+<td>~2 µs</td>
+</tr>
+</tbody></table></div>
+
+<p>The combined bind-path cost (<code>clear_bindings</code> + parameter count check)</p>
+<p>is <strong>~50 ns out of ~15 µs</strong> — about 0.3 % of the re-query. A perfect</p>
+<p>implementation saves nothing visible against noise.</p>
+<h3>The memcmp-based bind cache has a fundamental flaw</h3>
+<p>Dart's <code>allocateParams</code> builds a fresh <code>resqlite_param[]</code> buffer on</p>
+<p>every call. For integer and double params the values are inlined — a</p>
+<p>memcmp against a cached buffer would correctly detect &quot;same params.&quot;</p>
+<p>But for text and blob params, Dart writes a <strong>pointer + length</strong>:</p>
+<pre><code class="lang-c">
+struct { const char* data; int len; } text;
+struct { const void* data; int len; } blob;
+</code></pre>
+<p>The pointer is a fresh Dart heap allocation each call, even when the</p>
+<p>logical text is identical. A memcmp never matches, so the bind-cache</p>
+<p>never hits on any query with string parameters — which is the majority</p>
+<p>of real Flutter queries (<code>WHERE name = ?</code>, <code>WHERE user_id = ?</code> etc.).</p>
+<p>Workarounds considered:</p>
+<ol>
+<li><strong>Content-compare text/blob in C.</strong> Equivalent cost to re-binding;</li>
+</ol>
+<p>no win.</p>
+<ol>
+<li><strong>Dart inlines text content into the param buffer.</strong> Requires</li>
+</ol>
+<p>copying text twice (once into the param buffer, once via SQLite's</p>
+<p>bind copy) — more work than the current path.</p>
+<ol>
+<li><strong>API-level &quot;same as last time&quot; hint from Dart.</strong> Would require a</li>
+</ol>
+<p>public API change, violating the round 2 constraint.</p>
+<h3>Per-stream pre-bind (the tier-list variant)</h3>
+<p>A stream-specific dedicated stmt pre-prepared + pre-bound on every</p>
+<p>reader, never shared with ad-hoc queries, would dodge the text-pointer</p>
+<p>problem. But:</p>
+<ul>
+<li>Memory cost: <code>N_streams × N_readers × ~1-4 KB</code> — tolerable.</li>
+<li>Complexity cost: new lifecycle (per-stream stmt created at subscribe,</li>
+</ul>
+<p>released at cancel, re-prepared on sacrifice-respawn).</p>
+<ul>
+<li>Actual savings: the ~50 ns per re-query still holds. Even across a</li>
+</ul>
+<p>100-stream-update burst that's 5 µs of savings total — under the</p>
+<p>measurement floor.</p>
+<h2>Decision</h2>
+<p>Rejected without implementing. The analysis shows the savings ceiling</p>
+<p>is ~50 ns per re-query (0.3% of wall time), and the only clean way to</p>
+<p>realize it (dedicated per-stream stmts) adds real complexity for a</p>
+<p>change that wouldn't register on any benchmark.</p>
+<h2>What this means for future rounds</h2>
+<p>The right optimizations are further up the stack. Per-re-query work</p>
+<p>breaks down as:</p>
+<ol>
+<li><strong>isolate dispatch + SendPort round-trips</strong> (~12 µs): experiment</li>
+</ol>
+<p>056-class — move dispatch or the hop.</p>
+<ol>
+<li><strong>FFI crossings in the step loop</strong> (~3 µs + ~50 ns × rows): experiment</li>
+</ol>
+<p>052' — one FFI call instead of N.</p>
+<ol>
+<li><strong>Dart-side object materialization</strong> (~2 µs + alloc per cell): attack</li>
+</ol>
+<p>via lazy decode or raw buffer transport.</p>
+<p>Bind is not on the list. Moving on to experiment 074.</p>
+<h2>What WAS tried before writing this up</h2>
+<p>None — this document is the pre-implementation analysis. Saving the</p>
+<p>time it would have taken to write the C+Dart machinery for a</p>
+<p>guaranteed-null result.</p>
+
+  </article>
+</div>
+</body>
+</html>

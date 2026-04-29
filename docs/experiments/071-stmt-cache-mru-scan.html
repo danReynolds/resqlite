@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 071: MRU-first stmt cache scan + precomputed SQL hash — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Rejected (no measurable impact)</span>
+    <p class="story-byline">Apr 16, 2026 · Rejected (no measurable impact)</p>
+<h1>Experiment 071: MRU-first stmt cache scan + precomputed SQL hash</h1>
+<p><strong>Date:</strong> 2026-04-16</p>
+<p><strong>Status:</strong> Rejected (no measurable impact)</p>
+<h2>Problem</h2>
+<p>Scanning <code>stmt_cache_lookup_entry</code> in <code>native/resqlite.c</code>:</p>
+<pre><code class="lang-c">
+for (int i = 0; i &lt; c-&gt;count; i++) {
+    if (c-&gt;entries[i].sql_len == sql_len &amp;&amp;
+        memcmp(c-&gt;entries[i].sql, sql, sql_len) == 0) {
+        if (i != c-&gt;count - 1) { /* MRU-promote by swap with tail */ }
+        return &amp;c-&gt;entries[c-&gt;count - 1];
+    }
+}
+</code></pre>
+<p>The MRU entry lives at the tail (new inserts append, hit promotions swap</p>
+<p>to the tail). But the scan walks head-to-tail, so a hot query — the very</p>
+<p>thing the cache is designed to accelerate — must traverse every other</p>
+<p>entry before finding itself.</p>
+<h2>Hypothesis</h2>
+<p>Two changes would speed up the common hot-loop case:</p>
+<ol>
+<li><strong>Reverse scan direction</strong> (tail → head). The MRU now hits in one</li>
+</ol>
+<p>iteration.</p>
+<ol>
+<li><strong>Precomputed <code>sql_hash</code></strong> stored on each entry. Compare the 32-bit</li>
+</ol>
+<p>hash before the <code>memcmp</code>, so cache misses on differently-shaped SQL</p>
+<p>pay ~1 ns instead of ~tens of ns.</p>
+<p>Originally framed as &quot;SQL fingerprint for stmt cache&quot; in the Round 1</p>
+<p>plan, which I rejected during pre-implementation analysis — the literal-</p>
+<p>normalization version has a correctness issue because prepared</p>
+<p>statements bake in literal values and can't be reused across different</p>
+<p>literal bindings. The hash+MRU variant is the honest, implementable</p>
+<p>version of the same goal: reduce cache lookup cost.</p>
+<h2>Approach</h2>
+<p>Added <code>uint32_t sql_hash</code> field to <code>resqlite_cached_stmt</code>, populated</p>
+<p>via <code>fnv1a_32()</code> at insert time. Rewrote <code>stmt_cache_lookup_entry</code> to</p>
+<p>scan <code>count-1</code> down to <code>0</code>, comparing <code>sql_hash</code> first as a fast</p>
+<p>reject, then <code>sql_len</code>, then <code>memcmp</code> only on hash+length match.</p>
+<p>MRU promotion preserved: matched non-tail entries are swapped with the</p>
+<p>tail as before.</p>
+<p>129 tests pass.</p>
+<h2>Results</h2>
+<p><code>--repeat=5</code> against <code>noise-2.md</code> baseline:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline</th>
+<th>exp048</th>
+<th>Verdict</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Point Query Throughput</td>
+<td>118,259 qps</td>
+<td>114,548 qps</td>
+<td>within noise (±14%)</td>
+</tr>
+<tr>
+<td>Select → Maps / 1000 rows</td>
+<td>0.40 ms</td>
+<td>0.39 ms</td>
+<td>within noise</td>
+</tr>
+<tr>
+<td>Parameterized Queries</td>
+<td>14.79 ms</td>
+<td>14.79 ms</td>
+<td>within noise</td>
+</tr>
+<tr>
+<td>All 63 benchmarks</td>
+<td>—</td>
+<td>—</td>
+<td>0 wins, 0 regressions*</td>
+</tr>
+</tbody></table></div>
+
+<p>\* Two regression entries for Stream Churn, which uses a single SQL and</p>
+<p>is dominated by stream lifecycle overhead rather than cache lookup cost</p>
+<p>— previously observed noise-band variance.</p>
+<h2>Why It Didn't Move the Needle</h2>
+<p>Each benchmark suite uses ≤ 10 distinct SQL strings. At that size:</p>
+<ul>
+<li>The head-to-tail scan visits 2-5 entries before finding the MRU —</li>
+</ul>
+<p>cheap enough that reversing to tail-first saves only single-digit ns.</p>
+<ul>
+<li>The <code>sql_len</code> fast-reject in the original code already avoids most</li>
+</ul>
+<p><code>memcmp</code> calls, since SQL lengths differ. The <code>sql_hash</code> filter</p>
+<p>almost never triggers because the <code>sql_len</code> filter got there first.</p>
+<p>The improvement would show when the cache is near its 32-entry capacity</p>
+<p><em>and</em> the workload cycles through many similar-length SQLs (where</p>
+<p><code>sql_len</code> fails to reject and <code>memcmp</code> does most of the work).</p>
+<h2>Decision</h2>
+<p>Rejected on the same methodology as 050: if we can't measure it, we</p>
+<p>don't adopt it. The change was structurally sound and zero-risk, but</p>
+<p>the default benchmark suite has no workload that stresses the cache</p>
+<p>lookup path.</p>
+<h2>Follow-ups</h2>
+<ul>
+<li>Round 2 should include a &quot;high-diversity SQL&quot; benchmark (e.g. 64</li>
+</ul>
+<p>rotating query shapes, cache at capacity) before revisiting either</p>
+<p>this or any cache-capacity experiment.</p>
+<ul>
+<li>If that benchmark lands a real win, the same experiment becomes</li>
+</ul>
+<p>trivially re-runnable against it.</p>
+
+  </article>
+</div>
+</body>
+</html>

@@ -113,9 +113,9 @@
 <p>The core design put all mutations on a single writer isolate and moved batch execution into native code. <code>executeBatch()</code> serializes parameter sets into native storage, crosses the FFI boundary once, and lets C loop through bind, step, reset, and commit.</p>
 <p>Several follow-up experiments then reduced fixed costs:</p>
 <ul>
-<li><a href="../../../experiments/014-writer-tuning.md">Experiment 014</a> accepted <code>BEGIN IMMEDIATE</code> and removed redundant <code>sqlite3_clear_bindings</code>, while rejecting <code>locking_mode=EXCLUSIVE</code> because it blocked readers.</li>
-<li><a href="../../../experiments/101-tx-stmt-cache.md">Experiment 101</a> replaced repeated <code>sqlite3_exec(&quot;BEGIN/COMMIT/ROLLBACK&quot;)</code> calls with cached transaction-control statements.</li>
-<li><a href="../../../experiments/109-inline-param-buffer.md">Experiment 109</a> packed text/blob parameter bytes into the reusable parameter buffer and passed explicit UTF-8 lengths to SQLite.</li>
+<li><a href="../../experiments/014-writer-tuning.html">Experiment 014</a> accepted <code>BEGIN IMMEDIATE</code> and removed redundant <code>sqlite3_clear_bindings</code>, while rejecting <code>locking_mode=EXCLUSIVE</code> because it blocked readers.</li>
+<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101</a> replaced repeated <code>sqlite3_exec(&quot;BEGIN/COMMIT/ROLLBACK&quot;)</code> calls with cached transaction-control statements.</li>
+<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109</a> packed text/blob parameter bytes into the reusable parameter buffer and passed explicit UTF-8 lengths to SQLite.</li>
 </ul>
 <h2>Results</h2>
 <p>The baseline write path was already fast enough that many single changes fell near the noise floor. The later accepted wins were concentrated where the hypothesis predicted: transaction boundaries and bind-heavy workloads.</p>
@@ -195,9 +195,9 @@
 <p>With reads, streams, and writes now organized around stable subsystems, the project entered a different phase. The hard part became deciding which optimizations were worth carrying forward and which ones should be documented as dead ends.</p>
 <h2>Related Experiments</h2>
 <ul>
-<li><a href="../../../experiments/014-writer-tuning.md">Experiment 014: Writer connection tuning</a></li>
-<li><a href="../../../experiments/101-tx-stmt-cache.md">Experiment 101: Cached transaction statements</a></li>
-<li><a href="../../../experiments/109-inline-param-buffer.md">Experiment 109: Inline-packed parameter buffer</a></li>
+<li><a href="../../experiments/014-writer-tuning.html">Experiment 014: Writer connection tuning</a></li>
+<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101: Cached transaction statements</a></li>
+<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109: Inline-packed parameter buffer</a></li>
 </ul>
 <h2>Reference Docs</h2>
 <ul>
