@@ -93,10 +93,11 @@
     <p class="story-byline">Apr 10, 2026 · reader pool · sacrifice path · point queries</p>
 <h1>Persistent Reader Pool Design</h1>
 <h2>Problem Statement</h2>
+<p>Once rows crossed isolates cheaply, the read path started failing in a different way. Large reads were no longer the clearest problem. Small reads were.</p>
 <p>The flat-list <code>ResultSet</code> fixed the large-result transfer problem, but it exposed a different bottleneck on small reads. Every <code>select()</code> still spawned a fresh isolate, ran the query, transferred the result with <code>Isolate.exit()</code>, and terminated.</p>
 <p>For large result sets, isolate setup was a small fraction of total time. For point queries, it dominated. A one-row lookup should not pay the full cost of creating a fresh isolate.</p>
 <h2>Background</h2>
-<p>The first persistent-pool attempt, <a href="../../../experiments/011-persistent-reader-pool.md">Experiment 011</a>, was rejected because it still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>. Copying maps with repeated column keys erased the benefit of reusing workers.</p>
+<p>The first persistent-pool attempt, <a href="../../../experiments/011-persistent-reader-pool.md">Experiment 011</a>, was rejected because it arrived too early. It still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>, so copying maps with repeated column keys erased the benefit of reusing workers.</p>
 <p><a href="../../../experiments/012-sendport-vs-spawn-deep-dive.md">Experiment 012</a> showed the raw trade-off more carefully. A <code>SendPort</code> round trip with no payload was around 6 us, while <code>Isolate.spawn</code> plus <code>Isolate.exit</code> was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.</p>
 <p>This is the practical difference between a worker pool and a one-shot task helper. Dart isolates communicate by message passing, as described in the <a href="https://dart.dev/language/isolates">Dart isolate guide</a>. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> lets a long-lived worker reply and then accept more work, but ordinary mutable messages may be copied. <a href="https://api.dart.dev/dart-isolate/Isolate/exit.html"><code>Isolate.exit</code></a> can transfer ownership of the final message more efficiently, but only because the sending isolate exits. A pool therefore has to decide when keeping the worker alive is worth copying, and when the result is large enough to sacrifice the worker.</p>
 <p>The flat-list <code>ResultSet</code> changed the economics. A small result was no longer a graph of repeated maps and keys. It was one compact values list plus one shared schema.</p>
@@ -218,7 +219,8 @@
 
 <h2>Outcome</h2>
 <p>The reader pool was accepted only after the row representation changed. The same architectural idea was a rejection with per-row maps and a win with flat results.</p>
-<p>The lesson is that a layer can be correct when introduced and become overhead after the surrounding design changes. Persistence helped by removing isolate setup from small reads, and later wins came from deleting coordination that persistence made redundant.</p>
+<p>The lesson is that timing matters in architecture. A layer can be wrong when introduced and become right after the surrounding representation changes. Persistence helped by removing isolate setup from small reads, and later wins came from deleting coordination that persistence made redundant.</p>
+<p>At this point resqlite had a plausible read engine. The next challenge was returning to one of the original product goals: making reads reactive without turning every write into an application-level invalidation problem.</p>
 <h2>Related Experiments</h2>
 <ul>
 <li><a href="../../../experiments/011-persistent-reader-pool.md">Experiment 011: Persistent reader worker pool</a></li>

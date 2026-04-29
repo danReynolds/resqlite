@@ -11,13 +11,15 @@ tone: amber
 
 ## Problem Statement
 
+After the core architecture settled, the project stopped being a search for one breakthrough and became a discipline problem. There were still performance wins available, but they were smaller, more workload-dependent, and easier to misread.
+
 Once point queries reached the 100K qps range and large reads had a stable representation, more read-path experiments became harder to interpret. Many changes were small enough to disappear into benchmark noise, and some improvements on synthetic workloads did not help app-shaped scenarios.
 
 The project needed a stronger process for deciding what to try, what to reject, and which benchmark signal should count.
 
 ## Background
 
-The early project had obvious bottlenecks: main-isolate work, isolate transfer graphs, per-query spawn overhead, and per-row map storage. Later work was different. The remaining opportunities were spread across stream fanout, transaction setup, parameter allocation, memory behavior, and benchmark coverage.
+The early project had obvious bottlenecks: main-isolate work, isolate transfer graphs, per-query spawn overhead, and per-row map storage. Later work was different. The remaining opportunities were spread across stream fanout, transaction setup, parameter allocation, memory behavior, and benchmark coverage. The project needed a way to keep learning without accepting every local improvement as a global win.
 
 That meant each experiment needed a sharper hypothesis and a clearer acceptance bar. A small optimization should not be accepted only because one benchmark moved once. It needed to move the workload it structurally targeted, avoid regressions elsewhere, and leave behind useful evidence even when rejected.
 
@@ -69,6 +71,8 @@ The documentation split became intentional:
 - `doc/stories/` is the curated chronological history.
 
 The early read-path results made the project direction clear. The later optimization and process work made that direction repeatable. Future stories should keep that pattern: state the problem, identify the hypothesis, describe what changed, and show the benchmark signal that justified the decision.
+
+The final story in this sequence is different. It is not about accepting a resqlite optimization. It is about how a real application failure tested whether the project could debug below its own abstractions when the obvious database explanation was wrong.
 
 ## Related Experiments
 

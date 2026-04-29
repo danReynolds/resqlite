@@ -11,13 +11,15 @@ tone: rose
 
 ## Problem Statement
 
+By this point, resqlite had enough machinery that a real application failure could plausibly be its fault: reader workers, a writer isolate, migrations, stream invalidation, and native SQLite all sat under startup. That made the next challenge less like a benchmark and more like production engineering.
+
 A Flutter macOS app occasionally froze on cold launch. The last application log line was `Migrate DB started`, so the first visible suspect was resqlite's migration path. The failure looked like a database hang, but the real problem was that the Dart VM stopped making progress.
 
 This story is not a performance experiment. It is included because it documents an engineering investigation pattern that mattered for resqlite: when the runtime is stuck, Dart-level observability can become part of the failure surface.
 
 ## Background
 
-The migration was simple: read `PRAGMA user_version`, create schema if needed, and write the new version. It had succeeded many times. Hot-reload state and stale database locks were plausible first theories, but they did not fit cold-launch reproductions.
+The migration was simple: read `PRAGMA user_version`, create schema if needed, and write the new version. It had succeeded many times. Hot-reload state and stale database locks were plausible first theories, because they fit the last visible log line. They did not fit cold-launch reproductions.
 
 The first migration read used the reader pool, so the investigation added logs around worker startup:
 
@@ -91,7 +93,7 @@ The Dart SDK fix was subtractive: stop returning the old `Stack.messages` queue 
 
 resqlite's role was indirect. The project provided the reproducible pressure, the ruled-out database theories, the native sample, and enough thread evidence for VM maintainers to finish the diagnosis.
 
-The engineering lesson is specific: when the runtime is not making progress, use observability outside the runtime. In this case, a database-looking hang became a VM service deadlock only because the investigation moved below Dart-level tooling.
+The engineering lesson is specific: when the runtime is not making progress, use observability outside the runtime. In this case, a database-looking hang became a VM service deadlock only because the investigation moved below Dart-level tooling. It is a fitting end to this first run of stories: building the library required benchmarks, but trusting it in real apps also required knowing when the evidence had left the library.
 
 ## Related Records
 

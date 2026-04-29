@@ -93,10 +93,11 @@
     <p class="story-byline">Apr 16, 2026 · writer isolate · preupdate hook · batch execution</p>
 <h1>Writer Isolate and Invalidation Data</h1>
 <h2>Problem Statement</h2>
+<p>The stream engine made one thing unavoidable: writes were not just commands that changed the database. They were also the source of truth for reactive invalidation. If writes were unordered, ran on the wrong isolate, or failed to report what changed, streams would either miss updates or do unnecessary work.</p>
 <p>SQLite in WAL mode supports many concurrent readers but only one writer. resqlite needed to preserve that serialization rule, keep write work off the main isolate, support interactive transactions, and report the dirty-table facts that reactive streams depend on.</p>
 <p>The write path was therefore not just a queue of <code>execute()</code> calls. It was the owner of mutation order, transaction state, and invalidation data.</p>
 <h2>Background</h2>
-<p>Three shapes were considered:</p>
+<p>Three shapes were considered as the library moved from read experiments toward a complete database runtime:</p>
 <ol>
 <li>Run writes on the main isolate.</li>
 <li>Spawn a one-off isolate for each write.</li>
@@ -191,6 +192,7 @@
 <li>Publish dirty-table data for reactive streams.</li>
 </ol>
 <p>The deeper walkthrough is <a href="../writing.html">How resqlite Writes Data</a>. The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.</p>
+<p>With reads, streams, and writes now organized around stable subsystems, the project entered a different phase. The hard part became deciding which optimizations were worth carrying forward and which ones should be documented as dead ends.</p>
 <h2>Related Experiments</h2>
 <ul>
 <li><a href="../../../experiments/014-writer-tuning.md">Experiment 014: Writer connection tuning</a></li>

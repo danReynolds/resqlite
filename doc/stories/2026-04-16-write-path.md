@@ -11,13 +11,15 @@ tone: violet
 
 ## Problem Statement
 
+The stream engine made one thing unavoidable: writes were not just commands that changed the database. They were also the source of truth for reactive invalidation. If writes were unordered, ran on the wrong isolate, or failed to report what changed, streams would either miss updates or do unnecessary work.
+
 SQLite in WAL mode supports many concurrent readers but only one writer. resqlite needed to preserve that serialization rule, keep write work off the main isolate, support interactive transactions, and report the dirty-table facts that reactive streams depend on.
 
 The write path was therefore not just a queue of `execute()` calls. It was the owner of mutation order, transaction state, and invalidation data.
 
 ## Background
 
-Three shapes were considered:
+Three shapes were considered as the library moved from read experiments toward a complete database runtime:
 
 1. Run writes on the main isolate.
 2. Spawn a one-off isolate for each write.
@@ -77,6 +79,8 @@ The writer isolate remained a first-class subsystem because it owns three connec
 3. Publish dirty-table data for reactive streams.
 
 The deeper walkthrough is [How resqlite Writes Data](../writing.html). The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.
+
+With reads, streams, and writes now organized around stable subsystems, the project entered a different phase. The hard part became deciding which optimizations were worth carrying forward and which ones should be documented as dead ends.
 
 ## Related Experiments
 

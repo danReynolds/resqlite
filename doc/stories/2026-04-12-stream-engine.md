@@ -11,13 +11,15 @@ tone: green
 
 ## Problem Statement
 
+Fast reads were only half of the library resqlite was trying to become. From the outset, the goal included reactive queries: application code should be able to subscribe to a SQL query and let the database layer decide when that query needed to run again.
+
 The public `stream()` API is small: run a query now, then emit again when writes change the data the query depends on. The implementation was not small. It needed to identify dependencies, receive write invalidations, suppress duplicate work, handle stale results, and keep errors from leaving subscribers hanging.
 
 The problem was no longer "rerun reads after writes." It was to build a stream engine with explicit correctness and performance rules.
 
 ## Background
 
-The dependency side uses SQLite's authorizer hook on reader connections. While a stream query runs, SQLite reports table reads. resqlite records those tables instead of maintaining a SQL parser.
+The first design choice was to use SQLite itself as the source of dependency information. The dependency side uses SQLite's authorizer hook on reader connections. While a stream query runs, SQLite reports table reads. resqlite records those tables instead of maintaining a SQL parser.
 
 The write side uses SQLite's preupdate hook on the writer connection. A completed write response includes the table names it touched. The stream engine intersects those dirty tables with active stream dependencies and schedules re-queries only where needed.
 
@@ -37,7 +39,7 @@ Stream work should be reduced before it reaches the main isolate. If an invalida
 
 ## What We Tried
 
-The first stream engine established dependency capture and dirty-table dispatch. Later experiments tightened the expensive cases:
+The first stream engine established dependency capture and dirty-table dispatch. That made the API useful, but real applications create fanout: many widgets, overlapping queries, repeated writes, and streams whose results often do not actually change. Later experiments tightened those expensive cases:
 
 - [Experiment 045](../../../experiments/045-microtask-invalidation-coalescing.md) batched multiple synchronous dirty-table reports into one microtask flush.
 - [Experiment 075](../../../experiments/075-native-hash-selectifchanged.md) moved unchanged-result hashing into C so unchanged re-queries could skip Dart decode.
@@ -75,7 +77,7 @@ The pre-dispatch queue addressed the high-fanout backlog that ordinary coalescin
 
 Streaming became its own subsystem because it had its own failure modes. Correctness depended on dependency capture, generation ordering, and error propagation. Performance depended on doing less work when many streams were invalidated but few results changed.
 
-The detailed architecture walkthrough is [How resqlite Makes Queries Reactive](../streaming.html). The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine.
+The detailed architecture walkthrough is [How resqlite Makes Queries Reactive](../streaming.html). The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine. That naturally made the write path part of the same story, because every useful stream invalidation starts with a correctly serialized mutation.
 
 ## Related Experiments
 

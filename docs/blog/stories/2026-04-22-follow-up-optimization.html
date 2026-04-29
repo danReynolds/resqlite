@@ -93,10 +93,11 @@
     <p class="story-byline">Apr 22, 2026 · benchmark process · allocation · experiment log</p>
 <h1>Optimization After the Read Path Stabilized</h1>
 <h2>Problem Statement</h2>
+<p>After the core architecture settled, the project stopped being a search for one breakthrough and became a discipline problem. There were still performance wins available, but they were smaller, more workload-dependent, and easier to misread.</p>
 <p>Once point queries reached the 100K qps range and large reads had a stable representation, more read-path experiments became harder to interpret. Many changes were small enough to disappear into benchmark noise, and some improvements on synthetic workloads did not help app-shaped scenarios.</p>
 <p>The project needed a stronger process for deciding what to try, what to reject, and which benchmark signal should count.</p>
 <h2>Background</h2>
-<p>The early project had obvious bottlenecks: main-isolate work, isolate transfer graphs, per-query spawn overhead, and per-row map storage. Later work was different. The remaining opportunities were spread across stream fanout, transaction setup, parameter allocation, memory behavior, and benchmark coverage.</p>
+<p>The early project had obvious bottlenecks: main-isolate work, isolate transfer graphs, per-query spawn overhead, and per-row map storage. Later work was different. The remaining opportunities were spread across stream fanout, transaction setup, parameter allocation, memory behavior, and benchmark coverage. The project needed a way to keep learning without accepting every local improvement as a global win.</p>
 <p>That meant each experiment needed a sharper hypothesis and a clearer acceptance bar. A small optimization should not be accepted only because one benchmark moved once. It needed to move the workload it structurally targeted, avoid regressions elsewhere, and leave behind useful evidence even when rejected.</p>
 <p>The repository's benchmark process became part of the design. The <a href="../../../benchmark/METHODOLOGY.md">benchmark methodology</a> separates workload types and measurement concerns, while the <a href="../../../benchmark/EXPERIMENTS.md">experiment index</a> keeps the accepted and rejected records discoverable. This matters because the same micro-optimization can look good in isolation and still be wrong for a stream fanout, transaction, or application-shaped workload.</p>
 <h2>Hypothesis</h2>
@@ -163,6 +164,7 @@
 <li><code>doc/stories/</code> is the curated chronological history.</li>
 </ul>
 <p>The early read-path results made the project direction clear. The later optimization and process work made that direction repeatable. Future stories should keep that pattern: state the problem, identify the hypothesis, describe what changed, and show the benchmark signal that justified the decision.</p>
+<p>The final story in this sequence is different. It is not about accepting a resqlite optimization. It is about how a real application failure tested whether the project could debug below its own abstractions when the obvious database explanation was wrong.</p>
 <h2>Related Experiments</h2>
 <ul>
 <li><a href="../../../experiments/083-stream-rerun-pre-dispatch-queue.md">Experiment 083: Stream rerun pre-dispatch queue</a></li>

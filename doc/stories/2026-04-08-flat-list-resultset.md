@@ -11,6 +11,8 @@ tone: green
 
 ## Problem Statement
 
+The false starts made the shape of the solution clearer. resqlite did not need a clever byte format that pushed decode back to the UI isolate, and it did not need to give up the row-map API. It needed to stop storing every row as a separate mutable map when query results are more regular than that.
+
 The read path no longer looked limited by SQLite execution. Native connection state, statement caching, and mutex reductions had helped, but `List<Map<String, Object?>>` still produced a large transfer graph. resqlite needed a row representation that preserved the map-like API without paying for one mutable hash map per row.
 
 ## Background
@@ -34,7 +36,7 @@ If values are stored in one flat row-major list and column metadata is shared on
 
 ## What We Tried
 
-[Experiment 008](../../../experiments/008-flat-list-lazy-resultset.md) built the representation in three steps:
+[Experiment 008](../../../experiments/008-flat-list-lazy-resultset.md) built the representation in three steps. The design deliberately changed storage first and presentation second:
 
 1. Store all row values in one `List<Object?>`.
 2. Store column names and the name-to-index map in one shared `RowSchema`.
@@ -80,6 +82,8 @@ The structural object count dropped from hundreds of thousands of map-related ob
 The flat-list `ResultSet` became the core read-path representation. It kept the caller-facing API ordinary while removing the per-row map infrastructure from the isolate transfer graph.
 
 The broader engineering lesson was that API shape and storage shape do not have to be the same. resqlite could expose map-like rows without storing rows as maps.
+
+This was the first major positive turn in the story. With large result transfer under control, the next bottleneck moved to the other end of the size spectrum: tiny reads were still paying too much to create one-off workers.
 
 ## Related Experiments
 

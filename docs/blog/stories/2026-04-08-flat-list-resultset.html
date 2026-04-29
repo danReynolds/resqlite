@@ -93,6 +93,7 @@
     <p class="story-byline">Apr 8, 2026 · ResultSet · Row facade · read path</p>
 <h1>Flat-List ResultSet Design</h1>
 <h2>Problem Statement</h2>
+<p>The false starts made the shape of the solution clearer. resqlite did not need a clever byte format that pushed decode back to the UI isolate, and it did not need to give up the row-map API. It needed to stop storing every row as a separate mutable map when query results are more regular than that.</p>
 <p>The read path no longer looked limited by SQLite execution. Native connection state, statement caching, and mutex reductions had helped, but <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> still produced a large transfer graph. resqlite needed a row representation that preserved the map-like API without paying for one mutable hash map per row.</p>
 <h2>Background</h2>
 <p>Database result rows have a constrained shape:</p>
@@ -108,7 +109,7 @@
 <h2>Hypothesis</h2>
 <p>If values are stored in one flat row-major list and column metadata is shared once, then <code>Isolate.exit()</code> will validate far fewer structural objects. The main isolate can still expose <code>Map&lt;String, Object?&gt;</code> behavior by creating cheap row facades on demand.</p>
 <h2>What We Tried</h2>
-<p><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a> built the representation in three steps:</p>
+<p><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008</a> built the representation in three steps. The design deliberately changed storage first and presentation second:</p>
 <ol>
 <li>Store all row values in one <code>List&lt;Object?&gt;</code>.</li>
 <li>Store column names and the name-to-index map in one shared <code>RowSchema</code>.</li>
@@ -194,6 +195,7 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
 <h2>Outcome</h2>
 <p>The flat-list <code>ResultSet</code> became the core read-path representation. It kept the caller-facing API ordinary while removing the per-row map infrastructure from the isolate transfer graph.</p>
 <p>The broader engineering lesson was that API shape and storage shape do not have to be the same. resqlite could expose map-like rows without storing rows as maps.</p>
+<p>This was the first major positive turn in the story. With large result transfer under control, the next bottleneck moved to the other end of the size spectrum: tiny reads were still paying too much to create one-off workers.</p>
 <h2>Related Experiments</h2>
 <ul>
 <li><a href="../../../experiments/008-flat-list-lazy-resultset.md">Experiment 008: Flat value list with lazy ResultSet</a></li>

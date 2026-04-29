@@ -11,13 +11,15 @@ tone: amber
 
 ## Problem Statement
 
+Once rows crossed isolates cheaply, the read path started failing in a different way. Large reads were no longer the clearest problem. Small reads were.
+
 The flat-list `ResultSet` fixed the large-result transfer problem, but it exposed a different bottleneck on small reads. Every `select()` still spawned a fresh isolate, ran the query, transferred the result with `Isolate.exit()`, and terminated.
 
 For large result sets, isolate setup was a small fraction of total time. For point queries, it dominated. A one-row lookup should not pay the full cost of creating a fresh isolate.
 
 ## Background
 
-The first persistent-pool attempt, [Experiment 011](../../../experiments/011-persistent-reader-pool.md), was rejected because it still moved `List<Map<String, Object?>>` through `SendPort.send()`. Copying maps with repeated column keys erased the benefit of reusing workers.
+The first persistent-pool attempt, [Experiment 011](../../../experiments/011-persistent-reader-pool.md), was rejected because it arrived too early. It still moved `List<Map<String, Object?>>` through `SendPort.send()`, so copying maps with repeated column keys erased the benefit of reusing workers.
 
 [Experiment 012](../../../experiments/012-sendport-vs-spawn-deep-dive.md) showed the raw trade-off more carefully. A `SendPort` round trip with no payload was around 6 us, while `Isolate.spawn` plus `Isolate.exit` was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.
 
@@ -80,7 +82,9 @@ The later event-port cleanup showed that simplifying the protocol also moved the
 
 The reader pool was accepted only after the row representation changed. The same architectural idea was a rejection with per-row maps and a win with flat results.
 
-The lesson is that a layer can be correct when introduced and become overhead after the surrounding design changes. Persistence helped by removing isolate setup from small reads, and later wins came from deleting coordination that persistence made redundant.
+The lesson is that timing matters in architecture. A layer can be wrong when introduced and become right after the surrounding representation changes. Persistence helped by removing isolate setup from small reads, and later wins came from deleting coordination that persistence made redundant.
+
+At this point resqlite had a plausible read engine. The next challenge was returning to one of the original product goals: making reads reactive without turning every write into an application-level invalidation problem.
 
 ## Related Experiments
 
