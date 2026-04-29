@@ -145,6 +145,11 @@ const curatedMetricDefinitions = [
     chartId: 'chartReactiveMicros',
   ),
   CuratedMetricDefinition(
+    pattern: 'Long-Text Unchanged Fanout',
+    displayName: 'long-text unchanged',
+    chartId: 'chartReactiveMicros',
+  ),
+  CuratedMetricDefinition(
     pattern: 'resqlite qps',
     displayName: 'point query qps',
     chartId: 'chartThroughput',

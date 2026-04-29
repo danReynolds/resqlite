@@ -1,0 +1,544 @@
+import 'dart:convert';
+import 'dart:io';
+
+const _readmePath = 'experiments/README.md';
+const _signalsPath = 'experiments/signals.json';
+final _outcomeClassPattern = RegExp(
+  r'^(accepted(_.+)?|rejected(_.+)?|in_review(_.+)?|watch|benchmark_gap|deferred)$',
+);
+
+void main() {
+  final errors = <_ValidationError>[];
+  final experimentIdErrorCount = errors.length;
+  final experimentIndex = _readExperimentIndex(errors);
+  final hasExperimentIdErrors = errors.length > experimentIdErrorCount;
+  final signals = _readSignals(errors);
+
+  if (signals != null && !hasExperimentIdErrors) {
+    _checkSignals(signals, experimentIndex, errors);
+  }
+
+  if (errors.isNotEmpty) {
+    for (final error in errors) {
+      stderr.writeln('::error file=${error.file}::${error.message}');
+    }
+    exitCode = 1;
+    return;
+  }
+
+  print('Experiment signal map is valid.');
+}
+
+Map<String, _ExperimentEntry> _readExperimentIndex(
+  List<_ValidationError> errors,
+) {
+  final file = File(_readmePath);
+  if (!file.existsSync()) {
+    _readmeError(errors, 'Missing $_readmePath.');
+    return const {};
+  }
+
+  final entries = <String, _ExperimentEntry>{};
+  final rowPattern = RegExp(r'^\|\s*\[(\d+\w?)\]\(([^)]+)\)\s*\|');
+  var currentStatus = 'accepted';
+  for (final line in file.readAsStringSync().split('\n')) {
+    if (line.startsWith('## Accepted')) {
+      currentStatus = 'accepted';
+    } else if (line.startsWith('## In Review')) {
+      currentStatus = 'in_review';
+    } else if (line.startsWith('## Rejected')) {
+      currentStatus = 'rejected';
+    }
+
+    final match = rowPattern.firstMatch(line);
+    if (match == null) continue;
+
+    final id = match.group(1)!;
+    final filename = match.group(2)!;
+    entries[id] = _ExperimentEntry(
+      id: id,
+      filename: filename,
+      status: currentStatus,
+    );
+  }
+  if (entries.isEmpty) {
+    _readmeError(errors, 'No experiment rows found in $_readmePath.');
+  }
+  return entries;
+}
+
+Map<Object?, Object?>? _readSignals(List<_ValidationError> errors) {
+  final file = File(_signalsPath);
+  if (!file.existsSync()) {
+    _signalError(errors, 'Missing $_signalsPath.');
+    return null;
+  }
+
+  Object? decoded;
+  try {
+    decoded = json.decode(file.readAsStringSync());
+  } on FormatException catch (error) {
+    _signalError(errors, 'signals.json is not valid JSON: ${error.message}');
+    return null;
+  }
+
+  if (decoded is! Map) {
+    _signalError(errors, 'signals.json must contain a top-level JSON object.');
+    return null;
+  }
+  return decoded.cast<Object?, Object?>();
+}
+
+void _checkSignals(
+  Map<Object?, Object?> root,
+  Map<String, _ExperimentEntry> experimentIndex,
+  List<_ValidationError> errors,
+) {
+  if (root['schemaVersion'] is! int) {
+    _signalError(errors, 'schemaVersion must be an integer.');
+  }
+  _requireString(root, 'purpose', 'root', errors);
+  final experimentIds = experimentIndex.keys.toSet();
+  final coverage = _map(root['coverage'], 'coverage', errors);
+  final experimentEntriesRequiredFrom = coverage == null
+      ? null
+      : _intField(
+          coverage,
+          'experimentEntriesRequiredFrom',
+          'coverage',
+          errors,
+        );
+  final directionFieldRequiredFrom = coverage == null
+      ? null
+      : _intField(coverage, 'directionFieldRequiredFrom', 'coverage', errors);
+  final statusDefinitions = _stringMap(
+    root,
+    'statusDefinitions',
+    'root',
+    errors,
+    required: true,
+  );
+  final allowedStatuses = statusDefinitions.keys.toSet();
+
+  final directionIds = <String>{};
+  final directions = _list(root, 'directions', 'root', errors, required: true);
+  for (var i = 0; i < directions.length; i++) {
+    final path = 'directions[$i]';
+    final direction = _map(directions[i], path, errors);
+    if (direction == null) continue;
+
+    final id = _requireString(direction, 'id', path, errors);
+    if (id != null) {
+      if (!RegExp(r'^[a-z0-9][a-z0-9-]*$').hasMatch(id)) {
+        _signalError(errors, '$path.id must be lowercase kebab-case.');
+      }
+      if (!directionIds.add(id)) {
+        _signalError(errors, 'Duplicate direction id "$id".');
+      }
+    }
+
+    final status = _requireString(direction, 'status', path, errors);
+    if (status != null &&
+        allowedStatuses.isNotEmpty &&
+        !allowedStatuses.contains(status)) {
+      _signalError(
+        errors,
+        '$path.status "$status" must be one of: '
+        '${allowedStatuses.join(', ')}.',
+      );
+    }
+
+    _requireString(direction, 'currentRead', path, errors);
+    _stringList(
+      direction,
+      'subsystems',
+      path,
+      errors,
+      required: true,
+      nonEmpty: true,
+    );
+    _checkExperimentRefs(
+      _stringList(direction, 'evidence', path, errors),
+      experimentIds,
+      '$path.evidence',
+      errors,
+    );
+    _stringList(direction, 'interestingIf', path, errors);
+    _stringList(direction, 'openQuestions', path, errors);
+    _stringList(direction, 'adjacentIdeas', path, errors);
+    _requireString(direction, 'notesForExperimenters', path, errors);
+  }
+
+  final experiments = root['experiments'];
+  if (experiments == null) {
+    _signalError(errors, 'root.experiments is required.');
+    return;
+  }
+  final experimentMap = _map(experiments, 'experiments', errors);
+  if (experimentMap == null) return;
+
+  for (final entry in experimentMap.entries) {
+    final expId = entry.key?.toString();
+    final path = 'experiments.$expId';
+    final experiment = expId == null ? null : experimentIndex[expId];
+    if (expId == null || experiment == null) {
+      _signalError(
+        errors,
+        '$path references an experiment not listed in README.md.',
+      );
+      continue;
+    }
+
+    final note = _map(entry.value, path, errors);
+    if (note == null) continue;
+
+    final referencedDirections = _stringList(
+      note,
+      'directions',
+      path,
+      errors,
+      required: true,
+      nonEmpty: true,
+    );
+    for (final direction in referencedDirections) {
+      if (!directionIds.contains(direction)) {
+        _signalError(
+          errors,
+          '$path.directions references unknown direction "$direction".',
+        );
+      }
+    }
+    final outcomeClass = _requireString(note, 'outcomeClass', path, errors);
+    _checkOutcomeConsistency(experiment, outcomeClass, path, errors);
+    _stringList(note, 'changedBeliefs', path, errors);
+    _stringList(note, 'nextSignals', path, errors);
+  }
+
+  _checkFutureCoverage(
+    experimentIndex,
+    experimentMap,
+    directionIds,
+    experimentEntriesRequiredFrom,
+    directionFieldRequiredFrom,
+    errors,
+  );
+}
+
+Map<Object?, Object?>? _map(
+  Object? value,
+  String path,
+  List<_ValidationError> errors,
+) {
+  if (value is Map) return value.cast<Object?, Object?>();
+  _signalError(errors, '$path must be an object.');
+  return null;
+}
+
+List<Object?> _list(
+  Map<Object?, Object?> map,
+  String key,
+  String path,
+  List<_ValidationError> errors, {
+  bool required = false,
+}) {
+  final value = map[key];
+  if (value == null) {
+    if (required) _signalError(errors, '$path.$key is required.');
+    return const [];
+  }
+  if (value is List) return value.cast<Object?>();
+  _signalError(errors, '$path.$key must be a list.');
+  return const [];
+}
+
+String? _requireString(
+  Map<Object?, Object?> map,
+  String key,
+  String path,
+  List<_ValidationError> errors,
+) {
+  final value = map[key];
+  if (value is String && value.trim().isNotEmpty) return value;
+  _signalError(errors, '$path.$key must be a non-empty string.');
+  return null;
+}
+
+List<String> _stringList(
+  Map<Object?, Object?> map,
+  String key,
+  String path,
+  List<_ValidationError> errors, {
+  bool required = false,
+  bool nonEmpty = false,
+}) {
+  final value = map[key];
+  if (value == null) {
+    if (required) _signalError(errors, '$path.$key is required.');
+    return const [];
+  }
+  if (value is! List) {
+    _signalError(errors, '$path.$key must be a list of strings.');
+    return const [];
+  }
+
+  final result = <String>[];
+  for (var i = 0; i < value.length; i++) {
+    final item = value[i];
+    if (item is String && item.trim().isNotEmpty) {
+      result.add(item);
+    } else {
+      _signalError(errors, '$path.$key[$i] must be a non-empty string.');
+    }
+  }
+  if (nonEmpty && result.isEmpty) {
+    _signalError(errors, '$path.$key must not be empty.');
+  }
+  return result;
+}
+
+Map<String, String> _stringMap(
+  Map<Object?, Object?> map,
+  String key,
+  String path,
+  List<_ValidationError> errors, {
+  bool required = false,
+}) {
+  final value = map[key];
+  if (value == null) {
+    if (required) _signalError(errors, '$path.$key is required.');
+    return const {};
+  }
+  if (value is! Map) {
+    _signalError(errors, '$path.$key must be an object of strings.');
+    return const {};
+  }
+
+  final result = <String, String>{};
+  for (final entry in value.entries) {
+    final entryKey = entry.key;
+    final entryValue = entry.value;
+    if (entryKey is! String || entryKey.trim().isEmpty) {
+      _signalError(errors, '$path.$key contains a non-string or empty key.');
+      continue;
+    }
+    if (entryValue is! String || entryValue.trim().isEmpty) {
+      _signalError(errors, '$path.$key.$entryKey must be a non-empty string.');
+      continue;
+    }
+    result[entryKey] = entryValue;
+  }
+  return result;
+}
+
+int? _intField(
+  Map<Object?, Object?> map,
+  String key,
+  String path,
+  List<_ValidationError> errors,
+) {
+  final value = map[key];
+  if (value is int) return value;
+  _signalError(errors, '$path.$key must be an integer.');
+  return null;
+}
+
+void _checkOutcomeConsistency(
+  _ExperimentEntry experiment,
+  String? outcomeClass,
+  String path,
+  List<_ValidationError> errors,
+) {
+  if (outcomeClass == null) return;
+  final normalized = outcomeClass.toLowerCase();
+  if (!_outcomeClassPattern.hasMatch(normalized)) {
+    _signalError(
+      errors,
+      '$path.outcomeClass "$outcomeClass" must match '
+      'accepted(_...), rejected(_...), in_review(_...), watch, '
+      'benchmark_gap, or deferred.',
+    );
+  }
+  if (experiment.status == 'accepted' && !normalized.startsWith('accepted')) {
+    _signalError(
+      errors,
+      '$path.outcomeClass "$outcomeClass" must start with accepted for an '
+      'accepted README entry.',
+    );
+  }
+  if (experiment.status == 'rejected' &&
+      (normalized.startsWith('accepted') ||
+          normalized.startsWith('in_review'))) {
+    _signalError(
+      errors,
+      '$path.outcomeClass "$outcomeClass" contradicts rejected README status.',
+    );
+  }
+  if (experiment.status == 'in_review' &&
+      (normalized.startsWith('accepted') ||
+          normalized.startsWith('rejected'))) {
+    _signalError(
+      errors,
+      '$path.outcomeClass "$outcomeClass" contradicts in-review README status.',
+    );
+  }
+}
+
+void _checkFutureCoverage(
+  Map<String, _ExperimentEntry> experimentIndex,
+  Map<Object?, Object?> experimentSignals,
+  Set<String> directionIds,
+  int? experimentEntriesRequiredFrom,
+  int? directionFieldRequiredFrom,
+  List<_ValidationError> errors,
+) {
+  for (final experiment in experimentIndex.values) {
+    final number = experiment.numericId;
+    if (number == null) continue;
+
+    final signal = experimentSignals[experiment.id];
+    if (experimentEntriesRequiredFrom != null &&
+        number >= experimentEntriesRequiredFrom &&
+        signal == null) {
+      _signalError(
+        errors,
+        'experiments.${experiment.id} is required because '
+        'coverage.experimentEntriesRequiredFrom is '
+        '$experimentEntriesRequiredFrom.',
+      );
+    }
+
+    if (directionFieldRequiredFrom != null &&
+        number >= directionFieldRequiredFrom) {
+      final docDirections = _readExperimentDirections(experiment, errors);
+      if (docDirections.isEmpty) {
+        _fileError(
+          errors,
+          experiment.path,
+          'Experiment ${experiment.id} must include a Direction header '
+          'such as **Direction:** `direction-id` because '
+          'coverage.directionFieldRequiredFrom is '
+          '$directionFieldRequiredFrom.',
+        );
+        continue;
+      }
+      for (final direction in docDirections) {
+        if (!directionIds.contains(direction)) {
+          _fileError(
+            errors,
+            experiment.path,
+            'Experiment ${experiment.id} references unknown direction '
+            '"$direction".',
+          );
+        }
+      }
+
+      final signalMap = signal is Map ? signal.cast<Object?, Object?>() : null;
+      if (signalMap == null) continue;
+      final signalDirections = _stringList(
+        signalMap,
+        'directions',
+        'experiments.${experiment.id}',
+        errors,
+      ).toSet();
+      final docDirectionSet = docDirections.toSet();
+      if (!_sameSet(signalDirections, docDirectionSet)) {
+        _signalError(
+          errors,
+          'experiments.${experiment.id}.directions must match '
+          '${experiment.path} Direction field.',
+        );
+      }
+    }
+  }
+}
+
+List<String> _readExperimentDirections(
+  _ExperimentEntry experiment,
+  List<_ValidationError> errors,
+) {
+  final file = File(experiment.path);
+  if (!file.existsSync()) {
+    _fileError(errors, experiment.path, 'Missing experiment file.');
+    return const [];
+  }
+
+  final content = file.readAsStringSync();
+  final match = RegExp(
+    r'^\*\*Direction:\*\*\s*(.+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  if (match == null) return const [];
+
+  final raw = match.group(1)!.trim();
+  final directions = RegExp(r'`([^`]+)`')
+      .allMatches(raw)
+      .map((m) => m.group(1)!.trim())
+      .where((v) => v.isNotEmpty)
+      .toList();
+
+  if (directions.isEmpty) {
+    _fileError(
+      errors,
+      experiment.path,
+      'Experiment ${experiment.id} Direction field must contain one or more '
+      'backticked direction ids.',
+    );
+  }
+  return directions;
+}
+
+bool _sameSet(Set<String> left, Set<String> right) {
+  if (left.length != right.length) return false;
+  return left.containsAll(right);
+}
+
+void _checkExperimentRefs(
+  List<String> refs,
+  Set<String> experimentIds,
+  String path,
+  List<_ValidationError> errors,
+) {
+  for (final ref in refs) {
+    if (!experimentIds.contains(ref)) {
+      _signalError(errors, '$path references unknown experiment "$ref".');
+    }
+  }
+}
+
+void _readmeError(List<_ValidationError> errors, String message) {
+  errors.add(_ValidationError(_readmePath, message));
+}
+
+void _signalError(List<_ValidationError> errors, String message) {
+  errors.add(_ValidationError(_signalsPath, message));
+}
+
+void _fileError(List<_ValidationError> errors, String file, String message) {
+  errors.add(_ValidationError(file, message));
+}
+
+class _ExperimentEntry {
+  const _ExperimentEntry({
+    required this.id,
+    required this.filename,
+    required this.status,
+  });
+
+  final String id;
+  final String filename;
+  final String status;
+
+  String get path => 'experiments/$filename';
+
+  int? get numericId {
+    final match = RegExp(r'^\d+').firstMatch(id);
+    return match == null ? null : int.tryParse(match.group(0)!);
+  }
+}
+
+class _ValidationError {
+  const _ValidationError(this.file, this.message);
+
+  final String file;
+  final String message;
+}

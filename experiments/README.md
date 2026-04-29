@@ -56,6 +56,7 @@ merged into the codebase.
 |---|---|---|---|
 | [083](083-stream-rerun-pre-dispatch-queue.md) | Stream rerun pre-dispatch queue | Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission | [#25](https://github.com/danReynolds/resqlite/pull/25) |
 | [097](097-one-pass-initial-stream-hash.md) | One-pass initial stream decode and hash | 14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay |  |
+| [110](110-long-text-fnv-8byte.md) | Long-text stream hash benchmark + 8-byte FNV | Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing | [#53](https://github.com/danReynolds/resqlite/pull/53) |
 
 ## Rejected
 
@@ -120,6 +121,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [096](096-direct-batch-param-encoding.md) | Direct batch parameter encoding | Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code |
 | [099](099-fnv-8byte-bytestream.md) | 8-byte-chunked FNV for byte-stream cells | Structurally sound (folds 8 bytes per multiply on the long-text hash path) but benchmark-invisible — current streaming workloads carry only short cells (≤ 3–8 bytes) that bypass the new main loop. Same class as exp 071. Revisit when a long-text streaming benchmark exists |
 | [102](102-savepoint-string-cache.md) | Cached SAVEPOINT/RELEASE/ROLLBACK TO strings on `_WriterState` | Theoretically removes per-nested-tx `toNativeUtf8` + `calloc.free` pair, but the benchmark suite has no nested-transaction workload — no directly attributable signal, only run-to-run drift on unrelated read paths. Pattern-matches exp 095. Revisit if a deeply-nested-tx benchmark exists |
+| [111](111-nested-tx-benchmark-savepoint-cache.md) | Nested-tx benchmark + revisit savepoint string cache | Built the missing nested-transaction workload (shipped) and re-tested exp 102's archived cached-savepoint-string pattern against it. Even on the worst-case 50×-shallow-fan-out shape the cache landed at -9 % (below the ±17 % decision threshold); deep-5-chain was flat. Confirms exp 102 across a maximally stressing workload — per-isolate-round-trip cost dominates per-call savepoint allocations |
 
 ## Conventions
 
@@ -127,6 +129,31 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 - **Date:** When the experiment was run (full timestamp preferred: `2026-04-14T12:30:00`)
 - **Status:** `Accepted` (merged into codebase), `In Review` (promising but not merged), or `Rejected` (abandoned, with explanation)
 - **Commit:** Git hash of the implementing commit (added to header of each accepted experiment)
+
+### Research Map
+
+Scheduled experimenters should use
+[`RUNNER_INSTRUCTIONS.md`](RUNNER_INSTRUCTIONS.md) as the copyable instruction
+block for recurring experiment systems. Those instructions point runners at
+this README, [`signals.json`](signals.json), [`JOURNAL.md`](JOURNAL.md), and
+[`MILESTONES.md`](MILESTONES.md) before choosing work.
+
+`signals.json` is the canonical research map. These files are steering context,
+not an allowed list. They should make prior work easy to understand without
+preventing creative experiments outside the current map. A strong new
+experiment can follow an active direction, revisit an area that recently looked
+weak, or open a new direction entirely. The important thing is to explain why
+the attempt is worth a bounded pass in light of prior work.
+
+When an experiment changes what future work should try, de-emphasize, measure,
+or watch:
+
+- update the experiment writeup with the record of what happened
+- update `signals.json` with machine-readable direction context
+- add to `JOURNAL.md` only when the run surfaced a transferable lesson a
+  future runner could reapply elsewhere
+- leave `MILESTONES.md` alone — it is updated on maintainer request, not per
+  experiment
 
 ### Standard Template
 
@@ -137,6 +164,7 @@ Use these exact headings so the experiments page can extract content automatical
 
 **Date:** 2026-04-14
 **Status:** Accepted / Rejected
+**Direction:** `direction-id`
 **Commit:** [`abc1234`](https://github.com/danReynolds/resqlite/commit/abc1234)
 **Archive:** [`archive/exp-NNN`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-NNN)
 
@@ -159,6 +187,11 @@ Benchmark measurements. Use markdown tables for comparisons.
 ## Decision
 
 Why accepted or rejected. Trade-offs considered.
+
+## Future Notes
+
+Optional. Short notes for future experimenters: adjacent prior work, what would
+make the area interesting again, or what to measure before revisiting.
 ```
 
 Header fields:

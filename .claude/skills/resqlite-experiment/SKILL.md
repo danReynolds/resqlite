@@ -113,6 +113,15 @@ Result files use: `YYYY-MM-DDTHH-MM-SS-<label>.md`
 
 Label patterns that work well with the chart:
 - `exp043-swar-escape` — per-experiment runs (the chart uses these for points)
+- `baseline-for-expNNN` — the fresh pre-change baseline taken right
+  before a candidate run, when doing an A/B that uses
+  `--compare-to=...baseline-for-expNNN.md`. The candidate's `expNNN-*`
+  prefix is what makes the experiment->chart linker pick the right
+  file; if you call your candidate something else (e.g. `bind-rewrite`),
+  the chart will not find it. CI will fail the freshness check via
+  `_assertAcceptedExperimentsLinkToCandidates` if an accepted
+  experiment ends up linked to a baseline-shaped run while a candidate
+  is available.
 - `round5-baseline` — round-level baselines for diff anchors
 - `round5-aggregate` — post-round aggregate result
 

@@ -76,6 +76,11 @@ int? artifactRepeatCount(Map<String, Object?> artifact) {
   return null;
 }
 
+String? artifactComparisonBaselineFile(Map<String, Object?> artifact) {
+  final value = artifact['comparisonBaselineFile'];
+  return value is String && value.isNotEmpty ? value : null;
+}
+
 /// Read sqlite3's `Single Inserts (100 sequential)` wall numbers out of a
 /// release-run sidecar's `benchmarkSummary` payload.
 Sqlite3SingleInsertWall artifactSqlite3SingleInsertWall(

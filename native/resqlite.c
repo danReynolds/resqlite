@@ -1807,7 +1807,16 @@ static inline uint64_t fnv_combine_u64(uint64_t h, uint64_t v) {
 // Fold a byte buffer into the running hash.
 static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
     const unsigned char* b = (const unsigned char*)p;
-    for (int i = 0; i < len; i++) {
+    int i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t word;
+        // Unaligned-safe load; compilers turn this into one native load.
+        // The hash is in-process only, so host byte order is acceptable.
+        memcpy(&word, b + i, 8);
+        h ^= word;
+        h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
+    }
+    for (; i < len; i++) {
         h ^= (uint64_t)b[i];
         h = (h * RESQLITE_FNV_PRIME) & RESQLITE_FNV_MASK;
     }

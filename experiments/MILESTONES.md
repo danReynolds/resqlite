@@ -361,6 +361,177 @@ Two more experiments closed the gap between "fast" and "fastest."
 
 The full experiment log — every accepted optimization and every rejected dead end — is available on the [experiments page](https://danreynolds.github.io/resqlite/experiments/), with interactive charts showing how each metric evolved over time.
 
+## Act Three: After the Headlines
+
+107K qps is a nice round number to wrap a blog post on, but it's a strange place for a library to actually be. The architectural budget was spent — connection pool, persistent workers, flat-list ResultSet, dedicated readers. Anywhere we looked at the read path, we'd already touched it. So we started looking elsewhere: the streaming engine, the write path, and the C internals we'd previously left alone.
+
+### The Streaming Engine, Revisited
+
+The reactive layer worked, but it was naive about repeated work. A single write that touched a popular table would re-query every subscriber, even if the resulting rows were identical to the last emission. For Flutter UIs with many widgets watching the same data, that's a lot of pointless decode work.
+
+**Microtask invalidation coalescing (experiment 045)** was the easy win. Multiple writes inside the same synchronous block — common when an app applies a server sync — used to fire one re-query batch per write. We accumulated dirty tables across the microtask boundary and dispatched once at the end. Fan-out workloads dropped 46%.
+
+The harder win was **native-buffered hashing (experiment 075)**. We moved query result hashing into C as `resqlite_query_hash`, called inline during the read loop on the worker. If the hash matches the last emitted hash for that subscriber, we skip the Dart decode entirely and signal "no change" to the main isolate with a single integer. Unchanged-fanout workloads — a canary write plus 10 watchers seeing identical results — improved 39%.
+
+This led directly to **the cheap-check-first sweep (experiment 077)**: four small fast-rejects strung together. Skip work if no streams are registered. Stop hash folding the moment row counts diverge. Cache the bind-parameter count instead of recomputing. Reuse a persistent buffer for the dirty-table list. Each was below the noise floor on its own; together they were 13–23% across write benchmarks. None of them were clever — they were just things we hadn't bothered to do before because the read path was the only thing we were measuring.
+
+### The Allocation Hunt
+
+A pattern emerged across the next dozen experiments: build it once at startup, reuse it forever. Per-call `calloc`/`free` had been quietly costing us hundreds of nanoseconds on every hot path.
+
+**Persistent dirty buffer (experiment 070)** allocated a 512-byte FFI scratch space at worker init instead of per write. **Cached transaction statements (experiment 101)** prepared `BEGIN`, `COMMIT`, and `ROLLBACK` once at `resqlite_open` instead of re-parsing them per transaction — SQLite's `sqlite3_exec` rebuilds the AST and bytecode every call, and that adds up. 13–14% on transaction-heavy benchmarks. **Inline-packed parameter buffer (experiment 109)** went further: instead of allocating native memory for each text or blob bind, the bytes pack inline at the tail of the persistent param buffer, with explicit length passed to SQLite (skipping its internal `strlen`). 10–16% on text-INSERT workloads.
+
+None of these are exciting individually. The pattern is. After enough rounds of "remove the per-call allocation," you start to see them everywhere — and most of them have been hiding in plain sight since experiment 008.
+
+### Two Rejections Worth Naming
+
+Not every plausible idea worked, and two of the rejections in this stretch were instructive enough to remember.
+
+**The hash optimization that wasn't running (experiment 099).** We added an 8-byte main loop to the FNV byte hasher — fold 8 bytes per multiply instead of 1, a textbook win for long inputs. It measured flat. The cause wasn't the implementation; the streaming benchmarks at the time only carried cells of 5–8 bytes (column names like `item_5`, ID strings, short metadata). The new main loop literally never executed. Before declaring an optimization dead, verify the workload exercises the path it targets.
+
+We later built [the long-text streaming benchmark (experiment 110)](https://github.com/danReynolds/resqlite/pull/54) specifically to give this kind of work somewhere to land.
+
+**More workers, more problems (experiment 105).** The reader pool sizes itself at `clamp(numProcessors - 1, 2, 4)`. We tried raising it to 8 on the theory that fan-out workloads were starving for parallelism. Writer throughput regressed about 31%. Profiling showed the bottleneck wasn't reader availability — it was completion-side microtask churn on the main isolate. Per-write wall closely matched `pool_round_trip × ⌈N/pool_size⌉ + ~30 µs flat`, which means adding workers only helps when there are enough concurrent reads to fill them. On writer-shaped fan-out, the extra workers cost more in scheduling than they saved in latency.
+
+The takeaway is one we keep relearning: the architecture that's right at one scale becomes the bottleneck at the next. Pool sizing tuned for read concurrency wasn't the right size for write fan-out, and the symptom looked nothing like the cause.
+
+### Process Catches Up With The Code
+
+By experiment 100, the project had a problem that had nothing to do with code. We'd run enough experiments that "what should I try next" was a non-trivial question. Some directions had clear next signals (exp 099 *needed* a long-text benchmark before another hash-loop change was worth attempting). Others looked active but had been quietly exhausted. Others were genuinely speculative but indistinguishable from the exhausted ones to a fresh runner.
+
+The fix wasn't a doc — it was a structured machine-readable map. [`experiments/signals.json`](https://github.com/danReynolds/resqlite/blob/main/experiments/signals.json) now carries per-direction state, evidence pointers, and explicit `nextSignals` actions attached to rejections. A CI validator (`benchmark/check_experiment_signals.dart`) closes the gap between "outcome class" and "what was actually written" so the data stays honest. The journal you're partway through reading sits next to it, holding the lessons that don't fit a structured field. And [`RUNNER_INSTRUCTIONS.md`](https://github.com/danReynolds/resqlite/blob/main/experiments/RUNNER_INSTRUCTIONS.md) is the playbook for any agent or human who picks up the next experiment cold.
+
+The whole system was dogfooded by experiment 110, which both *resolved* exp 099's `nextSignals` ("representative long-text streaming benchmark") and *exposed* a hole in the validator's outcomeClass enum — a hole the same PR closed. That's the loop working as designed: process improvements arrive as outputs of running the process, not as separate planning work.
+
+### The Numbers, Three Months Later
+
+The same M1 Pro, the same benchmark suite, after experiments 041–110:
+
+| Metric | Then (exp 040) | Now (exp 110) |
+|---|---:|---:|
+| Point query | 107K qps | 107K qps |
+| Unchanged-fanout (10 watchers) | baseline | −39% |
+| Fan-out invalidation (10 streams, batched) | baseline | −46% |
+| Transaction-bracketed batch (1k rows) | baseline | −13% |
+| Text-parameter inserts | baseline | −10–16% |
+
+The headline ceiling didn't move — it was already at the floor of what the architecture allows. What moved is everything around it: the streaming engine wastes much less work, the write path allocates less per call, and the project now has a process that turns rejections into next experiments instead of dead ends.
+
+## The Hang That Wasn't Ours
+
+Every library that ships long enough eventually does something inexplicable. resqlite's turn came on a Wednesday. The Flutter app we were dogfooding it in started freezing on cold launch — about one in five tries — black screen, beachball, logs that always stopped in the same place: `Migrate DB started`. After that, nothing. Force-quit, relaunch, sometimes work, sometimes not.
+
+`_migrate` does almost nothing. It reads `PRAGMA user_version`, runs schema DDL on a fresh database, writes the new version. We had thousands of clean runs in the bag. And then, intermittently, just a hush.
+
+The first guess was the most boring guess: hot reload. Maybe Flutter was leaving an old `Database` singleton around, the writer connection from the previous run still holding `BEGIN IMMEDIATE`, the new writer parking on a SQLite busy timeout that would never tick down. We wrote a close-before-reopen guard, were about to commit it, and then asked the question that saved us: would `sqflite`, `drift`, and `sqlite_async` need this same guard? Because if the answer was yes, the entire ecosystem was broken and it had been for years.
+
+It wasn't. They don't carry it. Hot reload doesn't re-run `main()`. Hot restart resets the VM. There's no scenario where two `Database` instances exist. And — looking back at the actual logs — the hang was on cold launch anyway, where neither concept applies. We deleted the guard with mild embarrassment and went back to staring at `Migrate DB started`.
+
+### Wait, what's the VM doing?
+
+The first call into the reader pool from migration is `db.select('PRAGMA user_version')`. We littered the worker spawn with prints — start of `Isolate.spawn`, resolve of `Isolate.spawn`, entrypoint enter, SendPort handshake — and got the next reproduction back:
+
+```
+[ReaderPool] reader 0: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 1: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 2: Isolate.spawn done, awaiting SendPort...
+[ReaderPool] reader 3: Isolate.spawn done, awaiting SendPort...
+```
+
+Four spawn futures resolved. The VM said *yep, isolates created.* And then nothing. Not one entrypoint executed. Not one print from inside an isolate. We checked our prints, double-checked our prints, ran it again. Same thing.
+
+So we added a `Timer.periodic` on the main isolate to confirm the event loop was at least alive. It wasn't. The timer never fired. Whatever was happening, it wasn't async. The main thread had stopped processing events entirely. We were looking at a synchronous freeze, somewhere below Dart, in code we couldn't see from Dart.
+
+### The cool part
+
+Here's the thing about a dead Dart VM: you can't debug it with anything that talks to the Dart VM. DevTools is dead. The VM service's WebSocket accepts your connection and then sits there like a stunned fish. `print` from any isolate goes to a queue that nobody is draining. You can stare at the process from inside Dart all day and learn nothing.
+
+Then someone said: macOS has `sample(1)`. It's been there forever. It snapshots every thread's call stack, in C, with no help from the runtime. It does not care that your VM is dead.
+
+We pointed it at the hung process and got back the kind of stack trace you don't usually get to see:
+
+```
+dart::SafepointHandler::ExitSafepointLocked
+  → ConditionVariable::WaitMicros
+    → _pthread_cond_wait
+```
+
+The Dart VM's safepoint handler. On the main thread. Parked on a condition variable. *We were inside the Dart VM, looking at a piece of plumbing nobody is supposed to look at, watching it not move.* And then, reading further up the stack, we got to see what had even called into the VM in the first place:
+
+```
+CGSDatagramReadStream::dispatchMainQueueDatagrams
+  → NSNotificationCenter
+    → FlutterAppLifecycleRegistrar.handleDidChangeOcclusionState
+      → FlutterEngine setApplicationState
+        → Dart_EnterIsolate
+          → Thread::ExitSafepoint           ← BLOCKED
+```
+
+A window-server datagram. macOS sending the app a `didChangeOcclusionState` — fired the moment a window first becomes visible, which is to say, every cold launch, every time. Flutter's lifecycle handler caught it on the main thread and dispatched it inline as a Dart platform message. `Dart_EnterIsolate` saw a safepoint operation in progress, parked to wait for it, and never came back.
+
+That stack was the moment the chapter shifted. We were chasing a database hang. We were now reading a Dart VM trace and a Flutter engine trace and a CoreGraphicsServices trace, all in one process, all in one frozen instant. None of it was our code. We hadn't written any of these lines. But the symptom was sitting on top of our library.
+
+### The clean theory that wasn't
+
+There was an obvious story to tell, and it was almost true. Flutter 3.33+ merges the platform thread and the UI thread on macOS — same OS thread runs the Cocoa run loop and the Dart VM. So a system notification arriving on that thread runs the lifecycle handler *on the same thread the VM is on*. If the VM is mid-safepoint, the handler tries to re-enter the isolate, can't, deadlocks. We added `FLTEnableMergedPlatformUIThread = false` to `Info.plist` and the freeze went away. We had a theory, a fix, and a workaround. We were ready to file the bug.
+
+The theory survived about an hour. We sent three research agents into the Dart VM and Flutter engine source in parallel — and what came back didn't fit. The full `sample` had a four-thread tangle inside the DartWorker pool that had nothing to do with `Isolate.spawn`:
+
+| Thread | Holds | Waiting for |
+|---|---|---|
+| DartWorker A | Deopt-level safepoint | All threads to park |
+| DartWorker B | `PortMap::mutex_` | A `MessageHandler` monitor |
+| DartWorker C, D | (in `HandleMessages`) | Safepoint to complete |
+| Main thread | — | Safepoint to complete |
+
+The thread holding the safepoint wasn't doing isolate setup. It was running `Debugger::RunWithStoppedDeoptimizedWorld` — the VM debugger, setting a breakpoint on behalf of the IDE attached to our `flutter run`. The IDE sends breakpoint sync requests during cold launch. They go through the VM service. They request a safepoint. The safepoint can't complete. Everyone parks. Including, if you're unlucky enough to be in merged-thread mode, the main thread.
+
+Suddenly merged threads weren't the cause. They were the amplifier. The four-thread deadlock was happening anyway, on every reproduction; merged threads were just what dragged the main thread into it and turned a silent VM stall into a beach-balling app. Without them, the UI would render and the user would see a working app — but the debugger would still be wedged, the VM service would still be unresponsive, and breakpoints would silently stop working.
+
+We re-read everything. Most of our cycle dissolved on closer inspection. `MessageHandler::HandleMessages` *explicitly* releases its monitor (`ml->Exit()`) before invoking message work, with an inline comment confirming the release is intentional to avoid this exact deadlock. So DartWorker C and D weren't holding the monitor at all. The mutex DartWorker B was blocked on should have been free. None of our 21 sampled threads were holding it. We could rule out everything except the only thing that mattered.
+
+That was as far as we could get. We had hard evidence, a clear story for what was happening above the lock, and an honest gap where the lock holder should be.
+
+### Filing it anyway
+
+We wrote it up: the full thread dump, the merged-thread amplifier story, the four-thread tangle, the mutex we couldn't pin a holder on, our best guess at a fix, and an explicit "we cannot identify the actual lock holder from sample output." We hit submit on [flutter/flutter#185156](https://github.com/flutter/flutter/issues/185156) at the end of a long debugging day, half expecting it to languish.
+
+Vyacheslav Egorov — mraleph, who has been writing the Dart VM since approximately forever — replied within hours. He led with our open question (*"who is holding the mutex that `MessageHandler::PostMessage` is trying to grab?"*) and then, gently but firmly, told us our suggested fix made no sense: deferring the Flutter lifecycle dispatch would only unblock the main thread; the four-thread DartWorker deadlock would still be there. He was right. The "fix" we'd shipped to the issue would have shifted a beach-balling app to a silently broken debugger.
+
+He asked for a repro. We tried. We built a Flutter app that opened a VM service connection back to *itself* and used `vm_service` to flood `addBreakpointWithScriptUri` calls during isolate spawning, sustaining 130+ overlapping breakpoint sets. 150 launches, no deadlock. The original timing window had been opened by heavyweight FFI startup work — SQLCipher initializing, multi-connection setup, ~880ms of activity that gave the IDE time to send breakpoint requests during the spawn window. The minimal app finished too fast to ever land in that window. We told mraleph we couldn't repro and waited for the issue to go cold.
+
+### The catch
+
+Then Martin Kustermann showed up.
+
+He had read the call path with the right file open and named what we'd missed in one syllable: `AcquiredQueues`.
+
+We'd checked `MessageHandler::HandleMessages` — the path message-handler threads take when they're processing their queue — and found the deliberate release. We had not checked the *other* place the same monitor is acquired. `Service::InvokeMethod`, while servicing a `GetStack` request, takes the monitor inside an `AcquiredQueues` scope so the service can dump the message queue into the JSON reply ([service.cc:1758](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/service.cc#L1758)). That scope was open on DartWorker B for the entire trace. We'd been staring at it the whole time without recognizing it.
+
+What follows is the funniest call chain we've ever read:
+
+1. `Service::InvokeMethod` enters `AcquiredQueues`. It takes `MessageHandler::monitor_`.
+2. `MessageQueue::PrintJSON` runs, formatting the queue contents for the reply. Touching some message types triggers JIT compilation ([message.cc:235](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/message.cc#L235) → [dart_entry.cc:728](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/dart_entry.cc#L728)).
+3. Compilation runs inside a `NoReloadScope`, which suppresses hot-reload safepoints during the work.
+4. The destructor `~NoReloadScope` notices another thread (the debugger, setting its breakpoint!) had requested a reload-class safepoint while reload was suppressed. So the destructor posts the isolate an OOB "check in for reload" message — to itself, the same isolate ([thread.cc:1752](https://github.com/dart-lang/sdk/blob/0e6666fd4a762390bfc2a69bed5a2b906e340cd6/runtime/vm/thread.cc#L1752)).
+5. `PortMap::PostMessage` acquires `PortMap::mutex_`. Then it calls `MessageHandler::PostMessage`, which goes to acquire — the very same `MessageHandler::monitor_` we took in step 1. The one we still hold.
+
+`pthread_mutex_firstfit` is not recursive. The thread blocks waiting for itself.
+
+Once that one thread is wedged, the rest of the deadlock falls into place: the debugger waits for that thread to park, every other Dart worker that touches the port map waits for the safepoint or `PortMap::mutex_`, and merged threads pull in the main thread via `didChangeOcclusionState`. The whole VM stops, in lockstep, behind one thread holding a single mutex it forgot it was holding.
+
+mraleph's response: *"ah-ha! Nice catch — I have somehow overlooked the existence of `AcquiredQueues`."*
+
+### The fix
+
+There were several obvious ways to break the cycle. Make the monitor recursive. Drop and re-acquire across the JIT step. Restructure `~NoReloadScope` so it doesn't post during destruction. The fix that actually shipped is sneakier and better.
+
+mraleph audited who consumes the message-queue dump in the `GetStack` reply. The answer was: nobody. Observatory used to. DevTools never has. So [dart-lang/sdk@53ac68e](https://github.com/dart-lang/sdk/commit/53ac68e2dd750d988c676cce0ae79b385d1efeec) deprecates `Stack.messages`, makes the VM always return an empty array for that field, and removes the lock-then-run-Dart pattern that produced the recursive acquisition. The bug that started with us beach-balling on cold launch and ended with a five-step recursive self-lock is fixed by *deleting the feature that asks for it.* The Flutter issue closed six days after we filed it, retitled with cheerful precision: *"Dart vm-service GetStack method can deadlock by trying to lock the same MessageHandler monitor recursively."*
+
+The shape of the fix is the part we keep coming back to. The bug had been latent in the VM since the `GetStack` queue dump was first written. Merged threads on macOS were what made it user-visible — by recruiting the main thread, they turned a silent VM-internal stall into a beach-ball. Pulling the feature retired both the deadlock and a small bestiary of unstated invariants ("don't call into Dart while holding the queue lock," "don't post during reload-scope teardown") that nobody had written down because nobody had needed to until now. Subtractive fixes for recursive-lock bugs are rare. This one was a particularly clean one.
+
+Our share of the credit is, in honesty, in the negative space. We never identified `AcquiredQueues`. We shipped one wrong proposed fix on the way. What we contributed was a 21-thread `sample` dump and a careful list of what we'd ruled out and what we couldn't see — enough scaffolding that an expert with the right files open could finish the puzzle in fifteen minutes. It turns out that's a perfectly fine way to help fix a Dart VM bug.
+
 ## What We'd Tell Our Past Selves
 
 **Measure main-isolate time separately from wall time.** A library can look fast on wall time while putting all the work on the thread that renders your UI. These are different metrics and you need to optimize for both, but main-isolate time is what your users actually feel.
