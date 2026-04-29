@@ -118,13 +118,8 @@ void readerEntrypoint(List<Object> args) {
           // short-circuit on unchanged state. Experiment 106 piggybacks
           // a per-table column-dependency map on the same call so the
           // stream engine can perform writer-side dispatch elision.
-          final (
-            raw,
-            readTables,
-            readColumns,
-            initialHash,
-            initialRowCount,
-          ) = executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
+          final (raw, readTables, readColumns, initialHash, initialRowCount) =
+              executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           result = (
             _toRows(raw),
@@ -294,14 +289,14 @@ Uint8List executeQueryBytes(
 
 /// Execute a stream's initial query.
 ///
-/// Returns the rows, the authorizer-captured read tables (typed —
-/// either `.known(tables)` or `.all()` when the C-side reliability
-/// flag was tripped during prepare, see [TableDependencySet]), the
+/// Returns the rows, the authorizer-captured read tables (typed as
+/// [TableDependencies], with [TableDependencies.all] used when the C-side
+/// reliability flag was tripped during prepare), the
 /// per-table column dependencies (experiment 106), the C-computed
 /// baseline hash (exp 075), and the row count (exp 077 — cached so
 /// subsequent selectIfChanged calls can short-circuit on count
 /// mismatch).
-(RawQueryResult, TableDependencySet, Map<String, Set<String>?>, int, int)
+(RawQueryResult, TableDependencies, Map<String, Set<String>?>, int, int)
 executeQueryWithDeps(
   int handleAddr,
   int readerId,

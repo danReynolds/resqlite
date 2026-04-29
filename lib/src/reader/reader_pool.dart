@@ -9,7 +9,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../exceptions.dart';
-import '../native/resqlite_bindings.dart' show TableDependencySet;
+import '../native/resqlite_bindings.dart' show TableDependencies;
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -81,7 +81,7 @@ final class ReaderPool {
   Future<
     (
       List<Map<String, Object?>>,
-      TableDependencySet,
+      TableDependencies,
       Map<String, Set<String>?>,
       int,
       int,
@@ -92,7 +92,7 @@ final class ReaderPool {
     return result
         as (
           List<Map<String, Object?>>,
-          TableDependencySet,
+          TableDependencies,
           Map<String, Set<String>?>,
           int,
           int,
@@ -302,14 +302,11 @@ class _WorkerSlot {
       }
     };
 
-    await Isolate.spawn(
-        readerEntrypoint,
-        [
-          dbHandleAddr,
-          _readerId,
-          workerPort.sendPort,
-        ],
-        onExit: workerPort.sendPort);
+    await Isolate.spawn(readerEntrypoint, [
+      dbHandleAddr,
+      _readerId,
+      workerPort.sendPort,
+    ], onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

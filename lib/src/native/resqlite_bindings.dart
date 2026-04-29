@@ -323,46 +323,54 @@ const _dependencyCountUnknown = -1;
 /// returned when the C set overflowed / OOMed during prepare or the
 /// preupdate hook merge.
 ///
-/// Returned by [getReadTables] and [getDirtyTables]. The StreamEngine
-/// branches subscribe-side and invalidate-side on `.all`:
-///   * `.known(tables)` → use the `_tableIndex` per existing behavior.
-///   * `.all()` → route into the global `_allTableEntries` bucket
-///     (subscribe) or invalidate every active entry (invalidate).
-final class TableDependencySet {
-  /// Concrete list of tables — column elision can apply per [tables].
-  const TableDependencySet.known(this.tables) : all = false;
+/// Returned by [getReadTables] and [getDirtyTables]:
+///   * `TableDependencies(tables)` → use the `_tableIndex` per existing
+///     behavior.
+///   * `TableDependencies.all` → route into the global `_allTableEntries`
+///     bucket (subscribe) or invalidate every active entry (invalidate).
+sealed class TableDependencies {
+  const TableDependencies._();
+
+  /// Concrete list of tables — column elision can apply per table.
+  const factory TableDependencies(List<String> tables) = TableListDependencies;
 
   /// Unknown dependency set — fall back to the all-tables bucket.
-  const TableDependencySet.all() : tables = const <String>[], all = true;
+  static const all = AllTableDependencies._();
+}
 
-  /// The known table dependencies. Empty when [all] is true.
+/// Concrete table dependency list.
+final class TableListDependencies extends TableDependencies {
+  const TableListDependencies(this.tables) : super._();
+
   final List<String> tables;
 
-  /// `true` when the C-side set was unreliable; treat as "every table".
-  final bool all;
+  bool get isEmpty => tables.isEmpty;
+}
 
-  bool get isEmpty => !all && tables.isEmpty;
+/// Sentinel for unreliable native table dependency tracking.
+final class AllTableDependencies extends TableDependencies {
+  const AllTableDependencies._() : super._();
 }
 
 /// Read and clear the dirty tables set from the C connection.
 ///
 /// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
-/// the `List<String>` allocation and return a [TableDependencySet.known]
-/// with a const-empty backing list.
+/// the `List<String>` allocation and return an empty [TableDependencies]
+/// value.
 ///
 /// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel
 /// returned when the C-side dirty-table set overflowed / OOMed during
 /// the write — interpreted by the StreamEngine as "every active stream
 /// must invalidate".
-TableDependencySet getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
+TableDependencies getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
-  if (count == _dependencyCountUnknown) return const TableDependencySet.all();
-  if (count == 0) return const TableDependencySet.known(<String>[]);
+  if (count == _dependencyCountUnknown) return TableDependencies.all;
+  if (count == 0) return const TableDependencies(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _dirtyTablesBuf[i].toDartString();
   }
-  return TableDependencySet.known(tables);
+  return TableDependencies(tables);
 }
 
 // ---------------------------------------------------------------------------
@@ -451,34 +459,29 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
 /// the reader runs another query or the entry is evicted.
 ///
 /// Zero-table short-circuit: if the count is 0, skip the `List<String>`
-/// allocation and return a [TableDependencySet.known] with a
-/// const-empty backing list.
+/// allocation and return an empty [TableDependencies] value.
 ///
 /// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel —
 /// the C-side `read_tables_reliable` flag flipped during prepare, so
 /// the stream's true table dependencies are not known. Returns
-/// [TableDependencySet.all]; the StreamEngine routes such streams into
+/// [TableDependencies.all]; the StreamEngine routes such streams into
 /// the "all tables" fallback bucket so every write invalidates them.
-TableDependencySet getReadTables(
-  ffi.Pointer<ffi.Void> dbHandle,
-  int readerId,
-) {
+TableDependencies getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
   final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
-  if (count == _dependencyCountUnknown) return const TableDependencySet.all();
-  if (count == 0) return const TableDependencySet.known(<String>[]);
+  if (count == _dependencyCountUnknown) return TableDependencies.all;
+  if (count == 0) return const TableDependencies(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _readTablesBuf[i].toDartString();
   }
-  return TableDependencySet.known(tables);
+  return TableDependencies(tables);
 }
 
 // Experiment 106: per-worker persistent buffers for column pointer
 // marshalling. The C layer returns parallel table/column arrays so names with
 // dots do not need escaping or ad-hoc parsing in Dart.
-final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf = calloc<ffi.Pointer<Utf8>>(
-  64,
-);
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
+    calloc<ffi.Pointer<Utf8>>(64);
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 

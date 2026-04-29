@@ -4,7 +4,11 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 
 import 'native/resqlite_bindings.dart'
-    show ColumnDependencyMap, TableDependencySet;
+    show
+        AllTableDependencies,
+        ColumnDependencyMap,
+        TableDependencies,
+        TableListDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
@@ -29,7 +33,7 @@ import 'reader/reader_pool.dart';
 // never to a skipped one.
 //
 // At the FFI boundary the C-side reliability flags propagate through
-// `TableDependencySet.all()` (table side) and a `null` column-set value
+// `TableDependencies.all` (table side) and a `null` column-set value
 // for a table (column side). The asymmetry is load-bearing: a table
 // fall-through invalidates every stream, a column fall-through only
 // forces re-query for streams that already share dirty tables.
@@ -57,10 +61,10 @@ final class StreamEngine {
   /// Polish (post-2026-04): bucket of stream entries whose table
   /// dependencies could not be captured reliably during the initial
   /// query (read_set overflow / OOM at prepare). Every write — both
-  /// `.known(...)` and `.all()` — invalidates every entry in this
-  /// bucket. Column elision is skipped for these entries because we
-  /// don't know which tables they depend on, so columns are
-  /// meaningless. Empty in the steady-state common case.
+  /// concrete table lists and `TableDependencies.all` — invalidates
+  /// every entry in this bucket. Column elision is skipped for these
+  /// entries because we don't know which tables they depend on, so
+  /// columns are meaningless. Empty in the steady-state common case.
   final Set<StreamEntry> _allTableEntries = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
@@ -109,21 +113,27 @@ final class StreamEngine {
   /// streams created before this experiment landed) both force the
   /// re-query.
   ///
-  /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencySet];
+  /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencies];
   /// `null` still means "nothing to invalidate" (e.g. inside a
-  /// transaction where the writer hasn't published yet), `.known([])`
-  /// is "no dirty tables this cycle", and `.all()` is the C-side
+  /// transaction where the writer hasn't published yet), `TableDependencies([])`
+  /// is "no dirty tables this cycle", and `TableDependencies.all` is the C-side
   /// reliability sentinel that forces every active stream — even the
   /// "all tables" bucket — to invalidate, bypassing the column elision
   /// short-circuit entirely.
   Future<void> invalidate(
-    TableDependencySet? dirtyTables, [
+    TableDependencies? dirtyTables, [
     Map<String, Set<String>?>? dirtyColumns,
   ]) async {
     if (_entries.isEmpty || dirtyTables == null) {
       return;
     }
-    if (!dirtyTables.all && dirtyTables.tables.isEmpty) {
+
+    final dirtyTableList = switch (dirtyTables) {
+      AllTableDependencies() => null,
+      TableListDependencies(:final tables) => tables,
+    };
+
+    if (dirtyTableList != null && dirtyTableList.isEmpty) {
       return;
     }
 
@@ -141,7 +151,7 @@ final class StreamEngine {
 
     final dirtyEntries = <StreamEntry>{};
 
-    if (dirtyTables.all) {
+    if (dirtyTableList == null) {
       // Polish: writer-side reliability tripped — the dirty-table set
       // overflowed / OOMed and we don't know which tables changed.
       // Invalidate every active entry (both `_tableIndex` watchers and
@@ -167,8 +177,6 @@ final class StreamEngine {
       }
       return;
     }
-
-    final dirtyTableList = dirtyTables.tables;
 
     // Reader-side "all tables" entries (their own read_set was unreliable
     // when the stream was registered) get invalidated on every write,
@@ -202,11 +210,7 @@ final class StreamEngine {
           intersectionEntries++;
           intersectionSw!.start();
         }
-        final affects = _writeAffectsEntry(
-          entry,
-          dirtyTableList,
-          dirtyColumns,
-        );
+        final affects = _writeAffectsEntry(entry, dirtyTableList, dirtyColumns);
         if (kProfileMode) {
           intersectionSw!.stop();
         }
@@ -251,8 +255,7 @@ final class StreamEngine {
     StreamEntry entry,
     List<String> dirtyTables,
     ColumnDependencyMap dirtyColumns,
-  ) =>
-      ColumnInvalidationPolicy.affects(entry, dirtyTables, dirtyColumns);
+  ) => ColumnInvalidationPolicy.affects(entry, dirtyTables, dirtyColumns);
 
   Future<void> _flushQueue() async {
     if (_requeryQueue.isEmpty) {
@@ -327,25 +330,26 @@ final class StreamEngine {
           initialRowCount,
         ) = result;
 
-        if (initialTables.all) {
-          // Polish: read_set was unreliable for this stream's initial
-          // query — every write must invalidate it. The all-tables
-          // bucket short-circuits column elision for this entry too,
-          // since the columns map is meaningless without knowing the
-          // tables.
-          _allTableEntries.add(entry);
-          entry.dependencies = const <String>{};
-          entry.columnDependencies = const <String, Set<String>?>{};
-        } else {
-          // Index the entry's table dependencies after its initial query
-          // completes.
-          for (final table in initialTables.tables) {
-            (_tableIndex[table] ??= {}).add(entry);
-          }
-          entry.dependencies = initialTables.tables.toSet();
-          // Experiment 106: persist the per-table read-column map for the
-          // dispatch elision check on subsequent invalidations.
-          entry.columnDependencies = initialColumns;
+        switch (initialTables) {
+          case AllTableDependencies():
+            // Polish: read_set was unreliable for this stream's initial
+            // query — every write must invalidate it. The all-tables
+            // bucket short-circuits column elision for this entry too,
+            // since the columns map is meaningless without knowing the
+            // tables.
+            _allTableEntries.add(entry);
+            entry.dependencies = const <String>{};
+            entry.columnDependencies = const <String, Set<String>?>{};
+          case TableListDependencies(:final tables):
+            // Index the entry's table dependencies after its initial query
+            // completes.
+            for (final table in tables) {
+              (_tableIndex[table] ??= {}).add(entry);
+            }
+            entry.dependencies = tables.toSet();
+            // Experiment 106: persist the per-table read-column map for the
+            // dispatch elision check on subsequent invalidations.
+            entry.columnDependencies = initialColumns;
         }
 
         entry.lastResult = initialRows;
