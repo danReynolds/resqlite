@@ -90,6 +90,18 @@ const curatedMetricDefinitions = [
     chartId: 'chartTransactions',
   ),
   CuratedMetricDefinition(
+    pattern:
+        'Nested Transactions (savepoints) / resqlite nested transaction() x50',
+    displayName: 'nested tx x50',
+    chartId: 'chartTransactions',
+  ),
+  CuratedMetricDefinition(
+    pattern:
+        'Nested Transactions (savepoints) / resqlite nested transaction() depth=5',
+    displayName: 'nested tx depth 5',
+    chartId: 'chartTransactions',
+  ),
+  CuratedMetricDefinition(
     pattern: 'Parameterized',
     displayName: 'parameterized 100q',
     chartId: 'chartConcurrency',

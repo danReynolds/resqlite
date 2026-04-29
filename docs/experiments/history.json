@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-29T01:28:11.204037",
+  "generated": "2026-04-29T06:17:11.759637",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -16239,6 +16239,8 @@
     "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()",
     "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()",
     "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()",
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50",
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5",
     "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()",
     "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x",
     "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite",
@@ -16262,6 +16264,8 @@
     "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": "interactive tx",
     "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": "tx read 1K rows",
     "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": "tx batch 1K rows",
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50": "nested tx x50",
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5": "nested tx depth 5",
     "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()": "parameterized 100q",
     "Concurrent Reads (1000 rows per query) / resqlite concurrent 4x": "concurrent 4x",
     "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite": "feed reactive (A6)",
@@ -16289,7 +16293,9 @@
     "chartTransactions": [
       "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()",
       "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()",
-      "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()"
+      "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()",
+      "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50",
+      "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5"
     ],
     "chartConcurrency": [
       "Parameterized Queries / 100 queries × ~500 rows each / resqlite select()",
