@@ -7,8 +7,8 @@ import 'native/resqlite_bindings.dart'
     show
         AllTableDependencies,
         ColumnDependencyMap,
-        TableDependencies,
-        TableListDependencies;
+        FixedTableDependencies,
+        TableDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
@@ -115,9 +115,10 @@ final class StreamEngine {
   ///
   /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencies];
   /// `null` still means "nothing to invalidate" (e.g. inside a
-  /// transaction where the writer hasn't published yet), `TableDependencies([])`
-  /// is "no dirty tables this cycle", and `TableDependencies.all` is the C-side
-  /// reliability sentinel that forces every active stream — even the
+  /// transaction where the writer hasn't published yet),
+  /// `TableDependencies.fixed([])` is "no dirty tables this cycle", and
+  /// `TableDependencies.all` is the C-side reliability sentinel that forces
+  /// every active stream — even the
   /// "all tables" bucket — to invalidate, bypassing the column elision
   /// short-circuit entirely.
   Future<void> invalidate(
@@ -130,7 +131,7 @@ final class StreamEngine {
 
     final dirtyTableList = switch (dirtyTables) {
       AllTableDependencies() => null,
-      TableListDependencies(:final tables) => tables,
+      FixedTableDependencies(:final tables) => tables,
     };
 
     if (dirtyTableList != null && dirtyTableList.isEmpty) {
@@ -340,7 +341,7 @@ final class StreamEngine {
             _allTableEntries.add(entry);
             entry.dependencies = const <String>{};
             entry.columnDependencies = const <String, Set<String>?>{};
-          case TableListDependencies(:final tables):
+          case FixedTableDependencies(:final tables):
             // Index the entry's table dependencies after its initial query
             // completes.
             for (final table in tables) {

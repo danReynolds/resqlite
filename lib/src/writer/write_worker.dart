@@ -79,10 +79,11 @@ final class CloseRequest extends WriterRequest {
 ///
 /// Polish (post-2026-04): `dirtyTables` is now a [TableDependencies]
 /// rather than a plain `List<String>?` — `null` still means "no dirty
-/// info to publish yet (inside a transaction)", `TableDependencies(...)`
-/// is the concrete dirty list, and `TableDependencies.all` is the unknown
-/// sentinel from the C-side reliability flag (overflow / OOM during the
-/// write cycle) that forces every active stream to invalidate.
+/// info to publish yet (inside a transaction)",
+/// `TableDependencies.fixed(...)` is the concrete dirty list, and
+/// `TableDependencies.all` is the unknown sentinel from the C-side
+/// reliability flag (overflow / OOM during the write cycle) that forces every
+/// active stream to invalidate.
 final class ExecuteResponse {
   const ExecuteResponse(this.result, this.dirtyTables, this.dirtyColumns);
   final WriteResult result;

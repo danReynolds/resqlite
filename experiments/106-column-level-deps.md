@@ -306,7 +306,7 @@ delimiter parsing at the FFI boundary and preserves table or column
 names that contain dots.
 
 The Dart layer captures the asymmetry in two types:
-`TableDependencies` (`TableDependencies(tables)` vs
+`TableDependencies` (`TableDependencies.fixed(tables)` vs
 `TableDependencies.all`) at the FFI boundary, and `_allTableEntries`
 at the StreamEngine level. The
 contract is documented at the top of `lib/src/stream_engine.dart`:

@@ -324,7 +324,7 @@ const _dependencyCountUnknown = -1;
 /// preupdate hook merge.
 ///
 /// Returned by [getReadTables] and [getDirtyTables]:
-///   * `TableDependencies(tables)` → use the `_tableIndex` per existing
+///   * `TableDependencies.fixed(tables)` → use the `_tableIndex` per existing
 ///     behavior.
 ///   * `TableDependencies.all` → route into the global `_allTableEntries`
 ///     bucket (subscribe) or invalidate every active entry (invalidate).
@@ -332,15 +332,16 @@ sealed class TableDependencies {
   const TableDependencies._();
 
   /// Concrete list of tables — column elision can apply per table.
-  const factory TableDependencies(List<String> tables) = TableListDependencies;
+  const factory TableDependencies.fixed(List<String> tables) =
+      FixedTableDependencies;
 
   /// Unknown dependency set — fall back to the all-tables bucket.
   static const all = AllTableDependencies._();
 }
 
-/// Concrete table dependency list.
-final class TableListDependencies extends TableDependencies {
-  const TableListDependencies(this.tables) : super._();
+/// Known, bounded table dependency list.
+final class FixedTableDependencies extends TableDependencies {
+  const FixedTableDependencies(this.tables) : super._();
 
   final List<String> tables;
 
@@ -365,12 +366,12 @@ final class AllTableDependencies extends TableDependencies {
 TableDependencies getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   if (count == _dependencyCountUnknown) return TableDependencies.all;
-  if (count == 0) return const TableDependencies(<String>[]);
+  if (count == 0) return const TableDependencies.fixed(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _dirtyTablesBuf[i].toDartString();
   }
-  return TableDependencies(tables);
+  return TableDependencies.fixed(tables);
 }
 
 // ---------------------------------------------------------------------------
@@ -469,12 +470,12 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
 TableDependencies getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
   final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
   if (count == _dependencyCountUnknown) return TableDependencies.all;
-  if (count == 0) return const TableDependencies(<String>[]);
+  if (count == 0) return const TableDependencies.fixed(<String>[]);
   final tables = List<String>.filled(count, '', growable: false);
   for (var i = 0; i < count; i++) {
     tables[i] = _readTablesBuf[i].toDartString();
   }
-  return TableDependencies(tables);
+  return TableDependencies.fixed(tables);
 }
 
 // Experiment 106: per-worker persistent buffers for column pointer
