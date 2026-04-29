@@ -80,6 +80,23 @@ can't see it.
 benchmark line that will move under the change, the next experiment is probably
 the benchmark, not the change.*
 
+### Filling a measurement gap can still produce a rejection — and that's a stronger result
+
+When a prior experiment was rejected for "no workload to measure," it's
+tempting to treat building the workload as a setup step before the eventual
+acceptance. [Exp 111](111-nested-tx-benchmark-savepoint-cache.md) added the
+missing nested-transaction benchmark that exp 102 and exp 103 had both pointed
+at, then re-ran exp 102's archived savepoint string cache against it. The
+shallow fan-out shape — 50 SAVEPOINTs/iteration, the worst case achievable
+through the public API — moved -9 %, below the ±17 % decision threshold. The
+benchmark is the lasting contribution; the implementation rejection now rests
+on direct worst-case-workload evidence rather than the absence of evidence.
+
+*Reapplies whenever a "blocked on missing measurement" rejection is being
+revisited. Frame the experiment so the new measurement is the deliverable
+regardless of the implementation outcome — and budget for the implementation
+to fail more confidently than before.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

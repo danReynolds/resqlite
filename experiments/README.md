@@ -120,6 +120,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 | [096](096-direct-batch-param-encoding.md) | Direct batch parameter encoding | Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code |
 | [099](099-fnv-8byte-bytestream.md) | 8-byte-chunked FNV for byte-stream cells | Structurally sound (folds 8 bytes per multiply on the long-text hash path) but benchmark-invisible — current streaming workloads carry only short cells (≤ 3–8 bytes) that bypass the new main loop. Same class as exp 071. Revisit when a long-text streaming benchmark exists |
 | [102](102-savepoint-string-cache.md) | Cached SAVEPOINT/RELEASE/ROLLBACK TO strings on `_WriterState` | Theoretically removes per-nested-tx `toNativeUtf8` + `calloc.free` pair, but the benchmark suite has no nested-transaction workload — no directly attributable signal, only run-to-run drift on unrelated read paths. Pattern-matches exp 095. Revisit if a deeply-nested-tx benchmark exists |
+| [111](111-nested-tx-benchmark-savepoint-cache.md) | Nested-tx benchmark + revisit savepoint string cache | Built the missing nested-transaction workload (shipped) and re-tested exp 102's archived cached-savepoint-string pattern against it. Even on the worst-case 50×-shallow-fan-out shape the cache landed at -9 % (below the ±17 % decision threshold); deep-5-chain was flat. Confirms exp 102 across a maximally stressing workload — per-isolate-round-trip cost dominates per-call savepoint allocations |
 
 ## Conventions
 
