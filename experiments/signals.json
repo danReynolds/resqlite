@@ -106,23 +106,25 @@
       "id": "transaction-control-paths",
       "status": "watch",
       "subsystems": ["writer", "transactions", "sqlite"],
-      "currentRead": "Cached top-level transaction control statements won. Nested transaction string/native helpers have not shown enough signal without a workload that stresses nesting.",
-      "evidence": ["027", "101", "102", "103"],
+      "currentRead": "Cached top-level transaction control statements won. The default write suite now includes depth-3 nested transaction rows, so future savepoint-path work has release-mode coverage instead of relying on focused scripts only.",
+      "evidence": ["027", "101", "102", "103", "111"],
       "interestingIf": [
-        "a real workload or benchmark uses deep nested transactions",
+        "a production trace shows deep nested transactions are common enough to matter",
+        "a savepoint-path change moves the nested transaction benchmark beyond repeat-aware noise thresholds",
         "the implementation shares the accepted top-level transaction machinery",
         "the change reduces prepare/string work without adding much native API surface"
       ],
       "openQuestions": [
         "How often do realistic resqlite users nest transactions deeply?",
-        "Can nested control be optimized without specialized C helpers for every operation?"
+        "Can nested control be optimized without specialized C helpers for every operation?",
+        "Will a 5-run nested benchmark artifact classify empty/write commit rows as stable enough for small deltas?"
       ],
       "adjacentIdeas": [
-        "nested transaction benchmark",
+        "nested transaction benchmark follow-up",
         "savepoint naming",
         "transaction statement reuse"
       ],
-      "notesForExperimenters": "A nested-transaction benchmark would make this area much easier to reason about."
+      "notesForExperimenters": "Use exp 111's nested transaction rows before revisiting savepoint optimizations. The benchmark makes the path visible, but exp 103 still warns against adding native depth-control surface for small or noisy wins."
     },
     {
       "id": "result-transfer-shape",
@@ -272,6 +274,18 @@
       "nextSignals": [
         "watch normal short-cell streaming metrics for platform-specific regressions",
         "use the long-text unchanged-fanout benchmark before trying future hash-loop variants"
+      ]
+    },
+    "111": {
+      "directions": ["transaction-control-paths", "measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The default release suite now exercises depth-3 nested SAVEPOINT, RELEASE, and ROLLBACK TO paths",
+        "Nested transaction commit rows are visible but still noisy in a 3-run artifact; rollback was stable enough to evaluate larger changes"
+      ],
+      "nextSignals": [
+        "compare savepoint-path changes against the nested transaction benchmark before adding complexity",
+        "look for production evidence of deep nesting before prioritizing another implementation pass"
       ]
     }
   }

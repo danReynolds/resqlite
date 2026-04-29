@@ -11,16 +11,17 @@ import '../shared/stats.dart';
 
 /// Write performance benchmarks: single writes, batch, transactions.
 ///
-/// Organized in five sections:
+/// Organized in six sections:
 ///   1. Single Inserts — [PeerSet]-based, 4 peers
 ///   2. Batch Insert (3 sizes) — [PeerSet]-based, 4 peers
 ///   3. Interactive Transaction — hand-rolled, resqlite + sqlite_async
-///   4. Batched Write Inside Transaction — hand-rolled, resqlite
+///   4. Nested Transactions — hand-rolled, resqlite-only savepoint coverage
+///   5. Batched Write Inside Transaction — hand-rolled, resqlite
 ///      variants + sqlite_async. Guards the [`resqlite_run_batch_nested`]
 ///      C entry point.
-///   5. Transaction Read — hand-rolled, resqlite + sqlite_async
+///   6. Transaction Read — hand-rolled, resqlite + sqlite_async
 ///
-/// Sections 3–5 aren't on [PeerSet] because they exercise interactive
+/// Sections 3–6 aren't on [PeerSet] because they exercise interactive
 /// transaction APIs (`tx.execute` / `tx.select` / `tx.executeBatch`
 /// nested inside `db.transaction`) which [BenchmarkPeer] doesn't yet
 /// expose. Extending the peer interface with a `transaction()`
@@ -220,6 +221,102 @@ Future<String> runWritesBenchmark() async {
     }
 
     // -----------------------------------------------------------------
+    // Nested transaction savepoint path.
+    //
+    // resqlite maps nested transaction() calls to SAVEPOINT / RELEASE /
+    // ROLLBACK TO on the writer connection. The standard release suite
+    // used to cover only top-level BEGIN/COMMIT plus tx.executeBatch;
+    // this keeps the depth-dependent savepoint path visible.
+    // -----------------------------------------------------------------
+    {
+      const nestedDepth = 3;
+      const cycles = 50;
+      final resqliteDb = await resqlite.Database.open(
+        '${tempDir.path}/resqlite_nested_tx.db',
+      );
+
+      const createSql =
+          'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)';
+      const insertSql = 'INSERT INTO t(value) VALUES (?)';
+      await resqliteDb.execute(createSql);
+
+      for (var i = 0; i < defaultWarmup; i++) {
+        await resqliteDb.transaction((tx) async {
+          for (var cycle = 0; cycle < cycles; cycle++) {
+            await _runNestedTransaction(tx, nestedDepth, (_) async {});
+          }
+        });
+        await resqliteDb.transaction((tx) async {
+          for (var cycle = 0; cycle < cycles; cycle++) {
+            await _runNestedTransaction(tx, nestedDepth, (inner) async {
+              await inner.execute(insertSql, [cycle]);
+            });
+          }
+        });
+        await resqliteDb.execute('DELETE FROM t');
+      }
+
+      final tEmptyCommit = BenchmarkTiming('resqlite empty commit');
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          for (var cycle = 0; cycle < cycles; cycle++) {
+            await _runNestedTransaction(tx, nestedDepth, (_) async {});
+          }
+        });
+        sw.stop();
+        tEmptyCommit.recordWallOnly(sw.elapsedMicroseconds);
+      }
+
+      final tWriteCommit = BenchmarkTiming('resqlite write commit');
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          for (var cycle = 0; cycle < cycles; cycle++) {
+            await _runNestedTransaction(tx, nestedDepth, (inner) async {
+              await inner.execute(insertSql, [cycle]);
+            });
+          }
+        });
+        sw.stop();
+        tWriteCommit.recordWallOnly(sw.elapsedMicroseconds);
+        await resqliteDb.execute('DELETE FROM t');
+      }
+
+      final tWriteRollback = BenchmarkTiming('resqlite write rollback');
+      for (var iter = 0; iter < defaultIterations; iter++) {
+        final sw = Stopwatch()..start();
+        await resqliteDb.transaction((tx) async {
+          for (var cycle = 0; cycle < cycles; cycle++) {
+            try {
+              await _runNestedTransaction(tx, nestedDepth, (inner) async {
+                await inner.execute(insertSql, [cycle]);
+                throw _nestedRollbackSentinel;
+              });
+            } catch (error) {
+              if (!identical(error, _nestedRollbackSentinel)) rethrow;
+            }
+          }
+        });
+        sw.stop();
+        tWriteRollback.recordWallOnly(sw.elapsedMicroseconds);
+      }
+
+      printComparisonTable(
+        '=== Nested Transactions (depth $nestedDepth × $cycles cycles) ===',
+        [tEmptyCommit, tWriteCommit, tWriteRollback],
+      );
+      markdown.write(
+        markdownTable(
+          'Nested Transactions (depth $nestedDepth × $cycles cycles)',
+          [tEmptyCommit, tWriteCommit, tWriteRollback],
+        ),
+      );
+
+      await resqliteDb.close();
+    }
+
+    // -----------------------------------------------------------------
     // Batched writes INSIDE an interactive transaction.
     //
     // Regression guard for the "tx.executeBatch is a loop of individual
@@ -407,6 +504,19 @@ Future<String> runWritesBenchmark() async {
   }
 
   return markdown.toString();
+}
+
+final Object _nestedRollbackSentinel = Object();
+
+Future<void> _runNestedTransaction(
+  resqlite.Transaction tx,
+  int depth,
+  Future<void> Function(resqlite.Transaction tx) body,
+) {
+  if (depth == 0) return body(tx);
+  return tx.transaction((inner) {
+    return _runNestedTransaction(inner, depth - 1, body);
+  });
 }
 
 Future<void> main() async {

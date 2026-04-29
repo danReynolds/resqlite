@@ -90,6 +90,18 @@ const curatedMetricDefinitions = [
     chartId: 'chartTransactions',
   ),
   CuratedMetricDefinition(
+    pattern:
+        'Nested Transactions (depth 3 × 50 cycles) / resqlite empty commit',
+    displayName: 'nested tx empty',
+    chartId: 'chartTransactions',
+  ),
+  CuratedMetricDefinition(
+    pattern:
+        'Nested Transactions (depth 3 × 50 cycles) / resqlite write rollback',
+    displayName: 'nested tx rollback',
+    chartId: 'chartTransactions',
+  ),
+  CuratedMetricDefinition(
     pattern: 'Parameterized',
     displayName: 'parameterized 100q',
     chartId: 'chartConcurrency',
