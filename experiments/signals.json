@@ -40,8 +40,8 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation or repeated SQLite work. Smaller Dart-side allocation cleanups and duplicated encoding paths have usually measured flat or regressed.",
-      "evidence": ["028", "076", "077", "095", "096", "109"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation or repeated SQLite work. Smaller Dart-side allocation cleanups, duplicated encoding paths, and batch-list flattening changes have usually measured flat or below threshold.",
+      "evidence": ["028", "076", "077", "095", "096", "109", "112"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -56,7 +56,7 @@
         "batch parameter shape",
         "SQLite bind semantics"
       ],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple batch-list construction tweaks are not enough by themselves."
     },
     {
       "id": "long-text-stream-hashing",
@@ -285,6 +285,18 @@
       "nextSignals": [
         "look for round-trip-batching opportunities for savepoint open/close pairs (analogous to exp 009 read-side batching)",
         "compare any future savepoint-path change against the exp 111 nested-tx benchmark before claiming a win"
+      ]
+    },
+    "112": {
+      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "Pre-sizing the temporary executeBatch flat parameter list is below the current benchmark signal",
+        "The shared inline parameter encoder should stay centralized unless a profiler proves batch flattening is material"
+      ],
+      "nextSignals": [
+        "writer-isolate profile showing flat-list construction as a material batch-write cost",
+        "batch workload with much wider parameter rows than the current two-param INSERT shape"
       ]
     }
   }

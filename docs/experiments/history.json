@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-29T01:28:11.204037",
+  "generated": "2026-04-29T13:51:04.196817",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -16227,6 +16227,25 @@
         "date": "2026-04-28",
         "timestamp": "2026-04-28T13:24:34",
         "source": "exact"
+      }
+    },
+    {
+      "id": "112",
+      "title": "Fixed-length batch parameter flattening",
+      "date": "2026-04-28",
+      "status": "rejected",
+      "summary": "Focused benchmark medians overlapped after repeated A/B passes; any large-batch improvement was below the current decision threshold, so the simpler growable-list flattening stays",
+      "commit": null,
+      "problem": "Experiment 096 rejected direct nested batch parameter encoding because it added\na second encoder path and did not move the benchmark suite. Experiment 109 then\nmade the shared `allocateParams` path faster by packing text and blob bytes\ninline, leaving one simpler adjacent question: does the existing Dart-side\nbatch flatten step still cost enough to optimize?\n\n`executeBatchWrite` and `executeNestedBatchWrite` flatten\n`List<List<Object?>>` into a temporary `List<Object?>` before calling\n`allocateParams`. The live implementation used a growable list plus `addAll`,\nwhich can resize while building large batches.",
+      "hypothesis": "Pre-sizing the flattened list and filling it by index should remove growable\nlist resizing without reviving experiment 096's larger duplicate-encoder\ncomplexity. The result would be most visible on large text-param batch writes,\nespecially the 10,000-row batch insert shape that benefited from experiment\n109.\n\nAccept if the focused benchmark shows a repeatable large-batch improvement\noutside run noise, with no small-batch regression. Reject if medians overlap or\nthe effect stays below the release-suite decision threshold.",
+      "approach": "Added a focused exploratory benchmark:\n\n```text\ndart run benchmark/experiments/batch_param_flatten.dart --iterations=50\n```\n\nThe benchmark prebuilds `paramSets` outside the timed region, then measures one\n`executeBatch` call for 100, 1,000, and 10,000 rows. Between samples it deletes\nthe previously inserted rows outside the timed region, so the timed portion is\ncentered on writer-isolate batch preparation and SQLite batch execution.\n\nThe candidate production change was deliberately small:\n\n```dart\nfinal flattened = List<Object?>.filled(\n  paramSets.length * paramCount,\n  null,\n  growable: false,\n);\nvar offset = 0;\nfor (final set in paramSets) {\n  for (var i = 0; i < paramCount; i++) {\n    flattened[offset + i] = set[i];\n  }\n  offset += paramCount;\n}\n```\n\nBoth top-level and nested transa...",
+      "results": "Focused benchmark p50 wall time:\n\n| Run | Variant | 100 rows | 1,000 rows | 10,000 rows |\n|---|---|---:|---:|---:|\n| 1 | Baseline | 0.169 ms | 0.426 ms | 4.042 ms |\n| 2 | Candidate | 0.210 ms | 0.372 ms | 3.479 ms |\n| 3 | Candidate | 0.182 ms | 0.379 ms | 3.578 ms |\n| 4 | Baseline | 0.220 ms | 0.402 ms | 3.727 ms |\n| 5 | Candidate | 0.154 ms | 0.413 ms | 3.779 ms |\n\nThe first candidate run looked promising at 10,000 rows, but the confirmation\npasses overlapped with the baseline. The 1,000-row and 10,000-row candidate\nmedians stayed directionally plausible, but the effect was small enough that\nrun ordering and tail noise could explain it. The 100-row shape was mixed and\nnot a target.\n\nThe production change was reverted after measurement. No release-suite run was\nperformed because the foc...",
+      "reasoning": "**Rejected.**\n\nFixed-length flattening is much cheaper than experiment 096's duplicate\nencoder, but it still does not produce an acceptance-level signal. Dart's\ngrowable-list plus `addAll` path appears good enough relative to SQLite batch\nexecution and the shared inline parameter encoder.\n\nThe focused benchmark remains useful as a quick probe for future batch\nparameter work, but the production code should stay with the simpler current\nflattening path.",
+      "benchmarkRun": {
+        "id": "baseline-for-exp111",
+        "date": "2026-04-28",
+        "timestamp": "2026-04-28T13:13:50",
+        "source": "same-day"
       }
     }
   ],
