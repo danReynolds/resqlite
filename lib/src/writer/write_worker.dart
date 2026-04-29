@@ -13,6 +13,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
+import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
@@ -75,24 +76,14 @@ final class CloseRequest extends WriterRequest {
 // Response types
 // ---------------------------------------------------------------------------
 
-/// Response to [ExecuteRequest]. Includes dirty tables for stream invalidation.
-///
-/// Polish (post-2026-04): `dirtyTables` is now a [TableDependencies]
-/// rather than a plain `List<String>?` — `null` still means "no dirty
-/// info to publish yet (inside a transaction)",
-/// `TableDependencies.fixed(...)` is the concrete dirty list, and
-/// `TableDependencies.all` is the unknown sentinel from the C-side
-/// reliability flag (overflow / OOM during the write cycle) that forces every
-/// active stream to invalidate.
+/// Response to [ExecuteRequest]. Includes the stream invalidation publication
+/// produced by the write, or [StreamInvalidation.none] when the write is inside
+/// a transaction and should be published only by the outermost commit.
 final class ExecuteResponse {
-  const ExecuteResponse(this.result, this.dirtyTables, this.dirtyColumns);
+  const ExecuteResponse(this.result, this.invalidation);
+
   final WriteResult result;
-  final TableDependencies? dirtyTables;
-  // Experiment 106: per-table dirty-column map.
-  // `ColumnDependencies.all` for a table means "all columns dirty"
-  // (INSERT / DELETE / preupdate hook fired outside a tagged stmt).
-  // Absent map entries mean the table itself wasn't dirtied.
-  final ColumnDependencyMap? dirtyColumns;
+  final StreamInvalidation invalidation;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -103,9 +94,9 @@ final class QueryResponse {
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.dirtyTables, this.dirtyColumns);
-  final TableDependencies? dirtyTables;
-  final ColumnDependencyMap? dirtyColumns;
+  const BatchResponse(this.invalidation);
+
+  final StreamInvalidation invalidation;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,14 +216,27 @@ void writerEntrypoint(List<Object> args) {
 // Per-request handlers
 // ---------------------------------------------------------------------------
 
+StreamInvalidation _drainStreamInvalidation(ffi.Pointer<ffi.Void> dbHandle) {
+  return StreamInvalidation.dirty(
+    getDirtyTables(dbHandle),
+    columnInvalidations: getDirtyColumnInvalidations(dbHandle),
+  );
+}
+
+void _discardStreamInvalidation(ffi.Pointer<ffi.Void> dbHandle) {
+  getDirtyTables(dbHandle);
+  getDirtyColumnInvalidations(dbHandle);
+}
+
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
-  final dirty = state.txDepth > 0 ? null : getDirtyTables(state.dbHandle);
-  final dirtyCols = state.txDepth > 0 ? null : getDirtyColumns(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, dirty, dirtyCols));
+  final invalidation = state.txDepth > 0
+      ? StreamInvalidation.none
+      : _drainStreamInvalidation(state.dbHandle);
+  msg.replyPort.send(ExecuteResponse(result, invalidation));
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
@@ -240,15 +244,10 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(null, null));
+    msg.replyPort.send(const BatchResponse(StreamInvalidation.none));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(
-        getDirtyTables(state.dbHandle),
-        getDirtyColumns(state.dbHandle),
-      ),
-    );
+    msg.replyPort.send(BatchResponse(_drainStreamInvalidation(state.dbHandle)));
   }
 }
 
@@ -334,8 +333,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // legitimately fail with "no transaction active".
       resqliteTxRollback(state.dbHandle);
       // Drop any tables/columns dirtied by the aborted transaction.
-      getDirtyTables(state.dbHandle);
-      getDirtyColumns(state.dbHandle);
+      _discardStreamInvalidation(state.dbHandle);
       state.txDepth = newDepth;
       throw ResqliteTransactionException(
         errMsg,
@@ -344,12 +342,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(
-      BatchResponse(
-        getDirtyTables(state.dbHandle),
-        getDirtyColumns(state.dbHandle),
-      ),
-    );
+    msg.replyPort.send(BatchResponse(_drainStreamInvalidation(state.dbHandle)));
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
     final rc = resqliteExec(state.dbHandle, sp);
@@ -388,7 +381,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(const BatchResponse(null, null));
+    msg.replyPort.send(const BatchResponse(StreamInvalidation.none));
   }
 }
 
@@ -402,8 +395,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     final rc = resqliteTxRollback(state.dbHandle);
     // Clear the dirty sets — rolled-back changes don't count for stream
     // invalidation, even if SQLite reported a rollback error.
-    getDirtyTables(state.dbHandle);
-    getDirtyColumns(state.dbHandle);
+    _discardStreamInvalidation(state.dbHandle);
     state.txDepth = newDepth;
     if (rc != 0) {
       throw ResqliteTransactionException(

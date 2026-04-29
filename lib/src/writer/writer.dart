@@ -162,7 +162,7 @@ final class Writer {
     );
 
     if (Transaction.current == null) {
-      _streamEngine.invalidate(response.dirtyTables, response.dirtyColumns);
+      _streamEngine.invalidate(response.invalidation);
     }
 
     return result;

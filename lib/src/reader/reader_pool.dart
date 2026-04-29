@@ -8,9 +8,9 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../exceptions.dart';
-import '../native/resqlite_bindings.dart'
+import '../dependency_tracking.dart'
     show ColumnDependencies, ColumnDependencyMap, TableDependencies;
+import '../exceptions.dart';
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.

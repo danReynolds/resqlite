@@ -3,14 +3,18 @@ import 'dart:async';
 
 import 'package:meta/meta.dart';
 
-import 'native/resqlite_bindings.dart'
+import 'dependency_tracking.dart'
     show
         AllColumnDependencies,
         AllTableDependencies,
         ColumnDependencyMap,
         ColumnDependencies,
+        DirtyStreamInvalidation,
         FixedColumnDependencies,
         FixedTableDependencies,
+        NoStreamInvalidation,
+        StreamInvalidation,
+        TableInvalidation,
         TableDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
@@ -103,33 +107,39 @@ final class StreamEngine {
     return _createStream(key, sql, parameters);
   }
 
-  /// Invalidate all streams dependent on the given tables, scheduling them
+  /// Apply a writer-produced stream invalidation, scheduling affected streams
   /// for requery.
   ///
-  /// Experiment 106: when [dirtyColumns] is provided, perform a per-table
-  /// column-intersection check before scheduling the requery. A stream
+  /// Experiment 106: when per-table column invalidations are provided, perform
+  /// a column-intersection check before scheduling the requery. A stream
   /// only re-runs if its read-column set intersects the writer's modified
   /// column set for at least one shared table. The check degrades to
   /// today's table-only behaviour when either side is unknown —
-  /// `ColumnDependencies.all` in `dirtyColumns` (writer-side wildcard
+  /// `ColumnDependencies.all` in a table invalidation (writer-side wildcard
   /// for INSERT/DELETE) or a missing entry in the stream's
   /// `columnDependencies` (e.g. legacy streams created before this
   /// experiment landed) both force the re-query.
   ///
-  /// Polish (post-2026-04): [dirtyTables] is now a [TableDependencies];
-  /// `null` still means "nothing to invalidate" (e.g. inside a
-  /// transaction where the writer hasn't published yet),
-  /// `TableDependencies.fixed([])` is "no dirty tables this cycle", and
-  /// `TableDependencies.all` is the C-side reliability sentinel that forces
-  /// every active stream — even the
+  /// [StreamInvalidation.none] means the writer response does not publish an
+  /// invalidation yet (for example, an inner transaction write). Inside a
+  /// dirty invalidation, `TableDependencies.fixed([])` is "no dirty tables
+  /// this cycle", and `TableDependencies.all` is the C-side reliability
+  /// sentinel that forces every active stream — even the
   /// "all tables" bucket — to invalidate, bypassing the column elision
   /// short-circuit entirely.
-  Future<void> invalidate(
-    TableDependencies? dirtyTables, [
-    ColumnDependencyMap? dirtyColumns,
-  ]) async {
-    if (_entries.isEmpty || dirtyTables == null) {
+  Future<void> invalidate(StreamInvalidation invalidation) async {
+    if (_entries.isEmpty) {
       return;
+    }
+
+    final TableDependencies dirtyTables;
+    final List<TableInvalidation> dirtyColumnInvalidations;
+    switch (invalidation) {
+      case NoStreamInvalidation():
+        return;
+      case DirtyStreamInvalidation(:final tables, :final columnInvalidations):
+        dirtyTables = tables;
+        dirtyColumnInvalidations = columnInvalidations;
     }
 
     final dirtyTableList = switch (dirtyTables) {
@@ -160,7 +170,7 @@ final class StreamEngine {
       // overflowed / OOMed and we don't know which tables changed.
       // Invalidate every active entry (both `_tableIndex` watchers and
       // the all-tables bucket) and bypass the column-elision check
-      // entirely; the check would dereference `dirtyColumns[table]` for
+      // entirely; the check would dereference dirty-column metadata for
       // tables we can't enumerate, and there's no benefit to elision
       // when we don't know the dirty set.
       dirtyEntries.addAll(_allTableEntries);
@@ -196,6 +206,8 @@ final class StreamEngine {
       }
     }
 
+    ColumnDependencyMap? dirtyColumnsByTable;
+
     final intersectionSw = kProfileMode ? Stopwatch() : null;
     var intersectionEntries = 0;
     for (final entry in dirtyEntries) {
@@ -209,12 +221,19 @@ final class StreamEngine {
       // short-circuit — the hash short-circuit pays the requery cost and
       // suppresses the emission; the column elision skips the requery
       // itself.
-      if (dirtyColumns != null && !isAllTablesEntry) {
+      if (dirtyColumnInvalidations.isNotEmpty && !isAllTablesEntry) {
         if (kProfileMode) {
           intersectionEntries++;
           intersectionSw!.start();
         }
-        final affects = _writeAffectsEntry(entry, dirtyTableList, dirtyColumns);
+        dirtyColumnsByTable ??= _columnInvalidationsByTable(
+          dirtyColumnInvalidations,
+        );
+        final affects = _writeAffectsEntry(
+          entry,
+          dirtyTableList,
+          dirtyColumnsByTable,
+        );
         if (kProfileMode) {
           intersectionSw!.stop();
         }
@@ -557,6 +576,15 @@ final class StreamEntry {
 /// Compute a stable hash key for a stream query.
 int _streamKey(String sql, List<Object?> params) {
   return Object.hash(sql, Object.hashAll(params));
+}
+
+ColumnDependencyMap _columnInvalidationsByTable(
+  List<TableInvalidation> invalidations,
+) {
+  return {
+    for (final invalidation in invalidations)
+      invalidation.table: invalidation.columns,
+  };
 }
 
 /// Column-level dispatch elision policy (experiment 106 polish).

@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import 'request_cache.dart';
 
@@ -317,42 +318,6 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
 /// Mirrors `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` in `native/resqlite.h`.
 const _dependencyCountUnknown = -1;
 
-/// Polish (post-2026-04): the C-side reliability flag's table-getter
-/// return convention is encoded here once. A non-negative count is the
-/// known dependency list; [_dependencyCountUnknown] is the unknown sentinel
-/// returned when the C set overflowed / OOMed during prepare or the
-/// preupdate hook merge.
-///
-/// Returned by [getReadTables] and [getDirtyTables]:
-///   * `TableDependencies.fixed(tables)` → use the `_tableIndex` per existing
-///     behavior.
-///   * `TableDependencies.all` → route into the global `_allTableEntries`
-///     bucket (subscribe) or invalidate every active entry (invalidate).
-sealed class TableDependencies {
-  const TableDependencies._();
-
-  /// Concrete list of tables — column elision can apply per table.
-  const factory TableDependencies.fixed(List<String> tables) =
-      FixedTableDependencies;
-
-  /// Unknown dependency set — fall back to the all-tables bucket.
-  static const all = AllTableDependencies._();
-}
-
-/// Known, bounded table dependency list.
-final class FixedTableDependencies extends TableDependencies {
-  const FixedTableDependencies(this.tables) : super._();
-
-  final List<String> tables;
-
-  bool get isEmpty => tables.isEmpty;
-}
-
-/// Sentinel for unreliable native table dependency tracking.
-final class AllTableDependencies extends TableDependencies {
-  const AllTableDependencies._() : super._();
-}
-
 /// Read and clear the dirty tables set from the C connection.
 ///
 /// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
@@ -486,43 +451,11 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
-/// Per-table dirty / read column dependency map.
-typedef ColumnDependencyMap = Map<String, ColumnDependencies>;
-
-/// Column dependency set for one known table.
-///
-/// The native layer uses `"*"` as a compact transport sentinel for "all
-/// columns". Dart decodes that immediately into [ColumnDependencies.all] so
-/// the stream policy does not rely on nullable map values.
-sealed class ColumnDependencies {
-  const ColumnDependencies._();
-
-  /// Concrete set of columns — column elision can apply by intersection.
-  const factory ColumnDependencies.fixed(Set<String> columns) =
-      FixedColumnDependencies;
-
-  /// Unknown / all columns — fall back to table-level invalidation.
-  static const all = AllColumnDependencies._();
-}
-
-/// Known, bounded column dependency set for one table.
-final class FixedColumnDependencies extends ColumnDependencies {
-  const FixedColumnDependencies(this.columns) : super._();
-
-  final Set<String> columns;
-}
-
-/// Sentinel for "any column may matter" within a known table.
-final class AllColumnDependencies extends ColumnDependencies {
-  const AllColumnDependencies._() : super._();
-}
-
 /// Decode `count` parallel table/column pointers into a per-table column map.
 /// Wildcard columns (`"*"`) collapse the table to [ColumnDependencies.all].
 ///
-/// Shared between [getReadColumns] and [getDirtyColumns] — both decoders
-/// are otherwise identical, the only difference is which FFI getter
-/// produced the count + pointer fill.
+/// Used by [getReadColumns], which keeps reader dependencies map-shaped for
+/// hot lookup by table in the stream policy.
 ColumnDependencyMap _decodeColumnMap(int count) {
   if (count <= 0) return const <String, ColumnDependencies>{};
   final out = <String, ColumnDependencies>{};
@@ -541,6 +474,48 @@ ColumnDependencyMap _decodeColumnMap(int count) {
         columns.add(col);
       case null:
         out[table] = ColumnDependencies.fixed(<String>{col});
+    }
+  }
+  return out;
+}
+
+/// Decode writer-side table/column pairs into grouped invalidation objects.
+///
+/// This is intentionally list-shaped because it represents a write event:
+/// "these tables were dirtied, with these column details where available."
+/// Stream read dependencies stay map-shaped because the hot policy path looks
+/// them up by table.
+List<TableInvalidation> _decodeTableInvalidations(int count) {
+  if (count <= 0) return const <TableInvalidation>[];
+  final out = <TableInvalidation>[];
+  for (var i = 0; i < count; i++) {
+    final table = _columnTablesBuf[i].toDartString();
+    final col = _columnNamesBuf[i].toDartString();
+    final existingIndex = out.indexWhere((entry) => entry.table == table);
+
+    if (col == '*') {
+      final invalidation = TableInvalidation(table, ColumnDependencies.all);
+      if (existingIndex == -1) {
+        out.add(invalidation);
+      } else {
+        out[existingIndex] = invalidation;
+      }
+      continue;
+    }
+
+    if (existingIndex == -1) {
+      out.add(
+        TableInvalidation(table, ColumnDependencies.fixed(<String>{col})),
+      );
+      continue;
+    }
+
+    switch (out[existingIndex].columns) {
+      case AllColumnDependencies():
+        // Wildcard already present — keep it.
+        continue;
+      case FixedColumnDependencies(:final columns):
+        columns.add(col);
     }
   }
   return out;
@@ -569,16 +544,20 @@ ColumnDependencyMap getReadColumns(
   return _decodeColumnMap(count);
 }
 
-/// Drain the writer's dirty-column accumulator. Wildcards collapse to
-/// [ColumnDependencies.all] to signal "all columns of this table are dirty".
-ColumnDependencyMap getDirtyColumns(ffi.Pointer<ffi.Void> dbHandle) {
+/// Drain the writer's dirty-column accumulator as grouped table invalidations.
+///
+/// Wildcards collapse to [ColumnDependencies.all] to signal "all columns of
+/// this table are dirty".
+List<TableInvalidation> getDirtyColumnInvalidations(
+  ffi.Pointer<ffi.Void> dbHandle,
+) {
   final count = resqliteGetDirtyColumns(
     dbHandle,
     _columnTablesBuf,
     _columnNamesBuf,
     64,
   );
-  return _decodeColumnMap(count);
+  return _decodeTableInvalidations(count);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle

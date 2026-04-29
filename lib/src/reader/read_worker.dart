@@ -13,6 +13,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';

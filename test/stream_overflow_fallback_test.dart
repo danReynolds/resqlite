@@ -73,8 +73,9 @@ void main() {
     late Database db;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp
-          .createTemp('resqlite_stream_overflow_');
+      tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_stream_overflow_',
+      );
       db = await Database.open('${tempDir.path}/test.db');
     });
 
@@ -95,13 +96,13 @@ void main() {
         // 70 columns — strictly more than the 64-column read-column cap.
         const colCount = 70;
         final cols = List.generate(colCount, (i) => 'c$i').join(', ');
-        final colDefs = List.generate(colCount, (i) => 'c$i INTEGER').join(', ');
+        final colDefs = List.generate(
+          colCount,
+          (i) => 'c$i INTEGER',
+        ).join(', ');
         await db.execute('CREATE TABLE wide(id INTEGER PRIMARY KEY, $colDefs)');
         final placeholders = List.generate(colCount, (_) => '?').join(', ');
-        final initialValues = [
-          1,
-          ...List.generate(colCount, (i) => i),
-        ];
+        final initialValues = [1, ...List.generate(colCount, (i) => i)];
         await db.execute(
           'INSERT INTO wide(id, $cols) VALUES (?, $placeholders)',
           initialValues,
@@ -114,10 +115,7 @@ void main() {
         expect(initial, hasLength(1));
         // SELECT * captures every column → overflows the 64-cap.
         // Writer's UPDATE on a column past the cap must still re-emit.
-        await db.execute(
-          'UPDATE wide SET c69 = ? WHERE id = ?',
-          [9999, 1],
-        );
+        await db.execute('UPDATE wide SET c69 = ? WHERE id = ?', [9999, 1]);
         final after = await probe.event(2);
         expect(after[0]['c69'], 9999);
 
@@ -131,7 +129,7 @@ void main() {
         // Writer-side overflow: a stmt that SETs more than 64 columns
         // makes its `dep_columns` set unreliable. The preupdate hook
         // then propagates `dep_columns_reliable = 0` into
-        // `dirty_columns.reliable = 0`, so getDirtyColumns returns 0
+        // `dirty_columns.reliable = 0`, so getDirtyColumnInvalidations returns 0
         // entries — every stream that watches the table re-emits via
         // table-only fallback.
         //
@@ -143,7 +141,10 @@ void main() {
         const colCount = 70;
         const watchedColumn = 'c69';
         final cols = List.generate(colCount, (i) => 'c$i').join(', ');
-        final colDefs = List.generate(colCount, (i) => 'c$i INTEGER').join(', ');
+        final colDefs = List.generate(
+          colCount,
+          (i) => 'c$i INTEGER',
+        ).join(', ');
         await db.execute('CREATE TABLE wide(id INTEGER PRIMARY KEY, $colDefs)');
         final placeholders = List.generate(colCount, (_) => '?').join(', ');
         await db.execute(
@@ -180,10 +181,7 @@ void main() {
           await db.execute(
             'CREATE TABLE t$i(id INTEGER PRIMARY KEY, value INTEGER)',
           );
-          await db.execute(
-            'INSERT INTO t$i(id, value) VALUES (?, ?)',
-            [1, i],
-          );
+          await db.execute('INSERT INTO t$i(id, value) VALUES (?, ?)', [1, i]);
         }
 
         // UNION ALL across all N+1 tables — the authorizer fires
@@ -200,10 +198,7 @@ void main() {
         // Write to a table well past the cap — would have been silently
         // dropped without the polish (read_set capped at 64 missed
         // tables 64..68).
-        await db.execute(
-          'UPDATE t68 SET value = ? WHERE id = 1',
-          [4242],
-        );
+        await db.execute('UPDATE t68 SET value = ? WHERE id = 1', [4242]);
         final after = await probe.event(2);
         // The row from t68 should have the new value.
         final t68row = after.firstWhere((r) => r['src'] == 68);

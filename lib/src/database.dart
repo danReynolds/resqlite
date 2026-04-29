@@ -345,7 +345,7 @@ final class Database {
     final writer = await _writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
-    _streamEngine.invalidate(response.dirtyTables, response.dirtyColumns);
+    _streamEngine.invalidate(response.invalidation);
 
     return response.result;
   }
@@ -383,7 +383,7 @@ final class Database {
     );
 
     if (reponse != null) {
-      _streamEngine.invalidate(reponse.dirtyTables, reponse.dirtyColumns);
+      _streamEngine.invalidate(reponse.invalidation);
     }
   }
 

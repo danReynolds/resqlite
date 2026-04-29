@@ -9,9 +9,9 @@
 //
 // Direct tests on the policy helper prove the dispatch-side decision
 // regardless of result-change-detection confounds.
-import 'package:resqlite/src/stream_engine.dart';
-import 'package:resqlite/src/native/resqlite_bindings.dart'
+import 'package:resqlite/src/dependency_tracking.dart'
     show ColumnDependencies, ColumnDependencyMap;
+import 'package:resqlite/src/stream_engine.dart';
 import 'package:test/test.dart';
 
 StreamEntry _entryWith({
