@@ -53,8 +53,8 @@ Future<void> _runBatchSize({
         ')',
       );
 
-      final paramSets = [
-        for (var i = 0; i < batchSize; i++) ['item_$i', i * 1.5],
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < batchSize; i++) <Object?>['item_$i', i * 1.5],
       ];
       const insertSql = 'INSERT INTO items(name, value) VALUES (?, ?)';
 
