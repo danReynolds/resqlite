@@ -240,7 +240,7 @@ Initial stream emission and invalidation benchmark:
 | Initial emission | 0.03 ms | 0.10 ms |
 | Invalidation latency | 0.07 ms | 0.05 ms |
 
-In the many-stream writer-throughput benchmark, 50 streams watch selected columns on one wide table. On the April 30, 2026 MacBook Pro run, resqlite wrote to a disjoint column at **6,752 writes/sec** and to an overlapping column at **4,503 writes/sec**. That spread is the signature of column-level dispatch elision: disjoint writes skip stream re-query dispatch instead of paying table-level fanout cost.
+In the many-stream writer-throughput benchmark, 50 streams watch selected columns on one wide table. On the April 30, 2026 MacBook Pro run, resqlite wrote to a disjoint column at **23,045 writes/sec** and to an overlapping column at **7,915 writes/sec**. That spread is the signature of column-level dispatch elision: disjoint writes skip stream re-query dispatch instead of paying table-level fanout cost.
 
 The benchmark disables sqlite_async's default throttle so the table reports the measured end-to-end latency for the benchmarked scenario.
 
