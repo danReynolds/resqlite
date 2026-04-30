@@ -205,26 +205,26 @@
 <tbody>
 <tr>
 <td>resqlite</td>
-<td class="winner">6752</td>
-<td class="winner">4503</td>
-<td>0.667x</td>
+<td>23,045</td>
+<td>7,915</td>
+<td class="winner">0.343</td>
 </tr>
 <tr>
 <td>sqlite_async</td>
-<td>2062</td>
-<td>2009</td>
-<td>0.975x</td>
+<td>2,451</td>
+<td>2,228</td>
+<td>0.909</td>
 </tr>
 <tr>
 <td>drift</td>
-<td>211</td>
-<td>108</td>
-<td>0.510x</td>
+<td class="winner">201</td>
+<td class="winner">200</td>
+<td>0.994</td>
 </tr>
 </tbody></table></div>
 
-<p>The resqlite spread is the intended signature. Disjoint writes avoid stream dispatch, while overlapping writes still do the work because the selected result can change. <code>sqlite_async</code> is close to a 1.0 overlap/disjoint ratio, which means it performs nearly the same writer-side work in both cases. Drift is much slower overall in this workload; its ratio is lower, but at 211 writes/sec disjoint and 108 writes/sec overlap it is not showing the same high-throughput dispatch-elision shape.</p>
-<p>Compared with the experiment baseline for the same 50-stream workload, Experiment 106 raised resqlite's disjoint writer throughput from 3956 to 7201 writes/sec in the isolated experiment run while leaving overlap essentially unchanged. The release run settles at 6752 disjoint writes/sec and 4503 overlap writes/sec, which is the production benchmark signal after the feature landed.</p>
+<p>The resqlite spread is the intended signature. Disjoint writes avoid stream dispatch, while overlapping writes still do the work because the selected result can change. <code>sqlite_async</code> is close to a 1.0 overlap/disjoint ratio, which means it performs nearly the same writer-side work in both cases. Drift is much slower overall in this workload; at 201 writes/sec disjoint and 200 writes/sec overlap, it is not showing the same high-throughput dispatch-elision shape.</p>
+<p>Compared with the experiment baseline for the same 50-stream workload, Experiment 106 raised resqlite's disjoint writer throughput from 3956 to 7201 writes/sec in the isolated experiment run while leaving overlap essentially unchanged. The corrected release run is the production benchmark signal after the feature landed: 23,045 disjoint writes/sec, 7,915 overlapping writes/sec, and zero disjoint re-emits.</p>
 <h2 id="outcome">Outcome</h2>
 <p>Column-level reactivity is now a user-visible feature, not only an internal optimization. A stream no longer has to wake up for every write to a table it mentions; when SQLite can prove the write touches unrelated columns, resqlite keeps the stream idle.</p>
 <p>The important engineering contract is conservative degradation: precision is optional, correctness is not. Column metadata may disappear and fall back to table-level invalidation, but a missed dependency must not become a stale stream.</p>
@@ -243,7 +243,7 @@
 </ul>
 <h2 id="reference-docs">Reference Docs</h2>
 <ul>
-<li><a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/results/2026-04-30T13-39-30-MacBook Pro 14in.md">April 30 benchmark run</a></li>
+<li><a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/results/2026-04-30T14-17-01-MacBook Pro 14in.md">April 30 benchmark run</a></li>
 <li><a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/SCOPE.md">Benchmark scope</a></li>
 <li><a href="https://www.sqlite.org/c3ref/set_authorizer.html">SQLite authorizer callbacks</a></li>
 <li><a href="https://www.sqlite.org/c3ref/preupdate_blobwrite.html">SQLite preupdate hook</a></li>

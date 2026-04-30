@@ -410,7 +410,7 @@ stream.listen((rows) {
 </tr>
 </tbody></table></div>
 
-<p>In the many-stream writer-throughput benchmark, 50 streams watch selected columns on one wide table. On the April 30, 2026 MacBook Pro run, resqlite wrote to a disjoint column at <strong>6,752 writes/sec</strong> and to an overlapping column at <strong>4,503 writes/sec</strong>. That spread is the signature of column-level dispatch elision: disjoint writes skip stream re-query dispatch instead of paying table-level fanout cost.</p>
+<p>In the many-stream writer-throughput benchmark, 50 streams watch selected columns on one wide table. On the April 30, 2026 MacBook Pro run, resqlite wrote to a disjoint column at <strong>23,045 writes/sec</strong> and to an overlapping column at <strong>7,915 writes/sec</strong>. That spread is the signature of column-level dispatch elision: disjoint writes skip stream re-query dispatch instead of paying table-level fanout cost.</p>
 <p>The benchmark disables sqlite_async's default throttle so the table reports the measured end-to-end latency for the benchmarked scenario.</p>
 <h2 id="c-layer">C Layer</h2>
 <p>The native code lives in <code>native/resqlite.c</code> and is compiled alongside the SQLite amalgamation via Dart's native assets build hooks (<code>hook/build.dart</code>).</p>

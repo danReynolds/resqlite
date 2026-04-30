@@ -487,13 +487,13 @@ Future<_IterResult> _singleIteration(
       await Future<void>.delayed(Duration.zero);
       await Future<void>.delayed(Duration.zero);
     }
-    // Wait for any trailing in-flight emissions to settle before
-    // stopping the wall clock — but only briefly, because we're
-    // measuring writer throughput, not steady-state listener drain.
+    wallSw.stop();
+    // Drain any trailing in-flight emissions for the emission count, but
+    // only after the wall clock is already stopped. The fixed drain is
+    // `50ms / writeCount` of padding if it is included in writes/sec.
     if (streamCount > 0) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
-    wallSw.stop();
 
     final wallUs = wallSw.elapsedMicroseconds;
     final listenerDelta = listenerUs - baselineListenerUs;

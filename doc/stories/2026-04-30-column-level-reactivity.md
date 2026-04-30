@@ -61,13 +61,13 @@ That table is not the whole story. Result hashing can also suppress unchanged em
 
 | Library | Disjoint/sec | Overlap/sec | Ratio |
 |---|---:|---:|---:|
-| resqlite | 6752 | 4503 | 0.667x |
-| sqlite_async | 2062 | 2009 | 0.975x |
-| drift | 211 | 108 | 0.510x |
+| resqlite | 23,045 | 7,915 | 0.343 |
+| sqlite_async | 2,451 | 2,228 | 0.909 |
+| drift | 201 | 200 | 0.994 |
 
-The resqlite spread is the intended signature. Disjoint writes avoid stream dispatch, while overlapping writes still do the work because the selected result can change. `sqlite_async` is close to a 1.0 overlap/disjoint ratio, which means it performs nearly the same writer-side work in both cases. Drift is much slower overall in this workload; its ratio is lower, but at 211 writes/sec disjoint and 108 writes/sec overlap it is not showing the same high-throughput dispatch-elision shape.
+The resqlite spread is the intended signature. Disjoint writes avoid stream dispatch, while overlapping writes still do the work because the selected result can change. `sqlite_async` is close to a 1.0 overlap/disjoint ratio, which means it performs nearly the same writer-side work in both cases. Drift is much slower overall in this workload; at 201 writes/sec disjoint and 200 writes/sec overlap, it is not showing the same high-throughput dispatch-elision shape.
 
-Compared with the experiment baseline for the same 50-stream workload, Experiment 106 raised resqlite's disjoint writer throughput from 3956 to 7201 writes/sec in the isolated experiment run while leaving overlap essentially unchanged. The release run settles at 6752 disjoint writes/sec and 4503 overlap writes/sec, which is the production benchmark signal after the feature landed.
+Compared with the experiment baseline for the same 50-stream workload, Experiment 106 raised resqlite's disjoint writer throughput from 3956 to 7201 writes/sec in the isolated experiment run while leaving overlap essentially unchanged. The corrected release run is the production benchmark signal after the feature landed: 23,045 disjoint writes/sec, 7,915 overlapping writes/sec, and zero disjoint re-emits.
 
 ## Outcome
 
@@ -90,7 +90,7 @@ The practical mental model is:
 
 ## Reference Docs
 
-- [April 30 benchmark run](../../../benchmark/results/2026-04-30T13-39-30-MacBook Pro 14in.md)
+- [April 30 benchmark run](../../../benchmark/results/2026-04-30T14-17-01-MacBook Pro 14in.md)
 - [Benchmark scope](../../../benchmark/SCOPE.md)
 - [SQLite authorizer callbacks](https://www.sqlite.org/c3ref/set_authorizer.html)
 - [SQLite preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html)
