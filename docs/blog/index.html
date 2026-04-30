@@ -18,8 +18,16 @@
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
-  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
-  .top-nav a { margin-right: 1.5rem; }
+  .top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 1.5rem;
+    margin-bottom: 2rem;
+    font-size: 0.85rem;
+  }
+  .top-nav a {
+    white-space: nowrap;
+  }
   h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
   .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
   .post-category {
@@ -300,7 +308,7 @@
         <a class="post-row" href="stories/2026-04-30-column-level-reactivity.html">
           <span class="post-row-meta"><time>Apr 30, 2026</time> · Project Story</span>
           <strong>Column-Level Reactivity</strong>
-          <span>Column-level dependency tracking lets resqlite skip stream work when writes touch columns a query cannot observe, while table-level tracking remains the correctness fallback.</span>
+          <span>Column-level dependency tracking moves stream invalidation from broad table wakeups toward query-aware dispatch, while table-level invalidation remains the correctness fallback.</span>
         </a>
         <a class="post-row" href="stories/2026-04-27-dart-vm-deadlock.html">
           <span class="post-row-meta"><time>Apr 27, 2026</time> · Project Story</span>

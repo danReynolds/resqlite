@@ -906,6 +906,7 @@ String _renderTable(List<String> rows, PostKind kind) {
     final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
     final higherIsBetter = header.contains('qps') ||
         header.contains('ops') ||
+        header.contains('/sec') ||
         header.contains('throughput');
     double? best;
     for (final row in bodyRows) {
@@ -1117,8 +1118,16 @@ String _sharedCss() => '''
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
-  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
-  .top-nav a { margin-right: 1.5rem; }
+  .top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 1.5rem;
+    margin-bottom: 2rem;
+    font-size: 0.85rem;
+  }
+  .top-nav a {
+    white-space: nowrap;
+  }
   h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
   .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
   .post-category {
@@ -1451,6 +1460,14 @@ String _articleCss() => '''
   .bench-table tr:last-child td { border-bottom: none; }
   .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
   .bench-table .winner { color: #3fb950; font-weight: 600; }
+  @media (max-width: 520px) {
+    .page-wrap { padding: 1.5rem; }
+    .bench-table { font-size: 0.78rem; }
+    .bench-table th,
+    .bench-table td {
+      padding: 0.45rem 0.55rem;
+    }
+  }
 ''';
 
 String _storyBylineCss() => '''
