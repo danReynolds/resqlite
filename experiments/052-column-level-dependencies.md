@@ -1,7 +1,13 @@
-# Experiment 052: Column-level dependency tracking
+# EXP-052: Column-level dependency tracking
 
 **Date:** 2026-04-15
-**Status:** Deferred (architectural fit valid, benchmark cannot measure)
+**Status:** Deferred → superseded by [EXP-106](106-column-level-deps.md) (Accepted, 2026-04-25)
+
+**Follow-up:** [EXP-106](106-column-level-deps.md) implemented this design once
+the [A11c Many-Streams Writer Throughput](../benchmark/suites/many_streams_writer_throughput.dart)
+benchmark in PR #39 made the dispatch-elision win measurable. Result:
+**+82 %** A11c disjoint writer throughput (3,956 → 7,201 w/s) with
+overlap unchanged.
 
 ## Problem
 
@@ -46,4 +52,4 @@ Against ~50-500μs of SQLite write work, this is 1-5% overhead. Real but accepta
 
 **Prerequisite for revisit:** Add a benchmark that exercises column-disjoint streams (e.g., stream A watches `users.name`, stream B watches `users.avatar_url`; writes only modify `avatar_url`). That benchmark would show where column-level tracking pays off.
 
-Pairs naturally with experiment 061 (C-side hash for unchanged re-queries) — both need the same benchmark support and together would capture the full "don't do work when results didn't change" story.
+Pairs naturally with [EXP-061](061-c-side-hash.md) (C-side hash for unchanged re-queries) — both need the same benchmark support and together would capture the full "don't do work when results didn't change" story.

@@ -10,6 +10,13 @@
 
 typedef struct resqlite_db resqlite_db;
 
+// Dependency getters return this sentinel when table-level metadata is
+// unavailable. Callers must treat it as "unknown dependencies" and choose the
+// conservative all-tables invalidation path. Column metadata uses a different
+// fallback: 0 column entries means "no precise column optimization available"
+// while table metadata remains the correctness source.
+#define RESQLITE_DEPENDENCY_COUNT_UNKNOWN (-1)
+
 // ---------------------------------------------------------------------------
 // Parameter types for binding
 // ---------------------------------------------------------------------------
@@ -57,7 +64,8 @@ typedef struct {
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 
-// Transaction-control fast path (experiment 101).
+// Transaction-control fast path
+// ([EXP-101](../experiments/101-tx-stmt-cache.md)).
 //
 // These run pre-prepared `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` stmts
 // via sqlite3_reset + sqlite3_step, skipping sqlite3_exec's per-call
@@ -111,8 +119,16 @@ int resqlite_run_batch_nested(
 #define RESQLITE_MAX_DIRTY_TABLES 64
 
 // Get the set of tables modified since the last call to this function.
-// Returns the number of dirty table names written to out_tables.
-// Clears the dirty set after reading.
+// Returns:
+//   * `>= 0` — count of dirty table names written to out_tables; the
+//     dirty set is cleared after reading.
+//   * `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` — the dirty set is unreliable
+//     (overflow / OOM during the transaction). Caller must treat this as
+//     "all tables potentially dirty" and invalidate every dependent stream.
+//     The dirty set is reset before returning so the next transaction starts
+//     fresh.
+// Strings are owned by the dirty set (freed on next add or close);
+// callers must copy before further writer activity.
 int resqlite_get_dirty_tables(
     resqlite_db* db,
     const char** out_tables,  // array of at least RESQLITE_MAX_DIRTY_TABLES pointers
@@ -125,14 +141,82 @@ int resqlite_get_dirty_tables(
 
 #define RESQLITE_MAX_READ_TABLES 64
 
-// Get the set of tables read by queries on the given reader since the
-// last call to this function. Returns the count of table names written.
-// Clears the set after reading.
+// Get the set of tables read by the most recent prepared statement on
+// the given reader. Served directly from the cached stmt entry's
+// `read_tables` (no per-call strdup; the entry's strings outlive this
+// call until cache eviction).
+//
+// Returns:
+//   * `>= 0` — count of table names written to out_tables. Caller must
+//     copy strings before the next query on this reader (cache
+//     eviction may free the entry's storage).
+//   * `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` — the cached entry's read-table
+//     set is unreliable (the authorizer overflowed `RESQLITE_MAX_READ_TABLES`
+//     or hit OOM during prepare). Caller must treat this as "depends on every
+//     table" and route the stream into the unknown-dependencies fallback.
+//   * `0`    — no entry yet (no query has been prepared on this
+//     reader).
 int resqlite_get_read_tables(
     resqlite_db* db,
     int reader_id,
     const char** out_tables,
     int max_tables
+);
+
+// ---------------------------------------------------------------------------
+// Column dependency tracking
+// ([EXP-106](../experiments/106-column-level-deps.md))
+// ---------------------------------------------------------------------------
+
+// Hard cap on the number of distinct columns tracked per dependency set.
+// Sets that exceed this cap during capture flip their `reliable` flag
+// to 0 (rather than silently truncating); the corresponding getter
+// then returns 0 entries to signal "no precise column metadata
+// available" — Dart falls back to table-level invalidation for the
+// known dirty tables.
+#define RESQLITE_MAX_DEP_COLUMNS 64
+
+// Get the table/column pairs read by the most recent prepared statement on
+// the given reader. Served directly from the cached stmt entry's structured
+// dependency pairs.
+//
+// Returns:
+//   * `>= 0` — count of pairs written to out_tables/out_columns. Caller must
+//     copy strings before the next query on this reader.
+//   * `0`    — either no entry yet, OR the cached entry's column set is
+//     unreliable (overflow / OOM during prepare). In both cases the
+//     Dart side treats the (known) read tables as "any column matters"
+//     and falls back to table-level invalidation. Tables remain the
+//     correctness layer; columns are an optimization that gracefully
+//     degrades.
+int resqlite_get_read_columns(
+    resqlite_db* db,
+    int reader_id,
+    const char** out_tables,
+    const char** out_columns,
+    int max_columns
+);
+
+// Get the table/column pairs modified by writer activity since the last
+// drain. Strings live until the next dirty-set update; callers must copy
+// before further writer activity. The dirty set is reset after reading.
+//
+// INSERT and DELETE writes leave a `"*"` wildcard column sentinel (column
+// information is unavailable from the SQLite authorizer for those actions).
+//
+// Returns:
+//   * `>= 0` — count of pairs written to out_tables/out_columns.
+//   * `0`    — either no writes since the last drain, OR the column
+//     set's `reliable` flag was cleared during capture (overflow /
+//     OOM). In the unreliable case the corresponding `dirty_tables`
+//     getter still reports the dirty tables (or returns
+//     RESQLITE_DEPENDENCY_COUNT_UNKNOWN itself if it overflowed); Dart falls
+//     back to table-level invalidation.
+int resqlite_get_dirty_columns(
+    resqlite_db* db,
+    const char** out_tables,
+    const char** out_columns,
+    int max_columns
 );
 
 int resqlite_db_status_total(
@@ -218,7 +302,8 @@ int resqlite_step_row_hash(
 // one that was just drained by decodeQuery — either way works.
 //
 // `last_row_count` is the caller's cached row count from the last
-// emission (or -1 on the initial-query path). When set, experiment 077
+// emission (or -1 on the initial-query path). When set,
+// [EXP-077](../experiments/077-cheap-check-first-sweep.md)
 // short-circuits: if the fresh step count exceeds `last_row_count` the
 // final hash can't possibly match, so we stop folding cell bytes and
 // just drain the remaining rows to report the new count. `out_row_count`

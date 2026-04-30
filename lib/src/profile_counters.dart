@@ -5,7 +5,8 @@
 /// counters themselves are plain `int` fields; they cost nothing when
 /// never incremented.
 ///
-/// **Purpose.** Support memory-axis experiments (exp 055 columnar typed
+/// **Purpose.** Support memory-axis experiments
+/// ([EXP-055](../../experiments/055-columnar-typed-arrays.md) columnar typed
 /// arrays, FFI param allocation, blob path optimization, etc.) by
 /// giving the profile-mode harness exact counts of what the decode
 /// path produced. RSS delta from `ProcessInfo.currentRss` is a coarse
@@ -21,7 +22,8 @@
 ///
 /// **Counters that require worker-isolate visibility** (per-SQLite-type
 /// breakdowns, e.g. "how many int cells got boxed into `List<Object?>`"
-/// — the exp 055 metric) are NOT captured here yet. Adding them
+/// — the [EXP-055](../../experiments/055-columnar-typed-arrays.md) metric)
+/// are NOT captured here yet. Adding them
 /// requires a round-trip request to each worker to snapshot its local
 /// state, which is a meaningful protocol addition — deferred to the
 /// experiment that actually needs it.
@@ -50,11 +52,34 @@ class ProfileCounters {
   /// queries with different column counts.
   static int cellsDecoded = 0;
 
+  /// Cumulative wall-clock microseconds spent inside the synchronous
+  /// body of `StreamEngine.onDependencyChanges` — `_tableIndex` lookup,
+  /// per-entry column intersection checks, dirty/in-flight
+  /// scheduling, and `_flushQueue` kickoff. Incremented per write when
+  /// at least one stream is registered. Used by the A11c profile
+  /// harness to isolate writer-side fanout cost from the reader-pool
+  /// drain time captured in `yield_us`.
+  static int invalidateUs = 0;
+  static int invalidateCount = 0;
+
+  /// Cumulative wall-clock microseconds spent specifically inside
+  /// `StreamEngine.onDependencyChanges` column-set intersection probes.
+  /// Sum across every concrete column-vs-column watcher visited per
+  /// dependency change. Lets the harness compute average
+  /// per-watcher intersection cost as `intersectionUs /
+  /// intersectionEntries`.
+  static int intersectionUs = 0;
+  static int intersectionEntries = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
-        'rows_decoded': rowsDecoded,
-        'cells_decoded': cellsDecoded,
-      };
+    'rows_decoded': rowsDecoded,
+    'cells_decoded': cellsDecoded,
+    'invalidate_us': invalidateUs,
+    'invalidate_count': invalidateCount,
+    'intersection_us': intersectionUs,
+    'intersection_entries': intersectionEntries,
+  };
 
   /// Compute `after - before` for every key present in both snapshots.
   static Map<String, int> diff(
@@ -74,5 +99,9 @@ class ProfileCounters {
   static void reset() {
     rowsDecoded = 0;
     cellsDecoded = 0;
+    invalidateUs = 0;
+    invalidateCount = 0;
+    intersectionUs = 0;
+    intersectionEntries = 0;
   }
 }

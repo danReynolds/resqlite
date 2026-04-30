@@ -1,7 +1,42 @@
 import 'dart:collection';
 import 'dart:async';
 
+import 'dependency_tracking.dart'
+    show
+        TableColumnDependency,
+        FixedTableDependencies,
+        TableDependencies,
+        TableDependency,
+        UnknownTableDependencies;
+import 'extensions/set.dart';
+import 'profile_counters.dart';
+import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+
+// ---------------------------------------------------------------------------
+// Stream dependency tracking contract
+// ([EXP-106](../../experiments/106-column-level-deps.md) polish)
+// ---------------------------------------------------------------------------
+//
+// Stream dependency tracking is layered:
+//
+//   * Table dependencies are the correctness source of truth.
+//     A stream watches a known set of tables, or — if tracking is
+//     unavailable for any reason — every table.
+//   * Column dependencies are an optimization layer that can elide
+//     re-query dispatch when a write provably touches no projected
+//     column. Column information is precise or absent. Absent column
+//     information always falls back to table-level re-query for the
+//     known dirty tables.
+//
+// Every uncertainty (overflow, OOM, missing metadata, triggers /
+// cascades, virtual tables) routes to a more conservative re-query,
+// never to a skipped one.
+//
+// At the FFI boundary the C-side table reliability flags propagate through
+// `TableDependencies.unknown`. Per-table column fallbacks use a plain
+// `TableDependency(table)`, which only forces re-query for streams that already
+// share that table.
 
 /// Stream engine — reactive query lifecycle.
 ///
@@ -17,8 +52,9 @@ final class StreamEngine {
   /// The index of streamed queries by their hash key.
   final Map<int, StreamEntry> _entries = {};
 
-  /// The set of stream queries pending initialization and performing their first initial query.
-  final Set<StreamEntry> _pendingEntries = {};
+  /// Entries whose table dependencies are not available yet, or are
+  /// permanently unknown because native tracking fell back.
+  final Set<StreamEntry> _unknownDepsEntries = {};
 
   /// Index of tables to the set of stream entries that depend on that table.
   final Map<String, Set<StreamEntry>> _tableIndex = {};
@@ -56,39 +92,82 @@ final class StreamEngine {
     return _createStream(key, sql, parameters);
   }
 
-  /// Invalidate all streams dependent on the given tables, scheduling them for requery.
-  Future<void> invalidate(List<String>? dirtyTables) async {
-    if (_entries.isEmpty || dirtyTables == null || dirtyTables.isEmpty) {
+  /// Apply table dependency updates from a write.
+  ///
+  /// [TableDependencies.none] means there are no stream-visible changes for
+  /// this writer response. [TableDependencies.unknown] means native dirty-table
+  /// tracking was unreliable, so every active stream must re-query.
+  Future<void> onDependencyChanges(TableDependencies changes) async {
+    if (_entries.isEmpty) {
+      return;
+    }
+    if (changes case FixedTableDependencies(
+      tables: final deps,
+    ) when deps.isEmpty) {
       return;
     }
 
-    // Pending entries have not resolved dependencies yet, so any table write
-    // could affect their eventual result.
-    for (final entry in _pendingEntries) {
-      entry.dirty = true;
-    }
-
+    // Profile-mode instrumentation.
+    final invalidateSw = kProfileMode ? (Stopwatch()..start()) : null;
+    final intersectionSw = kProfileMode ? Stopwatch() : null;
+    var intersectionEntries = 0;
     final dirtyEntries = <StreamEntry>{};
 
-    for (final table in dirtyTables) {
-      if (_tableIndex[table] case Set<StreamEntry> entries) {
-        dirtyEntries.addAll(entries);
-      }
+    switch (changes) {
+      case UnknownTableDependencies():
+        dirtyEntries.addAll(_unknownDepsEntries);
+        for (final entries in _tableIndex.values) {
+          dirtyEntries.addAll(entries);
+        }
+      case FixedTableDependencies(tables: final deps):
+        dirtyEntries.addAll(_unknownDepsEntries);
+
+        for (final dep in deps) {
+          if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
+            switch (dep) {
+              case TableColumnDependency(columns: final changedCols):
+                for (final entry in entries) {
+                  switch (entry.dependencies[dep.table]) {
+                    case TableColumnDependency(columns: final entryCols):
+                      bool intersects;
+                      if (kProfileMode) {
+                        intersectionEntries++;
+                        intersectionSw!.start();
+                        intersects = entryCols.intersects(changedCols);
+                        intersectionSw.stop();
+                      } else {
+                        intersects = entryCols.intersects(changedCols);
+                      }
+                      if (intersects) {
+                        dirtyEntries.add(entry);
+                      }
+                    case TableDependency _:
+                      dirtyEntries.add(entry);
+                  }
+                }
+              case TableDependency():
+                dirtyEntries.addAll(entries);
+            }
+          }
+        }
     }
 
     for (final entry in dirtyEntries) {
       entry.dirty = true;
-
-      // Don't schedule dirty entries for requery if they are *already in-flight*
-      // so that there is at most 1 reader assigned to a given stream query at a time.
-      // This is a performance trade-off that optimizes for availability to other streams
-      // versus eagerly re-querying a stream that is invalidated while still reading.
       if (!entry.inFlight) {
         _requeryQueue.add(entry);
       }
     }
 
     _flushQueue();
+
+    if (kProfileMode) {
+      invalidateSw!.stop();
+      ProfileCounters.invalidateUs += invalidateSw.elapsedMicroseconds;
+      ProfileCounters.invalidateCount++;
+      ProfileCounters.intersectionUs += intersectionSw!.elapsedMicroseconds;
+      ProfileCounters.intersectionEntries += intersectionEntries;
+    }
   }
 
   Future<void> _flushQueue() async {
@@ -118,6 +197,7 @@ final class StreamEngine {
 
     _entries.clear();
     _tableIndex.clear();
+    _unknownDepsEntries.clear();
     _requeryQueue.clear();
   }
 
@@ -139,8 +219,9 @@ final class StreamEngine {
     );
     entry.inFlight = true;
 
-    // Add the new entry to the list of entries pending initialization.
-    _pendingEntries.add(entry);
+    // The entry is considered dependent on all tables until its initial query
+    // result with its dependencies returns.
+    _unknownDepsEntries.add(entry);
 
     // Subscribe immediately — buffered controller queues events until listened.
     final subscriberStream = _subscribe(entry);
@@ -155,18 +236,23 @@ final class StreamEngine {
           return;
         }
 
-        final (initialRows, initialTables, initialHash, initialRowCount) =
+        final (initialRows, dependencies, initialHash, initialRowCount) =
             result;
-
-        // Index the entry's table dependencies after its initial query completes.
-        for (final table in initialTables) {
-          (_tableIndex[table] ??= {}).add(entry);
-        }
 
         entry.lastResult = initialRows;
         entry.lastResultHash = initialHash;
         entry.lastRowCount = initialRowCount;
-        entry.dependencies = initialTables.toSet();
+
+        if (dependencies case FixedTableDependencies(tables: final tables)) {
+          _unknownDepsEntries.remove(entry);
+
+          for (final dependency in tables) {
+            (_tableIndex[dependency.table] ??= {}).add(entry);
+          }
+          entry.dependencies = {
+            for (final dependency in tables) dependency.table: dependency,
+          };
+        }
 
         // If an invalidation occurred while performing the entry's initial query then the entry
         // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
@@ -182,7 +268,6 @@ final class StreamEngine {
         _remove(entry);
       } finally {
         entry.inFlight = false;
-        _pendingEntries.remove(entry);
       }
     });
 
@@ -265,9 +350,12 @@ final class StreamEngine {
     _requeryQueue.remove(entry);
 
     // Clean up inverted index.
-    for (final table in entry.dependencies) {
+    for (final table in entry.dependencies.keys) {
       _tableIndex[table]?.remove(entry);
     }
+    // No-op if the entry was never registered there; the membership check is
+    // O(1).
+    _unknownDepsEntries.remove(entry);
 
     // Close any remaining subscriber controllers.
     for (final sub in entry.subscribers) {
@@ -299,8 +387,12 @@ final class StreamEntry {
   /// Bind parameters for the query.
   final List<Object?> params;
 
-  /// The table dependencies of the query.
-  Set<String> dependencies;
+  /// Table dependencies of the query, keyed by table name for invalidation.
+  ///
+  /// A plain [TableDependency] falls back to table-level invalidation.
+  /// [TableColumnDependency] carries precise column detail for dispatch
+  /// elision.
+  Map<String, TableDependency> dependencies = const {};
 
   /// Per-subscriber buffered controllers. Each subscriber gets their own
   /// non-broadcast StreamController that buffers events, eliminating the
@@ -314,7 +406,8 @@ final class StreamEntry {
   /// Hash of the last emitted result, for change detection.
   int lastResultHash = 0;
 
-  /// Row count of the last emitted result (experiment 077). -1 means
+  /// Row count of the last emitted result
+  /// ([EXP-077](../../experiments/077-cheap-check-first-sweep.md)). -1 means
   /// "no baseline yet" — the initial query hasn't returned. Passed into
   /// `selectIfChanged` so the worker can short-circuit hashing once it
   /// knows the fresh row count diverges.

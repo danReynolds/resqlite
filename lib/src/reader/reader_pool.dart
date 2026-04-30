@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import 'read_worker.dart';
 
@@ -69,19 +70,20 @@ final class ReaderPool {
     return result as List<Map<String, Object?>>;
   }
 
-  /// Execute a query and capture read dependencies (table names).
+  /// Execute a query and capture read dependencies.
   ///
-  /// Also returns the C-computed hash (exp 075) and row count (exp 077)
-  /// of the initial result so later [selectIfChanged] calls have both
-  /// baselines to short-circuit against.
-  Future<(List<Map<String, Object?>>, List<String>, int, int)> selectWithDeps(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    final result = await _dispatch(
-      SelectWithDepsRequest(sql, parameters),
-    );
-    return result as (List<Map<String, Object?>>, List<String>, int, int);
+  /// Also returns the C-computed hash
+  /// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)) and
+  /// row count
+  /// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md)) of the
+  /// initial result so later [selectIfChanged] calls have both baselines to
+  /// short-circuit against.
+  /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
+  /// column detail under each table dependency.
+  Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
+  selectWithDeps(String sql, [List<Object?> parameters = const []]) async {
+    final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
+    return result as (List<Map<String, Object?>>, TableDependencies, int, int);
   }
 
   /// Execute a query returning JSON-encoded bytes.
@@ -287,14 +289,11 @@ class _WorkerSlot {
       }
     };
 
-    await Isolate.spawn(
-        readerEntrypoint,
-        [
-          dbHandleAddr,
-          _readerId,
-          workerPort.sendPort,
-        ],
-        onExit: workerPort.sendPort);
+    await Isolate.spawn(readerEntrypoint, [
+      dbHandleAddr,
+      _readerId,
+      workerPort.sendPort,
+    ], onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

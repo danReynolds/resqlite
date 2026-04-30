@@ -16,6 +16,10 @@ void main() {
     expect(ProfileCounters.diff(before, ProfileCounters.snapshot()), {
       'rows_decoded': 2,
       'cells_decoded': 8,
+      'invalidate_us': 0,
+      'invalidate_count': 0,
+      'intersection_us': 0,
+      'intersection_entries': 0,
     });
 
     ProfileCounters.reset();
@@ -23,6 +27,10 @@ void main() {
     expect(ProfileCounters.snapshot(), {
       'rows_decoded': 0,
       'cells_decoded': 0,
+      'invalidate_us': 0,
+      'invalidate_count': 0,
+      'intersection_us': 0,
+      'intersection_entries': 0,
     });
   });
 }

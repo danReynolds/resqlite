@@ -2,8 +2,8 @@
 //
 // This script runs automatically during `dart run` or `flutter build`, before
 // any Dart code compiles. It compiles our C sources (SQLite amalgamation +
-// resqlite.c) into a shared library (libresqlite.dylib/so/dll) and registers
-// it as a native asset.
+// resqlite native sources) into a shared library (libresqlite.dylib/so/dll)
+// and registers it as a native asset.
 //
 // How the pieces connect:
 //
@@ -75,6 +75,7 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         // for plain SQLite that adds encryption support. Zero runtime
         // overhead when no encryption key is set.
         p.join(packageRoot, 'third_party', 'sqlite3mc', 'sqlite3mc_amalgamation.c'),
+        p.join(packageRoot, 'native', 'resqlite_deps.c'),
         p.join(packageRoot, 'native', 'resqlite.c'),
       ],
       includes: [
@@ -224,6 +225,8 @@ const _exportedSymbols = [
   'resqlite_run_batch_nested',
   'resqlite_get_dirty_tables',
   'resqlite_get_read_tables',
+  'resqlite_get_dirty_columns',
+  'resqlite_get_read_columns',
   'resqlite_db_status_total',
   'resqlite_writer_handle',
   'resqlite_stmt_acquire',

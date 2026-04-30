@@ -1,4 +1,5 @@
 #include "resqlite.h"
+#include "resqlite_deps.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -87,6 +88,11 @@ static int buf_write_str(resqlite_buf* b, const char* s, int len) {
 
 #define STMT_CACHE_MAX 32
 
+// [EXP-106](../experiments/106-column-level-deps.md): column-level dependency
+// tracking. Columns are stored as structured table/column pairs; the wildcard
+// column `"*"` is used for INSERT/DELETE writes and for authorizer events that
+// arrive without a column name (triggers, views).
+
 typedef struct {
     char* sql;
     int sql_len;
@@ -98,6 +104,27 @@ typedef struct {
     int param_count;
     char* read_tables[RESQLITE_MAX_READ_TABLES];
     int read_table_count;
+    // [EXP-106](../experiments/106-column-level-deps.md) polish: 1 if
+    // `read_tables[]` is the complete dependency set captured by the
+    // authorizer; 0 if any resqlite_read_set_add during prepare overflowed /
+    // OOMed / strdup-failed, or if copying the captured set into this cache
+    // entry failed.
+    // When 0, `resqlite_get_read_tables` returns
+    // RESQLITE_DEPENDENCY_COUNT_UNKNOWN so the StreamEngine routes the stream
+    // into its unknown-dependencies bucket.
+    int read_tables_reliable;
+    // [EXP-106](../experiments/106-column-level-deps.md): per-stmt column
+    // dependencies (reader: SELECT/WHERE columns from authorizer SQLITE_READ
+    // events; writer: SET columns from authorizer SQLITE_UPDATE events). For
+    // writers, INSERT/DELETE leave a "*" column sentinel because the authorizer
+    // fires SQLITE_INSERT / SQLITE_DELETE without a column.
+    resqlite_column_dep dep_columns[RESQLITE_MAX_DEP_COLUMNS];
+    int dep_column_count;
+    // [EXP-106](../experiments/106-column-level-deps.md) polish: 1 if
+    // `dep_columns[]` is the complete dependency set; 0 on any capture/copy
+    // failure. When 0, the column getters return 0 entries, so Dart builds a
+    // plain table-level dependency and skips column elision.
+    int dep_columns_reliable;
 } resqlite_cached_stmt;
 
 typedef struct {
@@ -108,6 +135,35 @@ typedef struct {
 static void stmt_cache_init(resqlite_stmt_cache* c) {
     c->count = 0;
     memset(c->entries, 0, sizeof(c->entries));
+}
+
+static void stmt_cache_entry_clear_read_tables(resqlite_cached_stmt* entry) {
+    resqlite_string_array_clear(entry->read_tables, &entry->read_table_count);
+}
+
+static void stmt_cache_entry_clear_dep_columns(resqlite_cached_stmt* entry) {
+    resqlite_column_dep_array_clear(entry->dep_columns, &entry->dep_column_count);
+}
+
+static void stmt_cache_entry_dispose(resqlite_cached_stmt* entry) {
+    if (entry->stmt) sqlite3_finalize(entry->stmt);
+    free(entry->sql);
+    stmt_cache_entry_clear_read_tables(entry);
+    stmt_cache_entry_clear_dep_columns(entry);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static void stmt_cache_entry_init(resqlite_cached_stmt* entry,
+                                  char* sql_copy,
+                                  int sql_len,
+                                  sqlite3_stmt* stmt) {
+    memset(entry, 0, sizeof(*entry));
+    entry->sql = sql_copy;
+    entry->sql_len = sql_len;
+    entry->stmt = stmt;
+    entry->param_count = sqlite3_bind_parameter_count(stmt);
+    entry->read_tables_reliable = 1;
+    entry->dep_columns_reliable = 1;
 }
 
 static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
@@ -138,11 +194,7 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
                                               int sql_len,
                                               sqlite3_stmt* stmt) {
     if (c->count >= STMT_CACHE_MAX) {
-        sqlite3_finalize(c->entries[0].stmt);
-        free(c->entries[0].sql);
-        for (int i = 0; i < c->entries[0].read_table_count; i++) {
-            free(c->entries[0].read_tables[i]);
-        }
+        stmt_cache_entry_dispose(&c->entries[0]);
         memmove(&c->entries[0], &c->entries[1],
                 (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
         c->count = STMT_CACHE_MAX - 1;
@@ -152,100 +204,86 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
     memcpy(sql_copy, sql, sql_len);
     sql_copy[sql_len] = '\0';
 
-    c->entries[c->count].sql = sql_copy;
-    c->entries[c->count].sql_len = sql_len;
-    c->entries[c->count].stmt = stmt;
-    c->entries[c->count].param_count = sqlite3_bind_parameter_count(stmt);
-    c->entries[c->count].read_table_count = 0;
-    memset(c->entries[c->count].read_tables, 0, sizeof(c->entries[c->count].read_tables));
+    stmt_cache_entry_init(&c->entries[c->count], sql_copy, sql_len, stmt);
     c->count++;
     return &c->entries[c->count - 1];
 }
 
 static void stmt_cache_clear(resqlite_stmt_cache* c) {
     for (int i = 0; i < c->count; i++) {
-        sqlite3_finalize(c->entries[i].stmt);
-        free(c->entries[i].sql);
-        for (int j = 0; j < c->entries[i].read_table_count; j++) {
-            free(c->entries[i].read_tables[j]);
-        }
+        stmt_cache_entry_dispose(&c->entries[i]);
     }
     c->count = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Reader connection
-// ---------------------------------------------------------------------------
-
-// Read table tracking (per-reader, for stream dependency capture).
-typedef struct {
-    char* names[RESQLITE_MAX_READ_TABLES];
-    int count;      // number of active entries
-    int allocated;  // number of slots with strdup'd strings (>= count)
-} resqlite_read_set;
-
-static void read_set_init(resqlite_read_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-}
-
-static void read_set_add(resqlite_read_set* s, const char* table_name) {
-    if (!table_name) return;
-    // Deduplicate.
-    for (int i = 0; i < s->count; i++) {
-        if (strcmp(s->names[i], table_name) == 0) return;
-    }
-    if (s->count >= RESQLITE_MAX_READ_TABLES) return;
-    // Free old string in this slot if one exists from a previous cycle.
-    if (s->count < s->allocated) {
-        free(s->names[s->count]);
-    }
-    s->names[s->count] = strdup(table_name);
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
-}
-
-static void read_set_reset(resqlite_read_set* s) {
-    // Reset active count. Strings stay valid (Dart reads them after
-    // resqlite_get_read_tables returns pointers). They'll be freed
-    // on the next read_set_add when their slots are reused.
-    s->count = 0;
-}
-
-static void read_set_free(resqlite_read_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        free(s->names[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
-}
-
 static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
                                              const resqlite_read_set* read_tables) {
-    for (int i = 0; i < entry->read_table_count; i++) {
-        free(entry->read_tables[i]);
-        entry->read_tables[i] = NULL;
-    }
-    entry->read_table_count = 0;
+    stmt_cache_entry_clear_read_tables(entry);
+    // [EXP-106](../experiments/106-column-level-deps.md) polish: source set
+    // reliability caps the entry's.
+    // If unreliable, drop entries and mark the cache entry too — the
+    // FFI getter will return RESQLITE_DEPENDENCY_COUNT_UNKNOWN so StreamEngine
+    // routes the stream into the unknown-dependencies bucket.
+    entry->read_tables_reliable = read_tables->reliable;
+    if (!read_tables->reliable) return;
 
-    for (int i = 0; i < read_tables->count && i < RESQLITE_MAX_READ_TABLES; i++) {
-        entry->read_tables[i] = strdup(read_tables->names[i]);
-        entry->read_table_count++;
+    if (resqlite_string_array_copy(entry->read_tables, RESQLITE_MAX_READ_TABLES,
+                                   &entry->read_table_count,
+                                   (char* const*)read_tables->names,
+                                   read_tables->count) != 0) {
+        entry->read_tables_reliable = 0;
     }
 }
 
-static void read_set_load_from_cache_entry(resqlite_read_set* read_set,
-                                           const resqlite_cached_stmt* entry) {
-    read_set_reset(read_set);
-    for (int i = 0; i < entry->read_table_count; i++) {
-        read_set_add(read_set, entry->read_tables[i]);
+static void stmt_cache_entry_set_dep_columns(resqlite_cached_stmt* entry,
+                                             const resqlite_column_set* cols) {
+    stmt_cache_entry_clear_dep_columns(entry);
+    // [EXP-106](../experiments/106-column-level-deps.md) polish: the source
+    // set's reliability is the cap.
+    // If it is already 0, the cache entry exposes no column metadata
+    // and dispatching consumers route to the conservative re-query path.
+    entry->dep_columns_reliable = cols->reliable;
+
+    if (!cols->reliable) return;
+
+    if (resqlite_column_dep_array_copy_from_set(
+            entry->dep_columns, RESQLITE_MAX_DEP_COLUMNS,
+            &entry->dep_column_count, cols) != 0) {
+        entry->dep_columns_reliable = 0;
     }
 }
+
+// Authorizer context — bundles the read set (table+column captures) into
+// one user_data pointer so the same callback can be installed on writer
+// and readers without branching on connection identity. The authorizer
+// callback definition (see below) does the actual SQLITE_READ /
+// SQLITE_UPDATE etc. dispatch.
+typedef struct resqlite_authz_ctx_s {
+    resqlite_read_set* tables;
+    resqlite_column_set* columns;
+    // When non-zero, also capture writer-side dirty columns for
+    // SQLITE_UPDATE / SQLITE_INSERT / SQLITE_DELETE actions. Reader
+    // contexts leave this zero.
+    int track_writes;
+} resqlite_authz_ctx;
 
 typedef struct {
     sqlite3* db;
     resqlite_stmt_cache cache;
     resqlite_read_set read_tables;
+    // [EXP-106](../experiments/106-column-level-deps.md): per-reader column
+    // dependency capture. The authorizer populates this set during prepare; on
+    // cache hit the column getter reads directly from the cached stmt entry
+    // instead of rehydrating per-call (avoids strdup-per-column on the read hot
+    // path).
+    resqlite_column_set read_columns;
+    // Pointer to the cache entry of the most recent acquire on this
+    // reader. Cleared on reset; set by `get_or_prepare_reader`. The
+    // FFI getters (`resqlite_get_read_columns`, `_read_tables`) serve
+    // directly from this entry's `read_tables` / `dep_columns` arrays,
+    // so the read hot path pays no per-call strdup-into-scratch cost.
+    resqlite_cached_stmt* last_entry;
+    resqlite_authz_ctx authz_ctx;
     resqlite_buf json_buf;  // persistent buffer for resqlite_query_bytes
     int in_use;
 } resqlite_reader;
@@ -255,53 +293,6 @@ typedef struct {
 // ---------------------------------------------------------------------------
 
 #define MAX_READERS 16
-
-// ---------------------------------------------------------------------------
-// Dirty table tracking
-// ---------------------------------------------------------------------------
-
-typedef struct {
-    char* names[RESQLITE_MAX_DIRTY_TABLES];
-    int count;
-    int allocated;
-} resqlite_dirty_set;
-
-static void dirty_set_init(resqlite_dirty_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-}
-
-static void dirty_set_add(resqlite_dirty_set* s, const char* table_name) {
-    if (!table_name) return;
-
-    // Check for duplicate.
-    for (int i = 0; i < s->count; i++) {
-        if (strcmp(s->names[i], table_name) == 0) return;
-    }
-
-    if (s->count >= RESQLITE_MAX_DIRTY_TABLES) return;  // overflow protection
-    // Free old string in this slot if one exists from a previous cycle.
-    if (s->count < s->allocated) {
-        free(s->names[s->count]);
-    }
-    s->names[s->count] = strdup(table_name);
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
-}
-
-static void dirty_set_reset(resqlite_dirty_set* s) {
-    // Reset active count. Strings stay valid (Dart reads them after
-    // resqlite_get_dirty_tables returns pointers). Freed on next add or close.
-    s->count = 0;
-}
-
-static void dirty_set_free(resqlite_dirty_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        free(s->names[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
-}
 
 // ---------------------------------------------------------------------------
 // Connection pool + dirty tracking
@@ -319,7 +310,8 @@ struct resqlite_db {
     resqlite_stmt_cache writer_cache;
     sqlite3_mutex* writer_mutex;
 
-    // Persistently prepared transaction-control statements (experiment 101).
+    // Persistently prepared transaction-control statements
+    // ([EXP-101](../experiments/101-tx-stmt-cache.md)).
     // The writer fires these on every transaction boundary; preparing them
     // once eliminates the prepare+step+finalize cost of `sqlite3_exec` for
     // each call. Held outside writer_cache so they never compete with user
@@ -330,6 +322,25 @@ struct resqlite_db {
 
     // Dirty tables accumulated by the preupdate hook.
     resqlite_dirty_set dirty_tables;
+    // [EXP-106](../experiments/106-column-level-deps.md): dirty columns
+    // accumulated alongside dirty tables.
+    // Populated at prepare-time via the writer authorizer (cached on the
+    // stmt) and merged into this set on each execute by the preupdate
+    // hook (per-row firing piggybacks on the existing dirty-table flow).
+    // Drained by `resqlite_get_dirty_columns()` after the writer publishes
+    // the dirty set to Dart at end-of-transaction.
+    resqlite_column_set dirty_columns;
+    // Per-prepare scratch space populated by the writer authorizer. The
+    // authorizer fires inside `sqlite3_prepare_v3`, so this set is drained
+    // into the cached stmt entry as soon as prepare returns and is reset
+    // before the next prepare. The writer mutex serialises this access.
+    resqlite_column_set writer_authz_scratch;
+    resqlite_authz_ctx writer_authz_ctx;
+    // Currently-executing stmt cache entry for the writer. Set just before
+    // each `sqlite3_step` and cleared after, so the preupdate hook can
+    // merge the stmt's pre-captured `dep_columns` into `dirty_columns`
+    // whenever a row is actually modified. NULL outside of stepping.
+    resqlite_cached_stmt* writer_active_entry;
     int writer_checkpoint_running;
 
     // Reader pool.
@@ -344,30 +355,93 @@ struct resqlite_db {
 #define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 500
 
 // ---------------------------------------------------------------------------
-// Authorizer callback — records read tables (for stream dependencies)
+// Authorizer callback — records read tables/columns (stream deps) or, on
+// the writer, modified tables/columns (dispatch elision in
+// [EXP-106](../experiments/106-column-level-deps.md))
 // ---------------------------------------------------------------------------
 
-#define SQLITE_READ 20  // SQLite authorizer action code for column read
+#define SQLITE_READ 20    // authorizer action: SELECT-side column read
+#define SQLITE_INSERT 18
+#define SQLITE_DELETE 9
+#define SQLITE_UPDATE 23  // authorizer action: UPDATE column write
 
 static int authorizer_callback(
     void* user_data,
     int action_code,
-    const char* arg1,   // table name for SQLITE_READ
-    const char* arg2,   // column name
-    const char* arg3,   // database name
-    const char* arg4    // trigger/view name
+    const char* arg1,
+    const char* arg2,
+    const char* arg3,
+    const char* arg4
 ) {
-    (void)arg2; (void)arg3; (void)arg4;
-    if (action_code == SQLITE_READ && arg1 != NULL) {
-        resqlite_read_set* rs = (resqlite_read_set*)user_data;
-        read_set_add(rs, arg1);
+    (void)arg3; (void)arg4;
+    resqlite_authz_ctx* ctx = (resqlite_authz_ctx*)user_data;
+    switch (action_code) {
+        case SQLITE_READ:
+            if (arg1 != NULL) {
+                if (ctx->tables) resqlite_read_set_add(ctx->tables, arg1);
+                // Only reader contexts care about the read-column set —
+                // the writer authorizer collects dirty columns for
+                // SQLITE_UPDATE/INSERT/DELETE only. Capturing reads on
+                // the writer would pollute its scratch with the columns
+                // touched by tx-scoped SELECTs.
+                if (ctx->columns && !ctx->track_writes) {
+                    resqlite_column_set_add(ctx->columns, arg1, arg2);
+                }
+            }
+            break;
+        case SQLITE_UPDATE:
+            if (ctx->track_writes && arg1 != NULL && ctx->columns) {
+                // arg2 is the column being SET; capture exactly that.
+                resqlite_column_set_add(ctx->columns, arg1, arg2);
+            }
+            break;
+        case SQLITE_INSERT:
+        case SQLITE_DELETE:
+            if (ctx->track_writes && arg1 != NULL && ctx->columns) {
+                // No column info from SQLite for INSERT/DELETE — emit a
+                // wildcard sentinel so the dispatch path knows to skip
+                // the column-intersection optimisation for this table.
+                resqlite_column_set_add(ctx->columns, arg1, "*");
+            }
+            break;
+        default:
+            break;
     }
     return SQLITE_OK;  // allow all operations
 }
 
 // ---------------------------------------------------------------------------
-// Preupdate hook callback — records dirty tables
+// Preupdate hook callback — records dirty tables/columns
 // ---------------------------------------------------------------------------
+
+static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
+                                              const char* table_name) {
+    if (!table_name) {
+        sdb->dirty_columns.reliable = 0;
+        return;
+    }
+
+    resqlite_cached_stmt* entry = sdb->writer_active_entry;
+    if (!entry) {
+        resqlite_column_set_add(&sdb->dirty_columns, table_name, "*");
+        return;
+    }
+
+    if (!entry->dep_columns_reliable) {
+        sdb->dirty_columns.reliable = 0;
+        return;
+    }
+
+    int table_name_len = (int)strlen(table_name);
+    for (int i = 0; i < entry->dep_column_count; i++) {
+        const char* column = NULL;
+        if (resqlite_column_dep_belongs_to_table(&entry->dep_columns[i],
+                                                 table_name, table_name_len,
+                                                 &column)) {
+            resqlite_column_set_add(&sdb->dirty_columns, table_name, column);
+        }
+    }
+}
 
 static void preupdate_hook(
     void* user_data,
@@ -380,7 +454,8 @@ static void preupdate_hook(
 ) {
     (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
-    dirty_set_add(&sdb->dirty_tables, table_name);
+    resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
+    dirty_columns_add_for_active_stmt(sdb, table_name);
 }
 
 static int writer_wal_hook(
@@ -514,11 +589,15 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     db->writer = writer;
     db->path = strdup(path);
     stmt_cache_init(&db->writer_cache);
-    dirty_set_init(&db->dirty_tables);
+    resqlite_dirty_set_init(&db->dirty_tables);
+    resqlite_column_set_init(&db->dirty_columns);
+    resqlite_column_set_init(&db->writer_authz_scratch);
+    db->writer_active_entry = NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
-    // Pre-prepare transaction-control stmts (experiment 101). These are
+    // Pre-prepare transaction-control stmts
+    // ([EXP-101](../experiments/101-tx-stmt-cache.md)). These are
     // hot-path statements fired on every transaction boundary, so we
     // prepare them once and re-use via sqlite3_reset + sqlite3_step
     // instead of paying sqlite3_exec's prepare+step+finalize each call.
@@ -533,6 +612,17 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     sqlite3_preupdate_hook(writer, preupdate_hook, db);
     sqlite3_wal_hook(writer, writer_wal_hook, db);
 
+    // [EXP-106](../experiments/106-column-level-deps.md): install authorizer on
+    // the writer to capture which columns each prepared DML stmt could modify.
+    // The authorizer fires inside `sqlite3_prepare_v3`; we drain
+    // `writer_authz_scratch` into the cached stmt entry as soon as prepare
+    // returns. With `track_writes` set on the writer, SQLITE_READ events are
+    // ignored; read dependencies are captured by the reader authorizers below.
+    db->writer_authz_ctx.tables = NULL;
+    db->writer_authz_ctx.columns = &db->writer_authz_scratch;
+    db->writer_authz_ctx.track_writes = 1;
+    sqlite3_set_authorizer(writer, authorizer_callback, &db->writer_authz_ctx);
+
     // Open reader connections with authorizer hooks for dependency tracking.
     // Use reader_count as the insertion index so successful readers are
     // packed contiguously — no gaps if an earlier open/init fails.
@@ -544,7 +634,9 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
         int idx = db->reader_count;
         db->readers[idx].db = rdb;
         stmt_cache_init(&db->readers[idx].cache);
-        read_set_init(&db->readers[idx].read_tables);
+        resqlite_read_set_init(&db->readers[idx].read_tables);
+        resqlite_column_set_init(&db->readers[idx].read_columns);
+        db->readers[idx].last_entry = NULL;
         if (buf_init(&db->readers[idx].json_buf, 16384) != 0) {
             sqlite3_close_v2(rdb);
             db->readers[idx].db = NULL;
@@ -552,8 +644,15 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
         }
         db->readers[idx].in_use = 0;
 
-        // Install authorizer to capture read dependencies.
-        sqlite3_set_authorizer(rdb, authorizer_callback, &db->readers[idx].read_tables);
+        // Install authorizer to capture read dependencies (table + column).
+        // The context lives inline on the reader so its address is stable
+        // across the connection's lifetime — sqlite3_set_authorizer stores
+        // the pointer for the duration of the connection.
+        db->readers[idx].authz_ctx.tables = &db->readers[idx].read_tables;
+        db->readers[idx].authz_ctx.columns = &db->readers[idx].read_columns;
+        db->readers[idx].authz_ctx.track_writes = 0;
+        sqlite3_set_authorizer(rdb, authorizer_callback,
+                               &db->readers[idx].authz_ctx);
 
         db->reader_count++;
     }
@@ -572,7 +671,8 @@ void resqlite_close(resqlite_db* db) {
     // Close all readers.
     for (int i = 0; i < db->reader_count; i++) {
         stmt_cache_clear(&db->readers[i].cache);
-        read_set_free(&db->readers[i].read_tables);
+        resqlite_read_set_free(&db->readers[i].read_tables);
+        resqlite_column_set_free(&db->readers[i].read_columns);
         if (db->readers[i].json_buf.data) free(db->readers[i].json_buf.data);
         sqlite3_close_v2(db->readers[i].db);
     }
@@ -583,7 +683,9 @@ void resqlite_close(resqlite_db* db) {
     if (db->tx_begin_stmt) sqlite3_finalize(db->tx_begin_stmt);
     if (db->tx_commit_stmt) sqlite3_finalize(db->tx_commit_stmt);
     if (db->tx_rollback_stmt) sqlite3_finalize(db->tx_rollback_stmt);
-    dirty_set_free(&db->dirty_tables);
+    resqlite_dirty_set_free(&db->dirty_tables);
+    resqlite_column_set_free(&db->dirty_columns);
+    resqlite_column_set_free(&db->writer_authz_scratch);
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
 
@@ -616,7 +718,8 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
 }
 
 // Run one of the cached transaction-control statements on the writer
-// (experiment 101). Caller is responsible for any required mutex.
+// ([EXP-101](../experiments/101-tx-stmt-cache.md)). Caller is responsible for
+// any required mutex.
 // SQLite returns SQLITE_DONE on a successful no-result step; we
 // translate that to SQLITE_OK so callers can use a single == 0 check.
 static int run_cached_tx_stmt(sqlite3_stmt* stmt) {
@@ -661,7 +764,7 @@ int resqlite_tx_rollback(resqlite_db* db) {
 // Returns the cached entry (which carries both the stmt pointer and
 // the pre-computed param_count). Callers that only need the stmt read
 // `entry->stmt`; bind_params callers pass `entry->param_count` as the
-// expected count (experiment 077).
+// expected count ([EXP-077](../experiments/077-cheap-check-first-sweep.md)).
 static resqlite_cached_stmt* get_or_prepare_writer(
     resqlite_db* db, const char* sql, int sql_len, int* out_rc,
     const char** out_tail
@@ -676,6 +779,11 @@ static resqlite_cached_stmt* get_or_prepare_writer(
         *out_tail = sql + sql_len;
         return entry;
     }
+
+    // [EXP-106](../experiments/106-column-level-deps.md): reset the authorizer
+    // scratch column set so this prepare's authorizer events accumulate
+    // cleanly. The writer mutex serialises this access.
+    resqlite_column_set_reset(&db->writer_authz_scratch);
 
     sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v3(db->writer, sql, sql_len, SQLITE_PREPARE_PERSISTENT,
@@ -693,6 +801,10 @@ static resqlite_cached_stmt* get_or_prepare_writer(
         *out_rc = SQLITE_NOMEM;
         return NULL;
     }
+    // Persist the authorizer-captured columns onto the cache entry so
+    // subsequent re-uses skip the prepare path entirely (the authorizer
+    // does not refire on a cached stmt — only on the initial prepare).
+    stmt_cache_entry_set_dep_columns(entry, &db->writer_authz_scratch);
     *out_rc = SQLITE_OK;
     return entry;
 }
@@ -751,7 +863,14 @@ int resqlite_execute(
         return rc;
     }
 
+    // [EXP-106](../experiments/106-column-level-deps.md): tag the active stmt
+    // entry so the preupdate hook can merge its pre-captured column set into
+    // `dirty_columns` on each per-row firing. Cleared after step so unrelated
+    // callers (e.g. trigger bodies driven by sqlite3_exec) fall back to the
+    // wildcard path.
+    db->writer_active_entry = entry;
     rc = sqlite3_step(stmt);
+    db->writer_active_entry = NULL;
     if (out_result) {
         out_result->affected_rows = sqlite3_changes(db->writer);
         out_result->last_insert_id = sqlite3_last_insert_rowid(db->writer);
@@ -781,6 +900,7 @@ static int run_batch_locked(
         stmt = entry->stmt;
         sqlite3_reset(stmt);
     } else {
+        resqlite_column_set_reset(&db->writer_authz_scratch);
         int rc = sqlite3_prepare_v3(
             db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
         if (rc != SQLITE_OK) return rc;
@@ -790,6 +910,10 @@ static int run_batch_locked(
             sqlite3_finalize(stmt);
             return SQLITE_NOMEM;
         }
+        // [EXP-106](../experiments/106-column-level-deps.md): drain authz
+        // scratch into the cache entry once prepare returns. The per-set step
+        // loop below benefits from the pre-captured column set on every row.
+        stmt_cache_entry_set_dep_columns(entry, &db->writer_authz_scratch);
     }
     const int expected = entry->param_count;
 
@@ -803,7 +927,12 @@ static int run_batch_locked(
             return rc;
         }
 
+        // [EXP-106](../experiments/106-column-level-deps.md): tag the active
+        // entry so the preupdate hook can merge cached columns. Cleared after
+        // step on every iteration.
+        db->writer_active_entry = entry;
         rc = sqlite3_step(stmt);
+        db->writer_active_entry = NULL;
         if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
             sqlite3_reset(stmt);
             return rc;
@@ -829,7 +958,7 @@ int resqlite_run_batch(
     // BEGIN IMMEDIATE acquires the write lock upfront, avoiding the
     // lock-upgrade path since we know we're writing. The cached
     // prepared stmt skips sqlite3_exec's per-call prepare+finalize
-    // (experiment 101).
+    // ([EXP-101](../experiments/101-tx-stmt-cache.md)).
     int rc = run_cached_tx_stmt(db->tx_begin_stmt);
     if (rc != SQLITE_OK) {
         sqlite3_mutex_leave(db->writer_mutex);
@@ -867,12 +996,25 @@ int resqlite_run_batch_nested(
     return rc;
 }
 
+// Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
+// the dirty-table set is unreliable (overflow / OOM during the write cycle).
+// Zero would mean "no tables dirty" — invalidations would be silently missed;
+// the negative sentinel forces the StreamEngine to invalidate every active
+// entry.
 int resqlite_get_dirty_tables(
     resqlite_db* db,
     const char** out_tables,
     int max_tables
 ) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+    int reliable = db->dirty_tables.reliable;
+    if (!reliable) {
+        // Reset before returning — caller has been signalled, future
+        // writes start with a fresh reliability flag.
+        resqlite_dirty_set_reset(&db->dirty_tables);
+        return RESQLITE_DEPENDENCY_COUNT_UNKNOWN;
+    }
+
     int count = db->dirty_tables.count;
     if (count > max_tables) count = max_tables;
 
@@ -882,12 +1024,17 @@ int resqlite_get_dirty_tables(
     }
 
     // Reset active count. Strings stay valid — out_tables still points to them.
-    // They'll be freed on the next dirty_set_add when slots are reused.
-    dirty_set_reset(&db->dirty_tables);
+    // They'll be freed on the next resqlite_dirty_set_add when slots are reused.
+    resqlite_dirty_set_reset(&db->dirty_tables);
 
     return count;
 }
 
+// Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
+// the cached entry's read-table dependencies are unreliable (overflow / OOM
+// during prepare). Zero would mean "stream has no table deps" → silent stuck
+// stream; the negative sentinel forces the Dart-side StreamEngine to route the
+// stream into its unknown-dependencies bucket where every write invalidates it.
 int resqlite_get_read_tables(
     resqlite_db* db,
     int reader_id,
@@ -897,16 +1044,86 @@ int resqlite_get_read_tables(
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
     if (reader_id < 0 || reader_id >= db->reader_count) return 0;
 
-    resqlite_read_set* rs = &db->readers[reader_id].read_tables;
-    int count = rs->count;
+    resqlite_reader* reader = &db->readers[reader_id];
+    // [EXP-106](../experiments/106-column-level-deps.md): serve directly from
+    // the cached stmt entry of the most recent acquire so we don't pay the
+    // strdup-per-table cost that the per-reader scratch incurred on every cache
+    // hit. The entry's strings outlive this call (they're freed on stmt cache
+    // eviction), so the caller's copy-before-next-query contract is unchanged.
+    resqlite_cached_stmt* entry = reader->last_entry;
+    if (!entry) return 0;
+    if (!entry->read_tables_reliable) return RESQLITE_DEPENDENCY_COUNT_UNKNOWN;
+    int count = entry->read_table_count;
     if (count > max_tables) count = max_tables;
+    for (int i = 0; i < count; i++) {
+        out_tables[i] = entry->read_tables[i];
+    }
+    return count;
+}
+
+// [EXP-106](../experiments/106-column-level-deps.md): return read-column
+// metadata for the most recent acquired statement on this reader. Entries are
+// structured table/column pairs owned by the cached stmt entry; the caller MUST
+// copy them before issuing the next query on this reader.
+//
+// Polish (post-2026-04): when the cached entry's column dependencies
+// are unreliable (overflow / OOM during prepare), this returns 0 so
+// the StreamEngine's "table absent from column map" branch falls
+// through to a conservative table-level re-query. Zero is the load-
+// bearing signal — table dependencies are still reliable on the same
+// path; the column elision optimisation simply opts out for this stmt.
+int resqlite_get_read_columns(
+    resqlite_db* db,
+    int reader_id,
+    const char** out_tables,
+    const char** out_columns,
+    int max_columns
+) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+    if (reader_id < 0 || reader_id >= db->reader_count) return 0;
+
+    resqlite_reader* reader = &db->readers[reader_id];
+    resqlite_cached_stmt* entry = reader->last_entry;
+    if (!entry) return 0;
+    if (!entry->dep_columns_reliable) return 0;
+    int count = entry->dep_column_count;
+    if (count > max_columns) count = max_columns;
+    for (int i = 0; i < count; i++) {
+        out_tables[i] = entry->dep_columns[i].table;
+        out_columns[i] = entry->dep_columns[i].column;
+    }
+    return count;
+}
+
+// [EXP-106](../experiments/106-column-level-deps.md): drain the dirty-columns
+// accumulator alongside dirty tables. Returns the number of table/column pairs
+// written. Like
+// `resqlite_get_dirty_tables`, the strings stay valid until the next
+// `resqlite_column_set_add` reuses their slot — caller must copy before
+// further writer activity.
+//
+// Polish (post-2026-04): when the dirty-columns set is unreliable
+// (overflow / OOM during preupdate hook merge), returns 0 so the
+// StreamEngine sees "no precise column metadata" and falls back to
+// dispatching on the (still-reliable) dirty table set.
+int resqlite_get_dirty_columns(
+    resqlite_db* db,
+    const char** out_tables,
+    const char** out_columns,
+    int max_columns
+) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+
+    int reliable = db->dirty_columns.reliable;
+    int count = reliable ? db->dirty_columns.count : 0;
+    if (count > max_columns) count = max_columns;
 
     for (int i = 0; i < count; i++) {
-        out_tables[i] = rs->names[i];
+        out_tables[i] = db->dirty_columns.deps[i].table;
+        out_columns[i] = db->dirty_columns.deps[i].column;
     }
 
-    // Reset active count. Strings stay valid until next query on this reader.
-    read_set_reset(rs);
+    resqlite_column_set_reset(&db->dirty_columns);
 
     return count;
 }
@@ -1007,7 +1224,8 @@ static void release_reader(resqlite_db* db, int idx) {
 
 // Returns the cached entry (stmt + param_count + read-tables).
 // Callers that only need the stmt read `entry->stmt`; bind_params
-// callers pass `entry->param_count` as the expected count (exp 077).
+// callers pass `entry->param_count` as the expected count
+// ([EXP-077](../experiments/077-cheap-check-first-sweep.md)).
 static resqlite_cached_stmt* get_or_prepare_reader(
     resqlite_reader* reader, const char* sql, int sql_len, int* out_rc
 ) {
@@ -1015,14 +1233,19 @@ static resqlite_cached_stmt* get_or_prepare_reader(
         stmt_cache_lookup_entry(&reader->cache, sql, sql_len);
     if (entry) {
         sqlite3_reset(entry->stmt);
-        read_set_load_from_cache_entry(&reader->read_tables, entry);
+        // [EXP-106](../experiments/106-column-level-deps.md): tag the active
+        // entry so the FFI getters can serve table/column dependencies straight
+        // from the cache (no strdup-per-column rehydrate on the read hot path).
+        // Avoids the wide-schema main-thread regression spotted on first run.
+        reader->last_entry = entry;
         *out_rc = SQLITE_OK;
         return entry;
     }
 
     // The authorizer populates per-reader read tables during prepare.
     // Reset before preparing so this statement captures only its own deps.
-    read_set_reset(&reader->read_tables);
+    resqlite_read_set_reset(&reader->read_tables);
+    resqlite_column_set_reset(&reader->read_columns);
 
     sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v3(reader->db, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
@@ -1038,6 +1261,8 @@ static resqlite_cached_stmt* get_or_prepare_reader(
         return NULL;
     }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
+    stmt_cache_entry_set_dep_columns(entry, &reader->read_columns);
+    reader->last_entry = entry;
     *out_rc = SQLITE_OK;
     return entry;
 }
@@ -1047,7 +1272,8 @@ static resqlite_cached_stmt* get_or_prepare_reader(
 // ---------------------------------------------------------------------------
 
 // Caller provides `expected` — it's a property of the prepared SQL and
-// the cache tracks it alongside the stmt (experiment 077). Saves one
+// the cache tracks it alongside the stmt
+// ([EXP-077](../experiments/077-cheap-check-first-sweep.md)). Saves one
 // sqlite3_bind_parameter_count FFI-internal call per query.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected) {
@@ -1567,7 +1793,9 @@ __attribute__((hot)) int resqlite_step_row(
 }
 
 // ---------------------------------------------------------------------------
-// Stream-hash helpers (experiment 075, was 053 on worktree)
+// Stream-hash helpers
+// ([EXP-075](../experiments/075-native-hash-selectifchanged.md), was 053 on
+// worktree)
 //
 // Hashing raw cell bytes in C using FNV-1a (63-bit masked) lets reactive
 // streams short-circuit the "unchanged re-query" case without paying any
@@ -1615,7 +1843,8 @@ static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
 //
 // `last_row_count` is the caller's cached row count from the previous
 // emission, or -1 if unknown (initial-query path; or when row_count is
-// not being tracked). When set, experiment 077 short-circuits: if we
+// not being tracked). When set,
+// [EXP-077](../experiments/077-cheap-check-first-sweep.md) short-circuits: if we
 // step past `last_row_count` rows, the hashes CANNOT match regardless
 // of content, so we stop hashing cell bytes and just count remaining
 // rows to report the final size. `out_row_count` is written in all
@@ -1646,7 +1875,8 @@ long long resqlite_query_hash(
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         row_count++;
-        // Experiment 077: once row_count exceeds last_row_count, the
+        // [EXP-077](../experiments/077-cheap-check-first-sweep.md): once
+        // row_count exceeds last_row_count, the
         // final hash cannot possibly match (row_count is folded in at
         // the end). Stop hashing cell bytes; just drain rows for count.
         if (!skip_hash && last_row_count >= 0 && row_count > last_row_count) {

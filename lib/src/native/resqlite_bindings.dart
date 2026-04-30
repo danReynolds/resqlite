@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import 'request_cache.dart';
 
@@ -43,7 +44,8 @@ external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
 // Transaction-control fast path: pre-prepared BEGIN IMMEDIATE / COMMIT /
 // ROLLBACK stmts in C, run via sqlite3_reset + sqlite3_step instead of
-// sqlite3_exec's prepare+step+finalize per call (experiment 101).
+// sqlite3_exec's prepare+step+finalize per call
+// ([EXP-101](../../../experiments/101-tx-stmt-cache.md)).
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'resqlite_tx_begin_immediate',
   isLeaf: true,
@@ -310,23 +312,13 @@ void executeNestedBatchWrite(
 
 /// Per-worker persistent buffer for dirty-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte calloc/free
-/// pair on every write (experiment 070).
+/// pair on every write
+/// ([EXP-070](../../../experiments/070-zero-row-change-shortcircuit.md)).
 final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
-/// Read and clear the dirty tables set from the C connection.
-///
-/// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
-/// the `List<String>` allocation and return a shared `const <String>[]`.
-List<String> getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
-  final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
-  if (count == 0) return const <String>[];
-  final tables = List<String>.filled(count, '', growable: false);
-  for (var i = 0; i < count; i++) {
-    tables[i] = _dirtyTablesBuf[i].toDartString();
-  }
-  return tables;
-}
+/// Mirrors `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` in `native/resqlite.h`.
+const _dependencyCountUnknown = -1;
 
 // ---------------------------------------------------------------------------
 // Read dependency tracking
@@ -345,6 +337,42 @@ external int resqliteGetReadTables(
   int readerId,
   ffi.Pointer<ffi.Pointer<Utf8>> outTables,
   int maxTables,
+);
+
+// [EXP-106](../../../experiments/106-column-level-deps.md): column-level
+// dependency tracking. The C layer captures structured table/column pairs
+// alongside table dependencies; these bindings fetch them on the same cadence
+// as the table-level FFI.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Int,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_get_read_columns', isLeaf: true)
+external int resqliteGetReadColumns(
+  ffi.Pointer<ffi.Void> db,
+  int readerId,
+  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
+  ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
+  int maxColumns,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Pointer<ffi.Pointer<Utf8>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_get_dirty_columns', isLeaf: true)
+external int resqliteGetDirtyColumns(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
+  ffi.Pointer<ffi.Pointer<Utf8>> outColumns,
+  int maxColumns,
 );
 
 @ffi.Native<
@@ -366,25 +394,159 @@ external int resqliteDbStatusTotal(
 
 /// Per-worker persistent buffer for read-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte
-/// calloc/free pair per stream subscription (experiment 077).
-/// Mirrors the `_dirtyTablesBuf` pattern introduced in exp 070.
+/// calloc/free pair per stream subscription
+/// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md)).
+/// Mirrors the `_dirtyTablesBuf` pattern introduced in
+/// [EXP-070](../../../experiments/070-zero-row-change-shortcircuit.md).
 final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
 
-/// Get the set of tables read by the last query on the given reader.
-/// Clears after reading.
+/// Build the final nested table dependency value from native table metadata
+/// and optional per-table column detail.
 ///
-/// Zero-table short-circuit: if the count is 0, skip the `List<String>`
-/// allocation and return a shared `const <String>[]`.
-List<String> getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
-  final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
-  if (count == 0) return const <String>[];
-  final tables = List<String>.filled(count, '', growable: false);
+/// Table metadata is authoritative. Column detail can only refine tables that
+/// are already present in [tableBuf]; details for other tables are ignored.
+TableDependencies _decodeTableDependencies(
+  int count,
+  ffi.Pointer<ffi.Pointer<Utf8>> tableBuf,
+  List<TableDependency> columnDetails,
+) {
+  if (count == _dependencyCountUnknown) return TableDependencies.unknown;
+  if (count == 0) return TableDependencies.none;
+
+  final byTable = columnDetails.isEmpty
+      ? null
+      : <String, TableDependency>{
+          for (final detail in columnDetails) detail.table: detail,
+        };
+  final tables = List<TableDependency>.filled(
+    count,
+    const TableDependency(''),
+    growable: false,
+  );
   for (var i = 0; i < count; i++) {
-    tables[i] = _readTablesBuf[i].toDartString();
+    final table = tableBuf[i].toDartString();
+    tables[i] = byTable?[table] ?? TableDependency(table);
   }
-  return tables;
+  return TableDependencies.fixed(tables);
+}
+
+// [EXP-106](../../../experiments/106-column-level-deps.md): per-worker
+// persistent buffers for column pointer marshalling. The C layer returns
+// parallel table/column arrays so names with dots do not need escaping or
+// ad-hoc parsing in Dart.
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
+    calloc<ffi.Pointer<Utf8>>(64);
+final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
+    calloc<ffi.Pointer<Utf8>>(64);
+
+/// Decode table/column pointers into grouped column details.
+///
+/// Wildcard columns (`"*"`) collapse the table to a plain [TableDependency],
+/// which means column-level precision is unavailable for that table.
+List<TableDependency> _decodeColumnDetails(int count) {
+  if (count <= 0) return const <TableDependency>[];
+  final out = <TableDependency>[];
+  for (var i = 0; i < count; i++) {
+    final table = _columnTablesBuf[i].toDartString();
+    final col = _columnNamesBuf[i].toDartString();
+    final existingIndex = out.indexWhere((entry) => entry.table == table);
+
+    if (col == '*') {
+      final dependency = TableDependency(table);
+      if (existingIndex == -1) {
+        out.add(dependency);
+      } else {
+        out[existingIndex] = dependency;
+      }
+      continue;
+    }
+
+    if (existingIndex == -1) {
+      out.add(TableColumnDependency(table, <String>{col}));
+      continue;
+    }
+
+    switch (out[existingIndex]) {
+      case TableColumnDependency(:final columns):
+        columns.add(col);
+      case TableDependency():
+        // Table-level dependency already present — keep it.
+        continue;
+    }
+  }
+  return out;
+}
+
+/// Get per-reader column detail for the most recent acquired statement.
+/// Wildcards collapse the table to a plain [TableDependency].
+///
+/// Repeated calls return metadata from the most recent acquired statement until
+/// the reader runs another query or the entry is evicted.
+///
+/// Zero-entry short-circuit returns a const empty list to avoid allocations on
+/// the hot streaming path.
+List<TableDependency> _getReadColumnDetails(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
+  final count = resqliteGetReadColumns(
+    dbHandle,
+    readerId,
+    _columnTablesBuf,
+    _columnNamesBuf,
+    64,
+  );
+  return _decodeColumnDetails(count);
+}
+
+/// Drain the writer's dirty-column accumulator as grouped table details.
+///
+/// Wildcards collapse to a plain [TableDependency] to signal that the table
+/// changed without column-level precision.
+List<TableDependency> _getDirtyColumnDetails(ffi.Pointer<ffi.Void> dbHandle) {
+  final count = resqliteGetDirtyColumns(
+    dbHandle,
+    _columnTablesBuf,
+    _columnNamesBuf,
+    64,
+  );
+  return _decodeColumnDetails(count);
+}
+
+/// Read dependencies for the most recent acquired statement on [readerId].
+///
+/// The C layer exposes table and column metadata separately, but callers should
+/// consume the nested [TableDependencies] value returned here.
+TableDependencies getReadTableDependencies(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
+  final tableCount = resqliteGetReadTables(
+    dbHandle,
+    readerId,
+    _readTablesBuf,
+    64,
+  );
+  final columnDetails = _getReadColumnDetails(dbHandle, readerId);
+  return _decodeTableDependencies(tableCount, _readTablesBuf, columnDetails);
+}
+
+/// Dirty dependencies for the completed write cycle, draining native state.
+///
+/// This drains both native dirty-table and dirty-column accumulators before
+/// constructing a single [TableDependencies] value.
+TableDependencies getDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
+  final tableCount = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  final columnDetails = _getDirtyColumnDetails(dbHandle);
+  return _decodeTableDependencies(tableCount, _dirtyTablesBuf, columnDetails);
+}
+
+/// Drain dirty dependency state when a write rolls back or is discarded.
+void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
+  resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  resqliteGetDirtyColumns(dbHandle, _columnTablesBuf, _columnNamesBuf, 64);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle
