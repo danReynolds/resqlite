@@ -1,4 +1,5 @@
-// Cache-hit preservation tests for exp-106 polish.
+// Cache-hit preservation tests for
+// [EXP-106](../experiments/106-column-level-deps.md) polish.
 //
 // The C-side cache stores `read_tables_reliable` and
 // `dep_columns_reliable` flags on each cached stmt entry. On cache

@@ -1,10 +1,10 @@
-/// Dependency and invalidation value types shared by the native bindings,
-/// writer, reader, and stream engine.
+/// Dependency value types shared by the native bindings, writer, reader, and
+/// stream engine.
 ///
 /// Tables are the correctness layer: when table tracking is unknown, every
-/// stream must be invalidated. Columns are an optimization layer scoped to a
-/// known table: when column tracking is unavailable for that table, streams
-/// already watching the table re-query.
+/// stream must re-query. Columns are an optimization layer scoped to a known
+/// table: when column tracking is unavailable for that table, streams already
+/// watching the table re-query.
 
 /// Tracked table set for one query or write cycle.
 sealed class TableDependencies {
@@ -13,7 +13,7 @@ sealed class TableDependencies {
   /// Known empty table set.
   static const none = FixedTableDependencies([]);
 
-  /// Unknown table set. Consumers must invalidate every stream.
+  /// Unknown table set. Consumers must re-query every stream.
   static const unknown = UnknownTableDependencies._();
 
   /// Known table set.

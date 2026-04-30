@@ -15,9 +15,12 @@
 ///
 /// The existing `disjoint_columns.dart` suite measures the ratio of
 /// disjoint-vs-overlapping stream emissions on the **stream side** —
-/// it asks "did the library suppress emission?". On that metric, exp 075
+/// it asks "did the library suppress emission?". On that metric,
+/// [EXP-075](../../experiments/075-native-hash-selectifchanged.md)
 /// (worker-side result-hash short-circuit, accepted) is observationally
-/// indistinguishable from exp 052 (column-level dependency tracking,
+/// indistinguishable from
+/// [EXP-052](../../experiments/052-column-level-dependencies.md)
+/// (column-level dependency tracking,
 /// rejected — sound but benchmark-invisible). The disjoint_columns suite
 /// header explicitly notes:
 ///
@@ -31,13 +34,18 @@
 /// short-circuit still pays the dispatch cost (the re-query runs and
 /// hashes; only the emission to the listener is suppressed). So a
 /// writer-throughput-under-fanout benchmark should differentiate them
-/// and unblock revisiting exp 052.
+/// and unblock revisiting
+/// [EXP-052](../../experiments/052-column-level-dependencies.md).
 ///
 /// ## What it does NOT differentiate
 ///
-/// - **Hash short-circuit (exp 075) vs no suppression at all** on the
+/// - **Hash short-circuit
+///   ([EXP-075](../../experiments/075-native-hash-selectifchanged.md)) vs no
+///   suppression at all** on the
 ///   stream-side. That story is told by `disjoint_columns.dart`.
-/// - **Coalescing strategies** (exp 045, PR #17). Writes are issued
+/// - **Coalescing strategies**
+///   ([EXP-045](../../experiments/045-microtask-invalidation-coalescing.md),
+///   PR #17). Writes are issued
 ///   sequentially with awaits and microtask yields so per-stream
 ///   coalescing collapses to ~1 invalidation per write rather than
 ///   batching across the whole burst.
@@ -49,8 +57,8 @@
 ///
 /// | Peer | Disjoint vs overlap | Why |
 /// |---|---|---|
-/// | resqlite (today) | similar | Both go through writer-side dispatch; exp 075 saves the emission but the per-stream re-query is still scheduled. Disjoint may be slightly cheaper because the post-hash compare suppresses listener delivery, but the writer-side fanout cost dominates. |
-/// | resqlite (with exp 052 dispatch elision) | disjoint ≫ overlap | The dispatch itself would be skipped on column-disjoint writes — what this benchmark exists to make visible. |
+/// | resqlite (today) | similar | Both go through writer-side dispatch; [EXP-075](../../experiments/075-native-hash-selectifchanged.md) saves the emission but the per-stream re-query is still scheduled. Disjoint may be slightly cheaper because the post-hash compare suppresses listener delivery, but the writer-side fanout cost dominates. |
+/// | resqlite (with [EXP-052](../../experiments/052-column-level-dependencies.md) dispatch elision) | disjoint ≫ overlap | The dispatch itself would be skipped on column-disjoint writes — what this benchmark exists to make visible. |
 /// | sqlite_async | similar | Table-level invalidation; disjoint and overlap both invalidate every stream uniformly. |
 /// | drift | similar | `StreamQueryStore` is also table-level. |
 ///
@@ -88,7 +96,8 @@
 /// ## Implementation notes
 ///
 /// Microtask yields between writes (`Future.delayed(Duration.zero)`) defeat
-/// resqlite's per-microtask invalidation coalescing (exp 045) so each
+/// resqlite's per-microtask invalidation coalescing
+/// ([EXP-045](../../experiments/045-microtask-invalidation-coalescing.md)) so each
 /// write produces one invalidation per overlapping stream. Without this,
 /// 500 sequential writes collapse to ~10 invalidations and the ratio
 /// signal washes out. This matches the convention in
@@ -241,7 +250,7 @@ Future<String> _run({
     ..writeln(
       '**Emissions** are post-baseline emissions summed across '
       'all $streamCount streams during the timed write loop. A library '
-      'with hash-based result suppression (resqlite exp 075) reports '
+      'with hash-based result suppression (resqlite EXP-075) reports '
       'low emission counts on the disjoint scenario even when its '
       'writer throughput is unchanged — that signal lives in '
       '`disjoint_columns.dart`, not here. This suite is about the '
@@ -470,7 +479,8 @@ Future<_IterResult> _singleIteration(
       // Two event-queue yields. `Future.delayed(Duration.zero)`
       // schedules via `Timer.run`, which drains the microtask queue
       // first and then fires on the next event-loop turn — defeating
-      // resqlite's per-microtask invalidation coalescing (exp 045).
+      // resqlite's per-microtask invalidation coalescing
+      // ([EXP-045](../../experiments/045-microtask-invalidation-coalescing.md)).
       // Without this, 500 sequential writes collapse to ~10
       // invalidations per stream and the writer-side fanout cost is
       // hidden. Matches disjoint_columns.dart.

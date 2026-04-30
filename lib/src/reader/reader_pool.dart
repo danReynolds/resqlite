@@ -72,9 +72,13 @@ final class ReaderPool {
 
   /// Execute a query and capture read dependencies.
   ///
-  /// Also returns the C-computed hash (exp 075) and row count (exp 077)
-  /// of the initial result so later [selectIfChanged] calls have both
-  /// baselines to short-circuit against. Experiment 106 nests optional
+  /// Also returns the C-computed hash
+  /// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)) and
+  /// row count
+  /// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md)) of the
+  /// initial result so later [selectIfChanged] calls have both baselines to
+  /// short-circuit against.
+  /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
   /// column detail under each table dependency.
   Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
   selectWithDeps(String sql, [List<Object?> parameters = const []]) async {

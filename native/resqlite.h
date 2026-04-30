@@ -64,7 +64,8 @@ typedef struct {
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 
-// Transaction-control fast path (experiment 101).
+// Transaction-control fast path
+// ([EXP-101](../experiments/101-tx-stmt-cache.md)).
 //
 // These run pre-prepared `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` stmts
 // via sqlite3_reset + sqlite3_step, skipping sqlite3_exec's per-call
@@ -163,7 +164,8 @@ int resqlite_get_read_tables(
 );
 
 // ---------------------------------------------------------------------------
-// Column dependency tracking (experiment 106)
+// Column dependency tracking
+// ([EXP-106](../experiments/106-column-level-deps.md))
 // ---------------------------------------------------------------------------
 
 // Hard cap on the number of distinct columns tracked per dependency set.
@@ -300,7 +302,8 @@ int resqlite_step_row_hash(
 // one that was just drained by decodeQuery — either way works.
 //
 // `last_row_count` is the caller's cached row count from the last
-// emission (or -1 on the initial-query path). When set, experiment 077
+// emission (or -1 on the initial-query path). When set,
+// [EXP-077](../experiments/077-cheap-check-first-sweep.md)
 // short-circuits: if the fresh step count exceeds `last_row_count` the
 // final hash can't possibly match, so we stop folding cell bytes and
 // just drain the remaining rows to report the new count. `out_row_count`

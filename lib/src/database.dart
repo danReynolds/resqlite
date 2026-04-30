@@ -121,7 +121,9 @@ final class Database {
       // Determine the number of reader isolates to spawn.
       // cores - 1: leave one core for the main isolate (UI thread in Flutter).
       // min 2: so one worker sacrifice doesn't leave zero capacity.
-      // max 4: benchmarked 2/4/8/16 workers (exp 105). Concurrent query
+      // max 4: benchmarked 2/4/8/16 workers
+      // ([EXP-105](../../experiments/105-reader-pool-sizing.md)).
+      // Concurrent query
       //   throughput plateaus at 4; raising past that regresses A11c
       //   many-streams-writer-throughput by ~55% and high-cardinality
       //   stream fan-out (A11b) by ~88% because each completed

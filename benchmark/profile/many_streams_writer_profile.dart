@@ -489,7 +489,7 @@ String _aggregate(List<_Sample> samples) {
     buf.writeln();
     buf.writeln(
       '`overlap.total - disjoint.total = ${ot - dt} μs/write`. '
-      'This is the absolute time exp 075\'s worker-side hash '
+      'This is the absolute time EXP-075\'s worker-side hash '
       'short-circuit saves on disjoint writes — the per-stream '
       're-query still runs on disjoint, but the hash compares equal '
       'so emission to the listener is suppressed.',

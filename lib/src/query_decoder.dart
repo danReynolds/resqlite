@@ -56,13 +56,15 @@ external int resqliteStepRowHash(
   ffi.Pointer<ffi.Uint64> hash,
 );
 
-// Hash-only pass (experiment 075, extended in exp 077).
+// Hash-only pass ([EXP-075](../../experiments/075-native-hash-selectifchanged.md),
+// extended in [EXP-077](../../experiments/077-cheap-check-first-sweep.md)).
 //
 // Steps the bound stmt to DONE, hashes every cell's raw bytes in C,
 // resets at both ends, returns the hash.
 //
 // `lastRowCount` is -1 on the initial-query path (no prior count
-// cached), or the previous emission's row count. When set, exp 077
+// cached), or the previous emission's row count. When set,
+// [EXP-077](../../experiments/077-cheap-check-first-sweep.md)
 // short-circuits: if the fresh step count exceeds the cached value,
 // stop folding cell bytes — the hashes can't match anyway. The function
 // still drains the remaining rows to report the fresh count via

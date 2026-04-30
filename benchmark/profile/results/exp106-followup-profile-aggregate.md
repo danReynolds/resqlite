@@ -1,6 +1,6 @@
-# exp 106 follow-up profile aggregate
+# [EXP-106](../../../experiments/106-column-level-deps.md) follow-up profile aggregate
 
-Reconnaissance pass on **A11c many-streams writer-throughput** _after_ exp 106
+Reconnaissance pass on **A11c many-streams writer-throughput** _after_ [EXP-106](../../../experiments/106-column-level-deps.md)
 (column-level dependency tracking) landed. Goal: characterise the remaining
 fanout cost on disjoint and overlap and identify the next high-impact lever.
 
@@ -21,7 +21,7 @@ Each per-write sample splits the wall into:
 **New in this profile** (gated by `kProfileMode`, tree-shaken in release):
 
 - `invalidate_us`: synchronous body of `StreamEngine.onDependencyChanges` only, isolated from writer-isolate IPC. Subset of `writer_us`.
-- `intersection_us`: cumulative microseconds spent inside per-stream column-set intersection probes added in exp 106. Subset of `invalidate_us`.
+- `intersection_us`: cumulative microseconds spent inside per-stream column-set intersection probes added in [EXP-106](../../../experiments/106-column-level-deps.md). Subset of `invalidate_us`.
 - `intersection_entries`: number of concrete column-vs-column intersection probes per write (50 = "all watchers tested").
 - `per-watcher µs`: mean `intersection_us / intersection_entries` across all samples.
 
@@ -47,7 +47,7 @@ CV for `total_us` p50: baseline 7.4 %, disjoint 3.0 %, overlap 1.4 %. Tight.
 
 ## Comparison vs prior cap=4 vanilla aggregate
 
-The prior `a11c-writer-fanout-aggregate.md` (3-run medians, same harness, vanilla pre-exp-106 code):
+The prior `a11c-writer-fanout-aggregate.md` (3-run medians, same harness, vanilla pre-[EXP-106](../../../experiments/106-column-level-deps.md) code):
 
 | scenario | total_us p50 prior | total_us p50 now | Δ | writes/sec prior → now |
 |---|---:|---:|---:|---|
@@ -57,7 +57,7 @@ The prior `a11c-writer-fanout-aggregate.md` (3-run medians, same harness, vanill
 
 Note: the harness yields aggressively (`Future.delayed(Duration.zero) × 2` per write), so the absolute writes/sec here is higher than the suite's `~7 200 / ~4 600` w/s (which has different pacing). The shape of the delta — **disjoint collapses to baseline; overlap unchanged** — is what reproduces the suite signal cleanly.
 
-## Disjoint per-write cost decomposition (post exp-106)
+## Disjoint per-write cost decomposition (post [EXP-106](../../../experiments/106-column-level-deps.md))
 
 Per-write `total_us = 39` µs at 50 streams. Subtracting the no-streams baseline of 37 µs gives **+2 µs net fanout cost** — within Stopwatch noise.
 
@@ -73,7 +73,7 @@ Per-write `total_us = 39` µs at 50 streams. Subtracting the no-streams baseline
 
 **The disjoint bucket has effectively no remaining fanout cost in this harness.** Exp 106 elides every dispatch; what's left is the writer round-trip + ~7 µs of column bookkeeping.
 
-## Overlap per-write cost decomposition (post exp-106)
+## Overlap per-write cost decomposition (post [EXP-106](../../../experiments/106-column-level-deps.md))
 
 Per-write `total_us = 113` µs at 50 streams. Subtracting baseline 37 µs → **+76 µs net fanout cost**.
 
@@ -121,7 +121,7 @@ Disjoint p99 (135 µs) is *better* than baseline p99 (200 µs) — column elisio
 **Risk assessment:**
 - **Worker monopolisation.** A 50-entry batch holds one worker for the duration of all 50 prepares + executes + hashes. Other concurrent reads (point lookups, peer reads) get parked behind it — the 4-worker pool degrades to 3-worker effective capacity for the batch duration. On A11c-shape workloads (write-heavy) this is fine; on mixed read+write it could regress reads. Need to measure A11b (high-cardinality fanout) and chat-sim (mixed) alongside A11c.
 - **Cancellation correctness.** A subscriber cancelling mid-batch must not break the others. Implementable but requires careful sequencing.
-- **Memory pressure.** 50 prepared statements + 50 result hashes accumulated in one worker reply message vs 13 small replies. The exp 094 (dirty-read reuse dispatch) and 095 (writer-result-buffer dispatch) attempts hit similar serialisation cost issues — worth re-reading those rejections before committing.
+- **Memory pressure.** 50 prepared statements + 50 result hashes accumulated in one worker reply message vs 13 small replies. The [EXP-094](../../../experiments/094-dirty-read-string-reuse.md) (dirty-read reuse dispatch) and [EXP-095](../../../experiments/095-writer-result-buffer.md) (writer-result-buffer dispatch) attempts hit similar serialisation cost issues — worth re-reading those rejections before committing.
 - **History.** Exp 071/093/094 each tried adjacent batching shapes and were rejected. The rejections were on different specific batching geometries. The simplest experiment is "batch the dirty queue once per invalidation" — neither 071, 093, nor 094 was exactly that. Worth one focused attempt with a profile-mode A/B against the cap=4 vanilla baseline.
 
 **Alternative if batching proves intractable:** raise the reader pool cap when the writer detects "stream count ≫ poolSize". Exp 105 was rejected in the static configuration — doubling the static pool from 4→8 regressed A11c by 55 % and A11b by 88 % because each completed reply queues a microtask ahead of the next pending write. A dynamic policy that grows the pool _only when_ active stream count exceeds 4N pool size and the writer is stalled on `_flushQueue` could sidestep the regression on small-watch workloads while unlocking parallel fanout when it's needed. **Lower priority — try batching first.**

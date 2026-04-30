@@ -1,5 +1,6 @@
 // Black-box correctness tests for the column / read / dirty set
-// overflow fallbacks introduced in the exp-106 polish.
+// overflow fallbacks introduced in the
+// [EXP-106](../experiments/106-column-level-deps.md) polish.
 //
 // These prove end-to-end correctness under the failure modes the
 // reliability flags target. A stream that overflows the C-side caps

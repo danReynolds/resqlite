@@ -215,14 +215,6 @@ void writerEntrypoint(List<Object> args) {
 // Per-request handlers
 // ---------------------------------------------------------------------------
 
-TableDependencies _drainTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
-  return getDirtyTableDependencies(dbHandle);
-}
-
-void _discardTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
-  discardDirtyTableDependencies(dbHandle);
-}
-
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   // Dirty tables and columns are only collected outside transactions.
@@ -230,7 +222,7 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   // the outermost transaction completes.
   final modifications = state.txDepth > 0
       ? TableDependencies.none
-      : _drainTableDependencies(state.dbHandle);
+      : getDirtyTableDependencies(state.dbHandle);
   msg.replyPort.send(ExecuteResponse(result, modifications));
 }
 
@@ -242,7 +234,9 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     msg.replyPort.send(const BatchResponse(TableDependencies.none));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(BatchResponse(_drainTableDependencies(state.dbHandle)));
+    msg.replyPort.send(
+      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+    );
   }
 }
 
@@ -328,7 +322,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // legitimately fail with "no transaction active".
       resqliteTxRollback(state.dbHandle);
       // Drop any tables/columns dirtied by the aborted transaction.
-      _discardTableDependencies(state.dbHandle);
+      discardDirtyTableDependencies(state.dbHandle);
       state.txDepth = newDepth;
       throw ResqliteTransactionException(
         errMsg,
@@ -337,7 +331,9 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(BatchResponse(_drainTableDependencies(state.dbHandle)));
+    msg.replyPort.send(
+      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+    );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
     final rc = resqliteExec(state.dbHandle, sp);
@@ -390,7 +386,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     final rc = resqliteTxRollback(state.dbHandle);
     // Clear the dirty sets — rolled-back changes don't count for stream
     // invalidation, even if SQLite reported a rollback error.
-    _discardTableDependencies(state.dbHandle);
+    discardDirtyTableDependencies(state.dbHandle);
     state.txDepth = newDepth;
     if (rc != 0) {
       throw ResqliteTransactionException(

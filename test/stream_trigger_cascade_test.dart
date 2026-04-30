@@ -1,4 +1,5 @@
-// Phase 0 verification for exp-106 polish.
+// Phase 0 verification for
+// [EXP-106](../experiments/106-column-level-deps.md) polish.
 //
 // Three black-box scenarios that exercise SQLite's authorizer behavior on
 // triggers and FK cascades. The polish design hinges on whether the
@@ -7,8 +8,9 @@
 //
 //   * If yes → column tracking captures the propagated writes; no
 //     additional fallback is needed.
-//   * If no → exp-106's column-level dispatch elision can silently
-//     drop trigger / cascade-induced re-emissions, and the polish must
+//   * If no → [EXP-106](../experiments/106-column-level-deps.md)'s column-level
+//     dispatch elision can silently drop trigger / cascade-induced re-emissions,
+//     and the polish must
 //     ship a "trigger-touched stmt → unreliable column set" fallback.
 //
 // These tests assert that streams DO re-emit in each of the three
@@ -46,10 +48,7 @@ final class _StreamProbe<T> {
   final _waiters = <_EventWaiter<T>>[];
   late final StreamSubscription<T> _subscription;
 
-  Future<T> event(
-    int count, {
-    Duration timeout = const Duration(seconds: 2),
-  }) {
+  Future<T> event(int count, {Duration timeout = const Duration(seconds: 2)}) {
     if (_events.length >= count) {
       return Future.value(_events[count - 1]);
     }
@@ -75,8 +74,9 @@ void main() {
     late Database db;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp
-          .createTemp('resqlite_trigger_cascade_');
+      tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_trigger_cascade_',
+      );
       db = await Database.open('${tempDir.path}/test.db');
       // Required for ON DELETE CASCADE to actually fire.
       await db.execute('PRAGMA foreign_keys = ON');
@@ -109,14 +109,11 @@ void main() {
             UPDATE table_a SET col_x = NEW.y WHERE id = OLD.id;
           END;
         ''');
-        await db.execute(
-          'INSERT INTO table_a(id, col_x) VALUES (?, ?)',
-          [1, 100],
-        );
-        await db.execute(
-          'INSERT INTO table_b(id, y) VALUES (?, ?)',
-          [1, 200],
-        );
+        await db.execute('INSERT INTO table_a(id, col_x) VALUES (?, ?)', [
+          1,
+          100,
+        ]);
+        await db.execute('INSERT INTO table_b(id, y) VALUES (?, ?)', [1, 200]);
 
         // Stream watches a column on table_a only.
         final probe = _StreamProbe(
@@ -166,10 +163,7 @@ void main() {
         // dispatch elision uses set intersection, the trigger-induced
         // col_b write is silently lost UNLESS the authorizer captured
         // col_b at prepare time.
-        await db.execute(
-          'UPDATE table_t SET col_a = ? WHERE id = 1',
-          [42],
-        );
+        await db.execute('UPDATE table_t SET col_a = ? WHERE id = 1', [42]);
         final after = await probe.event(2);
         expect(after[0]['col_b'], 84);
 
@@ -191,10 +185,10 @@ void main() {
             FOREIGN KEY(parent_id) REFERENCES parent(id) ON DELETE CASCADE
           )
         ''');
-        await db.execute(
-          'INSERT INTO parent(id, label) VALUES (?, ?)',
-          [1, 'p1'],
-        );
+        await db.execute('INSERT INTO parent(id, label) VALUES (?, ?)', [
+          1,
+          'p1',
+        ]);
         await db.execute(
           'INSERT INTO child(id, parent_id, data) VALUES (?, ?, ?)',
           [10, 1, 'c1'],

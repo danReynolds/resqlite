@@ -14,7 +14,8 @@ import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 
 // ---------------------------------------------------------------------------
-// Stream dependency tracking contract (experiment 106 polish)
+// Stream dependency tracking contract
+// ([EXP-106](../../experiments/106-column-level-deps.md) polish)
 // ---------------------------------------------------------------------------
 //
 // Stream dependency tracking is layered:
@@ -405,7 +406,8 @@ final class StreamEntry {
   /// Hash of the last emitted result, for change detection.
   int lastResultHash = 0;
 
-  /// Row count of the last emitted result (experiment 077). -1 means
+  /// Row count of the last emitted result
+  /// ([EXP-077](../../experiments/077-cheap-check-first-sweep.md)). -1 means
   /// "no baseline yet" — the initial query hasn't returned. Passed into
   /// `selectIfChanged` so the worker can short-circuit hashing once it
   /// knows the fresh row count diverges.

@@ -44,7 +44,8 @@ external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
 // Transaction-control fast path: pre-prepared BEGIN IMMEDIATE / COMMIT /
 // ROLLBACK stmts in C, run via sqlite3_reset + sqlite3_step instead of
-// sqlite3_exec's prepare+step+finalize per call (experiment 101).
+// sqlite3_exec's prepare+step+finalize per call
+// ([EXP-101](../../../experiments/101-tx-stmt-cache.md)).
 @ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'resqlite_tx_begin_immediate',
   isLeaf: true,
@@ -311,7 +312,8 @@ void executeNestedBatchWrite(
 
 /// Per-worker persistent buffer for dirty-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte calloc/free
-/// pair on every write (experiment 070).
+/// pair on every write
+/// ([EXP-070](../../../experiments/070-zero-row-change-shortcircuit.md)).
 final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
@@ -337,9 +339,10 @@ external int resqliteGetReadTables(
   int maxTables,
 );
 
-// Experiment 106: column-level dependency tracking. The C layer captures
-// structured table/column pairs alongside table dependencies; these bindings
-// fetch them on the same cadence as the table-level FFI.
+// [EXP-106](../../../experiments/106-column-level-deps.md): column-level
+// dependency tracking. The C layer captures structured table/column pairs
+// alongside table dependencies; these bindings fetch them on the same cadence
+// as the table-level FFI.
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
@@ -391,8 +394,10 @@ external int resqliteDbStatusTotal(
 
 /// Per-worker persistent buffer for read-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte
-/// calloc/free pair per stream subscription (experiment 077).
-/// Mirrors the `_dirtyTablesBuf` pattern introduced in exp 070.
+/// calloc/free pair per stream subscription
+/// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md)).
+/// Mirrors the `_dirtyTablesBuf` pattern introduced in
+/// [EXP-070](../../../experiments/070-zero-row-change-shortcircuit.md).
 final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
@@ -427,9 +432,10 @@ TableDependencies _decodeTableDependencies(
   return TableDependencies.fixed(tables);
 }
 
-// Experiment 106: per-worker persistent buffers for column pointer
-// marshalling. The C layer returns parallel table/column arrays so names with
-// dots do not need escaping or ad-hoc parsing in Dart.
+// [EXP-106](../../../experiments/106-column-level-deps.md): per-worker
+// persistent buffers for column pointer marshalling. The C layer returns
+// parallel table/column arrays so names with dots do not need escaping or
+// ad-hoc parsing in Dart.
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =

@@ -5,7 +5,8 @@
 /// counters themselves are plain `int` fields; they cost nothing when
 /// never incremented.
 ///
-/// **Purpose.** Support memory-axis experiments (exp 055 columnar typed
+/// **Purpose.** Support memory-axis experiments
+/// ([EXP-055](../../experiments/055-columnar-typed-arrays.md) columnar typed
 /// arrays, FFI param allocation, blob path optimization, etc.) by
 /// giving the profile-mode harness exact counts of what the decode
 /// path produced. RSS delta from `ProcessInfo.currentRss` is a coarse
@@ -21,7 +22,8 @@
 ///
 /// **Counters that require worker-isolate visibility** (per-SQLite-type
 /// breakdowns, e.g. "how many int cells got boxed into `List<Object?>`"
-/// — the exp 055 metric) are NOT captured here yet. Adding them
+/// — the [EXP-055](../../experiments/055-columnar-typed-arrays.md) metric)
+/// are NOT captured here yet. Adding them
 /// requires a round-trip request to each worker to snapshot its local
 /// state, which is a meaningful protocol addition — deferred to the
 /// experiment that actually needs it.

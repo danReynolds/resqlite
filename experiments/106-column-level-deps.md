@@ -1,4 +1,4 @@
-# Experiment 106: Column-level dependency tracking (re-attempt of 052)
+# EXP-106: Column-level dependency tracking (re-attempt of [EXP-052](052-column-level-dependencies.md))
 
 **Date:** 2026-04-25
 **Status:** Accepted
@@ -13,7 +13,7 @@ streams on a wide table) the writer pays a per-stream re-query dispatch
 even when the modified column couldn't possibly change any stream's
 result.
 
-The original [exp 052](052-column-level-dependencies.md) was deferred as
+The original [EXP-052](052-column-level-dependencies.md) was deferred as
 *"benchmark-invisible"* — the design was sound, but the existing
 streaming benchmarks all watched every column of every table, so the
 dispatch-elision win had nowhere to show up. With the
@@ -32,7 +32,7 @@ Pre-experiment back-of-envelope on cap=4 baseline:
 | Overlap (write to projected column) | 4,477 | every stream must re-query |
 
 The 12.7× gap between the no-streams ceiling and the 50-stream disjoint
-case is the writer-side fan-out tax that exp 052 was designed to remove.
+case is the writer-side fan-out tax that [EXP-052](052-column-level-dependencies.md) was designed to remove.
 
 ## Hypothesis
 
@@ -139,12 +139,12 @@ Benchmark: [`benchmark/results/2026-04-25T22-10-11-exp106-column-level-deps.md`]
 
 ### A11c (50 streams × 500 writes)
 
-| Scenario | Cap=4 baseline | exp106 | Delta |
+| Scenario | Cap=4 baseline | EXP-106 | Delta |
 |---|---|---|---|
 | No-streams (writer ceiling) | 50,110 w/s | run-to-run noise (noisy) | — |
 | **Disjoint column writes** | **3,956 w/s** | **7,201 w/s** | **+82%** |
 | Overlap column writes | 4,477 w/s | 4,581 w/s | +2.3% (within noise) |
-| Overlap/disjoint ratio | 1.132 | **0.636** | exactly the signal exp 052 was designed to deliver |
+| Overlap/disjoint ratio | 1.132 | **0.636** | exactly the signal [EXP-052](052-column-level-dependencies.md) was designed to deliver |
 
 The no-streams baseline column has high run-to-run variance (the
 benchmark stability column flags it as "noisy", CV ~23%) because it's a
@@ -174,7 +174,7 @@ the dirtied table — a follow-up experiment.
   elision is selective rather than wholesale.
 - **Disjoint Columns Stream Suite:** re-emit ratio for resqlite stays
   at 0.000 on disjoint scenarios — same as before. The stream-side hash
-  short-circuit (exp 075) was already at 0 emissions; this experiment
+  short-circuit ([EXP-075](075-native-hash-selectifchanged.md)) was already at 0 emissions; this experiment
   adds the writer-side dispatch elision on top, so the *cost* of getting
   to that 0-emission state is what dropped, not the emission count
   itself.
@@ -212,12 +212,12 @@ stmt entry now also stores its captured column set (up to 64 strings
 per entry, capped at 32 cached entries per connection). The 95% CI on
 the regressions includes 0 MB on the lower bound — these are RSS
 outliers driven by p90 rather than a tight median. Acceptable for the
-+82% writer-throughput win on the workloads exp 052 was designed for.
++82% writer-throughput win on the workloads [EXP-052](052-column-level-dependencies.md) was designed for.
 
 ## Decision
 
 **Accepted.** The change ships measurable writer-side dispatch elision
-on the workloads exp 052 was originally designed for, with no functional
+on the workloads [EXP-052](052-column-level-dependencies.md) was originally designed for, with no functional
 regressions to the invalidation contract:
 
 - `dart test` — 209/209 tests pass (no test had to change).
@@ -239,7 +239,7 @@ benchmark was added to PR #39 to make visible.
   re-query for any stream watching the inserted/deleted table, even if
   the WHERE clause means no row could enter or exit that stream's
   result. Tighter handling would need preupdate-hook per-column diffing
-  (which exp 057 rejected as below-noise on bulk writes) or a custom
+  (which [EXP-057](057-preupdate-batching.md) rejected as below-noise on bulk writes) or a custom
   SQL parser. Out of scope here.
 - **Dirty-set drain elision** could push disjoint w/s closer to the
   no-streams ceiling: if `_streamEngine` knows no stream watches any of
@@ -337,7 +337,7 @@ prepare time. Three black-box tests were written *first*
    at prepare time, the trigger-induced write is silently lost.
 3. FK `ON DELETE CASCADE` from parent to child.
 
-All three pass on the original exp-106 implementation. SQLite's
+All three pass on the original EXP-106 implementation. SQLite's
 authorizer fires `SQLITE_UPDATE` events during prepare for every
 column the calling stmt's bytecode could write (including those
 generated from compiled trigger bodies and FK cascade actions). The
@@ -347,7 +347,7 @@ tests are locked in as regression protection.
 
 ### Performance check
 
-Three workloads, vs `main` (the cap=4 baseline before exp 106):
+Three workloads, vs `main` (the cap=4 baseline before EXP-106):
 
 | Workload | Main | Polish | Δ |
 |---|---|---|---|
@@ -360,7 +360,7 @@ Three workloads, vs `main` (the cap=4 baseline before exp 106):
 | A11b wall median | 245.51 ms | 241.86 ms | -1.5 % (noise) |
 
 The +72.5 % on A11c disjoint is within run-to-run noise of the
-+82 % originally reported for the unpolished exp 106 code (single-
++82 % originally reported for the unpolished EXP-106 code (single-
 iteration runs; the doc's three-iteration medians were tighter).
 Crucially, the overlap/disjoint ratio drops to 0.647 — the
 dispatch-elision signature — confirming the column elision still
@@ -371,10 +371,10 @@ stays flat.
 ### Out of scope
 
 * **Schema watchdog / DDL invalidation.** A pre-existing hazard
-  tracked by deferred [exp 068](068-ddl-schema-watchdog.md): when
+  tracked by deferred [EXP-068](068-ddl-schema-watchdog.md): when
   `ALTER TABLE` adds or drops columns, cached column metadata goes
   stale, but the cache is keyed on SQL text so the next prepare hits
-  the cache and re-uses stale metadata. exp 106 inherits but does
+  the cache and re-uses stale metadata. EXP-106 inherits but does
   not introduce this. Documented here so future revisitors don't
   re-discover it as new.
 * **Full SQLite-level OOM simulation.** The expanded cleanup added a

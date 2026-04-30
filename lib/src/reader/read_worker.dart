@@ -59,7 +59,9 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastResultHash;
 
   /// Previously-emitted row count, or `-1` if unknown. Passed into
-  /// `resqlite_query_hash` to enable the exp 077 short-circuit when
+  /// `resqlite_query_hash` to enable the
+  /// [EXP-077](../../../experiments/077-cheap-check-first-sweep.md)
+  /// short-circuit when
   /// the fresh row count already diverges.
   final int lastRowCount;
 }
@@ -115,10 +117,12 @@ void readerEntrypoint(List<Object> args) {
 
         case SelectWithDepsRequest(:final sql, :final parameters):
           // Initial stream query produces hash + row-count baselines
-          // (exp 075 + 077) so future selectIfChanged calls can
-          // short-circuit on unchanged state. Experiment 106 piggybacks table
-          // dependencies on the same call so the stream engine can perform
-          // writer-side dispatch elision.
+          // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)
+          // + [EXP-077](../../../experiments/077-cheap-check-first-sweep.md))
+          // so future selectIfChanged calls can short-circuit on unchanged state.
+          // [EXP-106](../../../experiments/106-column-level-deps.md)
+          // piggybacks table dependencies on the same call so the stream
+          // engine can perform writer-side dispatch elision.
           final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
@@ -140,9 +144,12 @@ void readerEntrypoint(List<Object> args) {
           :final lastResultHash,
           :final lastRowCount,
         ):
-          // Two-pass selectIfChanged (exp 075). Row-count short-circuit
-          // (exp 077) stops the hash walk early if count-differ is already
-          // evident, so the changed case pays less pass-1 work.
+          // Two-pass selectIfChanged
+          // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)).
+          // Row-count short-circuit
+          // ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md))
+          // stops the hash walk early if count-differ is already evident, so
+          // the changed case pays less pass-1 work.
           final (newHash, newRowCount, raw) = executeQueryIfChanged(
             dbHandleAddr,
             readerId,
@@ -286,9 +293,11 @@ Uint8List executeQueryBytes(
 ///
 /// Returns the rows, the authorizer-captured read dependencies
 /// ([TableDependencies.unknown] when the C-side reliability flag was tripped
-/// during prepare), the C-computed baseline hash (exp 075), and the row count
-/// (exp 077 — cached so subsequent selectIfChanged calls can short-circuit on
-/// count mismatch).
+/// during prepare), the C-computed baseline hash
+/// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)), and
+/// the row count
+/// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md) — cached so
+/// subsequent selectIfChanged calls can short-circuit on count mismatch).
 (RawQueryResult, TableDependencies, int, int) executeQueryWithDeps(
   int handleAddr,
   int readerId,
@@ -305,7 +314,10 @@ Uint8List executeQueryBytes(
   );
 });
 
-/// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).
+/// Two-pass selectIfChanged
+/// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md) +
+/// row-count short-circuit
+/// [EXP-077](../../../experiments/077-cheap-check-first-sweep.md)).
 ///
 /// Pass 1: `resqliteQueryHash` steps + hashes the bound stmt in C. If
 /// the fresh hash matches the stream's last-emitted value AND the row
