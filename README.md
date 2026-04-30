@@ -19,8 +19,8 @@ final db = await Database.open('app.db');
 final users = await db.select('SELECT * FROM users WHERE active = ?', [1]);
 await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
 
-// Reactive queries — automatic table dependency detection using SQLite's
-// authorizer hook and the pre-update hook for invalidation.
+// Reactive queries — automatic dependency detection using SQLite's
+// authorizer hook and the pre-update hook for column-aware invalidation.
 db.stream('SELECT * FROM users WHERE active = ?', [1]).listen((users) {
   setState(() => this.users = users);
 });
@@ -42,8 +42,8 @@ await db.transaction((tx) async {
 ## Features
 
 - **🚀 Zero main-isolate jank.** Reads, writes, and reactive re-queries all run on persistent worker isolates. A 5,000-row query uses sub-millisecond main-isolate time.
-- **⚡ Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns any query into a live stream. Table dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
-- **🔁 Smart invalidation.** Identical queries are deduplicated. Unchanged results are suppressed. Re-queries fire immediately on write commit — sub-millisecond, no polling.
+- **⚡ Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns any query into a live stream. Dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
+- **🔁 Column-aware invalidation.** Writes to unrelated columns do not wake streams that cannot change. Identical queries are deduplicated, unchanged results are suppressed, and uncertain metadata falls back safely to table-level invalidation.
 - **📦 Just SQL.** [`select`](./lib/src/database.dart), [`execute`](./lib/src/database.dart), [`executeBatch`](./lib/src/database.dart), [`transaction`](./lib/src/database.dart), [`stream`](./lib/src/database.dart). No ORM, no query builder, no code generation.
 - **🔒 Encryption.** Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.
 
@@ -53,13 +53,13 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 
 | Metric | Wall time | Main isolate time |
 |---|---:|---:|
-| Point query (1 row) | 0.010ms | 0.010ms |
-| 1,000-row select() | 0.40ms | 0.10ms |
-| 10,000-row select() | 5.60ms | 1.01ms |
-| Batch insert (1,000 rows) | 0.43ms | 0.00ms |
-| Stream invalidation | 0.05ms | 0.05ms |
+| Point query (1 row) | 0.008ms | 0.008ms |
+| 1,000-row select() | 0.44ms | 0.09ms |
+| 10,000-row select() | 4.65ms | 0.88ms |
+| Batch insert (1,000 rows) | 0.44ms | 0.44ms |
+| Stream invalidation | 0.06ms | 0.06ms |
 
-~107K point queries/sec. 1.8x faster wall-clock reads and 7.9x less main-isolate time at 1K rows compared to synchronous alternatives. Sub-millisecond stream invalidation.
+~123K point queries/sec. 2.5x faster wall-clock reads and 12x less main-isolate time at 1K rows compared to synchronous alternatives. Sub-millisecond stream invalidation.
 
 Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Batch inserts at scale are comparable to sqlite3. Results will vary by hardware. The [sqlite3](https://pub.dev/packages/sqlite3) package is a great choice for synchronous workloads; [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync) offers production-tested streaming with built-in throttling. resqlite is optimized for Flutter apps where main-isolate time is the critical constraint.
 
@@ -76,6 +76,7 @@ db.stream('SELECT * FROM users WHERE active = ?', [1]).listen((users) {
 That's the entire reactive API. Under the hood:
 
 - **Automatic dependency tracking** via SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) — no manual table lists
+- **Column-aware dispatch** — writes to columns outside a stream's projection are skipped when SQLite metadata is precise
 - **Deduplication** — 100 widgets watching the same query = 1 actual SQLite query per write
 - **Unchanged suppression** — writes that don't change your query's results are silently filtered
 - **Immediate** — re-queries fire on write commit, not on a timer
@@ -162,9 +163,10 @@ class _TaskDashboardState extends State<TaskDashboard> {
 When a write hits the `tasks` table:
 
 1. resqlite looks up affected streams via an inverted index — no scanning.
-2. Only those streams re-query. Streams on other tables don't wake up.
-3. The worker hashes the new result. If the data hasn't changed, nothing is sent back and no work is done on the main isolate.
-4. If it changed, the [`StreamBuilder`](https://api.flutter.dev/flutter/widgets/StreamBuilder-class.html) receives the new data and rebuilds.
+2. If SQLite reported precise column metadata, streams whose selected columns are disjoint from the write do not wake up.
+3. Streams on other tables do not wake up; uncertain column metadata falls back to table-level re-query.
+4. The worker hashes the new result. If the data hasn't changed, nothing is sent back and no work is done on the main isolate.
+5. If it changed, the [`StreamBuilder`](https://api.flutter.dev/flutter/widgets/StreamBuilder-class.html) receives the new data and rebuilds.
 
 ### JSON bytes for HTTP responses
 
@@ -199,7 +201,7 @@ await db.executeBatch(
 
 - **Reads** go through a [persistent reader pool](./lib/src/reader_pool.dart) (2-4 workers with dedicated C connections)
 - **Writes** go through a single [persistent writer isolate](./lib/src/write_worker.dart)
-- **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_count.html) for write invalidation
+- **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_count.html) for column-aware write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
 - [Full Breakdown](./docs/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
