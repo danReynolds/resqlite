@@ -116,19 +116,13 @@ void readerEntrypoint(List<Object> args) {
         case SelectWithDepsRequest(:final sql, :final parameters):
           // Initial stream query produces hash + row-count baselines
           // (exp 075 + 077) so future selectIfChanged calls can
-          // short-circuit on unchanged state. Experiment 106 piggybacks
-          // a per-table column-dependency map on the same call so the
-          // stream engine can perform writer-side dispatch elision.
-          final (raw, readTables, readColumns, initialHash, initialRowCount) =
+          // short-circuit on unchanged state. Experiment 106 piggybacks table
+          // dependencies on the same call so the stream engine can perform
+          // writer-side dispatch elision.
+          final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
-          result = (
-            _toRows(raw),
-            readTables,
-            readColumns,
-            initialHash,
-            initialRowCount,
-          );
+          result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
           final bytes = executeQueryBytes(
@@ -290,27 +284,25 @@ Uint8List executeQueryBytes(
 
 /// Execute a stream's initial query.
 ///
-/// Returns the rows, the authorizer-captured read tables (typed as
-/// [TableDependencies], with [TableDependencies.all] used when the C-side
-/// reliability flag was tripped during prepare), the
-/// per-table column dependencies (experiment 106), the C-computed
-/// baseline hash (exp 075), and the row count (exp 077 — cached so
-/// subsequent selectIfChanged calls can short-circuit on count
-/// mismatch).
-(RawQueryResult, TableDependencies, ColumnDependencyMap, int, int)
-executeQueryWithDeps(
+/// Returns the rows, the authorizer-captured read dependencies
+/// ([TableDependencies.unknown] when the C-side reliability flag was tripped
+/// during prepare), the C-computed baseline hash (exp 075), and the row count
+/// (exp 077 — cached so subsequent selectIfChanged calls can short-circuit on
+/// count mismatch).
+(RawQueryResult, TableDependencies, int, int) executeQueryWithDeps(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
   final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
-  // Collect both dependency views for this query before returning. Both
-  // getters serve metadata from the reader's most recent cached stmt entry,
-  // so there is no ordering dependency between them.
-  final readColumns = getReadColumns(dbHandle, readerId);
-  final readTables = getReadTables(dbHandle, readerId);
-  return (raw, readTables, readColumns, hash, raw.rowCount);
+  // Collect dependency metadata from the reader's most recent cached stmt entry.
+  return (
+    raw,
+    getReadTableDependencies(dbHandle, readerId),
+    hash,
+    raw.rowCount,
+  );
 });
 
 /// Two-pass selectIfChanged (experiment 075 + row-count short-circuit 077).

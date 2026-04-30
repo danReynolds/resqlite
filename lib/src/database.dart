@@ -345,7 +345,7 @@ final class Database {
     final writer = await _writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
-    _streamEngine.invalidate(response.invalidation);
+    _streamEngine.onDependencyChanges(response.modifications);
 
     return response.result;
   }
@@ -383,7 +383,7 @@ final class Database {
     );
 
     if (reponse != null) {
-      _streamEngine.invalidate(reponse.invalidation);
+      _streamEngine.onDependencyChanges(reponse.modifications);
     }
   }
 

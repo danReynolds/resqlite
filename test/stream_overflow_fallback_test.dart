@@ -1,13 +1,11 @@
 // Black-box correctness tests for the column / read / dirty set
 // overflow fallbacks introduced in the exp-106 polish.
 //
-// These don't *prove* dispatch elision (see
-// `column_invalidation_policy_test.dart` for the direct-policy
-// coverage that does), but they do prove end-to-end correctness
-// under the failure modes the reliability flags target. A stream
-// that overflows the C-side caps must still re-emit when its data
-// changes — the polish trades a perf optimization (column elision)
-// for guaranteed correctness when the optimization can't be applied.
+// These prove end-to-end correctness under the failure modes the
+// reliability flags target. A stream that overflows the C-side caps
+// must still re-emit when its data changes — the polish trades a perf
+// optimization (column elision) for guaranteed correctness when the
+// optimization can't be applied.
 //
 // Caps under test (must match `RESQLITE_MAX_DEP_COLUMNS`,
 // `RESQLITE_MAX_READ_TABLES`, `RESQLITE_MAX_DIRTY_TABLES` in C):
@@ -129,8 +127,8 @@ void main() {
         // Writer-side overflow: a stmt that SETs more than 64 columns
         // makes its `dep_columns` set unreliable. The preupdate hook
         // then propagates `dep_columns_reliable = 0` into
-        // `dirty_columns.reliable = 0`, so getDirtyColumnInvalidations returns 0
-        // entries — every stream that watches the table re-emits via
+        // `dirty_columns.reliable = 0`, so no column detail is attached —
+        // every stream that watches the table re-emits via
         // table-only fallback.
         //
         // The stream watches a column past the writer's 64-column cap

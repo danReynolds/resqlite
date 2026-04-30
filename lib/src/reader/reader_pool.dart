@@ -8,8 +8,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../dependency_tracking.dart'
-    show ColumnDependencies, ColumnDependencyMap, TableDependencies;
+import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import 'read_worker.dart';
 
@@ -71,33 +70,16 @@ final class ReaderPool {
     return result as List<Map<String, Object?>>;
   }
 
-  /// Execute a query and capture read dependencies (table names + per-
-  /// table column sets).
+  /// Execute a query and capture read dependencies.
   ///
   /// Also returns the C-computed hash (exp 075) and row count (exp 077)
   /// of the initial result so later [selectIfChanged] calls have both
-  /// baselines to short-circuit against. Experiment 106 adds the
-  /// per-table column map; [ColumnDependencies.all] for a table means
-  /// "any column modification matters" (e.g. SELECT *).
-  Future<
-    (
-      List<Map<String, Object?>>,
-      TableDependencies,
-      ColumnDependencyMap,
-      int,
-      int,
-    )
-  >
+  /// baselines to short-circuit against. Experiment 106 nests optional
+  /// column detail under each table dependency.
+  Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
   selectWithDeps(String sql, [List<Object?> parameters = const []]) async {
     final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
-    return result
-        as (
-          List<Map<String, Object?>>,
-          TableDependencies,
-          ColumnDependencyMap,
-          int,
-          int,
-        );
+    return result as (List<Map<String, Object?>>, TableDependencies, int, int);
   }
 
   /// Execute a query returning JSON-encoded bytes.

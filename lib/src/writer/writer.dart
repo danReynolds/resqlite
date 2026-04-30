@@ -162,7 +162,7 @@ final class Writer {
     );
 
     if (Transaction.current == null) {
-      _streamEngine.invalidate(response.invalidation);
+      _streamEngine.onDependencyChanges(response.modifications);
     }
 
     return result;

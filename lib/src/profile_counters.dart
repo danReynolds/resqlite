@@ -51,8 +51,8 @@ class ProfileCounters {
   static int cellsDecoded = 0;
 
   /// Cumulative wall-clock microseconds spent inside the synchronous
-  /// body of `StreamEngine.invalidate` — `_tableIndex` lookup,
-  /// per-entry [_writeAffectsEntry] intersection check, dirty/in-flight
+  /// body of `StreamEngine.onDependencyChanges` — `_tableIndex` lookup,
+  /// per-entry column intersection checks, dirty/in-flight
   /// scheduling, and `_flushQueue` kickoff. Incremented per write when
   /// at least one stream is registered. Used by the A11c profile
   /// harness to isolate writer-side fanout cost from the reader-pool
@@ -61,9 +61,9 @@ class ProfileCounters {
   static int invalidateCount = 0;
 
   /// Cumulative wall-clock microseconds spent specifically inside
-  /// `StreamEngine._writeAffectsEntry` — the per-entry column-set
-  /// intersection probe added in exp 106. Sum across every entry
-  /// visited per invalidate. Lets the harness compute average
+  /// `StreamEngine.onDependencyChanges` column-set intersection probes.
+  /// Sum across every concrete column-vs-column watcher visited per
+  /// dependency change. Lets the harness compute average
   /// per-watcher intersection cost as `intersectionUs /
   /// intersectionEntries`.
   static int intersectionUs = 0;
@@ -71,13 +71,13 @@ class ProfileCounters {
 
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
-        'rows_decoded': rowsDecoded,
-        'cells_decoded': cellsDecoded,
-        'invalidate_us': invalidateUs,
-        'invalidate_count': invalidateCount,
-        'intersection_us': intersectionUs,
-        'intersection_entries': intersectionEntries,
-      };
+    'rows_decoded': rowsDecoded,
+    'cells_decoded': cellsDecoded,
+    'invalidate_us': invalidateUs,
+    'invalidate_count': invalidateCount,
+    'intersection_us': intersectionUs,
+    'intersection_entries': intersectionEntries,
+  };
 
   /// Compute `after - before` for every key present in both snapshots.
   static Map<String, int> diff(

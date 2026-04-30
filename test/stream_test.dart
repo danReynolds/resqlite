@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 // ignore: implementation_imports
 import 'package:resqlite/src/dependency_tracking.dart'
-    show StreamInvalidation, TableDependencies;
+    show TableDependencies, TableDependency;
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
@@ -797,10 +797,8 @@ void main() {
 
         // Break the query by renaming the column it selects.
         await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-        db.streamEngine.invalidate(
-          const StreamInvalidation.dirty(
-            TableDependencies.fixed(<String>['items']),
-          ),
+        db.streamEngine.onDependencyChanges(
+          const TableDependencies.fixed([TableDependency('items')]),
         );
 
         // Error should be delivered to onError, not swallowed.

@@ -76,37 +76,31 @@ identical to dirty-table semantics: writes that modify zero rows leave
 both sets clean, and per-row hook firings only do an O(small) dedup
 linear scan.
 
-**3. Dispatch elision.** `StreamEngine.invalidate(invalidation)` receives a
-`StreamInvalidation` from the writer. Write-side column metadata is grouped as
-`List<TableInvalidation>` (`table` + `ColumnDependencies`) and normalized to a
-map once inside the stream engine before the per-entry intersection check:
+**3. Dispatch elision.** `StreamEngine.onDependencyChanges(modifications)`
+receives `TableDependencies` from the writer. Known write-side detail is a
+`List<TableDependency>`: a plain `TableDependency(table)` means table-level
+fallback, while `TableColumDependency(table, columns)` enables column
+intersection:
 
 ```dart
-// Pseudo-code from lib/src/stream_engine.dart:_writeAffectsEntry
-for (final table in dirtyTables) {
-  if (!entryDeps.contains(table)) continue;
-  final writerCols = switch (dirtyColumns[table]) {
-    FixedColumnDependencies(:final columns) => columns,
-    _ => null,
-  };
-  if (writerCols == null) return true;       // wildcard / unknown — re-query
-  final readerCols = switch (entryCols[table]) {
-    FixedColumnDependencies(:final columns) => columns,
-    _ => null,
-  };
-  if (readerCols == null) return true;       // wildcard / unknown — re-query
-  for (final c in writerCols) {              // both concrete: intersect
-    if (readerCols.contains(c)) return true;
-  }
+// Pseudo-code from lib/src/stream_engine.dart:onDependencyChanges
+final dependency = entry.dependencies[modification.table];
+if (dependency == null) return false;
+
+return switch ((dependency, modification)) {
+  (
+    TableColumDependency(columns: final readColumns),
+    TableColumDependency(columns: final modifiedColumns),
+  ) =>
+    readColumns.intersects(modifiedColumns),
+  _ => true, // table-level dependency or modification: re-query
 }
-return false;                                 // disjoint — skip dispatch
 ```
 
 The check is O(small × small) per watcher per dirty table — typically
 2-5 columns each. It runs only when both sides have concrete column
-sets; either side carrying a wildcard or missing column metadata degrades
-to today's unconditional re-query, so the experiment never *reduces*
-invalidation fidelity.
+sets; either side falling back to table-level metadata degrades to today's
+unconditional re-query, so the experiment never *reduces* invalidation fidelity.
 
 ### Files touched
 
@@ -119,22 +113,22 @@ invalidation fidelity.
   structured table/column pairs.
 - `native/resqlite.h` — public FFI surface for the two new getters and
   `RESQLITE_MAX_DEP_COLUMNS = 64`.
-- `lib/src/native/resqlite_bindings.dart` — `getReadColumns()` and
-  `getDirtyColumnInvalidations()` returning grouped table invalidations
-  (`TableInvalidation(table, ColumnDependencies...)`).
-- `lib/src/dependency_tracking.dart` — table/column dependency ADTs plus
-  `StreamInvalidation` and write-side `TableInvalidation` values.
+- `lib/src/native/resqlite_bindings.dart` — `getReadTableDependencies()` and
+  `getDirtyTableDependencies()` returning grouped table dependencies /
+  modifications with column detail nested under matching tables.
+- `lib/src/dependency_tracking.dart` — read-side `TableDependencies` and
+  write-side `TableDependencies`, plus column-precise per-table variants.
 - `lib/src/reader/read_worker.dart` — `executeQueryWithDeps` now returns
-  the column map alongside table list.
+  merged table dependencies.
 - `lib/src/reader/reader_pool.dart` — `selectWithDeps` tuple shape
   extended.
 - `lib/src/writer/write_worker.dart` — `ExecuteResponse` /
-  `BatchResponse` carry `StreamInvalidation`; rollback paths drain the
+  `BatchResponse` carry `TableDependencies`; rollback paths drain the
   column accumulator.
 - `lib/src/writer/writer.dart`, `lib/src/database.dart` — thread
-  `StreamInvalidation` into `_streamEngine.invalidate`.
-- `lib/src/stream_engine.dart` — `StreamEntry.columnDependencies`,
-  `invalidate(StreamInvalidation)` performs the intersection,
+  `TableDependencies` into `_streamEngine.onDependencyChanges`.
+- `lib/src/stream_engine.dart` — `StreamEntry.dependencies`,
+  `onDependencyChanges(TableDependencies)` performs the intersection,
   graceful degradation to table-only when either side is unknown.
 
 ## Results
@@ -157,7 +151,7 @@ benchmark stability column flags it as "noisy", CV ~23%) because it's a
 pure write loop with no streaming work and dominates short total wall
 time. Median run-to-run drift on a no-stream workload is not
 attributable to this change — the no-streams path doesn't exercise
-`StreamEngine.invalidate` at all.
+`StreamEngine.onDependencyChanges` at all.
 
 The disjoint w/s lift (+82%) clears the ≥+50% target threshold in the
 experiment scope. The overlap-vs-disjoint ratio dropping from 1.132 to
@@ -168,7 +162,7 @@ writes now skip the re-query entirely.
 The disjoint case still doesn't reach the no-streams ceiling because the
 writer mutex, FFI crossing, and dirty-set drain all stay on the per-write
 path. Reaching the ceiling would require also eliding the
-`getDirtyColumnInvalidations` / `getDirtyTables` round-trip when no stream watches
+dirty-dependency drain round-trip when no stream watches
 the dirtied table — a follow-up experiment.
 
 ### Other A11/A11b workloads
@@ -241,7 +235,7 @@ benchmark was added to PR #39 to make visible.
 
 ## Notes for follow-ups
 
-- **Wildcard column sentinel for INSERT/DELETE** is conservative — it forces a
+- **Table-level modification for INSERT/DELETE** is conservative — it forces a
   re-query for any stream watching the inserted/deleted table, even if
   the WHERE clause means no row could enter or exit that stream's
   result. Tighter handling would need preupdate-hook per-column diffing
@@ -249,8 +243,8 @@ benchmark was added to PR #39 to make visible.
   SQL parser. Out of scope here.
 - **Dirty-set drain elision** could push disjoint w/s closer to the
   no-streams ceiling: if `_streamEngine` knows no stream watches any of
-  the dirtied tables, the writer could skip `getDirtyColumnInvalidations` /
-  `getDirtyTables` entirely. The current code always drains both sets
+  the dirtied tables, the writer could skip `getDirtyTableDependencies`
+  entirely. The current code always drains both native sets
   for every write.
 - **Wildcard column reads** for triggers / views: the authorizer fires
   inside trigger bodies and view evaluations with concrete column
@@ -298,13 +292,14 @@ sets. The asymmetric FFI boundary is the load-bearing piece:
 
 * **column getters** (`resqlite_get_read_columns`,
   `resqlite_get_dirty_columns`) return 0 on unreliable. Zero entries
-  is interpreted by `_writeAffectsEntry` as "absent column map for
-  this table" and falls through to table-level re-query.
+  means no per-table column detail is attached, so the Dart layer builds
+  plain `TableDependency(table)` entries and falls through to table-level
+  re-query.
 * **table getters** (`resqlite_get_read_tables`,
   `resqlite_get_dirty_tables`) return -1 on unreliable. Zero would
   mean "no deps" / "no dirty tables" — both result in stuck streams;
   -1 is the explicit unknown sentinel that forces the Dart side to
-  route into the `_allTableEntries` bucket (subscribe path) or
+  route into the `_unknownDepsEntries` bucket (subscribe path) or
   invalidate every active entry (write path).
 
 A follow-up cleanup split the dependency tracking primitives out of
@@ -314,22 +309,19 @@ table/column pairs backed by one compact allocation. This removes
 delimiter parsing at the FFI boundary and preserves table or column
 names that contain dots.
 
-The Dart layer captures the dependency sentinels in matching types:
-`TableDependencies` (`TableDependencies.fixed(tables)` vs
-`TableDependencies.all`) for the table correctness layer, and
-`ColumnDependencies` (`ColumnDependencies.fixed(columns)` vs
-`ColumnDependencies.all`) for the per-table column optimization
-layer. Writer responses publish a `StreamInvalidation`; concrete write-side
-column detail is a list of `TableInvalidation` values, which keeps the event
-shape explicit while the stream engine normalizes it for hot lookup.
-`_allTableEntries` remains the StreamEngine-level bucket for streams with
+The Dart layer captures table uncertainty explicitly:
+`TableDependencies.unknown` for unreliable read-side table tracking and
+`TableDependencies.unknown` for unreliable writer-side dirty-table tracking.
+Known writer responses publish `TableDependencies.fixed([...])`; a plain
+`TableDependency(table)` means table-level fallback, while
+`TableColumDependency(table, columns)` enables column elision.
+`_unknownDepsEntries` remains the StreamEngine-level bucket for streams with
 unknown table dependencies. The
 contract is documented at the top of `lib/src/stream_engine.dart`:
 *tables = correctness, columns = optimization*. The dispatch
-elision policy is extracted into a `@visibleForTesting`
-`ColumnInvalidationPolicy.affects` so direct unit tests can prove
-the dispatch decision regardless of result-change-detection
-confounds.
+elision policy is simple enough to live directly in
+`StreamEngine.onDependencyChanges`; black-box overflow and stream tests cover
+the conservative fallback paths.
 
 ### Trigger / FK cascade verification (Phase 0)
 

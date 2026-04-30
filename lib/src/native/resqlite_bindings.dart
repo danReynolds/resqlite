@@ -318,27 +318,6 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _dirtyTablesBuf =
 /// Mirrors `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` in `native/resqlite.h`.
 const _dependencyCountUnknown = -1;
 
-/// Read and clear the dirty tables set from the C connection.
-///
-/// Zero-row-change short-circuit (experiment 070): if the count is 0, skip
-/// the `List<String>` allocation and return an empty [TableDependencies]
-/// value.
-///
-/// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel
-/// returned when the C-side dirty-table set overflowed / OOMed during
-/// the write — interpreted by the StreamEngine as "every active stream
-/// must invalidate".
-TableDependencies getDirtyTables(ffi.Pointer<ffi.Void> dbHandle) {
-  final count = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
-  if (count == _dependencyCountUnknown) return TableDependencies.all;
-  if (count == 0) return const TableDependencies.fixed(<String>[]);
-  final tables = List<String>.filled(count, '', growable: false);
-  for (var i = 0; i < count; i++) {
-    tables[i] = _dirtyTablesBuf[i].toDartString();
-  }
-  return TableDependencies.fixed(tables);
-}
-
 // ---------------------------------------------------------------------------
 // Read dependency tracking
 // ---------------------------------------------------------------------------
@@ -418,27 +397,32 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
   64,
 );
 
-/// Get the set of tables read by the most recent acquired statement on the
-/// given reader.
+/// Build the final nested table dependency value from native table metadata
+/// and optional per-table column detail.
 ///
-/// Repeated calls return metadata from the same cached statement entry until
-/// the reader runs another query or the entry is evicted.
-///
-/// Zero-table short-circuit: if the count is 0, skip the `List<String>`
-/// allocation and return an empty [TableDependencies] value.
-///
-/// Polish (post-2026-04): [_dependencyCountUnknown] is the unknown sentinel —
-/// the C-side `read_tables_reliable` flag flipped during prepare, so
-/// the stream's true table dependencies are not known. Returns
-/// [TableDependencies.all]; the StreamEngine routes such streams into
-/// the "all tables" fallback bucket so every write invalidates them.
-TableDependencies getReadTables(ffi.Pointer<ffi.Void> dbHandle, int readerId) {
-  final count = resqliteGetReadTables(dbHandle, readerId, _readTablesBuf, 64);
-  if (count == _dependencyCountUnknown) return TableDependencies.all;
-  if (count == 0) return const TableDependencies.fixed(<String>[]);
-  final tables = List<String>.filled(count, '', growable: false);
+/// Table metadata is authoritative. Column detail can only refine tables that
+/// are already present in [tableBuf]; details for other tables are ignored.
+TableDependencies _decodeTableDependencies(
+  int count,
+  ffi.Pointer<ffi.Pointer<Utf8>> tableBuf,
+  List<TableDependency> columnDetails,
+) {
+  if (count == _dependencyCountUnknown) return TableDependencies.unknown;
+  if (count == 0) return TableDependencies.none;
+
+  final byTable = columnDetails.isEmpty
+      ? null
+      : <String, TableDependency>{
+          for (final detail in columnDetails) detail.table: detail,
+        };
+  final tables = List<TableDependency>.filled(
+    count,
+    const TableDependency(''),
+    growable: false,
+  );
   for (var i = 0; i < count; i++) {
-    tables[i] = _readTablesBuf[i].toDartString();
+    final table = tableBuf[i].toDartString();
+    tables[i] = byTable?[table] ?? TableDependency(table);
   }
   return TableDependencies.fixed(tables);
 }
@@ -451,86 +435,53 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 
-/// Decode `count` parallel table/column pointers into a per-table column map.
-/// Wildcard columns (`"*"`) collapse the table to [ColumnDependencies.all].
+/// Decode table/column pointers into grouped column details.
 ///
-/// Used by [getReadColumns], which keeps reader dependencies map-shaped for
-/// hot lookup by table in the stream policy.
-ColumnDependencyMap _decodeColumnMap(int count) {
-  if (count <= 0) return const <String, ColumnDependencies>{};
-  final out = <String, ColumnDependencies>{};
-  for (var i = 0; i < count; i++) {
-    final table = _columnTablesBuf[i].toDartString();
-    final col = _columnNamesBuf[i].toDartString();
-    if (col == '*') {
-      out[table] = ColumnDependencies.all;
-      continue;
-    }
-    switch (out[table]) {
-      case AllColumnDependencies():
-        // Wildcard already present — keep it.
-        continue;
-      case FixedColumnDependencies(:final columns):
-        columns.add(col);
-      case null:
-        out[table] = ColumnDependencies.fixed(<String>{col});
-    }
-  }
-  return out;
-}
-
-/// Decode writer-side table/column pairs into grouped invalidation objects.
-///
-/// This is intentionally list-shaped because it represents a write event:
-/// "these tables were dirtied, with these column details where available."
-/// Stream read dependencies stay map-shaped because the hot policy path looks
-/// them up by table.
-List<TableInvalidation> _decodeTableInvalidations(int count) {
-  if (count <= 0) return const <TableInvalidation>[];
-  final out = <TableInvalidation>[];
+/// Wildcard columns (`"*"`) collapse the table to a plain [TableDependency],
+/// which means column-level precision is unavailable for that table.
+List<TableDependency> _decodeColumnDetails(int count) {
+  if (count <= 0) return const <TableDependency>[];
+  final out = <TableDependency>[];
   for (var i = 0; i < count; i++) {
     final table = _columnTablesBuf[i].toDartString();
     final col = _columnNamesBuf[i].toDartString();
     final existingIndex = out.indexWhere((entry) => entry.table == table);
 
     if (col == '*') {
-      final invalidation = TableInvalidation(table, ColumnDependencies.all);
+      final dependency = TableDependency(table);
       if (existingIndex == -1) {
-        out.add(invalidation);
+        out.add(dependency);
       } else {
-        out[existingIndex] = invalidation;
+        out[existingIndex] = dependency;
       }
       continue;
     }
 
     if (existingIndex == -1) {
-      out.add(
-        TableInvalidation(table, ColumnDependencies.fixed(<String>{col})),
-      );
+      out.add(TableColumDependency(table, <String>{col}));
       continue;
     }
 
-    switch (out[existingIndex].columns) {
-      case AllColumnDependencies():
-        // Wildcard already present — keep it.
-        continue;
-      case FixedColumnDependencies(:final columns):
+    switch (out[existingIndex]) {
+      case TableColumDependency(:final columns):
         columns.add(col);
+      case TableDependency():
+        // Table-level dependency already present — keep it.
+        continue;
     }
   }
   return out;
 }
 
-/// Get the per-reader read-column metadata as a Dart map of
-/// `table -> ColumnDependencies`. Wildcards collapse the table to
-/// [ColumnDependencies.all], signalling "any column matters".
+/// Get per-reader column detail for the most recent acquired statement.
+/// Wildcards collapse the table to a plain [TableDependency].
 ///
 /// Repeated calls return metadata from the most recent acquired statement until
 /// the reader runs another query or the entry is evicted.
 ///
-/// Zero-entry short-circuit returns a `const {}` to avoid allocations on
+/// Zero-entry short-circuit returns a const empty list to avoid allocations on
 /// the hot streaming path.
-ColumnDependencyMap getReadColumns(
+List<TableDependency> _getReadColumnDetails(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
 ) {
@@ -541,23 +492,55 @@ ColumnDependencyMap getReadColumns(
     _columnNamesBuf,
     64,
   );
-  return _decodeColumnMap(count);
+  return _decodeColumnDetails(count);
 }
 
-/// Drain the writer's dirty-column accumulator as grouped table invalidations.
+/// Drain the writer's dirty-column accumulator as grouped table details.
 ///
-/// Wildcards collapse to [ColumnDependencies.all] to signal "all columns of
-/// this table are dirty".
-List<TableInvalidation> getDirtyColumnInvalidations(
-  ffi.Pointer<ffi.Void> dbHandle,
-) {
+/// Wildcards collapse to a plain [TableDependency] to signal that the table
+/// changed without column-level precision.
+List<TableDependency> _getDirtyColumnDetails(ffi.Pointer<ffi.Void> dbHandle) {
   final count = resqliteGetDirtyColumns(
     dbHandle,
     _columnTablesBuf,
     _columnNamesBuf,
     64,
   );
-  return _decodeTableInvalidations(count);
+  return _decodeColumnDetails(count);
+}
+
+/// Read dependencies for the most recent acquired statement on [readerId].
+///
+/// The C layer exposes table and column metadata separately, but callers should
+/// consume the nested [TableDependencies] value returned here.
+TableDependencies getReadTableDependencies(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int readerId,
+) {
+  final tableCount = resqliteGetReadTables(
+    dbHandle,
+    readerId,
+    _readTablesBuf,
+    64,
+  );
+  final columnDetails = _getReadColumnDetails(dbHandle, readerId);
+  return _decodeTableDependencies(tableCount, _readTablesBuf, columnDetails);
+}
+
+/// Dirty dependencies for the completed write cycle, draining native state.
+///
+/// This drains both native dirty-table and dirty-column accumulators before
+/// constructing a single [TableDependencies] value.
+TableDependencies getDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
+  final tableCount = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  final columnDetails = _getDirtyColumnDetails(dbHandle);
+  return _decodeTableDependencies(tableCount, _dirtyTablesBuf, columnDetails);
+}
+
+/// Drain dirty dependency state when a write rolls back or is discarded.
+void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
+  resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
+  resqliteGetDirtyColumns(dbHandle, _columnTablesBuf, _columnNamesBuf, 64);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle
