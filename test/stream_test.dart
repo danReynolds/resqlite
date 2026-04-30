@@ -2,9 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-// ignore: implementation_imports
-import 'package:resqlite/src/dependency_tracking.dart'
-    show TableDependencies, TableDependency;
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
