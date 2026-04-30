@@ -253,9 +253,9 @@ Future<String> _run({
       'divided by writes/sec under disjoint. A ratio close to 1.0 means '
       'the library performs similar writer-side work in both scenarios; '
       'a ratio ≪ 1.0 means it is actually eliding per-stream dispatch '
-      'on disjoint writes. resqlite today is expected near 1.0; this '
-      'benchmark exists to make a future column-tracking optimization '
-      '(exp 052) visible by driving that ratio down.',
+      'on disjoint writes. With column-level dependency tracking enabled, '
+      'resqlite should drive that ratio below broad table-invalidation '
+      'peers by skipping column-disjoint stream dispatch.',
     )
     ..writeln();
 
@@ -315,7 +315,7 @@ Future<_PeerReadings> _measurePeer(
     warmup: warmup,
     iterations: iterations,
     updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-    valueFor: (i) => 'b$i',
+    valueFor: (writeIndex, iteration) => 'b$iteration-$writeIndex',
   );
 
   final disjoint = await _measureScenario(
@@ -325,7 +325,7 @@ Future<_PeerReadings> _measurePeer(
     warmup: warmup,
     iterations: iterations,
     updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-    valueFor: (i) => 'd$i',
+    valueFor: (writeIndex, iteration) => 'd$iteration-$writeIndex',
   );
 
   final overlap = await _measureScenario(
@@ -335,7 +335,7 @@ Future<_PeerReadings> _measurePeer(
     warmup: warmup,
     iterations: iterations,
     updateSql: 'UPDATE wide SET a = ? WHERE id = ?',
-    valueFor: (i) => 'z$i',
+    valueFor: (writeIndex, iteration) => 'z$iteration-$writeIndex',
   );
 
   return _PeerReadings(
@@ -353,7 +353,7 @@ Future<_ScenarioReading> _measureScenario(
   required int warmup,
   required int iterations,
   required String updateSql,
-  required String Function(int) valueFor,
+  required String Function(int writeIndex, int iteration) valueFor,
 }) async {
   final timing = BenchmarkTiming(peer.label);
   final wpsByIter = <double>[];
@@ -365,6 +365,7 @@ Future<_ScenarioReading> _measureScenario(
       streamCount: streamCount,
       writeCount: writeCount,
       updateSql: updateSql,
+      iteration: iter,
       valueFor: valueFor,
     );
     if (iter >= warmup) {
@@ -401,7 +402,8 @@ Future<_IterResult> _singleIteration(
   required int streamCount,
   required int writeCount,
   required String updateSql,
-  required String Function(int) valueFor,
+  required int iteration,
+  required String Function(int writeIndex, int iteration) valueFor,
 }) async {
   final emitCounts = List<int>.filled(streamCount, 0);
   final initialCompleters = <Completer<void>>[];
@@ -464,7 +466,7 @@ Future<_IterResult> _singleIteration(
       // a different partition each iteration in the with-streams runs,
       // so the partitioned streams all eventually see writes — making
       // overlap-vs-disjoint a meaningful distinction.
-      await peer.execute(updateSql, [valueFor(w), w % _rowCount]);
+      await peer.execute(updateSql, [valueFor(w, iteration), w % _rowCount]);
       // Two event-queue yields. `Future.delayed(Duration.zero)`
       // schedules via `Timer.run`, which drains the microtask queue
       // first and then fires on the next event-loop turn — defeating

@@ -163,7 +163,7 @@ Future<void> main(List<String> args) async {
             scenario: 'scale_n$n',
             streamCount: n,
             updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-            valueFor: (i) => 'd$i',
+            valueFor: (writeIndex, iteration) => 'd$iteration-$writeIndex',
           ),
         );
       }
@@ -176,7 +176,7 @@ Future<void> main(List<String> args) async {
           scenario: 'baseline',
           streamCount: 0,
           updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-          valueFor: (i) => 'b$i',
+          valueFor: (writeIndex, iteration) => 'b$iteration-$writeIndex',
         ),
       );
 
@@ -188,7 +188,7 @@ Future<void> main(List<String> args) async {
           scenario: 'disjoint',
           streamCount: _streamCount,
           updateSql: 'UPDATE wide SET c = ? WHERE id = ?',
-          valueFor: (i) => 'd$i',
+          valueFor: (writeIndex, iteration) => 'd$iteration-$writeIndex',
         ),
       );
 
@@ -200,7 +200,7 @@ Future<void> main(List<String> args) async {
           scenario: 'overlap',
           streamCount: _streamCount,
           updateSql: 'UPDATE wide SET a = ? WHERE id = ?',
-          valueFor: (i) => 'z$i',
+          valueFor: (writeIndex, iteration) => 'z$iteration-$writeIndex',
         ),
       );
     }
@@ -246,7 +246,7 @@ Future<List<_Sample>> _runScenario(
   required String scenario,
   required int streamCount,
   required String updateSql,
-  required String Function(int) valueFor,
+  required String Function(int writeIndex, int iteration) valueFor,
 }) async {
   final samples = <_Sample>[];
 
@@ -330,7 +330,7 @@ Future<List<_Sample>> _runScenario(
         writerSw
           ..reset()
           ..start();
-        await db.execute(updateSql, [valueFor(w), w % _rowCount]);
+        await db.execute(updateSql, [valueFor(w, iter), w % _rowCount]);
         writerSw.stop();
 
         final invalUs = ProfileCounters.invalidateUs - invalUsBefore;
