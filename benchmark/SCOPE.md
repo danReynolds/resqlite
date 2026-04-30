@@ -206,7 +206,7 @@ per workload live in the workload's source comments and in
 | A5 | Chat sim | **Shipped** (Phase 2) | Mixed R/W with joins and Zipfian distribution |
 | A6 | Feed paging | **Shipped** (Phase 2) | Keyset pagination + reactive stream under concurrent writes |
 | A11b | High-cardinality fan-out | **Shipped** (Phase 2) | 100 streams on a 10K-row table |
-| A11c | Many-streams writer throughput | **Shipped** (`--include-slow`) | Writes/sec under N=50 stream fan-out, disjoint vs overlapping projection. Writer-side counterpart to `disjoint_columns.dart`'s stream-side ratio; visible only when a column-tracking optimization (exp 052 design) elides per-stream dispatch. |
+| A11c | Many-streams writer throughput | **Shipped** (`--include-slow`) | Writes/sec under N=50 stream fan-out, disjoint vs overlapping projection. Writer-side counterpart to `disjoint_columns.dart`'s stream-side ratio; visible when EXP-106 column dependency tracking elides per-stream dispatch. |
 | A7 | Sync burst | **Shipped** (Phase 3, `--include-slow`) | 50K-row bulk insert with active stream |
 | A9 | 1 GB working set | **Shipped** (Phase 3, `--include-slow`) | mmap behavior and cache locality |
 

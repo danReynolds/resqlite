@@ -46,7 +46,7 @@ A pool of 2-4 persistent worker isolates dispatches queries via SendPort. Small 
 SQLite only supports one writer at a time. A single persistent writer isolate processes all writes sequentially, maintaining transaction state across messages. Write results (small — affected rows, last insert ID) transfer via `SendPort.send()` which is fine for small payloads.
 
 **4. Stream invalidation piggybacks on write responses.**
-No separate notification channel. Every write response includes the set of dirty tables. The StreamEngine checks these against active stream dependencies and re-queries affected streams through the reader pool.
+No separate notification channel. Every write response includes the tables and, when SQLite can report them precisely, columns modified by the write. The StreamEngine checks these against active stream dependencies and re-queries only the streams that can change.
 
 ## Read Path: select() and selectBytes()
 
@@ -190,7 +190,7 @@ Representative write benchmarks:
 
 ## Reactive Streams: stream()
 
-`stream()` turns a query into a live data source. It emits current results immediately, then re-emits when writes modify tables the query read.
+`stream()` turns a query into a live data source. It emits current results immediately, then re-emits when writes modify data the query can observe.
 
 ```dart
 final stream = db.stream('SELECT * FROM users WHERE active = ?', [1]);
@@ -202,41 +202,47 @@ stream.listen((rows) {
 The mechanism combines three pieces:
 
 1. **SQLite authorizer hooks** on readers capture which tables a query reads.
-2. **SQLite preupdate hooks** on the writer capture which tables a write modifies.
-3. **StreamEngine** on main matches dirty tables to stream dependencies and schedules re-queries.
+2. **SQLite authorizer hooks** on prepared writes capture which columns a statement may modify.
+3. **SQLite preupdate hooks** on the writer capture which tables actually changed.
+4. **StreamEngine** on main matches dirty table/column dependencies and schedules re-queries.
 
 ### Dependency capture
 
-SQLite's [authorizer callback](https://www.sqlite.org/c3ref/set_authorizer.html) fires during query planning and execution. For `SQLITE_READ`, it receives the table name being read. resqlite installs this on every reader connection and reads the accumulated table set after the query completes.
+SQLite's [authorizer callback](https://www.sqlite.org/c3ref/set_authorizer.html) fires during query planning and execution. For `SQLITE_READ`, it receives the table and column being read. resqlite installs this on every reader connection and stores the accumulated table/column set on the cached statement entry.
 
 This avoids SQL parsing. The authorizer naturally handles joins, subqueries, views, common table expressions, triggers, and attached databases. SQLite tells resqlite what was actually read.
+
+Column metadata is an optimization layer, not the correctness source of truth. If a query touches too many columns, allocation fails, a trigger or cascade writes outside the prepared statement metadata, or SQLite cannot provide column precision, resqlite falls back to table-level invalidation for the affected table. If table tracking itself is unavailable, every active stream re-queries.
 
 ### StreamEngine lifecycle
 
 `StreamEngine` owns active reactive queries. It keeps:
 
 - `_entries`, keyed by `Object.hash(sql, Object.hashAll(params))`, so identical streams share one SQLite query.
-- `_tableToKeys`, an inverted index from table name to affected stream keys.
-- `_writeGeneration`, a monotonic counter used to detect writes during initial query setup.
+- `_unknownDepsEntries`, streams whose table dependencies are not available yet or fell back to unknown.
+- `_tableIndex`, an inverted index from table name to affected stream entries.
+- `_requeryQueue`, a bounded queue of dirty entries waiting for reader-pool capacity.
 
-Each stream entry tracks its SQL, params, read tables, cached last result, result hash, re-query generation, and subscriber controllers.
+Each stream entry tracks its SQL, params, table dependencies, optional column dependencies, cached last result, in-flight state, and subscriber controllers.
 
 Subscribers get individual non-broadcast controllers. That avoids the race where a broadcast stream drops events when a listener attaches during an async gap. New subscribers to an existing query receive the cached last result immediately.
 
 ### Invalidation and stale-result protection
 
-When a write returns dirty tables, `database.dart` calls `streamEngine.handleDirtyTables()`. The engine looks up affected stream keys through `_tableToKeys`, increments each entry's re-query generation, and dispatches a fresh reader-pool query.
+When a write returns table dependencies, `database.dart` calls `streamEngine.onDependencyChanges()`. The engine first uses `_tableIndex` to find streams that share a table. If both the stream and the write have fixed column details for that table, it intersects those sets and skips the re-query when they are disjoint. A plain table dependency means column precision is unavailable, so streams on that table re-query.
 
-If rapid writes dispatch multiple re-queries for the same stream, results can arrive out of order. The per-entry generation check discards stale arrivals, so an older SQLite snapshot cannot overwrite newer data. A result hash suppresses no-op emissions when a table was dirtied but the query result did not actually change.
+If rapid writes dispatch multiple re-queries for the same stream, duplicate queue entries collapse before they reach the reader pool. A result hash suppresses no-op emissions when a table was dirtied but the query result did not actually change.
 
 Initial stream emission and invalidation benchmark:
 
 | Metric | resqlite | sqlite_async |
 |---|---:|---:|
-| Initial emission | 0.01 ms | 0.64 ms |
-| Invalidation latency | 0.36 ms | 32.61 ms |
+| Initial emission | 0.03 ms | 0.10 ms |
+| Invalidation latency | 0.07 ms | 0.05 ms |
 
-sqlite_async includes a 30 ms default throttle; the table reports measured end-to-end latency for the benchmarked scenario.
+In the many-stream writer-throughput benchmark, 50 streams watch selected columns on one wide table. On the April 30, 2026 MacBook Pro run, resqlite wrote to a disjoint column at **6,752 writes/sec** and to an overlapping column at **4,503 writes/sec**. That spread is the signature of column-level dispatch elision: disjoint writes skip stream re-query dispatch instead of paying table-level fanout cost.
+
+The benchmark disables sqlite_async's default throttle so the table reports the measured end-to-end latency for the benchmarked scenario.
 
 ## C Layer
 
@@ -313,12 +319,14 @@ Main: db.execute(sql, params)
   │  Writer isolate:
   │    ├─ resqlite_execute() → C locks writer mutex, looks up cached stmt,
   │    │   binds params, steps, reads affected rows + last insert ID
-  │    ├─ resqlite_get_dirty_tables() → reads tables dirtied by preupdate hook
-  │    └─ Sends ExecuteResponse(result, dirtyTables) back via SendPort
+  │    ├─ Reads dirty table dependencies from the native writer
+  │    │   → tables plus precise columns when available
+  │    └─ Sends ExecuteResponse(result, modifications) back via SendPort
   │
   ├─ Main receives response
   │   ├─ Returns WriteResult to caller
-  │   └─ streamEngine.handleDirtyTables() → checks against active streams → re-queries
+  │   └─ streamEngine.onDependencyChanges()
+  │       → table/column intersection against active streams → re-queries
   │
   └─ Stream invalidation (if any):
       └─ Reader pool → select() → emit to subscribers
@@ -334,14 +342,14 @@ Main: db.stream(sql, params)
   │   └─ If not: create new stream ↓
   │
   ├─ pool.selectWithDeps(sql, params)
-  │   └─ Same as select() but also reads authorizer-captured read tables
+  │   └─ Same as select() but also reads authorizer-captured table/column deps
   │
-  ├─ Register in StreamEngine with read tables
+  ├─ Register in StreamEngine with table/column dependencies
   │
   ├─ Push initial results to all subscribers
   │
   └─ On subsequent writes:
-      ├─ handleDirtyTables() finds intersection with readTables
+      ├─ onDependencyChanges() finds table/column intersections
       ├─ _reQuery() → pool.select() on reader pool
       ├─ Generation check: discard if stale
       └─ _emitResult() → hash check → push to all subscriber controllers
