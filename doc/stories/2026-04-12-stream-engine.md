@@ -77,7 +77,7 @@ The pre-dispatch queue addressed the high-fanout backlog that ordinary coalescin
 
 Streaming became its own subsystem because it had its own failure modes. Correctness depended on dependency capture, generation ordering, and error propagation. Performance depended on doing less work when many streams were invalidated but few results changed.
 
-The detailed architecture walkthrough is [How resqlite Makes Queries Reactive](../streaming.html). The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine. That naturally made the write path part of the same story, because every useful stream invalidation starts with a correctly serialized mutation.
+The detailed architecture walkthrough is now part of [resqlite Architecture](../architecture.html). The story-level point is that reactive SQLite needed more than a callback after writes; it needed a measured invalidation engine. That naturally made the write path part of the same story, because every useful stream invalidation starts with a correctly serialized mutation.
 
 ## Related Experiments
 

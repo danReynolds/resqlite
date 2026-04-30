@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,20 +112,19 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 6, 2026 · main isolate · Flutter · measurement</p>
-<h1>Why resqlite Started</h1>
-<h2>Problem Statement</h2>
+<h1 id="why-resqlite-started">Why resqlite Started</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>resqlite did not start as an attempt to make SQLite itself faster. SQLite was already fast. The starting problem was how SQLite felt inside a data-heavy Flutter app: screen loads, reactive views, and writes all competed with rendering and input when too much database work happened on the main isolate.</p>
 <p>The library goal was deliberately practical: keep the directness of SQLite, expose ordinary Dart rows, support reactive queries, and avoid making application code own invalidation rules. The first constraint was therefore not &quot;can SQLite be fast?&quot; It was: can a Dart SQLite wrapper keep normal query ergonomics while moving database work and result preparation off the UI isolate?</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>The first motivating workload was ordinary screen loading: query a few thousand rows, turn them into Dart data, and let the UI render. The synchronous <code>sqlite3</code> package ran the query and materialized rows on the calling isolate, which was usually the main isolate. That is a reasonable API for many programs, but it is uncomfortable when the caller is also responsible for frame production.</p>
 <p>The second requirement was reactivity. The application wanted live queries: widgets should update when writes changed their data without every call site maintaining its own cache, listener, or table-dependency logic. That requirement made resqlite more than &quot;run SQLite on a worker.&quot; It had to become a small database runtime for Flutter.</p>
 <p>For readers new to this part of Flutter: the <a href="https://docs.flutter.dev/perf/ui-performance">Flutter performance guide</a> frames smoothness around the frame budget, and the <a href="https://docs.flutter.dev/perf/isolates">Flutter isolate guide</a> explains why CPU-heavy work is commonly moved away from the main isolate. Dart's lower-level <a href="https://dart.dev/language/isolates">isolate documentation</a> is the runtime background behind <code>Isolate.run</code>, <code>Isolate.spawn</code>, <code>SendPort</code>, and <code>ReceivePort</code>.</p>
@@ -106,10 +135,10 @@
 <li>Stream invalidation should be part of the database layer.</li>
 <li>Benchmarks should report main-isolate time separately from end-to-end wall time.</li>
 </ol>
-<h2>Hypothesis</h2>
+<h2 id="hypothesis">Hypothesis</h2>
 <p>The first hypothesis was intentionally modest: moving SQLite execution to a worker isolate should reduce UI-isolate exposure. The more important hypothesis came immediately after: this only solves the product problem if the result representation also crosses isolates cheaply. A small transfer graph, such as one <code>Uint8List</code>, should put much less pressure on the main isolate than a large graph of Dart maps.</p>
 <p>That made the first lesson about measurement rather than cleverness. A byte buffer is not automatically better because it is &quot;lower level&quot;; it is better when the caller wants bytes. If the caller wants rows, bytes still have to become Dart values somewhere. The opening story in the project is therefore about choosing the right metric before choosing the data structure.</p>
-<h2>What We Tried</h2>
+<h2 id="what-we-tried">What We Tried</h2>
 <p>The first prototype was close to what many Flutter developers would try first: put the SQLite call on a worker isolate while keeping the caller-facing row shape familiar.</p>
 <pre><code class="lang-dart">
 final rows = await Isolate.run(() {
@@ -117,8 +146,8 @@ final rows = await Isolate.run(() {
   return db.select('SELECT * FROM items');
 });
 </code></pre>
-<p>That moved SQLite execution away from the caller, but returned <code>List&lt;Map&lt;String, Object?&gt;&gt;</code>. A second path returned one byte buffer instead, matching the direction later captured in <a href="../../experiments/001-c-native-json-serialization.html">Experiment 001</a>. The point was not that JSON bytes should be the final API. It was a probe: how much of the observed pain came from SQLite execution, and how much came from the shape of the Dart data crossing back?</p>
-<h2>Results</h2>
+<p>That moved SQLite execution away from the caller, but returned <code>List&lt;Map&lt;String, Object?&gt;&gt;</code>. A second path returned one byte buffer instead, matching the direction later captured in <a href="../experiments/001-c-native-json-serialization.html">Experiment 001</a>. The point was not that JSON bytes should be the final API. It was a probe: how much of the observed pain came from SQLite execution, and how much came from the shape of the Dart data crossing back?</p>
+<h2 id="results">Results</h2>
 <p>The important signal was main-isolate time, not just wall time:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -144,7 +173,7 @@ final rows = await Isolate.run(() {
 </tr>
 </tbody></table></div>
 
-<p><a href="../../experiments/001-c-native-json-serialization.html">Experiment 001</a> measured the same idea on the JSON response path:</p>
+<p><a href="../experiments/001-c-native-json-serialization.html">Experiment 001</a> measured the same idea on the JSON response path:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
 <th>Path (5,000 rows, about 1 MB JSON)</th>
@@ -162,15 +191,15 @@ final rows = await Isolate.run(() {
 </tbody></table></div>
 
 <p>The byte path was not just faster. It avoided creating Dart result objects for the response body, which meant there was essentially nothing heavy for the main isolate to validate or encode.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The first design principle became measurable: wall time matters, but main-isolate time is the product constraint for Flutter. From this point on, resqlite treated &quot;async SQLite&quot; as insufficient. The goal became SQLite with small main-isolate exposure, a normal row API, and enough internal structure to support reactive queries without pushing bookkeeping into application code.</p>
 <p>This opening measurement set up the rest of the project. The next stories ask, in order, what the isolate boundary really costs, which result representations fail under that constraint, and what shape finally lets resqlite keep the API ordinary without handing too much work back to the UI isolate.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/001-c-native-json-serialization.html">Experiment 001: C-native JSON serialization</a></li>
-<li><a href="../../experiments/002-c-binary-buffer-for-maps.html">Experiment 002: C binary buffer for maps</a></li>
+<li><a href="../experiments/001-c-native-json-serialization.html">Experiment 001: C-native JSON serialization</a></li>
+<li><a href="../experiments/002-c-binary-buffer-for-maps.html">Experiment 002: C binary buffer for maps</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://docs.flutter.dev/perf/ui-performance">Flutter performance profiling</a></li>
 <li><a href="https://docs.flutter.dev/perf/isolates">Flutter concurrency and isolates</a></li>

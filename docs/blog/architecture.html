@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -80,15 +110,32 @@
     <a href="index.html">&larr; All Posts</a>
     <a href="../index.html">Home</a>
     <a href="../benchmarks/index.html">Benchmarks</a>
-    <a href="../experiments/index.html">Experiments</a>
+    <a href="experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Architecture</span>
-    <h1>resqlite Architecture</h1>
+        <nav class="article-toc" aria-labelledby="architecture-toc-title">
+      <strong id="architecture-toc-title">On this page</strong>
+      <div>
+      <a href="#system-overview">System Overview</a>
+      <a href="#core-principles">Core Principles</a>
+      <a href="#read-path-select-and-selectbytes">Read Path: select() and selectBytes()</a>
+      <a href="#write-path-execute-executebatch-transaction">Write Path: execute(), executeBatch(), transaction()</a>
+      <a href="#reactive-streams-stream">Reactive Streams: stream()</a>
+      <a href="#c-layer">C Layer</a>
+      <a href="#ffi-boundary">FFI Boundary</a>
+      <a href="#data-flow-select">Data Flow: select()</a>
+      <a href="#data-flow-execute">Data Flow: execute()</a>
+      <a href="#data-flow-stream">Data Flow: stream()</a>
+      <a href="#file-layout">File Layout</a>
+      <a href="#related-documents">Related Documents</a>
+      </div>
+    </nav>
+<h1 id="resqlite-architecture">resqlite Architecture</h1>
 <p>resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: <strong>minimize main-isolate work</strong>.</p>
 <p>In a Flutter app, the main isolate is the single thread responsible for rendering your UI at 60fps — that's a 16ms budget per frame. Every millisecond your database spends on the main isolate is a millisecond that could cause dropped frames, stuttery scrolling, or unresponsive touch handling. resqlite pushes virtually all database work off the main isolate, leaving it free for what it's meant to do: render your UI.</p>
 <p>This post walks through the high-level architecture — how the pieces fit together and why they're designed this way.</p>
-<h2>System Overview</h2>
+<h2 id="system-overview">System Overview</h2>
 <pre><code class="lang-">
 ┌─────────────────────────────────────────────────────────────┐
 │                       Main Isolate                          │
@@ -114,7 +161,7 @@
 │      └── Authorizer hook on readers (dependency tracking)   │
 └─────────────────────────────────────────────────────────────┘
 </code></pre>
-<h2>Core Principles</h2>
+<h2 id="core-principles">Core Principles</h2>
 <p><strong>1. C owns the state, Dart owns the orchestration.</strong></p>
 <p>Database connections, statement caches, mutexes, and hooks live in C structs that persist across Dart isolate lifetimes. Dart isolates are workers that call into C, do their work, and return results. This separation means the expensive state (open connections, cached prepared statements) survives worker isolate deaths and respawns.</p>
 <p><strong>2. Reads use a persistent reader pool with hybrid transmission.</strong></p>
@@ -123,37 +170,231 @@
 <p>SQLite only supports one writer at a time. A single persistent writer isolate processes all writes sequentially, maintaining transaction state across messages. Write results (small — affected rows, last insert ID) transfer via <code>SendPort.send()</code> which is fine for small payloads.</p>
 <p><strong>4. Stream invalidation piggybacks on write responses.</strong></p>
 <p>No separate notification channel. Every write response includes the set of dirty tables. The StreamEngine checks these against active stream dependencies and re-queries affected streams through the reader pool.</p>
-<h2>Subsystems</h2>
-<h3><a href="reading.html">Reading: select() and selectBytes()</a></h3>
-<p>The read path is where most of the performance engineering lives. Key innovations:</p>
+<h2 id="read-path-select-and-selectbytes">Read Path: select() and selectBytes()</h2>
+<p>Reads are the hot path for most SQLite-backed applications, and they are also where a Flutter library can most easily steal time from the UI thread. resqlite exposes two read APIs:</p>
 <ul>
-<li><strong>Persistent reader pool</strong> with hybrid SendPort/Isolate.exit transmission, busy tracking, and automatic respawn</li>
-<li><strong>C-level connection pool</strong> with per-connection statement caches and per-query locking (instead of SQLite's per-API-call <code>FULLMUTEX</code>)</li>
-<li><strong>Batch FFI</strong> via <code>resqlite_step_row()</code> — one C call per row instead of ~16 individual FFI calls</li>
-<li><strong>Flat value list with lazy ResultSet</strong> — all values in one <code>List&lt;Object?&gt;</code>, <code>Row</code> objects created on-demand. Reduces the <code>Isolate.exit</code> validation graph from ~200k objects to ~3</li>
-<li><strong>C-native JSON serialization</strong> for <code>selectBytes()</code> — zero Dart objects for result data, scan-then-flush string escaping, hand-rolled integer formatting</li>
+<li><strong><code>select(sql, params)</code></strong> -&gt; <code>Future&lt;List&lt;Map&lt;String, Object?&gt;&gt;&gt;</code>, for ordinary Dart row access.</li>
+<li><strong><code>selectBytes(sql, params)</code></strong> -&gt; <code>Future&lt;Uint8List&gt;</code>, for JSON bytes when the caller wants to write a response or file without first materializing Dart maps.</li>
 </ul>
-<h3><a href="writing.html">Writing: execute(), executeBatch(), transaction()</a></h3>
-<p>The write path uses a persistent writer isolate that processes messages sequentially. Key design choices:</p>
+<p>Both APIs dispatch through the same persistent reader pool. The pool keeps worker isolates alive, assigns one query at a time to each worker, and sends the worker into the C connection pool. Small results return over <code>SendPort.send()</code>. Large results return via <code>Isolate.exit()</code>, which avoids copying the result graph and lets the pool respawn the sacrificed worker in the background.</p>
+<pre><code class="lang-">
+select()/selectBytes()
+  └─ ReaderPool._dispatch() -&gt; find available worker
+      └─ Worker isolate
+          ├─ resqlite_stmt_acquire() -&gt; idle C reader + cached statement
+          ├─ Execute query
+          ├─ resqlite_stmt_release() -&gt; return reader to pool
+          └─ SendPort.send or Isolate.exit based on result size
+</code></pre>
+<h3 id="reader-pool">Reader pool</h3>
+<p>The Dart reader pool manages a small set of persistent worker isolates. Dispatch is round-robin with busy tracking: a worker is available when it is alive, has published a <code>SendPort</code>, and is not currently processing a query. If all workers are busy, callers wait on a shared completer that fires when any worker becomes available.</p>
+<p>The hybrid transfer threshold was tuned empirically. Below the threshold, keeping the worker alive and paying the copy cost is cheaper. Above it, <code>Isolate.exit()</code> wins because the large result transfers without copying. The worker wraps replies in an envelope that tells the pool whether it sacrificed itself, so the slot stays unavailable until its replacement is ready.</p>
+<h3 id="flat-list-resultset">Flat-list ResultSet</h3>
+<p>The main <code>select()</code> path stores all row values in a single flat <code>List&lt;Object?&gt;</code>:</p>
+<pre><code class="lang-">
+values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
+</code></pre>
+<p><code>ResultSet</code> creates lightweight <code>Row</code> views lazily when a caller indexes into the result. Each <code>Row</code> implements <code>Map&lt;String, Object?&gt;</code> against a shared <code>RowSchema</code>, so users keep normal map ergonomics without paying for a <code>LinkedHashMap</code> per row.</p>
+<p>This mattered because <code>Isolate.exit()</code> still validates the object graph it transfers. With per-row maps, a 20,000-row result can contain hundreds of thousands of map-internal objects. With the flat list, the structural graph is essentially the result object, schema, and values list. The value objects are unchanged, but the transfer graph is dramatically smaller. See <a href="experiments/008-flat-list-lazy-resultset.html">Experiment 008</a>.</p>
+<h3 id="batch-ffi">Batch FFI</h3>
+<p>Instead of calling through FFI for every SQLite column operation, resqlite steps one row at a time with a batched C helper:</p>
+<pre><code class="lang-c">
+int resqlite_step_row(sqlite3_stmt* stmt, int col_count, resqlite_cell* cells);
+</code></pre>
+<p>C advances the statement and fills a pre-allocated native cell buffer with all column types and values. Dart reads that buffer through <code>ByteData</code>. Integers and doubles are direct native reads; text still becomes Dart <code>String</code> objects, which is unavoidable for the map API. This reduces a typical row from many FFI calls to one. See <a href="experiments/009-batch-ffi-step-row.html">Experiment 009</a>.</p>
+<h3 id="c-connection-pool">C connection pool</h3>
+<p>The C layer owns multiple read-only <code>sqlite3*</code> connections, each with its own prepared statement cache. <code>resqlite_stmt_acquire()</code> finds an idle reader, prepares or retrieves the statement, binds parameters, and holds the per-query mutex until the query is complete.</p>
+<p>Connections are opened with <code>SQLITE_OPEN_NOMUTEX</code>. Instead of SQLite's <code>FULLMUTEX</code> locking around every API call, resqlite locks around the whole query. For large result sets, that replaces tens of thousands of lock/unlock operations with one acquire and one release. See <a href="experiments/004-nomutex-per-query-locking.html">Experiment 004</a>.</p>
+<h3 id="selectbytes">selectBytes()</h3>
+<p><code>selectBytes()</code> bypasses Dart row objects entirely. A C function reads SQLite columns and writes JSON directly into a <code>malloc</code>'d buffer:</p>
+<pre><code class="lang-c">
+int resqlite_query_bytes(resqlite_db* db, const char* sql, ...);
+</code></pre>
+<p>The C path handles string escaping, integer formatting, double formatting, null literals, and JSON structure. The result is one <code>Uint8List</code>, which is cheap to transfer and ready for HTTP responses or file export. This is the right API when the consumer wants JSON and the application does not need to inspect each row in Dart. See <a href="experiments/001-c-native-json-serialization.html">Experiment 001</a>.</p>
+<p>At 5,000 rows with six mixed columns:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>select()</th>
+<th>selectBytes()</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Wall time</td>
+<td>2.25 ms</td>
+<td>3.14 ms</td>
+<td>4.20 ms</td>
+<td>4.10 ms</td>
+</tr>
+<tr>
+<td>Main-isolate time</td>
+<td>0.49 ms</td>
+<td>0.00 ms</td>
+<td>4.20 ms</td>
+<td>0.83 ms</td>
+</tr>
+</tbody></table></div>
+
+<h2 id="write-path-execute-executebatch-transaction">Write Path: execute(), executeBatch(), transaction()</h2>
+<p>SQLite only allows one writer at a time. resqlite embraces that constraint by routing all writes through one persistent writer isolate. The writer processes messages sequentially, owns transaction state, and keeps write work off the main isolate.</p>
+<p>The write API has three public shapes:</p>
 <ul>
-<li><strong>Persistent isolate</strong> instead of one-off — avoids the closure sendability footgun and enables interactive transactions</li>
-<li><strong>C batch runner</strong> (<code>resqlite_run_batch</code>) for <code>executeBatch()</code> — one FFI call for the entire batch, single prepared statement reused</li>
-<li><strong>Async transaction API</strong> — the callback runs on main (no isolate scope leakage), sends messages to the writer for each operation</li>
-<li><strong>Preupdate hook</strong> on the writer connection tracks dirty tables, accumulated across transaction scope</li>
+<li><strong><code>execute(sql, params)</code></strong> -&gt; <code>Future&lt;WriteResult&gt;</code>, for one statement.</li>
+<li><strong><code>executeBatch(sql, paramSets)</code></strong> -&gt; <code>Future&lt;void&gt;</code>, for one SQL statement with many parameter sets.</li>
+<li><strong><code>transaction(callback)</code></strong> -&gt; <code>Future&lt;T&gt;</code>, for interactive multi-statement work with reads.</li>
 </ul>
-<h3><a href="streaming.html">Streaming: stream()</a></h3>
-<p>Reactive queries that re-emit when underlying data changes. Key design choices:</p>
+<h3 id="writer-isolate-message-protocol">Writer isolate message protocol</h3>
+<p>The writer isolate receives sealed request messages from <code>write_worker.dart</code>:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Message</th>
+<th>Purpose</th>
+<th>Response</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>ExecuteRequest</code></td>
+<td>Single parameterized write</td>
+<td><code>ExecuteResponse(WriteResult, dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>QueryRequest</code></td>
+<td>Read within a transaction</td>
+<td><code>QueryResponse(rows, dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>BatchRequest</code></td>
+<td>Batch write</td>
+<td><code>BatchResponse(dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>BeginRequest</code></td>
+<td>Start transaction</td>
+<td><code>true</code></td>
+</tr>
+<tr>
+<td><code>CommitRequest</code></td>
+<td>Commit transaction</td>
+<td><code>BatchResponse(dirtyTables)</code></td>
+</tr>
+<tr>
+<td><code>RollbackRequest</code></td>
+<td>Rollback transaction</td>
+<td><code>true</code></td>
+</tr>
+</tbody></table></div>
+
+<p>Each request carries a reply port. The writer pattern-matches the message, calls the relevant C function, and returns either a small result or an error envelope.</p>
+<h3 id="execute-and-executebatch">execute() and executeBatch()</h3>
+<p><code>execute()</code> prepares or retrieves a cached statement, binds parameters, steps, and returns <code>sqlite3_changes()</code> plus <code>sqlite3_last_insert_rowid()</code>. DDL and non-parameterized statements can use the simpler <code>sqlite3_exec()</code> path.</p>
+<p><code>executeBatch()</code> moves the loop into C:</p>
+<ol>
+<li>Lock the writer mutex.</li>
+<li>Begin a transaction.</li>
+<li>Prepare the statement once.</li>
+<li>Loop through the flat native parameter array: bind, step, reset.</li>
+<li>Commit or roll back.</li>
+<li>Unlock.</li>
+</ol>
+<p>This avoids a Dart-to-C boundary crossing for every row in a batch. Parameters are serialized into a contiguous native array of <code>resqlite_param</code> structs, so C can index into <code>param_sets[i * param_count + j]</code>.</p>
+<h3 id="transaction">transaction()</h3>
+<p>Transactions use an async callback on the main isolate:</p>
+<pre><code class="lang-dart">
+final count = await db.transaction((tx) async {
+  await tx.execute('INSERT INTO users(name) VALUES (?)', ['alice']);
+  final rows = await tx.select('SELECT COUNT(*) AS cnt FROM users');
+  return rows[0]['cnt'] as int;
+});
+</code></pre>
+<p>The callback does not run on the worker. That is intentional. Running a closure on another isolate would require every captured object to be sendable, which is easy to violate accidentally. Instead, the callback is ordinary Dart code on main, and <code>tx.execute()</code> or <code>tx.select()</code> sends request messages to the writer isolate.</p>
+<p>Transaction reads run on the writer connection, not the reader pool, because uncommitted writes are visible only on the connection that made them. Those results return through <code>SendPort.send()</code>, which is acceptable because transaction reads are usually small.</p>
+<h3 id="dirty-table-tracking">Dirty table tracking</h3>
+<p>The writer connection installs <code>sqlite3_preupdate_hook</code>. Every INSERT, UPDATE, or DELETE records the affected table in a deduplicated dirty-table set. Write responses include that set so the stream engine can invalidate affected reactive queries.</p>
+<p>Inside a transaction, dirty tables accumulate until commit. Individual statements return empty dirty sets, commit returns the accumulated set, and rollback clears the set without notifying streams.</p>
+<p>Representative write benchmarks:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Workload</th>
+<th>resqlite</th>
+<th>sqlite3</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>100 sequential inserts</td>
+<td>1.73 ms</td>
+<td>5.19 ms</td>
+<td>4.10 ms</td>
+</tr>
+<tr>
+<td>1,000-row batch insert</td>
+<td>0.48 ms</td>
+<td>0.57 ms</td>
+<td>0.63 ms</td>
+</tr>
+<tr>
+<td>Interactive transaction</td>
+<td>0.06 ms</td>
+<td>n/a</td>
+<td>0.12 ms</td>
+</tr>
+</tbody></table></div>
+
+<h2 id="reactive-streams-stream">Reactive Streams: stream()</h2>
+<p><code>stream()</code> turns a query into a live data source. It emits current results immediately, then re-emits when writes modify tables the query read.</p>
+<pre><code class="lang-dart">
+final stream = db.stream('SELECT * FROM users WHERE active = ?', [1]);
+stream.listen((rows) {
+  setState(() =&gt; users = rows);
+});
+</code></pre>
+<p>The mechanism combines three pieces:</p>
+<ol>
+<li><strong>SQLite authorizer hooks</strong> on readers capture which tables a query reads.</li>
+<li><strong>SQLite preupdate hooks</strong> on the writer capture which tables a write modifies.</li>
+<li><strong>StreamEngine</strong> on main matches dirty tables to stream dependencies and schedules re-queries.</li>
+</ol>
+<h3 id="dependency-capture">Dependency capture</h3>
+<p>SQLite's <a href="https://www.sqlite.org/c3ref/set_authorizer.html">authorizer callback</a> fires during query planning and execution. For <code>SQLITE_READ</code>, it receives the table name being read. resqlite installs this on every reader connection and reads the accumulated table set after the query completes.</p>
+<p>This avoids SQL parsing. The authorizer naturally handles joins, subqueries, views, common table expressions, triggers, and attached databases. SQLite tells resqlite what was actually read.</p>
+<h3 id="streamengine-lifecycle">StreamEngine lifecycle</h3>
+<p><code>StreamEngine</code> owns active reactive queries. It keeps:</p>
 <ul>
-<li><strong>Authorizer hook</strong> (<code>sqlite3_set_authorizer</code>) on all readers captures read dependencies during query execution — no SQL parsing</li>
-<li><strong>StreamEngine</strong> owns full lifecycle: registration, initial query, dependency tracking, invalidation, re-query, result dedup, subscriber management</li>
-<li><strong>Per-subscriber buffered controllers</strong> — eliminates broadcast race conditions</li>
-<li><strong>Per-entry re-query generation</strong> — discards stale out-of-order results from concurrent re-queries</li>
-<li><strong>Error propagation</strong> — bad SQL or connection errors reach subscribers instead of hanging</li>
-<li><strong>Deduplication</strong> by <code>Object.hash(sql, Object.hashAll(params))</code> — 100 widgets listening to the same query = 1 actual SQLite query per invalidation</li>
+<li><code>_entries</code>, keyed by <code>Object.hash(sql, Object.hashAll(params))</code>, so identical streams share one SQLite query.</li>
+<li><code>_tableToKeys</code>, an inverted index from table name to affected stream keys.</li>
+<li><code>_writeGeneration</code>, a monotonic counter used to detect writes during initial query setup.</li>
 </ul>
-<h2>C Layer</h2>
+<p>Each stream entry tracks its SQL, params, read tables, cached last result, result hash, re-query generation, and subscriber controllers.</p>
+<p>Subscribers get individual non-broadcast controllers. That avoids the race where a broadcast stream drops events when a listener attaches during an async gap. New subscribers to an existing query receive the cached last result immediately.</p>
+<h3 id="invalidation-and-stale-result-protection">Invalidation and stale-result protection</h3>
+<p>When a write returns dirty tables, <code>database.dart</code> calls <code>streamEngine.handleDirtyTables()</code>. The engine looks up affected stream keys through <code>_tableToKeys</code>, increments each entry's re-query generation, and dispatches a fresh reader-pool query.</p>
+<p>If rapid writes dispatch multiple re-queries for the same stream, results can arrive out of order. The per-entry generation check discards stale arrivals, so an older SQLite snapshot cannot overwrite newer data. A result hash suppresses no-op emissions when a table was dirtied but the query result did not actually change.</p>
+<p>Initial stream emission and invalidation benchmark:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Metric</th>
+<th>resqlite</th>
+<th>sqlite_async</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Initial emission</td>
+<td>0.01 ms</td>
+<td>0.64 ms</td>
+</tr>
+<tr>
+<td>Invalidation latency</td>
+<td>0.36 ms</td>
+<td>32.61 ms</td>
+</tr>
+</tbody></table></div>
+
+<p>sqlite_async includes a 30 ms default throttle; the table reports measured end-to-end latency for the benchmarked scenario.</p>
+<h2 id="c-layer">C Layer</h2>
 <p>The native code lives in <code>native/resqlite.c</code> and is compiled alongside the SQLite amalgamation via Dart's native assets build hooks (<code>hook/build.dart</code>).</p>
-<h3>Key C structures</h3>
+<h3 id="key-c-structures">Key C structures</h3>
 <pre><code class="lang-c">
 struct resqlite_db {
     sqlite3* writer;              // Single write connection
@@ -173,14 +414,14 @@ struct resqlite_reader {
     int in_use;                     // Pool tracking
 };
 </code></pre>
-<h3>Threading model</h3>
+<h3 id="threading-model">Threading model</h3>
 <p>All connections are opened with <code>SQLITE_OPEN_NOMUTEX</code> — SQLite does no internal locking. Thread safety is managed by resqlite:</p>
 <ul>
 <li><strong>Reader pool:</strong> <code>sqlite3_mutex</code> for pool coordination. Multiple readers execute truly in parallel (SQLite WAL mode supports concurrent reads).</li>
 <li><strong>Writer:</strong> <code>sqlite3_mutex</code> serializes all writes. The persistent writer isolate is the only writer, but the mutex protects against edge cases.</li>
 <li><strong>Per-query locking:</strong> Lock is acquired in <code>resqlite_stmt_acquire</code> and released in <code>resqlite_stmt_release</code>. The entire query (prepare → bind → step all rows → reset) runs under one lock, eliminating the ~60k lock/unlock operations that <code>FULLMUTEX</code> would produce for a large query.</li>
 </ul>
-<h2>FFI Boundary</h2>
+<h2 id="ffi-boundary">FFI Boundary</h2>
 <p>All FFI declarations use <code>@ffi.Native</code> annotations with <code>@ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')</code> to resolve against the compiled resqlite library.</p>
 <p>Key FFI patterns:</p>
 <ul>
@@ -188,7 +429,7 @@ struct resqlite_reader {
 <li><strong>Native cell buffer for batch reads:</strong> <code>resqlite_step_row()</code> fills a pre-allocated native struct array with all column values. Dart reads via <code>ByteData</code> (no per-cell FFI call)</li>
 <li><strong>Pointer passing for connections:</strong> The C <code>resqlite_db*</code> handle address is passed as an <code>int</code> to worker isolates. The worker reconstructs the pointer via <code>Pointer.fromAddress()</code>. This works because native memory is process-global.</li>
 </ul>
-<h2>Data Flow: select()</h2>
+<h2 id="data-flow-select">Data Flow: select()</h2>
 <pre><code class="lang-">
 Main: db.select(sql, params)
   │
@@ -208,7 +449,7 @@ Main: db.select(sql, params)
   └─ Main receives ResultSet
       └─ result[i] creates lightweight Row on demand (3 field assignments)
 </code></pre>
-<h2>Data Flow: execute()</h2>
+<h2 id="data-flow-execute">Data Flow: execute()</h2>
 <pre><code class="lang-">
 Main: db.execute(sql, params)
   │
@@ -227,7 +468,7 @@ Main: db.execute(sql, params)
   └─ Stream invalidation (if any):
       └─ Reader pool → select() → emit to subscribers
 </code></pre>
-<h2>Data Flow: stream()</h2>
+<h2 id="data-flow-stream">Data Flow: stream()</h2>
 <pre><code class="lang-">
 Main: db.stream(sql, params)
   │
@@ -248,7 +489,7 @@ Main: db.stream(sql, params)
       ├─ Generation check: discard if stale
       └─ _emitResult() → hash check → push to all subscriber controllers
 </code></pre>
-<h2>File Layout</h2>
+<h2 id="file-layout">File Layout</h2>
 <pre><code class="lang-">
 lib/src/
 ├── database.dart          — public API (Database, Transaction), subsystem init
@@ -265,12 +506,11 @@ native/
 ├── resqlite.c              — C implementation (pool, cache, serialization)
 └── resqlite.h              — C API declarations
 </code></pre>
-<h2>Related Documents</h2>
+<h2 id="related-documents">Related Documents</h2>
 <ul>
-<li><strong><a href="reading.html">Reading</a></strong> — select(), selectBytes(), reader pool, batch FFI, flat list architecture</li>
-<li><strong><a href="writing.html">Writing</a></strong> — execute(), executeBatch(), transaction(), writer isolate, C batch runner</li>
-<li><strong><a href="streaming.html">Streaming</a></strong> — stream(), authorizer hooks, dependency tracking, invalidation, deduplication</li>
-<li><strong><a href="../experiments/index.html">experiments/</a></strong> — Individual experiment logs with benchmarks and reasoning</li>
+<li><strong><a href="experiments/index.html">Experiment posts</a></strong> — individual experiment logs with benchmark numbers and reasoning</li>
+<li><strong><a href="../benchmarks/index.html">Benchmark dashboard</a></strong> — generated charts for current results, history, devices, and workload comparisons</li>
+<li><strong><a href="../api/resqlite/resqlite-library.html">API docs</a></strong> — generated Dart API reference</li>
 </ul>
 
   </article>

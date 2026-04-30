@@ -1,13 +1,13 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
 
-/// Converts markdown files from `doc/` into styled HTML pages in `docs/blog/`.
+/// Converts project writing into styled HTML pages in `docs/blog/`.
 ///
-/// Architecture/deep-dive posts are rendered into `docs/blog/*.html`.
-/// Project stories are rendered into `docs/blog/stories/*.html`, with a
-/// chronological timeline at `docs/blog/stories/index.html`.
-/// Experiment markdown files are rendered into `docs/experiments/*.html`, while
-/// the existing interactive experiment dashboard remains at
+/// The architecture post is rendered into `docs/blog/architecture.html`.
+/// Project stories are rendered into `docs/blog/stories/*.html` and listed on
+/// the blog home.
+/// Experiment markdown files are rendered into `docs/blog/experiments/*.html`,
+/// while the existing interactive experiment dashboard remains at
 /// `docs/experiments/index.html`.
 ///
 /// Usage:
@@ -19,21 +19,6 @@ void main() {
       slug: 'architecture',
       category: 'Architecture',
     ),
-    _loadPost(
-      path: 'doc/arch/reading.md',
-      slug: 'reading',
-      category: 'Deep Dive',
-    ),
-    _loadPost(
-      path: 'doc/arch/writing.md',
-      slug: 'writing',
-      category: 'Deep Dive',
-    ),
-    _loadPost(
-      path: 'doc/arch/streaming.md',
-      slug: 'streaming',
-      category: 'Deep Dive',
-    ),
   ].whereType<BlogPost>().toList();
 
   final stories = _loadStories(Directory('doc/stories'));
@@ -42,7 +27,7 @@ void main() {
   final outDir = Directory('docs/blog')..createSync(recursive: true);
   final storyOutDir = Directory('${outDir.path}/stories')
     ..createSync(recursive: true);
-  final experimentOutDir = Directory('docs/experiments')
+  final experimentOutDir = Directory('${outDir.path}/experiments')
     ..createSync(recursive: true);
 
   // Remove generated story HTML that may no longer correspond to a source file.
@@ -50,11 +35,9 @@ void main() {
     if (file.path.endsWith('.html')) file.deleteSync();
   }
 
-  // Remove generated experiment article pages. Keep the hand-authored
-  // interactive dashboard at index.html.
+  // Remove generated experiment article pages.
   for (final file in experimentOutDir.listSync().whereType<File>()) {
-    final name = file.uri.pathSegments.last;
-    if (name.endsWith('.html') && name != 'index.html') file.deleteSync();
+    if (file.path.endsWith('.html')) file.deleteSync();
   }
 
   // Remove the old milestone page. Stories are the canonical narrative surface.
@@ -67,6 +50,12 @@ void main() {
     ).writeAsStringSync(_renderPost(post, PostKind.blog));
     print('  ${post.slug}.html - ${post.title}');
   }
+  for (final entry in _legacyArchitectureRedirects.entries) {
+    File('${outDir.path}/${entry.key}.html').writeAsStringSync(
+      _renderRedirect(entry.value, 'resqlite Architecture'),
+    );
+    print('  ${entry.key}.html - redirect to ${entry.value}');
+  }
 
   for (final story in stories) {
     File(
@@ -74,20 +63,30 @@ void main() {
     ).writeAsStringSync(_renderPost(story, PostKind.story));
     print('  stories/${story.slug}.html - ${story.title}');
   }
+  File(
+    '${storyOutDir.path}/index.html',
+  ).writeAsStringSync(_renderRedirect('../index.html', 'resqlite Blog'));
+  print('  stories/index.html - redirect to ../index.html');
 
   for (final experiment in experiments) {
     File(
       '${experimentOutDir.path}/${experiment.slug}.html',
-    ).writeAsStringSync(_renderPost(experiment, PostKind.experiment));
-    print('  experiments/${experiment.slug}.html - ${experiment.title}');
+    ).writeAsStringSync(
+      _compactGeneratedHtml(_renderPost(experiment, PostKind.experiment)),
+    );
+    print('  blog/experiments/${experiment.slug}.html - ${experiment.title}');
   }
 
   File(
-    '${storyOutDir.path}/index.html',
-  ).writeAsStringSync(_renderStoryIndex(stories));
-  print('  stories/index.html - Stories timeline');
+    '${experimentOutDir.path}/index.html',
+  ).writeAsStringSync(
+    _compactGeneratedHtml(_renderExperimentBlogIndex(experiments)),
+  );
+  print('  blog/experiments/index.html - Experiment posts');
 
-  File('${outDir.path}/index.html').writeAsStringSync(_renderBlogIndex(posts));
+  File(
+    '${outDir.path}/index.html',
+  ).writeAsStringSync(_renderBlogIndex(posts, stories, experiments));
   print('  index.html - Blog index');
 
   print(
@@ -235,6 +234,11 @@ int _experimentNumber(String slug) {
   return match == null ? 999999 : int.parse(match.group(1)!);
 }
 
+String _experimentLabel(String slug) {
+  final match = RegExp(r'^(\d+[a-z]?)').firstMatch(slug);
+  return match == null ? 'Exp' : 'Exp ${match.group(1)!}';
+}
+
 Map<String, String> _extractExperimentMeta(String content) {
   final meta = <String, String>{};
   for (final line in content.split('\n')) {
@@ -267,11 +271,24 @@ String _extractExperimentDescription(String content) {
   );
   if (start == -1) return _extractDescription(content);
 
+  final paragraph = <String>[];
   for (var i = start + 1; i < lines.length; i++) {
     final line = lines[i].trim();
-    if (line.isEmpty || line.startsWith('**')) continue;
+    if (line.isEmpty) {
+      if (paragraph.isNotEmpty) break;
+      continue;
+    }
     if (line.startsWith('#')) break;
-    return line.length > 200 ? '${line.substring(0, 197)}...' : line;
+    if (line.startsWith('**') && paragraph.isEmpty) continue;
+    if (line.startsWith('|')) break;
+    paragraph.add(line);
+    if (paragraph.join(' ').length >= 200) break;
+  }
+  if (paragraph.isNotEmpty) {
+    final description = paragraph.join(' ');
+    return description.length > 200
+        ? '${description.substring(0, 197)}...'
+        : description;
   }
   return _extractDescription(content);
 }
@@ -330,204 +347,253 @@ String _extractDescription(String content) {
   return '';
 }
 
-String _renderBlogIndex(List<BlogPost> posts) {
-  final cards = [
-    '''
-    <a class="post-card" href="stories/index.html">
-      <span class="post-category">Project Stories</span>
-      <h2>The Chronological History of resqlite</h2>
-      <p>An annotated timeline of the design decisions behind resqlite: object graphs, flat-list rows, reader-pool tradeoffs, stream invalidation, write serialization, and a Dart VM hang.</p>
-    </a>''',
-    ...posts.map(
-      (p) => '''
-    <a class="post-card" href="${p.slug}.html">
-      <span class="post-category">${_esc(p.category)}</span>
-      <h2>${_esc(p.title)}</h2>
-      <p>${_esc(p.description)}</p>
-    </a>''',
+String _renderBlogIndex(
+  List<BlogPost> posts,
+  List<BlogPost> stories,
+  List<BlogPost> experiments,
+) {
+  final allPosts = [
+    ...stories.reversed.map(
+      (post) => _renderBlogHomePostItem(
+        post,
+        href: 'stories/${post.slug}.html',
+      ),
     ),
+    ...posts.map(
+        (post) => _renderBlogHomePostItem(post, href: '${post.slug}.html')),
   ].join('\n');
+  final recentExperiments = experiments.reversed
+      .take(3)
+      .map((post) => _renderSidebarExperiment(post))
+      .join('\n');
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Blog - Stories &amp; Architecture</title>
+<title>resqlite Blog - Engineering Notes</title>
 <style>
 ${_sharedCss()}
-  .post-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
-  .post-card {
-    display: block; text-decoration: none; color: var(--text);
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1.5rem; transition: border-color 0.15s, transform 0.15s;
-  }
-  .post-card:hover { border-color: var(--accent); transform: translateY(-2px); text-decoration: none; }
-  .post-card h2 { font-size: 1.15rem; margin-bottom: 0.4rem; }
-  .post-card p { font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
-  .post-category {
-    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
-  }
+${_blogIndexCss()}
 </style>
 </head>
 <body>
-<div class="page-wrap">
+<div class="page-wrap blog-wrap">
   <nav class="top-nav">
     <a href="../index.html">&larr; Home</a>
     <a href="../benchmarks/index.html">Benchmarks</a>
-    <a href="../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Dashboard</a>
     <a href="../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
-  <h1>Stories &amp; Architecture</h1>
-  <p class="subtitle">The chronological engineering history of resqlite, plus technical deep-dives into how the library works.</p>
-  <div class="post-list">
-$cards
+  <header class="blog-hero">
+    <span class="post-category">resqlite Blog</span>
+    <h1>Engineering notes from the project.</h1>
+    <p class="subtitle">A single index for the project narrative and architecture writing. Experiments live here too, with the dashboard kept as the interactive benchmark view.</p>
+  </header>
+
+  <div class="blog-layout">
+    <main class="primary-column" aria-labelledby="all-posts-title">
+      <div class="section-heading">
+        <h2 id="all-posts-title">All Posts</h2>
+        <span class="section-note">Stories and architecture notes, newest stories first.</span>
+      </div>
+      <div class="post-ledger">
+$allPosts
+      </div>
+    </main>
+
+    <aside class="blog-sidebar" aria-label="Blog context">
+      <section class="sidebar-card">
+        <div class="section-heading compact">
+          <h2>Reference</h2>
+        </div>
+        <div class="sidebar-list">
+${_renderProjectLinks()}
+        </div>
+      </section>
+
+      <section class="sidebar-card">
+        <div class="section-heading compact">
+          <h2>Recent Experiments</h2>
+          <a href="experiments/index.html">All &rarr;</a>
+        </div>
+        <div class="sidebar-list">
+$recentExperiments
+        </div>
+      </section>
+    </aside>
   </div>
 </div>
 </body>
 </html>''';
 }
 
-String _renderStoryIndex(List<BlogPost> stories) {
-  final entries = stories.map(_renderStoryTimelineEntry).join('\n');
-  final leadTitle = stories.isEmpty ? 'Stories' : _esc(stories.first.title);
-  final leadDescription = stories.isEmpty
-      ? 'Project stories will appear here as markdown posts are added.'
-      : _inline(stories.first.description);
+String _renderBlogHomePostItem(BlogPost post, {required String href}) {
+  final date =
+      post.date == null ? '' : '<time>${_esc(_longDate(post.date))}</time>';
+  return '''
+        <a class="post-row" href="$href">
+          <span class="post-row-meta">${date.isEmpty ? _esc(post.category) : '$date · ${_esc(post.category)}'}</span>
+          <strong>${_esc(post.title)}</strong>
+          <span>${_summaryInline(post.description)}</span>
+        </a>''';
+}
+
+String _renderSidebarExperiment(BlogPost post) {
+  final date =
+      post.date == null ? '' : '<time>${_esc(_longDate(post.date))}</time>';
+  return '''
+          <a class="sidebar-item" href="experiments/${post.slug}.html">
+            <span>${date.isEmpty ? _esc(post.category) : '$date · ${_esc(post.category)}'}</span>
+            <strong>${_esc(post.title)}</strong>
+          </a>''';
+}
+
+String _renderProjectLinks() => '''
+          <a class="sidebar-item" href="architecture.html">
+            <span>Architecture</span>
+            <strong>Architecture Breakdown</strong>
+            <em>The full system view: reader pool, writer isolate, reactive streams, native state, and data flow.</em>
+          </a>
+          <a class="sidebar-item" href="../benchmarks/index.html">
+            <span>Benchmarks</span>
+            <strong>Benchmark Dashboard</strong>
+            <em>Interactive charts for current performance, history, devices, and workload comparisons.</em>
+          </a>
+          <a class="sidebar-item" href="../api/resqlite/resqlite-library.html">
+            <span>Reference</span>
+            <strong>API Documentation</strong>
+            <em>Generated Dart API docs for the public resqlite package surface.</em>
+          </a>''';
+
+const _legacyArchitectureRedirects = {
+  'reading': 'architecture.html',
+  'writing': 'architecture.html',
+  'streaming': 'architecture.html',
+};
+
+String _renderExperimentBlogIndex(List<BlogPost> experiments) {
+  final entries = experiments.reversed
+      .map((post) => _renderExperimentIndexItem(post))
+      .join('\n');
+  final acceptedCount = experiments
+      .where((post) => post.category.toLowerCase().contains('accepted'))
+      .length;
+  final rejectedCount = experiments
+      .where((post) => post.category.toLowerCase().contains('rejected'))
+      .length;
 
   return '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Stories - Project Timeline</title>
+<title>resqlite Experiment Posts</title>
 <style>
-${_storyIndexCss()}
+${_sharedCss()}
+${_blogIndexCss()}
 </style>
 </head>
 <body>
-<div class="page-wrap">
+<div class="page-wrap blog-wrap">
   <nav class="top-nav">
     <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../../experiments/index.html">Experiment Dashboard</a>
     <a href="../../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
-
-  <header class="hero">
-    <div>
-      <span class="eyebrow">Project Stories</span>
-      <h1>The chronological history of resqlite.</h1>
-      <p class="subtitle">The public docs explain what the library does. The experiment log records every measurement. These stories explain the design decisions that changed the project, with enough context to read any entry on its own.</p>
-    </div>
-    <a class="lead-card" href="${stories.isEmpty ? '../index.html' : '${stories.first.slug}.html'}">
-      <span class="label">Start here</span>
-      <h2>$leadTitle</h2>
-      <p>$leadDescription</p>
-    </a>
+  <header class="blog-hero">
+    <span class="post-category">Experiment Posts</span>
+    <h1>The resqlite research log.</h1>
+    <p class="subtitle">Generated from the experiment markdown files. Each post keeps the engineering record close to the benchmark evidence: problem, hypothesis, implementation, result, and decision.</p>
   </header>
 
-  <section class="stats" aria-label="Project story highlights">
-    <div class="stat">
-      <strong>${stories.length}</strong>
-      <span>chronological stories split from the original project narrative</span>
-    </div>
-    <div class="stat">
-      <strong>0.47 ms</strong>
-      <span>main-isolate time for 5,000-row map reads in the early benchmark set</span>
-    </div>
-    <div class="stat">
-      <strong>116K</strong>
-      <span>point queries per second measured after the reader event-port cleanup</span>
-    </div>
-    <div class="stat">
-      <strong>6 days</strong>
-      <span>from filing the Flutter hang to the Dart VM fix landing upstream</span>
-    </div>
+  <section class="stats-row" aria-label="Experiment post counts">
+    <div><strong>${experiments.length}</strong><span>experiment posts</span></div>
+    <div><strong>$acceptedCount</strong><span>accepted records</span></div>
+    <div><strong>$rejectedCount</strong><span>rejected records</span></div>
   </section>
 
-  <section aria-labelledby="timeline-title">
+  <section class="blog-section" aria-labelledby="all-experiments-title">
     <div class="section-heading">
-      <h2 id="timeline-title">Timeline</h2>
-      <a href="../../experiments/index.html">Open the experiment log &rarr;</a>
+      <h2 id="all-experiments-title">All Experiments</h2>
+      <a href="../../experiments/index.html">Open dashboard &rarr;</a>
     </div>
-
-    <div class="timeline">
+    <div class="experiment-ledger">
 $entries
     </div>
-  </section>
-
-  <section class="lower-links" aria-label="Related documentation">
-    <a class="link-card" href="../../experiments/index.html">
-      <h3>Experiment Log</h3>
-      <p>The complete lab notebook: accepted ideas, rejected ideas, benchmark links, and reasoning.</p>
-    </a>
-    <a class="link-card" href="../../benchmarks/index.html">
-      <h3>Benchmark Dashboard</h3>
-      <p>Interactive charts for peer comparisons, run history, devices, and scenario workloads.</p>
-    </a>
-    <a class="link-card" href="../architecture.html">
-      <h3>Architecture</h3>
-      <p>The system-level view of readers, writers, native handles, and streaming behavior.</p>
-    </a>
   </section>
 </div>
 </body>
 </html>''';
 }
 
-String _renderStoryTimelineEntry(BlogPost story) {
-  final tags = story.tags
-      .map((tag) => '<span class="tag">${_esc(tag)}</span>')
-      .join('\n              ');
+String _renderExperimentIndexItem(BlogPost post) {
+  final fields = [
+    if (post.date != null) _longDate(post.date),
+    post.category,
+    if (post.meta['Direction'] case final direction?) direction,
+  ].where((field) => field.trim().isNotEmpty).map(_esc).join(' · ');
+
   return '''
-      <article class="story-entry" data-tone="${_escAttr(story.tone)}">
-        <div class="story-date">
-          <strong>${_storyMonthDay(story.date)}</strong>
-          ${story.date?.year ?? ''}
-        </div>
-        <a class="story-card" href="${story.slug}.html">
-          <div>
-            <h3>${_esc(story.title)}</h3>
-            <p>${_inline(story.description)}</p>
-            <div class="story-meta">
-              $tags
-            </div>
-          </div>
-          <span class="story-action">Read story &rarr;</span>
-        </a>
-      </article>''';
+      <a class="experiment-row" href="${post.slug}.html" data-tone="${_escAttr(post.tone)}">
+        <span class="experiment-number">${_esc(_experimentLabel(post.slug))}</span>
+        <span>
+          <strong>${_esc(post.title)}</strong>
+          <small>$fields</small>
+          <em>${_summaryInline(post.description)}</em>
+        </span>
+      </a>''';
+}
+
+String _renderRedirect(String href, String title) {
+  final escapedHref = _escAttr(href);
+  return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="0; url=$escapedHref">
+<link rel="canonical" href="$escapedHref">
+<title>${_esc(title)} — resqlite</title>
+</head>
+<body>
+<p>This page moved to <a href="$escapedHref">$escapedHref</a>.</p>
+</body>
+</html>''';
 }
 
 String _renderPost(BlogPost post, PostKind kind) {
   final htmlBody = _markdownToHtml(post.content, kind);
   final isStory = kind == PostKind.story;
   final isExperiment = kind == PostKind.experiment;
+  final tableOfContents = kind == PostKind.blog && post.slug == 'architecture'
+      ? _renderTableOfContents(post.content)
+      : '';
   final nav = switch (kind) {
     PostKind.story => '''
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>''',
     PostKind.experiment => '''
   <nav class="top-nav">
-    <a href="index.html">&larr; Experiment Dashboard</a>
-    <a href="../blog/stories/index.html">Stories</a>
-    <a href="../blog/index.html">Blog</a>
-    <a href="../index.html">Home</a>
-    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="index.html">&larr; All Experiments</a>
+    <a href="../index.html">Blog</a>
+    <a href="../../index.html">Home</a>
+    <a href="../../benchmarks/index.html">Benchmarks</a>
+    <a href="../../experiments/index.html">Experiment Dashboard</a>
   </nav>''',
     PostKind.blog => '''
   <nav class="top-nav">
     <a href="index.html">&larr; All Posts</a>
     <a href="../index.html">Home</a>
     <a href="../benchmarks/index.html">Benchmarks</a>
-    <a href="../experiments/index.html">Experiments</a>
+    <a href="experiments/index.html">Experiment Posts</a>
   </nav>''',
   };
   final meta = isStory
@@ -535,7 +601,9 @@ String _renderPost(BlogPost post, PostKind kind) {
       : isExperiment
           ? _renderExperimentMeta(post)
           : '';
-  final body = isStory || isExperiment ? '$meta$htmlBody' : '    $htmlBody';
+  final body = isStory || isExperiment
+      ? '$meta$htmlBody'
+      : '    $tableOfContents$htmlBody';
   final extraCss = isStory || isExperiment ? _storyBylineCss() : '';
 
   return '''<!DOCTYPE html>
@@ -561,6 +629,31 @@ $body
 </html>''';
 }
 
+String _compactGeneratedHtml(String html) {
+  final protectedBlocks = <String>[];
+  final withTokens = html.replaceAllMapped(
+    RegExp(r'<pre><code>.*?</code></pre>', dotAll: true),
+    (match) {
+      final token = '___RESQLITE_PRE_${protectedBlocks.length}___';
+      protectedBlocks.add(match.group(0)!);
+      return token;
+    },
+  );
+
+  final compact = withTokens
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .join(' ')
+      .replaceAll(RegExp(r'>\s+<'), '><');
+
+  return compact.replaceAllMapped(RegExp(r'___RESQLITE_PRE_(\d+)___'), (
+    match,
+  ) {
+    return protectedBlocks[int.parse(match.group(1)!)];
+  });
+}
+
 String _renderExperimentMeta(BlogPost post) {
   final fields = <String>[
     if (post.date != null) _longDate(post.date),
@@ -569,12 +662,47 @@ String _renderExperimentMeta(BlogPost post) {
   ].where((field) => field.trim().isNotEmpty).toList();
 
   if (fields.isEmpty) return '';
-  return '    <p class="story-byline">${fields.map(_inline).join(' · ')}</p>\n';
+  return '    <p class="story-byline">${fields.map((field) => _inline(field, PostKind.experiment)).join(' · ')}</p>\n';
 }
 
-String _storyMonthDay(DateTime? date) {
-  if (date == null) return '';
-  return '${_month(date.month)} ${date.day.toString().padLeft(2, '0')}';
+String _renderTableOfContents(String md) {
+  final items = <({String id, String title})>[];
+  final usedIds = <String>{};
+  var inCodeBlock = false;
+
+  for (final line in md.split('\n')) {
+    if (line.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) continue;
+
+    final trimmed = line.trim();
+    final match = RegExp(r'^(#{1,6})\s+(.+)$').firstMatch(trimmed);
+    if (match == null) continue;
+
+    final level = match.group(1)!.length;
+    final title = match.group(2)!.trim();
+    final id = _headingAnchor(title, usedIds);
+    if (level == 2) items.add((id: id, title: title));
+  }
+
+  if (items.isEmpty) return '';
+
+  final links = items
+      .map(
+        (item) => '<a href="#${_escAttr(item.id)}">${_inline(item.title)}</a>',
+      )
+      .join('\n      ');
+
+  return '''
+    <nav class="article-toc" aria-labelledby="architecture-toc-title">
+      <strong id="architecture-toc-title">On this page</strong>
+      <div>
+      $links
+      </div>
+    </nav>
+''';
 }
 
 String _longDate(DateTime? date) {
@@ -609,6 +737,7 @@ String _markdownToHtml(String md, PostKind kind) {
   var inList = false;
   var listType = '';
   final tableRows = <String>[];
+  final usedHeadingIds = <String>{};
 
   void flushTable() {
     if (tableRows.isEmpty) return;
@@ -661,17 +790,23 @@ String _markdownToHtml(String md, PostKind kind) {
     }
 
     if (trimmed.startsWith('######')) {
-      buf.writeln('<h6>${_inline(trimmed.substring(6).trim(), kind)}</h6>');
+      buf.writeln(
+          _renderHeading(6, trimmed.substring(6).trim(), kind, usedHeadingIds));
     } else if (trimmed.startsWith('#####')) {
-      buf.writeln('<h5>${_inline(trimmed.substring(5).trim(), kind)}</h5>');
+      buf.writeln(
+          _renderHeading(5, trimmed.substring(5).trim(), kind, usedHeadingIds));
     } else if (trimmed.startsWith('####')) {
-      buf.writeln('<h4>${_inline(trimmed.substring(4).trim(), kind)}</h4>');
+      buf.writeln(
+          _renderHeading(4, trimmed.substring(4).trim(), kind, usedHeadingIds));
     } else if (trimmed.startsWith('###')) {
-      buf.writeln('<h3>${_inline(trimmed.substring(3).trim(), kind)}</h3>');
+      buf.writeln(
+          _renderHeading(3, trimmed.substring(3).trim(), kind, usedHeadingIds));
     } else if (trimmed.startsWith('##')) {
-      buf.writeln('<h2>${_inline(trimmed.substring(2).trim(), kind)}</h2>');
+      buf.writeln(
+          _renderHeading(2, trimmed.substring(2).trim(), kind, usedHeadingIds));
     } else if (trimmed.startsWith('# ')) {
-      buf.writeln('<h1>${_inline(trimmed.substring(2).trim(), kind)}</h1>');
+      buf.writeln(
+          _renderHeading(1, trimmed.substring(2).trim(), kind, usedHeadingIds));
     } else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
       buf.writeln('<hr>');
     } else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
@@ -705,6 +840,42 @@ String _markdownToHtml(String md, PostKind kind) {
   if (inCodeBlock) buf.writeln('</code></pre>');
 
   return buf.toString();
+}
+
+String _renderHeading(
+  int level,
+  String title,
+  PostKind kind,
+  Set<String> usedIds,
+) {
+  final id = _headingAnchor(title, usedIds);
+  return '<h$level id="${_escAttr(id)}">${_inline(title, kind)}</h$level>';
+}
+
+String _headingAnchor(String title, Set<String> usedIds) {
+  final plain = _headingPlainText(title);
+  var base = plain
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  if (base.isEmpty) base = 'section';
+
+  var id = base;
+  var suffix = 2;
+  while (!usedIds.add(id)) {
+    id = '$base-${suffix++}';
+  }
+  return id;
+}
+
+String _headingPlainText(String title) {
+  var out = title.replaceAllMapped(
+    RegExp(r'\[([^\]]+)\]\([^)]+\)'),
+    (match) => match.group(1)!,
+  );
+  out = out.replaceAll(RegExp(r'[`*_~]'), '');
+  out = out.replaceAll('&', ' and ');
+  return out;
 }
 
 String _renderTable(List<String> rows, PostKind kind) {
@@ -805,6 +976,32 @@ String _inline(String s, [PostKind kind = PostKind.blog]) {
     RegExp(r'`([^`]+)`'),
     (m) => '<code>${m.group(1)}</code>',
   );
+  out = out.replaceAll('**', '');
+  return out;
+}
+
+String _summaryInline(String s, {int? maxLength}) {
+  final source = maxLength != null && s.length > maxLength
+      ? '${s.substring(0, maxLength - 3)}...'
+      : s;
+  var out = _esc(source);
+  out = out.replaceAllMapped(
+    RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
+    (m) => m.group(1)!,
+  );
+  out = out.replaceAllMapped(
+    RegExp(r'\*\*([^*]+)\*\*'),
+    (m) => '<strong>${m.group(1)}</strong>',
+  );
+  out = out.replaceAllMapped(
+    RegExp(r'(?<!\*)\*([^*]+)\*(?!\*)'),
+    (m) => '<em>${m.group(1)}</em>',
+  );
+  out = out.replaceAllMapped(
+    RegExp(r'`([^`]+)`'),
+    (m) => '<code>${m.group(1)}</code>',
+  );
+  out = out.replaceAll('**', '');
   return out;
 }
 
@@ -855,8 +1052,8 @@ bool _looksLikeRepoFile(String path) {
 
 String _experimentsPrefix(PostKind kind) {
   return switch (kind) {
-    PostKind.story => '../../experiments/',
-    PostKind.blog => '../experiments/',
+    PostKind.story => '../experiments/',
+    PostKind.blog => 'experiments/',
     PostKind.experiment => '',
   };
 }
@@ -930,11 +1127,290 @@ String _sharedCss() => '''
   }
 ''';
 
+String _blogIndexCss() => '''
+  .blog-wrap { max-width: 1060px; }
+  .blog-hero {
+    padding: 1.5rem 0 2rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .blog-hero h1 {
+    max-width: 760px;
+    font-size: 3rem;
+    line-height: 1.05;
+    margin-bottom: 1rem;
+  }
+  .blog-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 19rem;
+    gap: 2.5rem;
+    align-items: start;
+  }
+  .primary-column {
+    min-width: 0;
+  }
+  .post-ledger {
+    border-top: 1px solid var(--border);
+  }
+  .post-row {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1.15rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .post-row:hover {
+    text-decoration: none;
+  }
+  .post-row:hover strong {
+    color: var(--accent);
+  }
+  .post-row strong {
+    font-size: 1.08rem;
+    line-height: 1.35;
+  }
+  .post-row span {
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .post-row-meta,
+  .post-row-meta time {
+    color: var(--muted);
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .blog-sidebar {
+    position: sticky;
+    top: 1.5rem;
+    display: grid;
+    gap: 1rem;
+  }
+  .sidebar-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .sidebar-card h2 {
+    margin-bottom: 0.8rem;
+    font-size: 0.88rem;
+    letter-spacing: 0.08em;
+    line-height: 1.3;
+    text-transform: uppercase;
+  }
+  .sidebar-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--border);
+  }
+  .sidebar-item {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.75rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-item:hover {
+    text-decoration: none;
+  }
+  .sidebar-item:hover strong {
+    color: var(--accent);
+  }
+  .sidebar-item span {
+    color: var(--muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .sidebar-item strong {
+    font-size: 0.84rem;
+    line-height: 1.4;
+  }
+  .sidebar-item em {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-style: normal;
+    line-height: 1.4;
+  }
+  .post-row code,
+  .sidebar-item code,
+  .experiment-row em code {
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.9em;
+  }
+  .post-row span strong,
+  .experiment-row em strong {
+    color: var(--text);
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .blog-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .section-heading.compact {
+    margin-bottom: 0.6rem;
+  }
+  .section-heading h2 {
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-heading a,
+  .section-note,
+  .section-footnote {
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+  .section-heading a { color: var(--accent); }
+  .section-footnote {
+    margin-top: 1rem;
+  }
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 1.5rem 0 2rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stats-row div {
+    padding: 1rem;
+    border-right: 1px solid var(--border);
+  }
+  .stats-row div:last-child {
+    border-right: none;
+  }
+  .stats-row strong {
+    display: block;
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+  .stats-row span {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .experiment-ledger {
+    border-top: 1px solid var(--border);
+  }
+  .experiment-row {
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 1rem;
+    padding: 1rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .experiment-row:hover {
+    text-decoration: none;
+  }
+  .experiment-row:hover strong {
+    color: var(--accent);
+  }
+  .experiment-number {
+    color: var(--accent);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    padding-top: 0.1rem;
+  }
+  .experiment-row strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.96rem;
+    line-height: 1.35;
+  }
+  .experiment-row small {
+    display: block;
+    color: var(--muted);
+    font-size: 0.76rem;
+    margin-bottom: 0.3rem;
+  }
+  .experiment-row em {
+    display: block;
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-style: normal;
+    line-height: 1.45;
+  }
+  @media (max-width: 840px) {
+    .blog-hero h1 { font-size: 2.4rem; }
+    .blog-layout {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+    .blog-sidebar {
+      position: static;
+    }
+    .stats-row {
+      grid-template-columns: 1fr;
+    }
+    .stats-row div,
+    .stats-row div:last-child {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .stats-row div:last-child {
+      border-bottom: none;
+    }
+  }
+  @media (max-width: 520px) {
+    .blog-hero h1 { font-size: 2rem; }
+    .section-heading {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .experiment-row {
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+    }
+  }
+''';
+
 String _articleCss() => '''
   .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -982,315 +1458,5 @@ String _storyBylineCss() => '''
     color: var(--muted);
     font-size: 0.82rem;
     margin: -0.75rem 0 1.5rem;
-  }
-''';
-
-String _storyIndexCss() => '''
-  :root {
-    --bg: #0d1117;
-    --panel: #161b22;
-    --panel-2: #111722;
-    --panel-hover: rgba(88, 166, 255, 0.07);
-    --border: #30363d;
-    --border-strong: #46515f;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --amber: #d29922;
-    --rose: #ff7b72;
-    --violet: #bc8cff;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-  }
-  a { color: inherit; text-decoration: none; }
-  a:hover { text-decoration: none; }
-  a:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 3px;
-  }
-  .page-wrap {
-    width: min(1180px, 100%);
-    margin: 0 auto;
-    padding: 2rem;
-  }
-  .top-nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem 1.5rem;
-    margin-bottom: 1.5rem;
-    font-size: 0.85rem;
-    color: var(--muted);
-  }
-  .top-nav a { color: var(--accent); }
-  .top-nav a:hover { text-decoration: underline; }
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 1.25rem;
-    align-items: start;
-    padding: 2rem 0 1.5rem;
-    border-top: 2px solid var(--accent);
-    border-bottom: 2px solid var(--border);
-  }
-  .eyebrow {
-    display: inline-block;
-    margin-bottom: 0.75rem;
-    color: var(--green);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  h1 {
-    max-width: 900px;
-    margin-bottom: 1rem;
-    font-size: 3.05rem;
-    line-height: 1.05;
-    letter-spacing: 0;
-  }
-  .subtitle {
-    max-width: 780px;
-    color: var(--muted);
-    font-size: 1.05rem;
-  }
-  .lead-card {
-    display: block;
-    max-width: 640px;
-    padding: 0.4rem 0 0.4rem 1rem;
-    background: transparent;
-    border-left: 4px solid var(--accent);
-    transition: border-color 0.15s;
-  }
-  .lead-card:hover {
-    border-left-color: var(--green);
-  }
-  .lead-card .label {
-    display: block;
-    margin-bottom: 0.45rem;
-    color: var(--amber);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .lead-card h2 {
-    margin-bottom: 0.5rem;
-    font-size: 1.1rem;
-    line-height: 1.3;
-  }
-  .lead-card p {
-    color: var(--muted);
-    font-size: 0.88rem;
-    line-height: 1.5;
-  }
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    margin: 1.5rem 0 2rem;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-  }
-  .stat {
-    padding: 1rem;
-    border-right: 1px solid var(--border);
-  }
-  .stat:last-child {
-    border-right: none;
-  }
-  .stat strong {
-    display: block;
-    margin-bottom: 0.25rem;
-    color: var(--text);
-    font-size: 1.35rem;
-    line-height: 1;
-  }
-  .stat span {
-    color: var(--muted);
-    font-size: 0.78rem;
-    line-height: 1.35;
-  }
-  .section-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-  }
-  .section-heading h2 {
-    color: var(--text);
-    font-size: 1rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .section-heading a {
-    color: var(--accent);
-    font-size: 0.85rem;
-  }
-  .section-heading a:hover { text-decoration: underline; }
-  .timeline {
-    display: grid;
-    gap: 0;
-    padding-bottom: 2rem;
-    border-top: 1px solid var(--border);
-  }
-  .story-entry {
-    display: grid;
-    grid-template-columns: 7rem minmax(0, 1fr);
-    gap: 1.5rem;
-    padding: 1.15rem 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .story-date {
-    padding-top: 0.2rem;
-    color: var(--muted);
-    font-size: 0.82rem;
-    text-align: left;
-  }
-  .story-date strong {
-    display: block;
-    color: var(--text);
-    font-size: 0.95rem;
-  }
-  .story-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 7rem;
-    gap: 1rem;
-    padding: 0.25rem 0;
-    border-radius: 6px;
-    transition: background 0.15s, color 0.15s;
-  }
-  .story-card:hover {
-    background: var(--panel-hover);
-  }
-  .story-card:hover h3 {
-    color: var(--accent);
-  }
-  .story-card h3 {
-    margin-bottom: 0.45rem;
-    font-size: 1rem;
-    line-height: 1.3;
-  }
-  .story-card p {
-    max-width: 760px;
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.6;
-  }
-  .story-card code {
-    color: var(--text);
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.88em;
-  }
-  .story-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    margin-top: 0.55rem;
-  }
-  .tag {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.5rem;
-    padding: 0 0.45rem;
-    color: var(--muted);
-    background: rgba(139, 148, 158, 0.08);
-    border: 1px solid rgba(139, 148, 158, 0.2);
-    border-radius: 4px;
-    font-size: 0.72rem;
-  }
-  .story-action {
-    align-self: start;
-    justify-self: end;
-    padding-top: 0.1rem;
-    color: var(--accent);
-    font-size: 0.85rem;
-    white-space: nowrap;
-  }
-  .story-entry[data-tone="green"] .story-date strong { color: var(--green); }
-  .story-entry[data-tone="amber"] .story-date strong { color: var(--amber); }
-  .story-entry[data-tone="rose"] .story-date strong { color: var(--rose); }
-  .story-entry[data-tone="violet"] .story-date strong { color: var(--violet); }
-  .lower-links {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
-    margin-top: 2rem;
-    padding-top: 2rem;
-    border-top: 2px solid var(--accent);
-  }
-  .link-card {
-    display: block;
-    padding: 1.1rem;
-    border-right: 1px solid var(--border);
-    transition: background 0.15s;
-  }
-  .link-card:last-child {
-    border-right: none;
-  }
-  .link-card:hover {
-    background: var(--panel-hover);
-  }
-  .link-card:hover h3 {
-    color: var(--accent);
-  }
-  .link-card h3 {
-    margin-bottom: 0.35rem;
-    font-size: 0.95rem;
-  }
-  .link-card p {
-    color: var(--muted);
-    font-size: 0.82rem;
-    line-height: 1.45;
-  }
-  @media (max-width: 840px) {
-    .page-wrap { padding: 1.25rem; }
-    .hero { gap: 1.5rem; }
-    h1 { font-size: 3.2rem; }
-    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .stat:nth-child(2) { border-right: none; }
-    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
-    .story-card {
-      grid-template-columns: 1fr;
-    }
-    .story-action {
-      justify-self: start;
-    }
-    .story-entry {
-      grid-template-columns: 1fr;
-      gap: 0.55rem;
-    }
-    .story-date {
-      padding-top: 0;
-    }
-    .lower-links { grid-template-columns: 1fr; }
-    .link-card {
-      border-right: none;
-      border-bottom: 1px solid var(--border);
-    }
-    .link-card:last-child {
-      border-bottom: none;
-    }
-  }
-  @media (max-width: 520px) {
-    .stats {
-      grid-template-columns: 1fr;
-    }
-    .stat {
-      border-right: none;
-      border-bottom: 1px solid var(--border);
-    }
-    .stat:last-child {
-      border-bottom: none;
-    }
-    h1 {
-      font-size: 2.55rem;
-    }
   }
 ''';

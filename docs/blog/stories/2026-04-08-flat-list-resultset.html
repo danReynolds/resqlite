@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,20 +112,19 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 8, 2026 · ResultSet · Row facade · read path</p>
-<h1>Flat-List ResultSet Design</h1>
-<h2>Problem Statement</h2>
+<h1 id="flat-list-resultset-design">Flat-List ResultSet Design</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>The false starts made the shape of the solution clearer. resqlite did not need a clever byte format that pushed decode back to the UI isolate, and it did not need to give up the row-map API. It needed to stop storing every row as a separate mutable map when query results are more regular than that.</p>
 <p>The read path no longer looked limited by SQLite execution. Native connection state, statement caching, and mutex reductions had helped, but <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> still produced a large transfer graph. resqlite needed a row representation that preserved the map-like API without paying for one mutable hash map per row.</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>Database result rows have a constrained shape:</p>
 <ul>
 <li>Every row in a result has the same columns.</li>
@@ -106,10 +135,10 @@
 <p>That shape does not require a full <code>LinkedHashMap</code> for every row. The public API could remain map-like while the storage became specialized for query results.</p>
 <p>The SQLite side of this path is the normal prepared-statement loop: compile SQL with <a href="https://www.sqlite.org/c3ref/prepare.html"><code>sqlite3_prepare_v2()</code> or <code>sqlite3_prepare_v3()</code></a>, call <a href="https://www.sqlite.org/c3ref/step.html"><code>sqlite3_step()</code></a> until it stops returning rows, and read each column with the <a href="https://www.sqlite.org/c3ref/column_blob.html"><code>sqlite3_column_*()</code> family</a>. resqlite was not trying to replace that lifecycle. The question was what Dart shape should be built from those column values before the result crossed isolates.</p>
 <p>That distinction matters for FFI-heavy libraries. SQLite already exposes row values one statement step at a time. A wrapper can either mirror that row shape directly into Dart maps, or it can recognize that column metadata is stable across the result and store values in a representation better suited to transfer and iteration.</p>
-<h2>Hypothesis</h2>
+<h2 id="hypothesis">Hypothesis</h2>
 <p>If values are stored in one flat row-major list and column metadata is shared once, then <code>Isolate.exit()</code> will validate far fewer structural objects. The main isolate can still expose <code>Map&lt;String, Object?&gt;</code> behavior by creating cheap row facades on demand.</p>
-<h2>What We Tried</h2>
-<p><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a> built the representation in three steps. The design deliberately changed storage first and presentation second:</p>
+<h2 id="what-we-tried">What We Tried</h2>
+<p><a href="../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a> built the representation in three steps. The design deliberately changed storage first and presentation second:</p>
 <ol>
 <li>Store all row values in one <code>List&lt;Object?&gt;</code>.</li>
 <li>Store column names and the name-to-index map in one shared <code>RowSchema</code>.</li>
@@ -126,7 +155,7 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
 <li>Return the value from the flat list.</li>
 </ol>
 <p>Values are still decoded on the worker. The main isolate does not decode UTF-8 or materialize SQLite values; it creates only small facades.</p>
-<h2>Results</h2>
+<h2 id="results">Results</h2>
 <p>The 20,000-row benchmark showed the representation change clearly:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -192,16 +221,16 @@ values = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]
 </tbody></table></div>
 
 <p>The structural object count dropped from hundreds of thousands of map-related objects to a small set of shared containers plus the actual values.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The flat-list <code>ResultSet</code> became the core read-path representation. It kept the caller-facing API ordinary while removing the per-row map infrastructure from the isolate transfer graph.</p>
 <p>The broader engineering lesson was that API shape and storage shape do not have to be the same. resqlite could expose map-like rows without storing rows as maps.</p>
 <p>This was the first major positive turn in the story. With large result transfer under control, the next bottleneck moved to the other end of the size spectrum: tiny reads were still paying too much to create one-off workers.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
-<li><a href="../../experiments/032-row-map-facade.html">Experiment 032: Row Map facade overrides</a></li>
+<li><a href="../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
+<li><a href="../experiments/032-row-map-facade.html">Experiment 032: Row Map facade overrides</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://www.sqlite.org/c3ref/prepare.html">SQLite prepared statements</a></li>
 <li><a href="https://www.sqlite.org/c3ref/step.html">SQLite statement stepping</a></li>

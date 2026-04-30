@@ -78,7 +78,7 @@ The writer isolate remained a first-class subsystem because it owns three connec
 2. Preserve transaction semantics across async calls.
 3. Publish dirty-table data for reactive streams.
 
-The deeper walkthrough is [How resqlite Writes Data](../writing.html). The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.
+The deeper walkthrough is now part of [resqlite Architecture](../architecture.html). The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.
 
 With reads, streams, and writes now organized around stable subsystems, the project entered a different phase. The hard part became deciding which optimizations were worth carrying forward and which ones should be documented as dead ends.
 
