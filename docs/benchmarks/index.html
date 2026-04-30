@@ -384,33 +384,67 @@ Chart.register({
   afterDraw(chart) {
     const type = chart.config.type;
     if (type !== 'bar' && type !== 'line') return;
-    if (chart.options.plugins?.winnerLabels === false) return;
+    const pluginOptions = chart.options.plugins?.winnerLabels;
+    if (pluginOptions === false) return;
+    const higherBetter = pluginOptions && typeof pluginOptions === 'object' && pluginOptions.higherBetter === true;
+    const tieTolerance = pluginOptions && typeof pluginOptions === 'object' && pluginOptions.tieTolerance != null
+      ? pluginOptions.tieTolerance
+      : (higherBetter ? 0 : 0.002);
     const datasets = chart.data.datasets;
-    if (datasets.length < 2) return;
+    if (!datasets.length) return;
     const ctx = chart.ctx;
     const n = chart.data.labels.length;
-    const indices = type === 'line' ? [n - 1] : Array.from({length: n}, (_, i) => i);
-    for (const i of indices) {
-      const entries = [];
-      for (let di = 0; di < datasets.length; di++) {
-        const val = datasets[di].data[i];
-        if (val == null) continue;
-        const meta = chart.getDatasetMeta(di);
-        if (meta.hidden) continue;
-        const pt = meta.data[i];
-        if (!pt) continue;
-        entries.push({val, pt});
+    const candidateGroups = [];
+
+    if (type === 'bar' && datasets.length === 1) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta.hidden) {
+        const entries = [];
+        for (let i = 0; i < n; i++) {
+          const raw = datasets[0].data[i];
+          const val = raw == null ? null : Number(raw);
+          const pt = meta.data[i];
+          if (val == null || !Number.isFinite(val) || !pt) continue;
+          entries.push({ val, pt });
+        }
+        candidateGroups.push(entries);
       }
+    } else {
+      const indices = type === 'line' ? [n - 1] : Array.from({length: n}, (_, i) => i);
+      for (const i of indices) {
+        const entries = [];
+        for (let di = 0; di < datasets.length; di++) {
+          const raw = datasets[di].data[i];
+          const val = raw == null ? null : Number(raw);
+          if (val == null || !Number.isFinite(val)) continue;
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) continue;
+          const pt = meta.data[i];
+          if (!pt) continue;
+          entries.push({val, pt});
+        }
+        candidateGroups.push(entries);
+      }
+    }
+
+    for (const entries of candidateGroups) {
       if (entries.length < 2) continue;
-      entries.sort((a, b) => a.val - b.val);
-      // Treat differences under 0.002 ms (2 microseconds) as ties.
-      if (entries[1].val - entries[0].val < 0.002) continue;
-      if (entries[0].val > 0 && entries[1].val / entries[0].val < 1.05) continue;
+      entries.sort((a, b) => higherBetter ? b.val - a.val : a.val - b.val);
+      const best = entries[0];
+      const second = entries[1];
+      // Treat very small absolute differences as ties. For latency charts the
+      // default is 0.002 ms (2 microseconds); throughput charts opt into pure
+      // relative separation.
+      if (Math.abs(best.val - second.val) < tieTolerance) continue;
+      const ratio = higherBetter
+        ? (second.val > 0 ? best.val / second.val : Infinity)
+        : (best.val > 0 ? second.val / best.val : Infinity);
+      if (ratio < 1.05) continue;
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.font = '14px serif';
-      ctx.fillText('\u{1F3C6}', entries[0].pt.x, entries[0].pt.y - (type === 'line' ? 12 : 4));
+      ctx.fillText('\u{1F3C6}', best.pt.x, best.pt.y - (type === 'line' ? 12 : 4));
       ctx.restore();
     }
   },
@@ -869,12 +903,13 @@ function seriesMeta(name, mode) {
   return seriesRegistry.get(name);
 }
 
-function barOpts(yLabel, { valueLabels = false, xLabel = '' } = {}) {
+function barOpts(yLabel, { valueLabels = false, xLabel = '', higherBetter = false } = {}) {
   return {
     responsive: true, maintainAspectRatio: false,
     layout: { padding: { top: valueLabels ? 16 : 0 } },
     plugins: {
       legend: { display: true, position: 'top', labels: { boxWidth: 12 } },
+      winnerLabels: { higherBetter },
       barValueLabels: valueLabels,
     },
     scales: {
@@ -1913,7 +1948,11 @@ function buildSingleBar(B, titleMatch, canvasId, { yLabel = 'Wall time (ms)', hi
   allCharts.push(new Chart(document.getElementById(canvasId), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Wall time', data, backgroundColor: colors }] },
-    options: { ...barOpts(yLabel), plugins: { legend: { display: false } } },
+    options: (() => {
+      const opts = barOpts(yLabel, { higherBetter });
+      opts.plugins.legend = { display: false };
+      return opts;
+    })(),
   }));
 }
 
@@ -1939,7 +1978,11 @@ function buildPointThroughput(B, canvasId) {
       labels: rows.map(r => r.label),
       datasets: [{ label: 'Queries/sec', data: rows.map(r => r.value), backgroundColor: rows.map(r => r.color) }],
     },
-    options: { ...barOpts('Queries/sec'), plugins: { legend: { display: false } } },
+    options: (() => {
+      const opts = barOpts('Queries/sec', { higherBetter: true });
+      opts.plugins.legend = { display: false };
+      return opts;
+    })(),
   }));
 }
 
