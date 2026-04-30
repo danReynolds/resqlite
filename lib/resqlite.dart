@@ -9,7 +9,8 @@ export 'src/exceptions.dart'
         ResqliteException,
         ResqliteQueryException,
         ResqliteTransactionException;
-export 'src/dependency_tracking.dart' show TableDependencies, TableDependency;
+export 'src/dependency_tracking.dart'
+    show TableDependencies, TableDependency, TableColumnDependency;
 export 'src/native/resqlite_bindings.dart' show WriteResult;
 export 'src/row.dart' show ResultSet, Row, RowSchema;
 export 'src/stream_engine.dart' show StreamEngine;

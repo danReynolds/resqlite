@@ -464,12 +464,12 @@ List<TableDependency> _decodeColumnDetails(int count) {
     }
 
     if (existingIndex == -1) {
-      out.add(TableColumDependency(table, <String>{col}));
+      out.add(TableColumnDependency(table, <String>{col}));
       continue;
     }
 
     switch (out[existingIndex]) {
-      case TableColumDependency(:final columns):
+      case TableColumnDependency(:final columns):
         columns.add(col);
       case TableDependency():
         // Table-level dependency already present — keep it.

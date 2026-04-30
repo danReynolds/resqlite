@@ -38,7 +38,7 @@ final class UnknownTableDependencies extends TableDependencies {
 /// Table-level dependency.
 ///
 /// A plain [TableDependency] means column precision is unavailable or
-/// inapplicable. [TableColumDependency] is the precise optimization case:
+/// inapplicable. [TableColumnDependency] is the precise optimization case:
 /// only writes intersecting [columns] need re-query.
 base class TableDependency {
   const TableDependency(this.table);
@@ -47,8 +47,8 @@ base class TableDependency {
 }
 
 /// Dependency on a fixed set of columns in [table].
-final class TableColumDependency extends TableDependency {
-  const TableColumDependency(super.table, this.columns);
+final class TableColumnDependency extends TableDependency {
+  const TableColumnDependency(super.table, this.columns);
 
   final Set<String> columns;
 }

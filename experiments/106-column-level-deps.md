@@ -79,7 +79,7 @@ linear scan.
 **3. Dispatch elision.** `StreamEngine.onDependencyChanges(modifications)`
 receives `TableDependencies` from the writer. Known write-side detail is a
 `List<TableDependency>`: a plain `TableDependency(table)` means table-level
-fallback, while `TableColumDependency(table, columns)` enables column
+fallback, while `TableColumnDependency(table, columns)` enables column
 intersection:
 
 ```dart
@@ -89,8 +89,8 @@ if (dependency == null) return false;
 
 return switch ((dependency, modification)) {
   (
-    TableColumDependency(columns: final readColumns),
-    TableColumDependency(columns: final modifiedColumns),
+    TableColumnDependency(columns: final readColumns),
+    TableColumnDependency(columns: final modifiedColumns),
   ) =>
     readColumns.intersects(modifiedColumns),
   _ => true, // table-level dependency or modification: re-query
@@ -314,7 +314,7 @@ The Dart layer captures table uncertainty explicitly:
 `TableDependencies.unknown` for unreliable writer-side dirty-table tracking.
 Known writer responses publish `TableDependencies.fixed([...])`; a plain
 `TableDependency(table)` means table-level fallback, while
-`TableColumDependency(table, columns)` enables column elision.
+`TableColumnDependency(table, columns)` enables column elision.
 `_unknownDepsEntries` remains the StreamEngine-level bucket for streams with
 unknown table dependencies. The
 contract is documented at the top of `lib/src/stream_engine.dart`:

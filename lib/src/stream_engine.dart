@@ -3,7 +3,7 @@ import 'dart:async';
 
 import 'dependency_tracking.dart'
     show
-        TableColumDependency,
+        TableColumnDependency,
         FixedTableDependencies,
         TableDependencies,
         TableDependency,
@@ -125,10 +125,10 @@ final class StreamEngine {
         for (final dep in deps) {
           if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
             switch (dep) {
-              case TableColumDependency(columns: final changedCols):
+              case TableColumnDependency(columns: final changedCols):
                 for (final entry in entries) {
                   switch (entry.dependencies[dep.table]) {
-                    case TableColumDependency(columns: final entryCols):
+                    case TableColumnDependency(columns: final entryCols):
                       bool intersects;
                       if (kProfileMode) {
                         intersectionEntries++;
@@ -390,7 +390,7 @@ final class StreamEntry {
   /// Table dependencies of the query, keyed by table name for invalidation.
   ///
   /// A plain [TableDependency] falls back to table-level invalidation.
-  /// [TableColumDependency] carries precise column detail for dispatch
+  /// [TableColumnDependency] carries precise column detail for dispatch
   /// elision.
   Map<String, TableDependency> dependencies = const {};
 
