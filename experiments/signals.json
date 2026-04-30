@@ -19,7 +19,7 @@
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
       "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions.",
-      "evidence": ["045", "075", "083", "084", "085", "100", "105"],
+      "evidence": ["045", "075", "083", "084", "085", "100", "105", "113"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -34,7 +34,7 @@
         "many-stream writer throughput",
         "reader completion batching"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Exp 113 found that the unawaited async invalidation entrypoint is below the writer-round-trip noise floor by itself."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -297,6 +297,18 @@
       "nextSignals": [
         "writer-isolate profile showing flat-list construction as a material batch-write cost",
         "batch workload with much wider parameter rows than the current two-param INSERT shape"
+      ]
+    },
+    "113": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "Removing the completed Future from the unawaited StreamEngine.invalidate entrypoint does not produce a measurable no-stream write win",
+        "Entrypoint-level invalidation allocation cleanup is less promising than queueing and reader-pool dispatch measurement"
+      ],
+      "nextSignals": [
+        "profile evidence that invalidate Future allocation is material before retrying this cleanup",
+        "stream dispatch counters or traces that separate queueing, reader dispatch, and completion-side churn"
       ]
     }
   }

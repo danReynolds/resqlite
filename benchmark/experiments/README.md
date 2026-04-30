@@ -23,5 +23,6 @@ Current experiments:
 - [pool_vs_exit.dart](pool_vs_exit.dart)
 - [row_map_facade.dart](row_map_facade.dart)
 - [stream_scheduler.dart](stream_scheduler.dart)
+- [sync_invalidate_entrypoint.dart](sync_invalidate_entrypoint.dart)
 
 Use these when tuning internals, not when producing the headline package comparison.

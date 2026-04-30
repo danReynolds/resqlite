@@ -63,6 +63,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [113](113-sync-invalidate-entrypoint.md) | Synchronous stream invalidation entrypoint | Removing the unawaited `async`/completed-Future boundary from `StreamEngine.invalidate` did not move no-stream write p50s (14 us baseline and candidate) and made the one-stream focused case noisier, so the production change was reverted |
 | [112](112-fixed-length-batch-param-flatten.md) | Fixed-length batch parameter flattening | Focused benchmark medians overlapped after repeated A/B passes; any large-batch improvement was below the current decision threshold, so the simpler growable-list flattening stays |
 | [108](108-selectbytes-out-slots.md) | Persistent selectBytes out-parameter slots | Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |

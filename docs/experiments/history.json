@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-29T22:13:04.669438",
+  "generated": "2026-04-30T06:05:53.072363",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -16247,6 +16247,19 @@
         "timestamp": "2026-04-28T13:13:50",
         "source": "same-day"
       }
+    },
+    {
+      "id": "113",
+      "title": "Synchronous stream invalidation entrypoint",
+      "date": "2026-04-30",
+      "status": "rejected",
+      "summary": "Removing the unawaited `async`/completed-Future boundary from `StreamEngine.invalidate` did not move no-stream write p50s (14 us baseline and candidate) and made the one-stream focused case noisier, so the production change was reverted",
+      "commit": null,
+      "problem": "`Database.execute()` and `Database.executeBatch()` call\n`StreamEngine.invalidate(...)` after the writer isolate returns dirty\ntables. The method is declared `async`, but its body never awaits: it\ndoes synchronous dirty-entry bookkeeping, kicks `_flushQueue()`, and the\ncallers do not await the returned `Future<void>`.\n\nThat made a small optimization look plausible: every write might be\npaying a completed `Future` allocation even when no streams are active\nand `invalidate` returns immediately.\n\nAdjacent context:\n\n- [Exp 045](045-microtask-invalidation-coalescing.md) established that\n  invalidation scheduling can matter.\n- [Exp 083](083-stream-rerun-pre-dispatch-queue.md),\n  [084](084-late-dispatch-generation-stamp.md), and\n  [100](100-bounded-stream-requery-scheduler.md) show that stream ...",
+      "hypothesis": "Changing the internal entrypoint from:\n\n```dart\nFuture<void> invalidate(List<String>? dirtyTables) async { ... }\n```\n\nto:\n\n```dart\nvoid invalidate(List<String>? dirtyTables) { ... }\n```\n\nshould remove a per-write completed-Future allocation without changing\nthe public API. If the allocation is material, a tight sequential-write\nbenchmark should improve most clearly when no streams are active, where\nthe method returns at its first guard.\n\nAccept if no-stream writes improve repeatably without hurting the\none-stream case. Reject if p50s overlap with baseline or one-stream\ntail behavior worsens.",
+      "approach": "Added a focused exploratory benchmark:\n\n```text\ndart run benchmark/experiments/sync_invalidate_entrypoint.dart \\\n  --runs=3 --iterations=3000 --warmup=500\n```\n\nThe benchmark opens a fresh database for each sample run, seeds 1,000\nrows, then measures sequential `UPDATE items SET value = ? WHERE id = ?`\ncalls. It reports two cases:\n\n- `no_streams`: no reactive streams are registered, so `invalidate`\n  returns at `_entries.isEmpty`.\n- `one_stream`: one stream is registered and drained before timing, so\n  the invalidation path is live without the broader A11c fan-out cost.\n\nThe candidate production change was exactly the `Future<void>` to `void`\nsignature change. It was reverted after measurement.",
+      "results": "All values below are per-write microseconds. Each run reports p50/p90/p99\nover 3,000 measured writes after 500 warmup writes.\n\nBaseline pass 1:\n\n| case | run p50s | median p50 | median p90 | median p99 |\n|---|---:|---:|---:|---:|\n| no_streams | 20, 14, 13 | 14 | 19 | 34 |\n| one_stream | 25, 19, 18 | 19 | 31 | 80 |\n\nCandidate (`void invalidate`):\n\n| case | run p50s | median p50 | median p90 | median p99 |\n|---|---:|---:|---:|---:|\n| no_streams | 22, 14, 14 | 14 | 19 | 43 |\n| one_stream | 24, 26, 18 | 24 | 43 | 93 |\n\nBaseline pass 2 after reverting candidate:\n\n| case | run p50s | median p50 | median p90 | median p99 |\n|---|---:|---:|---:|---:|\n| no_streams | 20, 14, 14 | 14 | 18 | 49 |\n| one_stream | 25, 20, 18 | 20 | 37 | 75 |\n\nThe no-stream target did not move: both baseline passes and ...",
+      "reasoning": "**Rejected.**\n\nThe unawaited `async` entrypoint is theoretically wasteful, but the\nallocation is below the current writer-round-trip noise floor. Replacing\nit with `void` also changes how unexpected synchronous errors would\nsurface from `invalidate`, so there is no reason to keep the production\nchange without a clear measurement win.\n\nThe focused benchmark remains useful because it isolates the\n`invalidate` entrypoint from full A11c fan-out. Future stream-dispatch\nexperiments can rerun it quickly before spending a full release-suite\npass on entrypoint-level changes."
     }
   ],
   "tracked": [
