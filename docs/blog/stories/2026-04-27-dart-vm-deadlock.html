@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,21 +112,20 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 27, 2026 · Dart VM · macOS · upstream fix</p>
-<h1>Debugging a Dart VM Service Deadlock</h1>
-<h2>Problem Statement</h2>
+<h1 id="debugging-a-dart-vm-service-deadlock">Debugging a Dart VM Service Deadlock</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>By this point, resqlite had enough machinery that a real application failure could plausibly be its fault: reader workers, a writer isolate, migrations, stream invalidation, and native SQLite all sat under startup. That made the next challenge less like a benchmark and more like production engineering.</p>
 <p>A Flutter macOS app occasionally froze on cold launch. The last application log line was <code>Migrate DB started</code>, so the first visible suspect was resqlite's migration path. The failure looked like a database hang, but the real problem was that the Dart VM stopped making progress.</p>
 <p>This story is not a performance experiment. It is included because it documents an engineering investigation pattern that mattered for resqlite: when the runtime is stuck, Dart-level observability can become part of the failure surface.</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>The migration was simple: read <code>PRAGMA user_version</code>, create schema if needed, and write the new version. It had succeeded many times. Hot-reload state and stale database locks were plausible first theories, because they fit the last visible log line. They did not fit cold-launch reproductions.</p>
 <p>The first migration read used the reader pool, so the investigation added logs around worker startup:</p>
 <pre><code class="lang-text">
@@ -107,7 +136,7 @@
 </code></pre>
 <p>The spawn futures resolved, but no worker entrypoint log appeared. A <code>Timer.periodic</code> on the main isolate did not fire either. That ruled out a simple SQLite lock wait: the event loop itself was not advancing.</p>
 <p>Two runtime concepts explain why this investigation left the database layer. Isolates are Dart's independent units of execution and communicate by message passing, but they still run inside one Dart VM process. The <a href="https://dart.googlesource.com/sdk.git/+/refs/tags/3.9.0-2.0.dev/runtime/vm/service/service.md">VM service protocol</a> is the debugging and inspection protocol used by tools; its <code>getStack</code> RPC asks the VM for an isolate stack and message queue. If that machinery participates in the deadlock, Dart-level tools can become unreliable evidence rather than neutral observers.</p>
-<h2>Working Hypotheses</h2>
+<h2 id="working-hypotheses">Working Hypotheses</h2>
 <p>The investigation moved through three hypotheses:</p>
 <ol>
 <li>A stale SQLite writer or migration lock blocked the first read.</li>
@@ -115,7 +144,7 @@
 <li>The Dart VM or Flutter embedding was blocked below application code.</li>
 </ol>
 <p>The evidence pushed the investigation toward the third hypothesis.</p>
-<h2>What We Tried</h2>
+<h2 id="what-we-tried">What We Tried</h2>
 <p>Dart-level tools were not enough. DevTools and the VM service both depend on a responsive VM. macOS <code>sample(1)</code> snapshots native thread stacks from outside the process runtime, so it became the useful tool.</p>
 <p>The main thread was parked in the Dart VM safepoint handler:</p>
 <pre><code class="lang-text">
@@ -133,7 +162,7 @@ CGSDatagramReadStream::dispatchMainQueueDatagrams
           -&gt; Thread::ExitSafepoint
 </code></pre>
 <p>That shifted the investigation. The database migration was where logs stopped, but the process was blocked in a Dart VM safepoint while Flutter tried to enter the isolate from the main thread.</p>
-<h2>Results</h2>
+<h2 id="results">Results</h2>
 <p>The result was a root-cause handoff rather than a resqlite patch:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -166,13 +195,13 @@ CGSDatagramReadStream::dispatchMainQueueDatagrams
 <p>The first theory about Flutter's merged platform/UI thread mode on macOS was incomplete. Merged threads made the failure visible by pulling the main thread into the wait, but the underlying cycle involved Dart worker threads, debugger breakpoint synchronization, VM service requests, safepoints, <code>PortMap::mutex_</code>, and a message handler monitor.</p>
 <p>The missing piece was identified upstream. <code>Service::InvokeMethod</code>, while handling a <code>GetStack</code> request, entered an <code>AcquiredQueues</code> scope that held a message queue monitor. Formatting queued messages could trigger JIT compilation. Leaving that compilation scope could post an out-of-band reload check back to the same isolate, which tried to acquire the same monitor already held by the current thread.</p>
 <p>One thread waited for a monitor it already held. The rest of the VM accumulated behind that self-deadlock.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The Dart SDK fix was subtractive: stop returning the old <code>Stack.messages</code> queue dump from <code>GetStack</code>. DevTools did not use it. Removing that field removed the lock-then-run-Dart path that allowed recursive monitor acquisition.</p>
 <p>resqlite's role was indirect. The project provided the reproducible pressure, the ruled-out database theories, the native sample, and enough thread evidence for VM maintainers to finish the diagnosis.</p>
 <p>The engineering lesson is specific: when the runtime is not making progress, use observability outside the runtime. In this case, a database-looking hang became a VM service deadlock only because the investigation moved below Dart-level tooling. It is a fitting end to this first run of stories: building the library required benchmarks, but trusting it in real apps also required knowing when the evidence had left the library.</p>
-<h2>Related Records</h2>
+<h2 id="related-records">Related Records</h2>
 <p>There is no resqlite experiment file for this story because no resqlite code change was accepted or rejected. The relevant artifact is the native sampling evidence summarized above, and the upstream fix in the Dart VM service implementation.</p>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://dart.dev/language/isolates">Dart isolates</a></li>
 <li><a href="https://dart.googlesource.com/sdk.git/+/refs/tags/3.9.0-2.0.dev/runtime/vm/service/service.md">Dart VM service protocol</a></li>

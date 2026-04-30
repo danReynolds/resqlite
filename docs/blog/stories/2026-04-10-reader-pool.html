@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,45 +112,44 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 10, 2026 · reader pool · sacrifice path · point queries</p>
-<h1>Persistent Reader Pool Design</h1>
-<h2>Problem Statement</h2>
+<h1 id="persistent-reader-pool-design">Persistent Reader Pool Design</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>Once rows crossed isolates cheaply, the read path started failing in a different way. Large reads were no longer the clearest problem. Small reads were.</p>
 <p>The flat-list <code>ResultSet</code> fixed the large-result transfer problem, but it exposed a different bottleneck on small reads. Every <code>select()</code> still spawned a fresh isolate, ran the query, transferred the result with <code>Isolate.exit()</code>, and terminated.</p>
 <p>For large result sets, isolate setup was a small fraction of total time. For point queries, it dominated. A one-row lookup should not pay the full cost of creating a fresh isolate.</p>
-<h2>Background</h2>
-<p>The first persistent-pool attempt, <a href="../../experiments/011-persistent-reader-pool.html">Experiment 011</a>, was rejected because it arrived too early. It still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>, so copying maps with repeated column keys erased the benefit of reusing workers.</p>
-<p><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012</a> showed the raw trade-off more carefully. A <code>SendPort</code> round trip with no payload was around 6 us, while <code>Isolate.spawn</code> plus <code>Isolate.exit</code> was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.</p>
+<h2 id="background">Background</h2>
+<p>The first persistent-pool attempt, <a href="../experiments/011-persistent-reader-pool.html">Experiment 011</a>, was rejected because it arrived too early. It still moved <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> through <code>SendPort.send()</code>, so copying maps with repeated column keys erased the benefit of reusing workers.</p>
+<p><a href="../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012</a> showed the raw trade-off more carefully. A <code>SendPort</code> round trip with no payload was around 6 us, while <code>Isolate.spawn</code> plus <code>Isolate.exit</code> was around 47-50 us. The pool had a real messaging advantage, but the result representation and protocol overhead had to be small enough for that advantage to survive.</p>
 <p>This is the practical difference between a worker pool and a one-shot task helper. Dart isolates communicate by message passing, as described in the <a href="https://dart.dev/language/isolates">Dart isolate guide</a>. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> lets a long-lived worker reply and then accept more work, but ordinary mutable messages may be copied. <a href="https://api.dart.dev/dart-isolate/Isolate/exit.html"><code>Isolate.exit</code></a> can transfer ownership of the final message more efficiently, but only because the sending isolate exits. A pool therefore has to decide when keeping the worker alive is worth copying, and when the result is large enough to sacrifice the worker.</p>
 <p>The flat-list <code>ResultSet</code> changed the economics. A small result was no longer a graph of repeated maps and keys. It was one compact values list plus one shared schema.</p>
-<h2>Hypothesis</h2>
+<h2 id="hypothesis">Hypothesis</h2>
 <p>A persistent reader pool should be faster if it uses two transfer paths:</p>
 <ol>
 <li>Small results return through <code>SendPort.send()</code> so the worker stays alive.</li>
 <li>Large results return through <code>Isolate.exit()</code> so the data transfers without copying, and the sacrificed worker is replaced.</li>
 </ol>
 <p>This hybrid should remove spawn overhead for small reads without regressing large-result transfer.</p>
-<h2>What We Tried</h2>
-<p><a href="../../experiments/019-hybrid-reader-pool.html">Experiment 019</a> implemented the hybrid pool. Four reader workers stayed alive. Each query chose a path based on result size:</p>
+<h2 id="what-we-tried">What We Tried</h2>
+<p><a href="../experiments/019-hybrid-reader-pool.html">Experiment 019</a> implemented the hybrid pool. Four reader workers stayed alive. Each query chose a path based on result size:</p>
 <ul>
 <li>Below the threshold: send the <code>ResultSet</code> over <code>SendPort</code>.</li>
 <li>Above the threshold: call <code>Isolate.exit(replyPort, resultSet)</code>, intentionally killing the worker.</li>
 </ul>
 <p>The pool then evolved through follow-up experiments:</p>
 <ul>
-<li><a href="../../experiments/030-dedicated-reader-assignment.html">Experiment 030</a> assigned each Dart worker a fixed native reader index, removing the C reader-pool mutex from the hot path.</li>
-<li><a href="../../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039</a> replaced a cell-count sacrifice threshold with a byte-size estimate.</li>
-<li><a href="../../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040</a> simplified the worker protocol to one command port, one event port, and one authoritative pending completer.</li>
+<li><a href="../experiments/030-dedicated-reader-assignment.html">Experiment 030</a> assigned each Dart worker a fixed native reader index, removing the C reader-pool mutex from the hot path.</li>
+<li><a href="../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039</a> replaced a cell-count sacrifice threshold with a byte-size estimate.</li>
+<li><a href="../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040</a> simplified the worker protocol to one command port, one event port, and one authoritative pending completer.</li>
 </ul>
-<h2>Results</h2>
+<h2 id="results">Results</h2>
 <p>The initial hybrid pool made small reads much faster:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -217,20 +246,20 @@
 </tr>
 </tbody></table></div>
 
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The reader pool was accepted only after the row representation changed. The same architectural idea was a rejection with per-row maps and a win with flat results.</p>
 <p>The lesson is that timing matters in architecture. A layer can be wrong when introduced and become right after the surrounding representation changes. Persistence helped by removing isolate setup from small reads, and later wins came from deleting coordination that persistence made redundant.</p>
 <p>At this point resqlite had a plausible read engine. The next challenge was returning to one of the original product goals: making reads reactive without turning every write into an application-level invalidation problem.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/011-persistent-reader-pool.html">Experiment 011: Persistent reader worker pool</a></li>
-<li><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
-<li><a href="../../experiments/019-hybrid-reader-pool.html">Experiment 019: Hybrid reader pool</a></li>
-<li><a href="../../experiments/030-dedicated-reader-assignment.html">Experiment 030: Dedicated reader assignment</a></li>
-<li><a href="../../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039: Byte-size sacrifice threshold</a></li>
-<li><a href="../../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040: Reader slot event-port cleanup</a></li>
+<li><a href="../experiments/011-persistent-reader-pool.html">Experiment 011: Persistent reader worker pool</a></li>
+<li><a href="../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
+<li><a href="../experiments/019-hybrid-reader-pool.html">Experiment 019: Hybrid reader pool</a></li>
+<li><a href="../experiments/030-dedicated-reader-assignment.html">Experiment 030: Dedicated reader assignment</a></li>
+<li><a href="../experiments/039-byte-size-sacrifice-threshold.html">Experiment 039: Byte-size sacrifice threshold</a></li>
+<li><a href="../experiments/040-reader-slot-event-port-cleanup.html">Experiment 040: Reader slot event-port cleanup</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://dart.dev/language/isolates">Dart isolates</a></li>
 <li><a href="https://api.dart.dev/dart-isolate/SendPort/send.html">Dart <code>SendPort.send</code></a></li>

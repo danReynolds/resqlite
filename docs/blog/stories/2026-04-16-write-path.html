@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,21 +112,20 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 16, 2026 · writer isolate · preupdate hook · batch execution</p>
-<h1>Writer Isolate and Invalidation Data</h1>
-<h2>Problem Statement</h2>
+<h1 id="writer-isolate-and-invalidation-data">Writer Isolate and Invalidation Data</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>The stream engine made one thing unavoidable: writes were not just commands that changed the database. They were also the source of truth for reactive invalidation. If writes were unordered, ran on the wrong isolate, or failed to report what changed, streams would either miss updates or do unnecessary work.</p>
 <p>SQLite in WAL mode supports many concurrent readers but only one writer. resqlite needed to preserve that serialization rule, keep write work off the main isolate, support interactive transactions, and report the dirty-table facts that reactive streams depend on.</p>
 <p>The write path was therefore not just a queue of <code>execute()</code> calls. It was the owner of mutation order, transaction state, and invalidation data.</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>Three shapes were considered as the library moved from read experiments toward a complete database runtime:</p>
 <ol>
 <li>Run writes on the main isolate.</li>
@@ -107,17 +136,17 @@
 <p>The writer also owns the preupdate hook. As SQLite mutates rows, resqlite records touched table names. When the write finishes, the response includes affected rows, last insert ID, and the dirty-table set consumed by the stream engine.</p>
 <p>The SQLite constraints are explicit here. In <a href="https://www.sqlite.org/wal.html">write-ahead logging mode</a>, readers and a writer can overlap, but there is still only one active writer. SQLite's <a href="https://www.sqlite.org/lang_transaction.html">transaction rules</a> also make transaction lifetime meaningful: a <code>BEGIN</code>, subsequent statements, savepoints, and <code>COMMIT</code> have to run against a coherent connection state. resqlite's writer isolate maps that native constraint onto Dart by giving mutation work one owner.</p>
 <p>The hot path is still the ordinary prepared-statement API. Parameters are attached with the <a href="https://www.sqlite.org/c3ref/bind_blob.html"><code>sqlite3_bind_*()</code> family</a>, statements are stepped, reset, and reused, and transaction-control SQL can be executed either through <a href="https://www.sqlite.org/c3ref/exec.html"><code>sqlite3_exec()</code></a> or cached prepared statements. The experiments below are about reducing repeated work in that lifecycle, not changing SQLite's serialization model.</p>
-<h2>Hypothesis</h2>
+<h2 id="hypothesis">Hypothesis</h2>
 <p>A persistent writer isolate should make write behavior easier to reason about, and native batching should keep write throughput competitive despite the isolate boundary. If the writer also returns dirty tables with each completed mutation, stream invalidation can stay tied to the write that caused it.</p>
-<h2>What We Tried</h2>
+<h2 id="what-we-tried">What We Tried</h2>
 <p>The core design put all mutations on a single writer isolate and moved batch execution into native code. <code>executeBatch()</code> serializes parameter sets into native storage, crosses the FFI boundary once, and lets C loop through bind, step, reset, and commit.</p>
 <p>Several follow-up experiments then reduced fixed costs:</p>
 <ul>
-<li><a href="../../experiments/014-writer-tuning.html">Experiment 014</a> accepted <code>BEGIN IMMEDIATE</code> and removed redundant <code>sqlite3_clear_bindings</code>, while rejecting <code>locking_mode=EXCLUSIVE</code> because it blocked readers.</li>
-<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101</a> replaced repeated <code>sqlite3_exec(&quot;BEGIN/COMMIT/ROLLBACK&quot;)</code> calls with cached transaction-control statements.</li>
-<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109</a> packed text/blob parameter bytes into the reusable parameter buffer and passed explicit UTF-8 lengths to SQLite.</li>
+<li><a href="../experiments/014-writer-tuning.html">Experiment 014</a> accepted <code>BEGIN IMMEDIATE</code> and removed redundant <code>sqlite3_clear_bindings</code>, while rejecting <code>locking_mode=EXCLUSIVE</code> because it blocked readers.</li>
+<li><a href="../experiments/101-tx-stmt-cache.html">Experiment 101</a> replaced repeated <code>sqlite3_exec(&quot;BEGIN/COMMIT/ROLLBACK&quot;)</code> calls with cached transaction-control statements.</li>
+<li><a href="../experiments/109-inline-param-buffer.html">Experiment 109</a> packed text/blob parameter bytes into the reusable parameter buffer and passed explicit UTF-8 lengths to SQLite.</li>
 </ul>
-<h2>Results</h2>
+<h2 id="results">Results</h2>
 <p>The baseline write path was already fast enough that many single changes fell near the noise floor. The later accepted wins were concentrated where the hypothesis predicted: transaction boundaries and bind-heavy workloads.</p>
 <p>Cached transaction statements removed repeated prepare/finalize work:</p>
 <div class="table-wrap"><table class="bench-table">
@@ -184,22 +213,22 @@
 </tbody></table></div>
 
 <p>The rejected piece in Experiment 014 is also part of the evidence. <code>PRAGMA locking_mode=EXCLUSIVE</code> looked attractive as a writer optimization, but it caused <code>SQLITE_BUSY</code> on reader connections. That made it incompatible with the reader-pool architecture.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The writer isolate remained a first-class subsystem because it owns three connected responsibilities:</p>
 <ol>
 <li>Execute mutations in SQLite's single-writer order.</li>
 <li>Preserve transaction semantics across async calls.</li>
 <li>Publish dirty-table data for reactive streams.</li>
 </ol>
-<p>The deeper walkthrough is <a href="../writing.html">How resqlite Writes Data</a>. The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.</p>
+<p>The deeper walkthrough is now part of <a href="../architecture.html">resqlite Architecture</a>. The experiment record shows that the durable write-path wins came less from changing SQLite semantics and more from removing repeated setup from hot paths.</p>
 <p>With reads, streams, and writes now organized around stable subsystems, the project entered a different phase. The hard part became deciding which optimizations were worth carrying forward and which ones should be documented as dead ends.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/014-writer-tuning.html">Experiment 014: Writer connection tuning</a></li>
-<li><a href="../../experiments/101-tx-stmt-cache.html">Experiment 101: Cached transaction statements</a></li>
-<li><a href="../../experiments/109-inline-param-buffer.html">Experiment 109: Inline-packed parameter buffer</a></li>
+<li><a href="../experiments/014-writer-tuning.html">Experiment 014: Writer connection tuning</a></li>
+<li><a href="../experiments/101-tx-stmt-cache.html">Experiment 101: Cached transaction statements</a></li>
+<li><a href="../experiments/109-inline-param-buffer.html">Experiment 109: Inline-packed parameter buffer</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://www.sqlite.org/wal.html">SQLite write-ahead logging</a></li>
 <li><a href="https://www.sqlite.org/lang_transaction.html">SQLite transactions</a></li>

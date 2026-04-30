@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,30 +112,29 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 6, 2026 · Dart VM · Isolate.exit · object graphs</p>
-<h1>Understanding Dart Isolate Transfer Costs</h1>
-<h2>Problem Statement</h2>
+<h1 id="understanding-dart-isolate-transfer-costs">Understanding Dart Isolate Transfer Costs</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>After the first measurements, the project had a direction: keep the UI isolate out of SQLite work and result preparation. The next question was whether Dart's isolate transfer machinery already solved enough of that problem.</p>
 <p><code>Isolate.exit()</code> can transfer ownership of an object graph instead of copying it. That sounds ideal for query results: run SQLite on a worker, transfer rows back, and let the caller keep using normal Dart objects.</p>
 <p>The problem was that zero-copy transfer is not zero-cost transfer. The Dart VM still validates the graph before ownership changes. For database results represented as thousands of maps, that validation can be a major part of the query.</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>By this point, the read path had C-backed connection state, statement caching, and fewer SQLite mutex operations. Those changes made SQLite execution less of a confounding variable. That was an important phase shift: once the native side stopped dominating the numbers, the library could see the cost of the Dart boundary itself.</p>
 <p>The row representation was still conventional: one map per row. That shape is convenient for callers, but it creates many heap objects: map objects, hash-table internals, entry structures, column-name references, and boxed values.</p>
 <p>The relevant Dart APIs have different transfer models. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> sends asynchronously and may copy the transitive object graph. <a href="https://api.dart.dev/dart-isolate/Isolate/exit.html"><code>Isolate.exit</code></a> terminates the current isolate and can transfer the final message more efficiently because the sender will no longer access it. Flutter's isolate docs summarize the practical distinction: <code>SendPort.send</code> copies mutable messages, while <code>Isolate.exit</code> can pass ownership.</p>
-<h2>Hypothesis</h2>
+<h2 id="hypothesis">Hypothesis</h2>
 <p>If <code>Isolate.exit()</code> validation walks every reachable heap object, then reducing the number of structural Dart objects should matter more than reducing FFI calls. A result shape with fewer maps should transfer faster even if the logical data is the same.</p>
-<h2>What We Tried</h2>
+<h2 id="what-we-tried">What We Tried</h2>
 <p>The early implementation kept the map representation and measured scaling as result size grew. This was intentionally conservative: before inventing a custom row type, resqlite needed to know whether the normal Dart shape was actually the problem.</p>
-<p>A later phase breakdown, recorded in <a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a>, separated SQLite stepping, Dart object construction, and isolate validation.</p>
-<h2>Results</h2>
+<p>A later phase breakdown, recorded in <a href="../experiments/008-flat-list-lazy-resultset.html">Experiment 008</a>, separated SQLite stepping, Dart object construction, and isolate validation.</p>
+<h2 id="results">Results</h2>
 <p>The scaling data showed the gap widening with result size:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -162,7 +191,7 @@
 </tbody></table></div>
 
 <p>Almost 40% of the measured time was isolate validation. The database query itself was not the dominant cost.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>This separated two ideas that are easy to conflate:</p>
 <ul>
 <li><code>Isolate.exit()</code> can avoid copying.</li>
@@ -170,12 +199,12 @@
 </ul>
 <p>A single <code>Uint8List</code> crosses cheaply because the graph is structurally small. A <code>List&lt;Map&lt;String, Object?&gt;&gt;</code> crosses without copying, but the VM still has to inspect a very large graph.</p>
 <p>The next optimization target was therefore not &quot;make FFI faster.&quot; It was: find the smallest Dart object graph that can still present a normal row-map API. That discovery pushed the project into a short but useful run of rejected designs.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
-<li><a href="../../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
+<li><a href="../experiments/008-flat-list-lazy-resultset.html">Experiment 008: Flat value list with lazy ResultSet</a></li>
+<li><a href="../experiments/012-sendport-vs-spawn-deep-dive.html">Experiment 012: SendPort vs Isolate.spawn deep dive</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://api.dart.dev/dart-isolate/SendPort/send.html">Dart <code>SendPort.send</code></a></li>
 <li><a href="https://api.dart.dev/dart-isolate/Isolate/exit.html">Dart <code>Isolate.exit</code></a></li>

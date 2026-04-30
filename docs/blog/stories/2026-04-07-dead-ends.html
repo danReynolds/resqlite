@@ -31,6 +31,36 @@
   .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post h1[id],
+  .post h2[id],
+  .post h3[id],
+  .post h4[id] {
+    scroll-margin-top: 1.5rem;
+  }
+  .article-toc {
+    margin: -0.3rem 0 1.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .article-toc strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .article-toc div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+  }
+  .article-toc a {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
   .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
   .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
   .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
@@ -82,17 +112,16 @@
 <body>
 <div class="page-wrap">
   <nav class="top-nav">
-    <a href="index.html">&larr; All Stories</a>
-    <a href="../index.html">Blog</a>
+    <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
-    <a href="../../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Posts</a>
   </nav>
   <article class="post">
     <span class="post-category">Project Story</span>
     <p class="story-byline">Apr 7, 2026 · rejected ideas · TransferableTypedData · lazy decode</p>
-<h1>Result Representations That Did Not Work</h1>
-<h2>Problem Statement</h2>
+<h1 id="result-representations-that-did-not-work">Result Representations That Did Not Work</h1>
+<h2 id="problem-statement">Problem Statement</h2>
 <p>After the isolate-transfer measurements, resqlite had a clearer target but not yet a design. This was the stage where several plausible ideas had to be made concrete enough to fail.</p>
 <p>The result shape needed to satisfy three constraints at once:</p>
 <ol>
@@ -101,22 +130,22 @@
 <li>Preserve a normal row API for callers.</li>
 </ol>
 <p>Several plausible designs met one or two of those constraints, but not all three.</p>
-<h2>Background</h2>
+<h2 id="background">Background</h2>
 <p>The tempting direction was &quot;make the transfer smaller.&quot; That was directionally correct, but incomplete. A design that transfers fewer objects can still lose if it makes the main isolate decode strings, build values, or reconstruct rows during normal use. The core project constraint was not &quot;fewest bytes over the port&quot;; it was &quot;least disruptive database API for Flutter rendering.&quot;</p>
 <p>The rejected experiments were useful because they clarified which costs mattered and which costs merely moved around. This became a pattern for the project: rejected work still counted if it narrowed the design space and left behind numbers future experiments could trust.</p>
 <p>Two Dart runtime details are useful context here. <a href="https://api.dart.dev/dart-isolate/TransferableTypedData-class.html"><code>TransferableTypedData</code></a> is designed for efficiently moving byte sequences between isolates, but creating it is still proportional to the number of bytes. <a href="https://api.dart.dev/dart-isolate/SendPort/send.html"><code>SendPort.send</code></a> can move ordinary Dart objects between isolates, but mutable object graphs may be copied and the cost is tied to the graph being sent. These APIs are powerful, but neither removes the need to choose a representation that matches where work should happen.</p>
-<h2>Hypotheses</h2>
+<h2 id="hypotheses">Hypotheses</h2>
 <p>Three hypotheses were tested:</p>
 <ul>
 <li>A Dart binary codec plus <code>TransferableTypedData</code> might beat object transfer while keeping workers alive.</li>
 <li>String interning might reduce the graph that <code>Isolate.exit()</code> has to validate.</li>
 <li>Byte-backed lazy maps might transfer one buffer and decode only what the UI reads.</li>
 </ul>
-<h2>What We Tried</h2>
-<p><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005</a> encoded rows into bytes on the worker, transferred the bytes, and decoded maps afterward. It tested the most obvious &quot;make it bytes&quot; answer.</p>
-<p><a href="../../experiments/006-string-interning.html">Experiment 006</a> deduplicated repeated strings so the graph would contain fewer distinct string objects. It tested whether the current map shape could be kept by shaving off repeated values.</p>
-<p><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b</a> packed rows into a compact byte buffer and exposed each row as a lazy map that decoded values on access. It tested whether row materialization could be delayed instead of eliminated.</p>
-<h2>Results</h2>
+<h2 id="what-we-tried">What We Tried</h2>
+<p><a href="../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005</a> encoded rows into bytes on the worker, transferred the bytes, and decoded maps afterward. It tested the most obvious &quot;make it bytes&quot; answer.</p>
+<p><a href="../experiments/006-string-interning.html">Experiment 006</a> deduplicated repeated strings so the graph would contain fewer distinct string objects. It tested whether the current map shape could be kept by shaving off repeated values.</p>
+<p><a href="../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b</a> packed rows into a compact byte buffer and exposed each row as a lazy map that decoded values on access. It tested whether row materialization could be delayed instead of eliminated.</p>
+<h2 id="results">Results</h2>
 <p>The Dart binary codec was consistently slower than the VM serializer:</p>
 <div class="table-wrap"><table class="bench-table">
 <thead><tr>
@@ -198,16 +227,16 @@
 </tbody></table></div>
 
 <p>For partial access, byte-backed rows were excellent. For full access, they moved UTF-8 decode and value materialization onto the main isolate, which violated the original constraint.</p>
-<h2>Outcome</h2>
+<h2 id="outcome">Outcome</h2>
 <p>The rejected designs narrowed the acceptable shape. The solution could be lazy only if the deferred work was cheap. It could use bytes only if callers did not have to decode them on the UI isolate. It could reduce object count only if it did not add data-shape assumptions such as low-cardinality strings.</p>
 <p>That led directly to the flat-list <code>ResultSet</code>: materialize values on the worker, transfer a compact graph, and defer only lightweight row facade creation. The next accepted design was less exotic than the failed byte-backed versions, but it matched the product constraint better.</p>
-<h2>Related Experiments</h2>
+<h2 id="related-experiments">Related Experiments</h2>
 <ul>
-<li><a href="../../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005: Dart binary codec with TransferableTypedData</a></li>
-<li><a href="../../experiments/006-string-interning.html">Experiment 006: String interning for Isolate.exit</a></li>
-<li><a href="../../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b: Byte-backed lazy maps</a></li>
+<li><a href="../experiments/005-dart-binary-codec-transferable-typed-data.html">Experiment 005: Dart binary codec with TransferableTypedData</a></li>
+<li><a href="../experiments/006-string-interning.html">Experiment 006: String interning for Isolate.exit</a></li>
+<li><a href="../experiments/008b-byte-backed-lazy-maps.html">Experiment 008b: Byte-backed lazy maps</a></li>
 </ul>
-<h2>Reference Docs</h2>
+<h2 id="reference-docs">Reference Docs</h2>
 <ul>
 <li><a href="https://api.dart.dev/dart-isolate/TransferableTypedData-class.html">Dart <code>TransferableTypedData</code></a></li>
 <li><a href="https://api.dart.dev/dart-isolate/SendPort/send.html">Dart <code>SendPort.send</code></a></li>
