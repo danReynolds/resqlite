@@ -137,7 +137,7 @@ Scheduled experimenters should use
 [`RUNNER_INSTRUCTIONS.md`](RUNNER_INSTRUCTIONS.md) as the copyable instruction
 block for recurring experiment systems. Those instructions point runners at
 this README, [`signals.json`](signals.json), [`JOURNAL.md`](JOURNAL.md), and
-[`MILESTONES.md`](MILESTONES.md) before choosing work.
+the project [`stories`](../doc/stories/) before choosing work.
 
 `signals.json` is the canonical research map. These files are steering context,
 not an allowed list. They should make prior work easy to understand without
@@ -153,8 +153,8 @@ or watch:
 - update `signals.json` with machine-readable direction context
 - add to `JOURNAL.md` only when the run surfaced a transferable lesson a
   future runner could reapply elsewhere
-- leave `MILESTONES.md` alone — it is updated on maintainer request, not per
-  experiment
+- leave `../doc/stories/` alone — story posts are updated on maintainer
+  request, not per experiment
 
 ### Standard Template
 

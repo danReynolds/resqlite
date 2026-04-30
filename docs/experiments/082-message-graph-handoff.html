@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 082: Isolate message-graph benchmark for result payloads — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Rejected (optimization hypothesis disproven; benchmark harness kept)</span>
+    <p class="story-byline">Apr 20, 2026 · Rejected (optimization hypothesis disproven; benchmark harness kept)</p>
+<h1>Experiment 082: Isolate message-graph benchmark for result payloads</h1>
+<p><strong>Date:</strong> 2026-04-20</p>
+<p><strong>Status:</strong> Rejected (optimization hypothesis disproven; benchmark harness kept)</p>
+<h2>Problem</h2>
+<p>After several result-storage experiments, it was still unclear whether the</p>
+<p>remaining headroom lived in:</p>
+<ul>
+<li>SQLite decode</li>
+<li>isolate hand-off</li>
+<li>main-isolate row consumption</li>
+</ul>
+<p>Those phases were too entangled in normal <code>db.select()</code> benchmarking to</p>
+<p>attribute wins cleanly. We needed a benchmark that isolated the message</p>
+<p>graph itself.</p>
+<h2>Hypothesis</h2>
+<p>If the current <code>ResultSet</code> / <code>Row</code> shape is not near-optimal, then an</p>
+<p>isolated hand-off benchmark should show a clearly better alternative graph</p>
+<p>shape for one or both of:</p>
+<ul>
+<li><code>SendPort.send</code> (same-group copy path)</li>
+<li><code>Isolate.exit</code> (handoff path)</li>
+</ul>
+<p>Candidate graphs:</p>
+<ol>
+<li>Current <code>ResultSet</code></li>
+<li>Fully materialized row maps</li>
+<li>Binary row facade</li>
+</ol>
+<p>Measured separately:</p>
+<ul>
+<li>transfer time</li>
+<li>main-isolate consumption time</li>
+<li>total time</li>
+</ul>
+<h2>Approach</h2>
+<p>Added reusable benchmark harness:</p>
+<ul>
+<li><code>benchmark/experiments/message_graph.dart</code></li>
+</ul>
+<p>The harness:</p>
+<ul>
+<li>builds synthetic result-shaped payloads without SQLite</li>
+<li>tests both numeric-heavy and mixed-schema data</li>
+<li>tests 100 / 1000 / 10000 rows</li>
+<li>runs both <code>SendPort.send</code> and <code>Isolate.exit</code></li>
+<li>reports p50 / p90 for transfer, consume, and total</li>
+<li>runs in both JIT and AOT</li>
+</ul>
+<p>This gives a direct answer to “is the result object shape itself still a</p>
+<p>frontier?” without conflating decode cost.</p>
+<h2>Results</h2>
+<p>Artifacts:</p>
+<ul>
+<li>JIT: <code>/tmp/resqlite-exp097-jit.txt</code></li>
+<li>AOT: <code>/tmp/resqlite-exp097-aot.txt</code></li>
+</ul>
+<p>The AOT run is the most important signal because it matches shipped</p>
+<p>Flutter runtime behavior.</p>
+<h3>AOT examples</h3>
+<h4>Numeric-heavy, <code>SendPort.send</code>, 1000 rows</h4>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Shape</th>
+<th>Transfer p50</th>
+<th>Consume p50</th>
+<th>Total p50</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>current <code>ResultSet</code></td>
+<td>0.013 ms</td>
+<td>0.091 ms</td>
+<td><strong>0.104 ms</strong></td>
+</tr>
+<tr>
+<td>materialized maps</td>
+<td>0.165 ms</td>
+<td>0.157 ms</td>
+<td>0.316 ms</td>
+</tr>
+<tr>
+<td>binary row facade</td>
+<td>0.013 ms</td>
+<td>0.396 ms</td>
+<td>0.409 ms</td>
+</tr>
+</tbody></table></div>
+
+<h4>Mixed-schema, <code>SendPort.send</code>, 10000 rows</h4>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Shape</th>
+<th>Transfer p50</th>
+<th>Consume p50</th>
+<th>Total p50</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>current <code>ResultSet</code></td>
+<td>0.275 ms</td>
+<td>0.769 ms</td>
+<td><strong>1.048 ms</strong></td>
+</tr>
+<tr>
+<td>materialized maps</td>
+<td>2.021 ms</td>
+<td>1.266 ms</td>
+<td>3.345 ms</td>
+</tr>
+<tr>
+<td>binary row facade</td>
+<td>0.080 ms</td>
+<td>2.482 ms</td>
+<td>2.566 ms</td>
+</tr>
+</tbody></table></div>
+
+<h4>Mixed-schema, <code>Isolate.exit</code>, 10000 rows</h4>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Shape</th>
+<th>Transfer p50</th>
+<th>Consume p50</th>
+<th>Total p50</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>current <code>ResultSet</code></td>
+<td>1.816 ms</td>
+<td>0.781 ms</td>
+<td><strong>2.580 ms</strong></td>
+</tr>
+<tr>
+<td>materialized maps</td>
+<td>4.882 ms</td>
+<td>1.074 ms</td>
+<td>6.114 ms</td>
+</tr>
+<tr>
+<td>binary row facade</td>
+<td>2.063 ms</td>
+<td>2.370 ms</td>
+<td>4.397 ms</td>
+</tr>
+</tbody></table></div>
+
+<h2>Decision</h2>
+<p>Rejected as an optimization direction, but the benchmark harness should be</p>
+<p>kept.</p>
+<p>The main result is that the current <code>ResultSet</code> / <code>Row</code> shape is already</p>
+<p>very strong for the shipped <code>select()</code> contract:</p>
+<ul>
+<li>lazy rows on the receiving isolate</li>
+<li>one shared flat backing list</li>
+<li><code>Map</code>-compatible API</li>
+</ul>
+<p>Both alternatives we tested lost on end-to-end total time once actual row</p>
+<p>consumption was included:</p>
+<ul>
+<li>materialized maps lose on transfer/object count</li>
+<li>binary row facades lose on main-isolate access cost</li>
+</ul>
+<p>This is a useful negative result. It means future performance work should</p>
+<p>not keep trying to replace generic <code>select()</code> result objects unless the</p>
+<p>API contract changes.</p>
+<p>More promising directions from here are:</p>
+<ul>
+<li>specialized byte/typed-data APIs</li>
+<li>threshold / hand-off policy work</li>
+<li>optimizing stream/reactive work rather than generic row payloads</li>
+</ul>
+<p>The harness remains valuable because it gives a clean way to test any</p>
+<p>future result-graph idea without conflating SQLite decode, isolate</p>
+<p>transport, and row consumption.</p>
+
+  </article>
+</div>
+</body>
+</html>

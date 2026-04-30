@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 026: `sqlite3_db_status()` Probe — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Rejected (no follow-on optimization justified)</span>
+    <p class="story-byline">Apr 8, 2026 · Rejected (no follow-on optimization justified)</p>
+<h1>Experiment 026: <code>sqlite3_db_status()</code> Probe</h1>
+<p><strong>Date:</strong> 2026-04-08</p>
+<p><strong>Status:</strong> Rejected (no follow-on optimization justified)</p>
+<h2>Hypothesis</h2>
+<p>Before attempting a process-global page cache or more aggressive memory tuning, we</p>
+<p>should check whether sqlite is actually under page-cache or lookaside pressure in</p>
+<p>resqlite's hot paths.</p>
+<p>If cache miss rates are high, cache spill happens, or lookaside misses show up in</p>
+<p>meaningful volume, then a deeper page-cache experiment might be justified.</p>
+<h2>Change</h2>
+<p>Added an experiment-only aggregate probe:</p>
+<ul>
+<li>native helper: <code>resqlite_db_status_total(...)</code></li>
+<li>Dart binding: <code>getDbStatusTotal(...)</code></li>
+<li>benchmark script: <code>benchmark/experiments/db_status_probe.dart</code></li>
+</ul>
+<p>The probe sums <code>sqlite3_db_status()</code> across the writer and idle readers, then runs</p>
+<p>four representative workloads:</p>
+<ol>
+<li>point lookups</li>
+<li>parameterized page reads</li>
+<li>large result reads</li>
+<li>write burst</li>
+</ol>
+<h2>Results</h2>
+<p>Probe output:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Workload</th>
+<th>Cache hit rate</th>
+<th>Cache spill</th>
+<th>Lookaside misses</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Point lookups</td>
+<td>100.0% (2002 / 1)</td>
+<td class="winner">0</td>
+<td>0 / 0</td>
+</tr>
+<tr>
+<td>Parameterized page reads</td>
+<td>99.9% (7991 / 9)</td>
+<td class="winner">0</td>
+<td>0 / 0</td>
+</tr>
+<tr>
+<td>Large result reads</td>
+<td>100.0% (80 / 0)</td>
+<td class="winner">0</td>
+<td>0 / 0</td>
+</tr>
+<tr>
+<td>Write burst</td>
+<td>100.0% (6002 / 0)</td>
+<td class="winner">0</td>
+<td>0 / 0</td>
+</tr>
+</tbody></table></div>
+
+<p>Additional observations:</p>
+<ul>
+<li>aggregate cache usage sat around <code>3.08-3.35 MiB</code></li>
+<li>lookaside highwater reached <code>175</code>, but there were zero size/full misses</li>
+<li>no cache spill occurred in any workload</li>
+</ul>
+<h2>Decision</h2>
+<p><strong>Rejected</strong> as a tuning direction for now.</p>
+<p>The probe says the current configuration is already warm and healthy:</p>
+<ul>
+<li>near-perfect cache hit rates after warmup</li>
+<li>zero spill</li>
+<li>zero lookaside miss pressure</li>
+</ul>
+<p>That means a process-global page-cache experiment would be solving a problem we do</p>
+<p>not currently have. The measurement tooling was still useful, but the optimization</p>
+<p>it was meant to justify is not warranted by the data.</p>
+
+  </article>
+</div>
+</body>
+</html>

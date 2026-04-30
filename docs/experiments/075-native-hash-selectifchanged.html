@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 075: Native-buffered hash for `selectIfChanged` — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted</span>
+    <p class="story-byline">Apr 16, 2026 · Accepted</p>
+<h1>Experiment 075: Native-buffered hash for <code>selectIfChanged</code></h1>
+<p><strong>Date:</strong> 2026-04-16</p>
+<p><strong>Status:</strong> Accepted</p>
+<h2>Problem</h2>
+<p>Stream re-queries via <code>selectIfChanged</code> go through the full Dart decode</p>
+<p>path (allocate values list, decode every cell into a Dart String /</p>
+<p>Uint8List, build RowSchema, return a ResultSet) <em>then</em> hash the values.</p>
+<p>When the hash matches <code>lastResultHash</code>, all of that decoded material</p>
+<p>is discarded — the stream emits nothing.</p>
+<p>In dashboard apps with multiple streams on the same table, most writes</p>
+<p>change at most one stream's result set. Every other stream's re-query</p>
+<p>pays the full decode cost for a result that gets thrown away.</p>
+<h2>Hypothesis</h2>
+<p>Move the hash into native code, hashing raw cell bytes during</p>
+<p><code>sqlite3_step</code> without materializing any Dart objects. If the hash</p>
+<p>matches the cached value, return the &quot;unchanged&quot; sentinel immediately.</p>
+<p>Only on mismatch do we re-step the statement and build Dart objects.</p>
+<p>Trade-off: the &quot;changed&quot; path pays two <code>sqlite3_step</code> passes (hash pass</p>
+<p>+ decode pass). The expectation is that unchanged re-queries dominate</p>
+<p>in realistic reactive workloads, so the net impact is positive.</p>
+<h2>Approach</h2>
+<h3>C side</h3>
+<p>Hashing lives entirely in C. Two helpers and one exported entry point:</p>
+<ul>
+<li><code>fnv_combine_u64(h, v)</code> — 63-bit-masked FNV-1a step.</li>
+<li><code>fnv_combine_bytes(h, p, len)</code> — byte-at-a-time FNV fold for TEXT</li>
+</ul>
+<p>and BLOB payloads.</p>
+<ul>
+<li><code>resqlite_query_hash(stmt)</code> — the only Dart-visible function. Steps</li>
+</ul>
+<p>the bound statement to completion, folds every cell's type tag +</p>
+<p>value bytes + length into an FNV-1a accumulator, and returns the</p>
+<p>final hash. Calls <code>sqlite3_reset</code> at both ends so the caller can</p>
+<p>invoke this on a freshly-bound stmt <strong>or</strong> on one just drained by</p>
+<p><code>decodeQuery</code> — same function, both use cases.</p>
+<p>Per-cell fold rules (both paths must agree bit-for-bit with the</p>
+<p>re-query path, because they do):</p>
+<ul>
+<li>INTEGER: type + int64 value</li>
+<li>FLOAT: type + double bit pattern</li>
+<li>TEXT: type + length + raw UTF-8 bytes</li>
+<li>BLOB: type + length + raw bytes</li>
+<li>NULL: type only</li>
+<li>After all rows: fold <code>row_count</code> LAST; empty result ≡ 0.</li>
+</ul>
+<h3>Dart side</h3>
+<ul>
+<li>One FFI binding: <code>resqliteQueryHash</code>.</li>
+<li><code>executeQueryIfChanged</code> (the re-query path):</li>
+</ul>
+<p>```</p>
+<p>stmt = stmt_acquire_on(...)                 // binds params, reset</p>
+<p>new_hash = resqlite_query_hash(stmt)        // pass 1: hash in C</p>
+<p>if (new_hash == last_hash) return (new_hash, null)</p>
+<p>raw = decodeQuery(stmt, sql)                // pass 2: step + decode</p>
+<p>return (new_hash, raw)                      // reuse pass-1 hash</p>
+<p>```</p>
+<p>Same hash value from pass 1 is reused as the new baseline — no need</p>
+<p>to recompute during decode.</p>
+<ul>
+<li><code>executeQueryWithDeps</code> (the initial-query path):</li>
+</ul>
+<p>```</p>
+<p>raw = decodeQuery(stmt, sql)                // step + decode</p>
+<p>hash = resqlite_query_hash(stmt)            // step + hash (replay)</p>
+<p>return (raw, readTables, hash)</p>
+<p>```</p>
+<p>Pays one extra <code>sqlite3_step</code> walk through the same read-only query</p>
+<p>once per stream subscription. Amortized across every subsequent</p>
+<p>re-query of that stream (typically hundreds to thousands over the</p>
+<p>stream's lifetime), the cost is negligible.</p>
+<ul>
+<li><code>StreamEngine</code> stores the worker-returned hash directly on initial</li>
+</ul>
+<p>emission, removing the Dart-side <code>_hashResult</code> function and its</p>
+<p><code>result_hash.dart</code> module (both now dead code — hashes are C-computed</p>
+<p>everywhere).</p>
+<h3>Hash domain consistency</h3>
+<p>Only one hash implementation exists (<code>resqlite_query_hash</code>). Initial</p>
+<p>query and re-query both call it on the same stmt, so the baseline and</p>
+<p>every comparison hash live in the exact same domain by construction.</p>
+<p>No possibility of drift between paths.</p>
+<h2>Benchmark</h2>
+<p>Needed a new benchmark to measure the target path: none of the</p>
+<p>existing streaming benchmarks exercise unchanged re-queries. Added</p>
+<p><code>Unchanged Fanout Throughput (1 canary + 10 unchanged streams)</code> in</p>
+<p><code>benchmark/suites/streaming.dart</code>:</p>
+<ul>
+<li>10 unchanged streams, each using a literal <code>sid</code> column so the</li>
+</ul>
+<p>stream registry doesn't dedupe them. All select ~1000 rows and</p>
+<p>never change (writes target <code>id &gt; 1000</code>).</p>
+<ul>
+<li>1 canary stream (<code>COUNT(*)</code>) that changes on every write and emits</li>
+</ul>
+<p>a signal used for iteration synchronization.</p>
+<ul>
+<li>Each INSERT dispatches 11 re-queries; the reader pool (3-4 readers)</li>
+</ul>
+<p>processes them in waves. The canary's emission bounds iteration</p>
+<p>time.</p>
+<ul>
+<li>Seed data scaled to 1000 rows so the per-re-query decode cost</li>
+</ul>
+<p>dominates noise.</p>
+<p>Also verified the change correctness against the existing probe</p>
+<p><code>tool/experiments/hash_probe.dart</code>.</p>
+<h2>Results</h2>
+<p>A/B with 053 library changes stashed in/out to control for thermal</p>
+<p>drift:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline (ms)</th>
+<th>exp053 (ms)</th>
+<th>Δ</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Unchanged Fanout Throughput</td>
+<td>0.44</td>
+<td>0.27</td>
+<td><strong>−39%</strong></td>
+</tr>
+<tr>
+<td>Invalidation Latency (changed)</td>
+<td class="winner">0.05</td>
+<td class="winner">0.05</td>
+<td>within noise</td>
+</tr>
+<tr>
+<td>Fan-out (10 streams, changed)</td>
+<td>0.18</td>
+<td>0.22</td>
+<td>within noise</td>
+</tr>
+<tr>
+<td>Stream Churn (100 cycles)</td>
+<td>2.00</td>
+<td>2.18</td>
+<td>within noise</td>
+</tr>
+</tbody></table></div>
+
+<p>All 129 existing tests pass plus 3 new DDL-invalidation tests from</p>
+<p>exp 051.</p>
+<p>The &quot;changed&quot; path's 2-pass cost does not show up as a measurable</p>
+<p>regression on any existing streaming benchmark. The 2-pass overhead</p>
+<p>(step+hash, then step+decode+hash) is bounded above by the decode</p>
+<p>cost of one pass — small compared to the dispatch + isolate costs</p>
+<p>that dominate.</p>
+<h2>Why the earlier version of this idea (exp 072) failed</h2>
+<p>Exp 072 tried to swap FNV-1a for xxhash64 on already-hashed 64-bit</p>
+<p>values. On pre-hashed inputs, FNV's simpler xor+multiply beats</p>
+<p>xxhash's multi-step merge round. 072 regressed stream paths by</p>
+<p>+45-75%.</p>
+<p>The insight 053 rescues: xxhash/FNV choice matters for **byte-stream</p>
+<p>hashing**. In 053 we hash raw cell bytes in C — the scenario where</p>
+<p>the hash function's throughput actually matters. Here FNV is fine</p>
+<p>because we control the implementation and can avoid Dart↔C</p>
+<p>marshaling, so the algorithmic constant factor is not the</p>
+<p>bottleneck.</p>
+<h2>Decision</h2>
+<p>Accepted. Large win (−39%) on the target path, zero measurable</p>
+<p>regression on any other path. Hash code consolidates to a single C</p>
+<p>implementation; the main-isolate <code>_hashResult</code> becomes dead code and</p>
+<p>is removed.</p>
+<h2>Follow-ups</h2>
+<ul>
+<li>Add a &quot;no-op writes against wide table&quot; benchmark that exercises</li>
+</ul>
+<p>the changed-path 2-step cost pathologically.</p>
+<ul>
+<li>Exp 052' attempted to batch the step_row FFI crossings but hit the</li>
+</ul>
+<p>same memcpy-vs-FFI-savings wall as exp 018 and was rejected</p>
+<p>separately. A future experiment could combine 053's hashing with</p>
+<p>selective batching only when text/blob content is small (exploit</p>
+<p>the fact that pure-numeric rows don't need the memcpy).</p>
+
+  </article>
+</div>
+</body>
+</html>

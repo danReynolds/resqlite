@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experiment 109: Inline-packed parameter buffer — resqlite</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-wrap { max-width: 720px; margin: 0 auto; padding: 2rem; }
+  .top-nav { margin-bottom: 2rem; font-size: 0.85rem; }
+  .top-nav a { margin-right: 1.5rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .post-category {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  }
+
+  .post h1 { font-size: 1.8rem; margin-bottom: 1.5rem; line-height: 1.3; }
+  .post h2 { font-size: 1.3rem; margin: 2rem 0 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .post h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .post h4 { font-size: 0.95rem; margin: 1.25rem 0 0.4rem; color: var(--muted); }
+  .post p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.7; }
+  .post ul, .post ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+  .post li { margin-bottom: 0.3rem; font-size: 0.95rem; line-height: 1.6; }
+  .post code {
+    background: rgba(88,166,255,0.08); padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .post pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  .post pre code {
+    background: none; padding: 0; border-radius: 0; font-size: inherit;
+  }
+  .post hr {
+    border: none; border-top: 1px solid var(--border); margin: 2rem 0;
+  }
+  .post strong { color: var(--text); }
+  .post a { color: var(--accent); }
+  .table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+  .bench-table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .bench-table th {
+    text-align: left; padding: 0.6rem 0.75rem; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .bench-table td {
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .bench-table th:not(:first-child),
+  .bench-table td:not(:first-child) { text-align: right; }
+  .bench-table tr:last-child td { border-bottom: none; }
+  .bench-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .bench-table .winner { color: #3fb950; font-weight: 600; }
+  .story-byline {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin: -0.75rem 0 1.5rem;
+  }
+
+</style>
+</head>
+<body>
+<div class="page-wrap">
+  <nav class="top-nav">
+    <a href="index.html">&larr; Experiment Dashboard</a>
+    <a href="../blog/stories/index.html">Stories</a>
+    <a href="../blog/index.html">Blog</a>
+    <a href="../index.html">Home</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+  </nav>
+  <article class="post">
+    <span class="post-category">Accepted</span>
+    <p class="story-byline">Apr 27, 2026 · Accepted</p>
+<h1>Experiment 109: Inline-packed parameter buffer</h1>
+<p><strong>Date:</strong> 2026-04-27</p>
+<p><strong>Status:</strong> Accepted</p>
+<h2>Problem</h2>
+<p><code>allocateParams</code> (in <code>lib/src/native/resqlite_bindings.dart</code>) currently</p>
+<p>issues one native allocation per text/blob parameter on top of the</p>
+<p>reusable struct buffer:</p>
+<pre><code class="lang-dart">
+} else if (value is String) {
+  final encoded = value.toNativeUtf8();          // calloc(N+1) per text param
+  ...
+  byteData.setInt32(offset + 16, -1, ...);        // signal: SQLite must strlen
+} else if (value is Uint8List) {
+  final blob = calloc&lt;ffi.Uint8&gt;(value.length);   // calloc(N) per blob param
+  ...
+}
+</code></pre>
+<p><code>freeParams</code> then does N <code>calloc.free</code> calls plus one buffer release.</p>
+<p>For a query with K text params, the path is <code>1 + K</code> allocations and</p>
+<p><code>1 + K</code> frees per call — and SQLite separately calls <code>strlen</code> on every</p>
+<p>text bind because <code>text.len</code> is <code>-1</code>.</p>
+<p>The struct buffer itself has been a single reused 64 KB allocation since</p>
+<p>exp 070 (the <code>_reusableParamStructBuf</code> in <code>request_cache.dart</code>); only</p>
+<p>the per-string and per-blob byte buffers remain unbatched.</p>
+<h2>Hypothesis</h2>
+<p>Pack the text/blob bytes inline at the tail of the same buffer that</p>
+<p>holds the param structs. Layout becomes</p>
+<p><code>[struct_0 .. struct_N][text_0 bytes][blob_1 bytes][text_2 bytes] ...</code>,</p>
+<p>with each struct's <code>text.data</code> / <code>blob.data</code> pointer carrying the</p>
+<p>address of its slice inside the buffer.</p>
+<p>Because the worker that calls <code>allocateParams</code> is single-threaded and</p>
+<p>owns the bound stmt for the entire FFI exchange (`acquire → step* →</p>
+<p>reset<code>), </code>SQLITE_STATIC` pointers into the buffer remain valid for as</p>
+<p>long as SQLite needs them. The buffer is only ever reused on the</p>
+<p><em>next</em> call.</p>
+<p>Two side benefits compose with the main change:</p>
+<ol>
+<li>The actual UTF-8 byte length is known after <code>utf8.encode</code>, so it can</li>
+</ol>
+<p>be written to <code>text.len</code> directly. SQLite skips its internal</p>
+<p><code>strlen</code> walk on every text bind.</p>
+<ol>
+<li>Inline bytes don't need null termination — <code>sqlite3_bind_text</code></li>
+</ol>
+<p>reads exactly <code>len</code> bytes when <code>len &gt;= 0</code>.</p>
+<p>Expected upside: 1 native allocation per query regardless of param</p>
+<p>count, plus a per-text-param <code>strlen</code> saved inside SQLite. Pattern-</p>
+<p>matches the family of &quot;fewer allocations on the hot bind path&quot; wins</p>
+<p>that exp 028 (static-bind), exp 070 (zero-row dirty buffer), and</p>
+<p>exp 101 (cached tx stmts) belong to.</p>
+<p>Expected risk: same single-FFI-exchange ownership assumption that</p>
+<p>exp 028 already relies on for SQLITE_STATIC; no new lifetime</p>
+<p>assumption. Buffers larger than <code>_maxReusableParamBufBytes</code> (64 KB)</p>
+<p>fall back to a per-call calloc — still one allocation instead of</p>
+<p><code>1 + N</code>, so behavior degrades gracefully for large blobs.</p>
+<h2>Research Notes</h2>
+<ul>
+<li>Recent rejections (exp 094, 095, 096, 102, 108) all sit in the same</li>
+</ul>
+<p>zone — micro-allocation removals on hot paths whose suite-level</p>
+<p>signal is below noise. Read carefully before adding more.</p>
+<ul>
+<li>SQLite docs explicitly note that passing <code>-1</code> for the length argument</li>
+</ul>
+<p>to <code>sqlite3_bind_text</code> causes an internal <code>strlen</code> walk. The doc</p>
+<p>comment matches the C source in 3.51.3:</p>
+<p>&lt;https://www.sqlite.org/c3ref/bind_blob.html&gt;.</p>
+<ul>
+<li><code>package:ffi</code>'s <code>String.toNativeUtf8()</code> allocates <code>units.length + 1</code></li>
+</ul>
+<p>bytes via <code>calloc</code>, copies the encoded UTF-8 in, and returns a</p>
+<p>null-terminated pointer. Replacing it with an explicit <code>utf8.encode</code></p>
+<p>+ range copy is the same Dart-side work, but lets us reuse the</p>
+<p>param-struct buffer for the bytes and keep the byte length around.</p>
+<ul>
+<li>exp 028 already converted text/blob binds to SQLITE_STATIC, so the</li>
+</ul>
+<p>ownership invariant the new layout depends on is the <em>same</em> one</p>
+<p>that has been live since 028 merged.</p>
+<h2>Approach</h2>
+<p>Replaced <code>allocateParams</code> with a two-pass packer:</p>
+<ol>
+<li>Pass 1: <code>utf8.encode</code> each string param, collect the resulting</li>
+</ol>
+<p><code>Uint8List</code>s, sum their lengths plus blob lengths into</p>
+<p><code>extraBytes</code>.</p>
+<ol>
+<li>Pass 2: allocate <code>structsBytes + extraBytes</code> from</li>
+</ol>
+<p><code>allocateReusableParamStructBuf</code>, write each struct, and copy</p>
+<p>text/blob bytes into the tail. Each struct's data pointer is</p>
+<p><code>bufAddr + dataOffset</code> where <code>dataOffset</code> advances by the byte</p>
+<p>length of the value just written.</p>
+<p><code>freeParams</code> collapses to <code>freeReusableParamStructBuf(buf)</code> — the</p>
+<p>inline layout has nothing left to free per param.</p>
+<p>Validation before benchmarking:</p>
+<pre><code class="lang-text">
+dart analyze lib/
+dart test test/database_test.dart test/reader_pool_test.dart
+</code></pre>
+<p>Both passed.</p>
+<h2>Results</h2>
+<p>Artifacts:</p>
+<ul>
+<li>Baseline: <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md"><code>benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md</code></a></li>
+<li>Candidate: <a href="https://github.com/danReynolds/resqlite/blob/main/benchmark/results/2026-04-27T07-40-26-exp109-inline-param-buffer.md"><code>benchmark/results/2026-04-27T07-40-26-exp109-inline-param-buffer.md</code></a></li>
+</ul>
+<p>Command:</p>
+<pre><code class="lang-text">
+dart run benchmark/run_release.dart exp109-inline-param-buffer --repeat=5 \
+  --compare-to=benchmark/results/2026-04-27T07-29-26-baseline-for-exp109.md
+</code></pre>
+<p><strong>Suite-level: 15 wins, 0 regressions, 138 neutral.</strong></p>
+<p>The wins concentrate on bind-heavy paths exactly where the change</p>
+<p>should matter — text-param INSERT workloads:</p>
+<div class="table-wrap"><table class="bench-table">
+<thead><tr>
+<th>Benchmark</th>
+<th>Baseline ms</th>
+<th>Candidate ms</th>
+<th>Delta</th>
+<th>Status</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Write Performance / Single Inserts (100 sequential)</td>
+<td>1.88</td>
+<td>1.61</td>
+<td><strong>-14%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+<tr>
+<td>Write Performance / Batch Insert (10000 rows)</td>
+<td>4.21</td>
+<td>3.68</td>
+<td><strong>-13%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+<tr>
+<td>Write Performance / Batched Write Inside Transaction</td>
+<td class="winner">0.43</td>
+<td class="winner">0.39</td>
+<td><strong>-10%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+<tr>
+<td>Streaming / No-Streams Write Throughput (200 inserts)</td>
+<td>4.03</td>
+<td>3.40</td>
+<td><strong>-16%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+<tr>
+<td>Scaling / 20000 rows / resqlite</td>
+<td>12.24</td>
+<td>10.88</td>
+<td><strong>-11%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+<tr>
+<td>Scaling / 10000 rows / resqlite + jsonEncode</td>
+<td>23.92</td>
+<td>20.78</td>
+<td><strong>-13%</strong></td>
+<td>🟢 Stable win</td>
+</tr>
+</tbody></table></div>
+
+<p>The Single-Inserts and Batch-Insert wins are the clearest signal: the</p>
+<p>INSERT statement binds two parameters per row (<code>name TEXT</code>, `value</p>
+<p>REAL`), so the per-call savings from one allocation instead of two</p>
+<p>(plus <code>strlen</code> skipped for the text param) compound across the hot</p>
+<p>loop. The Streaming / No-Streams variant routes through the same</p>
+<p><code>executeWrite</code> path, which is why it tracks the single-insert delta.</p>
+<p>Two non-target wins worth flagging:</p>
+<ul>
+<li><code>Concurrent Reads / 4× concurrency</code>: -66% on a stable run. This</li>
+</ul>
+<p>workload binds an int param only (<code>SELECT WHERE id = ?</code>), so the</p>
+<p>bind path itself is not what moved — most likely run-to-run</p>
+<p>variance amplified by the 4× concurrency contention. Reported here</p>
+<p>for completeness; the experiment doesn't claim credit for it.</p>
+<ul>
+<li><code>Streaming / Stream Churn (100 cycles)</code>: -48% but flagged &quot;noisy&quot;</li>
+</ul>
+<p>by the harness (MDE_ci 26%). Same caveat — not a bind-path effect.</p>
+<p><strong>Memory comparison: 1 win, 0 regressions, 14 neutral.</strong> No memory</p>
+<p>flags on the target paths. (One drift batch-insert win was incidental,</p>
+<p>unrelated to the change.)</p>
+<p><code>Parameterized Queries / 100 queries × ~500 rows each</code> moved from</p>
+<p>15.15 → 14.48 ms (−4.4%, MDE_ci 3.1%). Below the 10% decision</p>
+<p>threshold so the harness reports neutral, but the direction matches</p>
+<p>the rest of the bind-path wins. Each parameterized query binds a</p>
+<p>single text param, so the per-call savings are smaller than on a</p>
+<p>two-text-param INSERT.</p>
+<h2>Decision</h2>
+<p><strong>Accepted.</strong></p>
+<p>The bind-heavy paths show consistent ~10-16% wall-clock wins with</p>
+<p>zero regressions and no memory flags. The wins are exactly where the</p>
+<p>hypothesis predicted — <code>executeWrite</code> and <code>executeBatchWrite</code> paths</p>
+<p>that bind text params on every call. The changes are localized to</p>
+<p>two functions (<code>allocateParams</code> / <code>freeParams</code>) in</p>
+<p><code>lib/src/native/resqlite_bindings.dart</code>, do not change any FFI</p>
+<p>contract, and rely on the same single-FFI-exchange ownership</p>
+<p>invariant that exp 028 already established for SQLITE_STATIC binds.</p>
+<p>This breaks the recent string of micro-allocation rejections (94, 95,</p>
+<p>96, 102, 108) by combining two compounding effects in a single change:</p>
+<p>fewer native allocations <em>and</em> a <code>strlen</code> skip per text bind. Either</p>
+<p>in isolation would have been at the noise floor; together they're</p>
+<p>above it.</p>
+
+  </article>
+</div>
+</body>
+</html>
