@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>resqlite Blog - Stories &amp; Architecture</title>
+<title>resqlite Blog - Engineering Notes</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --border: #30363d;
@@ -27,57 +27,374 @@
     letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
   }
 
-  .post-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
-  .post-card {
-    display: block; text-decoration: none; color: var(--text);
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1.5rem; transition: border-color 0.15s, transform 0.15s;
+  .blog-wrap { max-width: 1060px; }
+  .blog-hero {
+    padding: 1.5rem 0 2rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
   }
-  .post-card:hover { border-color: var(--accent); transform: translateY(-2px); text-decoration: none; }
-  .post-card h2 { font-size: 1.15rem; margin-bottom: 0.4rem; }
-  .post-card p { font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
-  .post-category {
-    display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem;
+  .blog-hero h1 {
+    max-width: 760px;
+    font-size: 3rem;
+    line-height: 1.05;
+    margin-bottom: 1rem;
   }
+  .blog-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 19rem;
+    gap: 2.5rem;
+    align-items: start;
+  }
+  .primary-column {
+    min-width: 0;
+  }
+  .post-ledger {
+    border-top: 1px solid var(--border);
+  }
+  .post-row {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1.15rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .post-row:hover {
+    text-decoration: none;
+  }
+  .post-row:hover strong {
+    color: var(--accent);
+  }
+  .post-row strong {
+    font-size: 1.08rem;
+    line-height: 1.35;
+  }
+  .post-row span {
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .post-row-meta,
+  .post-row-meta time {
+    color: var(--muted);
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .blog-sidebar {
+    position: sticky;
+    top: 1.5rem;
+    display: grid;
+    gap: 1rem;
+  }
+  .sidebar-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .sidebar-card h2 {
+    margin-bottom: 0.8rem;
+    font-size: 0.88rem;
+    letter-spacing: 0.08em;
+    line-height: 1.3;
+    text-transform: uppercase;
+  }
+  .sidebar-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--border);
+  }
+  .sidebar-item {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.75rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-item:hover {
+    text-decoration: none;
+  }
+  .sidebar-item:hover strong {
+    color: var(--accent);
+  }
+  .sidebar-item span {
+    color: var(--muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .sidebar-item strong {
+    font-size: 0.84rem;
+    line-height: 1.4;
+  }
+  .sidebar-item em {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-style: normal;
+    line-height: 1.4;
+  }
+  .post-row code,
+  .sidebar-item code,
+  .experiment-row em code {
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.9em;
+  }
+  .post-row span strong,
+  .experiment-row em strong {
+    color: var(--text);
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .blog-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .section-heading.compact {
+    margin-bottom: 0.6rem;
+  }
+  .section-heading h2 {
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-heading a,
+  .section-note,
+  .section-footnote {
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+  .section-heading a { color: var(--accent); }
+  .section-footnote {
+    margin-top: 1rem;
+  }
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 1.5rem 0 2rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stats-row div {
+    padding: 1rem;
+    border-right: 1px solid var(--border);
+  }
+  .stats-row div:last-child {
+    border-right: none;
+  }
+  .stats-row strong {
+    display: block;
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+  .stats-row span {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .experiment-ledger {
+    border-top: 1px solid var(--border);
+  }
+  .experiment-row {
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 1rem;
+    padding: 1rem 0;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .experiment-row:hover {
+    text-decoration: none;
+  }
+  .experiment-row:hover strong {
+    color: var(--accent);
+  }
+  .experiment-number {
+    color: var(--accent);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    padding-top: 0.1rem;
+  }
+  .experiment-row strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.96rem;
+    line-height: 1.35;
+  }
+  .experiment-row small {
+    display: block;
+    color: var(--muted);
+    font-size: 0.76rem;
+    margin-bottom: 0.3rem;
+  }
+  .experiment-row em {
+    display: block;
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-style: normal;
+    line-height: 1.45;
+  }
+  @media (max-width: 840px) {
+    .blog-hero h1 { font-size: 2.4rem; }
+    .blog-layout {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+    .blog-sidebar {
+      position: static;
+    }
+    .stats-row {
+      grid-template-columns: 1fr;
+    }
+    .stats-row div,
+    .stats-row div:last-child {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .stats-row div:last-child {
+      border-bottom: none;
+    }
+  }
+  @media (max-width: 520px) {
+    .blog-hero h1 { font-size: 2rem; }
+    .section-heading {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .experiment-row {
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+    }
+  }
+
 </style>
 </head>
 <body>
-<div class="page-wrap">
+<div class="page-wrap blog-wrap">
   <nav class="top-nav">
     <a href="../index.html">&larr; Home</a>
     <a href="../benchmarks/index.html">Benchmarks</a>
-    <a href="../experiments/index.html">Experiments</a>
+    <a href="../experiments/index.html">Experiment Dashboard</a>
     <a href="../api/resqlite/resqlite-library.html">API Docs</a>
   </nav>
-  <h1>Stories &amp; Architecture</h1>
-  <p class="subtitle">The chronological engineering history of resqlite, plus technical deep-dives into how the library works.</p>
-  <div class="post-list">
-    <a class="post-card" href="stories/index.html">
-      <span class="post-category">Project Stories</span>
-      <h2>The Chronological History of resqlite</h2>
-      <p>An annotated timeline of the design decisions behind resqlite: object graphs, flat-list rows, reader-pool tradeoffs, stream invalidation, write serialization, and a Dart VM hang.</p>
-    </a>
-    <a class="post-card" href="architecture.html">
-      <span class="post-category">Architecture</span>
-      <h2>resqlite Architecture</h2>
-      <p>resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: **minimize main-isola...</p>
-    </a>
-    <a class="post-card" href="reading.html">
-      <span class="post-category">Deep Dive</span>
-      <h2>How resqlite Reads Data</h2>
-      <p>Reads are the most common database operation — and the place where most SQLite libraries waste the most time on your UI thread. This post explains how resqlite's read path works, from the API call ...</p>
-    </a>
-    <a class="post-card" href="writing.html">
-      <span class="post-category">Deep Dive</span>
-      <h2>How resqlite Writes Data</h2>
-      <p>SQLite only allows one writer at a time — that's a fundamental constraint of the database engine. resqlite embraces this by routing all writes through a single dedicated background isolate, keeping...</p>
-    </a>
-    <a class="post-card" href="streaming.html">
-      <span class="post-category">Deep Dive</span>
-      <h2>How resqlite Makes Queries Reactive</h2>
-      <p>Most database libraries give you a one-shot query: ask for data, get data, done. resqlite's `stream()` API turns any query into a live data source — it emits results immediately and then re-emits w...</p>
-    </a>
+  <header class="blog-hero">
+    <span class="post-category">resqlite Blog</span>
+    <h1>Engineering notes from the project.</h1>
+    <p class="subtitle">A single index for the project narrative and architecture writing. Experiments live here too, with the dashboard kept as the interactive benchmark view.</p>
+  </header>
+
+  <div class="blog-layout">
+    <main class="primary-column" aria-labelledby="all-posts-title">
+      <div class="section-heading">
+        <h2 id="all-posts-title">All Posts</h2>
+        <span class="section-note">Stories and architecture notes, newest stories first.</span>
+      </div>
+      <div class="post-ledger">
+        <a class="post-row" href="stories/2026-04-27-dart-vm-deadlock.html">
+          <span class="post-row-meta"><time>Apr 27, 2026</time> · Project Story</span>
+          <strong>Debugging a Dart VM Service Deadlock</strong>
+          <span>A cold-launch freeze first looked like a database migration hang, but native stack sampling showed the process blocked inside a Dart VM service deadlock.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-22-follow-up-optimization.html">
+          <span class="post-row-meta"><time>Apr 22, 2026</time> · Project Story</span>
+          <strong>Optimization After the Read Path Stabilized</strong>
+          <span>Once the main read-path architecture was stable, later experiments focused on stream fanout, write-path allocation, benchmark coverage, and reusable research records.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-16-write-path.html">
+          <span class="post-row-meta"><time>Apr 16, 2026</time> · Project Story</span>
+          <strong>Writer Isolate and Invalidation Data</strong>
+          <span>The persistent writer isolate serialized SQLite mutations, preserved transaction state, and produced the dirty-table data used by reactive queries.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-12-stream-engine.html">
+          <span class="post-row-meta"><time>Apr 12, 2026</time> · Project Story</span>
+          <strong>Stream Invalidation Becomes a Subsystem</strong>
+          <span>Reactive queries required their own invalidation engine once dependency capture, dirty-table dispatch, deduplication, and stale-result handling became shared concerns.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-10-reader-pool.html">
+          <span class="post-row-meta"><time>Apr 10, 2026</time> · Project Story</span>
+          <strong>Persistent Reader Pool Design</strong>
+          <span>After the row representation improved, small reads were dominated by isolate setup, so resqlite moved to persistent reader workers with a separate large-result transfer path.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-08-flat-list-resultset.html">
+          <span class="post-row-meta"><time>Apr 8, 2026</time> · Project Story</span>
+          <strong>Flat-List ResultSet Design</strong>
+          <span>resqlite's row representation changed from per-row <code>LinkedHashMap</code> instances to a shared schema plus one flat value list, reducing transfer-graph size while preserving the map API.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-07-dead-ends.html">
+          <span class="post-row-meta"><time>Apr 7, 2026</time> · Project Story</span>
+          <strong>Result Representations That Did Not Work</strong>
+          <span>Several plausible row-transfer strategies were rejected because they improved the wrong metric or moved expensive work back onto the UI isolate.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-06-zero-copy.html">
+          <span class="post-row-meta"><time>Apr 6, 2026</time> · Project Story</span>
+          <strong>Understanding Dart Isolate Transfer Costs</strong>
+          <span><code>Isolate.exit()</code> avoided copying rows, but benchmark breakdowns showed that validating a large Dart object graph was still a major cost.</span>
+        </a>
+        <a class="post-row" href="stories/2026-04-06-main-isolate.html">
+          <span class="post-row-meta"><time>Apr 6, 2026</time> · Project Story</span>
+          <strong>Why resqlite Started</strong>
+          <span>resqlite began as a Flutter SQLite library shaped by one product constraint: keep database work from stealing frame time while preserving ordinary SQLite ergonomics and reactive queries.</span>
+        </a>
+        <a class="post-row" href="architecture.html">
+          <span class="post-row-meta">Architecture</span>
+          <strong>resqlite Architecture</strong>
+          <span>resqlite is a high-performance SQLite library for Dart built on raw C FFI (Foreign Function Interface — how Dart calls native C code). It's designed around a single principle: minimize main-isola...</span>
+        </a>
+      </div>
+    </main>
+
+    <aside class="blog-sidebar" aria-label="Blog context">
+      <section class="sidebar-card">
+        <div class="section-heading compact">
+          <h2>Reference</h2>
+        </div>
+        <div class="sidebar-list">
+          <a class="sidebar-item" href="architecture.html">
+            <span>Architecture</span>
+            <strong>Architecture Breakdown</strong>
+            <em>The full system view: reader pool, writer isolate, reactive streams, native state, and data flow.</em>
+          </a>
+          <a class="sidebar-item" href="../benchmarks/index.html">
+            <span>Benchmarks</span>
+            <strong>Benchmark Dashboard</strong>
+            <em>Interactive charts for current performance, history, devices, and workload comparisons.</em>
+          </a>
+          <a class="sidebar-item" href="../api/resqlite/resqlite-library.html">
+            <span>Reference</span>
+            <strong>API Documentation</strong>
+            <em>Generated Dart API docs for the public resqlite package surface.</em>
+          </a>
+        </div>
+      </section>
+
+      <section class="sidebar-card">
+        <div class="section-heading compact">
+          <h2>Recent Experiments</h2>
+          <a href="experiments/index.html">All &rarr;</a>
+        </div>
+        <div class="sidebar-list">
+          <a class="sidebar-item" href="experiments/112-fixed-length-batch-param-flatten.html">
+            <span><time>Apr 28, 2026</time> · Rejected</span>
+            <strong>Experiment 112: Fixed-length batch parameter flattening</strong>
+          </a>
+          <a class="sidebar-item" href="experiments/111-nested-tx-benchmark-savepoint-cache.html">
+            <span><time>Apr 28, 2026</time> · Rejected</span>
+            <strong>Experiment 111: Nested-transaction benchmark + revisit savepoint string cache</strong>
+          </a>
+          <a class="sidebar-item" href="experiments/110-long-text-fnv-8byte.html">
+            <span><time>Apr 27, 2026</time> · In Review</span>
+            <strong>Experiment 110: Long-text stream hash benchmark + 8-byte FNV</strong>
+          </a>
+        </div>
+      </section>
+    </aside>
   </div>
 </div>
 </body>

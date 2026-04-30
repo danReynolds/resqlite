@@ -192,6 +192,106 @@
       font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
     }
 
+    .quickstart {
+      max-width: 960px;
+      width: 100%;
+      padding: 0 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .quickstart-shell {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .quickstart-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1.5rem;
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .quickstart-header h2 {
+      font-size: 1.2rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .quickstart-header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      max-width: 620px;
+    }
+
+    .quickstart-header a {
+      color: var(--accent);
+      font-size: 0.84rem;
+      text-decoration: none;
+      white-space: nowrap;
+      align-self: flex-start;
+    }
+
+    .quickstart-header a:hover {
+      text-decoration: underline;
+    }
+
+    .quickstart-grid {
+      display: grid;
+      gap: 0;
+    }
+
+    .quickstart-row {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .quickstart-row:last-child {
+      border-bottom: none;
+    }
+
+    .quickstart-step {
+      padding: 1rem 1.25rem;
+      border-right: 1px solid var(--border);
+    }
+
+    .quickstart-step span {
+      display: block;
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.2rem;
+    }
+
+    .quickstart-step strong {
+      display: block;
+      font-size: 0.9rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .quickstart-step p {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .quickstart-code-step {
+      min-width: 0;
+    }
+
+    .quickstart-code-step pre {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      margin: 0;
+      min-height: 100%;
+      padding: 1rem 1.25rem;
+    }
+
     .kw {
       color: #ff7b72;
     }
@@ -283,6 +383,19 @@
         grid-template-columns: 1fr 1fr;
       }
 
+      .quickstart-header {
+        display: grid;
+      }
+
+      .quickstart-row {
+        grid-template-columns: 1fr;
+      }
+
+      .quickstart-step {
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+
       .hero h1 {
         font-size: 2rem;
       }
@@ -344,20 +457,91 @@
     </a>
     <a class="card" href="blog/index.html">
       <span class="icon">&#128221;</span>
-      <h2>Architecture &amp; Stories</h2>
-      <p>Project stories and technical deep dives on the reader pool, writer isolate, stream engine, and the decisions behind them.</p>
+      <h2>Blog</h2>
+      <p>Engineering stories, architecture deep dives, and generated experiment posts behind the library's design.</p>
     </a>
     <a class="card" href="https://github.com/danReynolds/resqlite">
       <span class="icon">&#128736;</span>
       <h2>Source Code</h2>
       <p>Browse the repo, open issues, and contribute on GitHub.</p>
     </a>
-    <a class="card" href="https://github.com/danReynolds/resqlite#getting-started">
+    <a class="card" href="#quickstart">
       <span class="icon">&#128640;</span>
-      <h2>Getting Started</h2>
-      <p>Installation, setup, and usage examples to get up and running.</p>
+      <h2>Quickstart</h2>
+      <p>Add the package, open a database, run plain SQL, and subscribe to reactive queries.</p>
     </a>
   </div>
+
+  <section class="quickstart" id="quickstart" aria-labelledby="quickstart-title">
+    <div class="quickstart-shell">
+      <div class="quickstart-header">
+        <div>
+          <h2 id="quickstart-title">Install and run the first query</h2>
+          <p>resqlite is currently source-only, so use a path dependency while the package is under active development. Native assets compile automatically for Dart and Flutter targets.</p>
+        </div>
+        <a href="api/resqlite/Database-class.html">Database API &rarr;</a>
+      </div>
+      <div class="quickstart-grid">
+        <div class="quickstart-row">
+          <div class="quickstart-step">
+            <span>1</span>
+            <strong>Add the dependency</strong>
+            <p>Use a local path dependency until the package is published.</p>
+          </div>
+          <div class="quickstart-code-step">
+            <pre><span class="cm">// pubspec.yaml</span>
+dependencies:
+  resqlite:
+    path: ../resqlite</pre>
+          </div>
+        </div>
+        <div class="quickstart-row">
+          <div class="quickstart-step">
+            <span>2</span>
+            <strong>Open and create schema</strong>
+            <p>Open an on-device SQLite database and manage schema with plain SQL.</p>
+          </div>
+          <div class="quickstart-code-step">
+            <pre><span class="cm">// Dart / Flutter</span>
+<span class="kw">import</span> <span class="str">'package:resqlite/resqlite.dart'</span>;
+
+<span class="kw">final</span> db = <span class="kw">await</span> <span class="ty">Database</span>.<span class="fn">open</span>(<span class="str">'app.db'</span>);
+
+<span class="kw">await</span> db.<span class="fn">execute</span>(<span class="str">'''
+  CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0
+  )
+'''</span>);</pre>
+          </div>
+        </div>
+        <div class="quickstart-row">
+          <div class="quickstart-step">
+            <span>3</span>
+            <strong>Read, write, stream</strong>
+            <p>Queries and writes run off the main isolate; streams re-query automatically.</p>
+          </div>
+          <div class="quickstart-code-step">
+            <pre><span class="cm">// Insert, query, then subscribe</span>
+<span class="kw">await</span> db.<span class="fn">execute</span>(
+  <span class="str">'INSERT INTO todos(title) VALUES (?)'</span>,
+  [<span class="str">'Ship a smooth local-first UI'</span>],
+);
+
+<span class="kw">final</span> openTodos = <span class="kw">await</span> db.<span class="fn">select</span>(
+  <span class="str">'SELECT * FROM todos WHERE done = ?'</span>,
+  [<span class="str">0</span>],
+);
+
+db.<span class="fn">stream</span>(<span class="str">'SELECT * FROM todos ORDER BY id DESC'</span>).<span class="fn">listen</span>((rows) {
+  <span class="fn">print</span>(<span class="str">'todos changed: </span>${rows.length}<span class="str">'</span>);
+});</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <div class="code-block">
     <h3>Quick look</h3>
