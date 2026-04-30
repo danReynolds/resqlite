@@ -14,15 +14,15 @@ fanout cost on disjoint and overlap and identify the next high-impact lever.
 
 Each per-write sample splits the wall into:
 
-- `writer_us`: `await db.execute(...)` — writer-isolate round-trip (writer.locked → mutex → SQL exec → WAL commit → reply) **plus** the synchronous body of `StreamEngine.invalidate(...)` that runs inside `Database.execute` before the future resolves.
+- `writer_us`: `await db.execute(...)` — writer-isolate round-trip (writer.locked → mutex → SQL exec → WAL commit → reply) **plus** the synchronous body of `StreamEngine.onDependencyChanges(...)` that runs inside `Database.execute` before the future resolves.
 - `yield_us`: `await Future<void>.delayed(Duration.zero) × 2` — the microtask drain. Where reader-pool `selectIfChanged` dispatches actually run, replies arrive, listener microtasks fire.
 - `total_us`: full per-write wall, await-to-await.
 
 **New in this profile** (gated by `kProfileMode`, tree-shaken in release):
 
-- `invalidate_us`: synchronous body of `StreamEngine.invalidate` only, isolated from writer-isolate IPC. Subset of `writer_us`.
-- `intersection_us`: cumulative microseconds spent inside `_writeAffectsEntry` (the per-stream column-set probe added in exp 106). Subset of `invalidate_us`.
-- `intersection_entries`: number of `_writeAffectsEntry` probes per write (50 = "all watchers tested").
+- `invalidate_us`: synchronous body of `StreamEngine.onDependencyChanges` only, isolated from writer-isolate IPC. Subset of `writer_us`.
+- `intersection_us`: cumulative microseconds spent inside per-stream column-set intersection probes added in exp 106. Subset of `invalidate_us`.
+- `intersection_entries`: number of concrete column-vs-column intersection probes per write (50 = "all watchers tested").
 - `per-watcher µs`: mean `intersection_us / intersection_entries` across all samples.
 
 ## Top-line: 5-run medians (N=50 streams)
@@ -64,8 +64,8 @@ Per-write `total_us = 39` µs at 50 streams. Subtracting the no-streams baseline
 | component | µs | how recovered |
 |---|---:|---|
 | writer-isolate round-trip + reply | ~25 | `writer_us` − `invalidate_us` |
-| `_streamEngine.invalidate` synchronous body | ~7 | `invalidate_us` p50 |
-| of which: `_writeAffectsEntry × 50` | ~4 | `intersection_us` p50 |
+| `_streamEngine.onDependencyChanges` synchronous body | ~7 | `invalidate_us` p50 |
+| of which: column intersection probes × 50 | ~4 | `intersection_us` p50 |
 | of which: dirty-set scheduling + flushQueue kick | ~3 | `invalidate_us − intersection_us` |
 | microtask drain (yields) | ~7 | `yield_us` p50 |
 
@@ -80,7 +80,7 @@ Per-write `total_us = 113` µs at 50 streams. Subtracting baseline 37 µs → **
 | component | µs | how recovered |
 |---|---:|---|
 | writer-isolate round-trip + reply | ~54 | `writer_us − invalidate_us` |
-| `_streamEngine.invalidate` synchronous body | ~7 | `invalidate_us` p50 |
+| `_streamEngine.onDependencyChanges` synchronous body | ~7 | `invalidate_us` p50 |
 | of which: 50 × intersection probes | ~4 | `intersection_us` p50 |
 | of which: scheduling 50 entries onto `_requeryQueue` | ~3 | residual |
 | **microtask drain (yields)** | **~47** | `yield_us` p50 |

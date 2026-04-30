@@ -110,7 +110,7 @@ typedef struct {
     // the captured set into this cache entry failed.
     // When 0, `resqlite_get_read_tables` returns
     // RESQLITE_DEPENDENCY_COUNT_UNKNOWN so the StreamEngine routes the stream
-    // into its global "all tables" bucket.
+    // into its unknown-dependencies bucket.
     int read_tables_reliable;
     // Experiment 106: per-stmt column dependencies (reader: SELECT/WHERE
     // columns from authorizer SQLITE_READ events; writer: SET columns
@@ -121,9 +121,8 @@ typedef struct {
     int dep_column_count;
     // Experiment 106 polish: 1 if `dep_columns[]` is the complete
     // dependency set; 0 on any capture/copy failure. When 0, the
-    // column getters return 0 entries — falling
-    // through `_writeAffectsEntry`'s "table missing from column map"
-    // branch into table-level re-query.
+    // column getters return 0 entries, so Dart builds a plain table-level
+    // dependency and skips column elision.
     int dep_columns_reliable;
 } resqlite_cached_stmt;
 
@@ -222,7 +221,7 @@ static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
     // Experiment 106 polish: source set reliability caps the entry's.
     // If unreliable, drop entries and mark the cache entry too — the
     // FFI getter will return RESQLITE_DEPENDENCY_COUNT_UNKNOWN so StreamEngine
-    // routes the stream into the all-tables bucket.
+    // routes the stream into the unknown-dependencies bucket.
     entry->read_tables_reliable = read_tables->reliable;
     if (!read_tables->reliable) return;
 
@@ -1025,7 +1024,7 @@ int resqlite_get_dirty_tables(
 // the cached entry's read-table dependencies are unreliable (overflow / OOM
 // during prepare). Zero would mean "stream has no table deps" → silent stuck
 // stream; the negative sentinel forces the Dart-side StreamEngine to route the
-// stream into the "all tables" bucket where every write invalidates it.
+// stream into its unknown-dependencies bucket where every write invalidates it.
 int resqlite_get_read_tables(
     resqlite_db* db,
     int reader_id,

@@ -152,7 +152,7 @@ int resqlite_get_dirty_tables(
 //   * `RESQLITE_DEPENDENCY_COUNT_UNKNOWN` — the cached entry's read-table
 //     set is unreliable (the authorizer overflowed `RESQLITE_MAX_READ_TABLES`
 //     or hit OOM during prepare). Caller must treat this as "depends on every
-//     table" and route the stream into the all-tables bucket.
+//     table" and route the stream into the unknown-dependencies fallback.
 //   * `0`    — no entry yet (no query has been prepared on this
 //     reader).
 int resqlite_get_read_tables(
