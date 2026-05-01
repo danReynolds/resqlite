@@ -63,19 +63,19 @@ Wide batch subsection:
 
 | Library | Wall med | Wall p90 |
 |---|---:|---:|
-| resqlite executeBatch() | 18.225 ms | 22.446 ms |
-| sqlite3 executeBatch() | 19.631 ms | 22.079 ms |
-| sqlite_async executeBatch() | 24.889 ms | 28.329 ms |
-| drift executeBatch() | 28.755 ms | 33.830 ms |
+| resqlite executeBatch() | 21.896 ms | 26.800 ms |
+| sqlite3 executeBatch() | 20.969 ms | 23.331 ms |
+| sqlite_async executeBatch() | 28.151 ms | 35.365 ms |
+| drift executeBatch() | 30.437 ms | 36.688 ms |
 
 The narrow batch sections still execute normally in the same run:
 
 | Shape | resqlite median |
 |---|---:|
-| Batch Insert (100 rows) | 0.088 ms |
-| Batch Insert (1000 rows) | 0.395 ms |
-| Batch Insert (10000 rows) | 3.848 ms |
-| Wide Batch Insert (10000 rows x 20 params) | 18.225 ms |
+| Batch Insert (100 rows) | 0.098 ms |
+| Batch Insert (1000 rows) | 0.459 ms |
+| Batch Insert (10000 rows) | 4.294 ms |
+| Wide Batch Insert (10000 rows x 20 params) | 21.896 ms |
 
 Validation:
 

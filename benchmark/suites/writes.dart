@@ -15,7 +15,7 @@ const int _wideBatchParamWidth = 20;
 
 /// Write performance benchmarks: single writes, batch, transactions.
 ///
-/// Organized in five sections:
+/// Organized in six sections:
 ///   1. Single Inserts — [PeerSet]-based, 4 peers
 ///   2. Batch Insert (3 narrow sizes) — [PeerSet]-based, 4 peers
 ///   3. Wide Batch Insert (10k rows x 20 params) — [PeerSet]-based, 4 peers
@@ -174,8 +174,8 @@ Future<String> runWritesBenchmark() async {
           // Warmup + clear.
           for (var i = 0; i < defaultWarmup; i++) {
             await peer.executeBatch(insertSql, paramSets);
+            await peer.execute('DELETE FROM wide_batch');
           }
-          await peer.execute('DELETE FROM wide_batch');
 
           final t = BenchmarkTiming('${peer.label} executeBatch()');
           for (var iter = 0; iter < defaultIterations; iter++) {
