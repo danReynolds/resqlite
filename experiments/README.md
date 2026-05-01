@@ -59,6 +59,7 @@ merged into the codebase.
 | [097](097-one-pass-initial-stream-hash.md) | One-pass initial stream decode and hash | 14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay |  |
 | [110](110-long-text-fnv-8byte.md) | Long-text stream hash benchmark + 8-byte FNV | Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing | [#53](https://github.com/danReynolds/resqlite/pull/53) |
 | [113](113-direct-batch-param-matrix.md) | Direct batch parameter matrix encoding | Avoids the temporary flat Dart parameter list; 10k-row wide batches improve 14-26% in the focused benchmark | [#70](https://github.com/danReynolds/resqlite/pull/70) |
+| [116](116-wide-batch-release-coverage.md) | Wide batch insert release coverage | Adds a 10k-row x 20-parameter mixed-type batch insert to the release write suite so parameter-width regressions are visible on the public benchmark path |  |
 
 ## Rejected
 

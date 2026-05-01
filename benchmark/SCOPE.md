@@ -102,7 +102,10 @@ Drift does **not** participate in:
   `transaction()` shape is possible but requires reconciling
   drift/sqlite_async/resqlite txn semantics — its own follow-up
   change. Single Inserts and Batch Insert (the simple write paths)
-  include drift.
+  include drift. The write suite also includes a 20-parameter wide batch
+  insert shape, because the narrow two-parameter batch insert is not a
+  sufficient proxy for generated statements or ORM-style writes that bind many
+  columns per row.
 - **Parameterized queries' `sqlite3 (no cache)` vs `(cached stmt)`
   variants** — those two rows specifically illustrate the cost of
   not caching prepared statements; drift and resqlite both cache
