@@ -18,17 +18,16 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool — exp 114's reader-pool wake-amplification fix measured -10 % to -32 % against the pre-exp-106 baseline and then collapsed into noise post-rebase. Reader-pool-internal dispatch tweaks now need workloads that bypass exp 106's elision (e.g., reads-only contention or streams whose projections all intersect the modified columns) to be measurable.",
-      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool — exp 114's reader-pool wake-amplification fix measured -10 % to -32 % against the pre-exp-106 baseline and then collapsed into noise post-rebase. Reader-pool-internal dispatch tweaks now need workloads that bypass exp 106's elision (e.g., reads-only contention or streams whose projections all intersect the modified columns) to be measurable. Exp 115 adds profile-mode counters that make the parked-dispatcher path directly observable — future dispatch experiments can now gate on `dispatcherWakeRetryTotal > 0` before claiming or rejecting a wall-time delta.",
+      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114", "115"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
         "a scheduler policy improves fan-out without harming unrelated reads"
       ],
       "openQuestions": [
-        "Can rerun dispatch be observed with enough detail to separate queue wait from decode and delivery work?",
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
-        "What read-only or column-tracking-bypassing workload would re-expose parked-dispatcher contention so reader-pool-internal optimizations (exp 114's FIFO swap, slot-handoff variants) become measurable again?"
+        "What read-only or column-tracking-bypassing workload would re-expose parked-dispatcher contention so reader-pool-internal optimizations (exp 114's FIFO swap, slot-handoff variants) become measurable again? (exp 115 added the counters needed to verify any such workload actually parks.)"
       ],
       "adjacentIdeas": [
         "rerun tracing",
@@ -155,7 +154,7 @@
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
       "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment.",
-      "evidence": ["055", "088", "099", "102", "108", "110", "111", "113", "116"],
+      "evidence": ["055", "088", "099", "102", "108", "110", "111", "113", "115", "116"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -322,9 +321,21 @@
         "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) — without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
       ],
       "nextSignals": [
-        "a long-running concurrent-reads workload (or any non-streaming workload) that sustains parked dispatchers past the worker count for measurable durations",
+        "a long-running concurrent-reads workload (or any non-streaming workload) that sustains parked dispatchers past the worker count for measurable durations (now verifiable via exp 115's `dispatcherMaxParkedConcurrent` counter)",
         "a streaming workload whose stream projections all intersect every write's modified columns, defeating exp 106's column-tracking elision",
-        "a profile-mode counter that records parked-dispatcher events per worker-free transition, so the wake-amplification cost can be measured directly without needing wall-time-visible workloads"
+        "exp 115 shipped the profile-mode counters; future re-evaluation can require `dispatcherWakeRetryTotal > 0` on the workload before judging a wall-time delta"
+      ]
+    },
+    "115": {
+      "directions": ["measurement-system", "stream-rerun-dispatch"],
+      "outcomeClass": "accepted_measurement",
+      "changedBeliefs": [
+        "The parked-dispatcher path inside `ReaderPool._dispatch` is now directly observable via `ProfileCounters.dispatcherParkedTotal`, `dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` — gated behind `kProfileMode` so release builds stay zero-cost",
+        "Future dispatch-area experiments (exp 114 archive, exp 083, slot-handoff variants) can gate evaluation on direct parking evidence rather than wall-time delta alone, closing the exp 099 / exp 110 evaluation-gap pattern earlier in the loop"
+      ],
+      "nextSignals": [
+        "use the new counters when re-evaluating exp 114's archived FIFO swap or other reader-pool-internal dispatch changes",
+        "profile real workloads (concurrent reads under writer, A11c stream fan-out post-exp-106) through the counters before choosing the next dispatch experiment target"
       ]
     },
     "116": {

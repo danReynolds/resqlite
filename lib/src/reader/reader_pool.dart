@@ -10,6 +10,8 @@ import 'dart:typed_data';
 
 import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
+import '../profile_counters.dart';
+import '../profile_mode.dart';
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -120,6 +122,7 @@ final class ReaderPool {
     }
 
     final count = _workers.length;
+    var hasPreviouslyParked = false;
 
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
@@ -130,9 +133,34 @@ final class ReaderPool {
         }
       }
 
+      // [EXP-115](../../../experiments/115-dispatcher-park-counters.md):
+      // a previous park already incremented `dispatcherParkedTotal`;
+      // landing back at this scan-fail point means the wake didn't
+      // produce a slot for us, so this is a spurious wake. Counted
+      // once per re-park, not per scan.
+      if (kProfileMode && hasPreviouslyParked) {
+        ProfileCounters.dispatcherWakeRetryTotal++;
+      }
+
       // All workers busy or dead. Wait for any to become available.
       _workerAvailable ??= Completer<void>.sync();
-      await _workerAvailable!.future;
+      if (kProfileMode) {
+        ProfileCounters.dispatcherParkedTotal++;
+        ProfileCounters.dispatcherCurrentParked++;
+        if (ProfileCounters.dispatcherCurrentParked >
+            ProfileCounters.dispatcherMaxParkedConcurrent) {
+          ProfileCounters.dispatcherMaxParkedConcurrent =
+              ProfileCounters.dispatcherCurrentParked;
+        }
+      }
+      try {
+        await _workerAvailable!.future;
+      } finally {
+        if (kProfileMode) {
+          ProfileCounters.dispatcherCurrentParked--;
+        }
+      }
+      hasPreviouslyParked = true;
 
       // Re-check after waking: close() may have run while we were
       // parked and we must not loop forever over dead slots.

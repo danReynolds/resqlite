@@ -71,6 +71,47 @@ class ProfileCounters {
   static int intersectionUs = 0;
   static int intersectionEntries = 0;
 
+  /// Times a `ReaderPool._dispatch` caller parked because no worker was
+  /// currently available for dispatch - for example, when every worker
+  /// was busy or when workers were temporarily unavailable during
+  /// respawn/sacrifice. One increment per `await` on the pool's shared
+  /// `_workerAvailable` completer (or whatever future mechanism
+  /// replaces it).
+  ///
+  /// Added by [EXP-115](../../experiments/115-dispatcher-park-counters.md)
+  /// to make the parked-dispatcher path that
+  /// [exp 105](../../experiments/105-reader-pool-sizing.md) and
+  /// [exp 114](../../experiments/114-fifo-waiter-queue.md) targeted directly
+  /// observable, without needing a workload that surfaces the cost as
+  /// wall time.
+  static int dispatcherParkedTotal = 0;
+
+  /// Times a parked dispatcher resumed from the await but found no
+  /// available worker on the next scan and re-parked. With the current
+  /// shared-completer wakeup scheme this is the wake-amplification
+  /// signal: every worker-free event wakes every parked dispatcher,
+  /// exactly one wins the freed slot, and the rest re-park. A FIFO or
+  /// slot-handoff scheme should drive this counter toward zero.
+  ///
+  /// `dispatcherWakeRetryTotal / dispatcherParkedTotal` is the average
+  /// spurious-wake fraction per park event over a workload.
+  static int dispatcherWakeRetryTotal = 0;
+
+  /// Peak observed concurrency of parked dispatchers since the last
+  /// [reset]. Computed monotonically: incremented before each park,
+  /// compared against the high-water mark, and decremented immediately
+  /// after the park wait resumes. A peak > pool size is the precondition
+  /// for the wake-amplification cost; without sustained parking past the
+  /// worker count, dispatch-internal optimizations are benchmark-invisible
+  /// (see exp 114 future-notes).
+  static int dispatcherMaxParkedConcurrent = 0;
+
+  /// Internal — running count of currently parked dispatchers. Not
+  /// exported in [snapshot]; only used to maintain
+  /// [dispatcherMaxParkedConcurrent]. Mutated only on the main
+  /// isolate (where `ReaderPool._dispatch` runs).
+  static int dispatcherCurrentParked = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -79,6 +120,9 @@ class ProfileCounters {
     'invalidate_count': invalidateCount,
     'intersection_us': intersectionUs,
     'intersection_entries': intersectionEntries,
+    'dispatcher_parked_total': dispatcherParkedTotal,
+    'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
+    'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -103,5 +147,9 @@ class ProfileCounters {
     invalidateCount = 0;
     intersectionUs = 0;
     intersectionEntries = 0;
+    dispatcherParkedTotal = 0;
+    dispatcherWakeRetryTotal = 0;
+    dispatcherMaxParkedConcurrent = 0;
+    dispatcherCurrentParked = 0;
   }
 }
