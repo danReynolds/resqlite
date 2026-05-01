@@ -796,6 +796,39 @@ void main() {
       }
     });
 
+    // ----- Default PRAGMAs -----
+
+    test('foreign_keys is ON by default on writer and readers', () async {
+      // Writer connection — select inside a transaction routes through the
+      // writer, not the reader pool.
+      final writerRows = await db.transaction(
+        (tx) => tx.select('PRAGMA foreign_keys'),
+      );
+      expect(writerRows.first['foreign_keys'], 1);
+
+      // Reader connection — bare db.select() routes through the reader pool.
+      final readerRows = await db.select('PRAGMA foreign_keys');
+      expect(readerRows.first['foreign_keys'], 1);
+    });
+
+    test('foreign_keys default actually enforces constraints', () async {
+      await db.execute('''
+        CREATE TABLE parent(id INTEGER PRIMARY KEY)
+      ''');
+      await db.execute('''
+        CREATE TABLE child(
+          id INTEGER PRIMARY KEY,
+          parent_id INTEGER NOT NULL REFERENCES parent(id)
+        )
+      ''');
+
+      // Inserting a child row pointing to a nonexistent parent must fail.
+      await expectLater(
+        db.execute('INSERT INTO child(id, parent_id) VALUES (1, 999)'),
+        throwsA(isA<ResqliteQueryException>()),
+      );
+    });
+
     // ----- Closed database -----
 
     test('operations on closed database throw ResqliteConnectionException', () async {
