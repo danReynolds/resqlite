@@ -18,8 +18,8 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions.",
-      "evidence": ["045", "075", "083", "084", "085", "100", "105"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool — exp 114's reader-pool wake-amplification fix measured -10 % to -32 % against the pre-exp-106 baseline and then collapsed into noise post-rebase. Reader-pool-internal dispatch tweaks now need workloads that bypass exp 106's elision (e.g., reads-only contention or streams whose projections all intersect the modified columns) to be measurable.",
+      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -27,14 +27,17 @@
       ],
       "openQuestions": [
         "Can rerun dispatch be observed with enough detail to separate queue wait from decode and delivery work?",
-        "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?"
+        "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
+        "What read-only or column-tracking-bypassing workload would re-expose parked-dispatcher contention so reader-pool-internal optimizations (exp 114's FIFO swap, slot-handoff variants) become measurable again?"
       ],
       "adjacentIdeas": [
         "rerun tracing",
         "many-stream writer throughput",
-        "reader completion batching"
+        "reader completion batching",
+        "direct slot handoff on wake",
+        "long-running concurrent-reads workload that sustains parked dispatchers"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Reader-pool-internal changes (e.g., wake amplification, slot-handoff) need a workload where exp 106's writer-side dispatch elision does NOT fire — otherwise the contention they target never reaches the pool. Compare any dispatch change against the exp 110 long-text unchanged-fanout benchmark and A11c overlap, but expect those to be column-elided after exp 106."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -297,6 +300,19 @@
       "nextSignals": [
         "writer-isolate profile showing flat-list construction as a material batch-write cost",
         "batch workload with much wider parameter rows than the current two-param INSERT shape"
+      ]
+    },
+    "114": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "Reader-pool wake amplification (single shared completer waking every parked dispatcher) was a real but workload-dependent cost: -10 % to -32 % on streaming fan-out paths against pre-exp-106 main, then collapsed into noise once exp 106 polish landed and elided most stream re-queries on the writer side",
+        "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) — without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
+      ],
+      "nextSignals": [
+        "a long-running concurrent-reads workload (or any non-streaming workload) that sustains parked dispatchers past the worker count for measurable durations",
+        "a streaming workload whose stream projections all intersect every write's modified columns, defeating exp 106's column-tracking elision",
+        "a profile-mode counter that records parked-dispatcher events per worker-free transition, so the wake-amplification cost can be measured directly without needing wall-time-visible workloads"
       ]
     }
   }

@@ -64,6 +64,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 | # | Experiment | Why Rejected |
 |---|---|---|
+| [114](114-fifo-waiter-queue.md) | FIFO waiter queue for `ReaderPool` dispatch | First A/B pass (against pre-exp-106 baseline) showed −10 % to −32 % on streaming fan-out paths; rebasing onto main with exp 106 polish merged collapsed all targeted wins into noise. Exp 106 elides stream re-queries on the writer side before they reach the reader pool, so the parked-dispatcher contention this change targeted no longer fires under any release-suite workload. Implementation reverted; doc + benchmark artifacts retained as the durable record. Cherry-pickable from PR git history if a workload re-introduces sustained pool parking |
 | [112](112-fixed-length-batch-param-flatten.md) | Fixed-length batch parameter flattening | Focused benchmark medians overlapped after repeated A/B passes; any large-batch improvement was below the current decision threshold, so the simpler growable-list flattening stays |
 | [108](108-selectbytes-out-slots.md) | Persistent selectBytes out-parameter slots | Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state |
 | [103](103-native-nested-tx-depth-control.md) | Native nested transaction depth control | Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified |

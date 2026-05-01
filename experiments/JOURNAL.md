@@ -97,6 +97,26 @@ revisited. Frame the experiment so the new measurement is the deliverable
 regardless of the implementation outcome — and budget for the implementation
 to fail more confidently than before.*
 
+### A new accepted experiment can erase the workload that justifies an open one
+
+[Exp 114](114-fifo-waiter-queue.md) opened with strong wins on streaming
+fan-out (-32 % Long-Text Unchanged Fanout, -18 % Streaming Fan-out, -10 %
+A11c Overlap) measured against a baseline that did not yet contain
+[exp 106 polish](106-column-level-deps.md). When 106 polish merged to
+main and 114 was rebased on top of it, the same change against the same
+workloads collapsed entirely into noise: 106's writer-side column-level
+elision skips most stream re-queries before they reach the reader pool,
+so the parked-dispatcher contention 114 was waking more efficiently
+simply doesn't fire anymore. The implementation was sound and the
+original measurements were honest — the workload that exposed the
+contention was just removed upstream while the PR was open.
+
+*Reapplies whenever a slow-merging in-flight PR is in the same subsystem
+as a freshly-merged accepted experiment. Re-baseline against current
+main before claiming acceptance — and ask, before opening, whether the
+contention path the change targets is still reachable on current main
+or whether some recently-accepted experiment now elides it.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
