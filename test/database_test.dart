@@ -799,15 +799,16 @@ void main() {
     // ----- Default PRAGMAs -----
 
     test('foreign_keys is ON by default on writer and readers', () async {
-      // Writer connection.
-      final writerRows = await db.select('PRAGMA foreign_keys');
-      expect(writerRows.first.values.first, 1);
+      // Writer connection — select inside a transaction routes through the
+      // writer, not the reader pool.
+      final writerRows = await db.transaction(
+        (tx) => tx.select('PRAGMA foreign_keys'),
+      );
+      expect(writerRows.first['foreign_keys'], 1);
 
-      // Force a reader by issuing a concurrent select while a slow write holds
-      // the writer; the second select must come from a reader connection.
-      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY)');
+      // Reader connection — bare db.select() routes through the reader pool.
       final readerRows = await db.select('PRAGMA foreign_keys');
-      expect(readerRows.first.values.first, 1);
+      expect(readerRows.first['foreign_keys'], 1);
     });
 
     test('foreign_keys default actually enforces constraints', () async {
