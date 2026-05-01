@@ -16,6 +16,7 @@ import 'package:resqlite/resqlite.dart' as resqlite;
 const _defaultWarmup = 8;
 const _defaultIterations = 30;
 const _batchSizes = [100, 1000, 10000];
+const _paramWidths = [2, 8, 20];
 
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
@@ -27,36 +28,34 @@ Future<void> main(List<String> args) async {
   print('Iterations: ${options.iterations}');
   print('');
 
-  for (final batchSize in _batchSizes) {
-    await _runBatchSize(
-      batchSize: batchSize,
-      warmup: options.warmup,
-      iterations: options.iterations,
-    );
+  for (final paramWidth in _paramWidths) {
+    for (final batchSize in _batchSizes) {
+      await _runBatchShape(
+        batchSize: batchSize,
+        paramWidth: paramWidth,
+        warmup: options.warmup,
+        iterations: options.iterations,
+      );
+    }
   }
 }
 
-Future<void> _runBatchSize({
+Future<void> _runBatchShape({
   required int batchSize,
+  required int paramWidth,
   required int warmup,
   required int iterations,
 }) async {
-  final tempDir = await Directory.systemTemp.createTemp('bench_batch_flatten_');
+  final tempDir = await Directory.systemTemp.createTemp(
+    'bench_batch_flatten_${paramWidth}_',
+  );
   try {
     final db = await resqlite.Database.open('${tempDir.path}/test.db');
     try {
-      await db.execute(
-        'CREATE TABLE items('
-        'id INTEGER PRIMARY KEY, '
-        'name TEXT NOT NULL, '
-        'value REAL NOT NULL'
-        ')',
-      );
+      await db.execute(_createTableSql(paramWidth));
 
-      final List<List<Object?>> paramSets = [
-        for (var i = 0; i < batchSize; i++) <Object?>['item_$i', i * 1.5],
-      ];
-      const insertSql = 'INSERT INTO items(name, value) VALUES (?, ?)';
+      final paramSets = _buildParamSets(batchSize, paramWidth);
+      final insertSql = _insertSql(paramWidth);
 
       for (var i = 0; i < warmup; i++) {
         await db.execute('DELETE FROM items');
@@ -79,7 +78,7 @@ Future<void> _runBatchSize({
       final min = timings.first / 1000.0;
       final max = timings.last / 1000.0;
 
-      print('--- $batchSize rows x 2 params ---');
+      print('--- $batchSize rows x $paramWidth params ---');
       print('  min: ${min.toStringAsFixed(3)} ms');
       print('  p50: ${p50.toStringAsFixed(3)} ms');
       print('  p90: ${p90.toStringAsFixed(3)} ms');
@@ -93,6 +92,40 @@ Future<void> _runBatchSize({
     await tempDir.delete(recursive: true);
   }
 }
+
+String _createTableSql(int paramWidth) {
+  final columns = [
+    'id INTEGER PRIMARY KEY',
+    for (var i = 0; i < paramWidth; i++) 'c$i ${_sqliteTypeFor(i)}',
+  ];
+  return 'CREATE TABLE items(${columns.join(', ')})';
+}
+
+String _insertSql(int paramWidth) {
+  final columns = [for (var i = 0; i < paramWidth; i++) 'c$i'];
+  final placeholders = [for (var i = 0; i < paramWidth; i++) '?'];
+  return 'INSERT INTO items(${columns.join(', ')}) '
+      'VALUES (${placeholders.join(', ')})';
+}
+
+List<List<Object?>> _buildParamSets(int batchSize, int paramWidth) => [
+  for (var row = 0; row < batchSize; row++)
+    [for (var col = 0; col < paramWidth; col++) _valueFor(row, col)],
+];
+
+String _sqliteTypeFor(int col) => switch (col % 4) {
+  0 => 'TEXT',
+  1 => 'INTEGER',
+  2 => 'REAL',
+  _ => 'BLOB',
+};
+
+Object? _valueFor(int row, int col) => switch (col % 4) {
+  0 => 'item_${row}_$col',
+  1 => row * 31 + col,
+  2 => row * 1.5 + col / 10,
+  _ => null,
+};
 
 int _percentile(List<int> sorted, double p) {
   if (sorted.isEmpty) return 0;
