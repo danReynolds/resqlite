@@ -46,6 +46,8 @@ The native layer now records table-column pairs during reader statement prepare 
 
 INSERT and DELETE still behave as table-wide invalidations. Even if individual column values are known, row membership changed, so every projection over that table can observe the mutation.
 
+The main boundary is virtual tables. SQLite's preupdate hook does not fire for virtual-table writes, so streams that depend only on an FTS or other virtual table are not automatically invalidated by direct virtual-table changes. External-content FTS works best when the streamed query also joins the real content table, because writes to that table still flow through the normal table dependency path.
+
 ## Results
 
 The April 30, 2026 MacBook Pro release run includes two useful signals. The first is a guardrail: do disjoint writes stay quiet while overlapping writes still wake the stream? The second is the real performance question: does writer-side dispatch get cheaper when 50 active streams are column-disjoint from the write?

@@ -214,6 +214,14 @@ This avoids SQL parsing. The authorizer naturally handles joins, subqueries, vie
 
 Column metadata is an optimization layer, not the correctness source of truth. If a query touches too many columns, allocation fails, a trigger or cascade writes outside the prepared statement metadata, or SQLite cannot provide column precision, resqlite falls back to table-level invalidation for the affected table. If table tracking itself is unavailable, every active stream re-queries.
 
+### Known reactivity limits
+
+Reactive invalidation is strongest for ordinary SQLite tables and queries that ultimately read ordinary tables. That includes joins, subqueries, views, common table expressions, predicates, ordering, grouping, triggers, and foreign-key cascades.
+
+Direct virtual-table streams are the current exception. SQLite's [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) only reports writes to real database tables; it is not invoked for virtual tables or system tables. Because resqlite uses that hook as the writer-side source of dirty-table truth, a stream that depends only on an FTS or other virtual table may not re-emit after direct virtual-table writes.
+
+For external-content FTS, prefer streamed queries that join the real content table. Writes to the content table are visible to the preupdate hook, so normal table invalidation can wake the stream. A future virtual-table fallback could conservatively treat prepared writes to virtual tables as unknown-table invalidations, but that is intentionally separate from the table-backed column-reactivity path.
+
 ### StreamEngine lifecycle
 
 `StreamEngine` owns active reactive queries. It keeps:

@@ -42,7 +42,7 @@ await db.transaction((tx) async {
 ## Features
 
 - **🚀 Zero main-isolate jank.** Reads, writes, and reactive re-queries all run on persistent worker isolates. A 5,000-row query uses sub-millisecond main-isolate time.
-- **⚡ Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns any query into a live stream. Dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
+- **⚡ Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns table-backed queries into live streams. Dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
 - **🔁 Column-aware invalidation.** Writes to unrelated columns do not wake streams that cannot change. Identical queries are deduplicated, unchanged results are suppressed, and uncertain metadata falls back safely to table-level invalidation.
 - **📦 Just SQL.** [`select`](./lib/src/database.dart), [`execute`](./lib/src/database.dart), [`executeBatch`](./lib/src/database.dart), [`transaction`](./lib/src/database.dart), [`stream`](./lib/src/database.dart). No ORM, no query builder, no code generation.
 - **🔒 Encryption.** Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.
@@ -80,6 +80,8 @@ That's the entire reactive API. Under the hood:
 - **Deduplication** — 100 widgets watching the same query = 1 actual SQLite query per write
 - **Unchanged suppression** — writes that don't change your query's results are silently filtered
 - **Immediate** — re-queries fire on write commit, not on a timer
+
+Direct virtual-table / FTS streams are a known limitation: SQLite's [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) does not report virtual-table writes. For external-content FTS, join the real content table in the streamed query so normal table invalidation can apply.
 
 ## API
 
@@ -201,7 +203,7 @@ await db.executeBatch(
 
 - **Reads** go through a [persistent reader pool](./lib/src/reader_pool.dart) (2-4 workers with dedicated C connections)
 - **Writes** go through a single [persistent writer isolate](./lib/src/write_worker.dart)
-- **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_count.html) for column-aware write invalidation
+- **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) for column-aware write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
 - [Full Breakdown](./docs/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
