@@ -373,8 +373,14 @@ Chart.defaults.plugins.tooltip.callbacks.label = function(ctx) {
   const v = ctx.parsed.y;
   if (v == null) return null;
   const yTitle = (ctx.chart.options.scales?.y?.title?.text || '').toLowerCase();
-  if (yTitle.includes('qps') || label.toLowerCase().includes('faster')) return `${label}: ${v.toFixed(1)}x`;
-  return `${label}: ${v < 0.01 ? v.toFixed(3) : v.toFixed(2)} ms`;
+  if (yTitle.includes('queries/sec')) return `${label}: ${v.toFixed(0)} qps`;
+  if (yTitle.includes('re-emits')) return `${label}: ${v.toFixed(0)} re-emits`;
+  if (yTitle.includes('ratio')) return `${label}: ${v.toFixed(3)}`;
+  if (label.toLowerCase().includes('faster')) return `${label}: ${v.toFixed(1)}x`;
+  if (yTitle.includes('ms') || yTitle.includes('time') || yTitle.includes('latency')) {
+    return `${label}: ${v < 0.01 ? v.toFixed(3) : v.toFixed(2)} ms`;
+  }
+  return `${label}: ${v < 0.01 ? v.toFixed(3) : v.toFixed(2)}`;
 };
 
 // Trophy plugin for bar and line charts. Includes zero-valued entries so a
@@ -521,8 +527,12 @@ function libColor(name) {
   return '#8b949e';
 }
 
-function libShort(name) {
+function libShort(name, { keepResqliteVariants = false } = {}) {
   const n = name.toLowerCase();
+  if (keepResqliteVariants && n.includes('resqlite')) {
+    if (n.includes('selectbytes')) return 'resqlite selectBytes';
+    if (n.includes('jsonencode')) return 'resqlite + jsonEncode';
+  }
   if (n.includes('resqlite')) return 'resqlite';
   if (n.includes('sqlite_async') || n.includes('async')) return 'sqlite_async';
   if (n.includes('drift')) return 'drift';
@@ -894,8 +904,14 @@ function closeDetailModal() {
 // uses the library palette (blue/orange/purple); runs and devices modes cycle
 // through a generic palette keyed off the series registry.
 const seriesRegistry = new Map();
-function seriesMeta(name, mode) {
-  if (mode === 'peer') return { color: libColor(name), short: libShort(name) };
+function seriesMeta(name, mode, options = {}) {
+  if (mode === 'peer') {
+    const short = libShort(name, options);
+    return {
+      color: short === 'resqlite + jsonEncode' ? '#79c0ff' : libColor(name),
+      short,
+    };
+  }
   if (!seriesRegistry.has(name)) {
     const idx = seriesRegistry.size;
     seriesRegistry.set(name, { color: SERIES_PALETTE[idx % SERIES_PALETTE.length], short: name });
@@ -1593,10 +1609,11 @@ const SCENARIOS = [
     whatToLookAt: [
       '<strong>Disjoint column writes</strong> — the interesting case. resqlite should ignore writes to columns no stream watches.',
       '<strong>Overlapping column writes</strong> — control case. Both streams re-query as expected.',
-      'Lower emission counts indicate a more precise invalidation engine, not a slower one. resqlite uses native result-hash suppression (exp 075) rather than column tracking.',
+      'Lower emission counts indicate a more precise invalidation engine, not a slower one. A11c is the direct writer-throughput probe for column-disjoint dispatch elision.',
     ],
     breakdowns: [
-      { title: 'Wall time', desc: 'Lower is better.', builder: (B, id) => buildGroupedBar(B, 'Column Granularity', id) },
+      { title: 'Re-emits by write pattern', desc: 'Lower is better. This is the primary signal for column-disjoint invalidation precision.', builder: (B, id) => buildGroupedBarAt(B, 'Column Granularity', id, 0, 'Re-emits (total)') },
+      { title: 'Drain time by write pattern', desc: 'Lower is better. Wall-clock time to drain the reactive workload after writes.', builder: (B, id) => buildGroupedBarAt(B, 'Column Granularity', id, 1, 'Wall drain (ms)') },
     ],
   },
   {
@@ -1825,19 +1842,24 @@ function renderEmptyCanvas(canvasId) {
 // Collect one dataset per series from sections, using seriesMeta for the active mode.
 // Emits a null placeholder when a series is missing from a section so every dataset
 // stays aligned with the section-indexed x-axis labels.
-function collectSeries(sections, valueIndex) {
+function collectSeries(sections, valueIndex, options = {}) {
   const libs = {};
   for (const sec of sections) {
     for (const entry of sec.entries) {
-      const meta = seriesMeta(entry.library, currentMode);
+      const meta = seriesMeta(entry.library, currentMode, options);
       if (!libs[meta.short]) libs[meta.short] = { data: [], color: meta.color };
     }
   }
   for (let i = 0; i < sections.length; i++) {
     const byName = {};
     for (const entry of sections[i].entries) {
-      const name = seriesMeta(entry.library, currentMode).short;
-      byName[name] = entry.values[valueIndex] ?? null;
+      const name = seriesMeta(entry.library, currentMode, options).short;
+      const value = entry.values[valueIndex] ?? null;
+      if (value == null) continue;
+      // Peer labels intentionally collapse implementation variants such as
+      // sqlite3 cached/no-cache or resqlite transaction batch/loop. Keep the
+      // best lower-latency value instead of letting markdown row order decide.
+      if (byName[name] == null || value < byName[name]) byName[name] = value;
     }
     for (const name of Object.keys(libs)) {
       libs[name].data.push(byName[name] ?? null);
@@ -1851,7 +1873,7 @@ function buildScaling(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => shortRowCountLabel(s.subtitle));
-  const libs = collectSeries(sections, 0);
+  const libs = collectSeries(sections, 0, { keepResqliteVariants: titleMatch.includes('JSON Bytes') });
   const datasets = Object.entries(libs).map(([name, d]) => ({
     label: name, data: d.data, borderColor: d.color, backgroundColor: d.color + '33',
     tension: 0.3, pointRadius: 4, spanGaps: true,
@@ -1866,7 +1888,7 @@ function buildMainIsolate(B, titleMatch, canvasId) {
   const sections = B.filter(s => s.title?.includes(titleMatch) && s.subtitle);
   if (!sections.length) { renderEmptyCanvas(canvasId); return; }
   const labels = sections.map(s => shortRowCountLabel(s.subtitle));
-  const libs = collectSeries(sections, 2);
+  const libs = collectSeries(sections, 2, { keepResqliteVariants: titleMatch.includes('JSON Bytes') });
   // Leave missing values as null (not 0) so Chart.js skips the bar and the
   // winner/value-label plugins don't treat "missing" as a genuine zero.
   const datasets = Object.entries(libs).map(([name, d]) => ({
