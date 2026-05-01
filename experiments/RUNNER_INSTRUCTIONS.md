@@ -104,6 +104,18 @@ Every scheduled experiment run must:
   that is immediately reviewable.
 - **Wait for CI on the PR and address actionable failures** before
   declaring the run finished. A red PR is not a completed run.
+- **Wait for automated review, not just CI.** After opening the PR, poll
+  for review submissions for a few minutes, then read inline review
+  threads with thread-aware review data (`reviewThreads` via the GitHub
+  API/connector, or the local GitHub comment-handler helper when
+  available). Do not rely on the top-level `gh pr view` overview alone:
+  Copilot often leaves actionable inline comments that are only visible
+  in review threads.
+- **Address unresolved, non-outdated actionable review threads** before
+  declaring the run finished. If no automated review arrives in the
+  short wait window, say that explicitly in the handoff and create a
+  follow-up/heartbeat when the environment supports it. After every
+  feedback-response push, watch CI again and re-check review threads.
 
 ### What the PR description must contain
 
