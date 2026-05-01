@@ -75,6 +75,11 @@ const curatedMetricDefinitions = [
     chartId: 'chartWrites',
   ),
   CuratedMetricDefinition(
+    pattern: 'Wide Batch Insert (10000 rows x 20 params)',
+    displayName: 'wide batch 10K x20',
+    chartId: 'chartWrites',
+  ),
+  CuratedMetricDefinition(
     pattern: 'Interactive Transaction',
     displayName: 'interactive tx',
     chartId: 'chartTransactions',

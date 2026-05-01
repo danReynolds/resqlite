@@ -1,7 +1,9 @@
 /// Drift schema for the Write Performance microbenchmarks.
 ///
 /// Covers the `t(id, name, value)` table used by the Single Inserts
-/// and Batch Insert subsections of `benchmark/suites/writes.dart`.
+/// and narrow Batch Insert subsections of `benchmark/suites/writes.dart`,
+/// plus `wide_batch` for the 20-parameter batch shape added after
+/// exp 113 showed row width is a first-class write-path dimension.
 ///
 /// The Interactive Transaction + Batched Write Inside Transaction +
 /// Transaction Read subsections are NOT migrated to drift in this
@@ -28,7 +30,37 @@ class T extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [T])
+class WideBatch extends Table {
+  @override
+  String? get tableName => 'wide_batch';
+
+  IntColumn get id => integer()();
+  TextColumn get c0 => text()();
+  IntColumn get c1 => integer()();
+  RealColumn get c2 => real()();
+  BlobColumn get c3 => blob()();
+  TextColumn get c4 => text()();
+  IntColumn get c5 => integer()();
+  RealColumn get c6 => real()();
+  BlobColumn get c7 => blob()();
+  TextColumn get c8 => text()();
+  IntColumn get c9 => integer()();
+  RealColumn get c10 => real()();
+  BlobColumn get c11 => blob()();
+  TextColumn get c12 => text()();
+  IntColumn get c13 => integer()();
+  RealColumn get c14 => real()();
+  BlobColumn get c15 => blob()();
+  TextColumn get c16 => text()();
+  IntColumn get c17 => integer()();
+  RealColumn get c18 => real()();
+  BlobColumn get c19 => blob()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+@DriftDatabase(tables: [T, WideBatch])
 class WritesDriftDb extends _$WritesDriftDb {
   WritesDriftDb(super.executor);
 
