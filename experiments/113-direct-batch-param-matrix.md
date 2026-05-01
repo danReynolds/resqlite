@@ -134,3 +134,8 @@ columns per row.
 Do not re-open fixed-length flattening alone unless Dart's collection
 implementation changes. The useful shape is avoiding the temporary flat list,
 not merely constructing that list differently.
+
+Post-merge review tightened the focused benchmark so `BLOB` columns now receive
+small non-null `Uint8List` values instead of `null`. The original A/B table above
+should be read as the row-width signal; future reruns of the script also cover
+the blob byte-copy path directly.

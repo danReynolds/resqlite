@@ -496,6 +496,30 @@ void main() {
       expect(rows[1]['value'], closeTo(2.5, 0.001));
     });
 
+    test('executeBatch preserves unicode text and blob parameters', () async {
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, payload BLOB NOT NULL)',
+      );
+
+      final payloadA = Uint8List.fromList([0x00, 0x7F, 0x80, 0xFF]);
+      final payloadB = Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF]);
+
+      await db.executeBatch(
+        'INSERT INTO t(name, payload) VALUES (?, ?)',
+        [
+          ['日本語テスト', payloadA],
+          ['emoji 🎉🚀', payloadB],
+        ],
+      );
+
+      final rows = await db.select('SELECT name, payload FROM t ORDER BY id');
+      expect(rows, hasLength(2));
+      expect(rows[0]['name'], '日本語テスト');
+      expect(rows[0]['payload'], payloadA);
+      expect(rows[1]['name'], 'emoji 🎉🚀');
+      expect(rows[1]['payload'], payloadB);
+    });
+
     test('executeBatch rolls back on error', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',

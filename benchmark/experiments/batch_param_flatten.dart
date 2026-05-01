@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 
@@ -124,7 +125,7 @@ Object? _valueFor(int row, int col) => switch (col % 4) {
   0 => 'item_${row}_$col',
   1 => row * 31 + col,
   2 => row * 1.5 + col / 10,
-  _ => null,
+  _ => Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, col & 0xff, 0xA5]),
 };
 
 int _percentile(List<int> sorted, double p) {
