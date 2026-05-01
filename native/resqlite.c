@@ -555,6 +555,11 @@ static sqlite3* open_connection(const char* path, int read_only,
     sqlite3_exec(db, "PRAGMA mmap_size = 268435456", NULL, NULL, NULL);  // 256 MB
     sqlite3_exec(db, "PRAGMA cache_size = -8192", NULL, NULL, NULL);    // 8 MB
     sqlite3_exec(db, "PRAGMA temp_store = MEMORY", NULL, NULL, NULL);
+    // FKs default off in SQLite. Turn on for every connection so cascades
+    // and constraints behave as users coming from other ORMs expect. Users
+    // who need it off (e.g. mid-migration) can run
+    // `PRAGMA foreign_keys = OFF` on the writer.
+    sqlite3_exec(db, "PRAGMA foreign_keys = ON", NULL, NULL, NULL);
     if (read_only) {
         // Readers should never trigger auto-checkpoints.
         sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 0", NULL, NULL, NULL);
