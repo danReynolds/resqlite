@@ -24,12 +24,12 @@
 
 ## API Polish
 
-- [ ] **selectBytes blob encoding.** Currently uses hex encoding for BLOBs in JSON output. Switch to base64 for standard JSON/REST compatibility. Requires updating C code.
+- [x] **selectBytes blob encoding.** BLOBs are emitted as base64 strings in JSON output (`json_write_base64` in `native/resqlite.c`). Edge cases — empty, 1/2/3-byte padding, longer payloads — are covered in `test/database_test.dart`.
 
 - [ ] **Read-only Database.open.** Open in read-only mode (no writer connection, no writer isolate). Useful for read replicas or archive databases.
 
 ## Documentation
 
-- [ ] **API documentation.** Dartdoc comments on all public types and methods.
+- [x] **API documentation.** Dartdoc on all public types and methods (`Database`, `Transaction`, `StreamEngine`, `Diagnostics`, `ResqliteException` family).
 
-- [ ] **README.** Getting started, API overview, benchmarks, comparison with other libraries.
+- [x] **README.** Getting started, API overview, benchmarks, peer comparison.
