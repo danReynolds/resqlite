@@ -29,9 +29,11 @@ import 'reader/reader_pool.dart';
 //     information always falls back to table-level re-query for the
 //     known dirty tables.
 //
-// Every uncertainty (overflow, OOM, missing metadata, triggers /
-// cascades, virtual tables) routes to a more conservative re-query,
-// never to a skipped one.
+// Every uncertainty inside the table-backed dependency path (overflow, OOM,
+// missing metadata, triggers / cascades) routes to a more conservative
+// re-query, never to a skipped one. Direct virtual-table / FTS writes are a
+// known boundary: SQLite's preupdate hook does not report those writes, so
+// streams that depend only on virtual tables are not automatically invalidated.
 //
 // At the FFI boundary the C-side table reliability flags propagate through
 // `TableDependencies.unknown`. Per-table column fallbacks use a plain

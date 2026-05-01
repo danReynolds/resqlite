@@ -286,8 +286,14 @@ final class Database {
   /// occur after any write that modifies tables this query depends on.
   ///
   /// Table dependencies are detected automatically via SQLite's authorizer
-  /// hook — works with JOINs, subqueries, views, and CTEs without requiring
-  /// a manual table list.
+  /// hook — works with table-backed JOINs, subqueries, views, and CTEs without
+  /// requiring a manual table list.
+  ///
+  /// Direct virtual-table / FTS streams are a known limitation. SQLite's
+  /// preupdate hook does not report virtual-table writes, so queries that only
+  /// depend on a virtual table may not re-emit automatically. For
+  /// external-content FTS, join the real content table in the streamed query so
+  /// normal table invalidation can apply.
   ///
   /// Streams are deduplicated: multiple calls with the same [sql] and
   /// [parameters] share a single underlying query. New listeners on an
