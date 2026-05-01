@@ -42,7 +42,7 @@ final class ReaderPool {
   ///
   /// Each worker-free event wakes one waiter instead of completing a
   /// shared future observed by every parked dispatcher.
-  final Queue<Completer<void>> _workerAvailableWaiters = Queue();
+  final Queue<Completer<void>> _dispatchWaiters = Queue();
 
   bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
 
@@ -60,8 +60,8 @@ final class ReaderPool {
 
   /// Wake up any callers waiting for an available worker.
   void _notifyAvailable() {
-    if (_workerAvailableWaiters.isNotEmpty) {
-      _workerAvailableWaiters.removeFirst().complete();
+    if (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
     }
   }
 
@@ -146,7 +146,7 @@ final class ReaderPool {
 
       // All workers busy or dead. Wait for a worker-free event.
       final waiter = Completer<void>.sync();
-      _workerAvailableWaiters.add(waiter);
+      _dispatchWaiters.add(waiter);
       if (kProfileMode) {
         ProfileCounters.dispatcherParkedTotal++;
         ProfileCounters.dispatcherCurrentParked++;
@@ -187,8 +187,8 @@ final class ReaderPool {
   Future<void> close() async {
     _closed = true;
     // Wake any parked dispatch waiters so they can re-check _closed.
-    while (_workerAvailableWaiters.isNotEmpty) {
-      _workerAvailableWaiters.removeFirst().complete();
+    while (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
     }
     await Future.wait(_workers.map((slot) => slot.close()));
   }
