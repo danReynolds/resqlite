@@ -74,9 +74,7 @@ class ProfileCounters {
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
   /// currently available for dispatch - for example, when every worker
   /// was busy or when workers were temporarily unavailable during
-  /// respawn/sacrifice. One increment per `await` on the pool's shared
-  /// `_workerAvailable` completer (or whatever future mechanism
-  /// replaces it).
+  /// respawn/sacrifice. One increment per dispatch wait.
   ///
   /// Added by [EXP-115](../../experiments/115-dispatcher-park-counters.md)
   /// to make the parked-dispatcher path that
@@ -87,11 +85,11 @@ class ProfileCounters {
   static int dispatcherParkedTotal = 0;
 
   /// Times a parked dispatcher resumed from the await but found no
-  /// available worker on the next scan and re-parked. With the current
-  /// shared-completer wakeup scheme this is the wake-amplification
-  /// signal: every worker-free event wakes every parked dispatcher,
-  /// exactly one wins the freed slot, and the rest re-park. A FIFO or
-  /// slot-handoff scheme should drive this counter toward zero.
+  /// available worker on the next scan and re-parked. Under the old
+  /// shared-completer wakeup scheme this was the wake-amplification
+  /// signal: every worker-free event woke every parked dispatcher,
+  /// exactly one won the freed slot, and the rest re-parked. FIFO or
+  /// slot-handoff dispatch should keep this counter near zero.
   ///
   /// `dispatcherWakeRetryTotal / dispatcherParkedTotal` is the average
   /// spurious-wake fraction per park event over a workload.
