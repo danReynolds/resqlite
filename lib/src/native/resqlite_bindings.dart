@@ -247,11 +247,7 @@ void executeBatchWrite(
   final paramCount = paramSets.first.length;
 
   final sqlNative = cachedSqlUtf8(sql);
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
+  final paramsNative = allocateBatchParams(paramSets);
   try {
     final rc = resqliteRunBatch(
       dbHandle,
@@ -268,7 +264,7 @@ void executeBatchWrite(
       );
     }
   } finally {
-    freeParams(paramsNative, allParams);
+    freeParamBuffer(paramsNative);
   }
 }
 
@@ -285,11 +281,7 @@ void executeNestedBatchWrite(
   final paramCount = paramSets.first.length;
 
   final sqlNative = cachedSqlUtf8(sql);
-  final allParams = <Object?>[];
-  for (final set in paramSets) {
-    allParams.addAll(set);
-  }
-  final paramsNative = allocateParams(allParams);
+  final paramsNative = allocateBatchParams(paramSets);
   try {
     final rc = resqliteRunBatchNested(
       dbHandle,
@@ -306,7 +298,7 @@ void executeNestedBatchWrite(
       );
     }
   } finally {
-    freeParams(paramsNative, allParams);
+    freeParamBuffer(paramsNative);
   }
 }
 
@@ -719,9 +711,83 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   return buf;
 }
 
-void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> params) {
+ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
+  if (paramSets.isEmpty) return ffi.nullptr.cast();
+  final paramCount = paramSets.first.length;
+  final totalCount = paramSets.length * paramCount;
+  if (totalCount == 0) return ffi.nullptr.cast();
+
+  List<Uint8List?>? encodedStrings;
+  var extraBytes = 0;
+  var flatIndex = 0;
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final value = set[i];
+      if (value is String) {
+        encodedStrings ??= List<Uint8List?>.filled(totalCount, null);
+        final bytes = utf8.encode(value);
+        encodedStrings[flatIndex] = bytes;
+        extraBytes += bytes.length;
+      } else if (value is Uint8List) {
+        extraBytes += value.length;
+      }
+      flatIndex++;
+    }
+  }
+
+  final structsBytes = _paramStructSize * totalCount;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  flatIndex = 0;
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final offset = flatIndex * _paramStructSize;
+      final value = set[i];
+
+      if (value == null) {
+        byteData.setInt32(offset, 0, Endian.little);
+      } else if (value is int) {
+        byteData.setInt32(offset, 1, Endian.little);
+        byteData.setInt64(offset + 8, value, Endian.little);
+      } else if (value is double) {
+        byteData.setInt32(offset, 2, Endian.little);
+        byteData.setFloat64(offset + 8, value, Endian.little);
+      } else if (value is String) {
+        final bytes = encodedStrings![flatIndex]!;
+        view.setRange(dataOffset, dataOffset + bytes.length, bytes);
+        byteData.setInt32(offset, 3, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 16, bytes.length, Endian.little);
+        dataOffset += bytes.length;
+      } else if (value is Uint8List) {
+        view.setRange(dataOffset, dataOffset + value.length, value);
+        byteData.setInt32(offset, 4, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 16, value.length, Endian.little);
+        dataOffset += value.length;
+      } else {
+        byteData.setInt32(offset, 0, Endian.little);
+      }
+
+      flatIndex++;
+    }
+  }
+
+  return buf;
+}
+
+void freeParamBuffer(ffi.Pointer<ffi.Uint8> buf) {
   if (buf == ffi.nullptr) return;
   freeReusableParamStructBuf(buf);
+}
+
+void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> _) {
+  freeParamBuffer(buf);
 }
 
 // ---------------------------------------------------------------------------

@@ -43,12 +43,12 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation or repeated SQLite work. Smaller Dart-side allocation cleanups, duplicated encoding paths, and batch-list flattening changes have usually measured flat or below threshold.",
-      "evidence": ["028", "076", "077", "095", "096", "109", "112"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely.",
+      "evidence": ["028", "076", "077", "095", "096", "109", "112", "113"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
-        "the approach preserves the lean API and avoids duplicate encoding logic"
+        "the approach preserves the lean API and targets parameter width as well as row count"
       ],
       "openQuestions": [
         "Are there remaining parameter shapes where SQLite bind work, not Dart dispatch, dominates?",
@@ -59,7 +59,7 @@
         "batch parameter shape",
         "SQLite bind semantics"
       ],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple batch-list construction tweaks are not enough by themselves."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder."
     },
     {
       "id": "long-text-stream-hashing",
@@ -155,7 +155,7 @@
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
       "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment.",
-      "evidence": ["055", "088", "099", "102", "108", "110", "111"],
+      "evidence": ["055", "088", "099", "102", "108", "110", "111", "113"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -300,6 +300,18 @@
       "nextSignals": [
         "writer-isolate profile showing flat-list construction as a material batch-write cost",
         "batch workload with much wider parameter rows than the current two-param INSERT shape"
+      ]
+    },
+    "113": {
+      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The two-parameter batch insert shape is not a sufficient proxy for batch parameter overhead",
+        "Avoiding the temporary flat Dart parameter list becomes measurable once batch rows are wide enough"
+      ],
+      "nextSignals": [
+        "watch release-suite two-parameter batch metrics for neutrality",
+        "include parameter width when evaluating future executeBatch encoder changes"
       ]
     },
     "114": {
