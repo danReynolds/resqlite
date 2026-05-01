@@ -117,6 +117,22 @@ main before claiming acceptance — and ask, before opening, whether the
 contention path the change targets is still reachable on current main
 or whether some recently-accepted experiment now elides it.*
 
+### Admission loops must consume scarce resources before checking capacity again
+
+[Exp 120](120-stream-flush-single-flight.md) found a subtle async admission
+bug: `StreamEngine._flushQueue` checked reader availability, called `_requery`,
+and then `_requery` awaited the already-resolved pool before it reached
+`ReaderPool._dispatch`. That await split let the flush loop check stale
+availability and admit more re-queries than the pool could take, recreating
+dispatch parking even after exp 118 fixed wake retries. Passing the resolved
+pool into `_requery` made each admitted re-query consume a reader before the
+next capacity check.
+
+*Reapplies whenever a loop gates work on a scarce resource such as reader
+slots, writer locks, or native buffers. The operation that consumes the
+resource needs to happen in the same synchronous turn as the capacity check, or
+the check is only advisory.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

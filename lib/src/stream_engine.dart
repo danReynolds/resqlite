@@ -64,6 +64,12 @@ final class StreamEngine {
   /// Stream entries scheduled to be requeried when an available reader opens up.
   final LinkedHashSet<StreamEntry> _requeryQueue = LinkedHashSet<StreamEntry>();
 
+  /// True while a queue flush is deciding which stream re-queries to admit.
+  bool _isFlushingQueue = false;
+
+  /// Set when another flush request arrives while one is already active.
+  bool _flushAgain = false;
+
   /// Number of active stream entries.
   ///
   /// Increments when [stream] registers a new query, decrements when all
@@ -177,11 +183,26 @@ final class StreamEngine {
       return;
     }
 
-    final pool = await _pool;
-    while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
-      final entry = _requeryQueue.first;
-      _requeryQueue.remove(entry);
-      _requery(entry);
+    if (_isFlushingQueue) {
+      _flushAgain = true;
+      return;
+    }
+
+    _isFlushingQueue = true;
+    try {
+      final pool = await _pool;
+      do {
+        _flushAgain = false;
+        while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
+          final entry = _requeryQueue.first;
+          _requeryQueue.remove(entry);
+          _requery(entry, pool);
+        }
+      } while (_flushAgain &&
+          _requeryQueue.isNotEmpty &&
+          pool.hasAvailableWorker);
+    } finally {
+      _isFlushingQueue = false;
     }
   }
 
@@ -201,6 +222,8 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
+    _flushAgain = false;
+    _isFlushingQueue = false;
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -277,12 +300,11 @@ final class StreamEngine {
   }
 
   /// Re-query a single stream on the reader pool.
-  Future<void> _requery(StreamEntry entry) async {
+  Future<void> _requery(StreamEntry entry, ReaderPool pool) async {
     try {
       entry.inFlight = true;
       entry.dirty = false;
 
-      final pool = await _pool;
       final (rows, newHash, newRowCount) = await pool.selectIfChanged(
         entry.sql,
         entry.params,
