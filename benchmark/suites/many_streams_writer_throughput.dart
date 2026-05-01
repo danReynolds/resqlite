@@ -22,13 +22,13 @@
 /// [EXP-052](../../experiments/052-column-level-dependencies.md)
 /// (column-level dependency tracking,
 /// rejected — sound but benchmark-invisible). The disjoint_columns suite
-/// header explicitly notes:
+/// header used to note:
 ///
 /// > Measuring 052 specifically would require a many-streams writer
 /// > throughput benchmark where the dispatch-elision win dominates. That
 /// > benchmark doesn't exist yet.
 ///
-/// This suite fills that gap. Exp 052's value is dispatch *elision* on
+/// This suite filled that gap. Exp 052's value is dispatch *elision* on
 /// the writer side: a write that touches a column no stream projects
 /// should skip the per-stream re-query dispatch entirely. Exp 075's hash
 /// short-circuit still pays the dispatch cost (the re-query runs and

@@ -26,22 +26,20 @@ import '../shared/peer.dart';
 ///
 /// ## Important: what this measures, and what it doesn't
 ///
-/// On resqlite's main branch, a low ratio is produced by **experiment
-/// 075** (`resqlite_query_hash` in native/resqlite.c) — the re-query
-/// dispatches normally, the native code hashes the projected result
-/// bytes, and emission is skipped when the hash is unchanged. Since
-/// column `c` isn't projected, the result bytes don't change, and the
-/// hash matches.
+/// On modern resqlite, a low ratio can be produced by writer-side
+/// column-level invalidation, by **experiment 075**
+/// (`resqlite_query_hash` in native/resqlite.c), or by both. With exp 075,
+/// native code hashes the projected result bytes and emission is skipped
+/// when the hash is unchanged. Since column `c` isn't projected, the result
+/// bytes don't change, and the hash matches.
 ///
-/// This is NOT the same as writer-side column-level dependency tracking
-/// (design in exp 052, never implemented). That design would skip the
-/// *dispatch* entirely on the writer side — a different optimization
-/// target. On this benchmark the two mechanisms are indistinguishable
-/// because any write to a projection-disjoint column produces identical
-/// result bytes, triggering 075's short-circuit in either world.
-/// Measuring 052 specifically would require a many-streams writer
-/// throughput benchmark where the dispatch-elision win dominates. That
-/// benchmark doesn't exist yet.
+/// This benchmark reports subscriber-visible emissions, not writer-side
+/// dispatch cost. It is still useful as a correctness/UX signal, but the
+/// two mechanisms are indistinguishable here because any write to a
+/// projection-disjoint column produces identical result bytes, triggering
+/// 075's short-circuit even when writer-side dispatch did happen. Use A11c
+/// (Many-Streams Writer Throughput) when the specific question is whether
+/// column metadata elides dispatch before the reader pool wakes up.
 ///
 /// sqlite_async has neither mechanism; its ratio is expected to be
 /// ≈1.0 (table-level invalidation, every write re-emits on every
@@ -72,10 +70,10 @@ Future<String> runDisjointColumnsBenchmark() async {
     'it shows how effectively the library suppresses re-emission on writes '
     'that don\'t affect the query\'s result. Absolute counts are '
     'coalescing-dependent and not directly comparable across libraries. '
-    'On resqlite\'s main branch this ratio is driven toward 0 by '
-    'experiment 075 (C-side result-hash short-circuit), not by '
-    'writer-side column-tracking (exp 052 is not implemented). The two '
-    'mechanisms are indistinguishable on this read-side benchmark.',
+    'For resqlite, this emission metric can reflect writer-side '
+    'column-level invalidation, experiment 075\'s native result-hash '
+    'short-circuit, or both. Use A11c (Many-Streams Writer Throughput) '
+    'when the question is specifically writer-side dispatch elision.',
   );
   markdown.writeln('');
 
