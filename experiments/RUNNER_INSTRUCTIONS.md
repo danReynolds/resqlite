@@ -99,8 +99,9 @@ Every scheduled experiment run must:
   on top of an unrelated in-flight branch.
 - **Push the branch to `origin` and open a real (non-draft) PR.** Do
   not leave the work unpublished, and do not open the PR as a draft.
-  Drafts get skipped by reviewers and CI gating; a runner that finishes
-  cleanly should produce a PR that is immediately reviewable.
+  Draft PRs are not ready to merge and are easier for reviewers to
+  defer or ignore; a runner that finishes cleanly should produce a PR
+  that is immediately reviewable.
 - **Wait for CI on the PR and address actionable failures** before
   declaring the run finished. A red PR is not a completed run.
 
