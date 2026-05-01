@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
@@ -9,18 +10,22 @@ import '../shared/config.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 
+const int _wideBatchSize = 10000;
+const int _wideBatchParamWidth = 20;
+
 /// Write performance benchmarks: single writes, batch, transactions.
 ///
 /// Organized in five sections:
 ///   1. Single Inserts — [PeerSet]-based, 4 peers
-///   2. Batch Insert (3 sizes) — [PeerSet]-based, 4 peers
-///   3. Interactive Transaction — hand-rolled, resqlite + sqlite_async
-///   4. Batched Write Inside Transaction — hand-rolled, resqlite
+///   2. Batch Insert (3 narrow sizes) — [PeerSet]-based, 4 peers
+///   3. Wide Batch Insert (10k rows x 20 params) — [PeerSet]-based, 4 peers
+///   4. Interactive Transaction — hand-rolled, resqlite + sqlite_async
+///   5. Batched Write Inside Transaction — hand-rolled, resqlite
 ///      variants + sqlite_async. Guards the [`resqlite_run_batch_nested`]
 ///      C entry point.
-///   5. Transaction Read — hand-rolled, resqlite + sqlite_async
+///   6. Transaction Read — hand-rolled, resqlite + sqlite_async
 ///
-/// Sections 3–5 aren't on [PeerSet] because they exercise interactive
+/// Sections 4–6 aren't on [PeerSet] because they exercise interactive
 /// transaction APIs (`tx.execute` / `tx.select` / `tx.executeBatch`
 /// nested inside `db.transaction`) which [BenchmarkPeer] doesn't yet
 /// expose. Extending the peer interface with a `transaction()`
@@ -78,10 +83,9 @@ Future<String> runWritesBenchmark() async {
           '=== Single Inserts ($insertCount sequential) ===',
           timings,
         );
-        markdown.write(markdownTable(
-          'Single Inserts ($insertCount sequential)',
-          timings,
-        ));
+        markdown.write(
+          markdownTable('Single Inserts ($insertCount sequential)', timings),
+        );
       } finally {
         await peers.closeAll();
       }
@@ -91,8 +95,9 @@ Future<String> runWritesBenchmark() async {
     // Batch inserts — 4 peers via PeerSet, 3 batch sizes
     // -----------------------------------------------------------------
     for (final batchSize in [100, 1000, 10000]) {
-      final subdir =
-          await Directory('${tempDir.path}/batch_$batchSize').create();
+      final subdir = await Directory(
+        '${tempDir.path}/batch_$batchSize',
+      ).create();
       final peers = await PeerSet.open(
         subdir.path,
         driftFactory: driftFactoryFor((exec) => WritesDriftDb(exec)),
@@ -130,14 +135,71 @@ Future<String> runWritesBenchmark() async {
           timings.add(t);
         }
 
+        printComparisonTable('=== Batch Insert ($batchSize rows) ===', timings);
+        markdown.write(
+          markdownTable('Batch Insert ($batchSize rows)', timings),
+        );
+      } finally {
+        await peers.closeAll();
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Wide batch insert — 4 peers via PeerSet.
+    //
+    // The narrow 2-parameter shape above is still the common baseline,
+    // but exp 113 showed it is not enough to track batch parameter
+    // encoding costs. This 20-parameter mixed-type shape is the release
+    // suite guard for ORM/generated-statement-style batch writes.
+    // -----------------------------------------------------------------
+    {
+      final subdir = await Directory('${tempDir.path}/wide_batch').create();
+      final peers = await PeerSet.open(
+        subdir.path,
+        driftFactory: driftFactoryFor((exec) => WritesDriftDb(exec)),
+      );
+      final timings = <BenchmarkTiming>[];
+      try {
+        final createSql = _wideBatchCreateSql();
+        final insertSql = _wideBatchInsertSql();
+        final paramSets = [
+          for (var i = 0; i < _wideBatchSize; i++) _wideBatchRow(i),
+        ];
+
+        for (final peer in peers.all) {
+          await peer.execute(createSql);
+        }
+
+        for (final peer in peers.all) {
+          // Warmup + clear.
+          for (var i = 0; i < defaultWarmup; i++) {
+            await peer.executeBatch(insertSql, paramSets);
+          }
+          await peer.execute('DELETE FROM wide_batch');
+
+          final t = BenchmarkTiming('${peer.label} executeBatch()');
+          for (var iter = 0; iter < defaultIterations; iter++) {
+            final swWall = Stopwatch()..start();
+            await peer.executeBatch(insertSql, paramSets);
+            swWall.stop();
+            t.recordWallOnly(swWall.elapsedMicroseconds);
+            await peer.execute('DELETE FROM wide_batch');
+          }
+          timings.add(t);
+        }
+
         printComparisonTable(
-          '=== Batch Insert ($batchSize rows) ===',
+          '=== Wide Batch Insert '
+          '($_wideBatchSize rows x $_wideBatchParamWidth params) ===',
           timings,
         );
-        markdown.write(markdownTable(
-          'Batch Insert ($batchSize rows)',
-          timings,
-        ));
+        markdown.write(
+          markdownTable(
+            'Wide Batch Insert '
+            '($_wideBatchSize rows x $_wideBatchParamWidth params)',
+            timings,
+          ),
+        );
       } finally {
         await peers.closeAll();
       }
@@ -147,22 +209,28 @@ Future<String> runWritesBenchmark() async {
     // Transaction with mixed read + write
     // -----------------------------------------------------------------
     {
-      final resqliteDb = await resqlite.Database.open('${tempDir.path}/resqlite_tx.db');
-      final asyncDb = sqlite_async.SqliteDatabase(path: '${tempDir.path}/async_tx.db');
+      final resqliteDb = await resqlite.Database.open(
+        '${tempDir.path}/resqlite_tx.db',
+      );
+      final asyncDb = sqlite_async.SqliteDatabase(
+        path: '${tempDir.path}/async_tx.db',
+      );
       await asyncDb.initialize();
 
-      await resqliteDb.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)');
-      await asyncDb.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)');
+      await resqliteDb.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
+      );
+      await asyncDb.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
+      );
 
       // Seed some data.
-      await resqliteDb.executeBatch(
-        'INSERT INTO t(value) VALUES (?)',
-        [for (var i = 0; i < 100; i++) [i]],
-      );
-      await asyncDb.executeBatch(
-        'INSERT INTO t(value) VALUES (?)',
-        [for (var i = 0; i < 100; i++) [i]],
-      );
+      await resqliteDb.executeBatch('INSERT INTO t(value) VALUES (?)', [
+        for (var i = 0; i < 100; i++) [i],
+      ]);
+      await asyncDb.executeBatch('INSERT INTO t(value) VALUES (?)', [
+        for (var i = 0; i < 100; i++) [i],
+      ]);
 
       // Warmup.
       for (var i = 0; i < defaultWarmup; i++) {
@@ -210,10 +278,12 @@ Future<String> runWritesBenchmark() async {
         '=== Interactive Transaction (insert + select + conditional delete) ===',
         [tResqlite, tAsync],
       );
-      markdown.write(markdownTable(
-        'Interactive Transaction (insert + select + conditional delete)',
-        [tResqlite, tAsync],
-      ));
+      markdown.write(
+        markdownTable(
+          'Interactive Transaction (insert + select + conditional delete)',
+          [tResqlite, tAsync],
+        ),
+      );
 
       await resqliteDb.close();
       await asyncDb.close();
@@ -267,9 +337,7 @@ Future<String> runWritesBenchmark() async {
       await resqliteDb.execute('DELETE FROM t');
       await asyncDb.execute('DELETE FROM t');
 
-      final tResqliteBatch = BenchmarkTiming(
-        'resqlite tx.executeBatch()',
-      );
+      final tResqliteBatch = BenchmarkTiming('resqlite tx.executeBatch()');
       for (var iter = 0; iter < defaultIterations; iter++) {
         final sw = Stopwatch()..start();
         await resqliteDb.transaction((tx) async {
@@ -280,9 +348,7 @@ Future<String> runWritesBenchmark() async {
         await resqliteDb.execute('DELETE FROM t');
       }
 
-      final tResqliteLoop = BenchmarkTiming(
-        'resqlite tx.execute() loop',
-      );
+      final tResqliteLoop = BenchmarkTiming('resqlite tx.execute() loop');
       for (var iter = 0; iter < defaultIterations; iter++) {
         final sw = Stopwatch()..start();
         await resqliteDb.transaction((tx) async {
@@ -295,9 +361,7 @@ Future<String> runWritesBenchmark() async {
         await resqliteDb.execute('DELETE FROM t');
       }
 
-      final tAsyncLoop = BenchmarkTiming(
-        'sqlite_async tx.execute() loop',
-      );
+      final tAsyncLoop = BenchmarkTiming('sqlite_async tx.execute() loop');
       for (var iter = 0; iter < defaultIterations; iter++) {
         final sw = Stopwatch()..start();
         await asyncDb.writeTransaction((tx) async {
@@ -314,10 +378,13 @@ Future<String> runWritesBenchmark() async {
         '=== Batched Write Inside Transaction ($batchSize rows) ===',
         [tResqliteBatch, tResqliteLoop, tAsyncLoop],
       );
-      markdown.write(markdownTable(
-        'Batched Write Inside Transaction ($batchSize rows)',
-        [tResqliteBatch, tResqliteLoop, tAsyncLoop],
-      ));
+      markdown.write(
+        markdownTable('Batched Write Inside Transaction ($batchSize rows)', [
+          tResqliteBatch,
+          tResqliteLoop,
+          tAsyncLoop,
+        ]),
+      );
 
       await resqliteDb.close();
       await asyncDb.close();
@@ -390,14 +457,13 @@ Future<String> runWritesBenchmark() async {
         tAsync.recordWallOnly(sw.elapsedMicroseconds);
       }
 
-      printComparisonTable(
-        '=== Transaction Read ($rowCount rows) ===',
-        [tResqlite, tAsync],
+      printComparisonTable('=== Transaction Read ($rowCount rows) ===', [
+        tResqlite,
+        tAsync,
+      ]);
+      markdown.write(
+        markdownTable('Transaction Read ($rowCount rows)', [tResqlite, tAsync]),
       );
-      markdown.write(markdownTable(
-        'Transaction Read ($rowCount rows)',
-        [tResqlite, tAsync],
-      ));
 
       await resqliteDb.close();
       await asyncDb.close();
@@ -500,14 +566,13 @@ Future<String> runWritesBenchmark() async {
           await resqliteDb.execute('DELETE FROM t');
         }
 
-        printComparisonTable(
-          '=== Nested Transactions (savepoints) ===',
-          [tFanout, tDeep],
+        printComparisonTable('=== Nested Transactions (savepoints) ===', [
+          tFanout,
+          tDeep,
+        ]);
+        markdown.write(
+          markdownTable('Nested Transactions (savepoints)', [tFanout, tDeep]),
         );
-        markdown.write(markdownTable(
-          'Nested Transactions (savepoints)',
-          [tFanout, tDeep],
-        ));
       } finally {
         await resqliteDb.close();
       }
@@ -518,6 +583,41 @@ Future<String> runWritesBenchmark() async {
 
   return markdown.toString();
 }
+
+String _wideBatchCreateSql() {
+  final columns = [
+    'id INTEGER PRIMARY KEY',
+    for (var i = 0; i < _wideBatchParamWidth; i++)
+      'c$i ${_wideBatchSqliteType(i)} NOT NULL',
+  ];
+  return 'CREATE TABLE IF NOT EXISTS wide_batch(${columns.join(', ')})';
+}
+
+String _wideBatchInsertSql() {
+  final columns = [for (var i = 0; i < _wideBatchParamWidth; i++) 'c$i'];
+  final placeholders = List.filled(_wideBatchParamWidth, '?');
+  return 'INSERT INTO wide_batch(${columns.join(', ')}) '
+      'VALUES (${placeholders.join(', ')})';
+}
+
+List<Object?> _wideBatchRow(int row) => [
+  for (var col = 0; col < _wideBatchParamWidth; col++)
+    _wideBatchValue(row, col),
+];
+
+String _wideBatchSqliteType(int col) => switch (col % 4) {
+  0 => 'TEXT',
+  1 => 'INTEGER',
+  2 => 'REAL',
+  _ => 'BLOB',
+};
+
+Object _wideBatchValue(int row, int col) => switch (col % 4) {
+  0 => 'item_${row}_$col',
+  1 => row * 31 + col,
+  2 => row * 1.5 + col / 10,
+  _ => Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, col & 0xff, 0xA5]),
+};
 
 Future<void> main() async {
   await runWritesBenchmark();
