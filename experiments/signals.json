@@ -18,8 +18,8 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool — exp 114's reader-pool wake-amplification fix measured -10 % to -32 % against the pre-exp-106 baseline and then collapsed into noise post-rebase. Reader-pool-internal dispatch tweaks now need workloads that bypass exp 106's elision (e.g., reads-only contention or streams whose projections all intersect the modified columns) to be measurable. Exp 115 adds profile-mode counters that make the parked-dispatcher path directly observable — future dispatch experiments can now gate on `dispatcherWakeRetryTotal > 0` before claiming or rejecting a wall-time delta.",
-      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114", "115"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable. Exp 118 uses that counter gate to show that FIFO one-shot dispatch waiters eliminate wake retries under read overload; future reader-pool dispatch work should look beyond shared-completer wake amplification unless new counters show remaining retry/parking headroom.",
+      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -27,16 +27,16 @@
       ],
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
-        "What read-only or column-tracking-bypassing workload would re-expose parked-dispatcher contention so reader-pool-internal optimizations (exp 114's FIFO swap, slot-handoff variants) become measurable again? (exp 115 added the counters needed to verify any such workload actually parks.)"
+        "After FIFO dispatch waiters, which admission or completion-side mechanism still produces measurable reader-pool parking under real workloads?"
       ],
       "adjacentIdeas": [
         "rerun tracing",
         "many-stream writer throughput",
         "reader completion batching",
-        "direct slot handoff on wake",
+        "reader-pool admission profiling",
         "long-running concurrent-reads workload that sustains parked dispatchers"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Reader-pool-internal changes (e.g., wake amplification, slot-handoff) need a workload where exp 106's writer-side dispatch elision does NOT fire — otherwise the contention they target never reaches the pool. Compare any dispatch change against the exp 110 long-text unchanged-fanout benchmark and A11c overlap, but expect those to be column-elided after exp 106."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115 counters before changing reader-pool dispatch. If exp 118 lands, shared-completer wake amplification is no longer the obvious target; look for workloads with remaining nonzero retries, sustained max parked concurrency, or completion-side churn before trying another queue policy."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -336,6 +336,18 @@
       "nextSignals": [
         "use the new counters when re-evaluating exp 114's archived FIFO swap or other reader-pool-internal dispatch changes",
         "profile real workloads (concurrent reads under writer, A11c stream fan-out post-exp-106) through the counters before choosing the next dispatch experiment target"
+      ]
+    },
+    "118": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The exp 115 counters convert exp 114's previously ambiguous FIFO waiter idea into a direct measurement: under overloaded reads, wake retries drop from 6/66/378 to 0 at concurrency 8/16/32 while max parked depth remains unchanged",
+        "Reader-pool shared-completer wake amplification is now a solved target if the FIFO waiter PR lands; future dispatch work needs a different counter signal before adding more queue policy"
+      ],
+      "nextSignals": [
+        "profile real app-shaped workloads after FIFO waiters land to see whether any nonzero dispatcherWakeRetryTotal remains",
+        "look for completion-side batching or admission-level work only if dispatcherMaxParkedConcurrent stays high with wall-time impact"
       ]
     },
     "116": {

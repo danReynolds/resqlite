@@ -221,10 +221,10 @@ String _renderMarkdown(List<_Result> rows, int readerCount) {
   sb.writeln(
     '- `wake_retry_total` increments when the dispatcher resumes '
     'from `await` but finds no slot on the next scan and re-parks. '
-    'With the current shared-completer wakeup, a single worker-free '
-    'event wakes every parked dispatcher; exactly one wins the slot '
-    'and the rest re-park, so this counter is the wake-amplification '
-    'signal.',
+    'With shared-completer wakeup, a single worker-free event wakes '
+    'every parked dispatcher; exactly one wins the slot and the rest '
+    're-park. FIFO or slot-handoff dispatch should keep this counter '
+    'near zero.',
   );
   sb.writeln(
     '- `max_parked` is the peak observed concurrency of parked '

@@ -60,6 +60,7 @@ merged into the codebase.
 | [110](110-long-text-fnv-8byte.md) | Long-text stream hash benchmark + 8-byte FNV | Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing | [#53](https://github.com/danReynolds/resqlite/pull/53) |
 | [113](113-direct-batch-param-matrix.md) | Direct batch parameter matrix encoding | Avoids the temporary flat Dart parameter list; 10k-row wide batches improve 14-26% in the focused benchmark | [#70](https://github.com/danReynolds/resqlite/pull/70) |
 | [116](116-wide-batch-release-coverage.md) | Wide batch insert release coverage | Adds a 10k-row x 20-parameter mixed-type batch insert to the release write suite so parameter-width regressions are visible on the public benchmark path |  |
+| [118](118-fifo-dispatch-counter-gate.md) | FIFO dispatch waiters with counter gate | Replaces the shared reader-pool dispatch completer with FIFO one-shot waiters; exp 115 counters show wake retries drop to zero under overload |  |
 
 ## Rejected
 

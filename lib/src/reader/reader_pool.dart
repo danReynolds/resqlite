@@ -5,6 +5,7 @@
 /// when all workers are busy). The actual query execution logic lives in
 /// read_worker.dart.
 import 'dart:async';
+import 'dart:collection';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -37,9 +38,11 @@ final class ReaderPool {
   int _next = 0;
   bool _closed = false;
 
-  /// Completed whenever any worker becomes available (finishes a query
-  /// or finishes respawning). Callers waiting in _dispatch are woken up.
-  Completer<void>? _workerAvailable;
+  /// FIFO waiters parked by _dispatch while no worker is available.
+  ///
+  /// Each worker-free event wakes one waiter instead of completing a
+  /// shared future observed by every parked dispatcher.
+  final Queue<Completer<void>> _workerAvailableWaiters = Queue();
 
   bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
 
@@ -57,9 +60,8 @@ final class ReaderPool {
 
   /// Wake up any callers waiting for an available worker.
   void _notifyAvailable() {
-    if (_workerAvailable case Completer<void> c) {
-      _workerAvailable = null;
-      c.complete();
+    if (_workerAvailableWaiters.isNotEmpty) {
+      _workerAvailableWaiters.removeFirst().complete();
     }
   }
 
@@ -142,8 +144,9 @@ final class ReaderPool {
         ProfileCounters.dispatcherWakeRetryTotal++;
       }
 
-      // All workers busy or dead. Wait for any to become available.
-      _workerAvailable ??= Completer<void>.sync();
+      // All workers busy or dead. Wait for a worker-free event.
+      final waiter = Completer<void>.sync();
+      _workerAvailableWaiters.add(waiter);
       if (kProfileMode) {
         ProfileCounters.dispatcherParkedTotal++;
         ProfileCounters.dispatcherCurrentParked++;
@@ -154,7 +157,7 @@ final class ReaderPool {
         }
       }
       try {
-        await _workerAvailable!.future;
+        await waiter.future;
       } finally {
         if (kProfileMode) {
           ProfileCounters.dispatcherCurrentParked--;
@@ -184,9 +187,8 @@ final class ReaderPool {
   Future<void> close() async {
     _closed = true;
     // Wake any parked dispatch waiters so they can re-check _closed.
-    if (_workerAvailable case Completer<void> c) {
-      _workerAvailable = null;
-      c.complete();
+    while (_workerAvailableWaiters.isNotEmpty) {
+      _workerAvailableWaiters.removeFirst().complete();
     }
     await Future.wait(_workers.map((slot) => slot.close()));
   }
