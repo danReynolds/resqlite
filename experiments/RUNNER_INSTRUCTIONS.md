@@ -85,3 +85,48 @@ When finished:
 The final summary should clearly state what was tried, what happened, whether
 each idea was accepted/rejected/deferred, and what future experimenters should
 learn from the run.
+
+## Branching, worktrees, and PRs
+
+Every scheduled experiment run must:
+
+- **Work on a dedicated git worktree**, never on a checkout of `main`
+  directly. Create the worktree off current `origin/main` and use a
+  branch name of the form `exp-NNN-short-slug` (e.g.
+  `exp-115-dispatcher-park-counters`). If the runner already starts you
+  in a worktree on a stale or unrelated branch, create a fresh branch
+  from `origin/main` before committing — do not pile a new experiment
+  on top of an unrelated in-flight branch.
+- **Push the branch to `origin` and open a real (non-draft) PR.** Do
+  not leave the work unpublished, and do not open the PR as a draft.
+  Draft PRs are not ready to merge and are easier for reviewers to
+  defer or ignore; a runner that finishes cleanly should produce a PR
+  that is immediately reviewable.
+- **Wait for CI on the PR and address actionable failures** before
+  declaring the run finished. A red PR is not a completed run.
+
+### What the PR description must contain
+
+The PR is the human-readable handoff. Even when the full experiment doc
+lives at `experiments/NNN-*.md`, the PR body must stand on its own and
+clearly state, in this order:
+
+1. **Hypothesis** — the proposed change and why it should work.
+2. **Approach** — what was built or instrumented (one paragraph or a
+   short bullet list; link to the experiment doc for full detail).
+3. **Results** — the measured outcome. Include the decision-relevant
+   numbers (medians, deltas, counter values, ratios) inline as a small
+   table; do not force the reviewer to open the aggregate file to see
+   the headline number.
+4. **Outcome** — Accepted / Rejected / Deferred, with the one-sentence
+   reason. For rejections, the reason must be specific enough that a
+   future runner can tell whether their new evidence changes the
+   calculus ("rejected because X, would reopen if Y" — same shape as
+   the experiment doc).
+5. **Test plan** — checkboxes for the validation that was actually run
+   (focused tests, `dart analyze`, generated-data checks, any
+   profile/release benchmark passes).
+
+If any of those sections are missing, the PR is not finished. Do not
+rely on the linked experiment doc to carry the headline; reviewers
+triage from the PR body first.
