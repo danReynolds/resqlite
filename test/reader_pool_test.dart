@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/reader/reader_pool.dart';
 import 'package:test/test.dart';
 
 /// Seed a wide table (6 columns) with [count] rows.
@@ -220,6 +221,30 @@ void main() {
         final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
         expect(decoded, hasLength(500));
       }
+    });
+
+    test('close releases parked dispatch waiters', () async {
+      await _seed(db, 10);
+      final pool = await ReaderPool.spawn(db.handle.address, 1);
+
+      final inFlight = pool.select('SELECT * FROM items LIMIT 1');
+      final parkedReads = List.generate(
+        3,
+        (_) => pool.select('SELECT * FROM items LIMIT 1'),
+      );
+      final parkedReadExpectations = [
+        for (final read in parkedReads)
+          expectLater(read, throwsA(isA<ResqliteConnectionException>())),
+      ];
+
+      final closeFuture = pool.close();
+
+      await Future.wait(
+        parkedReadExpectations,
+      ).timeout(const Duration(seconds: 5));
+
+      expect(await inFlight, hasLength(1));
+      await closeFuture;
     });
 
     test('select works correctly after stream setup (selectWithDeps)', () async {

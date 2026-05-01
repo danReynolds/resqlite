@@ -215,7 +215,7 @@ String _renderMarkdown(List<_Result> rows, int readerCount) {
   sb.writeln();
   sb.writeln(
     '- `parked_total` increments each time `_dispatch` awaits '
-    '`_workerAvailable` after finding no worker currently available '
+    'a parked-dispatch waiter after finding no worker currently available '
     'for dispatch.',
   );
   sb.writeln(

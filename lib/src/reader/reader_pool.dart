@@ -117,8 +117,8 @@ final class ReaderPool {
   Future<Object?> _dispatch(ReadRequest request) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
-    // fires during close) doesn't park forever on `_workerAvailable`
-    // waiting for a worker that will never come back.
+    // fires during close) doesn't park forever waiting for a worker
+    // that will never come back.
     if (_closed) {
       throw ResqliteConnectionException('Reader pool is closed.');
     }
@@ -181,9 +181,9 @@ final class ReaderPool {
   /// `Database.close()` so `resqliteClose(handle)` never runs while a
   /// reader worker is still stepping over the handle.
   ///
-  /// Any caller that had parked on `_workerAvailable` waiting for a
-  /// free worker is woken up so `_dispatch` can observe `_closed` and
-  /// bail out with StateError rather than looping over dead slots.
+  /// Any dispatch caller parked on a per-dispatch waiter is woken up
+  /// so `_dispatch` can observe `_closed` and throw
+  /// [ResqliteConnectionException] rather than looping over dead slots.
   Future<void> close() async {
     _closed = true;
     // Wake any parked dispatch waiters so they can re-check _closed.

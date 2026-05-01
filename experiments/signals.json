@@ -338,6 +338,16 @@
         "profile real workloads (concurrent reads under writer, A11c stream fan-out post-exp-106) through the counters before choosing the next dispatch experiment target"
       ]
     },
+    "116": {
+      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
+      ],
+      "nextSignals": [
+        "compare future batch-parameter changes against both narrow Batch Insert and Wide Batch Insert before claiming neutrality"
+      ]
+    },
     "118": {
       "directions": ["stream-rerun-dispatch"],
       "outcomeClass": "in_review_accepted",
@@ -348,16 +358,6 @@
       "nextSignals": [
         "profile real app-shaped workloads after FIFO waiters land to see whether any nonzero dispatcherWakeRetryTotal remains",
         "look for completion-side batching or admission-level work only if dispatcherMaxParkedConcurrent stays high with wall-time impact"
-      ]
-    },
-    "116": {
-      "directions": ["parameter-encoding-and-binding", "measurement-system"],
-      "outcomeClass": "in_review_accepted",
-      "changedBeliefs": [
-        "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
-      ],
-      "nextSignals": [
-        "compare future batch-parameter changes against both narrow Batch Insert and Wide Batch Insert before claiming neutrality"
       ]
     }
   }
