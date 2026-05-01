@@ -31,10 +31,15 @@ sealed class WriterRequest {
 }
 
 /// Single parameterized write (INSERT, UPDATE, DELETE, DDL).
+///
+/// `params` is `Object` — either `List<Object?>` (positional) or
+/// `Map<String, Object?>` (named). The check ran on the main isolate
+/// before this message was sent, so the writer worker can rely on the
+/// type without re-validating.
 final class ExecuteRequest extends WriterRequest {
   ExecuteRequest(this.sql, this.params, super.replyPort);
   final String sql;
-  final List<Object?> params;
+  final Object params;
 }
 
 /// Read query within a transaction — runs on the writer connection so it
@@ -42,14 +47,19 @@ final class ExecuteRequest extends WriterRequest {
 final class QueryRequest extends WriterRequest {
   QueryRequest(this.sql, this.params, super.replyPort);
   final String sql;
-  final List<Object?> params;
+  final Object params;
 }
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
+///
+/// Each row of `paramSets` is `Object` — `List<Object?>` (positional) or
+/// `Map<String, Object?>` (named). All rows in a single batch must share
+/// the same shape (uniformity is checked on the main isolate via
+/// `assertUniformParamSets` before dispatch).
 final class BatchRequest extends WriterRequest {
   BatchRequest(this.sql, this.paramSets, super.replyPort);
   final String sql;
-  final List<List<Object?>> paramSets;
+  final List<Object> paramSets;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
@@ -227,30 +237,49 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  // Promote the loose `List<Object>` SendPort payload into a sharply
+  // typed batch list once. This keeps the per-row `as` cost out of
+  // the encoder's hot loops in `allocateBatchParams` /
+  // `_allocateBatchNamedParams`. The promoted list is one allocation
+  // per call, which dominates only on tiny batches that aren't a hot
+  // path; on the wide batch insert workloads (10k rows × 20 params)
+  // a per-row cast inside the encoder loops shows up as a measurable
+  // regression, so doing it once outside is cheaper.
+  final paramSets = _promoteBatchPayload(msg.paramSets);
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    executeNestedBatchWrite(state.dbHandle, msg.sql, paramSets);
     msg.replyPort.send(const BatchResponse(TableDependencies.none));
   } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    executeBatchWrite(state.dbHandle, msg.sql, paramSets);
     msg.replyPort.send(
       BatchResponse(getDirtyTableDependencies(state.dbHandle)),
     );
   }
 }
 
+List<Object> _promoteBatchPayload(List<Object> paramSets) {
+  if (paramSets.isEmpty) return paramSets;
+  if (paramSets is List<List<Object?>>) return paramSets;
+  if (paramSets is List<Map<String, Object?>>) return paramSets;
+  if (paramSets.first is Map<String, Object?>) {
+    return paramSets.cast<Map<String, Object?>>().toList(growable: false);
+  }
+  return paramSets.cast<List<Object?>>().toList(growable: false);
+}
+
 /// Transaction-scoped read. Runs on the writer connection so uncommitted
 /// writes from earlier statements in the same transaction are visible.
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
   final sqlNative = cachedSqlUtf8(msg.sql);
-  final paramsNative = allocateParams(msg.params);
+  final encoded = encodeParametersArg(msg.params);
   try {
     final stmt = _resqliteStmtAcquireWriter(
       state.dbHandle,
       sqlNative.cast(),
-      paramsNative,
-      msg.params.length,
+      encoded.buf,
+      encoded.countSigned,
     );
     if (stmt == ffi.nullptr) {
       throw ResqliteQueryException(
@@ -266,8 +295,8 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
   } finally {
     // Both resources are freed in one finally regardless of which line
     // threw — an earlier version of this function had a paired try/finally
-    // that leaked `paramsNative` when stmt acquisition failed.
-    freeParams(paramsNative, msg.params);
+    // that leaked the param buffer when stmt acquisition failed.
+    freeParamBuffer(encoded.buf);
   }
 }
 

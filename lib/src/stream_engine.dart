@@ -79,9 +79,12 @@ final class StreamEngine {
   /// Streams are deduplicated: multiple calls with the same SQL and params
   /// share a single underlying query. New listeners receive the cached
   /// result immediately.
+  ///
+  /// `parameters` is `Object` — either `List<Object?>` (positional `?`
+  /// placeholders) or `Map<String, Object?>` (named placeholders).
   Stream<List<Map<String, Object?>>> stream(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) {
     final key = _streamKey(sql, parameters);
 
@@ -212,7 +215,7 @@ final class StreamEngine {
   Stream<List<Map<String, Object?>>> _createStream(
     int key,
     String sql,
-    List<Object?> params,
+    Object params,
   ) {
     final entry = _entries[key] = StreamEntry(
       key: key,
@@ -386,8 +389,10 @@ final class StreamEntry {
   /// The SQL query for this stream.
   final String sql;
 
-  /// Bind parameters for the query.
-  final List<Object?> params;
+  /// Bind parameters for the query — either `List<Object?>` (positional)
+  /// or `Map<String, Object?>` (named). Stored as `Object` so the stream
+  /// can be re-queried with the original input regardless of mode.
+  final Object params;
 
   /// Table dependencies of the query, keyed by table name for invalidation.
   ///
@@ -445,6 +450,23 @@ final class StreamEntry {
 }
 
 /// Compute a stable hash key for a stream query.
-int _streamKey(String sql, List<Object?> params) {
-  return Object.hash(sql, Object.hashAll(params));
+///
+/// Positional params hash as `Object.hashAll(list)` (order matters).
+/// Named params hash as `Object.hashAllUnordered(entries)` so two
+/// `Map<String, Object?>` instances with identical keys + values
+/// compare equal regardless of insertion order. This deduplicates
+/// streams correctly even when callers happen to construct otherwise-
+/// equivalent maps in different orders.
+int _streamKey(String sql, Object params) {
+  if (params is List<Object?>) {
+    return Object.hash(sql, Object.hashAll(params));
+  }
+  if (params is Map<String, Object?>) {
+    final hashes = params.entries.map(
+      (e) => Object.hash(e.key, e.value),
+    );
+    return Object.hash(sql, Object.hashAllUnordered(hashes));
+  }
+  // Fallback — preserves the previous shape.
+  return Object.hash(sql, params);
 }

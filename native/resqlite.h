@@ -37,6 +37,30 @@ typedef struct {
     };
 } resqlite_param;
 
+// Named parameter struct used by the *named* binding path. Carries a
+// pointer + length to the bind name (including the leading `:` / `@` /
+// `$` sigil) so the C binder can look up the SQLite-assigned index via
+// `sqlite3_bind_parameter_index`.
+//
+// The positional `resqlite_param` layout is unchanged; named binding
+// is opted into per call by passing a *negative* `param_count` to the
+// FFI entrypoints (`-N` means "buffer holds N `resqlite_named_param`
+// records, decode them with `bind_params_named`"). The hot-path
+// positional decoder is byte-identical to before — only the dispatch
+// site adds a single `if (param_count < 0)` check predicted-not-taken.
+typedef struct {
+    int type;
+    int name_len;          // bytes of the name (excluding any null
+                           // terminator); names are not zero-terminated
+    const char* name;      // pointer into the caller-owned name block
+    union {
+        long long int_val;
+        double float_val;
+        struct { const char* data; int len; } text;
+        struct { const void* data; int len; } blob;
+    };
+} resqlite_named_param;
+
 // ---------------------------------------------------------------------------
 // Connection lifecycle
 // ---------------------------------------------------------------------------

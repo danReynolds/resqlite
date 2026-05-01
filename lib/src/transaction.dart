@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 /// A transaction proxy object for executing writes and reads atomically.
@@ -59,13 +60,18 @@ final class Transaction {
   /// Same as [Database.execute], but the write is part of the enclosing
   /// transaction and only commits when the transaction completes.
   ///
+  /// [parameters] accepts the same shapes as [Database.execute]:
+  /// `List<Object?>` for positional `?` placeholders or
+  /// `Map<String, Object?>` for named `:name`/`@name`/`$name` placeholders.
+  ///
   /// Throws [StateError] if called after the enclosing transaction body
   /// has returned.
   Future<WriteResult> execute(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     _ensureActive();
+    checkParameters(parameters);
     final response = await _writer.execute(sql, parameters);
     return response.result;
   }
@@ -75,13 +81,18 @@ final class Transaction {
   /// This runs on the writer connection (not the reader pool) so it can
   /// see rows inserted or updated earlier in the same transaction.
   ///
+  /// [parameters] accepts the same shapes as [Database.select]:
+  /// `List<Object?>` for positional `?` placeholders or
+  /// `Map<String, Object?>` for named placeholders.
+  ///
   /// Throws [StateError] if called after the enclosing transaction body
   /// has returned.
   Future<List<Map<String, Object?>>> select(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     _ensureActive();
+    checkParameters(parameters);
     return _writer.select(sql, parameters);
   }
 
@@ -107,7 +118,7 @@ final class Transaction {
   /// has returned.
   Future<void> executeBatch(
     String sql,
-    List<List<Object?>> paramSets,
+    List<Object> paramSets,
   ) async {
     _ensureActive();
     await _writer.executeBatch(sql, paramSets);

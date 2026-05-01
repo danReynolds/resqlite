@@ -170,13 +170,43 @@ final class WriteResult {
 /// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
 /// the earlier resources are still released. Flat sequential allocation
 /// would leak on allocator failure, which is rare but real.
+///
+/// [params] accepts either a `List<Object?>` (positional `?`
+/// placeholders, the existing zero-overhead hot path) or a
+/// `Map<String, Object?>` (named `:foo`/`@foo`/`$foo` placeholders).
+/// Anything else throws.
+///
+/// The positional path calls `allocateParams` directly with no extra
+/// record/closure allocations between the type check and the C call —
+/// matching the byte-for-byte hot path that was in place before named
+/// support was added.
 WriteResult executeWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<Object?> params,
+  Object params,
 ) {
+  // Inline-typed dispatch. Each branch matches the original positional
+  // function's instruction sequence as closely as possible — the named
+  // branch carries the full extra cost; the positional branch carries
+  // exactly one extra `is List<Object?>` type check.
+  final ffi.Pointer<ffi.Uint8> paramsNative;
+  final int signedCount;
+  if (params is List<Object?>) {
+    paramsNative = allocateParams(params);
+    signedCount = params.length;
+  } else if (params is Map<String, Object?>) {
+    final encoded = allocateNamedParams(params);
+    paramsNative = encoded.buf;
+    signedCount = -encoded.count;
+  } else {
+    throw ArgumentError.value(
+      params,
+      'parameters',
+      'parameters must be either List<Object?> (positional) or '
+          'Map<String, Object?> (named).',
+    );
+  }
   final sqlNative = cachedSqlUtf8(sql);
-  final paramsNative = allocateParams(params);
   try {
     final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
     try {
@@ -184,12 +214,12 @@ WriteResult executeWrite(
         dbHandle,
         sqlNative,
         paramsNative,
-        params.length,
+        signedCount,
         resultBuf,
       );
       if (rc != 0) {
         throw ResqliteQueryException(
-          _queryErrorMessage(dbHandle, rc, params.length),
+          _queryErrorMessage(dbHandle, rc, signedCount.abs()),
           sql: sql,
           parameters: params,
           sqliteCode: rc,
@@ -206,34 +236,223 @@ WriteResult executeWrite(
       calloc.free(resultBuf);
     }
   } finally {
-    freeParams(paramsNative, params);
+    freeParamBuffer(paramsNative);
   }
 }
 
-/// Validates that every row in [paramSets] has the same length. The
-/// C-level batch runner treats the flattened param array as a fixed-
-/// shape matrix (`setCount × paramCount`), so non-uniform rows either
-/// silently truncate or read past the allocated buffer depending on
-/// which direction the shape drifts.
+/// Validates that every row in [paramSets] has the same shape. For
+/// positional rows (`List<Object?>`), this means the same length. For
+/// named rows (`Map<String, Object?>`), this means the same key set.
+/// Mixed positional/named rows are rejected — the C-level batch path
+/// uses one struct shape for the whole batch.
 ///
 /// Callers should invoke this on the *main* isolate before sending the
 /// paramSets to the writer — we want [ArgumentError] to surface
 /// directly to the user rather than crossing the isolate boundary as
 /// a generic "internal writer error".
-void assertUniformParamSets(String sql, List<List<Object?>> paramSets) {
+void assertUniformParamSets(String sql, List<Object> paramSets) {
   if (paramSets.isEmpty) return;
-  final paramCount = paramSets.first.length;
-  for (var i = 0; i < paramSets.length; i++) {
-    if (paramSets[i].length != paramCount) {
-      throw ArgumentError.value(
-        paramSets,
-        'paramSets',
-        'every row must have the same number of parameters. '
-            'Row 0 has $paramCount, row $i has ${paramSets[i].length}. '
-            'SQL: $sql',
-      );
+  final first = paramSets.first;
+
+  if (first is List<Object?>) {
+    final paramCount = first.length;
+    for (var i = 0; i < paramSets.length; i++) {
+      final row = paramSets[i];
+      if (row is! List<Object?>) {
+        throw ArgumentError.value(
+          paramSets,
+          'paramSets',
+          'rows must all be the same shape. Row 0 is positional '
+              '(List<Object?>), row $i is ${row.runtimeType}. '
+              'SQL: $sql',
+        );
+      }
+      if (row.length != paramCount) {
+        throw ArgumentError.value(
+          paramSets,
+          'paramSets',
+          'every row must have the same number of parameters. '
+              'Row 0 has $paramCount, row $i has ${row.length}. '
+              'SQL: $sql',
+        );
+      }
+    }
+    return;
+  }
+
+  if (first is Map<String, Object?>) {
+    final firstKeys = first.keys.toList(growable: false);
+    final firstKeySet = first.keys.toSet();
+    for (var i = 0; i < paramSets.length; i++) {
+      final row = paramSets[i];
+      if (row is! Map<String, Object?>) {
+        throw ArgumentError.value(
+          paramSets,
+          'paramSets',
+          'rows must all be the same shape. Row 0 is named '
+              '(Map<String, Object?>), row $i is ${row.runtimeType}. '
+              'SQL: $sql',
+        );
+      }
+      if (row.length != firstKeys.length ||
+          !row.keys.every(firstKeySet.contains)) {
+        throw ArgumentError.value(
+          paramSets,
+          'paramSets',
+          'every named row must have the same key set. '
+              'Row 0 keys: $firstKeys, row $i keys: ${row.keys.toList()}. '
+              'SQL: $sql',
+        );
+      }
+    }
+    return;
+  }
+
+  throw ArgumentError.value(
+    paramSets,
+    'paramSets',
+    'rows must be List<Object?> (positional) or '
+        'Map<String, Object?> (named). Row 0 is ${first.runtimeType}. '
+        'SQL: $sql',
+  );
+}
+
+/// Encode a batch's param matrix into a contiguous native buffer for
+/// either the positional or named binding path.
+///
+/// Returns `(buf, signedCount)` where `signedCount` is the per-row
+/// param count, negated for named binding so the C dispatcher picks
+/// the named binder.
+///
+/// Caller must pass a sharply-typed list — `List<List<Object?>>`
+/// (positional) or `List<Map<String, Object?>>` (named). The writer
+/// worker promotes the loose `List<Object>` SendPort payload before
+/// calling this; the per-row `as` cast must NOT live in the encoder's
+/// hot loop (each `as` adds enough work to regress 10k-row batch
+/// insert by ~40% in benchmarks).
+({ffi.Pointer<ffi.Uint8> buf, int signedCount}) encodeBatch(
+  List<Object> paramSets,
+) {
+  if (paramSets.isEmpty) {
+    return (buf: ffi.nullptr.cast(), signedCount: 0);
+  }
+  if (paramSets is List<List<Object?>>) {
+    return (
+      buf: allocateBatchParams(paramSets),
+      signedCount: paramSets.first.length,
+    );
+  }
+  if (paramSets is List<Map<String, Object?>>) {
+    return _allocateBatchNamedParams(paramSets);
+  }
+  // Defensive fallback: a caller bypassed the writer's promote step
+  // and handed us a loose `List<Object>`. Promote here so the encoder
+  // still gets sharp types; this path is not exercised by the public
+  // API.
+  if (paramSets.first is Map<String, Object?>) {
+    return _allocateBatchNamedParams(
+      paramSets.cast<Map<String, Object?>>().toList(growable: false),
+    );
+  }
+  return (
+    buf: allocateBatchParams(
+      paramSets.cast<List<Object?>>().toList(growable: false),
+    ),
+    signedCount: (paramSets.first as List<Object?>).length,
+  );
+}
+
+({ffi.Pointer<ffi.Uint8> buf, int signedCount}) _allocateBatchNamedParams(
+  List<Map<String, Object?>> rows,
+) {
+  if (rows.isEmpty) {
+    return (buf: ffi.nullptr.cast(), signedCount: 0);
+  }
+  final paramCount = rows.first.length;
+  if (paramCount == 0) {
+    return (buf: ffi.nullptr.cast(), signedCount: 0);
+  }
+  final totalSlots = rows.length * paramCount;
+
+  // Pass 1: encode every name (once per row — we do not assume keys are
+  // identical across rows even though `assertUniformParamSets` checked
+  // they are; matching insertion order also matters, so encoding
+  // independently is simplest).
+  final encodedNames = List<Uint8List>.filled(
+    totalSlots,
+    Uint8List(0),
+    growable: false,
+  );
+  final encodedStrings = List<Uint8List?>.filled(totalSlots, null);
+  var extraBytes = 0;
+  var slotIndex = 0;
+  for (final row in rows) {
+    for (final entry in row.entries) {
+      final nameBytes = utf8.encode(entry.key);
+      encodedNames[slotIndex] = nameBytes;
+      extraBytes += nameBytes.length;
+
+      final value = entry.value;
+      if (value is String) {
+        final valBytes = utf8.encode(value);
+        encodedStrings[slotIndex] = valBytes;
+        extraBytes += valBytes.length;
+      } else if (value is Uint8List) {
+        extraBytes += value.length;
+      }
+      slotIndex++;
     }
   }
+
+  final structsBytes = _namedParamStructSize * totalSlots;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  slotIndex = 0;
+  for (final row in rows) {
+    for (final entry in row.entries) {
+      final offset = slotIndex * _namedParamStructSize;
+      final value = entry.value;
+      final nameBytes = encodedNames[slotIndex];
+
+      view.setRange(dataOffset, dataOffset + nameBytes.length, nameBytes);
+      byteData.setInt32(offset + 4, nameBytes.length, Endian.little);
+      byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+      dataOffset += nameBytes.length;
+
+      if (value == null) {
+        byteData.setInt32(offset, 0, Endian.little);
+      } else if (value is int) {
+        byteData.setInt32(offset, 1, Endian.little);
+        byteData.setInt64(offset + 16, value, Endian.little);
+      } else if (value is double) {
+        byteData.setInt32(offset, 2, Endian.little);
+        byteData.setFloat64(offset + 16, value, Endian.little);
+      } else if (value is String) {
+        final bytes = encodedStrings[slotIndex]!;
+        view.setRange(dataOffset, dataOffset + bytes.length, bytes);
+        byteData.setInt32(offset, 3, Endian.little);
+        byteData.setInt64(offset + 16, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 24, bytes.length, Endian.little);
+        dataOffset += bytes.length;
+      } else if (value is Uint8List) {
+        view.setRange(dataOffset, dataOffset + value.length, value);
+        byteData.setInt32(offset, 4, Endian.little);
+        byteData.setInt64(offset + 16, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 24, value.length, Endian.little);
+        dataOffset += value.length;
+      } else {
+        byteData.setInt32(offset, 0, Endian.little);
+      }
+      slotIndex++;
+    }
+  }
+
+  return (buf: buf, signedCount: -paramCount);
 }
 
 /// Execute a batch: one SQL, many param sets, wrapped in a fresh
@@ -241,30 +460,29 @@ void assertUniformParamSets(String sql, List<List<Object?>> paramSets) {
 void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<List<Object?>> paramSets,
+  List<Object> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-  final paramCount = paramSets.first.length;
 
+  final encoded = encodeBatch(paramSets);
   final sqlNative = cachedSqlUtf8(sql);
-  final paramsNative = allocateBatchParams(paramSets);
   try {
     final rc = resqliteRunBatch(
       dbHandle,
       sqlNative,
-      paramsNative,
-      paramCount,
+      encoded.buf,
+      encoded.signedCount,
       paramSets.length,
     );
     if (rc != 0) {
       throw ResqliteQueryException(
-        _queryErrorMessage(dbHandle, rc, paramCount),
+        _queryErrorMessage(dbHandle, rc, encoded.signedCount.abs()),
         sql: sql,
         sqliteCode: rc,
       );
     }
   } finally {
-    freeParamBuffer(paramsNative);
+    freeParamBuffer(encoded.buf);
   }
 }
 
@@ -275,30 +493,29 @@ void executeBatchWrite(
 void executeNestedBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<List<Object?>> paramSets,
+  List<Object> paramSets,
 ) {
   if (paramSets.isEmpty) return;
-  final paramCount = paramSets.first.length;
 
+  final encoded = encodeBatch(paramSets);
   final sqlNative = cachedSqlUtf8(sql);
-  final paramsNative = allocateBatchParams(paramSets);
   try {
     final rc = resqliteRunBatchNested(
       dbHandle,
       sqlNative,
-      paramsNative,
-      paramCount,
+      encoded.buf,
+      encoded.signedCount,
       paramSets.length,
     );
     if (rc != 0) {
       throw ResqliteQueryException(
-        _queryErrorMessage(dbHandle, rc, paramCount),
+        _queryErrorMessage(dbHandle, rc, encoded.signedCount.abs()),
         sql: sql,
         sqliteCode: rc,
       );
     }
   } finally {
-    freeParamBuffer(paramsNative);
+    freeParamBuffer(encoded.buf);
   }
 }
 
@@ -629,6 +846,156 @@ void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
 
 const int _paramStructSize = 24;
 
+/// Layout of `resqlite_named_param` in C. Larger than the positional struct
+/// (24 → 32 bytes) to carry a name pointer + length, but only used on the
+/// named binding path. The positional layout is unchanged so the existing
+/// hot path stays byte-identical.
+///
+/// Field layout (matches `native/resqlite.h`'s `resqlite_named_param`):
+///
+/// ```
+/// offset  size  field
+/// 0       4     int32 type
+/// 4       4     int32 name_len
+/// 8       8     ptr   name           (into the same buffer's tail)
+/// 16      16    union {              (same shape as positional, just shifted)
+///                 int64 int_val
+///                 float64 float_val
+///                 { ptr data; int32 len; pad } text/blob
+///               }
+/// ```
+const int _namedParamStructSize = 32;
+
+/// Validate the public-API `Object parameters` argument shape on the
+/// main isolate.
+///
+/// Throws [ArgumentError] when [parameters] is neither `List<Object?>`
+/// (positional `?` placeholders) nor `Map<String, Object?>` (named
+/// `:name`/`@name`/`$name` placeholders). Doing the check here keeps
+/// the typed error in the caller's stack trace; if the bad value
+/// instead reached the writer isolate, the writer would re-wrap it
+/// as a generic `ResqliteException` and bury the diagnostic.
+void checkParameters(Object parameters) {
+  if (parameters is List<Object?>) return;
+  if (parameters is Map<String, Object?>) return;
+  throw ArgumentError.value(
+    parameters,
+    'parameters',
+    'parameters must be either List<Object?> (positional) or '
+        'Map<String, Object?> (named).',
+  );
+}
+
+/// Encode a named-parameter map into the named layout described above.
+///
+/// Returns `(buf, count)` where `count` is the *positive* entry count;
+/// callers that pass the buffer to FFI must negate it (`-count`) so the
+/// C dispatch picks the named binder. We return the unsigned count here
+/// so callers can size up reusable scratch state cleanly.
+///
+/// Map iteration order is the encoding order. The C side resolves each
+/// name to its 1-based bind index via `sqlite3_bind_parameter_index`,
+/// so the encoded order does not have to match SQL parameter order.
+({ffi.Pointer<ffi.Uint8> buf, int count}) allocateNamedParams(
+  Map<String, Object?> params,
+) {
+  if (params.isEmpty) {
+    return (buf: ffi.nullptr.cast(), count: 0);
+  }
+
+  // Pass 1: encode every name + every string value up front so we know
+  // the exact byte tail size before allocating. Names are encoded as
+  // UTF-8 (no leading sigil normalization — SQLite's
+  // `sqlite3_bind_parameter_index` expects the *full* placeholder text
+  // as it appeared in the SQL, including the leading `:`/`@`/`$`).
+  final entryCount = params.length;
+  final encodedNames = List<Uint8List>.filled(
+    entryCount,
+    Uint8List(0),
+    growable: false,
+  );
+  // String values get encoded eagerly so utf8.encode runs once total
+  // across both passes — same trick as `allocateParams`.
+  final encodedStrings = List<Uint8List?>.filled(entryCount, null);
+
+  var extraBytes = 0;
+  var i = 0;
+  for (final entry in params.entries) {
+    final name = entry.key;
+    final nameBytes = utf8.encode(name);
+    encodedNames[i] = nameBytes;
+    extraBytes += nameBytes.length;
+
+    final value = entry.value;
+    if (value is String) {
+      final valBytes = utf8.encode(value);
+      encodedStrings[i] = valBytes;
+      extraBytes += valBytes.length;
+    } else if (value is Uint8List) {
+      extraBytes += value.length;
+    }
+    i++;
+  }
+
+  final structsBytes = _namedParamStructSize * entryCount;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  // Pass 2: walk the entries in the same iteration order as pass 1 and
+  // write structs. Tail layout: names first (so name pointers live next
+  // to each other), then text/blob value bytes after.
+  var dataOffset = structsBytes;
+  i = 0;
+  for (final entry in params.entries) {
+    final offset = i * _namedParamStructSize;
+    final value = entry.value;
+    final nameBytes = encodedNames[i];
+
+    // Name first.
+    view.setRange(dataOffset, dataOffset + nameBytes.length, nameBytes);
+    byteData.setInt32(offset + 4, nameBytes.length, Endian.little);
+    byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+    dataOffset += nameBytes.length;
+
+    if (value == null) {
+      byteData.setInt32(offset, 0, Endian.little);
+    } else if (value is int) {
+      byteData.setInt32(offset, 1, Endian.little);
+      byteData.setInt64(offset + 16, value, Endian.little);
+    } else if (value is double) {
+      byteData.setInt32(offset, 2, Endian.little);
+      byteData.setFloat64(offset + 16, value, Endian.little);
+    } else if (value is String) {
+      final bytes = encodedStrings[i]!;
+      view.setRange(dataOffset, dataOffset + bytes.length, bytes);
+      byteData.setInt32(offset, 3, Endian.little);
+      byteData.setInt64(offset + 16, bufAddr + dataOffset, Endian.little);
+      byteData.setInt32(offset + 24, bytes.length, Endian.little);
+      dataOffset += bytes.length;
+    } else if (value is Uint8List) {
+      view.setRange(dataOffset, dataOffset + value.length, value);
+      byteData.setInt32(offset, 4, Endian.little);
+      byteData.setInt64(offset + 16, bufAddr + dataOffset, Endian.little);
+      byteData.setInt32(offset + 24, value.length, Endian.little);
+      dataOffset += value.length;
+    } else {
+      byteData.setInt32(offset, 0, Endian.little);
+    }
+    i++;
+  }
+
+  return (buf: buf, count: entryCount);
+}
+
+/// Encoded form of a single FFI exchange's parameter argument: either a
+/// positional list buffer (count > 0) or a named buffer (count < 0).
+/// Construct via [encodeParametersArg]. The negated count is what the C
+/// dispatch reads to switch between positional and named binders.
+typedef EncodedParameters = ({ffi.Pointer<ffi.Uint8> buf, int countSigned});
+
 /// Pack params into a single buffer: `[struct0..N][text/blob bytes]`.
 ///
 /// Text and blob bytes live inline at the tail of the same buffer that
@@ -711,6 +1078,16 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   return buf;
 }
 
+/// Pack a positional batch matrix into the same `[structs][bytes]`
+/// layout that single-row `allocateParams` produces, but with all
+/// `setCount` rows back-to-back.
+///
+/// [paramSets] is typed `List<List<Object?>>` so the two encode
+/// passes below iterate strongly-typed rows with no per-row `as`
+/// cast. The writer worker performs the public-API
+/// `List<Object>` -> `List<List<Object?>>` promotion once at message
+/// receive time (`_handleBatch`) — that keeps the per-row cast cost
+/// out of the hot encode loop entirely.
 ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   if (paramSets.isEmpty) return ffi.nullptr.cast();
   final paramCount = paramSets.first.length;
@@ -790,6 +1167,30 @@ void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> _) {
   freeParamBuffer(buf);
 }
 
+/// Encode an `Object` parameters argument (positional list or named map)
+/// for stmt-acquire callers (reader workers and the writer's transaction
+/// read path). Returns the buffer pointer and the *signed* count to pass
+/// to FFI — negative for named, positive for positional.
+///
+/// The positional path matches the original `allocateParams(list)` call
+/// shape exactly: one type check + one delegation. No record allocation
+/// in the hot path.
+EncodedParameters encodeParametersArg(Object params) {
+  if (params is List<Object?>) {
+    return (buf: allocateParams(params), countSigned: params.length);
+  }
+  if (params is Map<String, Object?>) {
+    final encoded = allocateNamedParams(params);
+    return (buf: encoded.buf, countSigned: -encoded.count);
+  }
+  throw ArgumentError.value(
+    params,
+    'parameters',
+    'parameters must be either List<Object?> (positional) or '
+        'Map<String, Object?> (named).',
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Query functions using C-level connection + statement cache
 // ---------------------------------------------------------------------------
@@ -831,10 +1232,26 @@ NativeBuffer queryBytes(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
   String sql,
-  List<Object?> params,
+  Object params,
 ) {
+  final ffi.Pointer<ffi.Uint8> paramsNative;
+  final int signedCount;
+  if (params is List<Object?>) {
+    paramsNative = allocateParams(params);
+    signedCount = params.length;
+  } else if (params is Map<String, Object?>) {
+    final encoded = allocateNamedParams(params);
+    paramsNative = encoded.buf;
+    signedCount = -encoded.count;
+  } else {
+    throw ArgumentError.value(
+      params,
+      'parameters',
+      'parameters must be either List<Object?> (positional) or '
+          'Map<String, Object?> (named).',
+    );
+  }
   final sqlNative = cachedSqlUtf8(sql);
-  final paramsNative = allocateParams(params);
   final pBuf = calloc<ffi.Pointer<ffi.Uint8>>();
   final pLen = calloc<ffi.Int>();
   try {
@@ -843,7 +1260,7 @@ NativeBuffer queryBytes(
       readerId,
       sqlNative,
       paramsNative,
-      params.length,
+      signedCount,
       pBuf,
       pLen,
     );
@@ -861,7 +1278,7 @@ NativeBuffer queryBytes(
     }
     return (ptr: pBuf.value, length: pLen.value);
   } finally {
-    freeParams(paramsNative, params);
+    freeParamBuffer(paramsNative);
     calloc.free(pBuf);
     calloc.free(pLen);
   }

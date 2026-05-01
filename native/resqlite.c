@@ -8,6 +8,30 @@
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
+static int bind_params_named(sqlite3_stmt* stmt,
+                             const resqlite_named_param* params,
+                             int param_count, int expected);
+
+// Dispatch wrapper: a *negative* `param_count` opts into named binding;
+// the buffer is then a `const resqlite_named_param*` and the absolute
+// value is the entry count. Positive (or zero) `param_count` keeps the
+// existing positional path on a byte-identical hot loop with one extra
+// integer compare at function entry.
+//
+// Putting this in a single inline helper means every caller stays one
+// line of integration code (`bind_params_dispatch(stmt, buf, count, expected)`)
+// while the per-slot decode loops never branch on mode.
+__attribute__((always_inline)) static inline int
+bind_params_dispatch(sqlite3_stmt* stmt, const void* params,
+                     int param_count, int expected) {
+    if (__builtin_expect(param_count >= 0, 1)) {
+        return bind_params(stmt, (const resqlite_param*)params,
+                           param_count, expected);
+    }
+    return bind_params_named(stmt,
+                             (const resqlite_named_param*)params,
+                             -param_count, expected);
+}
 
 // ---------------------------------------------------------------------------
 // Growable buffer
@@ -861,7 +885,7 @@ int resqlite_execute(
 
     // Single statement (or multi-statement with params — existing
     // behavior: only the first statement executes via prepare).
-    rc = bind_params(stmt, params, param_count, entry->param_count);
+    rc = bind_params_dispatch(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         sqlite3_mutex_leave(db->writer_mutex);
@@ -891,10 +915,17 @@ int resqlite_execute(
 // each param set. Assumes the caller holds writer_mutex and that any
 // enclosing transaction control (BEGIN/COMMIT/SAVEPOINT) is managed externally.
 // On error, leaves the statement reset and returns the sqlite error code.
+//
+// Named/positional dispatch: a *negative* `param_count` opts into named
+// binding. The buffer is then a flat array of `resqlite_named_param` records
+// (size 32 vs 24); `set_count` rows of `|param_count|` named entries each.
+// The hot positional path stays byte-identical — only the per-iteration
+// `bind_params_dispatch` call sees the sign check, and that compiles to a
+// single predicted-not-taken branch outside the per-slot loop.
 static int run_batch_locked(
     resqlite_db* db,
     const char* sql,
-    const resqlite_param* param_sets,
+    const void* param_sets,
     int param_count,
     int set_count
 ) {
@@ -922,11 +953,20 @@ static int run_batch_locked(
     }
     const int expected = entry->param_count;
 
+    // Pre-compute the per-row stride and absolute count once outside the
+    // hot loop so every iteration is a plain pointer add + dispatch call.
+    const int abs_count =
+        param_count < 0 ? -param_count : param_count;
+    const size_t stride = param_count < 0
+        ? sizeof(resqlite_named_param) * (size_t)abs_count
+        : sizeof(resqlite_param) * (size_t)abs_count;
+    const unsigned char* row_base = (const unsigned char*)param_sets;
+
     for (int i = 0; i < set_count; i++) {
         sqlite3_reset(stmt);
 
-        int rc = bind_params(
-            stmt, &param_sets[i * param_count], param_count, expected);
+        int rc = bind_params_dispatch(
+            stmt, row_base + (size_t)i * stride, param_count, expected);
         if (rc != SQLITE_OK) {
             sqlite3_reset(stmt);
             return rc;
@@ -1323,6 +1363,89 @@ static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
     return SQLITE_OK;
 }
 
+// Named-parameter bind path. Each entry's `name` field is a pointer into a
+// caller-owned name block (no null terminator — `name_len` is authoritative).
+// Resolves each name to the SQLite-assigned 1-based bind index via
+// `sqlite3_bind_parameter_index`, which expects a NUL-terminated string —
+// we copy onto a small stack buffer (heap-allocated for unusually long
+// names) before calling.
+//
+// Unknown names return SQLITE_RANGE so the error path matches the
+// out-of-bounds positional case. We also check that the caller supplied
+// every name SQLite knows about (`expected` vs `param_count`); a mismatch
+// likewise yields SQLITE_RANGE so the public API surfaces a clean
+// "parameter count mismatch" error rather than silent NULL binding for
+// missing names.
+static int bind_params_named(sqlite3_stmt* stmt,
+                             const resqlite_named_param* params,
+                             int param_count, int expected) {
+    if (expected != param_count) {
+        // Same forced-error trick the positional path uses to populate
+        // sqlite3_errmsg with a meaningful message.
+        (void)sqlite3_bind_null(stmt, expected + 1);
+        return SQLITE_RANGE;
+    }
+
+    // Most parameter names are short ("`:id`", "`@name`"). A 64-byte
+    // stack buffer covers the realistic range without a heap touch; we
+    // fall back to malloc for anything larger to keep correctness for
+    // pathological cases (very long names, JSON-style placeholders).
+    char small[64];
+
+    for (int i = 0; i < param_count; i++) {
+        const int name_len = params[i].name_len;
+        char* name_buf = small;
+        char* heap_buf = NULL;
+        if (name_len + 1 > (int)sizeof(small)) {
+            heap_buf = (char*)malloc((size_t)name_len + 1);
+            if (!heap_buf) return SQLITE_NOMEM;
+            name_buf = heap_buf;
+        }
+        if (name_len > 0) memcpy(name_buf, params[i].name, (size_t)name_len);
+        name_buf[name_len] = '\0';
+
+        const int idx = sqlite3_bind_parameter_index(stmt, name_buf);
+        if (heap_buf) free(heap_buf);
+        if (idx == 0) {
+            // Unknown name. Trip the same SQLITE_RANGE error the
+            // positional path uses for out-of-bounds, so the Dart
+            // caller surfaces a unified "bad parameter" exception.
+            (void)sqlite3_bind_null(stmt, expected + 1);
+            return SQLITE_RANGE;
+        }
+
+        int rc;
+        switch (params[i].type) {
+            case RESQLITE_TYPE_NULL:
+                rc = sqlite3_bind_null(stmt, idx);
+                break;
+            case RESQLITE_TYPE_INT64:
+                rc = sqlite3_bind_int64(stmt, idx, params[i].int_val);
+                break;
+            case RESQLITE_TYPE_FLOAT64:
+                rc = sqlite3_bind_double(stmt, idx, params[i].float_val);
+                break;
+            case RESQLITE_TYPE_TEXT:
+                rc = sqlite3_bind_text(stmt, idx,
+                                       params[i].text.data,
+                                       params[i].text.len,
+                                       SQLITE_STATIC);
+                break;
+            case RESQLITE_TYPE_BLOB:
+                rc = sqlite3_bind_blob64(stmt, idx,
+                                         params[i].blob.data,
+                                         params[i].blob.len,
+                                         SQLITE_STATIC);
+                break;
+            default:
+                rc = sqlite3_bind_null(stmt, idx);
+                break;
+        }
+        if (rc != SQLITE_OK) return rc;
+    }
+    return SQLITE_OK;
+}
+
 // ---------------------------------------------------------------------------
 // Public: stmt acquire/release (for Dart per-cell stepping)
 // ---------------------------------------------------------------------------
@@ -1355,7 +1478,7 @@ sqlite3_stmt* resqlite_stmt_acquire(
     }
     sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count, entry->param_count);
+    rc = bind_params_dispatch(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         release_reader(db, reader_idx);
@@ -1393,7 +1516,7 @@ sqlite3_stmt* resqlite_stmt_acquire_on(
     if (!entry) return NULL;
     sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count, entry->param_count);
+    rc = bind_params_dispatch(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         return NULL;
@@ -1418,7 +1541,7 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
     if (!entry) return NULL;
     sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count, entry->param_count);
+    rc = bind_params_dispatch(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         return NULL;
@@ -1733,7 +1856,7 @@ int resqlite_query_bytes(
     }
     sqlite3_stmt* stmt = entry->stmt;
 
-    rc = bind_params(stmt, params, param_count, entry->param_count);
+    rc = bind_params_dispatch(stmt, params, param_count, entry->param_count);
     if (rc != SQLITE_OK) {
         sqlite3_reset(stmt);
         *out_buf = NULL;

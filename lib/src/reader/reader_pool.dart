@@ -68,7 +68,7 @@ final class ReaderPool {
   /// Execute a query on the next available worker.
   Future<List<Map<String, Object?>>> select(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     final result = await _dispatch(SelectRequest(sql, parameters));
     return result as List<Map<String, Object?>>;
@@ -85,7 +85,7 @@ final class ReaderPool {
   /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
   /// column detail under each table dependency.
   Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
-  selectWithDeps(String sql, [List<Object?> parameters = const []]) async {
+  selectWithDeps(String sql, [Object parameters = const <Object?>[]]) async {
     final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
     return result as (List<Map<String, Object?>>, TableDependencies, int, int);
   }
@@ -93,7 +93,7 @@ final class ReaderPool {
   /// Execute a query returning JSON-encoded bytes.
   Future<Uint8List> selectBytes(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     final result = await _dispatch(SelectBytesRequest(sql, parameters));
     return result as Uint8List;
@@ -104,7 +104,7 @@ final class ReaderPool {
   /// result is unchanged (hash AND row count match).
   Future<(List<Map<String, Object?>>?, int, int)> selectIfChanged(
     String sql,
-    List<Object?> parameters,
+    Object parameters,
     int lastResultHash,
     int lastRowCount,
   ) async {

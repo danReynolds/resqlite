@@ -26,10 +26,15 @@ import '../row.dart';
 // ---------------------------------------------------------------------------
 
 /// Base class for read requests sent from the pool to a worker isolate.
+///
+/// `parameters` is `Object` — either `List<Object?>` (positional `?`
+/// placeholders) or `Map<String, Object?>` (named `:foo`/`@foo`/`$foo`
+/// placeholders). The check ran on the main isolate before this message
+/// was sent, so the worker can rely on the type without re-validating.
 sealed class ReadRequest {
   ReadRequest(this.sql, this.parameters);
   final String sql;
-  final List<Object?> parameters;
+  final Object parameters;
 }
 
 /// Standard row query — returns a [ResultSet].
@@ -235,19 +240,19 @@ T _withAcquiredStmt<T>(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
+  Object parameters,
   T Function(ffi.Pointer<ffi.Void> dbHandle, ffi.Pointer<ffi.Void> stmt) body,
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
   final sqlNative = cachedSqlUtf8(sql);
-  final paramsNative = allocateParams(parameters);
+  final encoded = encodeParametersArg(parameters);
   try {
     final stmt = _resqliteStmtAcquireOn(
       dbHandle,
       readerId,
       sqlNative.cast(),
-      paramsNative,
-      parameters.length,
+      encoded.buf,
+      encoded.countSigned,
     );
     if (stmt == ffi.nullptr) {
       throw ResqliteQueryException(
@@ -258,7 +263,7 @@ T _withAcquiredStmt<T>(
     }
     return body(dbHandle, stmt);
   } finally {
-    freeParams(paramsNative, parameters);
+    freeParamBuffer(encoded.buf);
   }
 }
 
@@ -267,7 +272,7 @@ RawQueryResult executeQuery(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
+  Object parameters,
 ) => _withAcquiredStmt(
   handleAddr,
   readerId,
@@ -281,7 +286,7 @@ Uint8List executeQueryBytes(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
+  Object parameters,
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
   final result = queryBytes(dbHandle, readerId, sql, parameters);
@@ -302,7 +307,7 @@ Uint8List executeQueryBytes(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
+  Object parameters,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
   final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
   // Collect dependency metadata from the reader's most recent cached stmt entry.
@@ -332,7 +337,7 @@ Uint8List executeQueryBytes(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
+  Object parameters,
   int lastResultHash,
   int lastRowCount,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {

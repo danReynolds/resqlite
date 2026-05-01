@@ -183,17 +183,32 @@ final class Database {
   /// Runs a query and returns all matching rows.
   ///
   /// ```dart
+  /// // Positional parameters — bound to `?` placeholders.
   /// final users = await db.select(
   ///   'SELECT id, name FROM users WHERE active = ?',
   ///   [1],
   /// );
+  ///
+  /// // Named parameters — bound to `:name` / `@name` / `$name`.
+  /// final user = await db.select(
+  ///   'SELECT id, name FROM users WHERE id = :id',
+  ///   {':id': 42},
+  /// );
+  ///
   /// for (final user in users) {
   ///   print('${user['id']}: ${user['name']}');
   /// }
   /// ```
   ///
-  /// The [parameters] list is bound positionally to `?` placeholders in
-  /// [sql]. Returns an empty list if no rows match.
+  /// [parameters] is either a `List<Object?>` (positional, bound to `?`)
+  /// or a `Map<String, Object?>` (named, bound to `:name`/`@name`/`$name`).
+  /// Each value must be a [String], [int], [double], [Uint8List] (for
+  /// blobs), or `null`. Returns an empty list if no rows match.
+  ///
+  /// Map keys must include the leading sigil (`:`, `@`, or `$`) exactly as
+  /// it appears in the SQL — SQLite resolves the bind index by string
+  /// match. The map's iteration order does not have to match the SQL
+  /// parameter order; `sqlite3_bind_parameter_index` looks each name up.
   ///
   /// The returned rows are lightweight [Row] views over a shared result
   /// buffer — accessing `row['column']` is a hash lookup, not a map copy.
@@ -203,6 +218,7 @@ final class Database {
   /// the finished result.
   ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed.
+  /// Throws an [ArgumentError] if [parameters] is neither a List nor a Map.
   ///
   /// See also:
   ///
@@ -210,8 +226,14 @@ final class Database {
   /// - [stream], for reactive queries that re-emit on writes
   Future<List<Map<String, Object?>>> select(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
+    // Validate the parameter shape on the main isolate so ArgumentError
+    // surfaces directly to the caller. Once a request crosses an isolate
+    // boundary the writer rewraps unknown errors as a generic
+    // ResqliteException.
+    checkParameters(parameters);
+
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.select(sql, parameters);
@@ -254,8 +276,10 @@ final class Database {
   /// Throws [StateError] if called inside a [transaction] body.
   Future<Uint8List> selectBytes(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
+    checkParameters(parameters);
+
     if (Transaction.current != null) {
       throw StateError(
         'selectBytes() cannot be used inside a transaction. '
@@ -306,8 +330,9 @@ final class Database {
   /// a `State` class), rather than creating new streams on every build.
   Stream<List<Map<String, Object?>>> stream(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) {
+    checkParameters(parameters);
     _ensureOpen();
     return _streamEngine.stream(sql, parameters);
   }
@@ -327,9 +352,10 @@ final class Database {
   /// print('${result.affectedRows} row(s) affected');
   /// ```
   ///
-  /// The [parameters] list is bound positionally to `?` placeholders in
-  /// [sql]. Each element must be a [String], [int], [double], [Uint8List]
-  /// (for blobs), or `null`.
+  /// [parameters] is either a `List<Object?>` (positional `?`) or a
+  /// `Map<String, Object?>` (named `:name`/`@name`/`$name`). Each value
+  /// must be a [String], [int], [double], [Uint8List] (for blobs), or
+  /// `null`.
   ///
   /// Suitable for INSERT, UPDATE, DELETE, and DDL statements. For queries
   /// that return rows, use [select] instead.
@@ -339,10 +365,13 @@ final class Database {
   ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed or
   /// violates a constraint.
+  /// Throws an [ArgumentError] if [parameters] is neither a List nor a Map.
   Future<WriteResult> execute(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
+    checkParameters(parameters);
+
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.execute(sql, parameters);
@@ -362,11 +391,26 @@ final class Database {
   /// transaction.
   ///
   /// ```dart
+  /// // Positional rows.
   /// await db.executeBatch(
   ///   'INSERT INTO users(name) VALUES (?)',
   ///   [['Ada'], ['Grace'], ['Sonja']],
   /// );
+  ///
+  /// // Named rows — every row must share the same key set.
+  /// await db.executeBatch(
+  ///   'INSERT INTO users(name, age) VALUES (:name, :age)',
+  ///   [
+  ///     {':name': 'Ada', ':age': 36},
+  ///     {':name': 'Grace', ':age': 85},
+  ///   ],
+  /// );
   /// ```
+  ///
+  /// Each row of [paramSets] is `Object` — either `List<Object?>`
+  /// (positional) or `Map<String, Object?>` (named). All rows must share
+  /// the same shape (a positional batch cannot mix in named rows, and
+  /// vice versa).
   ///
   /// The statement is prepared once and reused across all [paramSets],
   /// wrapped in a single BEGIN/COMMIT transaction. This is significantly
@@ -377,7 +421,12 @@ final class Database {
   /// Streams watching the affected table fire once on commit, not per row.
   ///
   /// Throws a [ResqliteQueryException] if any statement fails.
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
+  /// Throws an [ArgumentError] if rows are not a uniform shape.
+  Future<void> executeBatch(String sql, List<Object> paramSets) async {
+    // assertUniformParamSets runs lower in the writer's executeBatch
+    // path, but it's also safe (and informative) to run on the main
+    // isolate so the typed ArgumentError reaches the caller directly.
+
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.executeBatch(sql, paramSets);

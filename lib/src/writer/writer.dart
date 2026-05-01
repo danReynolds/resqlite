@@ -79,7 +79,7 @@ final class Writer {
 
   Future<ExecuteResponse> execute(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(sql, parameters, replyPort),
@@ -88,7 +88,7 @@ final class Writer {
 
   Future<BatchResponse?> executeBatch(
     String sql,
-    List<List<Object?>> paramSets,
+    List<Object> paramSets,
   ) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
@@ -107,7 +107,7 @@ final class Writer {
 
   Future<List<Map<String, Object?>>> select(
     String sql, [
-    List<Object?> parameters = const [],
+    Object parameters = const <Object?>[],
   ]) async {
     final response = await _request<QueryResponse>(
       (replyPort) => QueryRequest(sql, parameters, replyPort),

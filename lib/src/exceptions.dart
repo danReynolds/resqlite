@@ -48,7 +48,14 @@ class ResqliteQueryException extends ResqliteException {
   final String sql;
 
   /// The bound parameters, if any.
-  final List<Object?>? parameters;
+  ///
+  /// Either a `List<Object?>` (positional `?` placeholders) or a
+  /// `Map<String, Object?>` (named `:name`/`@name`/`$name`
+  /// placeholders), matching the form passed at the call site.
+  /// `null` when the error path could not surface the original input
+  /// (e.g. a marshalling failure that already crossed an isolate
+  /// boundary).
+  final Object? parameters;
 
   /// The SQLite result code (e.g., 19 for SQLITE_CONSTRAINT).
   ///
