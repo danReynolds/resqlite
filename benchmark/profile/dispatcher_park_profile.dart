@@ -194,8 +194,8 @@ String _renderMarkdown(List<_Result> rows, int readerCount) {
   sb.writeln(
     'Workload: `SELECT v FROM items WHERE v >= ? AND v < ?` '
     'fanned out at the listed concurrency. Each burst awaits all '
-    'queries; counters are reset between bursts and the median across '
-    'bursts is reported.',
+    'queries; counters are reset between bursts and the median for each '
+    'reported column is taken across bursts.',
   );
   sb.writeln();
   sb.writeln(
@@ -215,7 +215,8 @@ String _renderMarkdown(List<_Result> rows, int readerCount) {
   sb.writeln();
   sb.writeln(
     '- `parked_total` increments each time `_dispatch` awaits '
-    '`_workerAvailable` after finding every slot busy.',
+    '`_workerAvailable` after finding no worker currently available '
+    'for dispatch.',
   );
   sb.writeln(
     '- `wake_retry_total` increments when the dispatcher resumes '

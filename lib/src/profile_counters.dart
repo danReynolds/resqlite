@@ -71,8 +71,10 @@ class ProfileCounters {
   static int intersectionUs = 0;
   static int intersectionEntries = 0;
 
-  /// Times a `ReaderPool._dispatch` caller parked because every worker
-  /// was busy. One increment per `await` on the pool's shared
+  /// Times a `ReaderPool._dispatch` caller parked because no worker was
+  /// currently available for dispatch - for example, when every worker
+  /// was busy or when workers were temporarily unavailable during
+  /// respawn/sacrifice. One increment per `await` on the pool's shared
   /// `_workerAvailable` completer (or whatever future mechanism
   /// replaces it).
   ///
@@ -97,11 +99,11 @@ class ProfileCounters {
 
   /// Peak observed concurrency of parked dispatchers since the last
   /// [reset]. Computed monotonically: incremented before each park,
-  /// compared against the high-water mark, decremented after the
-  /// retry/acquire decision. A peak > pool size is the precondition
-  /// for the wake-amplification cost; without sustained parking past
-  /// the worker count, dispatch-internal optimizations are
-  /// benchmark-invisible (see exp 114 future-notes).
+  /// compared against the high-water mark, and decremented immediately
+  /// after the park wait resumes. A peak > pool size is the precondition
+  /// for the wake-amplification cost; without sustained parking past the
+  /// worker count, dispatch-internal optimizations are benchmark-invisible
+  /// (see exp 114 future-notes).
   static int dispatcherMaxParkedConcurrent = 0;
 
   /// Internal — running count of currently parked dispatchers. Not
