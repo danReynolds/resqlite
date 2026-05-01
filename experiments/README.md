@@ -46,6 +46,7 @@ Experiments that proved their value and were merged into the codebase.
 | [101](101-tx-stmt-cache.md) | Cached BEGIN/COMMIT/ROLLBACK statements | **−13 % to −14 %** on Batched-Write-Inside-Transaction and Growing-Stream Invalidation by replacing `sqlite3_exec`'s per-call prepare+finalize with three persistently prepared transaction-control stmts |  |
 | [106](106-column-level-deps.md) | Column-level dependency tracking (re-attempt of 052 under A11c) | **+82 %** on A11c disjoint writer throughput (3,956 → 7,201 w/s); overlap unchanged (4,477 → 4,581 w/s); overlap/disjoint ratio drops 1.132 → 0.636, the direct signature of writer-side dispatch elision |  |
 | [109](109-inline-param-buffer.md) | Inline-packed parameter buffer | **−10 % to −16 %** on text-param INSERT workloads (Single Inserts, Batch Insert, No-Streams Write Throughput) by collapsing per-text/blob `calloc` into the reusable param-struct buffer and passing actual UTF-8 byte length so `sqlite3_bind_text` skips its internal `strlen` |  |
+| [115](115-dispatcher-park-counters.md) | Dispatcher park counters for `ReaderPool` | Measurement-only: profile-mode counters (park-total, wake-retry-total, max-parked-concurrent) that quantify the parked-dispatcher path exp 105 / exp 114 targeted indirectly. Wake-retry/park ratio reaches 93 % at concurrency=32 (pool=4), the direct wake-amplification signal. Tree-shaken from release builds. Unblocks future dispatch-area experiments with a non-wall-time evaluation gate |  |
 
 ## In Review
 

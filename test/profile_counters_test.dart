@@ -20,6 +20,9 @@ void main() {
       'invalidate_count': 0,
       'intersection_us': 0,
       'intersection_entries': 0,
+      'dispatcher_parked_total': 0,
+      'dispatcher_wake_retry_total': 0,
+      'dispatcher_max_parked_concurrent': 0,
     });
 
     ProfileCounters.reset();
@@ -31,6 +34,26 @@ void main() {
       'invalidate_count': 0,
       'intersection_us': 0,
       'intersection_entries': 0,
+      'dispatcher_parked_total': 0,
+      'dispatcher_wake_retry_total': 0,
+      'dispatcher_max_parked_concurrent': 0,
     });
+  });
+
+  test('dispatcher park counters round-trip through snapshot/diff/reset', () {
+    ProfileCounters.dispatcherParkedTotal = 12;
+    ProfileCounters.dispatcherWakeRetryTotal = 8;
+    ProfileCounters.dispatcherMaxParkedConcurrent = 5;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['dispatcher_parked_total'], 12);
+    expect(snap['dispatcher_wake_retry_total'], 8);
+    expect(snap['dispatcher_max_parked_concurrent'], 5);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.dispatcherParkedTotal, 0);
+    expect(ProfileCounters.dispatcherWakeRetryTotal, 0);
+    expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
+    expect(ProfileCounters.dispatcherCurrentParked, 0);
   });
 }

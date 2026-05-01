@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-01T12:43:56.546113",
+  "generated": "2026-05-01T08:57:19.443227",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -17645,6 +17645,25 @@
         "date": "2026-04-30",
         "timestamp": "2026-04-30T14:07:26",
         "source": "exact"
+      }
+    },
+    {
+      "id": "115",
+      "title": "Dispatcher park counters for `ReaderPool`",
+      "date": "2026-05-01",
+      "status": "accepted",
+      "summary": "Measurement-only: profile-mode counters (park-total, wake-retry-total, max-parked-concurrent) that quantify the parked-dispatcher path exp 105 / exp 114 targeted indirectly. Wake-retry/park ratio reaches 93 % at concurrency=32 (pool=4), the direct wake-amplification signal. Tree-shaken from release builds. Unblocks future dispatch-area experiments with a non-wall-time evaluation gate",
+      "commit": null,
+      "problem": "[Exp 105](105-reader-pool-sizing.md) (raise pool cap 4→8, rejected) and\n[exp 114](114-fifo-waiter-queue.md) (FIFO waiter queue, rejected after the\nexp 106 rebase) both targeted the parked-dispatcher path inside\n`ReaderPool._dispatch`. Both rejections rested on indirect evidence: a\nbenchmark either didn't move (114) or moved in the wrong direction (105),\nand we inferred *why* from architectural reasoning. Neither experiment\ncould check whether the parked-dispatcher path was even being exercised\nby the workload that produced the wall-time number.\n\nThe signals.json next-signal list for entry 114 calls this gap out\nexplicitly:\n\n> a profile-mode counter that records parked-dispatcher events per\n> worker-free transition, so the wake-amplification cost can be measured\n> directly without needin...",
+      "hypothesis": "A small set of profile-mode counters around the `_workerAvailable`\npark/wake path will make dispatcher contention directly observable\nwithout changing dispatch behavior. Specifically, three counters will\nsuffice:\n\n- **park count** — total times a dispatcher entered `await _workerAvailable.future`\n- **wake-retry count** — total times a wake resumed but found no slot\n  on the next scan and re-parked\n- **max parked concurrent** — peak observed concurrency of parked\n  dispatchers\n\nThe wake-retry / park ratio is the wake-amplification signal: with the\ncurrent shared-completer design, every worker-free event wakes every\nparked dispatcher and exactly one wins, so under sustained parking the\nratio approaches `(N-1)/N`. A FIFO or slot-handoff design should drive\nit toward zero. `max parked concu...",
+      "approach": "`lib/src/profile_counters.dart` — three new counters with snapshot/diff/\nreset support, plus an internal `dispatcherCurrentParked` running gauge\nused to maintain `dispatcherMaxParkedConcurrent`. All increments happen\non the main isolate where `ReaderPool._dispatch` runs, so static counter\nstate needs no cross-isolate protocol (same convention as the existing\n`invalidateUs` / `intersectionUs` counters from the A11c profile work).\n\n`lib/src/reader/reader_pool.dart` — `_dispatch` increments under\n`if (kProfileMode)`:\n\n- before the `await _workerAvailable!.future`: increment park-total,\n  bump current-parked, update max-parked\n- after the `await` (in `finally`): decrement current-parked\n- on the next iteration of the outer `while`, before the park branch:\n  if we previously parked once alre...",
+      "results": "Profile-mode harness output on a 4-worker pool, 5 bursts × 6 concurrency\nlevels (full table:\n[`benchmark/profile/results/exp-115-dispatcher-park-aggregate.md`](../benchmark/profile/results/exp-115-dispatcher-park-aggregate.md)):\n\n| concurrency | parked_total | wake_retry_total | max_parked | wall_ms |\n|---:|---:|---:|---:|---:|\n| 1 | 0 | 0 | 0 | 0.09 |\n| 2 | 0 | 0 | 0 | 0.13 |\n| 4 | 0 | 0 | 0 | 0.18 |\n| 8 | 10 | 6 | 4 | 0.39 |\n| 16 | 78 | 66 | 12 | 0.77 |\n| 32 | 406 | 378 | 28 | 1.45 |\n\nThree things confirmed:\n\n1. **Park threshold matches pool size.** Concurrency ≤ 4 produces zero\n   park events. Counters fire only when callers exceed the pool — the\n   precondition for any reader-pool-internal dispatch optimization.\n2. **`max_parked` matches `concurrency − pool_size`** at every level\n  ...",
+      "reasoning": "**Accepted — measurement-only contribution.** The counters add no\nproduction overhead and unblock the next round of dispatch-area\nexperiments by making the parked-dispatcher path directly observable.\n\nWhat this changes for future dispatch experiments:\n\n- **exp 114-style FIFO / slot-handoff.** A re-evaluation can now require\n  `dispatcherWakeRetryTotal > 0` on the workload before claiming or\n  rejecting a wall-time delta. If a benchmark has zero retries, the\n  change cannot have produced a signal — same lesson as exp 099 / exp\n  110, applied earlier in the loop.\n- **exp 105-style pool sizing.** The `dispatcherMaxParkedConcurrent`\n  gauge tells you whether a workload would benefit from more workers\n  before you change the cap.\n- **exp 083 pre-dispatch queue.** The retry counter quantifies...",
+      "benchmarkRun": {
+        "id": "MacBook Pro 14in",
+        "date": "2026-04-30",
+        "timestamp": "2026-04-30T14:17:01",
+        "source": "nearby"
       }
     }
   ],
