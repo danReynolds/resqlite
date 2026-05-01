@@ -63,7 +63,7 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 
 Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Batch inserts at scale are comparable to sqlite3. Results will vary by hardware. The [sqlite3](https://pub.dev/packages/sqlite3) package is a great choice for synchronous workloads; [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync) offers production-tested streaming with built-in throttling. resqlite is optimized for Flutter apps where main-isolate time is the critical constraint.
 
-See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](./benchmark/HARDWARE_RESULTS.md).
+See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md).
 
 ## Reactive Queries
 
@@ -206,20 +206,24 @@ await db.executeBatch(
 - **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) for column-aware write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
-- [Full Breakdown](./docs/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
+- [Full Breakdown](./doc/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
 
 
 ## Getting Started
 
-Currently source-only (`publish_to: none`):
-
 ```yaml
 dependencies:
-  resqlite:
-    path: ../resqlite
+  resqlite: ^0.2.0
 ```
 
-Requires native Dart/Flutter builds (not web). The C code compiles automatically via Dart's native asset hooks.
+Or via the CLI:
+
+```sh
+dart pub add resqlite
+flutter pub add resqlite
+```
+
+Requires native Dart/Flutter builds (not web). The C code compiles automatically via Dart's native asset hooks — no manual build step.
 
 resqlite does not include a migration framework — schema management is done with plain SQL:
 
@@ -231,6 +235,6 @@ For versioned migrations, track a schema version in a `PRAGMA user_version` or a
 
 ## Learn More
 
-- [Architecture overview](./docs/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
-- [Experiment log](./experiments/README.md) — 41 documented experiments with benchmarks and reasoning behind every design decision
-- [Benchmark suite](./benchmark/README.md) — run the full suite yourself, or [see community results across hardware](./benchmark/HARDWARE_RESULTS.md)
+- [Architecture overview](./doc/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
+- [Experiment log](https://github.com/danReynolds/resqlite/blob/main/experiments/README.md) — 41 documented experiments with benchmarks and reasoning behind every design decision
+- [Benchmark suite](https://github.com/danReynolds/resqlite/blob/main/benchmark/README.md) — run the full suite yourself, or [see community results across hardware](https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md)

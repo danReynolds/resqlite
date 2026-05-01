@@ -1,0 +1,28 @@
+# Exclude internal/dev material from the published pub.dev archive.
+# Pub-relevant content (lib/, example/, hook/, native/, third_party/,
+# README.md, CHANGELOG.md, LICENSE, pubspec.yaml) is included by
+# default. This file excludes everything else that lives in the repo
+# for development but is not useful to a package consumer.
+
+# GitHub Pages site — served from /docs on github.com; pub.dev users
+# get the same content via the badge links in README.md.
+docs/
+
+# Internal performance experiment writeups, signals, journal.
+experiments/
+overnight-experiments/
+
+# Benchmark suite — separate directory for cross-library performance
+# comparison; not part of the library API. Users who want to run them
+# can clone the repo.
+benchmark/
+
+# Internal scripts.
+tool/
+
+# Internal roadmap.
+TODO.md
+
+# Tests are in the GitHub repo for contributors. Excluding them keeps
+# the pub.dev archive small and focused on the API surface.
+test/
