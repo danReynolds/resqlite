@@ -37,20 +37,43 @@ import 'stream_engine.dart';
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
   Database._(this._handle, this._path, int readerCount) {
-    // Spawn the reader pool.
-    _readerPool = ReaderPool.spawn(_handle.address, readerCount);
+    Future.sync(() async {
+      try {
+        // Spawn the reader pool.
+        final readerPool = await ReaderPool.spawn(_handle.address, readerCount);
 
-    // Start the reactive query stream engine.
-    _streamEngine = StreamEngine(_readerPool);
+        // Start the reactive query stream engine.
+        final streamEngine = StreamEngine(readerPool);
 
-    // Spawn the single writer isolate.
-    _writer = Writer.spawn(_streamEngine, _handle);
+        // Spawn the single writer isolate.
+        final writer = await Writer.spawn(streamEngine, _handle);
+
+        _initializer.complete((
+          readerPool: readerPool,
+          streamEngine: streamEngine,
+          writer: writer,
+        ));
+      } catch (error, stackTrace) {
+        _initializer.completeError(error, stackTrace);
+      }
+    });
   }
 
-  late final Future<Writer> _writer;
-  late final Future<ReaderPool> _readerPool;
-
   final ffi.Pointer<ffi.Void> _handle;
+
+  final _initializer =
+      Completer<
+        ({ReaderPool readerPool, StreamEngine streamEngine, Writer writer})
+      >();
+
+  Future<ReaderPool> get _readerPool async =>
+      _initializer.future.then((res) => res.readerPool);
+
+  Future<StreamEngine> get _streamEngine async =>
+      _initializer.future.then((res) => res.streamEngine);
+
+  Future<Writer> get _writer async =>
+      _initializer.future.then((res) => res.writer);
 
   /// The filesystem path the database was opened with. Retained so
   /// [diagnostics] can read the `-wal` sidecar size. `:memory:` or
@@ -60,20 +83,11 @@ final class Database {
 
   Completer<void>? _closedCompleter = null;
 
-  // Reactive query engine — owns stream lifecycle, uses reader pool for queries.
-  late final StreamEngine _streamEngine;
-
   /// The raw native database handle.
   ///
   /// Exposed for advanced FFI interop only. Most applications should not
   /// need this.
   ffi.Pointer<ffi.Void> get handle => _handle;
-
-  /// The reactive query engine.
-  ///
-  /// Exposed for testing stream cleanup behavior. Use [stream] for the
-  /// public reactive query API.
-  StreamEngine get streamEngine => _streamEngine;
 
   // -------------------------------------------------------------------------
   // Lifecycle
@@ -157,13 +171,16 @@ final class Database {
       return completer.future;
     }
 
-    final completer = _closedCompleter = Completer();
+    final completer = _closedCompleter = Completer<void>();
 
     try {
-      final (writer, readerPool) = await (_writer, _readerPool).wait;
+      final (streamEngine, readerPool, writer) = await (
+        _streamEngine,
+        _readerPool,
+        _writer,
+      ).wait;
 
-      _streamEngine.close();
-
+      streamEngine.close();
       await readerPool.close();
       await writer.close();
 
@@ -219,14 +236,13 @@ final class Database {
 
     _ensureOpen();
 
-    final pool = await _readerPool;
     // No post-await _ensureOpen re-check: if close() has run while we
     // were parked, the pool itself now rejects dispatch with
     // ResqliteConnectionException (see ReaderPool._dispatch). That lets
     // *in-flight* reads that had already dispatched to a worker finish
     // via the pool's drain semantics, while reads still parked on the
     // pool future bail out cleanly.
-    return pool.select(sql, parameters);
+    return (await _readerPool).select(sql, parameters);
   }
 
   /// Executes a query and returns the result as JSON-encoded bytes.
@@ -265,8 +281,7 @@ final class Database {
 
     _ensureOpen();
 
-    final pool = await _readerPool;
-    return pool.selectBytes(sql, parameters);
+    return (await _readerPool).selectBytes(sql, parameters);
   }
 
   // -------------------------------------------------------------------------
@@ -309,7 +324,9 @@ final class Database {
     List<Object?> parameters = const [],
   ]) {
     _ensureOpen();
-    return _streamEngine.stream(sql, parameters);
+    return Stream.fromFuture(
+      _streamEngine,
+    ).asyncExpand((streamEngine) => streamEngine.stream(sql, parameters));
   }
 
   // -------------------------------------------------------------------------
@@ -350,10 +367,10 @@ final class Database {
 
     _ensureOpen();
 
-    final writer = await _writer;
+    final (writer, streamEngine) = await (_writer, _streamEngine).wait;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
-    _streamEngine.onDependencyChanges(response.modifications);
+    streamEngine.onDependencyChanges(response.modifications);
 
     return response.result;
   }
@@ -385,13 +402,13 @@ final class Database {
 
     _ensureOpen();
 
-    final writer = await _writer;
+    final (writer, streamEngine) = await (_writer, _streamEngine).wait;
     final reponse = await writer.locked(
       () => writer.executeBatch(sql, paramSets),
     );
 
     if (reponse != null) {
-      _streamEngine.onDependencyChanges(reponse.modifications);
+      streamEngine.onDependencyChanges(reponse.modifications);
     }
   }
 
@@ -492,6 +509,7 @@ final class Database {
       sqliteStmtBytes: stmt,
       walBytes: walBytes,
       readersBusyAtSnapshot: readersBusy,
+      streamLength: (await _streamEngine).length,
     );
   }
 }

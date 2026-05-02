@@ -117,6 +117,21 @@ main before claiming acceptance — and ask, before opening, whether the
 contention path the change targets is still reachable on current main
 or whether some recently-accepted experiment now elides it.*
 
+### Admission loops need concrete resources before checking capacity
+
+[Exp 122](122-concrete-reader-pool-stream-admission.md) found a subtle async admission
+boundary: `StreamEngine._flushQueue` was trying to make reader-capacity
+decisions while the engine still held a `Future<ReaderPool>`. Even after the
+future had resolved, the stream path still crossed an async handoff before a
+re-query reached `ReaderPool._dispatch`. Constructing `StreamEngine` only after
+the reader pool has spawned makes the capacity check and re-query admission
+part of the same synchronous path.
+
+*Reapplies whenever a loop gates work on a scarce resource such as reader
+slots, writer locks, or native buffers. Prefer giving the admission owner a
+concrete handle to the resource over layering a second queue around a future;
+otherwise the check is only advisory.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

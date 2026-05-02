@@ -49,7 +49,7 @@ import 'reader/reader_pool.dart';
 final class StreamEngine {
   StreamEngine(this._pool);
 
-  final Future<ReaderPool> _pool;
+  final ReaderPool _pool;
 
   /// The index of streamed queries by their hash key.
   final Map<int, StreamEntry> _entries = {};
@@ -103,9 +103,10 @@ final class StreamEngine {
     if (_entries.isEmpty) {
       return;
     }
+
     if (changes case FixedTableDependencies(
-      tables: final deps,
-    ) when deps.isEmpty) {
+      :final tables,
+    ) when tables.isEmpty) {
       return;
     }
 
@@ -172,13 +173,12 @@ final class StreamEngine {
     }
   }
 
-  Future<void> _flushQueue() async {
+  void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
     }
 
-    final ReaderPool(:availableWorkerCount) = await _pool;
-    final dequeued = _requeryQueue.take(availableWorkerCount).toList();
+    final dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();
 
     for (final entry in dequeued) {
       _requery(entry);
@@ -231,8 +231,7 @@ final class StreamEngine {
 
     Future.sync(() async {
       try {
-        final pool = await _pool;
-        final result = await pool.selectWithDeps(sql, params);
+        final result = await _pool.selectWithDeps(sql, params);
 
         // Cancelled before query finished.
         if (entry.subscribers.isEmpty) {
@@ -283,8 +282,7 @@ final class StreamEngine {
       entry.inFlight = true;
       entry.dirty = false;
 
-      final pool = await _pool;
-      final (rows, newHash, newRowCount) = await pool.selectIfChanged(
+      final (rows, newHash, newRowCount) = await _pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,

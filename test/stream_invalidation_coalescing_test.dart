@@ -32,13 +32,16 @@ void main() {
     late Database db;
 
     setUp(() async {
-      tempDir =
-          await Directory.systemTemp.createTemp('resqlite_coalesce_test_');
+      tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_coalesce_test_',
+      );
       db = await Database.open('${tempDir.path}/test.db');
-      await db.execute('CREATE TABLE items('
-          'id INTEGER PRIMARY KEY, '
-          'name TEXT NOT NULL, '
-          'value INTEGER NOT NULL)');
+      await db.execute(
+        'CREATE TABLE items('
+        'id INTEGER PRIMARY KEY, '
+        'name TEXT NOT NULL, '
+        'value INTEGER NOT NULL)',
+      );
     });
 
     tearDown(() async {
@@ -54,8 +57,10 @@ void main() {
 
     test('coalescing does not lose updates — multiple writes during an '
         'in-flight re-query still surface the latest state', () async {
-      await db.execute(
-          'INSERT INTO items(name, value) VALUES (?, ?)', ['row', 0]);
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'row',
+        0,
+      ]);
 
       final stream = db.stream('SELECT value FROM items WHERE id = ?', [1]);
       final values = <int>[];
@@ -81,12 +86,13 @@ void main() {
       }
 
       // Wait for the stream to settle.
-      final deadline =
-          DateTime.now().add(const Duration(seconds: 10));
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
       while (values.isEmpty || values.last != 100) {
         if (DateTime.now().isAfter(deadline)) {
-          fail('stream never emitted the final value (100); '
-              'emitted: $values');
+          fail(
+            'stream never emitted the final value (100); '
+            'emitted: $values',
+          );
         }
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
@@ -114,8 +120,7 @@ void main() {
       // Phase 1: subscribe 20 streams, each watching a distinct group.
       // Matches A11b's "N streams each watching a distinct partition".
       final firstWaveCounts = List<int>.filled(20, 0);
-      final firstWaveSubs =
-          <StreamSubscription<List<Map<String, Object?>>>>[];
+      final firstWaveSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
       for (var k = 0; k < 20; k++) {
         final idx = k;
         final sub = db
@@ -125,8 +130,7 @@ void main() {
       }
 
       // Drain initial emissions.
-      var firstDrainDeadline =
-          DateTime.now().add(const Duration(seconds: 5));
+      var firstDrainDeadline = DateTime.now().add(const Duration(seconds: 5));
       while (!firstWaveCounts.every((c) => c >= 1)) {
         if (DateTime.now().isAfter(firstDrainDeadline)) {
           fail('initial drain of first wave timed out');
@@ -137,8 +141,9 @@ void main() {
       // Phase 2: write burst. Without coalescing, this queues
       // O(writes × streams) re-queries in the pool.
       for (var i = 0; i < 50; i++) {
-        await db.execute(
-            'UPDATE items SET value = value + 1 WHERE id = ?', [(i % 200) + 1]);
+        await db.execute('UPDATE items SET value = value + 1 WHERE id = ?', [
+          (i % 200) + 1,
+        ]);
       }
 
       // Phase 3: cancel the first wave — entries are removed from
@@ -152,8 +157,7 @@ void main() {
       // all emit. Pre-fix this would take 30+ seconds on a 4-worker
       // pool due to the write-burst backlog. Post-fix: sub-second.
       final freshCounts = List<int>.filled(20, 0);
-      final freshSubs =
-          <StreamSubscription<List<Map<String, Object?>>>>[];
+      final freshSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
       final sw = Stopwatch()..start();
       for (var k = 0; k < 20; k++) {
         final idx = k;
@@ -163,16 +167,17 @@ void main() {
         freshSubs.add(sub);
       }
 
-      final hardDeadline =
-          DateTime.now().add(const Duration(seconds: 15));
+      final hardDeadline = DateTime.now().add(const Duration(seconds: 15));
       while (!freshCounts.every((c) => c >= 1)) {
         if (DateTime.now().isAfter(hardDeadline)) {
           sw.stop();
-          fail('Fresh wave drain timed out at '
-              '${sw.elapsedMilliseconds}ms — pool is likely starved by '
-              're-query backlog from the write burst. This is the '
-              'exact bug A11b exposed; coalescing should cap in-flight '
-              're-queries at 1 per stream.');
+          fail(
+            'Fresh wave drain timed out at '
+            '${sw.elapsedMilliseconds}ms — pool is likely starved by '
+            're-query backlog from the write burst. This is the '
+            'exact bug A11b exposed; coalescing should cap in-flight '
+            're-queries at 1 per stream.',
+          );
         }
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
@@ -184,7 +189,8 @@ void main() {
       expect(
         sw.elapsedMilliseconds,
         lessThan(5000),
-        reason: 'Fresh-subscription drain after a write burst should '
+        reason:
+            'Fresh-subscription drain after a write burst should '
             'not be dominated by leftover re-query work — coalescing '
             'should cap in-flight re-queries to at most one per stream.',
       );
@@ -193,5 +199,70 @@ void main() {
         await sub.cancel();
       }
     });
+
+    test(
+      'overlapping flush requests can close while re-queries are active',
+      () async {
+        await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+          for (var i = 0; i < 400; i++) ['k_${i % 20}', i],
+        ]);
+
+        final initials = <Completer<void>>[];
+        final dones = <Completer<void>>[];
+        final subscriptions =
+            <StreamSubscription<List<Map<String, Object?>>>>[];
+
+        for (var k = 0; k < 20; k++) {
+          final initial = Completer<void>();
+          final done = Completer<void>();
+          initials.add(initial);
+          dones.add(done);
+          subscriptions.add(
+            db
+                .stream('SELECT id, value FROM items WHERE name = ?', ['k_$k'])
+                .listen(
+                  (_) {
+                    if (!initial.isCompleted) initial.complete();
+                  },
+                  onDone: () {
+                    if (!done.isCompleted) done.complete();
+                  },
+                ),
+          );
+        }
+
+        await Future.wait(
+          initials.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
+
+        final writes = [
+          for (var i = 0; i < 80; i++)
+            () async {
+              try {
+                await db.execute(
+                  'UPDATE items SET value = value + 1 WHERE id = ?',
+                  [(i % 400) + 1],
+                );
+              } on ResqliteConnectionException {
+                // close() may win the race for writes still waiting on the
+                // writer mutex. The assertion is that shutdown does not hang and
+                // active streams are closed.
+              }
+            }(),
+        ];
+
+        await Future<void>.delayed(Duration.zero);
+
+        await db.close().timeout(const Duration(seconds: 5));
+        await Future.wait(
+          dones.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
+        await Future.wait(writes).timeout(const Duration(seconds: 5));
+
+        for (final sub in subscriptions) {
+          await sub.cancel();
+        }
+      },
+    );
   });
 }
