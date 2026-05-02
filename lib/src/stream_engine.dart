@@ -178,10 +178,21 @@ final class StreamEngine {
     }
 
     final pool = await _pool;
-    while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
+    // Snapshot capacity once and decrement per pop. `_requery`'s slot
+    // reservation happens inside `_dispatch` after an `await` hop, so
+    // re-checking `hasAvailableWorker` after each fire-and-forget
+    // returns stale-true and over-dispatches the pool — the parked
+    // dispatcher path measured by exp 119 (3,590 parks at concurrency
+    // 50 on A11c overlap, max 46 parked, all from a single flush
+    // sweep). Bounding admission here drains slots in FIFO order
+    // through the per-`_requery` finally that calls `_flushQueue`
+    // again on completion.
+    var slots = pool.availableWorkerCount;
+    while (_requeryQueue.isNotEmpty && slots > 0) {
       final entry = _requeryQueue.first;
       _requeryQueue.remove(entry);
       _requery(entry);
+      slots--;
     }
   }
 

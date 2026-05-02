@@ -18,8 +18,8 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable. Exp 118 uses that counter gate to show that FIFO one-shot dispatch waiters eliminate wake retries under read overload. Exp 119 confirms wake retries stay zero on post-FIFO app-shaped workloads, but A11c overlap and keyed-PK streams still create parked dispatchers; future dispatch work should target stream re-query admission or completion, not another ReaderPool wake policy.",
-      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118", "119"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Future reader-pool dispatch work should look at completion-side churn, write-side dispatch, or invalidation traversal — the admission path is no longer the active target on currently-measured workloads.",
+      "evidence": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118", "119", "120"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -27,18 +27,18 @@
       ],
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
-        "Can stream re-query admission or completion-side scheduling reduce `dispatcherParkedTotal` on A11c overlap and keyed-PK workloads now that `dispatcherWakeRetryTotal` is zero?"
+        "After FIFO dispatch waiters and bounded `_flushQueue` admission, where does remaining stream-fanout wall sit — completion-side scheduling, writer-side dispatch, invalidation traversal, or reader work itself?"
       ],
       "adjacentIdeas": [
         "rerun tracing",
         "many-stream writer throughput",
-        "single-flight stream flush",
-        "stream re-query admission gate",
+        "completion-side microtask churn audit",
+        "writer-side dispatch wall split",
         "reader completion batching",
         "reader-pool admission profiling",
         "long-running concurrent-reads workload that sustains parked dispatchers"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. Shared-completer wake amplification is no longer the target after exp 118; if parks remain high with zero retries, test stream admission/completion changes before touching ReaderPool wake policy again."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. A new dispatch experiment needs a different counter (completion-side scheduling cost, writer-side dispatch wall, invalidation traversal) showing nonzero headroom on the workload before the change is worth trying."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -372,6 +372,19 @@
       "nextSignals": [
         "test a single-flight or otherwise stricter StreamEngine `_flushQueue` admission policy against A11c overlap and keyed-PK counters",
         "branch away from dispatch if admission changes reduce counters without moving wall time"
+      ]
+    },
+    "120": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within ±10% noise",
+        "After this, every measured stream workload reports `dispatcherParkedTotal == 0` on top of `dispatcherWakeRetryTotal == 0`. Future reader-pool dispatch optimizations need a different counter (completion-side scheduling, writer-side dispatch wall, invalidation traversal) before they are worth implementing"
+      ],
+      "nextSignals": [
+        "profile completion-side microtask scheduling cost on A11c overlap",
+        "split writer-isolate wall vs SQLite wall on overlap workloads to see whether write-side dispatch dominates remaining stream-fanout latency",
+        "audit invalidation traversal cost (`invalidateUs`/`intersectionUs`) as a fraction of overlap wall"
       ]
     }
   }

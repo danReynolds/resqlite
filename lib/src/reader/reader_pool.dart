@@ -46,6 +46,23 @@ final class ReaderPool {
 
   bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
 
+  /// Number of workers currently free for dispatch.
+  ///
+  /// Used by `StreamEngine._flushQueue` to bound how many re-queries it
+  /// fires off in a single sweep. The slot reservation in `_dispatch`
+  /// happens after an `await`, so a synchronous `hasAvailableWorker`
+  /// check inside `_flushQueue`'s loop reports stale-true after each
+  /// fire-and-forget `_requery`, leading to over-dispatch and
+  /// `_dispatchWaiters` parking. Snapshotting the count once and
+  /// decrementing per pop matches the actual capacity.
+  int get availableWorkerCount {
+    var count = 0;
+    for (final worker in _workers) {
+      if (worker.isAvailable) count++;
+    }
+    return count;
+  }
+
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
     final pool = ReaderPool._([]);
     final slots = List.generate(
