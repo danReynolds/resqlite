@@ -24,9 +24,9 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Future reader-pool dispatch work should look at completion-side churn, write-side dispatch, or invalidation traversal — the admission path is no longer the active target on currently-measured workloads.",
-      "keyPriors": ["100", "106", "115", "118", "119", "120"],
-      "archive": ["045", "075", "083", "084", "085", "105", "114"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 audited invalidation traversal as a fraction of overlap wall (7.11% raw / 8.66% active; intersection probes alone are only 1.4% of total wall) and ruled invalidation out as the next implementation target. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch — both admission and invalidation are now off the table on currently-measured workloads.",
+      "keyPriors": ["106", "115", "118", "119", "120", "121"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "114"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -50,11 +50,6 @@
           "blockedOn": "no profile-mode split between writer dispatch and SQLite step time"
         },
         {
-          "idea": "audit invalidation traversal cost (`invalidateUs` / `intersectionUs`) as a fraction of overlap wall",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
-        },
-        {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
           "addedDate": "2026-04-30",
           "addedAfter": "115"
@@ -66,14 +61,19 @@
         {
           "idea": "rerun tracing (per-entry dispatch lineage)",
           "addedDate": "2026-05-02"
+        },
+        {
+          "idea": "coarse table-level dirty-bitmap short-circuit before per-watcher column intersection (targets disjoint A11c, where invalidate_pct_active is highest)",
+          "addedDate": "2026-05-02",
+          "addedAfter": "121",
+          "blockedOn": "absolute cost is small (~16 ms across 500 writes); needs a larger-fan-out workload before it is worth trying"
         }
       ],
       "blockedOnMeasurement": [
         "completion-side microtask scheduling cost counter",
-        "writer-isolate wall vs SQLite wall split for overlap workloads",
-        "invalidation traversal cost as a fraction of overlap wall"
+        "writer-isolate wall vs SQLite wall split for overlap workloads"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. A new dispatch experiment needs a different counter (completion-side scheduling cost, writer-side dispatch wall, invalidation traversal) showing nonzero headroom on the workload before the change is worth trying."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119/121 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. After exp 121, invalidation traversal accounts for ≤9% of overlap wall and intersection probes alone for ~1.4% — invalidation is also off the table. A new dispatch experiment needs one of the remaining blocked measurements (completion-side scheduling cost or writer wall vs SQLite step wall split) showing nonzero headroom on the workload before the change is worth trying."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -233,9 +233,9 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 is the latest example: after exp 118 fixed wake retries, the profile audit showed the remaining dispatch pressure lives in stream admission/completion rather than ReaderPool wake policy.",
-      "keyPriors": ["099", "110", "111", "115", "119"],
-      "archive": ["055", "088", "102", "108", "113", "116"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 audited dispatch pressure after FIFO waiters and showed remaining pressure lives in stream admission/completion. Exp 121 then audited invalidation traversal as a fraction of overlap wall and ruled invalidation out as a meaningful share of wall (intersection probes ~1.4%; total invalidation ~7-9%). The two surviving blocked measurements (completion-side scheduling cost; writer wall vs SQLite step wall split) are now the gates for the next dispatch experiment.",
+      "keyPriors": ["110", "111", "115", "119", "121"],
+      "archive": ["055", "088", "099", "102", "108", "113", "116"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -476,6 +476,20 @@
         "profile completion-side microtask scheduling cost on A11c overlap",
         "split writer-isolate wall vs SQLite wall on overlap workloads to see whether write-side dispatch dominates remaining stream-fanout latency",
         "audit invalidation traversal cost (`invalidateUs`/`intersectionUs`) as a fraction of overlap wall"
+      ]
+    },
+    "121": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "Invalidation traversal accounts for 7.11% of A11c overlap wall (8.66% active) and per-watcher intersection probes alone for ~1.4% of total wall — neither side of the ≥10% / <3% pre-experiment decision gates, but the breakdown rules invalidation out as the next implementation target. Even an idealised zero-cost intersection would reclaim only ~1.4% of overlap wall",
+        "A11c disjoint reports a *higher* `invalidate_pct_wall` (9.08% raw / 12.73% active) than overlap because every per-watcher walk is followed by no reader-pool work — the post-exp-106 shape. A future column-elision experiment that short-circuits per-watcher probing with a coarser table-level dirty-bitmap would target this shape, but the absolute cost is small",
+        "The Linux export list (`hook/build.dart::_exportedSymbols`) was missing `resqlite_step_row_hash`, breaking library-level streaming on Linux against current main. CI runs on macOS, which does not apply the version script — the gap was invisible there. Fix is one line"
+      ],
+      "nextSignals": [
+        "build a completion-side microtask scheduling cost counter and audit it on A11c overlap",
+        "build a writer-isolate wall vs SQLite step wall split and check whether write-side dispatch dominates remaining overlap latency",
+        "include `invalidate_pct_wall` in any future stream-rerun-dispatch experiment's acceptance gate so invalidation cost does not have to be re-derived"
       ]
     }
   }

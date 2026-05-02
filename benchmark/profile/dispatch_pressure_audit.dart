@@ -49,7 +49,9 @@ final class _AuditRow {
     required this.parked,
     required this.retries,
     required this.maxParked,
+    required this.invalidateUs,
     required this.invalidateCount,
+    required this.intersectionUs,
     required this.intersectionEntries,
     required this.emissions,
     required this.observedHits,
@@ -61,12 +63,18 @@ final class _AuditRow {
   final int parked;
   final int retries;
   final int maxParked;
+  final int invalidateUs;
   final int invalidateCount;
+  final int intersectionUs;
   final int intersectionEntries;
   final int emissions;
   final int observedHits;
 
   double get wallMs => wallUs / 1000.0;
+  double get invalidateMs => invalidateUs / 1000.0;
+  double get intersectionMs => intersectionUs / 1000.0;
+  double get invalidatePctOfWall =>
+      wallUs == 0 ? 0.0 : (invalidateUs * 100.0) / wallUs;
 }
 
 Future<void> main(List<String> args) async {
@@ -78,6 +86,12 @@ Future<void> main(List<String> args) async {
   }
 
   final writeMarkdown = args.contains('--markdown');
+  String? explicitOut;
+  for (final arg in args) {
+    if (arg.startsWith('--out=')) {
+      explicitOut = arg.substring('--out='.length);
+    }
+  }
 
   final rows = <_AuditRow>[];
   rows.add(await _runReaderControl());
@@ -87,10 +101,12 @@ Future<void> main(List<String> args) async {
   final markdown = _renderMarkdown(rows);
   print(markdown);
 
-  if (writeMarkdown) {
-    final outFile = File(
-      'benchmark/profile/results/exp-119-dispatch-pressure-audit.md',
-    );
+  if (writeMarkdown || explicitOut != null) {
+    final outPath =
+        explicitOut ??
+        'benchmark/profile/results/exp-119-dispatch-pressure-audit.md';
+    final outFile = File(outPath);
+    await outFile.parent.create(recursive: true);
     await outFile.writeAsString(markdown);
     print('Wrote ${outFile.path}');
   }
@@ -129,7 +145,9 @@ Future<_AuditRow> _runReaderControl() async {
       parked: _median(parked),
       retries: _median(retries),
       maxParked: _median(maxParked),
+      invalidateUs: 0,
       invalidateCount: 0,
+      intersectionUs: 0,
       intersectionEntries: 0,
       emissions: 0,
       observedHits: 0,
@@ -377,7 +395,9 @@ _AuditRow _rowFromCounters({
     parked: counters['dispatcher_parked_total']!,
     retries: counters['dispatcher_wake_retry_total']!,
     maxParked: counters['dispatcher_max_parked_concurrent']!,
+    invalidateUs: counters['invalidate_us']!,
     invalidateCount: counters['invalidate_count']!,
+    intersectionUs: counters['intersection_us']!,
     intersectionEntries: counters['intersection_entries']!,
     emissions: emissions,
     observedHits: observedHits,
@@ -387,7 +407,7 @@ _AuditRow _rowFromCounters({
 String _renderMarkdown(List<_AuditRow> rows) {
   final readerCount = _readerPoolSize();
   final buf = StringBuffer();
-  buf.writeln('# Experiment 119 - Dispatch Pressure Audit');
+  buf.writeln('# Dispatch Pressure Audit');
   buf.writeln();
   buf.writeln(
     'Profile-mode harness: `benchmark/profile/dispatch_pressure_audit.dart`',
@@ -407,18 +427,48 @@ String _renderMarkdown(List<_AuditRow> rows) {
   );
   buf.writeln('```');
   buf.writeln();
+  buf.writeln('## Dispatch counters');
+  buf.writeln();
   buf.writeln(
     '| workload | shape | wall_ms | parked_total | wake_retry_total | '
-    'max_parked | invalidate_count | intersection_entries | emissions | observed_hits |',
+    'max_parked | emissions | observed_hits |',
   );
-  buf.writeln('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
+  buf.writeln('|---|---|---:|---:|---:|---:|---:|---:|');
   for (final row in rows) {
     buf.writeln(
       '| ${row.workload} | ${row.shape} | '
       '${row.wallMs.toStringAsFixed(2)} | ${row.parked} | '
-      '${row.retries} | ${row.maxParked} | ${row.invalidateCount} | '
-      '${row.intersectionEntries} | ${row.emissions} | '
+      '${row.retries} | ${row.maxParked} | ${row.emissions} | '
       '${row.observedHits} |',
+    );
+  }
+  buf.writeln();
+  buf.writeln('## Invalidation traversal cost');
+  buf.writeln();
+  buf.writeln(
+    '`invalidate_us` is cumulative wall-clock microseconds spent inside '
+    'the synchronous body of `StreamEngine.onDependencyChanges` across '
+    'every write in the workload. `intersection_us` is the subset spent '
+    'inside per-watcher column-set intersection probes. '
+    '`invalidate_pct_wall` is `invalidate_us / wall_us` — the fraction of '
+    'workload wall time consumed by writer-side invalidation, including '
+    'time blocked by `await Future.delayed` between writes and any quiet '
+    'window after the last write (so this is a lower bound on the active '
+    'fraction).',
+  );
+  buf.writeln();
+  buf.writeln(
+    '| workload | wall_ms | invalidate_ms | intersection_ms | '
+    'invalidate_count | intersection_entries | invalidate_pct_wall |',
+  );
+  buf.writeln('|---|---:|---:|---:|---:|---:|---:|');
+  for (final row in rows) {
+    buf.writeln(
+      '| ${row.workload} | ${row.wallMs.toStringAsFixed(2)} | '
+      '${row.invalidateMs.toStringAsFixed(2)} | '
+      '${row.intersectionMs.toStringAsFixed(2)} | '
+      '${row.invalidateCount} | ${row.intersectionEntries} | '
+      '${row.invalidatePctOfWall.toStringAsFixed(2)}% |',
     );
   }
   buf.writeln();
@@ -427,7 +477,8 @@ String _renderMarkdown(List<_AuditRow> rows) {
   buf.writeln(
     '- `direct reads control` intentionally overloads the reader pool. '
     'It should still park, but FIFO dispatch should keep '
-    '`wake_retry_total` at zero.',
+    '`wake_retry_total` at zero. No streams are registered, so '
+    '`invalidate_*` columns stay at zero.',
   );
   buf.writeln(
     '- A11c rows use the same 50-stream, 20-column shape as the release '
@@ -438,23 +489,6 @@ String _renderMarkdown(List<_AuditRow> rows) {
     '- `keyed PK subscriptions` mirrors the release keyed-PK miss-path: '
     '50 streams watch fixed primary keys while 200 deterministic writes '
     'target random rows.',
-  );
-  buf.writeln();
-  buf.writeln('## Interpretation');
-  buf.writeln();
-  buf.writeln(
-    'The post-FIFO signal is not wake amplification: `wake_retry_total` '
-    'is zero in every workload. The remaining dispatch pressure is '
-    'admission/completion shaped. Overlap and keyed-PK stream workloads '
-    'still create parked dispatchers even though visible emissions are '
-    'heavily coalesced or hash-suppressed.',
-  );
-  buf.writeln();
-  buf.writeln(
-    'A follow-up dispatch experiment should therefore target stream '
-    're-query admission or completion-side scheduling. Another '
-    'ReaderPool wake-policy change needs a new nonzero retry signal '
-    'before it is worth trying.',
   );
   return buf.toString();
 }

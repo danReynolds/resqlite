@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-02T20:55:17.624820",
+  "generated": "2026-05-02T23:35:01.632372",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18366,6 +18366,25 @@
         "date": "2026-05-02",
         "timestamp": "2026-05-02T07:25:17",
         "source": "exact"
+      }
+    },
+    {
+      "id": "121",
+      "title": "Invalidation traversal cost audit",
+      "date": "2026-05-02",
+      "status": "in_review",
+      "summary": "Extend dispatch-pressure audit with `invalidate_ms` / `intersection_ms` / `invalidate_pct_wall`. A11c overlap measures 7.11% raw / 8.66% active wall in invalidation, with intersection probes themselves only 1.4% of total wall — rules out invalidation as the next `stream-rerun-dispatch` implementation target. Side fix: adds `resqlite_step_row_hash` to the Linux version script (CI on macOS missed the broken Linux build)",
+      "commit": null,
+      "problem": "Experiment 120 closed the parked-dispatcher path on every measured stream\nworkload (`dispatcherParkedTotal` 3,590 → 0 on A11c overlap; 1,198 → 0 on\nkeyed-PK; `dispatcherWakeRetryTotal` already at 0 since exp 118). Its\nfuture notes flagged three open measurement gaps that gate the next\nimplementation experiment in the `stream-rerun-dispatch` direction:\n\n1. completion-side microtask scheduling cost\n2. writer-isolate wall vs SQLite step wall split\n3. invalidation traversal cost as a fraction of overlap wall\n\nThe third is the cheapest of the three to land: `ProfileCounters` already\nexposes `invalidateUs` and `intersectionUs`\n([`lib/src/profile_counters.dart:62`](../lib/src/profile_counters.dart),\npopulated in [`lib/src/stream_engine.dart:168`](../lib/src/stream_engine.dart)),\nbut the dispat...",
+      "hypothesis": "Adding `invalidate_ms`, `intersection_ms`, and `invalidate_pct_wall` columns\nto `dispatch_pressure_audit.dart` will tell us whether the next dispatch\nexperiment should target `StreamEngine.onDependencyChanges` directly. The\naudit accepts as a measurement experiment if:\n\n- the new columns are non-zero on stream workloads (proves they are wired up);\n- the direct-read control still parks (proves the existing dispatch counters\n  were not silenced);\n- at least one stream workload reports a clear `invalidate_pct_wall` reading\n  that distinguishes \"real implementation target\" from \"rule out the\n  direction\".\n\nPre-experiment decision gates:\n\n- **≥10% of overlap wall** in invalidation → direction has a real next\n  implementation target.\n- **<3% of overlap wall** → direction is ruled out; the nex...",
+      "approach": "`benchmark/profile/dispatch_pressure_audit.dart`:\n\n- Added `invalidateUs` / `intersectionUs` to `_AuditRow`, populated from\n  `ProfileCounters.snapshot()` (the keys already exist at\n  `profile_counters.dart:117/119`).\n- Split the rendered markdown into two tables: one for dispatch counters\n  (existing shape) and a new \"Invalidation traversal cost\" table with\n  `wall_ms`, `invalidate_ms`, `intersection_ms`, `invalidate_count`,\n  `intersection_entries`, and `invalidate_pct_wall`.\n- Added `--out=PATH` so callers can route per-pass output to a specific\n  filename (the existing `--markdown` continues to write the legacy default\n  path so the exp 119 / exp 120 invocation form still works).\n\n`hook/build.dart`:\n\n- Added `resqlite_step_row_hash` to `_exportedSymbols`. The Linux version\n  script ...",
+      "results": "Full per-pass values and methodology in\n[`benchmark/profile/results/exp-121-invalidation-cost-audit-aggregate.md`](../benchmark/profile/results/exp-121-invalidation-cost-audit-aggregate.md).\n\nHeadline medians (3 passes, Linux x64, reader pool size 3):\n\n| workload      | wall_ms | invalidate_ms | intersection_ms | invalidate_pct_wall | per-write_invalidate_us | per-entry_intersection_ns |\n|---------------|--------:|--------------:|----------------:|--------------------:|------------------------:|--------------------------:|\n| A11c baseline |  173.42 |          0.00 |            0.00 |               0.00% |                       — |                         — |\n| A11c disjoint |  173.80 |         15.76 |            5.34 |               9.08% |                    31.5 |                     ...",
+      "reasoning": "**Accept for review — measurement.**\n\nInvalidation traversal sits between the pre-experiment decision gates on\nthe overlap workload (7.11% raw / 8.66% active, neither side of the 3% / 10%\ngates). On its own that would be ambiguous, but the breakdown of\n`invalidate_us` makes the direction call clear:\n\n- Per-watcher intersection probes are only ~19% of `invalidate_us` on\n  overlap (4.32 / 22.27 ms = 1.4% of total wall). Even an idealised\n  zero-cost intersection would reclaim only ~1.4% of overlap wall.\n- The remaining ~81% of `invalidate_us` is `_tableIndex` lookup +\n  dirty/in-flight scheduling + `_flushQueue` kickoff. None of these have\n  obvious removable patterns at the per-write scale (~36 µs per write,\n  walking a 50-watcher index).\n\nThe disjoint workload is a structural finding: i...",
+      "benchmarkRun": {
+        "id": "baseline-for-exp120",
+        "date": "2026-05-02",
+        "timestamp": "2026-05-02T07:18:52",
+        "source": "same-day"
       }
     }
   ],

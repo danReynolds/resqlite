@@ -69,6 +69,7 @@ moved them.
 | [118](118-fifo-dispatch-counter-gate.md) | FIFO dispatch waiters with counter gate | Replaces the shared reader-pool dispatch completer with FIFO one-shot waiters; exp 115 counters show wake retries drop to zero under overload |  |
 | [119](119-dispatch-pressure-audit.md) | Post-FIFO dispatch pressure audit | Profile audit shows wake retries stay zero after FIFO, while A11c overlap and keyed-PK streams still produce parked dispatchers; next dispatch work should target stream admission/completion |  |
 | [120](120-flush-admit-bound.md) | Bounded `_flushQueue` admission | Cap stream re-query admission at `ReaderPool.availableWorkerCount` per call so synchronous over-dispatch can no longer pile up against `_dispatchWaiters`. `dispatcherParkedTotal` drops from 3,590 → 0 (A11c overlap) and 1,198 → 0 (keyed-PK); `max_parked` 46 → 0. Release suite: 9 wins, 0 regressions, including neutral high-cardinality fan-out (the exp-100 killer) |  |
+| [121](121-invalidation-cost-audit.md) | Invalidation traversal cost audit | Extend dispatch-pressure audit with `invalidate_ms` / `intersection_ms` / `invalidate_pct_wall`. A11c overlap measures 7.11% raw / 8.66% active wall in invalidation, with intersection probes themselves only 1.4% of total wall — rules out invalidation as the next `stream-rerun-dispatch` implementation target. Side fix: adds `resqlite_step_row_hash` to the Linux version script (CI on macOS missed the broken Linux build) |  |
 
 ## Rejected
 
