@@ -26,6 +26,17 @@ allowed list. You may pursue active directions, revisit areas that recently
 looked weak, or open a new speculative direction. The important thing is to
 explain why the attempt is worth a bounded pass in light of prior work.
 
+Inside each direction, the fields you should actually read first:
+
+- `keyPriors` — the experiments you must understand to evaluate work in
+  this direction. Read all of them.
+- `blockedOnMeasurement` — if non-empty, the next implementation
+  experiment in this direction is gated. Either build the missing
+  measurement (a valid run on its own, see exp 099 → 110 and exp 102 →
+  111) or pick a different direction.
+- `openCandidates` — dated candidate ideas. Prefer entries with a recent
+  `addedDate` and a clear `blockedOn` you can resolve.
+
 Prefer high-signal work. If the missing piece is measurement, profiling, or a
 benchmark, improve that first instead of forcing an implementation experiment.
 
@@ -86,6 +97,26 @@ The final summary should clearly state what was tried, what happened, whether
 each idea was accepted/rejected/deferred, and what future experimenters should
 learn from the run.
 
+### Post-merge soak and promotion
+
+A merged experiment lands in **In Review** for a soak window — typically two
+weeks, longer if a release-cycle benchmark hasn't run yet. The window catches
+regressions that only surface under realistic workloads or downstream rebases
+(see exp 114 in `JOURNAL.md` for the canonical "in-flight workload elided by
+a freshly-merged accepted experiment" case).
+
+A separate promotion pass moves merged-and-soaked experiments from **In
+Review** to **Accepted** in `experiments/README.md`. This is not the
+implementing runner's job — it's a periodic curation pass, suitable for a
+scheduled maintenance task. The promoter's checklist:
+
+- merge date > 2 weeks ago,
+- no release-suite regression has shown up since merge,
+- no rebase or follow-up experiment has changed the conclusion.
+
+If any check fails, leave the row in In Review and add a short note in
+`signals.json` explaining what's blocking acceptance.
+
 ## Branching, worktrees, and PRs
 
 Every scheduled experiment run must:
@@ -106,16 +137,28 @@ Every scheduled experiment run must:
   declaring the run finished. A red PR is not a completed run.
 - **Wait for automated review, not just CI.** After opening the PR, poll
   for review submissions for a few minutes, then read inline review
-  threads with thread-aware review data (`reviewThreads` via the GitHub
-  API/connector, or the local GitHub comment-handler helper when
-  available). Do not rely on the top-level `gh pr view` overview alone:
-  Copilot often leaves actionable inline comments that are only visible
-  in review threads.
+  threads with thread-aware review data. `gh pr view --json` does not
+  expose `reviewThreads`; use the GraphQL API directly:
+
+  ```bash
+  gh api graphql -f query='query { repository(owner: "<owner>", name: "<repo>") { pullRequest(number: <N>) { reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 5) { nodes { body author { login } path line } } } } reviews(first: 20) { nodes { author { login } state body submittedAt } } } } }'
+  ```
+
+  The top-level `gh pr view` overview misses inline comments that only
+  live in review threads — and Copilot in particular leaves most of
+  its actionable feedback there.
 - **Address unresolved, non-outdated actionable review threads** before
-  declaring the run finished. If no automated review arrives in the
-  short wait window, say that explicitly in the handoff and create a
-  follow-up/heartbeat when the environment supports it. After every
-  feedback-response push, watch CI again and re-check review threads.
+  declaring the run finished. After pushing the fix commit, mark each
+  addressed thread resolved via:
+
+  ```bash
+  gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread-id>"}) { thread { id isResolved } } }'
+  ```
+
+  If no automated review arrives in the short wait window, say that
+  explicitly in the handoff and create a follow-up/heartbeat when the
+  environment supports it. After every feedback-response push, watch
+  CI again and re-check review threads.
 
 ### What the PR description must contain
 

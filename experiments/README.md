@@ -50,8 +50,14 @@ Experiments that proved their value and were merged into the codebase.
 
 ## In Review
 
-Promising experiments with an active implementation or PR, but not yet
-merged into the codebase.
+Recent or pending-acceptance experiments. An entry sits here either
+because the PR is still open, or because the experiment has merged but
+is in its post-merge soak window — typically two weeks, longer if a
+release-cycle metric has not run yet. Soak is for catching regressions
+that only surface under realistic workloads or downstream rebases (see
+the journal entry on exp 114 for the canonical example). Promote rows
+to **Accepted** once the soak window closes and no new evidence has
+moved them.
 
 | # | Experiment | Impact | PR |
 |---|---|---|---|
@@ -135,7 +141,7 @@ Experiments that didn't work out. Each has valuable context on *why* — check b
 
 - **Experiment number:** Monotonically increasing, never reused
 - **Date:** When the experiment was run (full timestamp preferred: `2026-04-14T12:30:00`)
-- **Status:** `Accepted` (merged into codebase), `In Review` (promising but not merged), or `Rejected` (abandoned, with explanation)
+- **Status:** `Accepted` (merged + soak window closed), `In Review` (PR open or in post-merge soak window — typically two weeks), or `Rejected` (abandoned, with explanation). New experiments start at `In Review` and graduate after the soak.
 - **Commit:** Git hash of the implementing commit (added to header of each accepted experiment)
 
 ### Research Map
@@ -162,6 +168,21 @@ or watch:
   future runner could reapply elsewhere
 - leave `../doc/stories/` alone — story posts are updated on maintainer
   request, not per experiment
+
+`signals.json` per-direction fields (see the inline `schemaNotes` block at
+the top of the file for the canonical descriptions):
+
+- `keyPriors` (required, max 6) — experiments a future runner must read.
+- `archive` (optional) — older or superseded evidence; not required reading.
+  Curate from `keyPriors` when a new accepted experiment supersedes an
+  older one.
+- `openCandidates` (optional) — dated candidate ideas waiting for the
+  right workload, signal, or runner. Each item is `{idea, addedDate,
+  addedAfter?, blockedOn?}`. Prune entries older than ~3 months that
+  nobody picked up.
+- `blockedOnMeasurement` (optional) — measurements that must land before
+  the next implementation experiment in this direction is worth
+  attempting. Empty if no measurement is gating new work.
 
 ### Standard Template
 
