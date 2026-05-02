@@ -62,7 +62,7 @@ final class StreamEngine {
   final Map<String, Set<StreamEntry>> _tableIndex = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
-  final LinkedHashSet<StreamEntry> _requeryQueue = LinkedHashSet<StreamEntry>();
+  final _requeryQueue = LinkedHashSet<StreamEntry>();
 
   /// Number of active stream entries.
   ///
@@ -177,11 +177,12 @@ final class StreamEngine {
       return;
     }
 
-    final pool = await _pool;
-    while (_requeryQueue.isNotEmpty && pool.hasAvailableWorker) {
-      final entry = _requeryQueue.first;
-      _requeryQueue.remove(entry);
+    final ReaderPool(:availableWorkerCount) = await _pool;
+    final dequeued = _requeryQueue.take(availableWorkerCount).toList();
+
+    for (final entry in dequeued) {
       _requery(entry);
+      _requeryQueue.remove(entry);
     }
   }
 

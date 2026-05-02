@@ -44,7 +44,7 @@ final class ReaderPool {
   /// shared future observed by every parked dispatcher.
   final Queue<Completer<void>> _dispatchWaiters = Queue();
 
-  bool get hasAvailableWorker => _workers.any((worker) => worker.isAvailable);
+  int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
 
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
     final pool = ReaderPool._([]);
