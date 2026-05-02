@@ -62,7 +62,7 @@ final class StreamEngine {
   final Map<String, Set<StreamEntry>> _tableIndex = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
-  final LinkedHashSet<StreamEntry> _requeryQueue = LinkedHashSet<StreamEntry>();
+  final _requeryQueue = LinkedHashSet<StreamEntry>();
 
   /// Number of active stream entries.
   ///
@@ -177,19 +177,12 @@ final class StreamEngine {
       return;
     }
 
-    final pool = await _pool;
-    // Snapshot capacity once: slot reservation in `_dispatch` happens
-    // after an `await`, so a per-iteration `hasAvailableWorker` check
-    // would see stale-true after each fire-and-forget `_requery` and
-    // over-dispatch the pool. Streams beyond capacity stay in the
-    // queue and are drained when each `_requery`'s finally re-enters
-    // `_flushQueue`. See [EXP-120](../../experiments/120-flush-admit-bound.md).
-    var slots = pool.availableWorkerCount;
-    while (_requeryQueue.isNotEmpty && slots > 0) {
-      final entry = _requeryQueue.first;
-      _requeryQueue.remove(entry);
+    final ReaderPool(:availableWorkerCount) = await _pool;
+    final dequeued = _requeryQueue.take(availableWorkerCount).toList();
+
+    for (final entry in dequeued) {
       _requery(entry);
-      slots--;
+      _requeryQueue.remove(entry);
     }
   }
 
