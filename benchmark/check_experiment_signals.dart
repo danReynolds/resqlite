@@ -157,15 +157,37 @@ void _checkSignals(
       required: true,
       nonEmpty: true,
     );
-    _checkExperimentRefs(
-      _stringList(direction, 'evidence', path, errors),
-      experimentIds,
-      '$path.evidence',
+    final keyPriors = _stringList(
+      direction,
+      'keyPriors',
+      path,
       errors,
+      required: true,
+      nonEmpty: true,
     );
+    _checkExperimentRefs(keyPriors, experimentIds, '$path.keyPriors', errors);
+    if (keyPriors.length > 6) {
+      _signalError(
+        errors,
+        '$path.keyPriors should hold at most 6 entries; archive older priors '
+        'instead. Current length: ${keyPriors.length}.',
+      );
+    }
+    final archive = _stringList(direction, 'archive', path, errors);
+    _checkExperimentRefs(archive, experimentIds, '$path.archive', errors);
+    final keyPriorSet = keyPriors.toSet();
+    for (final id in archive) {
+      if (keyPriorSet.contains(id)) {
+        _signalError(
+          errors,
+          '$path: experiment "$id" appears in both keyPriors and archive.',
+        );
+      }
+    }
     _stringList(direction, 'interestingIf', path, errors);
     _stringList(direction, 'openQuestions', path, errors);
-    _stringList(direction, 'adjacentIdeas', path, errors);
+    _checkOpenCandidates(direction, path, experimentIds, errors);
+    _stringList(direction, 'blockedOnMeasurement', path, errors);
     _requireString(direction, 'notesForExperimenters', path, errors);
   }
 
@@ -501,6 +523,59 @@ void _checkExperimentRefs(
   for (final ref in refs) {
     if (!experimentIds.contains(ref)) {
       _signalError(errors, '$path references unknown experiment "$ref".');
+    }
+  }
+}
+
+final _isoDatePattern = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+void _checkOpenCandidates(
+  Map<Object?, Object?> direction,
+  String path,
+  Set<String> experimentIds,
+  List<_ValidationError> errors,
+) {
+  final value = direction['openCandidates'];
+  if (value == null) return;
+  if (value is! List) {
+    _signalError(errors, '$path.openCandidates must be a list.');
+    return;
+  }
+
+  for (var i = 0; i < value.length; i++) {
+    final itemPath = '$path.openCandidates[$i]';
+    final item = value[i];
+    if (item is! Map) {
+      _signalError(errors, '$itemPath must be an object.');
+      continue;
+    }
+    final asMap = item.cast<Object?, Object?>();
+    _requireString(asMap, 'idea', itemPath, errors);
+    final dateStr = _requireString(asMap, 'addedDate', itemPath, errors);
+    if (dateStr != null && !_isoDatePattern.hasMatch(dateStr)) {
+      _signalError(
+        errors,
+        '$itemPath.addedDate must be an ISO date string (YYYY-MM-DD).',
+      );
+    }
+    final addedAfter = asMap['addedAfter'];
+    if (addedAfter != null) {
+      if (addedAfter is! String || addedAfter.trim().isEmpty) {
+        _signalError(
+          errors,
+          '$itemPath.addedAfter must be a non-empty string.',
+        );
+      } else if (!experimentIds.contains(addedAfter)) {
+        _signalError(
+          errors,
+          '$itemPath.addedAfter references unknown experiment "$addedAfter".',
+        );
+      }
+    }
+    final blockedOn = asMap['blockedOn'];
+    if (blockedOn != null &&
+        (blockedOn is! String || blockedOn.trim().isEmpty)) {
+      _signalError(errors, '$itemPath.blockedOn must be a non-empty string.');
     }
   }
 }
