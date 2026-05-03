@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-02T20:55:17.624820",
+  "generated": "2026-05-03T07:09:44.371199",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18366,6 +18366,25 @@
         "date": "2026-05-02",
         "timestamp": "2026-05-02T07:25:17",
         "source": "exact"
+      }
+    },
+    {
+      "id": "121",
+      "title": "Invalidation traversal cost audit",
+      "date": "2026-05-03",
+      "status": "in_review",
+      "summary": "Measurement-only: profile-mode harness reports `invalidate_us` / `intersection_us` as a fraction of A11c overlap, A11c disjoint, and keyed-PK wall. Overlap invalidation is ~7% of wall (column intersection only ~1.6–1.9%); keyed-PK is ~1%. Removes invalidation traversal from `signals.json`'s `stream-rerun-dispatch` candidate list and steers future dispatch work toward completion-side or writer-side wall. Reproduces exp 120's `parked_total == 0` as a sanity check",
+      "commit": null,
+      "problem": "[Exp 120](120-flush-admit-bound.md) closed the over-dispatch path inside\n`StreamEngine._flushQueue` and dropped `dispatcherParkedTotal` and\n`dispatcherMaxParkedConcurrent` to zero on every measured stream\nworkload. Its future-notes section listed three remaining wall-time\nsources future dispatch work could plausibly target:\n\n- completion-side microtask churn\n- writer-side dispatch (writer wall vs SQLite step wall)\n- invalidation traversal (`invalidateUs` / `intersectionUs`, already\n  counted in profile mode but never audited as a fraction of overlap\n  wall)\n\nOf those, only invalidation traversal already has the counters in place\n(`ProfileCounters.invalidateUs` and `ProfileCounters.intersectionUs`,\nincremented inside `StreamEngine.onDependencyChanges`). The other two\nare blocked on new m...",
+      "hypothesis": "After exp 120, A11c overlap wall is dominated by writer SQLite step\ntime, completion-side scheduling, and reader-pool stream re-query work\n— not by writer-side invalidation traversal. The synchronous body of\n`onDependencyChanges` should be a small (sub-10%) slice of overlap\nwall, and the column-intersection sub-cost an even smaller slice.\n\nAccept this as a measurement experiment if:\n\n- `parked_total` stays at zero on every workload, reproducing exp 120\n  as a sanity check;\n- the audit produces a stable `invalidate_us / wall_us` figure across\n  repeated passes for A11c disjoint, A11c overlap, and keyed-PK\n  subscriptions;\n- the result removes one open candidate from `signals.json`'s\n  `stream-rerun-dispatch` direction one way or the other.",
+      "approach": "Added a resqlite-only profile harness:\n\n```text\nbenchmark/profile/invalidation_traversal_audit.dart\n```\n\nThe harness reuses exp 119's stream workload shapes (A11c baseline /\ndisjoint / overlap, plus 50-stream keyed-PK subscriptions) so the\ntwo reports are directly comparable, and reports `invalidate_us`,\n`intersection_us`, `invalidate_count`, `intersection_entries`,\n`parked_total`, and `max_parked` alongside total burst wall time.\n\nDerived fields computed per workload:\n\n- `invalidate_us / wall_us` — invalidation traversal as a fraction of\n  total burst wall time;\n- `intersection_us / wall_us` — column-set intersection as a fraction\n  of total burst wall time;\n- average µs per write inside `onDependencyChanges`;\n- average ns per (stream × write) intersection probe.\n\nThe harness is commit...",
+      "results": "Reader pool size: 4 (`(Platform.numberOfProcessors - 1).clamp(2, 4)`).\n\nCommand:\n\n```text\ndart run -DRESQLITE_PROFILE=true \\\n  benchmark/profile/invalidation_traversal_audit.dart --markdown\n```\n\nTwo profile passes; values bracket the per-run band. Full per-run\ntable is in\n[`benchmark/profile/results/exp-121-invalidation-traversal-aggregate.md`](../benchmark/profile/results/exp-121-invalidation-traversal-aggregate.md).\n\n| workload                | wall_ms     | invalidate_us | intersection_us | parked_total | invalidate / wall | intersection / wall |\n|-------------------------|------------:|--------------:|----------------:|-------------:|------------------:|--------------------:|\n| A11c baseline           | 92 – 93     |             0 |               0 |            0 | 0.00%            ...",
+      "reasoning": "**Accept for review — measurement.**\n\nThe audit answers the open `signals.json` question for the\n`stream-rerun-dispatch` direction:\n\n> audit invalidation traversal cost (`invalidateUs` /\n> `intersectionUs`) as a fraction of overlap wall\n\nInvalidation traversal is **not** a meaningful wall-time target on\ncurrent main. On A11c overlap — the workload exp 119 / 120 flagged as\nthe source of remaining stream-fanout pressure — the synchronous body\nof `onDependencyChanges` is ≈ 7% of total burst wall, and the\ncolumn-intersection sub-cost it would optimize is only ≈ 1.6 – 1.9%.\nOn keyed-PK subscriptions the fraction collapses to ~1% / ~0.2%\nbecause the stream's column set short-circuits the intersection probe\nquickly.\n\nA11c disjoint shows the largest *fraction* (~10%) only because column\nelision...",
+      "benchmarkRun": {
+        "id": "baseline-for-exp120",
+        "date": "2026-05-02",
+        "timestamp": "2026-05-02T07:18:52",
+        "source": "nearby"
       }
     }
   ],
