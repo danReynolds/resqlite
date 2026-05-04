@@ -142,6 +142,17 @@ git commit -m "Release X.Y.Z"
 git push origin main
 ```
 
+If the push is rejected because the remote is ahead, the auto-doc-update bot
+(`Auto-update docs (experiments + devices + blog)`) has likely landed a
+`docs/`-only commit while you were preparing the release. It only ever
+touches `docs/` (the GitHub Pages site, plural), never `doc/`, `lib/`, or
+`native/`, so a rebase is conflict-free:
+
+```bash
+git pull --rebase origin main
+git push origin main
+```
+
 Wait for CI to go green on `main` before publishing — pub.dev publishes are
 permanent (you can only retract within 7 days, and only if no one has
 depended on the version yet).
