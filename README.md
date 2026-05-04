@@ -213,7 +213,7 @@ await db.executeBatch(
 
 ```yaml
 dependencies:
-  resqlite: ^0.2.0
+  resqlite: ^0.3.0
 ```
 
 Or via the CLI:

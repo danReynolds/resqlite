@@ -47,7 +47,7 @@ final class Database {
       // Spawn the single writer isolate.
       final writer = await Writer.spawn(streamEngine, _handle);
 
-      return _DatabaseRuntime(
+      return (
         readerPool: readerPool,
         streamEngine: streamEngine,
         writer: writer,
@@ -158,10 +158,8 @@ final class Database {
     final completer = _closedCompleter = Completer<void>();
 
     try {
-      final runtime = await _runtime;
-      final readerPool = runtime.readerPool;
-      final streamEngine = runtime.streamEngine;
-      final writer = runtime.writer;
+      final _DatabaseRuntime(:readerPool, :streamEngine, :writer) =
+          await _runtime;
 
       streamEngine.close();
       await readerPool.close();
@@ -225,8 +223,7 @@ final class Database {
     // *in-flight* reads that had already dispatched to a worker finish
     // via the pool's drain semantics, while reads still parked on the
     // pool future bail out cleanly.
-    final runtime = await _runtime;
-    final readerPool = runtime.readerPool;
+    final _DatabaseRuntime(:readerPool) = await _runtime;
     return readerPool.select(sql, parameters);
   }
 
@@ -266,8 +263,7 @@ final class Database {
 
     _ensureOpen();
 
-    final runtime = await _runtime;
-    final readerPool = runtime.readerPool;
+    final _DatabaseRuntime(:readerPool) = await _runtime;
     return readerPool.selectBytes(sql, parameters);
   }
 
@@ -311,10 +307,8 @@ final class Database {
     List<Object?> parameters = const [],
   ]) {
     _ensureOpen();
-    return Stream.fromFuture(_runtime).asyncExpand((runtime) {
-      final streamEngine = runtime.streamEngine;
-      return streamEngine.stream(sql, parameters);
-    });
+    return Stream.fromFuture(_runtime)
+        .asyncExpand((runtime) => runtime.streamEngine.stream(sql, parameters));
   }
 
   // -------------------------------------------------------------------------
@@ -355,9 +349,7 @@ final class Database {
 
     _ensureOpen();
 
-    final runtime = await _runtime;
-    final streamEngine = runtime.streamEngine;
-    final writer = runtime.writer;
+    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
     streamEngine.onDependencyChanges(response.modifications);
@@ -392,9 +384,8 @@ final class Database {
 
     _ensureOpen();
 
-    final runtime = await _runtime;
-    final streamEngine = runtime.streamEngine;
-    final writer = runtime.writer;
+    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+
     final response = await writer.locked(
       () => writer.executeBatch(sql, paramSets),
     );
@@ -496,9 +487,7 @@ final class Database {
       }
     }
 
-    final runtime = await _runtime;
-    final streamEngine = runtime.streamEngine;
-
+    final _DatabaseRuntime(:streamEngine) = await _runtime;
     return Diagnostics(
       sqlitePageCacheBytes: pageCache,
       sqliteSchemaBytes: schema,
@@ -510,14 +499,8 @@ final class Database {
   }
 }
 
-final class _DatabaseRuntime {
-  const _DatabaseRuntime({
-    required this.readerPool,
-    required this.streamEngine,
-    required this.writer,
-  });
-
-  final ReaderPool readerPool;
-  final StreamEngine streamEngine;
-  final Writer writer;
-}
+typedef _DatabaseRuntime = ({
+  ReaderPool readerPool,
+  StreamEngine streamEngine,
+  Writer writer
+});

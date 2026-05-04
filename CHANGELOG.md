@@ -1,3 +1,10 @@
+## 0.3.0
+
+- **Behavior change:** `PRAGMA foreign_keys = ON` is now applied by default on every connection ([#77](https://github.com/danReynolds/resqlite/pull/77)). Code that relied on FK constraints being silently ignored will now see them enforced.
+- **Column-level reactive invalidation.** Streams now record the columns they read and writes record the columns they touch; a write to a column no stream watches no longer dispatches re-queries. Adds public `TableDependencies` / `TableDependency` / `TableColumnDependency` types ([#48](https://github.com/danReynolds/resqlite/pull/48)). +82% on disjoint-column writer-throughput benchmarks (A11c).
+- Further write-path and stream-dispatch wins: cached BEGIN/COMMIT/ROLLBACK statements, inline-packed parameter buffer, direct batch parameter matrix encoding, FIFO reader-pool dispatch with bounded synchronous stream admission. See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/) for current cross-library numbers.
+- Documented that streams over virtual tables (FTS5, R-Tree, JSON1 `json_each`, etc.) don't get reactive invalidation; use `select` instead.
+
 ## 0.2.0
 
 - Faster streaming fan-out and write-path marshalling. See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/) for current cross-library numbers.
