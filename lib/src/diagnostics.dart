@@ -17,6 +17,7 @@ final class Diagnostics {
     required this.sqliteStmtBytes,
     required this.walBytes,
     required this.readersBusyAtSnapshot,
+    required this.streamLength,
   });
 
   /// Total bytes used by the SQLite page cache across the writer and
@@ -68,12 +69,17 @@ final class Diagnostics {
   int get sqliteTotalBytes =>
       sqlitePageCacheBytes + sqliteSchemaBytes + sqliteStmtBytes;
 
+  /// Number of stream registrations (stream(sql) + listen).
+  final int streamLength;
+
   @override
-  String toString() => 'Diagnostics('
+  String toString() =>
+      'Diagnostics('
       'pageCache: $sqlitePageCacheBytes B, '
       'schema: $sqliteSchemaBytes B, '
       'stmt: $sqliteStmtBytes B, '
-      'wal: $walBytes B'
+      'wal: $walBytes B, '
+      'streams: $streamLength'
       '${readersBusyAtSnapshot ? ', readersBusy: true' : ''}'
       ')';
 }

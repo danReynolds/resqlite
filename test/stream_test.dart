@@ -77,6 +77,11 @@ final class _StreamProbe<T> {
   Future<void> cancel() => _subscription.cancel();
 }
 
+Future<int> _streamLength(Database db) async {
+  final diagnostics = await db.diagnostics();
+  return diagnostics.streamLength;
+}
+
 void main() {
   group('Database.stream', () {
     late Directory tempDir;
@@ -200,6 +205,8 @@ void main() {
           'alice',
           1,
         ]);
+        await db.execute('CREATE TABLE stream_filter(id INTEGER NOT NULL)');
+        await db.execute('INSERT INTO stream_filter(id) VALUES (?)', [1]);
         await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
           'bob',
           2,
@@ -584,19 +591,18 @@ void main() {
           1,
         ]);
 
-        final registry = db.streamEngine;
-        expect(registry.length, 0);
+        expect(await _streamLength(db), 0);
 
         // Create a stream and listen.
         final probe = _StreamProbe(
           db.stream('SELECT name FROM items ORDER BY id'),
         );
         await probe.event(1);
-        expect(registry.length, 1);
+        expect(await _streamLength(db), 1);
 
         // Cancel the subscription — entry should be cleaned up.
         await probe.cancel();
-        expect(registry.length, 0);
+        expect(await _streamLength(db), 0);
       },
     );
 
@@ -606,25 +612,27 @@ void main() {
         1,
       ]);
 
-      final registry = db.streamEngine;
       const sql = 'SELECT name FROM items ORDER BY id';
 
       // Create two subscriptions to the same stream (deduplicated).
       final probe1 = _StreamProbe(db.stream(sql));
       await probe1.event(1);
-      expect(registry.length, 1);
+      expect(await _streamLength(db), 1);
 
       final probe2 = _StreamProbe(db.stream(sql));
       await probe2.event(1);
-      expect(registry.length, 1); // Still just one entry (deduplicated).
+      expect(
+        await _streamLength(db),
+        1,
+      ); // Still just one entry (deduplicated).
 
       // Cancel first subscription — entry should remain (second listener still active).
       await probe1.cancel();
-      expect(registry.length, 1);
+      expect(await _streamLength(db), 1);
 
       // Cancel second subscription — entry should be removed.
       await probe2.cancel();
-      expect(registry.length, 0);
+      expect(await _streamLength(db), 0);
     });
 
     test('stream can be re-created after cleanup', () async {
@@ -633,16 +641,15 @@ void main() {
         1,
       ]);
 
-      final registry = db.streamEngine;
       const sql = 'SELECT name FROM items ORDER BY id';
 
       // Create, listen, cancel.
       final probe1 = _StreamProbe(db.stream(sql));
       await probe1.event(1);
-      expect(registry.length, 1);
+      expect(await _streamLength(db), 1);
 
       await probe1.cancel();
-      expect(registry.length, 0);
+      expect(await _streamLength(db), 0);
 
       // Create again — should work and register a new entry.
       final stream2 = db.stream(sql);
@@ -735,7 +742,6 @@ void main() {
     });
 
     test('stream error cleans up entry', () async {
-      final engine = db.streamEngine;
       final stream = db.stream('SELECT * FROM nonexistent_table');
 
       // Listen to consume the error (otherwise it's unhandled).
@@ -750,7 +756,7 @@ void main() {
       await completer.future.timeout(const Duration(seconds: 2));
 
       // Entry should be cleaned up after the error.
-      expect(engine.length, 0);
+      expect(await _streamLength(db), 0);
 
       await sub.cancel();
     });
@@ -762,6 +768,8 @@ void main() {
           'alice',
           1,
         ]);
+        await db.execute('CREATE TABLE stream_filter(id INTEGER NOT NULL)');
+        await db.execute('INSERT INTO stream_filter(id) VALUES (?)', [1]);
 
         final initial = Completer<void>();
         final recovered = Completer<void>();
@@ -770,7 +778,11 @@ void main() {
         Object? streamError;
 
         final sub = db
-            .stream('SELECT name FROM items ORDER BY id')
+            .stream(
+              'SELECT name FROM items '
+              'WHERE id IN (SELECT id FROM stream_filter) '
+              'ORDER BY id',
+            )
             .listen(
               (rows) {
                 results.add(rows);
@@ -792,29 +804,39 @@ void main() {
         expect(results, hasLength(1));
         expect(results[0][0]['name'], 'alice');
 
-        // Break the query by renaming the column it selects.
-        await db.execute('ALTER TABLE items RENAME COLUMN name TO title');
-        db.streamEngine.onDependencyChanges(
-          const TableDependencies.fixed([TableDependency('items')]),
-        );
+        // Break the query by dropping a referenced table, then issue a public
+        // write on the watched column to force the stream to re-run its
+        // now-broken SELECT.
+        await db.execute('DROP TABLE stream_filter');
+        await db.execute('UPDATE items SET name = ? WHERE id = ?', [
+          'alice!',
+          1,
+        ]);
 
         // Error should be delivered to onError, not swallowed.
         await errorReceived.future.timeout(const Duration(seconds: 2));
         expect(streamError, isA<ResqliteQueryException>());
         expect(results, hasLength(1)); // No data emission during failure.
 
-        // Fix the schema and insert — stream should recover.
+        // Fix the schema and insert in one public write transaction so the
+        // recovery re-query observes the complete repaired shape.
         streamError = null;
-        await db.execute('ALTER TABLE items RENAME COLUMN title TO name');
-        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-          'bob',
-          2,
-        ]);
+        await db.transaction((tx) async {
+          await tx.execute('CREATE TABLE stream_filter(id INTEGER NOT NULL)');
+          await tx.executeBatch('INSERT INTO stream_filter(id) VALUES (?)', [
+            [1],
+            [2],
+          ]);
+          await tx.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+            'bob',
+            2,
+          ]);
+        });
 
         await recovered.future.timeout(const Duration(seconds: 2));
         expect(streamError, isNull); // No new errors after recovery.
         expect(results, hasLength(2));
-        expect(results[1].map((row) => row['name']), ['alice', 'bob']);
+        expect(results[1].map((row) => row['name']), ['alice!', 'bob']);
 
         await sub.cancel();
       },
@@ -870,12 +892,11 @@ void main() {
           );
 
       await initial.future.timeout(const Duration(seconds: 2));
-      expect(db.streamEngine.length, 1);
+      expect(await _streamLength(db), 1);
 
       await db.close();
 
       await done.future.timeout(const Duration(seconds: 2));
-      expect(db.streamEngine.length, 0);
 
       await sub.cancel();
     });
