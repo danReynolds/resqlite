@@ -435,6 +435,18 @@
         "compare future batch-parameter changes against both narrow Batch Insert and Wide Batch Insert before claiming neutrality"
       ]
     },
+    "117": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "deferred",
+      "changedBeliefs": [
+        "Named-parameter support is functionally viable but too invasive for the v0.x launch path unless real user demand justifies widening the public parameter API",
+        "The focused wide-batch rerun suggested the apparent release-suite regression was mostly noise, but the write-path metrics still trended slower enough that a pre-launch performance package should defer the ergonomics win"
+      ],
+      "nextSignals": [
+        "reopen named parameters only after community feedback shows they are an adoption blocker, or after a specialized positional-vs-named bind loop benchmarks neutral across a 5-run release suite",
+        "if reopened, cache name-to-bind-index lookups per statement cache entry before claiming named-bind performance is settled"
+      ]
+    },
     "118": {
       "directions": ["stream-rerun-dispatch"],
       "outcomeClass": "in_review_accepted",

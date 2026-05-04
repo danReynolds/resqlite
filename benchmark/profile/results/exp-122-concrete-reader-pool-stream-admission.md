@@ -10,7 +10,7 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.
 dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=candidate-confirm
 dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=candidate-current
 dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=post-rebase
-dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=concrete-pool-rebased
+dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=concrete-pool-single-init
 ```
 
 ## Profile Counter A/B
@@ -40,14 +40,14 @@ Post-rebase pass on top of exp 120:
 | A11c overlap | 137.25 | 0 | 0 | 0 |
 | keyed PK subscriptions | 427.75 | 0 | 0 | 0 |
 
-Concrete-pool rebased confirmation:
+Concrete-pool single-initializer confirmation:
 
 | workload | wall_ms | parked_total | wake_retry_total | max_parked |
 |---|---:|---:|---:|---:|
-| A11c baseline | 197.57 | 0 | 0 | 0 |
-| A11c disjoint | 313.75 | 0 | 0 | 0 |
-| A11c overlap | 697.27 | 0 | 0 | 0 |
-| keyed PK subscriptions | 83.80 | 0 | 0 | 0 |
+| A11c baseline | 51.91 | 0 | 0 | 0 |
+| A11c disjoint | 42.51 | 0 | 0 | 0 |
+| A11c overlap | 100.17 | 0 | 0 | 0 |
+| keyed PK subscriptions | 29.19 | 0 | 0 | 0 |
 
 The wall time on the keyed-PK profile row is noisy because the harness waits
 for a quiet stream-emission window, but the counter signal is stable: all
@@ -67,11 +67,17 @@ dart run benchmark/suites/high_cardinality_fanout.dart
 
 | workload | baseline | candidate | delta | read |
 |---|---:|---:|---:|---|
-| A11c no-streams baseline | 27.41 ms | 26.47 ms | -3.4% | noise/control; no stream flush path |
-| A11c disjoint | 22.00 ms | 21.23 ms | -3.5% | neutral/supportive |
-| A11c overlap | 54.40 ms | 48.37 ms | -11.1% | win |
-| Keyed PK subscriptions | 222.46 ms | 233.45 ms | +4.9% | neutral |
-| High-cardinality fan-out | 240.19 ms | 245.25 ms | +2.1% | neutral |
+| A11c no-streams baseline | 29.38 ms | 27.64 ms | -5.9% | neutral/supportive; no stream flush path |
+| A11c disjoint | 21.39 ms | 20.87 ms | -2.4% | neutral/supportive |
+| A11c overlap | 56.39 ms | 55.73 ms | -1.2% | neutral |
+| Keyed PK subscriptions | 230.82 ms | 226.45 ms | -1.9% | neutral |
+| High-cardinality fan-out | 444.18 ms | 437.05 ms | -1.6% | neutral |
+
+The first concrete-pool rebase briefly used two derived futures in the hot
+write path (`(_writer, _streamEngine).wait`). A fresh A11c guardrail run caught
+that overhead in the no-streams baseline. The final implementation awaits one
+initialized runtime object per operation, matching the original one-await
+writer path while still giving `StreamEngine` a concrete `ReaderPool`.
 
 ## Interpretation
 
