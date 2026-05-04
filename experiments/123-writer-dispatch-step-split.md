@@ -1,8 +1,8 @@
 # Experiment 123: Writer Dispatch / Native Wall Split
 
 **Date:** 2026-05-04
-**Status:** Accepted
-**Direction:** `measurement-system`
+**Status:** In Review
+**Direction:** `measurement-system`, `stream-rerun-dispatch`, `parameter-encoding-and-binding`
 
 ## Problem
 

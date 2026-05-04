@@ -511,7 +511,7 @@
     },
     "123": {
       "directions": ["measurement-system", "stream-rerun-dispatch", "parameter-encoding-and-binding"],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "in_review_measurement",
       "changedBeliefs": [
         "Writer-isolate per-write wall splits cleanly into `writer_native_us` (FFI write call) and `writer_handler_us - writer_native_us` (Dart-side dispatch) via a profile-mode `Database.writerProfileSnapshot()` cross-isolate snapshot, gated behind `kProfileMode` so release builds tree-shake the timing entirely",
         "On A11c overlap, `writer_handler` is only 34–42 % of total wall — the majority (58–66 %) of fanout latency lives outside the writer in main-isolate scheduling and reader fan-out, ruling out writer-side dispatch as the next stream-fanout target",
