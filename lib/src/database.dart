@@ -5,8 +5,9 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
-import 'package:resqlite/src/writer/write_worker.dart' show WriterProfileSnapshotResponse;
 import 'package:resqlite/src/writer/writer.dart';
+import 'package:resqlite/src/writer/writer_profile_snapshot.dart'
+    show WriterProfileSnapshot;
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
@@ -514,7 +515,7 @@ final class Database {
   /// Setting [reset] to `true` clears the writer-side counters
   /// immediately after the snapshot, so a subsequent call begins from
   /// a known baseline.
-  Future<WriterProfileSnapshotResponse> writerProfileSnapshot({
+  Future<WriterProfileSnapshot> writerProfileSnapshot({
     bool reset = false,
   }) async {
     _ensureOpen();

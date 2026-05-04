@@ -21,6 +21,7 @@ import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
+import 'writer_profile_snapshot.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -92,30 +93,12 @@ final class WriterProfileSnapshotRequest extends WriterRequest {
   final bool reset;
 }
 
-/// Reply payload for [WriterProfileSnapshotRequest]. Carries the four
-/// writer-side counters as plain ints so the main isolate can format
-/// them without keeping a reference to a mutable static field.
-final class WriterProfileSnapshotResponse {
-  const WriterProfileSnapshotResponse({
-    required this.handlerUs,
-    required this.handlerCount,
-    required this.nativeUs,
-    required this.nativeCount,
-  });
-
-  /// Snapshot of [ProfileCounters.writerHandlerUs] taken inside the
-  /// writer isolate at request-handling time.
-  final int handlerUs;
-
-  /// Snapshot of [ProfileCounters.writerHandlerCount].
-  final int handlerCount;
-
-  /// Snapshot of [ProfileCounters.writerNativeUs].
-  final int nativeUs;
-
-  /// Snapshot of [ProfileCounters.writerNativeCount].
-  final int nativeCount;
-}
+// Reply payload is the public [WriterProfileSnapshot] type from
+// `writer_profile_snapshot.dart` so `Database.writerProfileSnapshot()`
+// can return it without forcing callers to import internal protocol
+// types from `lib/src/writer/...` (the previous, per-Copilot review,
+// shape leaked an internal `WriterProfileSnapshotResponse` through the
+// public Database surface).
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -290,8 +273,19 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
       handlerSw!.stop();
       ProfileCounters.writerHandlerUs += handlerSw.elapsedMicroseconds;
       ProfileCounters.writerHandlerCount += 1;
-      ProfileCounters.writerNativeUs += nativeSw!.elapsedMicroseconds;
-      ProfileCounters.writerNativeCount += 1;
+      // Only count the native segment when the FFI call actually ran.
+      // If `executeWrite` threw before reaching `resqliteExecute` (for
+      // example, `allocateParams` failed under memory pressure), the
+      // stopwatch was never started — `elapsedMicroseconds` stays at
+      // zero and we leave `writerNativeCount` alone so the audit's
+      // `nativeUs / nativeCount` average isn't deflated by ghost
+      // entries. SQLite write calls take >0 µs in any realistic
+      // environment, so treating `> 0` as "ran" is reliable here.
+      final nativeUs = nativeSw!.elapsedMicroseconds;
+      if (nativeUs > 0) {
+        ProfileCounters.writerNativeUs += nativeUs;
+        ProfileCounters.writerNativeCount += 1;
+      }
     }
   }
 }
@@ -330,14 +324,20 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       handlerSw!.stop();
       ProfileCounters.writerHandlerUs += handlerSw.elapsedMicroseconds;
       ProfileCounters.writerHandlerCount += 1;
-      ProfileCounters.writerNativeUs += nativeSw!.elapsedMicroseconds;
-      ProfileCounters.writerNativeCount += 1;
+      // See [_handleExecute] — only count the native segment when the
+      // FFI batch call actually ran. Ghost increments would deflate
+      // the audit's `nativeUs / nativeCount` average.
+      final nativeUs = nativeSw!.elapsedMicroseconds;
+      if (nativeUs > 0) {
+        ProfileCounters.writerNativeUs += nativeUs;
+        ProfileCounters.writerNativeCount += 1;
+      }
     }
   }
 }
 
 void _handleWriterProfileSnapshot(WriterProfileSnapshotRequest msg) {
-  final response = WriterProfileSnapshotResponse(
+  final response = WriterProfileSnapshot(
     handlerUs: ProfileCounters.writerHandlerUs,
     handlerCount: ProfileCounters.writerHandlerCount,
     nativeUs: ProfileCounters.writerNativeUs,

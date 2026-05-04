@@ -145,19 +145,25 @@ class ProfileCounters {
   /// Writer-isolate scope (see [writerHandlerUs]).
   static int writerNativeUs = 0;
 
-  /// Number of FFI write calls captured in [writerNativeUs]. Equal to
-  /// [writerHandlerCount] in steady state — they diverge only if the
-  /// handler exits early before issuing the FFI call (for example, a
-  /// rejected request that throws before reaching `executeWrite`).
+  /// Number of FFI write calls captured in [writerNativeUs]. The
+  /// writer handler only bumps this when the FFI call actually ran —
+  /// if `executeWrite` (or its batch variants) throws before reaching
+  /// `resqliteExecute` (e.g. a parameter-allocation failure), the
+  /// stopwatch was never started and the count is left unchanged.
+  /// Diverges from [writerHandlerCount] whenever such an early-exit
+  /// handler invocation occurs.
   static int writerNativeCount = 0;
 
-  /// Take a named snapshot of all counter values.
+  /// Take a named snapshot of the main-isolate counter values.
   ///
-  /// Only includes counters mutated on the calling isolate. The
-  /// writer-isolate-local `writer*` counters never appear here unless
-  /// [snapshot] is called from inside the writer isolate; main-isolate
-  /// callers should use `Database.writerProfileSnapshot()` to read
-  /// them across the isolate boundary.
+  /// The returned map intentionally never includes the
+  /// writer-isolate-local `writer*` counters, regardless of which
+  /// isolate calls [snapshot]. Those counters cross the isolate
+  /// boundary as fields on the response from
+  /// `Database.writerProfileSnapshot()`. Including them in this map
+  /// would let main-isolate callers read stale zeros (the writer
+  /// isolate's counters are unreachable from here without a
+  /// round-trip) and assume the writer is idle.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
     'cells_decoded': cellsDecoded,
@@ -186,9 +192,10 @@ class ProfileCounters {
 
   /// Reset all counters on the calling isolate to zero. This includes
   /// the writer-isolate-local `writer*` counters when called from
-  /// inside the writer isolate, but main-isolate callers can only
-  /// reset the writer-side counters via
-  /// `Database.resetWriterProfileCounters()`.
+  /// inside the writer isolate; main-isolate callers can only reset
+  /// the writer-side counters by calling
+  /// `Database.writerProfileSnapshot(reset: true)`, which atomically
+  /// snapshots and zeros them across the isolate boundary.
   static void reset() {
     rowsDecoded = 0;
     cellsDecoded = 0;

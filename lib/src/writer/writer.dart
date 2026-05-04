@@ -176,10 +176,10 @@ final class Writer {
   /// well-formed response. When [reset] is true the writer isolate
   /// clears its counters immediately after taking the snapshot, so the
   /// next call begins accumulating from a known baseline.
-  Future<WriterProfileSnapshotResponse> profileSnapshot({
+  Future<WriterProfileSnapshot> profileSnapshot({
     bool reset = false,
   }) {
-    return _request<WriterProfileSnapshotResponse>(
+    return _request<WriterProfileSnapshot>(
       (replyPort) => WriterProfileSnapshotRequest(replyPort, reset: reset),
     );
   }

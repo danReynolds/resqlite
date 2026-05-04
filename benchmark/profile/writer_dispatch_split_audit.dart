@@ -47,8 +47,6 @@ import 'dart:math' as math;
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
-import 'package:resqlite/src/writer/write_worker.dart'
-    show WriterProfileSnapshotResponse;
 
 // ---------------------------------------------------------------------------
 // Shared workload constants — mirror `audit_workloads.dart` so wall
@@ -143,10 +141,10 @@ final class _ScenarioResult {
 // Snapshot helpers
 // ---------------------------------------------------------------------------
 
-Future<WriterProfileSnapshotResponse> _resetWriter(Database db) =>
+Future<WriterProfileSnapshot> _resetWriter(Database db) =>
     db.writerProfileSnapshot(reset: true);
 
-Future<WriterProfileSnapshotResponse> _snapshotWriter(Database db) =>
+Future<WriterProfileSnapshot> _snapshotWriter(Database db) =>
     db.writerProfileSnapshot();
 
 // ---------------------------------------------------------------------------
