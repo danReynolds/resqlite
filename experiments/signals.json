@@ -24,9 +24,9 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch; the admission path and invalidation traversal are no longer the active targets on currently-measured workloads.",
-      "keyPriors": ["106", "118", "119", "120", "121", "122"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Exp 123 closes the last measurement gap by adding a writer-isolate dispatch / native wall split: on A11c overlap the writer accounts for only 34–42 % of total wall, so the remaining fanout latency (58–66 %) lives in main-isolate scheduling and reader fan-out, not in the writer. The active candidate is now completion-side scheduling, which still has no counter.",
+      "keyPriors": ["106", "118", "120", "121", "122", "123"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "119"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -44,12 +44,6 @@
           "blockedOn": "no current counter for completion-side scheduling cost"
         },
         {
-          "idea": "writer-isolate wall vs SQLite wall split on overlap workloads",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no profile-mode split between writer dispatch and SQLite step time"
-        },
-        {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
           "addedDate": "2026-04-30",
           "addedAfter": "115"
@@ -64,18 +58,17 @@
         }
       ],
       "blockedOnMeasurement": [
-        "completion-side microtask scheduling cost counter",
-        "writer-isolate wall vs SQLite wall split for overlap workloads"
+        "completion-side microtask scheduling cost counter"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8–14 ms off a 100 ms overlap burst — at the per-benchmark decision threshold edge — and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. A new dispatch experiment now needs a counter for completion-side scheduling cost or writer-side dispatch wall showing nonzero headroom on the workload before the change is worth trying."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119/123 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall). Exp 123 measured the writer-side wall split: on A11c overlap, `writer_handler` is only 34–42 % of total wall, so the remaining 58–66 % lives outside the writer. A new fanout-latency experiment should target completion-side microtask scheduling (still uninstrumented) before any further writer-area work."
     },
     {
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script.",
-      "keyPriors": ["028", "109", "112", "113", "116"],
-      "archive": ["076", "077", "095", "096"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 123's writer-isolate wall split shows the residual headroom is concentrated on the batch path: on a 10k x 20-param mixed batch the FFI write call accounts for only 33–43 % of the writer's batch handler wall — Dart-side allocateBatchParams consumes 24–27 ms (54–64 % of total wall) of a ~37–45 ms handler. Single Execute paths sit at 65–82 % native; writer-side dispatch on those is 11–21 µs/write and offers little remaining room.",
+      "keyPriors": ["028", "109", "113", "116", "123"],
+      "archive": ["076", "077", "095", "096", "112"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -83,7 +76,8 @@
       ],
       "openQuestions": [
         "Are there remaining parameter shapes where SQLite bind work, not Dart dispatch, dominates?",
-        "Can correctness improvements such as embedded-NUL text handling be evaluated separately from performance?"
+        "Can correctness improvements such as embedded-NUL text handling be evaluated separately from performance?",
+        "Within `allocateBatchParams`, is the residual cost cell-encoding loops, native allocation per row, or the per-row Object? type-switch?"
       ],
       "openCandidates": [
         {
@@ -91,15 +85,18 @@
           "addedDate": "2026-05-02"
         },
         {
-          "idea": "writer-isolate profile showing flat-list construction as a material batch-write cost",
-          "addedDate": "2026-04-26",
-          "addedAfter": "112"
+          "idea": "instrument allocateBatchParams further (per-cell type-switch vs per-row alloc vs UTF-8 encoding) to attribute the 24–27 ms wide-batch dispatch wall measured by exp 123",
+          "addedDate": "2026-05-04",
+          "addedAfter": "123"
+        },
+        {
+          "idea": "wide-batch encoder change targeting allocateBatchParams (since exp 123 measured 33–43 % native / 54–64 % dispatch on the batch path)",
+          "addedDate": "2026-05-04",
+          "addedAfter": "123"
         }
       ],
-      "blockedOnMeasurement": [
-        "writer-isolate profile separating bind work from dispatch and step time"
-      ],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. Exp 123 measured the writer-side dispatch / native split: the wide-batch path is the high-headroom target (Dart-side dispatch 24+ ms per 10k-row batch vs 13 ms native); single Execute paths are not (writer dispatch is 11–21 µs/write)."
     },
     {
       "id": "long-text-stream-hashing",
@@ -227,9 +224,9 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the latest examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 then ruled out invalidation traversal as a wall-time target by reading existing counters as a fraction of overlap wall (~7%, intersection ~1.6–1.9%).",
-      "keyPriors": ["099", "110", "111", "115", "119", "121"],
-      "archive": ["055", "088", "102", "108", "113", "116"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 / 121 / 123 are the latest examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target, and exp 123 added the writer-isolate dispatch / native wall split that closed the next two open measurement gaps in one harness — separating writer wall from main-isolate scheduling on overlap workloads, and separating Dart-side parameter encoding from FFI on the batch path.",
+      "keyPriors": ["099", "110", "111", "115", "121", "123"],
+      "archive": ["055", "088", "102", "108", "113", "116", "119"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -237,7 +234,8 @@
       ],
       "openQuestions": [
         "Which allocation-oriented ideas need memory/RSS acceptance criteria?",
-        "Which stream workloads are missing from the current suite?"
+        "Which stream workloads are missing from the current suite?",
+        "Is the run-to-run wall variance on the audit harnesses (~±20 % on overlap, ±15 % on wide batch) tight enough for future fraction-based decisions, or do the audits need multi-run aggregation?"
       ],
       "openCandidates": [
         {
@@ -250,9 +248,9 @@
           "addedAfter": "120"
         },
         {
-          "idea": "writer dispatch wall counter (dart wall - SQLite step wall)",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
+          "idea": "multi-run aggregation for the audit harnesses (fold them into diff_multirun.dart)",
+          "addedDate": "2026-05-04",
+          "addedAfter": "123"
         }
       ],
       "blockedOnMeasurement": [],
@@ -509,6 +507,21 @@
       "nextSignals": [
         "do not pursue more ReaderPool or stream-admission work unless exp 115 counters become nonzero again on an app-shaped workload or a new overlap shape breaks the concrete-pool admission invariant",
         "look for keyed/row-level invalidation or observer APIs to reduce keyed-PK miss-path work beyond what admission accuracy can solve"
+      ]
+    },
+    "123": {
+      "directions": ["measurement-system", "stream-rerun-dispatch", "parameter-encoding-and-binding"],
+      "outcomeClass": "accepted_measurement",
+      "changedBeliefs": [
+        "Writer-isolate per-write wall splits cleanly into `writer_native_us` (FFI write call) and `writer_handler_us - writer_native_us` (Dart-side dispatch) via a profile-mode `Database.writerProfileSnapshot()` cross-isolate snapshot, gated behind `kProfileMode` so release builds tree-shake the timing entirely",
+        "On A11c overlap, `writer_handler` is only 34–42 % of total wall — the majority (58–66 %) of fanout latency lives outside the writer in main-isolate scheduling and reader fan-out, ruling out writer-side dispatch as the next stream-fanout target",
+        "On the wide-batch path the FFI write call accounts for only 33–43 % of writer wall; Dart-side `allocateBatchParams` consumes 24–27 ms (54–64 % of total wall) of a ~37–45 ms batch handler — clear remaining headroom for the parameter-encoding direction even after exp 113",
+        "On every single-Execute path the FFI write call accounts for 65–82 % of writer wall (writer dispatch overhead is 11–21 µs/write) — too small to justify writer-area implementation work without a workload that amplifies it differently"
+      ],
+      "nextSignals": [
+        "next stream-fanout experiment must target completion-side scheduling (still uninstrumented) — writer-side dispatch can no longer be the explanation",
+        "next parameter-encoding experiment should target `allocateBatchParams` on wide batches; gate it on the exp 123 `wide batch insert` row of the audit moving (54–64 % dispatch overhead is the budget being competed for)",
+        "audit harness wall variance is ±15–20 %; if a future runner needs tighter intervals on these fractions, fold the writer-split audit into `diff_multirun.dart`"
       ]
     }
   }

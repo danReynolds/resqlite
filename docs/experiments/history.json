@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-04T03:23:23.213958",
+  "generated": "2026-05-04T07:20:58.173316",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18412,6 +18412,19 @@
         "timestamp": "2026-05-02T07:18:52",
         "source": "same-day"
       }
+    },
+    {
+      "id": "123",
+      "title": "Writer dispatch / native wall split",
+      "date": "2026-05-04",
+      "status": "in_review",
+      "summary": "Measurement-only: writer-isolate `_handleExecute` / `_handleBatch` wall now splits into native FFI (`writer_native_us`) and Dart-side dispatch (`writer_handler_us - writer_native_us`) via a `Database.writerProfileSnapshot()` cross-isolate snapshot. Closes the writer-wall measurement gap on both `stream-rerun-dispatch` and `parameter-encoding-and-binding`. Headlines: single Execute path is 65–82 % native (writer dispatch is small); wide batch is only 33–43 % native (Dart batch encoding dominates, 24+ ms recoverable); A11c overlap writer wall is only 34–42 % of total wall (most overlap-fanout cost is outside the writer)",
+      "commit": null,
+      "problem": "After [exp 120](120-flush-admit-bound.md) and [exp 122](122-concrete-reader-pool-stream-admission.md)\ndrove the dispatcher park / wake-retry counters to zero on every measured stream\nworkload, the future-notes from those experiments named three remaining\ncandidates for stream-fanout latency: completion-side microtask churn, invalidation\ntraversal, and writer-side dispatch wall. [Exp 121](121-invalidation-traversal-audit.md)\nruled out invalidation traversal at the per-benchmark decision-threshold edge.\nThat leaves writer-side dispatch wall, which `signals.json` listed under\n**both** `stream-rerun-dispatch.blockedOnMeasurement` (\"writer-isolate wall vs\nSQLite step wall split for overlap workloads\") and\n`parameter-encoding-and-binding.blockedOnMeasurement` (\"writer-isolate profile\nseparati...",
+      "hypothesis": "A profile-mode wall split inside the writer isolate, snapshotted to the main\nisolate via a dedicated request type, will let any future writer-area\nimplementation experiment be gated on direct evidence rather than wall-time\ndelta alone — closing the same evaluation-gap pattern that exps 115 / 119 / 121\nsolved for the read side. The split itself is not an optimization; it is the\nmeasurement future runners need before optimizing.",
+      "approach": "Built three things in one commit:\n\n1. **Per-write timing instrumentation in the writer isolate.** Added two\n   counters to `ProfileCounters`:\n   - `writerHandlerUs` / `writerHandlerCount` — cumulative wall inside\n     `_handleExecute` + `_handleBatch` bodies, message receive through reply\n     send.\n   - `writerNativeUs` / `writerNativeCount` — cumulative wall specifically\n     inside the FFI write call (`resqliteExecute`, `resqliteRunBatch`,\n     `resqliteRunBatchNested`).\n\n   Wired through optional `Stopwatch? nativeStopwatch` parameters on the three\n   bindings so the timed region is exactly the FFI call and the surrounding\n   `try`/`finally` blocks stay outside. All instrumentation is gated behind\n   `kProfileMode` so release builds tree-shake to zero.\n\n2. **Cross-isolate snapshot.*...",
+      "results": "Aggregate from `benchmark/profile/results/exp-123-writer-dispatch-split-aggregate.md`,\nplus run-to-run spread across three repeated runs (single-machine, Apple\nSilicon, reader pool size 4):\n\n| workload | wall_ms range | writer_handler / wall | native / handler | dispatch overhead / wall |\n|---|---:|---:|---:|---:|\n| A11c baseline (500 single writes, no streams) | 42.9–47.3 | 54.6–59.1% | 65.3–72.0% | 16.6–17.8% |\n| A11c disjoint (500 single writes, 50 streams, column-elided) | 46.6–61.8 | 47.7–51.5% | 70.7–75.8% | 11.9–15.1% |\n| A11c overlap (500 single writes, 50 streams, full fanout) | 91.8–113.8 | 33.8–42.0% | 72.4–78.1% | 9.2–9.7% |\n| keyed PK subscriptions (200 random writes, 50 PK-watching streams) | 21.6–29.8 | 40.3–57.9% | 70.3–82.4% | 10.2–13.7% |\n| wide batch insert (1 batch ×...",
+      "reasoning": "**Accepted (measurement).** Same outcome class as exps 115, 119, 121: the\nimplementation that lands here is the counters and harness, not an\noptimization. Implementing-side conclusions:\n\n- The `writer-isolate wall vs SQLite step wall split for overlap workloads`\n  measurement gap on `stream-rerun-dispatch` is closed. The 34–42 % writer\n  fraction of overlap wall is now a documented ceiling for any writer-area\n  fanout change. Future fanout-latency work should look at the 58–66 % that is\n  outside the writer (the remaining open candidate is \"completion-side\n  microtask scheduling cost counter\").\n- The `writer-isolate profile separating bind work from dispatch and step\n  time` measurement gap on `parameter-encoding-and-binding` is closed. The\n  33–43 % native fraction on the wide-batch pa..."
     }
   ],
   "tracked": [

@@ -110,7 +110,54 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative wall-clock microseconds spent inside the writer
+  /// isolate's `_handleExecute` and `_handleBatch` bodies — message
+  /// receive through reply send. Includes Dart-side parameter
+  /// encoding, the FFI write call itself, dirty-table extraction, and
+  /// reply marshalling.
+  ///
+  /// Together with [writerNativeUs] this lets a profile-mode harness
+  /// split per-write writer-isolate wall into "SQLite-side native
+  /// work" and "everything else": the difference
+  /// `writerHandlerUs - writerNativeUs` is the writer-isolate
+  /// dispatch overhead on the write path. Added by
+  /// [EXP-123](../../experiments/123-writer-dispatch-step-split.md).
+  ///
+  /// **Isolate scope.** Lives in the writer isolate only. Snapshot
+  /// across the isolate boundary via
+  /// `Database.writerProfileSnapshot()`; never appears in this
+  /// class's main-isolate [snapshot] map. Combined Execute + Batch.
+  static int writerHandlerUs = 0;
+
+  /// Number of writer-isolate Execute + Batch handler invocations
+  /// captured in [writerHandlerUs]. Lets the audit harness compute
+  /// `writerHandlerUs / writerHandlerCount` for a per-write average.
+  static int writerHandlerCount = 0;
+
+  /// Cumulative wall-clock microseconds spent specifically inside the
+  /// FFI write call (`resqliteExecute`, `resqliteRunBatch`, or
+  /// `resqliteRunBatchNested`) — i.e. the SQLite-side prepare / bind /
+  /// step / reset / commit work plus the FFI crossing itself.
+  ///
+  /// Wired through the optional `nativeStopwatch` parameter on
+  /// [executeWrite], [executeBatchWrite], and [executeNestedBatchWrite]
+  /// so the timed region is exactly the FFI call and nothing else.
+  /// Writer-isolate scope (see [writerHandlerUs]).
+  static int writerNativeUs = 0;
+
+  /// Number of FFI write calls captured in [writerNativeUs]. Equal to
+  /// [writerHandlerCount] in steady state — they diverge only if the
+  /// handler exits early before issuing the FFI call (for example, a
+  /// rejected request that throws before reaching `executeWrite`).
+  static int writerNativeCount = 0;
+
   /// Take a named snapshot of all counter values.
+  ///
+  /// Only includes counters mutated on the calling isolate. The
+  /// writer-isolate-local `writer*` counters never appear here unless
+  /// [snapshot] is called from inside the writer isolate; main-isolate
+  /// callers should use `Database.writerProfileSnapshot()` to read
+  /// them across the isolate boundary.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
     'cells_decoded': cellsDecoded,
@@ -137,7 +184,11 @@ class ProfileCounters {
     return out;
   }
 
-  /// Reset all counters to zero.
+  /// Reset all counters on the calling isolate to zero. This includes
+  /// the writer-isolate-local `writer*` counters when called from
+  /// inside the writer isolate, but main-isolate callers can only
+  /// reset the writer-side counters via
+  /// `Database.resetWriterProfileCounters()`.
   static void reset() {
     rowsDecoded = 0;
     cellsDecoded = 0;
@@ -149,5 +200,9 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    writerHandlerUs = 0;
+    writerHandlerCount = 0;
+    writerNativeUs = 0;
+    writerNativeCount = 0;
   }
 }

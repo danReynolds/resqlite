@@ -170,16 +170,27 @@ final class WriteResult {
 /// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
 /// the earlier resources are still released. Flat sequential allocation
 /// would leak on allocator failure, which is rare but real.
+///
+/// [nativeStopwatch] is an optional profile-mode hook. When supplied, the
+/// caller's stopwatch is started immediately before the `resqliteExecute`
+/// FFI call and stopped immediately after, so the cumulative wall captures
+/// only the SQLite-side work (FFI crossing + prepare/bind/step/reset). The
+/// surrounding Dart-side parameter encoding, dirty-table extraction, and
+/// reply marshalling stay outside the timed region. See
+/// [`writer_dispatch_split_audit.dart`](../../../benchmark/profile/writer_dispatch_split_audit.dart)
+/// (exp 123) for the harness that consumes this split.
 WriteResult executeWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<Object?> params,
-) {
+  List<Object?> params, {
+  Stopwatch? nativeStopwatch,
+}) {
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(params);
   try {
     final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
     try {
+      nativeStopwatch?.start();
       final rc = resqliteExecute(
         dbHandle,
         sqlNative,
@@ -187,6 +198,7 @@ WriteResult executeWrite(
         params.length,
         resultBuf,
       );
+      nativeStopwatch?.stop();
       if (rc != 0) {
         throw ResqliteQueryException(
           _queryErrorMessage(dbHandle, rc, params.length),
@@ -238,17 +250,21 @@ void assertUniformParamSets(String sql, List<List<Object?>> paramSets) {
 
 /// Execute a batch: one SQL, many param sets, wrapped in a fresh
 /// BEGIN IMMEDIATE / COMMIT transaction.
+///
+/// See [executeWrite] for the [nativeStopwatch] contract.
 void executeBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<List<Object?>> paramSets,
-) {
+  List<List<Object?>> paramSets, {
+  Stopwatch? nativeStopwatch,
+}) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
 
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateBatchParams(paramSets);
   try {
+    nativeStopwatch?.start();
     final rc = resqliteRunBatch(
       dbHandle,
       sqlNative,
@@ -256,6 +272,7 @@ void executeBatchWrite(
       paramCount,
       paramSets.length,
     );
+    nativeStopwatch?.stop();
     if (rc != 0) {
       throw ResqliteQueryException(
         _queryErrorMessage(dbHandle, rc, paramCount),
@@ -272,17 +289,21 @@ void executeBatchWrite(
 /// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
 /// without issuing any rollback, so the caller can roll back at the correct
 /// scope (full ROLLBACK vs ROLLBACK TO savepoint).
+///
+/// See [executeWrite] for the [nativeStopwatch] contract.
 void executeNestedBatchWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
-  List<List<Object?>> paramSets,
-) {
+  List<List<Object?>> paramSets, {
+  Stopwatch? nativeStopwatch,
+}) {
   if (paramSets.isEmpty) return;
   final paramCount = paramSets.first.length;
 
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateBatchParams(paramSets);
   try {
+    nativeStopwatch?.start();
     final rc = resqliteRunBatchNested(
       dbHandle,
       sqlNative,
@@ -290,6 +311,7 @@ void executeNestedBatchWrite(
       paramCount,
       paramSets.length,
     );
+    nativeStopwatch?.stop();
     if (rc != 0) {
       throw ResqliteQueryException(
         _queryErrorMessage(dbHandle, rc, paramCount),

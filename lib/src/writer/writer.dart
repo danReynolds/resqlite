@@ -168,6 +168,22 @@ final class Writer {
     return result;
   }
 
+  /// Snapshot the writer isolate's local profile counters.
+  ///
+  /// Profile-mode harness API (see `experiments/123-writer-dispatch-step-split.md`).
+  /// Outside `-DRESQLITE_PROFILE=true` the counters stay at zero, so
+  /// callers in production builds receive a meaningless but
+  /// well-formed response. When [reset] is true the writer isolate
+  /// clears its counters immediately after taking the snapshot, so the
+  /// next call begins accumulating from a known baseline.
+  Future<WriterProfileSnapshotResponse> profileSnapshot({
+    bool reset = false,
+  }) {
+    return _request<WriterProfileSnapshotResponse>(
+      (replyPort) => WriterProfileSnapshotRequest(replyPort, reset: reset),
+    );
+  }
+
   Future<void> close() async {
     _closed = true;
 

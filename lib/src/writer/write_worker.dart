@@ -17,6 +17,7 @@ import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
+import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
@@ -70,6 +71,50 @@ final class RollbackRequest extends WriterRequest {
 /// Shut down the writer isolate.
 final class CloseRequest extends WriterRequest {
   CloseRequest(super.replyPort);
+}
+
+/// Snapshot the writer isolate's local [ProfileCounters] state and
+/// return it to the main isolate via the reply port. Added by
+/// [EXP-123](../../../experiments/123-writer-dispatch-step-split.md) so
+/// profile-mode harnesses can read writer-side counters across the
+/// isolate boundary.
+///
+/// Production code never sends this — it is intended for
+/// `benchmark/profile/writer_dispatch_split_audit.dart` and similar
+/// harnesses. Outside `kProfileMode` builds the counters stay zero
+/// regardless, so the snapshot is harmlessly meaningless.
+final class WriterProfileSnapshotRequest extends WriterRequest {
+  WriterProfileSnapshotRequest(super.replyPort, {this.reset = false});
+
+  /// If true, reset the writer-isolate counters to zero immediately
+  /// after the snapshot is taken, so the next request begins
+  /// accumulating from a known baseline.
+  final bool reset;
+}
+
+/// Reply payload for [WriterProfileSnapshotRequest]. Carries the four
+/// writer-side counters as plain ints so the main isolate can format
+/// them without keeping a reference to a mutable static field.
+final class WriterProfileSnapshotResponse {
+  const WriterProfileSnapshotResponse({
+    required this.handlerUs,
+    required this.handlerCount,
+    required this.nativeUs,
+    required this.nativeCount,
+  });
+
+  /// Snapshot of [ProfileCounters.writerHandlerUs] taken inside the
+  /// writer isolate at request-handling time.
+  final int handlerUs;
+
+  /// Snapshot of [ProfileCounters.writerHandlerCount].
+  final int handlerCount;
+
+  /// Snapshot of [ProfileCounters.writerNativeUs].
+  final int nativeUs;
+
+  /// Snapshot of [ProfileCounters.writerNativeCount].
+  final int nativeCount;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +229,8 @@ void writerEntrypoint(List<Object> args) {
           _handleCommit(state, message);
         case RollbackRequest():
           _handleRollback(state, message);
+        case WriterProfileSnapshotRequest():
+          _handleWriterProfileSnapshot(message);
         case CloseRequest():
           receivePort.close();
           message.replyPort.send(true);
@@ -216,28 +263,93 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
-  // Dirty tables and columns are only collected outside transactions.
-  // Inside a transaction they accumulate in the C-level dirty sets until
-  // the outermost transaction completes.
-  final modifications = state.txDepth > 0
-      ? TableDependencies.none
-      : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  // Profile-mode wall split: the handler stopwatch covers the whole
+  // function body; the native stopwatch covers only the FFI write call
+  // segment inside `executeWrite`. Their difference is "writer
+  // dispatch overhead" — Dart-side parameter encoding, dirty-table
+  // FFI, and reply marshalling. See
+  // `experiments/123-writer-dispatch-step-split.md`.
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
+  final nativeSw = kProfileMode ? Stopwatch() : null;
+  try {
+    final result = executeWrite(
+      state.dbHandle,
+      msg.sql,
+      msg.params,
+      nativeStopwatch: nativeSw,
+    );
+    // Dirty tables and columns are only collected outside transactions.
+    // Inside a transaction they accumulate in the C-level dirty sets until
+    // the outermost transaction completes.
+    final modifications = state.txDepth > 0
+        ? TableDependencies.none
+        : getDirtyTableDependencies(state.dbHandle);
+    msg.replyPort.send(ExecuteResponse(result, modifications));
+  } finally {
+    if (kProfileMode) {
+      handlerSw!.stop();
+      ProfileCounters.writerHandlerUs += handlerSw.elapsedMicroseconds;
+      ProfileCounters.writerHandlerCount += 1;
+      ProfileCounters.writerNativeUs += nativeSw!.elapsedMicroseconds;
+      ProfileCounters.writerNativeCount += 1;
+    }
+  }
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
-  if (state.txDepth > 0) {
-    // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
-    // let the dirty set accumulate until the outermost commit.
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
-  } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
-    );
+  // See [_handleExecute] for the wall-split convention. Counter
+  // increments are merged with execute-path totals so a per-scenario
+  // audit can read writer wall as a single number; the harness picks
+  // workloads that exercise one path at a time.
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
+  final nativeSw = kProfileMode ? Stopwatch() : null;
+  try {
+    if (state.txDepth > 0) {
+      // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
+      // let the dirty set accumulate until the outermost commit.
+      executeNestedBatchWrite(
+        state.dbHandle,
+        msg.sql,
+        msg.paramSets,
+        nativeStopwatch: nativeSw,
+      );
+      msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    } else {
+      executeBatchWrite(
+        state.dbHandle,
+        msg.sql,
+        msg.paramSets,
+        nativeStopwatch: nativeSw,
+      );
+      msg.replyPort.send(
+        BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      );
+    }
+  } finally {
+    if (kProfileMode) {
+      handlerSw!.stop();
+      ProfileCounters.writerHandlerUs += handlerSw.elapsedMicroseconds;
+      ProfileCounters.writerHandlerCount += 1;
+      ProfileCounters.writerNativeUs += nativeSw!.elapsedMicroseconds;
+      ProfileCounters.writerNativeCount += 1;
+    }
   }
+}
+
+void _handleWriterProfileSnapshot(WriterProfileSnapshotRequest msg) {
+  final response = WriterProfileSnapshotResponse(
+    handlerUs: ProfileCounters.writerHandlerUs,
+    handlerCount: ProfileCounters.writerHandlerCount,
+    nativeUs: ProfileCounters.writerNativeUs,
+    nativeCount: ProfileCounters.writerNativeCount,
+  );
+  if (msg.reset) {
+    ProfileCounters.writerHandlerUs = 0;
+    ProfileCounters.writerHandlerCount = 0;
+    ProfileCounters.writerNativeUs = 0;
+    ProfileCounters.writerNativeCount = 0;
+  }
+  msg.replyPort.send(response);
 }
 
 /// Transaction-scoped read. Runs on the writer connection so uncommitted

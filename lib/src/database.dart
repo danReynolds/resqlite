@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
+import 'package:resqlite/src/writer/write_worker.dart' show WriterProfileSnapshotResponse;
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
@@ -496,6 +497,29 @@ final class Database {
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
     );
+  }
+
+  /// Snapshots the writer isolate's profile-mode counters.
+  ///
+  /// Profile-mode harness API: returns the cumulative
+  /// `writerHandlerUs` / `writerHandlerCount` / `writerNativeUs` /
+  /// `writerNativeCount` values from the writer's local
+  /// `ProfileCounters`. Outside `-DRESQLITE_PROFILE=true` builds the
+  /// counters stay at zero, so the response is harmlessly meaningless.
+  ///
+  /// Pair with `ProfileCounters.snapshot()` (main-isolate) to compute
+  /// the writer-side wall split discussed in
+  /// `experiments/123-writer-dispatch-step-split.md`.
+  ///
+  /// Setting [reset] to `true` clears the writer-side counters
+  /// immediately after the snapshot, so a subsequent call begins from
+  /// a known baseline.
+  Future<WriterProfileSnapshotResponse> writerProfileSnapshot({
+    bool reset = false,
+  }) async {
+    _ensureOpen();
+    final _DatabaseRuntime(:writer) = await _runtime;
+    return writer.profileSnapshot(reset: reset);
   }
 }
 

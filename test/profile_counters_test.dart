@@ -56,4 +56,33 @@ void main() {
     expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
     expect(ProfileCounters.dispatcherCurrentParked, 0);
   });
+
+  test(
+    'writer-isolate counters are excluded from main-isolate snapshot but reset by reset()',
+    () {
+      // Writer counters (exp 123) live in `ProfileCounters` but are
+      // mutated only inside the writer isolate. Cross-isolate access
+      // goes through `Database.writerProfileSnapshot()`. They are
+      // deliberately omitted from `snapshot()` — that map is the
+      // main-isolate aggregate.
+      ProfileCounters.writerHandlerUs = 1000;
+      ProfileCounters.writerHandlerCount = 5;
+      ProfileCounters.writerNativeUs = 700;
+      ProfileCounters.writerNativeCount = 5;
+
+      final snap = ProfileCounters.snapshot();
+      expect(snap.containsKey('writer_handler_us'), isFalse);
+      expect(snap.containsKey('writer_handler_count'), isFalse);
+      expect(snap.containsKey('writer_native_us'), isFalse);
+      expect(snap.containsKey('writer_native_count'), isFalse);
+
+      // reset() must still clear them — the writer isolate calls
+      // reset() in the same way the main isolate does.
+      ProfileCounters.reset();
+      expect(ProfileCounters.writerHandlerUs, 0);
+      expect(ProfileCounters.writerHandlerCount, 0);
+      expect(ProfileCounters.writerNativeUs, 0);
+      expect(ProfileCounters.writerNativeCount, 0);
+    },
+  );
 }
