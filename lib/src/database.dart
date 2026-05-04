@@ -37,43 +37,27 @@ import 'stream_engine.dart';
 /// - [StreamEngine], for the reactive query lifecycle internals
 final class Database {
   Database._(this._handle, this._path, int readerCount) {
-    Future.sync(() async {
-      try {
-        // Spawn the reader pool.
-        final readerPool = await ReaderPool.spawn(_handle.address, readerCount);
+    _runtime = Future.sync(() async {
+      // Spawn the reader pool.
+      final readerPool = await ReaderPool.spawn(_handle.address, readerCount);
 
-        // Start the reactive query stream engine.
-        final streamEngine = StreamEngine(readerPool);
+      // Start the reactive query stream engine.
+      final streamEngine = StreamEngine(readerPool);
 
-        // Spawn the single writer isolate.
-        final writer = await Writer.spawn(streamEngine, _handle);
+      // Spawn the single writer isolate.
+      final writer = await Writer.spawn(streamEngine, _handle);
 
-        _initializer.complete((
-          readerPool: readerPool,
-          streamEngine: streamEngine,
-          writer: writer,
-        ));
-      } catch (error, stackTrace) {
-        _initializer.completeError(error, stackTrace);
-      }
+      return _DatabaseRuntime(
+        readerPool: readerPool,
+        streamEngine: streamEngine,
+        writer: writer,
+      );
     });
   }
 
   final ffi.Pointer<ffi.Void> _handle;
 
-  final _initializer =
-      Completer<
-        ({ReaderPool readerPool, StreamEngine streamEngine, Writer writer})
-      >();
-
-  Future<ReaderPool> get _readerPool async =>
-      _initializer.future.then((res) => res.readerPool);
-
-  Future<StreamEngine> get _streamEngine async =>
-      _initializer.future.then((res) => res.streamEngine);
-
-  Future<Writer> get _writer async =>
-      _initializer.future.then((res) => res.writer);
+  late final Future<_DatabaseRuntime> _runtime;
 
   /// The filesystem path the database was opened with. Retained so
   /// [diagnostics] can read the `-wal` sidecar size. `:memory:` or
@@ -174,11 +158,10 @@ final class Database {
     final completer = _closedCompleter = Completer<void>();
 
     try {
-      final (streamEngine, readerPool, writer) = await (
-        _streamEngine,
-        _readerPool,
-        _writer,
-      ).wait;
+      final runtime = await _runtime;
+      final readerPool = runtime.readerPool;
+      final streamEngine = runtime.streamEngine;
+      final writer = runtime.writer;
 
       streamEngine.close();
       await readerPool.close();
@@ -242,7 +225,9 @@ final class Database {
     // *in-flight* reads that had already dispatched to a worker finish
     // via the pool's drain semantics, while reads still parked on the
     // pool future bail out cleanly.
-    return (await _readerPool).select(sql, parameters);
+    final runtime = await _runtime;
+    final readerPool = runtime.readerPool;
+    return readerPool.select(sql, parameters);
   }
 
   /// Executes a query and returns the result as JSON-encoded bytes.
@@ -281,7 +266,9 @@ final class Database {
 
     _ensureOpen();
 
-    return (await _readerPool).selectBytes(sql, parameters);
+    final runtime = await _runtime;
+    final readerPool = runtime.readerPool;
+    return readerPool.selectBytes(sql, parameters);
   }
 
   // -------------------------------------------------------------------------
@@ -324,9 +311,10 @@ final class Database {
     List<Object?> parameters = const [],
   ]) {
     _ensureOpen();
-    return Stream.fromFuture(
-      _streamEngine,
-    ).asyncExpand((streamEngine) => streamEngine.stream(sql, parameters));
+    return Stream.fromFuture(_runtime).asyncExpand((runtime) {
+      final streamEngine = runtime.streamEngine;
+      return streamEngine.stream(sql, parameters);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -367,7 +355,9 @@ final class Database {
 
     _ensureOpen();
 
-    final (writer, streamEngine) = await (_writer, _streamEngine).wait;
+    final runtime = await _runtime;
+    final streamEngine = runtime.streamEngine;
+    final writer = runtime.writer;
     final response = await writer.locked(() => writer.execute(sql, parameters));
 
     streamEngine.onDependencyChanges(response.modifications);
@@ -402,13 +392,15 @@ final class Database {
 
     _ensureOpen();
 
-    final (writer, streamEngine) = await (_writer, _streamEngine).wait;
-    final reponse = await writer.locked(
+    final runtime = await _runtime;
+    final streamEngine = runtime.streamEngine;
+    final writer = runtime.writer;
+    final response = await writer.locked(
       () => writer.executeBatch(sql, paramSets),
     );
 
-    if (reponse != null) {
-      streamEngine.onDependencyChanges(reponse.modifications);
+    if (response != null) {
+      streamEngine.onDependencyChanges(response.modifications);
     }
   }
 
@@ -442,7 +434,8 @@ final class Database {
 
     _ensureOpen();
 
-    final writer = await _writer;
+    final runtime = await _runtime;
+    final writer = runtime.writer;
     return writer.locked(() => writer.transaction(body));
   }
 
@@ -503,13 +496,28 @@ final class Database {
       }
     }
 
+    final runtime = await _runtime;
+    final streamEngine = runtime.streamEngine;
+
     return Diagnostics(
       sqlitePageCacheBytes: pageCache,
       sqliteSchemaBytes: schema,
       sqliteStmtBytes: stmt,
       walBytes: walBytes,
       readersBusyAtSnapshot: readersBusy,
-      streamLength: (await _streamEngine).length,
+      streamLength: streamEngine.length,
     );
   }
+}
+
+final class _DatabaseRuntime {
+  const _DatabaseRuntime({
+    required this.readerPool,
+    required this.streamEngine,
+    required this.writer,
+  });
+
+  final ReaderPool readerPool;
+  final StreamEngine streamEngine;
+  final Writer writer;
 }
