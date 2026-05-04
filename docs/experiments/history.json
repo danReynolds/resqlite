@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-03T20:52:16.275260",
+  "generated": "2026-05-04T02:31:50.924825",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -16555,19 +16555,6 @@
       "reasoning": "Eliminated the concurrent read weakness completely. resqlite now beats sqlite_async at every concurrency level. The C pool also enabled per-reader statement caches, improving cache hit rates under concurrent workloads."
     },
     {
-      "id": "008",
-      "title": "Flat value list + lazy ResultSet",
-      "date": "2026-04-06",
-      "status": "accepted",
-      "summary": "The breakthrough — 10x fewer objects, beat sqlite3",
-      "commit": "a18492c",
-      "problem": "At 20,000 rows, the `Isolate.exit()` validation walk cost 8.44ms — 38% of total `select()` time. Investigation revealed the Dart VM's `MessageValidator` walks every heap object in the transfer graph. A `LinkedHashMap` with 6 entries creates ~8-10 internal objects (hash table buckets, linked list entries, key-value nodes). For 20,000 rows: 160,000-200,000 internal objects to validate.",
-      "hypothesis": "Query result rows are immutable, fixed-schema, and read-only. They don't need `LinkedHashMap`'s hash table or insertion-order linked list. Replacing them with a simpler structure would reduce the object count in the `Isolate.exit` graph, cutting validation time.",
-      "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
-      "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
-      "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
-    },
-    {
       "id": "008b",
       "title": "Byte-backed lazy maps",
       "date": "2026-04-06",
@@ -16579,6 +16566,19 @@
       "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
       "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
       "reasoning": null
+    },
+    {
+      "id": "008",
+      "title": "Flat value list + lazy ResultSet",
+      "date": "2026-04-06",
+      "status": "accepted",
+      "summary": "The breakthrough — 10x fewer objects, beat sqlite3",
+      "commit": "a18492c",
+      "problem": "At 20,000 rows, the `Isolate.exit()` validation walk cost 8.44ms — 38% of total `select()` time. Investigation revealed the Dart VM's `MessageValidator` walks every heap object in the transfer graph. A `LinkedHashMap` with 6 entries creates ~8-10 internal objects (hash table buckets, linked list entries, key-value nodes). For 20,000 rows: 160,000-200,000 internal objects to validate.",
+      "hypothesis": "Query result rows are immutable, fixed-schema, and read-only. They don't need `LinkedHashMap`'s hash table or insertion-order linked list. Replacing them with a simpler structure would reduce the object count in the `Isolate.exit` graph, cutting validation time.",
+      "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
+      "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
+      "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
     },
     {
       "id": "009",
@@ -16665,10 +16665,10 @@
     },
     {
       "id": "014",
-      "title": "BEGIN IMMEDIATE + remove clear_bindings",
+      "title": "locking_mode=EXCLUSIVE *(partial)*",
       "date": "2026-04-07",
-      "status": "accepted",
-      "summary": "Correct but within noise (write I/O dominated)",
+      "status": "rejected",
+      "summary": "Blocks all readers — incompatible with concurrent reader pool",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -16684,10 +16684,10 @@
     },
     {
       "id": "014",
-      "title": "locking_mode=EXCLUSIVE *(partial)*",
+      "title": "BEGIN IMMEDIATE + remove clear_bindings",
       "date": "2026-04-07",
-      "status": "rejected",
-      "summary": "Blocks all readers — incompatible with concurrent reader pool",
+      "status": "accepted",
+      "summary": "Correct but within noise (write I/O dominated)",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -18322,6 +18322,19 @@
       "approach": "`benchmark/suites/writes.dart` now adds one subsection:\n\n```text\nWide Batch Insert (10000 rows x 20 params)\n```\n\nThe table shape mirrors experiment 113's mixed parameter matrix:\n\n- 20 bound parameters per row.\n- Column type cycle: `TEXT`, `INTEGER`, `REAL`, `BLOB`.\n- 10,000 rows per timed `executeBatch`.\n- Same warmup and iteration policy as the existing write suite.\n\n`benchmark/drift/writes_db.dart` now registers the matching `wide_batch` table\nso the drift peer participates through the same `BenchmarkPeer.executeBatch`\npath as the other peers. The curated metric registry tracks the resqlite row as\n`wide batch 10K x20` under the write chart.",
       "results": "Command:\n\n```text\n/Users/dan/Coding/flutter_arm64/bin/dart run benchmark/suites/writes.dart\n```\n\nWide batch subsection:\n\n| Library | Wall med | Wall p90 |\n|---|---:|---:|\n| resqlite executeBatch() | 21.896 ms | 26.800 ms |\n| sqlite3 executeBatch() | 20.969 ms | 23.331 ms |\n| sqlite_async executeBatch() | 28.151 ms | 35.365 ms |\n| drift executeBatch() | 30.437 ms | 36.688 ms |\n\nThe narrow batch sections still execute normally in the same run:\n\n| Shape | resqlite median |\n|---|---:|\n| Batch Insert (100 rows) | 0.098 ms |\n| Batch Insert (1000 rows) | 0.459 ms |\n| Batch Insert (10000 rows) | 4.294 ms |\n| Wide Batch Insert (10000 rows x 20 params) | 21.896 ms |\n\nValidation:\n\n```text\n/Users/dan/Coding/flutter_arm64/bin/dart pub get\n/Users/dan/Coding/flutter_arm64/bin/dart run build_runner bui...",
       "reasoning": "**Accepted — measurement coverage.**\n\nThis experiment intentionally adds no production optimization. Its value is\nthat the release suite now tracks the exact workload dimension experiment 113\nproved was missing: parameter width. Future batch-parameter work can compare\nboth the common two-parameter insert and the generated-statement-shaped\n20-parameter insert without relying on a focused script alone."
+    },
+    {
+      "id": "117",
+      "title": "Named parameter support (`Map<String, Object?>`)",
+      "date": "2026-05-01",
+      "status": "rejected",
+      "summary": "Functionally complete and correct; 5-run focused harness showed wide-batch within noise (+2.7%). Deferred for v0.x launch: 12K-LOC change touching the entire write path for an ergonomics nice-to-have, with 6/7 write-path benchmarks trending slightly slower (monotonic direction = weaker than independent noise). Reopen if (a) community feedback shows named params are a real adoption barrier and a 5-run release suite confirms neutral, or (b) someone redesigns dispatch as two top-level branches in `run_batch_locked` instead of per-row inline dispatch. Implementation lives on the `exp-117-named-parameters` branch.",
+      "commit": null,
+      "problem": "resqlite only accepts positional `?` parameters. SQLite supports four placeholder\nsyntaxes natively (`:name`, `@name`, `$name`, `?NNN`), all resolved through\n`sqlite3_bind_parameter_index`. Peers (sqlite3, sqlite_async, drift) accept\nnamed maps; the resqlite ergonomics gap shows up in any code that constructs SQL\nwith a templating layer or a struct-shaped row.\n\nThe constraint is that the existing positional hot path has been tuned across\nmany experiments (009 batch FFI, 028 SQLITE_STATIC, 070 zero-row buffer, 077\ncached `bind_parameter_count`, 109 inline param buffer, 113 direct batch matrix).\nA naïve \"switch on every call\" implementation would regress all of them. The\nacceptance criterion was therefore \"named ergonomics at zero cost to positional\".",
+      "hypothesis": "Add `Map<String, Object?>` as a second accepted shape on every public\nparameter-taking method (`select`, `selectBytes`, `execute`, `executeBatch`,\n`stream`, `transaction.execute`, `transaction.select`,\n`transaction.executeBatch`). The Dart-side encoder writes a different layout\nfor named binds; the C-side dispatcher picks between two binders based on the\nsign of `param_count` (negative = named).\n\nThe positional bind loop in C is left structurally identical: the dispatcher\ninlines into a single sign check that's loop-invariant in `run_batch_locked`,\nso the optimizer should hoist it out of the per-row hot path. The single-row\npositional encoder in Dart (`allocateParams(List<Object?>)`) is unchanged.",
+      "approach": "### Public API\n\n`Database.select`, `selectBytes`, `execute`, `stream`, `executeBatch`, plus the\nmatching `Transaction` methods, accept `Object` for parameters. At runtime the\ncaller-provided value must be either:\n\n- `List<Object?>` — positional binds for `?` placeholders\n- `Map<String, Object?>` — named binds; keys include the leading `:`/`@`/`$`\n  sigil exactly as written in the SQL\n\nFor `executeBatch`, every row in `paramSets` must have the same shape (all\npositional or all named). Mixed batches throw `ArgumentError` on the main\nisolate via `assertUniformParamSets`.\n\n### Wire format\n\nTwo parameter struct shapes share the same `[structs][bytes]` reusable native\nbuffer (introduced in exp 109):\n\n```\npositional (24 bytes / slot, unchanged):\n  type:i32  pad  int_val:i64\n                 OR...",
+      "results": "**Functional:** 26 new named-parameter tests pass; full existing suite (127\ntests) continues to pass. All four placeholder syntaxes work, in `select`,\n`execute`, `executeBatch`, `transaction`, and `stream`, with mixed types\nincluding unicode names and zero-length blobs.\n\n**Performance** (2-repeat release suite, candidate vs baseline):\n\n| Benchmark | Baseline ms | Candidate ms | Delta |\n|---|---:|---:|---:|\n| Single Inserts (100 sequential) | 2.18 | 2.12 | -3% |\n| Batch Insert (1000 rows) | 0.40 | 0.42 | +5% |\n| Batch Insert (10000 rows) | 3.96 | 4.14 | +5% |\n| **Wide Batch Insert (10000 × 20 params)** | **16.26** | **20.76** | **+28%** |\n| Batched Write Inside Transaction (1000 rows) | 0.66 | 0.75 | +14% |\n| Nested Transactions (savepoints) batch | 1.05 | 1.26 | +20% |\n\nThe Wide Batch +...",
+      "reasoning": "**Deferred for v0.x launch.** Will reopen post-launch if either condition holds.\n\nThe implementation is functionally complete and correct. The 5-run focused\nharness shows the wide-batch +28% in the 2-repeat suite is largely small-sample\nnoise — the real delta is +2.7%, within overlapping ranges. So this is *not*\nclearly broken.\n\nWhat it *is*, on close reading, is a 12K-LOC change touching the entire write\npath (writer isolate, reader pool, FFI bindings, native dispatch) where:\n\n1. **The trend across write-path metrics is consistently positive (slower).**\n   6 of 7 measured write benchmarks went the wrong direction. Each individually\n   is \"within noise,\" but collectively the direction is monotonic — that's\n   weaker evidence than independent random fluctuation would suggest.\n2. **The wi..."
     },
     {
       "id": "118",
