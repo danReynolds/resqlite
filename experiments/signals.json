@@ -73,8 +73,8 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script.",
-      "keyPriors": ["028", "109", "112", "113", "116"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms while falling back for non-ASCII text.",
+      "keyPriors": ["028", "109", "112", "113", "116", "125"],
       "archive": ["076", "077", "095", "096"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
@@ -82,24 +82,17 @@
         "the approach preserves the lean API and targets parameter width as well as row count"
       ],
       "openQuestions": [
-        "Are there remaining parameter shapes where SQLite bind work, not Dart dispatch, dominates?",
+        "Are there remaining non-ASCII or blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
         "Can correctness improvements such as embedded-NUL text handling be evaluated separately from performance?"
       ],
       "openCandidates": [
         {
           "idea": "embedded-NUL text handling as a correctness experiment, evaluated separately from performance",
           "addedDate": "2026-05-02"
-        },
-        {
-          "idea": "writer-isolate profile showing flat-list construction as a material batch-write cost",
-          "addedDate": "2026-04-26",
-          "addedAfter": "112"
         }
       ],
-      "blockedOnMeasurement": [
-        "writer-isolate profile separating bind work from dispatch and step time"
-      ],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125, ASCII-specific batch packing is justified only for large wide batches; keep Unicode on the generic fallback unless a non-ASCII workload proves otherwise."
     },
     {
       "id": "long-text-stream-hashing",
@@ -509,6 +502,18 @@
       "nextSignals": [
         "do not pursue more ReaderPool or stream-admission work unless exp 115 counters become nonzero again on an app-shaped workload or a new overlap shape breaks the concrete-pool admission invariant",
         "look for keyed/row-level invalidation or observer APIs to reduce keyed-PK miss-path work beyond what admission accuracy can solve"
+      ]
+    },
+    "125": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Large wide ASCII-heavy batches still had removable per-string UTF-8 allocation after exp 113's matrix encoder",
+        "A guarded ASCII fast path can improve wide batch parameter packing without changing the public API or weakening Unicode fallback behavior"
+      ],
+      "nextSignals": [
+        "watch release-suite Wide Batch Insert and narrow Batch Insert together",
+        "benchmark non-ASCII-heavy wide batches before broadening the fallback path"
       ]
     }
   }

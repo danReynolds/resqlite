@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-05T14:49:05.119903",
+  "generated": "2026-05-05T15:01:19.816981",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18412,6 +18412,19 @@
         "timestamp": "2026-05-02T07:18:52",
         "source": "same-day"
       }
+    },
+    {
+      "id": "125",
+      "title": "Wide ASCII batch parameter encoding",
+      "date": "2026-05-05",
+      "status": "in_review",
+      "summary": "Direct ASCII payload packing skips temporary per-string UTF-8 lists in large wide batches; focused 10k x20 improves 17.199 → 12.760 ms and release Wide Batch Insert improves 18.201 → 13.031 ms",
+      "commit": null,
+      "problem": "Experiment 113 removed the temporary flattened Dart parameter list from\n`executeBatch`, and experiment 116 promoted a 10,000-row x 20-parameter mixed\nbatch to the release write suite. That left a narrower question inside the same\nhot path: wide generated-statement-style batches still allocate one temporary\n`Uint8List` per text parameter before copying those bytes into the native\n`[param structs][payload bytes]` buffer.\n\nFor common ASCII identifiers, slugs, tags, and generated fixture values, UTF-8\nlength is the Dart string length. The current generic path still pays\n`utf8.encode` allocation for each string cell, then immediately copies the bytes\nagain into the native param arena.",
+      "hypothesis": "For wide, large ASCII-heavy batches, a guarded ASCII encoder can skip the\ntemporary per-string `Uint8List` allocation and write code units directly into\nthe existing native payload tail. The fast path should improve 8- and\n20-parameter batch rows while preserving the existing Unicode/blob behavior by\nfalling back to the generic encoder as soon as a non-ASCII string appears.\n\nAccept if the focused 8- and 20-parameter batch shapes improve clearly, the\nrelease-suite Wide Batch Insert improves under same-condition A/B, and\ntwo-parameter/nested-batch guardrails remain neutral. Reject if the ASCII scan\ncost erases the win or if the fallback semantics become fragile.",
+      "approach": "`allocateBatchParams` now probes only large wide batches:\n\n- `paramCount >= 8`\n- `totalCount >= 8192`\n- at least one string parameter\n- every string is ASCII\n\nWhen those conditions hold, `_allocateAsciiBatchParams` performs a direct pack:\n\n1. Measure string/blob payload bytes without allocating encoded string lists.\n2. Allocate the same native `[structs][payload bytes]` buffer used by the\n   generic path.\n3. Write integer, double, blob, null, and ASCII string parameters directly.\n4. Use the existing generic encoder unchanged for all other cases.\n\nTwo local variants were rejected before this final shape:\n\n- Stable column-kind specialization regressed the focused 10k x20 benchmark\n  because the extra type-shape bookkeeping cost more Dart work than it removed.\n- Raising the reusable native...",
+      "results": "Focused command:\n\n```text\ndart run benchmark/experiments/batch_param_flatten.dart --iterations=60\n```\n\nFocused p50 wall time:\n\n| Shape | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| 10,000 rows x 2 params | 3.829 ms | 3.613 ms | -5.6% |\n| 10,000 rows x 8 params | 7.639 ms | 6.218 ms | -18.6% |\n| 10,000 rows x 20 params | 17.199 ms | 12.760 ms | -25.8% |\n| 1,000 rows x 8 params | 0.706 ms | 0.690 ms | -2.3% |\n| 1,000 rows x 20 params | 1.376 ms | 1.139 ms | -17.2% |\n\nRelease write-suite same-condition command:\n\n```text\ndart run benchmark/suites/writes.dart\n```\n\nSame-condition p50 wall time:\n\n| Write workload | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| Batch Insert (100 rows) | 0.097 ms | 0.089 ms | -8.2% |\n| Batch Insert (1,000 rows) | 0.413 ms | 0.401 ms | -2.9% |\n|...",
+      "reasoning": "Keep in review.\n\nThe final fast path is bounded to the exact shape that measured: large wide\nASCII-containing batches. It preserves the lean public API, keeps the generic\nUnicode/blob encoder as the correctness fallback, and improves both the focused\nrow-width benchmark and the release-suite wide batch row."
     }
   ],
   "tracked": [

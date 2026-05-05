@@ -717,6 +717,104 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   final totalCount = paramSets.length * paramCount;
   if (totalCount == 0) return ffi.nullptr.cast();
 
+  if (paramCount >= 8 && totalCount >= 8192) {
+    final asciiBytes = _tryMeasureAsciiBatchBytes(paramSets, paramCount);
+    if (asciiBytes != null) {
+      return _allocateAsciiBatchParams(
+        paramSets,
+        paramCount,
+        totalCount,
+        asciiBytes,
+      );
+    }
+  }
+
+  return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
+}
+
+int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) {
+  var extraBytes = 0;
+  var hasString = false;
+
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final value = set[i];
+      if (value is String) {
+        hasString = true;
+        final length = value.length;
+        for (var j = 0; j < length; j++) {
+          if (value.codeUnitAt(j) > 0x7f) {
+            return null;
+          }
+        }
+        extraBytes += length;
+      } else if (value is Uint8List) {
+        extraBytes += value.length;
+      }
+    }
+  }
+
+  return hasString ? extraBytes : null;
+}
+
+ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
+  List<List<Object?>> paramSets,
+  int paramCount,
+  int totalCount,
+  int extraBytes,
+) {
+  final structsBytes = _paramStructSize * totalCount;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  var flatIndex = 0;
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final offset = flatIndex * _paramStructSize;
+      final value = set[i];
+
+      if (value == null) {
+        byteData.setInt32(offset, 0, Endian.little);
+      } else if (value is int) {
+        byteData.setInt32(offset, 1, Endian.little);
+        byteData.setInt64(offset + 8, value, Endian.little);
+      } else if (value is double) {
+        byteData.setInt32(offset, 2, Endian.little);
+        byteData.setFloat64(offset + 8, value, Endian.little);
+      } else if (value is String) {
+        for (var j = 0; j < value.length; j++) {
+          view[dataOffset + j] = value.codeUnitAt(j);
+        }
+        byteData.setInt32(offset, 3, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 16, value.length, Endian.little);
+        dataOffset += value.length;
+      } else if (value is Uint8List) {
+        view.setRange(dataOffset, dataOffset + value.length, value);
+        byteData.setInt32(offset, 4, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 16, value.length, Endian.little);
+        dataOffset += value.length;
+      } else {
+        byteData.setInt32(offset, 0, Endian.little);
+      }
+
+      flatIndex++;
+    }
+  }
+
+  return buf;
+}
+
+ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
+  List<List<Object?>> paramSets,
+  int paramCount,
+  int totalCount,
+) {
   List<Uint8List?>? encodedStrings;
   var extraBytes = 0;
   var flatIndex = 0;

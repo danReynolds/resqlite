@@ -520,6 +520,37 @@ void main() {
       expect(rows[1]['payload'], payloadB);
     });
 
+    test('wide executeBatch falls back for non-ascii text', () async {
+      await db.execute(
+        'CREATE TABLE t('
+        'id INTEGER PRIMARY KEY, '
+        'c0 TEXT NOT NULL, c1 INTEGER NOT NULL, '
+        'c2 REAL NOT NULL, c3 BLOB NOT NULL, '
+        'c4 TEXT NOT NULL, c5 INTEGER NOT NULL, '
+        'c6 REAL NOT NULL, c7 BLOB NOT NULL'
+        ')',
+      );
+
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          ['日本語テスト', 1, 1.5, payloadA, 'ascii_a', 2, 2.5, payloadB],
+          ['emoji 🎉🚀', 3, 3.5, payloadB, 'ascii_b', 4, 4.5, payloadA],
+        ],
+      );
+
+      final rows = await db.select('SELECT * FROM t ORDER BY id');
+      expect(rows, hasLength(2));
+      expect(rows[0]['c0'], '日本語テスト');
+      expect(rows[0]['c3'], payloadA);
+      expect(rows[1]['c0'], 'emoji 🎉🚀');
+      expect(rows[1]['c7'], payloadA);
+    });
+
     test('executeBatch rolls back on error', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
