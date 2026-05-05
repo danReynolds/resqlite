@@ -629,6 +629,11 @@ void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
 
 const int _paramStructSize = 24;
 
+// Exp 125 targets large generated-statement-style batches; smaller/narrower
+// batches measured neutral and should avoid the ASCII probe.
+const int _asciiBatchMinParamCount = 8;
+const int _asciiBatchMinTotalParamCount = 8192;
+
 /// Pack params into a single buffer: `[struct0..N][text/blob bytes]`.
 ///
 /// Text and blob bytes live inline at the tail of the same buffer that
@@ -717,7 +722,9 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   final totalCount = paramSets.length * paramCount;
   if (totalCount == 0) return ffi.nullptr.cast();
 
-  if (paramCount >= 8 && totalCount >= 8192) {
+  if (paramCount >= _asciiBatchMinParamCount &&
+      totalCount >= _asciiBatchMinTotalParamCount &&
+      _firstBatchRowHasString(paramSets.first, paramCount)) {
     final asciiBytes = _tryMeasureAsciiBatchBytes(paramSets, paramCount);
     if (asciiBytes != null) {
       return _allocateAsciiBatchParams(
@@ -730,6 +737,13 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   }
 
   return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
+}
+
+bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
+  for (var i = 0; i < paramCount; i++) {
+    if (params[i] is String) return true;
+  }
+  return false;
 }
 
 int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) {
