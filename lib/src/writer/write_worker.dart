@@ -79,10 +79,11 @@ final class CloseRequest extends WriterRequest {
 /// Response to [ExecuteRequest]. Includes the table modifications produced by
 /// the write.
 final class ExecuteResponse {
-  const ExecuteResponse(this.result, this.modifications);
+  const ExecuteResponse(this.result, this.modifications, [this.profile]);
 
   final WriteResult result;
   final TableDependencies modifications;
+  final WriterProfileSample? profile;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -93,9 +94,24 @@ final class QueryResponse {
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.modifications);
+  const BatchResponse(this.modifications, [this.profile]);
 
   final TableDependencies modifications;
+  final WriterProfileSample? profile;
+}
+
+/// Profile-only timing sample emitted by the writer isolate.
+///
+/// The main isolate owns [ProfileCounters], so profile-mode writer timings
+/// cross back with the normal response and are accumulated by `Database`.
+final class WriterProfileSample {
+  const WriterProfileSample({
+    required this.writeCallUs,
+    required this.dirtyFetchUs,
+  });
+
+  final int writeCallUs;
+  final int dirtyFetchUs;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,26 +232,81 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final profileEnabled = kProfileMode;
+  Stopwatch? writeSw;
+  if (profileEnabled) {
+    writeSw = Stopwatch()..start();
+  }
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  writeSw?.stop();
+
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
-  final modifications = state.txDepth > 0
-      ? TableDependencies.none
-      : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  var dirtyFetchUs = 0;
+  final TableDependencies modifications;
+  if (state.txDepth > 0) {
+    modifications = TableDependencies.none;
+  } else {
+    final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
+    modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
+    dirtyFetchUs = dirtySw?.elapsedMicroseconds ?? 0;
+  }
+
+  msg.replyPort.send(
+    ExecuteResponse(
+      result,
+      modifications,
+      profileEnabled
+          ? WriterProfileSample(
+              writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+              dirtyFetchUs: dirtyFetchUs,
+            )
+          : null,
+    ),
+  );
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final profileEnabled = kProfileMode;
+  Stopwatch? writeSw;
+  if (profileEnabled) {
+    writeSw = Stopwatch()..start();
+  }
+
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    writeSw?.stop();
+    msg.replyPort.send(
+      BatchResponse(
+        TableDependencies.none,
+        profileEnabled
+            ? WriterProfileSample(
+                writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+                dirtyFetchUs: 0,
+              )
+            : null,
+      ),
+    );
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    writeSw?.stop();
+    final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
     msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      BatchResponse(
+        modifications,
+        profileEnabled
+            ? WriterProfileSample(
+                writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+                dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
+              )
+            : null,
+      ),
     );
   }
 }

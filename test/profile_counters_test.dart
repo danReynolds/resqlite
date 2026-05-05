@@ -23,6 +23,10 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'writer_roundtrip_us': 0,
+      'writer_write_call_us': 0,
+      'writer_dirty_fetch_us': 0,
+      'writer_request_count': 0,
     });
 
     ProfileCounters.reset();
@@ -37,6 +41,10 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'writer_roundtrip_us': 0,
+      'writer_write_call_us': 0,
+      'writer_dirty_fetch_us': 0,
+      'writer_request_count': 0,
     });
   });
 
@@ -55,5 +63,24 @@ void main() {
     expect(ProfileCounters.dispatcherWakeRetryTotal, 0);
     expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
     expect(ProfileCounters.dispatcherCurrentParked, 0);
+  });
+
+  test('writer profile counters round-trip through snapshot/diff/reset', () {
+    ProfileCounters.writerRoundtripUs = 100;
+    ProfileCounters.writerWriteCallUs = 70;
+    ProfileCounters.writerDirtyFetchUs = 3;
+    ProfileCounters.writerRequestCount = 2;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['writer_roundtrip_us'], 100);
+    expect(snap['writer_write_call_us'], 70);
+    expect(snap['writer_dirty_fetch_us'], 3);
+    expect(snap['writer_request_count'], 2);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.writerRoundtripUs, 0);
+    expect(ProfileCounters.writerWriteCallUs, 0);
+    expect(ProfileCounters.writerDirtyFetchUs, 0);
+    expect(ProfileCounters.writerRequestCount, 0);
   });
 }
