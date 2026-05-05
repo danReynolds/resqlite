@@ -16,19 +16,19 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/stream_completion_audit.dart 
 
 | workload | shape | wall_ms | completion_us | completion_count | invalidate_us | invalidate_count | parked_total | max_parked | emissions |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 0 streams x 500 writes | 35.78 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| A11c disjoint | 50 streams x 500 writes | 39.70 | 0 | 0 | 9559 | 500 | 0 | 0 | 0 |
-| A11c overlap | 50 streams x 500 writes | 108.59 | 27256 | 3636 | 13707 | 500 | 0 | 0 | 24 |
-| keyed PK subscriptions | 50 streams x 200 random writes | 20.76 | 6676 | 999 | 3259 | 200 | 0 | 0 | 3 |
+| A11c baseline | 0 streams x 500 writes | 42.76 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| A11c disjoint | 50 streams x 500 writes | 38.12 | 0 | 0 | 8646 | 500 | 0 | 0 | 0 |
+| A11c overlap | 50 streams x 500 writes | 85.11 | 25018 | 3696 | 12159 | 500 | 0 | 0 | 28 |
+| keyed PK subscriptions | 50 streams x 200 random writes | 24.28 | 7414 | 1173 | 2814 | 200 | 0 | 0 | 3 |
 
 ## Derived fractions
 
 | workload | completion_us / wall_us | invalidate_us / wall_us | us per completion | us per write |
 |---|---:|---:|---:|---:|
 | A11c baseline | 0.00% | 0.00% | 0.00 | 0.00 |
-| A11c disjoint | 0.00% | 24.08% | 0.00 | 0.00 |
-| A11c overlap | 25.10% | 12.62% | 7.50 | 54.51 |
-| keyed PK subscriptions | 32.16% | 15.70% | 6.68 | 33.38 |
+| A11c disjoint | 0.00% | 22.68% | 0.00 | 0.00 |
+| A11c overlap | 29.39% | 14.29% | 6.77 | 50.04 |
+| keyed PK subscriptions | 30.54% | 11.59% | 6.32 | 37.07 |
 
 ## Reading the table
 

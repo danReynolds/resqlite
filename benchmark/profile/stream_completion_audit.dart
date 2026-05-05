@@ -40,11 +40,23 @@ import 'package:resqlite/src/profile_mode.dart';
 
 import 'audit_workloads.dart';
 
+int _writeCountForWorkload(String workload) {
+  // Explicit write counts taken from `audit_workloads.dart` constants
+  // (a11cWriteCount, keyedPkWriteCount). Carrying them through the row
+  // avoids deriving 'us per write' from `invalidate_count`, which is an
+  // invalidation counter and would silently break if a workload ever
+  // fired multiple dependency changes per write.
+  if (workload.startsWith('A11c')) return a11cWriteCount;
+  if (workload.startsWith('keyed PK')) return keyedPkWriteCount;
+  return 0;
+}
+
 final class _AuditRow {
   _AuditRow({
     required this.workload,
     required this.shape,
     required this.wallUs,
+    required this.writeCount,
     required this.completionUs,
     required this.completionCount,
     required this.invalidateUs,
@@ -58,6 +70,7 @@ final class _AuditRow {
     workload: r.workload,
     shape: r.shape,
     wallUs: r.wallUs,
+    writeCount: _writeCountForWorkload(r.workload),
     completionUs: r.counters['stream_completion_us'] ?? 0,
     completionCount: r.counters['stream_completion_count'] ?? 0,
     invalidateUs: r.counters['invalidate_us'] ?? 0,
@@ -70,6 +83,7 @@ final class _AuditRow {
   final String workload;
   final String shape;
   final int wallUs;
+  final int writeCount;
   final int completionUs;
   final int completionCount;
   final int invalidateUs;
@@ -86,7 +100,7 @@ final class _AuditRow {
   double get usPerCompletion =>
       completionCount == 0 ? 0.0 : completionUs / completionCount;
   double get usPerWriteCompletion =>
-      invalidateCount == 0 ? 0.0 : completionUs / invalidateCount;
+      writeCount == 0 ? 0.0 : completionUs / writeCount;
 }
 
 Future<void> main(List<String> args) async {

@@ -242,12 +242,16 @@ final class StreamEngine {
       Stopwatch? completionSw;
       try {
         final result = await _pool.selectWithDeps(sql, params);
-        if (kProfileMode) completionSw = Stopwatch()..start();
 
         // Cancelled before query finished.
         if (entry.subscribers.isEmpty) {
           return;
         }
+        // Stopwatch starts only after the cancellation fast-path so a
+        // cancelled-before-initial-emit stream does not inflate the
+        // per-completion average with the cost of just the
+        // `subscribers.isEmpty` check.
+        if (kProfileMode) completionSw = Stopwatch()..start();
 
         final (initialRows, dependencies, initialHash, initialRowCount) =
             result;
