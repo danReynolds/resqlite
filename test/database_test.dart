@@ -61,11 +61,17 @@ void main() {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
       );
-      final r1 = await db.execute('INSERT INTO t(name) VALUES (?)', ['hello']);
+      final r1 = await db.execute(
+        'INSERT INTO t(name) VALUES (?)',
+        ['hello'],
+      );
       expect(r1.affectedRows, 1);
       expect(r1.lastInsertId, 1);
 
-      final r2 = await db.execute('INSERT INTO t(name) VALUES (?)', ['world']);
+      final r2 = await db.execute(
+        'INSERT INTO t(name) VALUES (?)',
+        ['world'],
+      );
       expect(r2.affectedRows, 1);
       expect(r2.lastInsertId, 2);
     });
@@ -78,10 +84,10 @@ void main() {
       await db.execute('INSERT INTO t(name) VALUES (?)', ['bob']);
       await db.execute('INSERT INTO t(name) VALUES (?)', ['charlie']);
 
-      final result = await db.execute('UPDATE t SET name = ? WHERE id > ?', [
-        'updated',
-        1,
-      ]);
+      final result = await db.execute(
+        'UPDATE t SET name = ? WHERE id > ?',
+        ['updated', 1],
+      );
       expect(result.affectedRows, 2);
     });
 
@@ -102,7 +108,9 @@ void main() {
     });
 
     test('execute DDL returns zero affected rows', () async {
-      final result = await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY)');
+      final result = await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY)',
+      );
       expect(result.affectedRows, 0);
     });
 
@@ -177,13 +185,7 @@ void main() {
       await db.execute(
         'INSERT INTO types(int_val, real_val, text_val, blob_val, null_val) '
         'VALUES (?, ?, ?, ?, ?)',
-        [
-          42,
-          3.14,
-          'hello',
-          Uint8List.fromList([1, 2, 3]),
-          null,
-        ],
+        [42, 3.14, 'hello', Uint8List.fromList([1, 2, 3]), null],
       );
 
       final rows = await db.select('SELECT * FROM types');
@@ -219,15 +221,18 @@ void main() {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, active INTEGER)',
       );
-      await db.execute('INSERT INTO t(name, active) VALUES (?, ?)', [
-        'alice',
-        1,
-      ]);
-      await db.execute('INSERT INTO t(name, active) VALUES (?, ?)', ['bob', 0]);
-      await db.execute('INSERT INTO t(name, active) VALUES (?, ?)', [
-        'charlie',
-        1,
-      ]);
+      await db.execute(
+        'INSERT INTO t(name, active) VALUES (?, ?)',
+        ['alice', 1],
+      );
+      await db.execute(
+        'INSERT INTO t(name, active) VALUES (?, ?)',
+        ['bob', 0],
+      );
+      await db.execute(
+        'INSERT INTO t(name, active) VALUES (?, ?)',
+        ['charlie', 1],
+      );
 
       final rows = await db.select(
         'SELECT name FROM t WHERE active = ? ORDER BY name',
@@ -257,14 +262,14 @@ void main() {
       );
       final blob = Uint8List.fromList(List.generate(32, (i) => i));
       final otherBlob = Uint8List.fromList(List.generate(32, (i) => 255 - i));
-      await db.execute('INSERT INTO t(tag, payload) VALUES (?, ?)', [
-        'target',
-        blob,
-      ]);
-      await db.execute('INSERT INTO t(tag, payload) VALUES (?, ?)', [
-        'other',
-        otherBlob,
-      ]);
+      await db.execute(
+        'INSERT INTO t(tag, payload) VALUES (?, ?)',
+        ['target', blob],
+      );
+      await db.execute(
+        'INSERT INTO t(tag, payload) VALUES (?, ?)',
+        ['other', otherBlob],
+      );
 
       const sql = 'SELECT tag FROM t WHERE tag = ? AND payload = ?';
       for (var i = 0; i < 10; i++) {
@@ -310,14 +315,14 @@ void main() {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, value REAL)',
       );
-      await db.execute('INSERT INTO t(name, value) VALUES (?, ?)', [
-        'alpha',
-        1.5,
-      ]);
-      await db.execute('INSERT INTO t(name, value) VALUES (?, ?)', [
-        'beta',
-        2.5,
-      ]);
+      await db.execute(
+        'INSERT INTO t(name, value) VALUES (?, ?)',
+        ['alpha', 1.5],
+      );
+      await db.execute(
+        'INSERT INTO t(name, value) VALUES (?, ?)',
+        ['beta', 2.5],
+      );
 
       final bytes = await db.selectBytes('SELECT * FROM t ORDER BY id');
       final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
@@ -340,7 +345,10 @@ void main() {
 
       final bytes = await db.selectBytes('SELECT val FROM t');
       final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
-      expect((decoded[0] as Map)['val'], 'quote"slash\\newline\ntab\t');
+      expect(
+        (decoded[0] as Map)['val'],
+        'quote"slash\\newline\ntab\t',
+      );
     });
 
     test('selectBytes matches jsonEncode of select', () async {
@@ -362,9 +370,8 @@ void main() {
       final rows = await db.select('SELECT * FROM items ORDER BY id');
       final bytesFromSelect = utf8.encode(jsonEncode(rows));
 
-      final bytesFromSelectBytes = await db.selectBytes(
-        'SELECT * FROM items ORDER BY id',
-      );
+      final bytesFromSelectBytes =
+          await db.selectBytes('SELECT * FROM items ORDER BY id');
 
       final fromSelect = jsonDecode(utf8.decode(bytesFromSelect));
       final fromBytes = jsonDecode(utf8.decode(bytesFromSelectBytes));
@@ -376,10 +383,10 @@ void main() {
         'CREATE TABLE t(id INTEGER PRIMARY KEY, tag TEXT, payload BLOB)',
       );
       final blob = Uint8List.fromList(List.generate(48, (i) => i % 17));
-      await db.execute('INSERT INTO t(tag, payload) VALUES (?, ?)', [
-        'target',
-        blob,
-      ]);
+      await db.execute(
+        'INSERT INTO t(tag, payload) VALUES (?, ?)',
+        ['target', blob],
+      );
 
       const sql = 'SELECT tag FROM t WHERE tag = ? AND payload = ?';
       for (var i = 0; i < 10; i++) {
@@ -391,7 +398,9 @@ void main() {
     });
 
     test('selectBytes encodes blobs as base64', () async {
-      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, data BLOB)');
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, data BLOB)',
+      );
 
       // Test various sizes: empty, 1 byte (padding ==), 2 bytes (padding =),
       // 3 bytes (no padding), and a larger payload.
@@ -442,11 +451,10 @@ void main() {
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
       );
 
-      await db.executeBatch('INSERT INTO t(name) VALUES (?)', [
-        ['alice'],
-        ['bob'],
-        ['charlie'],
-      ]);
+      await db.executeBatch(
+        'INSERT INTO t(name) VALUES (?)',
+        [['alice'], ['bob'], ['charlie']],
+      );
 
       final rows = await db.select('SELECT name FROM t ORDER BY id');
       expect(rows, hasLength(3));
@@ -471,9 +479,10 @@ void main() {
         'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
       );
 
-      await db.executeBatch('INSERT INTO t(value) VALUES (?)', [
-        for (var i = 0; i < 1000; i++) [i],
-      ]);
+      await db.executeBatch(
+        'INSERT INTO t(value) VALUES (?)',
+        [for (var i = 0; i < 1000; i++) [i]],
+      );
 
       final rows = await db.select('SELECT COUNT(*) as cnt FROM t');
       expect(rows[0]['cnt'], 1000);
@@ -484,11 +493,14 @@ void main() {
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)',
       );
 
-      await db.executeBatch('INSERT INTO t(name, value) VALUES (?, ?)', [
-        ['alice', 1.5],
-        ['bob', 2.5],
-        ['charlie', 3.5],
-      ]);
+      await db.executeBatch(
+        'INSERT INTO t(name, value) VALUES (?, ?)',
+        [
+          ['alice', 1.5],
+          ['bob', 2.5],
+          ['charlie', 3.5],
+        ],
+      );
 
       final rows = await db.select('SELECT * FROM t ORDER BY id');
       expect(rows, hasLength(3));
@@ -504,10 +516,13 @@ void main() {
       final payloadA = Uint8List.fromList([0x00, 0x7F, 0x80, 0xFF]);
       final payloadB = Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF]);
 
-      await db.executeBatch('INSERT INTO t(name, payload) VALUES (?, ?)', [
-        ['日本語テスト', payloadA],
-        ['emoji 🎉🚀', payloadB],
-      ]);
+      await db.executeBatch(
+        'INSERT INTO t(name, payload) VALUES (?, ?)',
+        [
+          ['日本語テスト', payloadA],
+          ['emoji 🎉🚀', payloadB],
+        ],
+      );
 
       final rows = await db.select('SELECT name, payload FROM t ORDER BY id');
       expect(rows, hasLength(2));
@@ -517,48 +532,45 @@ void main() {
       expect(rows[1]['payload'], payloadB);
     });
 
-    test(
-      'wide executeBatch fast path preserves ascii text and blobs',
-      () async {
-        await createWideBatchTable();
+    test('wide executeBatch fast path preserves ascii text and blobs', () async {
+      await createWideBatchTable();
 
-        final payloadA = Uint8List.fromList([1, 2, 3, 4]);
-        final payloadB = Uint8List.fromList([5, 6, 7, 8]);
-        final List<List<Object?>> paramSets = [
-          for (var i = 0; i < 1024; i++)
-            <Object?>[
-              'ascii_$i',
-              i,
-              i + 0.5,
-              i.isEven ? payloadA : payloadB,
-              'slug_$i',
-              i * 2,
-              i + 1.5,
-              i.isEven ? payloadB : payloadA,
-            ],
-        ];
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < 1024; i++)
+          <Object?>[
+            'ascii_$i',
+            i,
+            i + 0.5,
+            i.isEven ? payloadA : payloadB,
+            'slug_$i',
+            i * 2,
+            i + 1.5,
+            i.isEven ? payloadB : payloadA,
+          ],
+      ];
 
-        await db.executeBatch(
-          'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          paramSets,
-        );
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        paramSets,
+      );
 
-        final count = await db.select('SELECT COUNT(*) AS cnt FROM t');
-        expect(count.single['cnt'], 1024);
+      final count = await db.select('SELECT COUNT(*) AS cnt FROM t');
+      expect(count.single['cnt'], 1024);
 
-        final rows = await db.select(
-          'SELECT * FROM t WHERE id IN (1, 512, 1024) ORDER BY id',
-        );
-        expect(rows, hasLength(3));
-        expect(rows[0]['c0'], 'ascii_0');
-        expect(rows[0]['c3'], payloadA);
-        expect(rows[1]['c0'], 'ascii_511');
-        expect(rows[1]['c7'], payloadA);
-        expect(rows[2]['c4'], 'slug_1023');
-        expect(rows[2]['c7'], payloadA);
-      },
-    );
+      final rows = await db.select(
+        'SELECT * FROM t WHERE id IN (1, 512, 1024) ORDER BY id',
+      );
+      expect(rows, hasLength(3));
+      expect(rows[0]['c0'], 'ascii_0');
+      expect(rows[0]['c3'], payloadA);
+      expect(rows[1]['c0'], 'ascii_511');
+      expect(rows[1]['c7'], payloadA);
+      expect(rows[2]['c4'], 'slug_1023');
+      expect(rows[2]['c7'], payloadA);
+    });
 
     test('wide executeBatch falls back for non-ascii text', () async {
       await createWideBatchTable();
@@ -604,11 +616,10 @@ void main() {
       );
 
       expect(
-        () => db.executeBatch('INSERT INTO t(name) VALUES (?)', [
-          ['alice'],
-          [null],
-          ['charlie'],
-        ]),
+        () => db.executeBatch(
+          'INSERT INTO t(name) VALUES (?)',
+          [['alice'], [null], ['charlie']],
+        ),
         throwsA(isA<ResqliteQueryException>()),
       );
 
@@ -672,7 +683,10 @@ void main() {
       );
 
       final lastId = await db.transaction((tx) async {
-        final r = await tx.execute('INSERT INTO t(name) VALUES (?)', ['alice']);
+        final r = await tx.execute(
+          'INSERT INTO t(name) VALUES (?)',
+          ['alice'],
+        );
         return r.lastInsertId;
       });
 
@@ -714,18 +728,17 @@ void main() {
 
     test('transaction with multiple tables', () async {
       await db.execute('CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)');
-      await db.execute(
-        'CREATE TABLE posts(id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)',
-      );
+      await db.execute('CREATE TABLE posts(id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)');
 
       await db.transaction((tx) async {
-        final r = await tx.execute('INSERT INTO users(name) VALUES (?)', [
-          'alice',
-        ]);
-        await tx.execute('INSERT INTO posts(user_id, title) VALUES (?, ?)', [
-          r.lastInsertId,
-          'Hello World',
-        ]);
+        final r = await tx.execute(
+          'INSERT INTO users(name) VALUES (?)',
+          ['alice'],
+        );
+        await tx.execute(
+          'INSERT INTO posts(user_id, title) VALUES (?, ?)',
+          [r.lastInsertId, 'Hello World'],
+        );
       });
 
       final users = await db.select('SELECT * FROM users');
@@ -768,9 +781,9 @@ void main() {
       ''');
       await db.executeBatch(
         'INSERT INTO items(name, price, data) VALUES (?, ?, ?)',
-        [
-          for (var i = 0; i < 500; i++) ['item_$i', i * 1.5, null],
-        ],
+        [for (var i = 0; i < 500; i++) [
+          'item_$i', i * 1.5, null,
+        ]],
       );
 
       final rows = await db.transaction((tx) async {
@@ -812,14 +825,14 @@ void main() {
       ''');
 
       final rows = await db.transaction((tx) async {
-        await tx.execute('INSERT INTO mixed(label, payload) VALUES (?, ?)', [
-          '日本語テスト',
-          Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF]),
-        ]);
-        await tx.execute('INSERT INTO mixed(label, payload) VALUES (?, ?)', [
-          'émojis 🎉🚀',
-          Uint8List.fromList([1, 2, 3]),
-        ]);
+        await tx.execute(
+          'INSERT INTO mixed(label, payload) VALUES (?, ?)',
+          ['日本語テスト', Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF])],
+        );
+        await tx.execute(
+          'INSERT INTO mixed(label, payload) VALUES (?, ?)',
+          ['émojis 🎉🚀', Uint8List.fromList([1, 2, 3])],
+        );
         return await tx.select('SELECT * FROM mixed ORDER BY id');
       });
 
@@ -850,9 +863,10 @@ void main() {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
       );
-      await db.executeBatch('INSERT INTO t(value) VALUES (?)', [
-        for (var i = 0; i < 100; i++) [i],
-      ]);
+      await db.executeBatch(
+        'INSERT INTO t(value) VALUES (?)',
+        [for (var i = 0; i < 100; i++) [i]],
+      );
 
       // Fire reads and writes concurrently.
       final results = await Future.wait([
@@ -907,34 +921,29 @@ void main() {
 
     // ----- Closed database -----
 
-    test(
-      'operations on closed database throw ResqliteConnectionException',
-      () async {
-        final closedDir = await Directory.systemTemp.createTemp(
-          'resqlite_closed_',
-        );
-        final closedDb = await Database.open('${closedDir.path}/test.db');
-        await closedDb.close();
+    test('operations on closed database throw ResqliteConnectionException', () async {
+      final closedDir = await Directory.systemTemp.createTemp('resqlite_closed_');
+      final closedDb = await Database.open('${closedDir.path}/test.db');
+      await closedDb.close();
 
-        expect(
-          () => closedDb.select('SELECT 1'),
-          throwsA(isA<ResqliteConnectionException>()),
-        );
-        expect(
-          () => closedDb.selectBytes('SELECT 1'),
-          throwsA(isA<ResqliteConnectionException>()),
-        );
-        expect(
-          () => closedDb.execute('CREATE TABLE t(id INTEGER)'),
-          throwsA(isA<ResqliteConnectionException>()),
-        );
-        expect(
-          () => closedDb.stream('SELECT 1'),
-          throwsA(isA<ResqliteConnectionException>()),
-        );
+      expect(
+        () => closedDb.select('SELECT 1'),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+      expect(
+        () => closedDb.selectBytes('SELECT 1'),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+      expect(
+        () => closedDb.execute('CREATE TABLE t(id INTEGER)'),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
+      expect(
+        () => closedDb.stream('SELECT 1'),
+        throwsA(isA<ResqliteConnectionException>()),
+      );
 
-        await closedDir.delete(recursive: true);
-      },
-    );
+      await closedDir.delete(recursive: true);
+    });
   });
 }
