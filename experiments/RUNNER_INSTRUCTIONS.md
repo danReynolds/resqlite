@@ -7,8 +7,13 @@ Resqlite performance experiment runner.
 
 Improve Resqlite performance while preserving the lean public API. It is valid
 for a run to produce an accepted optimization, a rejected experiment with useful
-evidence, or a measurement/profiling improvement that makes future experiments
-better.
+evidence, or a measurement/profiling improvement that makes a specific future
+optimization decision possible.
+
+Default toward implementation experiments when there is a plausible, bounded
+performance change to try. Measurement-only runs are lower-frequency support
+work: use them when implementation would otherwise be speculative, not as an
+equal-priority substitute for changing the hot path.
 
 ## Preflight
 
@@ -31,14 +36,17 @@ Inside each direction, the fields you should actually read first:
 - `keyPriors` — the experiments you must understand to evaluate work in
   this direction. Read all of them.
 - `blockedOnMeasurement` — if non-empty, the next implementation
-  experiment in this direction is gated. Either build the missing
-  measurement (a valid run on its own, see exp 099 → 110 and exp 102 →
-  111) or pick a different direction.
+  experiment in this direction is gated. Prefer a measurement run only when
+  it unblocks a named implementation path or can rule out a direction that
+  would otherwise waste an implementation pass. If the measurement is not
+  needed for that kind of decision, pick a different direction.
 - `openCandidates` — dated candidate ideas. Prefer entries with a recent
   `addedDate` and a clear `blockedOn` you can resolve.
 
-Prefer high-signal work. If the missing piece is measurement, profiling, or a
-benchmark, improve that first instead of forcing an implementation experiment.
+Prefer high-signal implementation work. If the missing piece is measurement,
+profiling, or a benchmark, improve that first only when you can name the
+optimization it enables or the candidate it will let future runners reject
+confidently.
 
 ## Research
 
@@ -54,14 +62,40 @@ Before coding, write a short working note for yourself:
 
 - what prior experiments are adjacent
 - why this is not just a duplicate attempt
+- whether this run is an implementation experiment or measurement-only; if it
+  is measurement-only, why an implementation pass is not yet the right next
+  step
 - what new evidence, benchmark, workload, implementation shape, or external
   change makes it worth trying now
 - what result would make you accept, reject, or defer the idea
+- for measurement-only runs, the specific follow-up optimization, rejection, or
+  de-prioritization decision the measurement is expected to unlock
 
 This note does not need to be committed directly, but the final experiment
 writeup should make the reasoning clear.
 
 ## Measurement
+
+Measurement is in service of performance work. Use it to choose, constrain, or
+reject implementation ideas; do not stack diagnostic runs just because another
+counter would be interesting.
+
+Before selecting a measurement-only run, make sure at least one of these is
+true:
+
+- `signals.json` marks the chosen direction as blocked on a missing measurement.
+- A concrete implementation candidate exists, but the current suite cannot tell
+  whether its target cost is material.
+- A recent accepted or in-review experiment changed the hot path enough that an
+  older candidate may now be obsolete.
+- The measurement will let future runners remove or de-prioritize a candidate
+  from `signals.json`.
+
+Avoid back-to-back measurement-only runs unless the current signal map makes an
+implementation pass genuinely speculative. After a measurement experiment
+lands, the next runner should usually consume that signal with an
+implementation, rejection, or direction cleanup rather than adding another
+diagnostic layer.
 
 - Use focused benchmarks when they better isolate the target path.
 - Use multi-run comparisons when measuring small effects.
@@ -95,7 +129,8 @@ When finished:
 
 The final summary should clearly state what was tried, what happened, whether
 each idea was accepted/rejected/deferred, and what future experimenters should
-learn from the run.
+learn from the run. For measurement-only runs, also state the implementation
+candidate or direction decision that should come next.
 
 ### Post-merge soak and promotion
 
