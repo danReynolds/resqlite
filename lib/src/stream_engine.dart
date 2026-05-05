@@ -230,8 +230,19 @@ final class StreamEngine {
     final subscriberStream = _subscribe(entry);
 
     Future.sync(() async {
+      // Profile-mode wall split: start the stopwatch once the await
+      // returns, so the timed segment is the synchronous main-isolate
+      // work the event loop runs in response to the initial query
+      // reply - dependency-set wiring, dirty/requeue scheduling, and
+      // `entry.emit(initialRows)` to subscribers. Pairs with
+      // `_requery`'s post-await stopwatch to measure the completion-
+      // side scheduling cost exp 120 / exp 121 left as an open
+      // counter for `stream-rerun-dispatch`. See
+      // `experiments/124-stream-completion-counter.md`.
+      Stopwatch? completionSw;
       try {
         final result = await _pool.selectWithDeps(sql, params);
+        if (kProfileMode) completionSw = Stopwatch()..start();
 
         // Cancelled before query finished.
         if (entry.subscribers.isEmpty) {
@@ -270,6 +281,12 @@ final class StreamEngine {
         _remove(entry);
       } finally {
         entry.inFlight = false;
+        if (kProfileMode && completionSw != null) {
+          completionSw.stop();
+          ProfileCounters.streamCompletionUs +=
+              completionSw.elapsedMicroseconds;
+          ProfileCounters.streamCompletionCount++;
+        }
       }
     });
 
@@ -278,6 +295,13 @@ final class StreamEngine {
 
   /// Re-query a single stream on the reader pool.
   Future<void> _requery(StreamEntry entry) async {
+    // Profile-mode wall split: timed segment starts once the
+    // reader-pool await returns and includes the trailing
+    // `_flushQueue` kickoff in the finally - that is what the main
+    // isolate event loop runs synchronously when a stream re-query
+    // reply lands. Per-completion segment count drives the per-write
+    // average reported by `experiments/124-stream-completion-counter.md`.
+    Stopwatch? completionSw;
     try {
       entry.inFlight = true;
       entry.dirty = false;
@@ -288,6 +312,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
+      if (kProfileMode) completionSw = Stopwatch()..start();
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
@@ -317,6 +342,12 @@ final class StreamEngine {
     } finally {
       entry.inFlight = false;
       _flushQueue();
+      if (kProfileMode && completionSw != null) {
+        completionSw.stop();
+        ProfileCounters.streamCompletionUs +=
+            completionSw.elapsedMicroseconds;
+        ProfileCounters.streamCompletionCount++;
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-04T03:23:23.213958",
+  "generated": "2026-05-05T07:19:04.143605",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18412,6 +18412,19 @@
         "timestamp": "2026-05-02T07:18:52",
         "source": "same-day"
       }
+    },
+    {
+      "id": "124",
+      "title": "Stream completion scheduling cost counter",
+      "date": "2026-05-05",
+      "status": "in_review",
+      "summary": "Measurement-only: `streamCompletionUs` / `streamCompletionCount` for the post-await body of `StreamEngine._requery` and `_createStream`. A11c overlap spends ~25-34% of writer-side burst wall in completion-side scheduling vs ~13-17% in invalidation traversal (exp 121); keyed-PK is ~21-32% vs ~13-16%. Disjoint stays at zero (column elision from exp 106). Pairs with exp 123 (writer-isolate vs native) to give end-to-end overlap-burst wall accounting; unblocks the remaining `stream-rerun-dispatch` measurement gap",
+      "commit": null,
+      "problem": "[Exp 121](121-invalidation-traversal-audit.md) ruled invalidation\ntraversal out as a wall-time target on writer-side burst path: 10–15%\nof A11c overlap wall, ~14% of keyed-PK wall, with column-set\nintersection ~3% — already O(1) bitset. Its future-notes section listed\nthe two remaining candidate measurement signals from\n[exp 120](120-flush-admit-bound.md):\n\n- completion-side microtask scheduling cost counter\n- writer-isolate wall vs SQLite step wall split\n\nBoth sat in the `signals.json` `blockedOnMeasurement` list for\n`stream-rerun-dispatch` and the `openCandidates` list for\n`measurement-system`. Without one of them, every future dispatch-area\nimplementation experiment would face the exp 099 / exp 110 evaluation\ngap: a structurally plausible change measured against a workload whose\nactu...",
+      "hypothesis": "After exp 120 / exp 121, A11c overlap writer-side burst wall is\ndominated by writer SQLite step time and the synchronous portion of\n`StreamEngine._requery` that runs *after* the reader-pool `await`\nreturns — the result-change check, `entry.emit(rows)` to subscribers,\nand the trailing `_flushQueue` kickoff. That work is pinned to the\nmain isolate event loop (every requery completes there before the\nnext dispatch fires) and currently has no counter, so we can't tell\nwhether it is a meaningful share of overlap wall or noise.\n\nAccept this as a measurement experiment if:\n\n- `parked_total` stays at zero on every workload, reproducing exp 120\n  as a sanity check;\n- the audit produces a stable `completion_us / wall_us` band across\n  repeated passes for A11c (baseline / disjoint / overlap) and\n ...",
+      "approach": "Two new profile-mode counters in `lib/src/profile_counters.dart`:\n\n```text\nstreamCompletionUs      // cumulative microseconds in the post-await\n                        // synchronous body of _requery / _createStream\nstreamCompletionCount   // one increment per resumed body\n```\n\nIncrements are gated behind `kProfileMode` (compile-time const) so AOT\nrelease builds tree-shake them away — same pattern as\n[exp 115](115-dispatcher-park-counters.md) /\n[exp 121](121-invalidation-traversal-audit.md) counters.\n\n`lib/src/stream_engine.dart` — both `_requery` and the inner\n`Future.sync` body inside `_createStream` allocate a nullable\n`Stopwatch?` outside the `try`, start it when the relevant `await`\nreturns, and stop + accumulate inside the matching `finally`. The\ntimed segment includes:\n\n- the `en...",
+      "results": "Reader pool size: 4 (`(Platform.numberOfProcessors - 1).clamp(2, 4)`).\n\nCommand:\n\n```text\ndart run -DRESQLITE_PROFILE=true \\\n  benchmark/profile/stream_completion_audit.dart --markdown\n```\n\nFour profile passes; values bracket the per-run band.\n\n| workload                | wall_ms     | completion_us  | completion_count | parked_total | completion / wall | invalidate / wall |\n|-------------------------|------------:|---------------:|-----------------:|-------------:|------------------:|------------------:|\n| A11c baseline           | 33 – 36     |              0 |                0 |            0 | 0.00%             | 0.00%             |\n| A11c disjoint           | 38 – 41     |              0 |                0 |            0 | 0.00%             | 21 – 24%          |\n| A11c overlap      ...",
+      "reasoning": "**Accept for review — measurement.**\n\nThe audit answers the open `signals.json` question for the\n`stream-rerun-dispatch` direction:\n\n> profile completion-side microtask scheduling cost on A11c overlap\n\nCompletion-side scheduling is the **larger** of the two known wall-time\nfractions on writer-side burst path on overlap-shaped workloads:\n\n- A11c overlap: ~25–34% completion vs ~13–17% invalidation\n- keyed-PK:    ~21–32% completion vs ~13–16% invalidation\n- A11c disjoint: 0% completion (exp 106 elision), ~21–24% invalidation\n- A11c baseline: 0/0 (no streams)\n\nThat makes completion-side the next plausible dispatch experiment\ntarget on overlap-shaped streams. The natural follow-up directions\nhave non-trivial implementation surface but are now evaluable:\n\n- **batched emit.** `_flushQueue` cur..."
     }
   ],
   "tracked": [

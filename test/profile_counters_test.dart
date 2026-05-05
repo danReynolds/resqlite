@@ -23,6 +23,8 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'stream_completion_us': 0,
+      'stream_completion_count': 0,
     });
 
     ProfileCounters.reset();
@@ -37,6 +39,8 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'stream_completion_us': 0,
+      'stream_completion_count': 0,
     });
   });
 
@@ -55,5 +59,18 @@ void main() {
     expect(ProfileCounters.dispatcherWakeRetryTotal, 0);
     expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
     expect(ProfileCounters.dispatcherCurrentParked, 0);
+  });
+
+  test('stream completion counters round-trip through snapshot/diff/reset', () {
+    ProfileCounters.streamCompletionUs = 4321;
+    ProfileCounters.streamCompletionCount = 17;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['stream_completion_us'], 4321);
+    expect(snap['stream_completion_count'], 17);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.streamCompletionUs, 0);
+    expect(ProfileCounters.streamCompletionCount, 0);
   });
 }

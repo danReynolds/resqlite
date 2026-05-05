@@ -23,10 +23,33 @@
     {
       "id": "stream-rerun-dispatch",
       "status": "active",
-      "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch; the admission path and invalidation traversal are no longer the active targets on currently-measured workloads.",
-      "keyPriors": ["106", "118", "119", "120", "121", "122"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115"],
+      "subsystems": [
+        "streaming",
+        "dispatch",
+        "reader-pool",
+        "invalidation"
+      ],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 \u2192 0 on A11c overlap and 1,198 \u2192 0 on keyed-PK; max_parked 46 \u2192 0). Exp 121 then audited the third candidate from exp 120's future notes \u2014 invalidation traversal \u2014 under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10\u201315% of A11c overlap wall (column intersection 2.5\u20135.7%), 13\u201314% of keyed-PK wall, and 22\u201323% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16\u201327 \u00b5s per write absolute cost, removing the entire path saves ~8\u201314 ms on a 100 ms overlap burst \u2014 at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch; the admission path and invalidation traversal are no longer the active targets on currently-measured workloads. Exp 124 then closes the matching counter gap on the main isolate: `streamCompletionUs` / `streamCompletionCount` measure the synchronous body of `StreamEngine._requery` and `_createStream` after the reader-pool `await` returns. On A11c overlap completion-side scheduling is ~25-34% of writer-side burst wall vs ~13-17% for invalidation traversal (exp 121); keyed-PK is ~21-32% vs ~13-16%. Per-completion cost is ~7 us on overlap, ~4-7 us on keyed-PK. A11c disjoint stays at zero, confirming exp 106 column-elision still skips re-queries upstream. Completion-side is now the larger known wall-time fraction on overlap-shaped streams and is the natural next implementation target.",
+      "keyPriors": [
+        "106",
+        "119",
+        "120",
+        "121",
+        "122",
+        "124"
+      ],
+      "archive": [
+        "045",
+        "075",
+        "083",
+        "084",
+        "085",
+        "100",
+        "105",
+        "114",
+        "115",
+        "118"
+      ],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a trace shows completion-side churn dominating a many-stream workload",
@@ -34,15 +57,9 @@
       ],
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
-        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, and the exp 121 invalidation-traversal audit, where does remaining stream-fanout wall sit — completion-side scheduling, writer-side dispatch, or reader work itself?"
+        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, and the exp 121 invalidation-traversal audit, where does remaining stream-fanout wall sit \u2014 completion-side scheduling, writer-side dispatch, or reader work itself?"
       ],
       "openCandidates": [
-        {
-          "idea": "completion-side microtask churn audit on A11c overlap",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no current counter for completion-side scheduling cost"
-        },
         {
           "idea": "writer-isolate wall vs SQLite wall split on overlap workloads",
           "addedDate": "2026-05-02",
@@ -61,21 +78,41 @@
         {
           "idea": "rerun tracing (per-entry dispatch lineage)",
           "addedDate": "2026-05-02"
+        },
+        {
+          "idea": "subscriber-side emit batching across one _flushQueue cycle",
+          "addedDate": "2026-05-05",
+          "addedAfter": "124"
         }
       ],
       "blockedOnMeasurement": [
-        "completion-side microtask scheduling cost counter",
         "writer-isolate wall vs SQLite wall split for overlap workloads"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8–14 ms off a 100 ms overlap burst — at the per-benchmark decision threshold edge — and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. A new dispatch experiment now needs a counter for completion-side scheduling cost or writer-side dispatch wall showing nonzero headroom on the workload before the change is worth trying."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload \u2014 the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10\u201315% of overlap wall, 2.5\u20135.7% intersection, 80\u2013200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8\u201314 ms off a 100 ms overlap burst \u2014 at the per-benchmark decision threshold edge \u2014 and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. A new dispatch experiment now needs a counter for completion-side scheduling cost or writer-side dispatch wall showing nonzero headroom on the workload before the change is worth trying. Exp 124 makes completion-side cost directly observable; the next dispatch implementation experiment should target post-await `_requery` work (emit batching, completion fast-paths) and gate evaluation on `stream_completion_us / wall_us` moving on the same A11c overlap workload, alongside the exp 123 writer-isolate split."
     },
     {
       "id": "parameter-encoding-and-binding",
       "status": "active",
-      "subsystems": ["ffi", "params", "writer", "allocation"],
+      "subsystems": [
+        "ffi",
+        "params",
+        "writer",
+        "allocation"
+      ],
       "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script.",
-      "keyPriors": ["028", "109", "112", "113", "116"],
-      "archive": ["076", "077", "095", "096"],
+      "keyPriors": [
+        "028",
+        "109",
+        "112",
+        "113",
+        "116"
+      ],
+      "archive": [
+        "076",
+        "077",
+        "095",
+        "096"
+      ],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -104,10 +141,20 @@
     {
       "id": "long-text-stream-hashing",
       "status": "watch",
-      "subsystems": ["streaming", "hashing", "text"],
+      "subsystems": [
+        "streaming",
+        "hashing",
+        "text"
+      ],
       "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark. Chunked byte-stream folding produced a large targeted win; further variants need a new profile signal or a broader long-payload workload.",
-      "keyPriors": ["075", "099", "110"],
-      "archive": ["033"],
+      "keyPriors": [
+        "075",
+        "099",
+        "110"
+      ],
+      "archive": [
+        "033"
+      ],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
         "the workload includes unchanged fan-out with larger text payloads",
@@ -119,7 +166,7 @@
       ],
       "openCandidates": [
         {
-          "idea": "broader long-payload workload (≥ 32KB TEXT cells, mixed BLOB/TEXT)",
+          "idea": "broader long-payload workload (\u2265 32KB TEXT cells, mixed BLOB/TEXT)",
           "addedDate": "2026-04-29",
           "addedAfter": "110",
           "blockedOn": "no benchmark covers payloads larger than the exp 110 4KB shape"
@@ -133,10 +180,22 @@
     {
       "id": "sqlite-version-and-build-config",
       "status": "watch",
-      "subsystems": ["sqlite", "sqlite3mc", "build", "planner"],
+      "subsystems": [
+        "sqlite",
+        "sqlite3mc",
+        "build",
+        "planner"
+      ],
       "currentRead": "SQLite compile/config changes have produced real wins, but version bumps need audit discipline because planner and text-format behavior can shift under the library.",
-      "keyPriors": ["016", "044", "090"],
-      "archive": ["020", "021"],
+      "keyPriors": [
+        "016",
+        "044",
+        "090"
+      ],
+      "archive": [
+        "020",
+        "021"
+      ],
       "interestingIf": [
         "sqlite3mc tracks a stable SQLite point release with relevant planner or C API changes",
         "a platform-specific storage feature maps cleanly to resqlite defaults",
@@ -160,10 +219,21 @@
     {
       "id": "transaction-control-paths",
       "status": "low-current-signal",
-      "subsystems": ["writer", "transactions", "sqlite"],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Per-isolate-round-trip cost dominates per-savepoint allocation savings.",
-      "keyPriors": ["101", "102", "111"],
-      "archive": ["027", "103"],
+      "subsystems": [
+        "writer",
+        "transactions",
+        "sqlite"
+      ],
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50\u00d7 SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the \u00b117 % decision threshold). Per-isolate-round-trip cost dominates per-savepoint allocation savings.",
+      "keyPriors": [
+        "101",
+        "102",
+        "111"
+      ],
+      "archive": [
+        "027",
+        "103"
+      ],
       "interestingIf": [
         "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching)",
         "a profile mode shows the savepoint allocator path as a measurable spike under a realistic workload",
@@ -193,10 +263,22 @@
     {
       "id": "result-transfer-shape",
       "status": "watch",
-      "subsystems": ["results", "isolate-transfer", "api-shape"],
+      "subsystems": [
+        "results",
+        "isolate-transfer",
+        "api-shape"
+      ],
       "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured.",
-      "keyPriors": ["008", "063", "082", "089"],
-      "archive": ["066", "081"],
+      "keyPriors": [
+        "008",
+        "063",
+        "082",
+        "089"
+      ],
+      "archive": [
+        "066",
+        "081"
+      ],
       "interestingIf": [
         "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
         "a change preserves the lean API while removing end-to-end work",
@@ -226,10 +308,29 @@
     {
       "id": "measurement-system",
       "status": "active",
-      "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the latest examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 then ruled out invalidation traversal as a wall-time target by reading existing counters as a fraction of overlap wall (~7%, intersection ~1.6–1.9%).",
-      "keyPriors": ["099", "110", "111", "115", "119", "121"],
-      "archive": ["055", "088", "102", "108", "113", "116"],
+      "subsystems": [
+        "benchmarking",
+        "profiling",
+        "methodology"
+      ],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the latest examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 then ruled out invalidation traversal as a wall-time target by reading existing counters as a fraction of overlap wall (~7%, intersection ~1.6\u20131.9%). Exp 124 lands the matching main-isolate counter (`streamCompletionUs` / `streamCompletionCount`) for the post-await body of `StreamEngine._requery` and `_createStream`, finishing the completion-side scheduling cost open candidate exp 120 / exp 121 left in the list.",
+      "keyPriors": [
+        "110",
+        "111",
+        "115",
+        "119",
+        "121",
+        "124"
+      ],
+      "archive": [
+        "055",
+        "088",
+        "102",
+        "108",
+        "113",
+        "116",
+        "099"
+      ],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -245,11 +346,6 @@
           "addedDate": "2026-05-02"
         },
         {
-          "idea": "completion-side scheduling cost counter (microtasks / event loop)",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
-        },
-        {
           "idea": "writer dispatch wall counter (dart wall - SQLite step wall)",
           "addedDate": "2026-05-02",
           "addedAfter": "120"
@@ -261,7 +357,9 @@
   ],
   "experiments": {
     "088": {
-      "directions": ["measurement-system"],
+      "directions": [
+        "measurement-system"
+      ],
       "outcomeClass": "rejected_after_noise_check",
       "changedBeliefs": [
         "Single-run tail wins need confirmation against control metrics before acceptance"
@@ -272,7 +370,9 @@
       ]
     },
     "090": {
-      "directions": ["sqlite-version-and-build-config"],
+      "directions": [
+        "sqlite-version-and-build-config"
+      ],
       "outcomeClass": "watch",
       "changedBeliefs": [
         "sqlite3mc version bumps should wait for safer point releases when the newest SQLite release is a fresh .0"
@@ -283,7 +383,10 @@
       ]
     },
     "099": {
-      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "directions": [
+        "long-text-stream-hashing",
+        "measurement-system"
+      ],
       "outcomeClass": "benchmark_gap",
       "changedBeliefs": [
         "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable"
@@ -293,7 +396,9 @@
       ]
     },
     "100": {
-      "directions": ["stream-rerun-dispatch"],
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "rejected_regression",
       "changedBeliefs": [
         "Bounded rerun scheduling can harm high-cardinality stream fan-out even if it looks attractive for unrelated reads"
@@ -303,7 +408,9 @@
       ]
     },
     "101": {
-      "directions": ["transaction-control-paths"],
+      "directions": [
+        "transaction-control-paths"
+      ],
       "outcomeClass": "accepted",
       "changedBeliefs": [
         "Top-level transaction control still had removable SQLite prepare/finalize work"
@@ -313,7 +420,9 @@
       ]
     },
     "103": {
-      "directions": ["transaction-control-paths"],
+      "directions": [
+        "transaction-control-paths"
+      ],
       "outcomeClass": "rejected_below_current_signal",
       "changedBeliefs": [
         "Native nested transaction helpers add complexity without a stable realistic-workload win"
@@ -323,7 +432,9 @@
       ]
     },
     "105": {
-      "directions": ["stream-rerun-dispatch"],
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "rejected_regression",
       "changedBeliefs": [
         "Increasing reader worker count can worsen writer throughput by increasing completion-side microtask churn"
@@ -333,7 +444,9 @@
       ]
     },
     "108": {
-      "directions": ["measurement-system"],
+      "directions": [
+        "measurement-system"
+      ],
       "outcomeClass": "rejected_below_current_signal",
       "changedBeliefs": [
         "Persistent selectBytes out-parameter slots are below the current benchmark and RSS signal"
@@ -343,7 +456,9 @@
       ]
     },
     "109": {
-      "directions": ["parameter-encoding-and-binding"],
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
       "outcomeClass": "accepted",
       "changedBeliefs": [
         "Parameter encoding still has worthwhile headroom when the change removes per-text/blob native allocations and SQLite strlen work"
@@ -353,7 +468,10 @@
       ]
     },
     "110": {
-      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "directions": [
+        "long-text-stream-hashing",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
         "The missing long-text unchanged-fanout benchmark was the blocker for evaluating byte-stream hash-loop work",
@@ -365,10 +483,13 @@
       ]
     },
     "111": {
-      "directions": ["transaction-control-paths", "measurement-system"],
+      "directions": [
+        "transaction-control-paths",
+        "measurement-system"
+      ],
       "outcomeClass": "rejected_below_current_signal",
       "changedBeliefs": [
-        "Even on a worst-case shallow-fan-out workload (50 SAVEPOINTs per iteration), the savepoint string allocation cost is below the per-benchmark decision threshold — per-isolate-round-trip cost dominates",
+        "Even on a worst-case shallow-fan-out workload (50 SAVEPOINTs per iteration), the savepoint string allocation cost is below the per-benchmark decision threshold \u2014 per-isolate-round-trip cost dominates",
         "The missing nested-transaction benchmark from exp 102 / exp 103 is now in the suite, so future savepoint-related experiments can be evaluated without forcing the same gap"
       ],
       "nextSignals": [
@@ -377,7 +498,10 @@
       ]
     },
     "112": {
-      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "directions": [
+        "parameter-encoding-and-binding",
+        "measurement-system"
+      ],
       "outcomeClass": "rejected_below_current_signal",
       "changedBeliefs": [
         "Pre-sizing the temporary executeBatch flat parameter list is below the current benchmark signal",
@@ -389,7 +513,10 @@
       ]
     },
     "113": {
-      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "directions": [
+        "parameter-encoding-and-binding",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
         "The two-parameter batch insert shape is not a sufficient proxy for batch parameter overhead",
@@ -401,11 +528,13 @@
       ]
     },
     "114": {
-      "directions": ["stream-rerun-dispatch"],
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "rejected_below_current_signal",
       "changedBeliefs": [
         "Reader-pool wake amplification (single shared completer waking every parked dispatcher) was a real but workload-dependent cost: -10 % to -32 % on streaming fan-out paths against pre-exp-106 main, then collapsed into noise once exp 106 polish landed and elided most stream re-queries on the writer side",
-        "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) — without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
+        "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) \u2014 without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
       ],
       "nextSignals": [
         "a long-running concurrent-reads workload (or any non-streaming workload) that sustains parked dispatchers past the worker count for measurable durations (now verifiable via exp 115's `dispatcherMaxParkedConcurrent` counter)",
@@ -414,10 +543,13 @@
       ]
     },
     "115": {
-      "directions": ["measurement-system", "stream-rerun-dispatch"],
+      "directions": [
+        "measurement-system",
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "accepted_measurement",
       "changedBeliefs": [
-        "The parked-dispatcher path inside `ReaderPool._dispatch` is now directly observable via `ProfileCounters.dispatcherParkedTotal`, `dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` — gated behind `kProfileMode` so release builds stay zero-cost",
+        "The parked-dispatcher path inside `ReaderPool._dispatch` is now directly observable via `ProfileCounters.dispatcherParkedTotal`, `dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` \u2014 gated behind `kProfileMode` so release builds stay zero-cost",
         "Future dispatch-area experiments (exp 114 archive, exp 083, slot-handoff variants) can gate evaluation on direct parking evidence rather than wall-time delta alone, closing the exp 099 / exp 110 evaluation-gap pattern earlier in the loop"
       ],
       "nextSignals": [
@@ -426,7 +558,10 @@
       ]
     },
     "116": {
-      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "directions": [
+        "parameter-encoding-and-binding",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
         "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
@@ -436,7 +571,9 @@
       ]
     },
     "117": {
-      "directions": ["parameter-encoding-and-binding"],
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
       "outcomeClass": "deferred",
       "changedBeliefs": [
         "Named-parameter support is functionally viable but too invasive for the v0.x launch path unless real user demand justifies widening the public parameter API",
@@ -448,7 +585,9 @@
       ]
     },
     "118": {
-      "directions": ["stream-rerun-dispatch"],
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
         "The exp 115 counters convert exp 114's previously ambiguous FIFO waiter idea into a direct measurement: under overloaded reads, wake retries drop from 6/66/378 to 0 at concurrency 8/16/32 while max parked depth remains unchanged",
@@ -460,7 +599,10 @@
       ]
     },
     "119": {
-      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "directions": [
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_measurement",
       "changedBeliefs": [
         "Post-FIFO app-shaped workloads keep `dispatcherWakeRetryTotal` at zero, so ReaderPool wake policy is no longer the active dispatch target",
@@ -472,10 +614,12 @@
       ]
     },
     "120": {
-      "directions": ["stream-rerun-dispatch"],
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
-        "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within ±10% noise",
+        "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within \u00b110% noise",
         "After this, every measured stream workload reports `dispatcherParkedTotal == 0` on top of `dispatcherWakeRetryTotal == 0`. Future reader-pool dispatch optimizations need a different counter (completion-side scheduling, writer-side dispatch wall, invalidation traversal) before they are worth implementing"
       ],
       "nextSignals": [
@@ -485,12 +629,15 @@
       ]
     },
     "121": {
-      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "directions": [
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_measurement",
       "changedBeliefs": [
-        "Under a corrected wall convention (stopwatch stops on the last write, not after a fixed drain), invalidation traversal is at the *edge* of the wall-time noise floor on A11c overlap (10–15% of wall, intersection 2.5–5.7%) and keyed-PK (13.5–13.9%, intersection ~4%). The earlier ~7%/~1.6% figures were biased low by an arbitrary 50 ms drain sleep included in the wall denominator",
-        "Per-write `onDependencyChanges` cost is workload-shape-stable at ~16–27 µs A11c, ~14 µs keyed-PK. Removing the entire path would save ~8–14 ms on a 100 ms A11c overlap burst — measurable in the focused harness, but at the per-benchmark decision threshold edge of the release suite",
-        "Column-set intersection is already O(1) bitset (80–200 ns per probe, ~3 ms total per overlap burst); the rest of the traversal is `_tableIndex` map lookup, dirtyEntries Set.add, and the synchronous portion of `_flushQueue` — none obviously reducible without a dependency-model redesign",
+        "Under a corrected wall convention (stopwatch stops on the last write, not after a fixed drain), invalidation traversal is at the *edge* of the wall-time noise floor on A11c overlap (10\u201315% of wall, intersection 2.5\u20135.7%) and keyed-PK (13.5\u201313.9%, intersection ~4%). The earlier ~7%/~1.6% figures were biased low by an arbitrary 50 ms drain sleep included in the wall denominator",
+        "Per-write `onDependencyChanges` cost is workload-shape-stable at ~16\u201327 \u00b5s A11c, ~14 \u00b5s keyed-PK. Removing the entire path would save ~8\u201314 ms on a 100 ms A11c overlap burst \u2014 measurable in the focused harness, but at the per-benchmark decision threshold edge of the release suite",
+        "Column-set intersection is already O(1) bitset (80\u2013200 ns per probe, ~3 ms total per overlap burst); the rest of the traversal is `_tableIndex` map lookup, dirtyEntries Set.add, and the synchronous portion of `_flushQueue` \u2014 none obviously reducible without a dependency-model redesign",
         "Wall-clock measurement convention for stream-fanout audits should stop the stopwatch on the last write, not after a fixed drain or quiet-window wait, and emission counts should be read after the stopwatch stops. Both `audit_workloads.dart` runners enforce this; future audits inherit it"
       ],
       "nextSignals": [
@@ -500,7 +647,10 @@
       ]
     },
     "122": {
-      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "directions": [
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
       "outcomeClass": "in_review_accepted",
       "changedBeliefs": [
         "Exp 120 fixed the per-flush over-dispatch signal; exp 122 removes the remaining async handoff by constructing `StreamEngine` with a concrete `ReaderPool`, so `_flushQueue` stays synchronous and admitted reads reach pool dispatch without awaiting a pool future",
@@ -509,6 +659,23 @@
       "nextSignals": [
         "do not pursue more ReaderPool or stream-admission work unless exp 115 counters become nonzero again on an app-shaped workload or a new overlap shape breaks the concrete-pool admission invariant",
         "look for keyed/row-level invalidation or observer APIs to reduce keyed-PK miss-path work beyond what admission accuracy can solve"
+      ]
+    },
+    "124": {
+      "directions": [
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "Completion-side scheduling on the main isolate is the larger wall-time fraction on writer-side burst path for overlap-shaped streams: ~25-34% of A11c overlap wall vs ~13-17% for invalidation traversal (exp 121), and ~21-32% vs ~13-16% on keyed-PK. Per-completion cost is ~7 us on overlap and ~4-7 us on keyed-PK",
+        "Exp 106 column-level dependency elision is still working as intended: A11c disjoint reports zero `streamCompletionUs` because `_requery` never runs on disjoint writes",
+        "Completion-side wall is now the natural next implementation target on overlap-shaped streams; future dispatch experiments should gate evaluation on `streamCompletionUs / wallUs` moving on the same A11c overlap workload"
+      ],
+      "nextSignals": [
+        "subscriber-side emit batching across one _flushQueue cycle (analogous to exp 045 microtask invalidation coalescing on the writer side)",
+        "completion fast-path on `selectIfChanged` returning null - currently still falls through dirty-check, emit short-circuit, and `_flushQueue`",
+        "multi-subscriber stream shape that pushes per-completion cost above ~7 us, before claiming any emit-batching win"
       ]
     }
   }

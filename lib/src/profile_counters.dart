@@ -110,6 +110,27 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative wall-clock microseconds spent in the synchronous body
+  /// of `StreamEngine._requery` and `_createStream` after the
+  /// reader-pool `await` returns — the per-requery completion segment
+  /// the main-isolate event loop runs in response to a stream re-query
+  /// reply: result-change check, subscriber `emit`, and the trailing
+  /// `_flushQueue` kickoff that admits the next dequeue. Together with
+  /// [streamCompletionCount] this gives a fraction of writer-side
+  /// burst wall attributable to completion-side scheduling — the gap
+  /// exp 120 / exp 121 left open for `stream-rerun-dispatch`.
+  ///
+  /// Added by
+  /// [EXP-124](../../experiments/124-stream-completion-counter.md).
+  /// Main-isolate scope (where `_requery` resumes from `await`).
+  static int streamCompletionUs = 0;
+
+  /// Number of completion segments captured in [streamCompletionUs].
+  /// One increment per resumed `_requery` body and one per resumed
+  /// `_createStream` initial-emit body. `streamCompletionUs /
+  /// streamCompletionCount` is the per-completion average.
+  static int streamCompletionCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -121,6 +142,8 @@ class ProfileCounters {
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'stream_completion_us': streamCompletionUs,
+    'stream_completion_count': streamCompletionCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -149,5 +172,7 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    streamCompletionUs = 0;
+    streamCompletionCount = 0;
   }
 }
