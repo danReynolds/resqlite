@@ -434,6 +434,18 @@ void main() {
 
     // ----- executeBatch -----
 
+    Future<void> createWideBatchTable() async {
+      await db.execute(
+        'CREATE TABLE t('
+        'id INTEGER PRIMARY KEY, '
+        'c0 TEXT NOT NULL, c1 INTEGER NOT NULL, '
+        'c2 REAL NOT NULL, c3 BLOB NOT NULL, '
+        'c4 TEXT NOT NULL, c5 INTEGER NOT NULL, '
+        'c6 REAL NOT NULL, c7 BLOB NOT NULL'
+        ')',
+      );
+    }
+
     test('executeBatch inserts multiple rows', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
@@ -518,6 +530,84 @@ void main() {
       expect(rows[0]['payload'], payloadA);
       expect(rows[1]['name'], 'emoji 🎉🚀');
       expect(rows[1]['payload'], payloadB);
+    });
+
+    test('wide executeBatch fast path preserves ascii text and blobs', () async {
+      await createWideBatchTable();
+
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < 1024; i++)
+          <Object?>[
+            'ascii_$i',
+            i,
+            i + 0.5,
+            i.isEven ? payloadA : payloadB,
+            'slug_$i',
+            i * 2,
+            i + 1.5,
+            i.isEven ? payloadB : payloadA,
+          ],
+      ];
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        paramSets,
+      );
+
+      final count = await db.select('SELECT COUNT(*) AS cnt FROM t');
+      expect(count.single['cnt'], 1024);
+
+      final rows = await db.select(
+        'SELECT * FROM t WHERE id IN (1, 512, 1024) ORDER BY id',
+      );
+      expect(rows, hasLength(3));
+      expect(rows[0]['c0'], 'ascii_0');
+      expect(rows[0]['c3'], payloadA);
+      expect(rows[1]['c0'], 'ascii_511');
+      expect(rows[1]['c7'], payloadA);
+      expect(rows[2]['c4'], 'slug_1023');
+      expect(rows[2]['c7'], payloadA);
+    });
+
+    test('wide executeBatch falls back for non-ascii text', () async {
+      await createWideBatchTable();
+
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < 1024; i++)
+          <Object?>[
+            i == 1023 ? 'emoji 🎉🚀' : 'ascii_$i',
+            i,
+            i + 0.5,
+            i.isEven ? payloadA : payloadB,
+            'slug_$i',
+            i * 2,
+            i + 1.5,
+            i.isEven ? payloadB : payloadA,
+          ],
+      ];
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        paramSets,
+      );
+
+      final count = await db.select('SELECT COUNT(*) AS cnt FROM t');
+      expect(count.single['cnt'], 1024);
+
+      final rows = await db.select(
+        'SELECT * FROM t WHERE id IN (1, 1024) ORDER BY id',
+      );
+      expect(rows, hasLength(2));
+      expect(rows[0]['c0'], 'ascii_0');
+      expect(rows[0]['c3'], payloadA);
+      expect(rows[1]['c0'], 'emoji 🎉🚀');
+      expect(rows[1]['c7'], payloadA);
     });
 
     test('executeBatch rolls back on error', () async {
