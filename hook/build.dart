@@ -235,6 +235,7 @@ const _exportedSymbols = [
   'resqlite_stmt_release',
   'resqlite_query_bytes',
   'resqlite_step_row',
+  'resqlite_step_row_hash',
   'resqlite_query_hash',
   'resqlite_free',
 ];
