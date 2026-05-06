@@ -5,6 +5,8 @@ import 'dart:isolate';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
+import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -81,9 +83,13 @@ final class Writer {
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
-    return _request<ExecuteResponse>(
+    final sw = kProfileMode ? (Stopwatch()..start()) : null;
+    final response = await _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(sql, parameters, replyPort),
     );
+    sw?.stop();
+    _recordWriterProfile(sw, _executeProfile(response));
+    return response;
   }
 
   Future<BatchResponse?> executeBatch(
@@ -100,9 +106,13 @@ final class Writer {
     // "internal error" response.
     assertUniformParamSets(sql, paramSets);
 
-    return _request<BatchResponse>(
+    final sw = kProfileMode ? (Stopwatch()..start()) : null;
+    final response = await _request<BatchResponse>(
       (replyPort) => BatchRequest(sql, paramSets, replyPort),
     );
+    sw?.stop();
+    _recordWriterProfile(sw, _batchProfile(response));
+    return response;
   }
 
   Future<List<Map<String, Object?>>> select(
@@ -157,9 +167,12 @@ final class Writer {
     // Commit is deliberately outside the try/catch: on commit failure the
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
+    final sw = kProfileMode ? (Stopwatch()..start()) : null;
     final response = await _request<BatchResponse>(
       (replyPort) => CommitRequest(replyPort),
     );
+    sw?.stop();
+    _recordWriterProfile(sw, _batchProfile(response));
 
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(response.modifications);
@@ -183,5 +196,35 @@ final class Writer {
         await done.future;
       }
     });
+  }
+}
+
+WriterProfileSample? _executeProfile(ExecuteResponse response) {
+  return switch (response) {
+    ProfiledExecuteResponse(:final profile) => profile,
+    _ => null,
+  };
+}
+
+WriterProfileSample? _batchProfile(BatchResponse response) {
+  return switch (response) {
+    ProfiledBatchResponse(:final profile) => profile,
+    _ => null,
+  };
+}
+
+void _recordWriterProfile(Stopwatch? roundtripSw, WriterProfileSample? sample) {
+  if (!kProfileMode) return;
+
+  ProfileCounters.writerRequestCount++;
+  ProfileCounters.writerRoundtripUs += roundtripSw?.elapsedMicroseconds ?? 0;
+
+  if (sample
+      case WriterProfileSample(
+        :final writeCallUs,
+        :final dirtyFetchUs,
+      )) {
+    ProfileCounters.writerWriteCallUs += writeCallUs;
+    ProfileCounters.writerDirtyFetchUs += dirtyFetchUs;
   }
 }

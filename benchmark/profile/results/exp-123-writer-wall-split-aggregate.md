@@ -14,45 +14,45 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart 
 
 | pass | workload | shape | wall_ms | writer_requests | writer_roundtrip_us | writer_write_call_us | dirty_fetch_us | invalidate_us | invalidate_count |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | A11c baseline | 0 streams x 500 writes | 55.53 | 500 | 44216 | 24640 | 4468 | 0 | 0 |
-| 1 | A11c disjoint | 50 streams x 500 writes | 52.01 | 500 | 31423 | 11586 | 3456 | 9647 | 500 |
-| 1 | A11c overlap | 50 streams x 500 writes | 99.91 | 500 | 53614 | 16365 | 4141 | 14358 | 500 |
-| 1 | keyed PK subscriptions | 50 streams x 200 random writes | 33.57 | 200 | 27953 | 13859 | 783 | 3505 | 200 |
-| 1 | Wide batch insert | 10000 rows x 20 params | 45.53 | 1 | 45502 | 34736 | 15 | 0 | 0 |
-| 2 | A11c baseline | 0 streams x 500 writes | 32.69 | 500 | 27444 | 19248 | 164 | 0 | 0 |
-| 2 | A11c disjoint | 50 streams x 500 writes | 24.68 | 500 | 16508 | 7702 | 99 | 2742 | 500 |
-| 2 | A11c overlap | 50 streams x 500 writes | 64.80 | 500 | 38954 | 10619 | 321 | 5518 | 500 |
-| 2 | keyed PK subscriptions | 50 streams x 200 random writes | 20.00 | 200 | 16677 | 7098 | 133 | 2093 | 200 |
-| 2 | Wide batch insert | 10000 rows x 20 params | 28.73 | 1 | 28709 | 23867 | 29 | 0 | 0 |
-| 3 | A11c baseline | 0 streams x 500 writes | 34.68 | 500 | 30191 | 21740 | 95 | 0 | 0 |
-| 3 | A11c disjoint | 50 streams x 500 writes | 25.84 | 500 | 18847 | 7648 | 94 | 2553 | 500 |
-| 3 | A11c overlap | 50 streams x 500 writes | 57.95 | 500 | 35445 | 11189 | 297 | 6228 | 500 |
-| 3 | keyed PK subscriptions | 50 streams x 200 random writes | 24.98 | 200 | 21319 | 11236 | 165 | 2634 | 200 |
-| 3 | Wide batch insert | 10000 rows x 20 params | 40.45 | 1 | 40440 | 33688 | 37 | 0 | 0 |
+| 1 | A11c baseline | 0 streams x 500 writes | 33.30 | 500 | 23125 | 10757 | 3165 | 0 | 0 |
+| 1 | A11c disjoint | 50 streams x 500 writes | 39.61 | 500 | 21178 | 7910 | 2643 | 9056 | 500 |
+| 1 | A11c overlap | 50 streams x 500 writes | 90.41 | 500 | 46739 | 12960 | 3859 | 12011 | 500 |
+| 1 | keyed PK subscriptions | 50 streams x 200 random writes | 21.59 | 200 | 16608 | 5011 | 457 | 3215 | 200 |
+| 1 | Wide batch insert | 10000 rows x 20 params | 43.14 | 1 | 42844 | 33033 | 15 | 0 | 0 |
+| 2 | A11c baseline | 0 streams x 500 writes | 20.02 | 500 | 15201 | 8600 | 95 | 0 | 0 |
+| 2 | A11c disjoint | 50 streams x 500 writes | 22.50 | 500 | 13828 | 6537 | 36 | 2967 | 500 |
+| 2 | A11c overlap | 50 streams x 500 writes | 54.60 | 500 | 28950 | 8415 | 184 | 4681 | 500 |
+| 2 | keyed PK subscriptions | 50 streams x 200 random writes | 16.59 | 200 | 13128 | 3734 | 53 | 1949 | 200 |
+| 2 | Wide batch insert | 10000 rows x 20 params | 33.29 | 1 | 33218 | 25015 | 28 | 0 | 0 |
+| 3 | A11c baseline | 0 streams x 500 writes | 18.35 | 500 | 14092 | 7496 | 9 | 0 | 0 |
+| 3 | A11c disjoint | 50 streams x 500 writes | 21.05 | 500 | 13882 | 6254 | 35 | 2715 | 500 |
+| 3 | A11c overlap | 50 streams x 500 writes | 48.96 | 500 | 29421 | 8202 | 135 | 5430 | 500 |
+| 3 | keyed PK subscriptions | 50 streams x 200 random writes | 16.66 | 200 | 13339 | 4170 | 81 | 2091 | 200 |
+| 3 | Wide batch insert | 10000 rows x 20 params | 37.37 | 1 | 37317 | 12708 | 13 | 0 | 0 |
 
 ## Derived split
 
 | pass | workload | roundtrip / wall | write call / roundtrip | dirty fetch / roundtrip | residual / roundtrip | invalidate / wall | us per writer request |
 |---:|---|---:|---:|---:|---:|---:|---:|
-| 1 | A11c baseline | 79.63% | 55.73% | 10.10% | 34.17% | 0.00% | 88.43 |
-| 1 | A11c disjoint | 60.42% | 36.87% | 11.00% | 52.13% | 18.55% | 62.85 |
-| 1 | A11c overlap | 53.66% | 30.52% | 7.72% | 61.75% | 14.37% | 107.23 |
-| 1 | keyed PK subscriptions | 83.27% | 49.58% | 2.80% | 47.62% | 10.44% | 139.76 |
-| 1 | Wide batch insert | 99.94% | 76.34% | 0.03% | 23.63% | 0.00% | 45502.00 |
-| 2 | A11c baseline | 83.95% | 70.14% | 0.60% | 29.27% | 0.00% | 54.89 |
-| 2 | A11c disjoint | 66.87% | 46.66% | 0.60% | 52.74% | 11.11% | 33.02 |
-| 2 | A11c overlap | 60.12% | 27.26% | 0.82% | 71.92% | 8.52% | 77.91 |
-| 2 | keyed PK subscriptions | 83.36% | 42.56% | 0.80% | 56.64% | 10.46% | 83.39 |
-| 2 | Wide batch insert | 99.94% | 83.13% | 0.10% | 16.76% | 0.00% | 28709.00 |
-| 3 | A11c baseline | 87.06% | 72.01% | 0.31% | 27.68% | 0.00% | 60.38 |
-| 3 | A11c disjoint | 72.93% | 40.58% | 0.50% | 58.92% | 9.88% | 37.69 |
-| 3 | A11c overlap | 61.16% | 31.57% | 0.84% | 67.59% | 10.75% | 70.89 |
-| 3 | keyed PK subscriptions | 85.34% | 52.70% | 0.77% | 46.52% | 10.54% | 106.59 |
-| 3 | Wide batch insert | 99.97% | 83.30% | 0.09% | 16.60% | 0.00% | 40440.00 |
+| 1 | A11c baseline | 69.45% | 46.52% | 13.69% | 39.80% | 0.00% | 46.25 |
+| 1 | A11c disjoint | 53.47% | 37.35% | 12.48% | 50.17% | 22.87% | 42.36 |
+| 1 | A11c overlap | 51.70% | 27.73% | 8.26% | 64.02% | 13.29% | 93.48 |
+| 1 | keyed PK subscriptions | 76.94% | 30.17% | 2.75% | 67.08% | 14.89% | 83.04 |
+| 1 | Wide batch insert | 99.32% | 77.10% | 0.04% | 22.86% | 0.00% | 42844.00 |
+| 2 | A11c baseline | 75.92% | 56.58% | 0.62% | 42.80% | 0.00% | 30.40 |
+| 2 | A11c disjoint | 61.46% | 47.27% | 0.26% | 52.47% | 13.19% | 27.66 |
+| 2 | A11c overlap | 53.02% | 29.07% | 0.64% | 70.30% | 8.57% | 57.90 |
+| 2 | keyed PK subscriptions | 79.14% | 28.44% | 0.40% | 71.15% | 11.75% | 65.64 |
+| 2 | Wide batch insert | 99.80% | 75.31% | 0.08% | 24.61% | 0.00% | 33218.00 |
+| 3 | A11c baseline | 76.79% | 53.19% | 0.06% | 46.74% | 0.00% | 28.18 |
+| 3 | A11c disjoint | 65.95% | 45.05% | 0.25% | 54.70% | 12.90% | 27.76 |
+| 3 | A11c overlap | 60.10% | 27.88% | 0.46% | 71.66% | 11.09% | 58.84 |
+| 3 | keyed PK subscriptions | 80.05% | 31.26% | 0.61% | 68.13% | 12.55% | 66.69 |
+| 3 | Wide batch insert | 99.87% | 34.05% | 0.03% | 65.91% | 0.00% | 37317.00 |
 
 ## Reading the table
 
-- `writer_roundtrip_us` is measured on the main isolate around the locked writer request. It includes message copy/delivery, writer scheduling, worker execution, dirty-dependency fetch, and the reply.
+- `writer_roundtrip_us` is measured on the main isolate around each writer request after the caller has entered the writer lock where applicable. It includes message copy/delivery, writer scheduling, worker execution, dirty-dependency fetch, and the reply.
 - `writer_write_call_us` is measured on the writer isolate around `executeWrite` / `executeBatchWrite`. It includes Dart parameter packing plus the FFI/native write call.
 - SQLite statement trace timing was researched for this experiment, but this build intentionally compiles SQLite with `SQLITE_OMIT_TRACE`. Changing that compile flag would alter the production SQLite build rather than adding a profile-only Dart counter.
 - `residual / roundtrip` is the remainder after subtracting write-call and dirty-fetch wall from main-isolate roundtrip wall. Treat it as isolate messaging, event-loop scheduling, reply copy, and small measurement skew.

@@ -5,14 +5,11 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
-import 'package:resqlite/src/writer/write_worker.dart' show WriterProfileSample;
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'native/resqlite_bindings.dart';
-import 'profile_counters.dart';
-import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
 
@@ -354,11 +351,7 @@ final class Database {
     _ensureOpen();
 
     final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
-    final writerSw = kProfileMode ? (Stopwatch()..start()) : null;
     final response = await writer.locked(() => writer.execute(sql, parameters));
-    writerSw?.stop();
-
-    _recordWriterProfile(writerSw, response.profile);
 
     streamEngine.onDependencyChanges(response.modifications);
 
@@ -394,14 +387,11 @@ final class Database {
 
     final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
 
-    final writerSw = kProfileMode ? (Stopwatch()..start()) : null;
     final response = await writer.locked(
       () => writer.executeBatch(sql, paramSets),
     );
-    writerSw?.stop();
 
     if (response != null) {
-      _recordWriterProfile(writerSw, response.profile);
       streamEngine.onDependencyChanges(response.modifications);
     }
   }
@@ -515,18 +505,3 @@ typedef _DatabaseRuntime = ({
   StreamEngine streamEngine,
   Writer writer,
 });
-
-void _recordWriterProfile(Stopwatch? roundtripSw, WriterProfileSample? sample) {
-  if (!kProfileMode) return;
-
-  ProfileCounters.writerRequestCount++;
-  ProfileCounters.writerRoundtripUs += roundtripSw?.elapsedMicroseconds ?? 0;
-
-  if (sample case WriterProfileSample(
-    :final writeCallUs,
-    :final dirtyFetchUs,
-  )) {
-    ProfileCounters.writerWriteCallUs += writeCallUs;
-    ProfileCounters.writerDirtyFetchUs += dirtyFetchUs;
-  }
-}

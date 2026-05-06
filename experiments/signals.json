@@ -93,7 +93,7 @@
       "blockedOnMeasurement": [
         "focused parameter-packing profile separating Dart encoding from native write-call wall on 10k x20 batches"
       ],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. Exp 123 keeps the area active for wide batches because the write helper dominates, but an exact SQLite statement-time split would require a deliberate build-config/profileability experiment due `SQLITE_OMIT_TRACE`."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. Exp 123 keeps the area active for wide batches because the write helper dominates, but an exact SQLite statement-time split would require a deliberate build-config/profileability experiment due to `SQLITE_OMIT_TRACE`."
     },
     {
       "id": "long-text-stream-hashing",

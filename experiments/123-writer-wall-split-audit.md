@@ -41,18 +41,20 @@ measurement item.
 
 Added profile-only writer timing to the internal write response path:
 
-- `writer_roundtrip_us` is measured on the main isolate around the locked
-  writer request.
+- `writer_roundtrip_us` is measured on the main isolate around each writer
+  request after the caller has entered the writer lock where applicable, so
+  concurrent write queueing is not folded into the residual bucket.
 - `writer_write_call_us` is measured inside the writer isolate around
   `executeWrite` / `executeBatchWrite`.
 - `writer_dirty_fetch_us` is measured inside the writer isolate around
   dirty table/column dependency fetch.
-- `writer_request_count` counts profiled top-level writer requests.
+- `writer_request_count` counts profiled write, batch, and commit requests,
+  including transaction-body writes.
 
 The counters are accumulated in `ProfileCounters` only when
-`-DRESQLITE_PROFILE=true` is compiled in. The normal response objects carry a
-nullable internal `WriterProfileSample`; when profile mode is off it remains
-`null`.
+`-DRESQLITE_PROFILE=true` is compiled in. Profile samples use dedicated
+internal response subtypes, so normal production write responses do not carry
+an always-null profile field over `SendPort`.
 
 Added:
 
@@ -98,25 +100,26 @@ decision read uses passes 2-3:
 
 | workload | wall_ms | roundtrip / wall | write call / roundtrip | dirty fetch / roundtrip | residual / roundtrip | invalidate / wall |
 |---|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 32.69-34.68 | 83.95-87.06% | 70.14-72.01% | 0.31-0.60% | 27.68-29.27% | 0.00% |
-| A11c disjoint | 24.68-25.84 | 66.87-72.93% | 40.58-46.66% | 0.50-0.60% | 52.74-58.92% | 9.88-11.11% |
-| A11c overlap | 57.95-64.80 | 60.12-61.16% | 27.26-31.57% | 0.82-0.84% | 67.59-71.92% | 8.52-10.75% |
-| keyed PK subscriptions | 20.00-24.98 | 83.36-85.34% | 42.56-52.70% | 0.77-0.80% | 46.52-56.64% | 10.46-10.54% |
-| Wide batch insert | 28.73-40.45 | 99.94-99.97% | 83.13-83.30% | 0.09-0.10% | 16.60-16.76% | 0.00% |
+| A11c baseline | 18.35-20.02 | 75.92-76.79% | 53.19-56.58% | 0.06-0.62% | 42.80-46.74% | 0.00% |
+| A11c disjoint | 21.05-22.50 | 61.46-65.95% | 45.05-47.27% | 0.25-0.26% | 52.47-54.70% | 12.90-13.19% |
+| A11c overlap | 48.96-54.60 | 53.02-60.10% | 27.88-29.07% | 0.46-0.64% | 70.30-71.66% | 8.57-11.09% |
+| keyed PK subscriptions | 16.59-16.66 | 79.14-80.05% | 28.44-31.26% | 0.40-0.61% | 68.13-71.15% | 11.75-12.55% |
+| Wide batch insert | 33.29-37.37 | 99.80-99.87% | 34.05-75.31% | 0.03-0.08% | 24.61-65.91% | 0.00% |
 
 Dirty dependency fetch is not an active target on these shapes: after warmup it
 is under 1% of writer roundtrip everywhere.
 
 A11c overlap is not native-write-call dominated. The write helper accounts for
-27-32% of writer roundtrip, while the residual bucket accounts for 68-72%.
+28-29% of writer roundtrip, while the residual bucket accounts for 70-72%.
 Combined with exp 121's invalidation fraction, the next stream measurement
 should target completion/event-loop scheduling rather than dirty fetch or
 native write work.
 
-Wide batch insert is the opposite: writer roundtrip is essentially all wall,
-and the write helper accounts for 83% of that roundtrip. That keeps
-parameter/native write-call work interesting for wide batches, but this
-experiment does not split Dart parameter packing from SQLite stepping.
+Wide batch insert is the opposite on the outer shape: writer roundtrip is
+essentially all wall. The write-helper share is less stable in profile mode,
+but it is still large enough to keep parameter/native write-call work
+interesting for wide batches. This experiment does not split Dart parameter
+packing from SQLite stepping.
 
 Validation:
 

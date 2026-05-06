@@ -89,7 +89,7 @@ Future<void> main(List<String> args) async {
     rows.add(await _runWideBatchAudit(pass));
   }
 
-  final markdown = _renderMarkdown(rows);
+  final markdown = _renderMarkdown(rows, repeats);
   print(markdown);
 
   if (writeMarkdown) {
@@ -214,32 +214,32 @@ INSERT INTO wide_batch(
 ''';
 
 List<Object?> _wideBatchRow(int i) => [
-  'text_${i}_0',
-  i,
-  i / 3.0,
-  _blob(i, 3),
-  'text_${i}_4',
-  i + 5,
-  i / 7.0,
-  _blob(i, 7),
-  'text_${i}_8',
-  i + 9,
-  i / 11.0,
-  _blob(i, 11),
-  'text_${i}_12',
-  i + 13,
-  i / 17.0,
-  _blob(i, 15),
-  'text_${i}_16',
-  i + 17,
-  i / 19.0,
-  _blob(i, 19),
-];
+      'text_${i}_0',
+      i,
+      i / 3.0,
+      _blob(i, 3),
+      'text_${i}_4',
+      i + 5,
+      i / 7.0,
+      _blob(i, 7),
+      'text_${i}_8',
+      i + 9,
+      i / 11.0,
+      _blob(i, 11),
+      'text_${i}_12',
+      i + 13,
+      i / 17.0,
+      _blob(i, 15),
+      'text_${i}_16',
+      i + 17,
+      i / 19.0,
+      _blob(i, 19),
+    ];
 
 Uint8List _blob(int row, int salt) =>
     Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, salt, 0x5a]);
 
-String _renderMarkdown(List<_WriterWallRow> rows) {
+String _renderMarkdown(List<_WriterWallRow> rows, int repeats) {
   final readerCount = readerPoolSize();
   final buf = StringBuffer();
   buf.writeln('# Experiment 123 - Writer Wall Split Audit');
@@ -259,7 +259,8 @@ String _renderMarkdown(List<_WriterWallRow> rows) {
   buf.writeln('```text');
   buf.writeln(
     'dart run -DRESQLITE_PROFILE=true '
-    'benchmark/profile/writer_wall_split_audit.dart --markdown --repeats=3',
+    'benchmark/profile/writer_wall_split_audit.dart --markdown '
+    '--repeats=$repeats',
   );
   buf.writeln('```');
   buf.writeln();
@@ -301,9 +302,10 @@ String _renderMarkdown(List<_WriterWallRow> rows) {
   buf.writeln('## Reading the table');
   buf.writeln();
   buf.writeln(
-    '- `writer_roundtrip_us` is measured on the main isolate around the '
-    'locked writer request. It includes message copy/delivery, writer '
-    'scheduling, worker execution, dirty-dependency fetch, and the reply.',
+    '- `writer_roundtrip_us` is measured on the main isolate around each '
+    'writer request after the caller has entered the writer lock where '
+    'applicable. It includes message copy/delivery, writer scheduling, '
+    'worker execution, dirty-dependency fetch, and the reply.',
   );
   buf.writeln(
     '- `writer_write_call_us` is measured on the writer isolate around '
