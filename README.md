@@ -33,19 +33,13 @@ await db.transaction((tx) async {
 });
 ```
 
-## Directory
-
-- 🏠 [Homepage](https://danreynolds.github.io/resqlite/) — project overview, architecture, and write-up
-- 📈 [Visual Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) — compare performance over time and across devices
-- 📄 [API Reference](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html) — full Dart API docs
-
 ## Features
 
-- **🚀 Zero main-isolate jank.** Reads, writes, and reactive re-queries all run on persistent worker isolates. A 5,000-row query uses sub-millisecond main-isolate time.
-- **⚡ Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns table-backed queries into live streams. Dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
-- **🔁 Column-aware invalidation.** Writes to unrelated columns do not wake streams that cannot change. Identical queries are deduplicated, unchanged results are suppressed, and uncertain metadata falls back safely to table-level invalidation.
-- **📦 Just SQL.** [`select`](./lib/src/database.dart), [`execute`](./lib/src/database.dart), [`executeBatch`](./lib/src/database.dart), [`transaction`](./lib/src/database.dart), [`stream`](./lib/src/database.dart). No ORM, no query builder, no code generation.
-- **🔒 Encryption.** Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.
+- **Zero main-isolate jank.** Reads, writes, and reactive re-queries all run on persistent worker isolates. A 5,000-row query uses sub-millisecond main-isolate time.
+- **Reactive SQL.** [`db.stream(sql)`](./lib/src/database.dart) turns table-backed queries into live streams. Dependencies are detected automatically — works with JOINs, subqueries, views, CTEs. No table lists to maintain.
+- **Column-aware invalidation.** Writes to unrelated columns do not wake streams that cannot change. Identical queries are deduplicated, unchanged results are suppressed, and uncertain metadata falls back safely to table-level invalidation.
+- **Just SQL.** [`select`](./lib/src/database.dart), [`execute`](./lib/src/database.dart), [`executeBatch`](./lib/src/database.dart), [`transaction`](./lib/src/database.dart), [`stream`](./lib/src/database.dart). No ORM, no query builder, no code generation.
+- **Encryption.** Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.
 
 ## Performance
 
@@ -61,7 +55,7 @@ resqlite is designed to work in the background and keep apps running smooth. Rea
 
 ~104K point queries/sec. 3x faster wall-clock reads and 13x less main-isolate time at 1K rows compared to synchronous alternatives. Sub-millisecond stream invalidation.
 
-Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Batch inserts at scale are comparable to sqlite3. Results will vary by hardware. The [sqlite3](https://pub.dev/packages/sqlite3) package is a great choice for synchronous workloads; [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync) offers production-tested streaming with built-in throttling. resqlite is optimized for Flutter apps where main-isolate time is the critical constraint.
+Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by hardware. The [sqlite3](https://pub.dev/packages/sqlite3) package is a great choice for synchronous workloads; [sqlite_async](https://pub.dev/packages/sqlite_async) (PowerSync) offers production-tested streaming with built-in throttling. resqlite is optimized for Flutter apps where main-isolate time is the critical constraint.
 
 See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md).
 
@@ -81,7 +75,7 @@ That's the entire reactive API. Under the hood:
 - **Unchanged suppression** — writes that don't change your query's results are silently filtered
 - **Immediate** — re-queries fire on write commit, not on a timer
 
-Direct virtual-table / FTS streams are a known limitation: SQLite's [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) does not report virtual-table writes. For external-content FTS, join the real content table in the streamed query so normal table invalidation can apply.
+**Virtual table limitation:** SQLite's [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) does not fire for virtual-table writes (FTS5, R-Tree, etc.), so streams over virtual tables do not auto-invalidate. For external-content FTS, join the real content table in the streamed query so normal table invalidation applies. For other cases, use [`select`](./lib/src/database.dart) instead of [`stream`](./lib/src/database.dart).
 
 ## API
 
@@ -90,11 +84,11 @@ final db = await Database.open('app.db');
 
 // Reads
 final rows = await db.select('SELECT * FROM users WHERE id = ?', [42]);
-final json = await db.selectBytes('SELECT * FROM users'); // Optimized for byte response use cases like HTTP servers.
+final json = await db.selectBytes('SELECT * FROM users'); // zero-copy JSON bytes, useful for HTTP servers
 
 // Writes
 final result = await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
-await db.executeBatch('INSERT INTO users(name) VALUES (?)', [['Ada'], ['Grace']]); // Optimized for bulk inserts and atomic batch updates.
+await db.executeBatch('INSERT INTO users(name) VALUES (?)', [['Ada'], ['Grace']]); // bulk inserts in a single transaction
 
 // Transactions
 await db.transaction((tx) async {
@@ -106,7 +100,7 @@ await db.transaction((tx) async {
 // Reactive streams
 db.stream('SELECT * FROM users ORDER BY id').listen((rows) { ... });
 
-// Out of the box encryption support.
+// Encryption
 final db = await Database.open('secure.db', encryptionKey: '0123...abcdef');
 
 await db.close();
@@ -197,23 +191,22 @@ await db.executeBatch(
 );
 ```
 
-1,000 rows in **0.8ms**. All-or-nothing atomicity — a crash mid-import leaves zero partial rows. Streams watching the table fire once on commit, not per row.
+1,000 rows in **~0.4ms**. All-or-nothing atomicity — a crash mid-import leaves zero partial rows. Streams watching the table fire once on commit, not per row.
 
-## Architecture TLDR
+## Architecture
 
 - **Reads** go through a [persistent reader pool](./lib/src/reader_pool.dart) (2-4 workers with dedicated C connections)
 - **Writes** go through a single [persistent writer isolate](./lib/src/write_worker.dart)
 - **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) for column-aware write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
-- [Full Breakdown](./doc/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
-
+See the [full architecture breakdown](./doc/arch/architecture.md) for how the reader pool, writer isolate, and stream engine fit together.
 
 ## Getting Started
 
 ```yaml
 dependencies:
-  resqlite: ^0.3.0
+  resqlite: ^0.3.1
 ```
 
 Or via the CLI:
@@ -231,10 +224,13 @@ resqlite does not include a migration framework — schema management is done wi
 await db.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT)');
 ```
 
-For versioned migrations, track a schema version in a `PRAGMA user_version` or a metadata table and run your DDL accordingly. This is a deliberate choice — resqlite stays close to raw SQL and leaves schema tooling to your application.
+For versioned migrations, track a schema version in `PRAGMA user_version` or a metadata table and run your DDL accordingly. This keeps resqlite close to raw SQL and leaves schema tooling to your application.
 
 ## Learn More
 
+- [Homepage](https://danreynolds.github.io/resqlite/) — project overview, architecture, and write-up
+- [Interactive Benchmarks](https://danreynolds.github.io/resqlite/benchmarks/) — compare performance over time and across devices
+- [API Reference](https://danreynolds.github.io/resqlite/api/resqlite/resqlite-library.html) — full Dart API docs
 - [Architecture overview](./doc/arch/architecture.md) — how the reader pool, writer isolate, and stream engine fit together
-- [Experiment log](https://github.com/danReynolds/resqlite/blob/main/experiments/README.md) — 41 documented experiments with benchmarks and reasoning behind every design decision
+- [Experiment log](https://github.com/danReynolds/resqlite/blob/main/experiments/README.md) — 110+ documented experiments with benchmarks and reasoning behind every design decision
 - [Benchmark suite](https://github.com/danReynolds/resqlite/blob/main/benchmark/README.md) — run the full suite yourself, or [see community results across hardware](https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md)
