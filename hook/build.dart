@@ -204,7 +204,6 @@ const _exportedSymbols = [
   'sqlite3_changes',
   'sqlite3_last_insert_rowid',
   'sqlite3_sleep',
-  'sqlite3_db_handle',
   // SQLite mutex (used by resqlite.c for cross-platform threading)
   'sqlite3_mutex_alloc',
   'sqlite3_mutex_enter',
