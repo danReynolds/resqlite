@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-06T15:19:14.592972",
+  "generated": "2026-05-06T18:03:55.185763",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -16555,19 +16555,6 @@
       "reasoning": "Eliminated the concurrent read weakness completely. resqlite now beats sqlite_async at every concurrency level. The C pool also enabled per-reader statement caches, improving cache hit rates under concurrent workloads."
     },
     {
-      "id": "008b",
-      "title": "Byte-backed lazy maps",
-      "date": "2026-04-06",
-      "status": "rejected",
-      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
-      "commit": null,
-      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
-      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
-      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
-      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
-      "reasoning": null
-    },
-    {
       "id": "008",
       "title": "Flat value list + lazy ResultSet",
       "date": "2026-04-06",
@@ -16579,6 +16566,19 @@
       "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
       "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
       "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
+    },
+    {
+      "id": "008b",
+      "title": "Byte-backed lazy maps",
+      "date": "2026-04-06",
+      "status": "rejected",
+      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
+      "commit": null,
+      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
+      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
+      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
+      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
+      "reasoning": null
     },
     {
       "id": "009",
@@ -16665,10 +16665,10 @@
     },
     {
       "id": "014",
-      "title": "locking_mode=EXCLUSIVE *(partial)*",
+      "title": "BEGIN IMMEDIATE + remove clear_bindings",
       "date": "2026-04-07",
-      "status": "rejected",
-      "summary": "Blocks all readers — incompatible with concurrent reader pool",
+      "status": "accepted",
+      "summary": "Correct but within noise (write I/O dominated)",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -16684,10 +16684,10 @@
     },
     {
       "id": "014",
-      "title": "BEGIN IMMEDIATE + remove clear_bindings",
+      "title": "locking_mode=EXCLUSIVE *(partial)*",
       "date": "2026-04-07",
-      "status": "accepted",
-      "summary": "Correct but within noise (write I/O dominated)",
+      "status": "rejected",
+      "summary": "Blocks all readers — incompatible with concurrent reader pool",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -18425,6 +18425,19 @@
       "approach": "`allocateBatchParams` now probes only large wide batches:\n\n- `paramCount >= 8`\n- `totalCount >= 8192`\n- at least one string parameter\n- every string is ASCII\n\nWhen those conditions hold, `_allocateAsciiBatchParams` performs a direct pack:\n\n1. Measure string/blob payload bytes without allocating encoded string lists.\n2. Allocate the same native `[structs][payload bytes]` buffer used by the\n   generic path.\n3. Write integer, double, blob, null, and ASCII string parameters directly.\n4. Use the existing generic encoder unchanged for all other cases.\n\nTwo local variants were rejected before this final shape:\n\n- Stable column-kind specialization regressed the focused 10k x20 benchmark\n  because the extra type-shape bookkeeping cost more Dart work than it removed.\n- Raising the reusable native...",
       "results": "Focused command:\n\n```text\ndart run benchmark/experiments/batch_param_flatten.dart --iterations=60\n```\n\nFocused p50 wall time:\n\n| Shape | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| 10,000 rows x 2 params | 3.829 ms | 3.613 ms | -5.6% |\n| 10,000 rows x 8 params | 7.639 ms | 6.218 ms | -18.6% |\n| 10,000 rows x 20 params | 17.199 ms | 12.760 ms | -25.8% |\n| 1,000 rows x 8 params | 0.706 ms | 0.690 ms | -2.3% |\n| 1,000 rows x 20 params | 1.376 ms | 1.139 ms | -17.2% |\n\nRelease write-suite same-condition command:\n\n```text\ndart run benchmark/suites/writes.dart\n```\n\nSame-condition p50 wall time:\n\n| Write workload | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| Batch Insert (100 rows) | 0.097 ms | 0.089 ms | -8.2% |\n| Batch Insert (1,000 rows) | 0.413 ms | 0.401 ms | -2.9% |\n|...",
       "reasoning": "Keep in review.\n\nThe final fast path is bounded to the exact shape that measured: large wide\nASCII-containing batches. It preserves the lean public API, keeps the generic\nUnicode/blob encoder as the correctness fallback, and improves both the focused\nrow-width benchmark and the release-suite wide batch row."
+    },
+    {
+      "id": "126",
+      "title": "Wide UTF-8 batch parameter packing",
+      "date": "2026-05-06",
+      "status": "in_review",
+      "summary": "Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 → 18.988 ms and emoji 10k x20 improves 24.187 → 17.458 ms while release write-suite guardrails remain neutral",
+      "commit": null,
+      "problem": "Experiment 125 proved that wide ASCII-heavy batches still had removable\nper-string `utf8.encode` allocation after exp 113's direct matrix encoder:\nthe accepted fast path writes ASCII code units directly into the native\nparameter payload tail and falls back to the generic encoder for non-ASCII.\n\nThat left the exact follow-up called out in exp 125's future notes: before\ngeneralizing the string encoder, benchmark a non-ASCII-heavy workload\ndirectly. The generic fallback still allocates one temporary `Uint8List` per\nnon-ASCII string cell, then copies those bytes into the same native batch\npayload buffer.\n\nExternal contract checks:\n\n- Dart's `Utf8Encoder.convert` encodes unpaired surrogate code units as\n  `U+FFFD`: https://api.dart.dev/dart-convert/Utf8Encoder/convert.html\n- SQLite `sqlite3_...",
+      "hypothesis": "For large wide non-ASCII batches, a guarded direct UTF-8 writer can skip the\ntemporary per-string `Uint8List` allocations and write UTF-8 bytes directly\ninto the already-allocated native parameter buffer. The fast path should\nimprove Unicode/emoji-heavy 8- and 20-parameter batch shapes while keeping the\nexisting ASCII path first and preserving Dart's malformed-surrogate semantics.\n\nAccept if Unicode/emoji wide batches improve clearly, narrow/small controls\nstay neutral, release write-suite rows do not show a targeted regression, and\nround-trip tests cover multibyte text plus embedded NULs. Reject if the manual\nUTF-8 scan/write cost erases the allocation win or the correctness surface\nbecomes fragile.",
+      "approach": "The existing exp 125 guard remains the entry point:\n\n- `paramCount >= 8`\n- `totalCount >= 8192`\n- the first row contains at least one string\n\n`allocateBatchParams` still tries the ASCII path first. Only when the batch\ncontains a non-ASCII string does it use the new direct UTF-8 path:\n\n1. Measure UTF-8 byte length without allocating encoded lists.\n2. Allocate the same native `[structs][payload bytes]` buffer as the generic\n   path.\n3. Write UTF-8 bytes directly into the payload tail, including surrogate-pair\n   handling and replacement-character encoding for unpaired surrogates.\n4. Bind the exact byte length through the existing C-side `sqlite3_bind_text`\n   call.\n\nThe focused benchmark now supports `--text-mode=unicode|emoji|nul` so future\nexperiments can reproduce the non-ASCII path in...",
+      "results": "Focused command:\n\n```text\ndart run benchmark/experiments/batch_param_flatten.dart --iterations=50 --text-mode=unicode\ndart run benchmark/experiments/batch_param_flatten.dart --iterations=50 --text-mode=emoji\n```\n\nFocused p50 wall time:\n\n| Text mode | Shape | Baseline | Candidate | Delta |\n|---|---:|---:|---:|---:|\n| unicode | 10,000 rows x 8 params | 9.903 ms | 8.216 ms | -17.0% |\n| unicode | 10,000 rows x 20 params | 21.945 ms | 18.988 ms | -13.5% |\n| emoji | 10,000 rows x 8 params | 9.580 ms | 8.358 ms | -12.8% |\n| emoji | 10,000 rows x 20 params | 24.187 ms | 17.458 ms | -27.8% |\n\nSmall/narrow controls stayed neutral:\n\n| Text mode | Shape | Baseline | Candidate | Delta |\n|---|---:|---:|---:|---:|\n| unicode | 10,000 rows x 2 params | 4.420 ms | 4.515 ms | +2.1% |\n| unicode | 1,000 row...",
+      "reasoning": "**Accept for review.** The non-ASCII direct writer clears the target workload:\nlarge wide Unicode batches improve 13-17%, and emoji-heavy batches improve\n13-28%. The ASCII release suite remains on exp 125's first-choice path and\nshows no targeted regression in same-day guardrails.\n\nThis preserves the lean public API and keeps the optimization private to the\nbatch parameter encoder. Correctness coverage now includes multibyte strings,\nemoji/surrogate-pair text, blobs, and embedded NUL text on the guarded wide\nbatch path."
     }
   ],
   "tracked": [

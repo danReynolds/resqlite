@@ -734,6 +734,14 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
         asciiBytes,
       );
     }
+
+    final utf8Bytes = _measureUtf8BatchBytes(paramSets, paramCount);
+    return _allocateUtf8BatchParams(
+      paramSets,
+      paramCount,
+      totalCount,
+      utf8Bytes,
+    );
   }
 
   return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
@@ -769,6 +777,23 @@ int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) {
   }
 
   return hasString ? extraBytes : null;
+}
+
+int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) {
+  var extraBytes = 0;
+
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final value = set[i];
+      if (value is String) {
+        extraBytes += _utf8Length(value);
+      } else if (value is Uint8List) {
+        extraBytes += value.length;
+      }
+    }
+  }
+
+  return extraBytes;
 }
 
 ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
@@ -823,6 +848,125 @@ ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
 
   return buf;
 }
+
+ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
+  List<List<Object?>> paramSets,
+  int paramCount,
+  int totalCount,
+  int extraBytes,
+) {
+  final structsBytes = _paramStructSize * totalCount;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  var flatIndex = 0;
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final offset = flatIndex * _paramStructSize;
+      final value = set[i];
+
+      if (value == null) {
+        byteData.setInt32(offset, 0, Endian.little);
+      } else if (value is int) {
+        byteData.setInt32(offset, 1, Endian.little);
+        byteData.setInt64(offset + 8, value, Endian.little);
+      } else if (value is double) {
+        byteData.setInt32(offset, 2, Endian.little);
+        byteData.setFloat64(offset + 8, value, Endian.little);
+      } else if (value is String) {
+        final start = dataOffset;
+        dataOffset = _writeUtf8(value, view, dataOffset);
+        byteData.setInt32(offset, 3, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
+        byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
+      } else if (value is Uint8List) {
+        view.setRange(dataOffset, dataOffset + value.length, value);
+        byteData.setInt32(offset, 4, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt32(offset + 16, value.length, Endian.little);
+        dataOffset += value.length;
+      } else {
+        byteData.setInt32(offset, 0, Endian.little);
+      }
+
+      flatIndex++;
+    }
+  }
+
+  return buf;
+}
+
+int _utf8Length(String value) {
+  var bytes = 0;
+  for (var i = 0; i < value.length; i++) {
+    final codeUnit = value.codeUnitAt(i);
+    if (codeUnit <= 0x7f) {
+      bytes++;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else if (_isLeadSurrogate(codeUnit)) {
+      if (i + 1 < value.length && _isTrailSurrogate(value.codeUnitAt(i + 1))) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+int _writeUtf8(String value, Uint8List out, int offset) {
+  for (var i = 0; i < value.length; i++) {
+    final codeUnit = value.codeUnitAt(i);
+    if (codeUnit <= 0x7f) {
+      out[offset++] = codeUnit;
+    } else if (codeUnit <= 0x7ff) {
+      out[offset++] = 0xc0 | (codeUnit >> 6);
+      out[offset++] = 0x80 | (codeUnit & 0x3f);
+    } else if (_isLeadSurrogate(codeUnit)) {
+      if (i + 1 < value.length) {
+        final next = value.codeUnitAt(i + 1);
+        if (_isTrailSurrogate(next)) {
+          final codePoint =
+              0x10000 + ((codeUnit - 0xd800) << 10) + (next - 0xdc00);
+          out[offset++] = 0xf0 | (codePoint >> 18);
+          out[offset++] = 0x80 | ((codePoint >> 12) & 0x3f);
+          out[offset++] = 0x80 | ((codePoint >> 6) & 0x3f);
+          out[offset++] = 0x80 | (codePoint & 0x3f);
+          i++;
+          continue;
+        }
+      }
+      offset = _writeReplacementCharacter(out, offset);
+    } else if (_isTrailSurrogate(codeUnit)) {
+      offset = _writeReplacementCharacter(out, offset);
+    } else {
+      out[offset++] = 0xe0 | (codeUnit >> 12);
+      out[offset++] = 0x80 | ((codeUnit >> 6) & 0x3f);
+      out[offset++] = 0x80 | (codeUnit & 0x3f);
+    }
+  }
+  return offset;
+}
+
+int _writeReplacementCharacter(Uint8List out, int offset) {
+  out[offset++] = 0xef;
+  out[offset++] = 0xbf;
+  out[offset++] = 0xbd;
+  return offset;
+}
+
+bool _isLeadSurrogate(int codeUnit) => codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+
+bool _isTrailSurrogate(int codeUnit) =>
+    codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
 
 ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
   List<List<Object?>> paramSets,

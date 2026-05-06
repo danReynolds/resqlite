@@ -73,26 +73,26 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms while falling back for non-ASCII text.",
-      "keyPriors": ["028", "109", "112", "113", "116", "125"],
-      "archive": ["076", "077", "095", "096"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral.",
+      "keyPriors": ["109", "112", "113", "116", "125", "126"],
+      "archive": ["028", "076", "077", "095", "096"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
         "the approach preserves the lean API and targets parameter width as well as row count"
       ],
       "openQuestions": [
-        "Are there remaining non-ASCII or blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
-        "Can correctness improvements such as embedded-NUL text handling be evaluated separately from performance?"
+        "Are there remaining blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
+        "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?"
       ],
       "openCandidates": [
         {
-          "idea": "embedded-NUL text handling as a correctness experiment, evaluated separately from performance",
+          "idea": "broader embedded-NUL text handling audit across public APIs, evaluated separately from performance",
           "addedDate": "2026-05-02"
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125, ASCII-specific batch packing is justified only for large wide batches; keep Unicode on the generic fallback unless a non-ASCII workload proves otherwise."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise."
     },
     {
       "id": "long-text-stream-hashing",
@@ -514,6 +514,18 @@
       "nextSignals": [
         "watch release-suite Wide Batch Insert and narrow Batch Insert together",
         "benchmark non-ASCII-heavy wide batches before broadening the fallback path"
+      ]
+    },
+    "126": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Large wide non-ASCII batches have the same removable per-string allocation pattern exp 125 found for ASCII: direct UTF-8 payload writing improves focused Unicode 10k x20 by 13.5% and emoji 10k x20 by 27.8%",
+        "Dart-compatible surrogate-pair and replacement-character encoding can stay private to the guarded batch encoder while preserving embedded-NUL byte lengths through sqlite3_bind_text"
+      ],
+      "nextSignals": [
+        "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
+        "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
       ]
     }
   }
