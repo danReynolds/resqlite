@@ -178,11 +178,21 @@ final class StreamEngine {
       return;
     }
 
-    final dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();
+    final availableWorkers = _pool.availableWorkerCount;
+    if (availableWorkers <= 0) {
+      return;
+    }
+
+    final dequeued = _requeryQueue.take(64).toList();
 
     for (final entry in dequeued) {
-      _requery(entry);
       _requeryQueue.remove(entry);
+    }
+
+    if (dequeued.length == 1) {
+      _requery(dequeued.single);
+    } else {
+      _requeryBatch(dequeued);
     }
   }
 
@@ -338,6 +348,91 @@ final class StreamEngine {
       }
     } finally {
       entry.inFlight = false;
+      _flushQueue();
+    }
+  }
+
+  Future<void> _requeryBatch(List<StreamEntry> entries) async {
+    try {
+      for (final entry in entries) {
+        entry.inFlight = true;
+        entry.dirty = false;
+      }
+
+      final selectSw = kProfileMode ? (Stopwatch()..start()) : null;
+      final results = await _pool.selectIfChangedBatch([
+        for (final entry in entries)
+          (
+            sql: entry.sql,
+            parameters: entry.params,
+            lastResultHash: entry.lastResultHash,
+            lastRowCount: entry.lastRowCount,
+          ),
+      ]);
+      if (kProfileMode) {
+        selectSw!.stop();
+        ProfileCounters.streamRequeryAwaitUs += selectSw.elapsedMicroseconds;
+        ProfileCounters.streamRequeryCount += entries.length;
+      }
+
+      for (var i = 0; i < entries.length; i++) {
+        final entry = entries[i];
+        if (!identical(_entries[entry.key], entry)) {
+          continue;
+        }
+
+        final result = results[i];
+        final error = result.error;
+        if (error != null) {
+          entry.emitError(error, StackTrace.current);
+          continue;
+        }
+
+        if (entry.dirty) {
+          if (kProfileMode) {
+            ProfileCounters.streamRequeryDiscardedCount++;
+          }
+          _requeryQueue.add(entry);
+          continue;
+        }
+
+        final rows = result.rows;
+        if (rows == null) {
+          if (kProfileMode) {
+            ProfileCounters.streamRequeryUnchangedCount++;
+          }
+          continue;
+        }
+
+        if (kProfileMode) {
+          ProfileCounters.streamRequeryChangedCount++;
+        }
+
+        entry.lastResultHash = result.newHash;
+        entry.lastRowCount = result.newRowCount;
+        entry.lastResult = rows;
+
+        final emitSw = kProfileMode ? (Stopwatch()..start()) : null;
+        entry.emit(rows);
+        if (kProfileMode) {
+          emitSw!.stop();
+          ProfileCounters.streamEmitUs += emitSw.elapsedMicroseconds;
+          ProfileCounters.streamEmitCount++;
+        }
+      }
+    } catch (e, st) {
+      for (final entry in entries) {
+        if (!identical(_entries[entry.key], entry)) {
+          continue;
+        }
+        entry.emitError(e, st);
+      }
+    } finally {
+      for (final entry in entries) {
+        if (identical(_entries[entry.key], entry)) {
+          entry.inFlight = false;
+        }
+      }
       _flushQueue();
     }
   }

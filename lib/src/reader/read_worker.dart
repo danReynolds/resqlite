@@ -32,6 +32,20 @@ sealed class ReadRequest {
   final List<Object?> parameters;
 }
 
+typedef SelectIfChangedBatchQuery = ({
+  String sql,
+  List<Object?> parameters,
+  int lastResultHash,
+  int lastRowCount,
+});
+
+typedef SelectIfChangedBatchReply = ({
+  List<Map<String, Object?>>? rows,
+  int newHash,
+  int newRowCount,
+  ResqliteException? error,
+});
+
 /// Standard row query — returns a [ResultSet].
 final class SelectRequest extends ReadRequest {
   SelectRequest(super.sql, super.parameters);
@@ -64,6 +78,14 @@ final class SelectIfChangedRequest extends ReadRequest {
   /// short-circuit when
   /// the fresh row count already diverges.
   final int lastRowCount;
+}
+
+/// Batch of stream re-queries sent to one reader worker.
+final class SelectIfChangedBatchRequest extends ReadRequest {
+  SelectIfChangedBatchRequest(this.queries)
+    : super('<selectIfChangedBatch>', const []);
+
+  final List<SelectIfChangedBatchQuery> queries;
 }
 
 /// Byte-size threshold for sacrifice. If the estimated transfer size of
@@ -161,6 +183,42 @@ void readerEntrypoint(List<Object> args) {
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
+
+        case SelectIfChangedBatchRequest(:final queries):
+          var estimatedBytes = 0;
+          final replies = <SelectIfChangedBatchReply>[];
+          for (final query in queries) {
+            try {
+              final (newHash, newRowCount, raw) = executeQueryIfChanged(
+                dbHandleAddr,
+                readerId,
+                query.sql,
+                query.parameters,
+                query.lastResultHash,
+                query.lastRowCount,
+              );
+              estimatedBytes += raw?.estimatedBytes ?? 0;
+              replies.add((
+                rows: raw == null ? null : _toRows(raw),
+                newHash: newHash,
+                newRowCount: newRowCount,
+                error: null,
+              ));
+            } catch (e) {
+              replies.add((
+                rows: null,
+                newHash: 0,
+                newRowCount: -1,
+                error: _queryExceptionFor(
+                  e,
+                  sql: query.sql,
+                  parameters: query.parameters,
+                ),
+              ));
+            }
+          }
+          sacrifice = estimatedBytes > sacrificeByteThreshold;
+          result = replies;
       }
 
       if (sacrifice) {
@@ -177,13 +235,11 @@ void readerEntrypoint(List<Object> args) {
       // via SendPort — the VM deep-copies them. Wrap non-resqlite errors
       // with the request's SQL context so callers always get a typed
       // exception with sql/parameters intact.
-      final error = e is ResqliteException
-          ? e
-          : ResqliteQueryException(
-              e.toString(),
-              sql: request.sql,
-              parameters: request.parameters,
-            );
+      final error = _queryExceptionFor(
+        e,
+        sql: request.sql,
+        parameters: request.parameters,
+      );
       eventPort.send((null, false, error));
     } finally {
       if (kProfileMode) {
@@ -192,6 +248,14 @@ void readerEntrypoint(List<Object> args) {
     }
   };
 }
+
+ResqliteException _queryExceptionFor(
+  Object e, {
+  required String sql,
+  required List<Object?> parameters,
+}) => e is ResqliteException
+    ? e
+    : ResqliteQueryException(e.toString(), sql: sql, parameters: parameters);
 
 // ---------------------------------------------------------------------------
 // Reader-specific FFI bindings
