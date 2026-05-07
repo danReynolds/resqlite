@@ -5,6 +5,12 @@ import 'dart:typed_data';
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
+String _hexUtf8(String value) => utf8
+    .encode(value)
+    .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+    .join()
+    .toUpperCase();
+
 void main() {
   group('Database', () {
     late Directory tempDir;
@@ -572,7 +578,7 @@ void main() {
       expect(rows[2]['c7'], payloadA);
     });
 
-    test('wide executeBatch falls back for non-ascii text', () async {
+    test('wide executeBatch preserves mixed non-ascii text', () async {
       await createWideBatchTable();
 
       final payloadA = Uint8List.fromList([1, 2, 3, 4]);
@@ -608,6 +614,43 @@ void main() {
       expect(rows[0]['c3'], payloadA);
       expect(rows[1]['c0'], 'emoji 🎉🚀');
       expect(rows[1]['c7'], payloadA);
+    });
+
+    test('wide executeBatch preserves multibyte and embedded-NUL text', () async {
+      await createWideBatchTable();
+
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final lastText = '項目_1023\u0000東京';
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < 1024; i++)
+          <Object?>[
+            i == 1023 ? lastText : '項目_${i}_東京',
+            i,
+            i + 0.5,
+            i.isEven ? payloadA : payloadB,
+            'emoji_${i}_🎉🚀',
+            i * 2,
+            i + 1.5,
+            i.isEven ? payloadB : payloadA,
+          ],
+      ];
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        paramSets,
+      );
+
+      final rows = await db.select(
+        'SELECT c0, c4, hex(CAST(c0 AS BLOB)) AS c0_hex '
+        'FROM t WHERE id IN (1, 1024) ORDER BY id',
+      );
+      expect(rows, hasLength(2));
+      expect(rows[0]['c0'], '項目_0_東京');
+      expect(rows[0]['c4'], 'emoji_0_🎉🚀');
+      expect(rows[1]['c0'], lastText);
+      expect(rows[1]['c0_hex'], _hexUtf8(lastText));
     });
 
     test('executeBatch rolls back on error', () async {
