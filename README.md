@@ -84,7 +84,7 @@ final db = await Database.open('app.db');
 
 // Reads
 final rows = await db.select('SELECT * FROM users WHERE id = ?', [42]);
-final json = await db.selectBytes('SELECT * FROM users'); // zero-copy JSON bytes, useful for HTTP servers
+final json = await db.selectBytes('SELECT * FROM users'); // JSON serialized in C — no Dart object allocation
 
 // Writes
 final result = await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
@@ -195,8 +195,8 @@ await db.executeBatch(
 
 ## Architecture
 
-- **Reads** go through a [persistent reader pool](./lib/src/reader_pool.dart) (2-4 workers with dedicated C connections)
-- **Writes** go through a single [persistent writer isolate](./lib/src/write_worker.dart)
+- **Reads** go through a [persistent reader pool](./lib/src/reader/reader_pool.dart) (2-4 workers with dedicated C connections)
+- **Writes** go through a single [persistent writer isolate](./lib/src/writer/write_worker.dart)
 - **Streams** use SQLite's [authorizer hook](https://www.sqlite.org/c3ref/set_authorizer.html) for table/column [dependency tracking](./lib/src/stream_engine.dart) and [preupdate hook](https://www.sqlite.org/c3ref/preupdate_blobwrite.html) for column-aware write invalidation
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
