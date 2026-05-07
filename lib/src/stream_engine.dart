@@ -282,31 +282,53 @@ final class StreamEngine {
       entry.inFlight = true;
       entry.dirty = false;
 
+      final selectSw = kProfileMode ? (Stopwatch()..start()) : null;
       final (rows, newHash, newRowCount) = await _pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
       );
+      if (kProfileMode) {
+        selectSw!.stop();
+        ProfileCounters.streamRequeryAwaitUs += selectSw.elapsedMicroseconds;
+        ProfileCounters.streamRequeryCount++;
+      }
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
       // the entry should be re-scheduled for requery.
       if (entry.dirty) {
+        if (kProfileMode) {
+          ProfileCounters.streamRequeryDiscardedCount++;
+        }
         _requeryQueue.add(entry);
         return;
       }
 
       // If no rows were returned, then the query result has not changed.
       if (rows == null) {
+        if (kProfileMode) {
+          ProfileCounters.streamRequeryUnchangedCount++;
+        }
         return;
+      }
+
+      if (kProfileMode) {
+        ProfileCounters.streamRequeryChangedCount++;
       }
 
       entry.lastResultHash = newHash;
       entry.lastRowCount = newRowCount;
       entry.lastResult = rows;
 
+      final emitSw = kProfileMode ? (Stopwatch()..start()) : null;
       entry.emit(rows);
+      if (kProfileMode) {
+        emitSw!.stop();
+        ProfileCounters.streamEmitUs += emitSw.elapsedMicroseconds;
+        ProfileCounters.streamEmitCount++;
+      }
     } catch (e, st) {
       // Propagate error to subscribers so they can handle it (e.g., table
       // dropped, schema changed). Silent failure would leave the stream

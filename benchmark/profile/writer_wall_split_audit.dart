@@ -52,6 +52,21 @@ final class _WriterWallRow {
   int get dirtyFetchUs => counters['writer_dirty_fetch_us']!;
   int get invalidateUs => counters['invalidate_us']!;
   int get invalidateCount => counters['invalidate_count']!;
+  int get dispatcherParkedTotal => counters['dispatcher_parked_total'] ?? 0;
+  int get streamRequeryAwaitUs => counters['stream_requery_await_us'] ?? 0;
+  int get streamRequeryCount => counters['stream_requery_count'] ?? 0;
+  int get streamRequeryChangedCount =>
+      counters['stream_requery_changed_count'] ?? 0;
+  int get streamRequeryUnchangedCount =>
+      counters['stream_requery_unchanged_count'] ?? 0;
+  int get streamRequeryDiscardedCount =>
+      counters['stream_requery_discarded_count'] ?? 0;
+  int get streamEmitUs => counters['stream_emit_us'] ?? 0;
+  int get streamEmitCount => counters['stream_emit_count'] ?? 0;
+  int get readerDispatchWaitUs => counters['reader_dispatch_wait_us'] ?? 0;
+  int get readerReplyDeliveryUs => counters['reader_reply_delivery_us'] ?? 0;
+  int get readerReplyDeliveryCount =>
+      counters['reader_reply_delivery_count'] ?? 0;
 
   int get nonWriteResidualUs {
     final residual = roundtripUs - writeCallUs - dirtyFetchUs;
@@ -61,6 +76,16 @@ final class _WriterWallRow {
   double get wallMs => wallUs / 1000.0;
   double get roundtripPerRequestUs =>
       requestCount == 0 ? 0.0 : roundtripUs / requestCount;
+  double get requeryAwaitPerRequestUs =>
+      streamRequeryCount == 0 ? 0.0 : streamRequeryAwaitUs / streamRequeryCount;
+  double get dispatchWaitPerParkUs => dispatcherParkedTotal == 0
+      ? 0.0
+      : readerDispatchWaitUs / dispatcherParkedTotal;
+  double get replyDeliveryPerReplyUs => readerReplyDeliveryCount == 0
+      ? 0.0
+      : readerReplyDeliveryUs / readerReplyDeliveryCount;
+  double get emitPerEmissionUs =>
+      streamEmitCount == 0 ? 0.0 : streamEmitUs / streamEmitCount;
 
   double pctOfWall(int value) => wallUs == 0 ? 0.0 : (value / wallUs) * 100.0;
   double pctOfRoundtrip(int value) =>
@@ -301,6 +326,32 @@ String _renderMarkdown(List<_WriterWallRow> rows, int repeats) {
     );
   }
   buf.writeln();
+  buf.writeln('## Stream completion and reader reply split');
+  buf.writeln();
+  buf.writeln(
+    '| pass | workload | requeries | changed / unchanged / discarded | '
+    'requery_await_us / avg | dispatcher_parks | dispatch_wait_us / avg | '
+    'reader_replies | reply_delivery_us / avg | stream_emits | '
+    'emit_us / avg |',
+  );
+  buf.writeln('|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  for (final row in rows) {
+    buf.writeln(
+      '| ${row.pass} | ${row.workload} | ${row.streamRequeryCount} | '
+      '${row.streamRequeryChangedCount} / '
+      '${row.streamRequeryUnchangedCount} / '
+      '${row.streamRequeryDiscardedCount} | '
+      '${row.streamRequeryAwaitUs} / '
+      '${row.requeryAwaitPerRequestUs.toStringAsFixed(2)} | '
+      '${row.dispatcherParkedTotal} | ${row.readerDispatchWaitUs} / '
+      '${row.dispatchWaitPerParkUs.toStringAsFixed(2)} | '
+      '${row.readerReplyDeliveryCount} | ${row.readerReplyDeliveryUs} / '
+      '${row.replyDeliveryPerReplyUs.toStringAsFixed(2)} | '
+      '${row.streamEmitCount} | ${row.streamEmitUs} / '
+      '${row.emitPerEmissionUs.toStringAsFixed(2)} |',
+    );
+  }
+  buf.writeln();
   buf.writeln('## Reading the table');
   buf.writeln();
   buf.writeln(
@@ -330,6 +381,16 @@ String _renderMarkdown(List<_WriterWallRow> rows, int repeats) {
     '- `invalidate_us` is the existing `StreamEngine.onDependencyChanges` '
     'counter. It is outside writer roundtrip and is reported as a share '
     'of workload wall.',
+  );
+  buf.writeln(
+    '- `stream_requery_await_us` is accumulated per stream re-query, so '
+    'overlapping re-queries can sum above workload wall. Use its average '
+    'with `dispatcher_parks` / `dispatch_wait_us` to separate reader-pool '
+    'queueing from tiny reply-delivery and controller-delivery costs.',
+  );
+  buf.writeln(
+    '- Stream completion counters are captured after the post-wall drain; '
+    '`wall_ms` still stops immediately after the write loop.',
   );
   return buf.toString();
 }

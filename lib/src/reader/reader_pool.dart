@@ -156,10 +156,13 @@ final class ReaderPool {
               ProfileCounters.dispatcherCurrentParked;
         }
       }
+      final waitSw = kProfileMode ? (Stopwatch()..start()) : null;
       try {
         await waiter.future;
       } finally {
         if (kProfileMode) {
+          waitSw!.stop();
+          ProfileCounters.readerDispatchWaitUs += waitSw.elapsedMicroseconds;
           ProfileCounters.dispatcherCurrentParked--;
         }
       }
@@ -287,6 +290,15 @@ class _WorkerSlot {
 
       final (result, sacrificed, error) =
           msg as (Object?, bool, ResqliteException?);
+      final replySw = kProfileMode ? (Stopwatch()..start()) : null;
+
+      void recordReplyDelivery() {
+        if (kProfileMode) {
+          replySw!.stop();
+          ProfileCounters.readerReplyDeliveryUs += replySw.elapsedMicroseconds;
+          ProfileCounters.readerReplyDeliveryCount++;
+        }
+      }
 
       // If the isolate has sacrified itself in order to return a large response,
       // then the pending request is resolved with the response and the worker
@@ -301,6 +313,7 @@ class _WorkerSlot {
         } else {
           pending.complete(result);
         }
+        recordReplyDelivery();
         if (!_closed) unawaited(spawn(_dbHandleAddr));
 
         // Otherwise, deliver the result and notify the pool that this worker is available
@@ -316,6 +329,7 @@ class _WorkerSlot {
         } else {
           pending.completeError(error);
         }
+        recordReplyDelivery();
       }
     };
 

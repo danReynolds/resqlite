@@ -27,6 +27,16 @@ void main() {
       'writer_write_call_us': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
+      'stream_requery_await_us': 0,
+      'stream_requery_count': 0,
+      'stream_requery_changed_count': 0,
+      'stream_requery_unchanged_count': 0,
+      'stream_requery_discarded_count': 0,
+      'stream_emit_us': 0,
+      'stream_emit_count': 0,
+      'reader_dispatch_wait_us': 0,
+      'reader_reply_delivery_us': 0,
+      'reader_reply_delivery_count': 0,
     });
 
     ProfileCounters.reset();
@@ -45,6 +55,16 @@ void main() {
       'writer_write_call_us': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
+      'stream_requery_await_us': 0,
+      'stream_requery_count': 0,
+      'stream_requery_changed_count': 0,
+      'stream_requery_unchanged_count': 0,
+      'stream_requery_discarded_count': 0,
+      'stream_emit_us': 0,
+      'stream_emit_count': 0,
+      'reader_dispatch_wait_us': 0,
+      'reader_reply_delivery_us': 0,
+      'reader_reply_delivery_count': 0,
     });
   });
 
@@ -82,5 +102,42 @@ void main() {
     expect(ProfileCounters.writerWriteCallUs, 0);
     expect(ProfileCounters.writerDirtyFetchUs, 0);
     expect(ProfileCounters.writerRequestCount, 0);
+  });
+
+  test('stream and reader completion counters round-trip', () {
+    ProfileCounters.streamRequeryAwaitUs = 100;
+    ProfileCounters.streamRequeryCount = 4;
+    ProfileCounters.streamRequeryChangedCount = 3;
+    ProfileCounters.streamRequeryUnchangedCount = 1;
+    ProfileCounters.streamRequeryDiscardedCount = 2;
+    ProfileCounters.streamEmitUs = 12;
+    ProfileCounters.streamEmitCount = 3;
+    ProfileCounters.readerDispatchWaitUs = 80;
+    ProfileCounters.readerReplyDeliveryUs = 7;
+    ProfileCounters.readerReplyDeliveryCount = 4;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['stream_requery_await_us'], 100);
+    expect(snap['stream_requery_count'], 4);
+    expect(snap['stream_requery_changed_count'], 3);
+    expect(snap['stream_requery_unchanged_count'], 1);
+    expect(snap['stream_requery_discarded_count'], 2);
+    expect(snap['stream_emit_us'], 12);
+    expect(snap['stream_emit_count'], 3);
+    expect(snap['reader_dispatch_wait_us'], 80);
+    expect(snap['reader_reply_delivery_us'], 7);
+    expect(snap['reader_reply_delivery_count'], 4);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.streamRequeryAwaitUs, 0);
+    expect(ProfileCounters.streamRequeryCount, 0);
+    expect(ProfileCounters.streamRequeryChangedCount, 0);
+    expect(ProfileCounters.streamRequeryUnchangedCount, 0);
+    expect(ProfileCounters.streamRequeryDiscardedCount, 0);
+    expect(ProfileCounters.streamEmitUs, 0);
+    expect(ProfileCounters.streamEmitCount, 0);
+    expect(ProfileCounters.readerDispatchWaitUs, 0);
+    expect(ProfileCounters.readerReplyDeliveryUs, 0);
+    expect(ProfileCounters.readerReplyDeliveryCount, 0);
   });
 }

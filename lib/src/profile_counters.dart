@@ -128,6 +128,35 @@ class ProfileCounters {
   /// Number of profiled writer execute, batch, and commit requests.
   static int writerRequestCount = 0;
 
+  /// Cumulative wall-clock microseconds spent by stream re-query tasks
+  /// awaiting `ReaderPool.selectIfChanged`. This includes dispatch wait,
+  /// worker execution, reply delivery, and scheduling delay observed by the
+  /// main-isolate continuation. Because stream re-queries overlap, this is
+  /// per-request accumulated time rather than workload wall time.
+  static int streamRequeryAwaitUs = 0;
+  static int streamRequeryCount = 0;
+
+  /// Number of stream re-queries whose worker-side hash comparison returned
+  /// changed or unchanged results.
+  static int streamRequeryChangedCount = 0;
+  static int streamRequeryUnchangedCount = 0;
+  static int streamRequeryDiscardedCount = 0;
+
+  /// Synchronous wall-clock microseconds spent delivering changed stream rows
+  /// to subscriber controllers. Listener callbacks run later; this only covers
+  /// the `StreamController.add` fan-out loop.
+  static int streamEmitUs = 0;
+  static int streamEmitCount = 0;
+
+  /// Cumulative wall-clock microseconds spent parked in `ReaderPool._dispatch`
+  /// after all reader workers were busy.
+  static int readerDispatchWaitUs = 0;
+
+  /// Synchronous wall-clock microseconds spent in the main-isolate reader reply
+  /// handler before the pending read future is completed.
+  static int readerReplyDeliveryUs = 0;
+  static int readerReplyDeliveryCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -143,6 +172,16 @@ class ProfileCounters {
     'writer_write_call_us': writerWriteCallUs,
     'writer_dirty_fetch_us': writerDirtyFetchUs,
     'writer_request_count': writerRequestCount,
+    'stream_requery_await_us': streamRequeryAwaitUs,
+    'stream_requery_count': streamRequeryCount,
+    'stream_requery_changed_count': streamRequeryChangedCount,
+    'stream_requery_unchanged_count': streamRequeryUnchangedCount,
+    'stream_requery_discarded_count': streamRequeryDiscardedCount,
+    'stream_emit_us': streamEmitUs,
+    'stream_emit_count': streamEmitCount,
+    'reader_dispatch_wait_us': readerDispatchWaitUs,
+    'reader_reply_delivery_us': readerReplyDeliveryUs,
+    'reader_reply_delivery_count': readerReplyDeliveryCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -175,5 +214,15 @@ class ProfileCounters {
     writerWriteCallUs = 0;
     writerDirtyFetchUs = 0;
     writerRequestCount = 0;
+    streamRequeryAwaitUs = 0;
+    streamRequeryCount = 0;
+    streamRequeryChangedCount = 0;
+    streamRequeryUnchangedCount = 0;
+    streamRequeryDiscardedCount = 0;
+    streamEmitUs = 0;
+    streamEmitCount = 0;
+    readerDispatchWaitUs = 0;
+    readerReplyDeliveryUs = 0;
+    readerReplyDeliveryCount = 0;
   }
 }

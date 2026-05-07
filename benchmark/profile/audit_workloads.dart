@@ -22,8 +22,10 @@
 //      them upward when the drain is too short on slower ones).
 //
 // Each scenario returns a raw map containing `wall_us`, `emissions`,
-// and the relevant `ProfileCounters` snapshot — callers format their
-// own report tables from those values.
+// and the relevant `ProfileCounters` snapshot. Writer/invalidation counters
+// are complete when the stopwatch stops; stream completion counters are
+// captured after the post-wall drain so trailing re-queries are visible
+// without inflating `wall_us`. Callers format their own report tables.
 
 import 'dart:async';
 import 'dart:io';
@@ -96,8 +98,7 @@ Future<({Database db, Directory tempDir})> setupA11cDb({
       'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
   await db.execute(createSql);
   await db.executeBatch(insertSql, [
-    for (var i = 0; i < a11cRowCount; i++)
-      [i, for (final _ in colNames) 'v$i'],
+    for (var i = 0; i < a11cRowCount; i++) [i, for (final _ in colNames) 'v$i'],
   ]);
   return (db: db, tempDir: tempDir);
 }
@@ -159,11 +160,11 @@ Future<AuditScenarioResult> runA11cScenario(
       await Future<void>.delayed(Duration.zero);
     }
     sw.stop();
-    final counters = ProfileCounters.snapshot();
 
     // Drain emissions without inflating wall_us.
     await Future<void>.delayed(const Duration(milliseconds: 50));
     final emissions = emitCounts.fold<int>(0, (a, b) => a + b);
+    final counters = ProfileCounters.snapshot();
 
     return AuditScenarioResult(
       workload: name,
@@ -186,9 +187,7 @@ Future<AuditScenarioResult> runA11cScenario(
 /// drain runs after the stopwatch stops, so emission count is stable
 /// without padding the wall denominator with idle wait.
 Future<AuditScenarioResult> runKeyedPkScenario() async {
-  final tempDir = await Directory.systemTemp.createTemp(
-    'audit_workloads_pk_',
-  );
+  final tempDir = await Directory.systemTemp.createTemp('audit_workloads_pk_');
   final db = await Database.open('${tempDir.path}/test.db');
   try {
     await db.execute(
@@ -198,10 +197,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       'updated_at INTEGER NOT NULL'
       ')',
     );
-    await db.executeBatch(
-      'INSERT INTO items(body, updated_at) VALUES (?, ?)',
-      [for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0]],
-    );
+    await db.executeBatch('INSERT INTO items(body, updated_at) VALUES (?, ?)', [
+      for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0],
+    ]);
 
     final watchedIds = _pickKeyedPkWatchedIds();
     final watchedSet = watchedIds.toSet();
@@ -246,7 +244,6 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
         );
       }
       sw.stop();
-      final counters = ProfileCounters.snapshot();
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.
@@ -259,6 +256,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
         if (nowEmissions == lastEmissions) break;
         lastEmissions = nowEmissions;
       }
+      final counters = ProfileCounters.snapshot();
 
       return AuditScenarioResult(
         workload: 'keyed PK subscriptions',

@@ -33,8 +33,8 @@ changing public API or production behavior:
 - If the write helper dominates wide batch wall, parameter encoding remains a
   plausible implementation area.
 - If stream overlap wall is mostly writer-roundtrip residual plus invalidation,
-  future stream work should target completion/scheduling rather than dirty
-  fetch or native write speed.
+  split completion-side work so future stream work targets the actual source
+  rather than dirty fetch, native write speed, or generic reader-pool wakeups.
 
 Accept this as a measurement experiment if the counters are profile-gated,
 the harness reports repeated rows for A11c, keyed-PK, and wide-batch shapes,
@@ -53,6 +53,17 @@ Added profile-only writer timing to the internal write response path:
   table/column dependency fetch.
 - `writer_request_count` counts profiled write, batch, and commit requests,
   including transaction-body writes.
+- `stream_requery_await_us` / `stream_requery_count` measure per-entry
+  `selectIfChanged` await cost. This is accumulated per stream re-query, so
+  overlapping work can sum above workload wall.
+- `stream_requery_changed_count`, `stream_requery_unchanged_count`, and
+  `stream_requery_discarded_count` classify whether re-query completions
+  emitted, found the result unchanged, or were discarded because another write
+  dirtied the stream while the re-query was in-flight.
+- `reader_dispatch_wait_us` and `reader_reply_delivery_us` separate reader-pool
+  parking from the synchronous main-isolate reply handler.
+- `stream_emit_us` measures the synchronous `StreamController.add` fan-out
+  loop for changed stream results.
 
 The counters are accumulated in `ProfileCounters` only when
 `-DRESQLITE_PROFILE=true` is compiled in. Profile samples use dedicated
@@ -102,14 +113,14 @@ The decision read uses passes 2-3:
 
 | workload | wall_ms | roundtrip / wall | write call / roundtrip | dirty fetch / roundtrip | residual / roundtrip | invalidate / wall |
 |---|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 19.97-20.46 | 74.45-77.01% | 55.21-56.23% | 0.25-0.70% | 43.07-44.53% | 0.00% |
-| A11c disjoint | 20.17-23.82 | 62.65-63.09% | 46.99-47.86% | 0.17-0.33% | 51.81-52.85% | 11.39-15.15% |
-| A11c overlap | 50.06-57.15 | 60.79-61.92% | 23.49-31.36% | 0.58-0.71% | 68.06-75.80% | 8.07-10.16% |
-| keyed PK subscriptions | 14.24-15.95 | 79.18-79.25% | 30.56-31.54% | 0.40-0.59% | 67.86-69.04% | 12.72-14.01% |
-| Wide batch insert | 21.08-24.50 | 99.64-99.77% | 68.28-69.81% | 0.04% | 30.14-31.69% | 0.00% |
+| A11c baseline | 24.63-29.14 | 64.09-78.03% | 44.31-51.85% | 0.63-1.34% | 46.81-55.05% | 0.00% |
+| A11c disjoint | 23.18-24.12 | 62.36-63.07% | 45.30-46.06% | 0.57-0.83% | 53.11-54.13% | 11.40-12.35% |
+| A11c overlap | 63.52-73.37 | 62.43-62.70% | 25.25-33.19% | 0.93-2.45% | 64.36-73.82% | 8.68-9.11% |
+| keyed PK subscriptions | 17.14-25.23 | 79.60-81.49% | 30.66-36.80% | 0.32-1.04% | 62.17-69.01% | 10.14-13.03% |
+| Wide batch insert | 15.05-16.39 | 98.98-99.80% | 71.30-74.51% | 0.07% | 25.42-28.63% | 0.00% |
 
 Dirty dependency fetch is not an active target on these shapes after warmup:
-it stays below 1% of writer roundtrip in every pass-2/pass-3 row.
+it is tiny relative to write-helper and residual writer-roundtrip costs.
 
 A11c overlap is not native-write-call dominated. The write helper accounts for
 23-31% of writer roundtrip, while the residual bucket accounts for 68-76%.
@@ -118,10 +129,26 @@ should target completion/event-loop scheduling or reply delivery rather than
 dirty fetch or native write work.
 
 Wide batch insert remains write-helper dominated: writer roundtrip is almost
-the entire workload wall, and the write helper is about 68-70% of that
+the entire workload wall, and the write helper is about 71-75% of that
 roundtrip. That keeps parameter/native write-call work interesting for wide
 batches, but this experiment does not split Dart parameter packing from SQLite
 stepping.
+
+The completion/reply counters answer the follow-up stream question directly:
+
+| workload | re-queries | changed / unchanged / discarded | await avg | dispatcher parks | reply delivery avg | emit avg |
+|---|---:|---:|---:|---:|---:|---:|
+| A11c overlap pass 2 | 3311 | 21 / 1446 / 1844 | 87.50 us | 0 | 8.00 us | 11.71 us |
+| A11c overlap pass 3 | 3105 | 27 / 1299 / 1779 | 79.77 us | 0 | 7.95 us | 6.52 us |
+| keyed PK pass 2 | 1162 | 3 / 382 / 777 | 84.53 us | 0 | 6.74 us | 13.33 us |
+| keyed PK pass 3 | 1115 | 3 / 322 / 790 | 61.91 us | 0 | 7.28 us | 6.33 us |
+
+The unlocked stream work is not another reader-pool wake policy: dispatch
+parking is zero. It is also not listener delivery: changed-result emit is tiny.
+The material signal is duplicate/stale `selectIfChanged` work. On A11c overlap,
+500 writes still drive roughly 3.1k-3.3k stream re-query completions, and most
+of those either find the result unchanged or are discarded because another write
+dirtied the stream while the re-query was already in-flight.
 
 Validation:
 
@@ -137,11 +164,12 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart 
 **Accept for review -- measurement.**
 
 This run removes dirty-dependency fetch and writer-wall split from the blocked
-measurement list. For stream-rerun work, the next useful signal is
-completion-side scheduling/reply-delivery cost. For parameter work, wide
-batches still have write-helper headroom, but the next measurement should split
-Dart parameter packing from the native write call before another encoder
-change.
+measurement list. It also resolves the completion/reply-delivery question far
+enough to choose a stream implementation target: reduce duplicate/stale
+`selectIfChanged` work, not reader-pool parking or controller emission. For
+parameter work, wide batches still have write-helper headroom, but the next
+measurement should split Dart parameter packing from the native write call
+before another encoder change.
 
 The narrower SQLite statement split is **deferred**, not solved. The official
 SQLite trace-profile API is unavailable under resqlite's current
@@ -151,8 +179,10 @@ inside another performance change.
 
 ## Future Notes
 
-- For stream-rerun work, build a completion-side scheduling or reply-delivery
-  counter before attempting another dispatch implementation.
+- For stream-rerun work, try a bounded implementation that reduces stale or
+  unchanged `selectIfChanged` completions. Plausible candidates are
+  generation-aware burst coalescing, simple row-range dependency elision for
+  partitioned primary-key streams, or cross-stream `selectIfChanged` batching.
 - For parameter work, add a focused split that separates Dart parameter packing
   from the native write call before attempting another wide-batch encoder
   change.
