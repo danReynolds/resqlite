@@ -78,11 +78,23 @@ final class CloseRequest extends WriterRequest {
 
 /// Response to [ExecuteRequest]. Includes the table modifications produced by
 /// the write.
-final class ExecuteResponse {
+class ExecuteResponse {
   const ExecuteResponse(this.result, this.modifications);
 
   final WriteResult result;
   final TableDependencies modifications;
+}
+
+/// Profile-mode execute response. Kept as a separate shape so production
+/// write responses do not carry an always-null profile slot.
+final class ProfiledExecuteResponse extends ExecuteResponse {
+  const ProfiledExecuteResponse(
+    super.result,
+    super.modifications,
+    this.profile,
+  );
+
+  final WriterProfileSample profile;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -92,10 +104,33 @@ final class QueryResponse {
 }
 
 /// Response to [BatchRequest] and [CommitRequest].
-final class BatchResponse {
+class BatchResponse {
   const BatchResponse(this.modifications);
 
   final TableDependencies modifications;
+}
+
+/// Profile-mode batch/commit response. Kept as a separate shape so production
+/// write responses do not carry an always-null profile slot.
+final class ProfiledBatchResponse extends BatchResponse {
+  const ProfiledBatchResponse(super.modifications, this.profile);
+
+  final WriterProfileSample profile;
+}
+
+/// Profile-only timing sample emitted by the writer isolate.
+///
+/// The main isolate owns [ProfileCounters], so profile-mode writer timings
+/// cross back with the normal response and are accumulated by the writer
+/// client after the response arrives.
+final class WriterProfileSample {
+  const WriterProfileSample({
+    required this.writeCallUs,
+    required this.dirtyFetchUs,
+  });
+
+  final int writeCallUs;
+  final int dirtyFetchUs;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,26 +251,104 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final profileEnabled = kProfileMode;
+  final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  writeSw?.stop();
+
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
-  final modifications = state.txDepth > 0
-      ? TableDependencies.none
-      : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  var dirtyFetchUs = 0;
+  final TableDependencies modifications;
+  if (state.txDepth > 0) {
+    modifications = TableDependencies.none;
+  } else {
+    final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
+    modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
+    dirtyFetchUs = dirtySw?.elapsedMicroseconds ?? 0;
+  }
+
+  msg.replyPort.send(
+    profileEnabled
+        ? ProfiledExecuteResponse(
+            result,
+            modifications,
+            WriterProfileSample(
+              writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+              dirtyFetchUs: dirtyFetchUs,
+            ),
+          )
+        : ExecuteResponse(result, modifications),
+  );
+}
+
+BatchResponse _batchResponse(
+  TableDependencies modifications, {
+  required bool profileEnabled,
+  required int writeCallUs,
+  required int dirtyFetchUs,
+}) {
+  if (!profileEnabled && identical(modifications, TableDependencies.none)) {
+    return const BatchResponse(TableDependencies.none);
+  }
+  return profileEnabled
+      ? ProfiledBatchResponse(
+          modifications,
+          WriterProfileSample(
+            writeCallUs: writeCallUs,
+            dirtyFetchUs: dirtyFetchUs,
+          ),
+        )
+      : BatchResponse(modifications);
+}
+
+void _sendBatchResponse(
+  BatchRequest msg,
+  TableDependencies modifications, {
+  required bool profileEnabled,
+  required int writeCallUs,
+  required int dirtyFetchUs,
+}) {
+  msg.replyPort.send(
+    _batchResponse(
+      modifications,
+      profileEnabled: profileEnabled,
+      writeCallUs: writeCallUs,
+      dirtyFetchUs: dirtyFetchUs,
+    ),
+  );
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final profileEnabled = kProfileMode;
+  final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
+
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    writeSw?.stop();
+    _sendBatchResponse(
+      msg,
+      TableDependencies.none,
+      profileEnabled: profileEnabled,
+      writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+      dirtyFetchUs: 0,
+    );
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+    writeSw?.stop();
+    final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
+    _sendBatchResponse(
+      msg,
+      modifications,
+      profileEnabled: profileEnabled,
+      writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+      dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
     );
   }
 }
@@ -311,7 +424,10 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // longer active. The next request sees a predictable state.
   final newDepth = state.txDepth - 1;
   if (newDepth == 0) {
+    final profileEnabled = kProfileMode;
+    final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
     final rc = resqliteTxCommit(state.dbHandle);
+    writeSw?.stop();
     if (rc != 0) {
       // Capture the error message BEFORE any further sqlite calls — the
       // errmsg pointer is only stable until the next call.
@@ -331,12 +447,23 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
+    final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
     msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      _batchResponse(
+        modifications,
+        profileEnabled: profileEnabled,
+        writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+        dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
+      ),
     );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
+    final profileEnabled = kProfileMode;
+    final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
     final rc = resqliteExec(state.dbHandle, sp);
+    writeSw?.stop();
     calloc.free(sp);
     if (rc != 0) {
       final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
@@ -372,7 +499,14 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    msg.replyPort.send(
+      _batchResponse(
+        TableDependencies.none,
+        profileEnabled: profileEnabled,
+        writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
+        dirtyFetchUs: 0,
+      ),
+    );
   }
 }
 

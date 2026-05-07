@@ -13,12 +13,11 @@
 /// lower bound; `Database.diagnostics()` is SQLite-specific; these
 /// counters fill the Dart-side gap.
 ///
-/// **Isolate scope.** Dart isolates don't share top-level state. These
-/// counters are currently populated from the main isolate — specifically
-/// by the `benchmark/profile/profiled_database.dart` wrapper, which
-/// sees every result after it crosses back from a worker. That lets
-/// the harness snapshot aggregates around a workload without a custom
-/// cross-isolate protocol.
+/// **Isolate scope.** Dart isolates don't share top-level state. Most
+/// counters are populated from the main isolate. Writer-isolate timings
+/// are copied back on internal writer responses and accumulated here by
+/// the main-isolate writer client, so profile harnesses can still
+/// snapshot one counter map.
 ///
 /// **Counters that require worker-isolate visibility** (per-SQLite-type
 /// breakdowns, e.g. "how many int cells got boxed into `List<Object?>`"
@@ -110,6 +109,25 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Main-isolate wall time spent awaiting writer operations. This
+  /// includes isolate message delivery/copy, writer scheduling, native
+  /// write work, dirty-dependency fetch, and the response hop back to
+  /// the caller, but excludes `StreamEngine.onDependencyChanges` because
+  /// that is already reported by [invalidateUs].
+  static int writerRoundtripUs = 0;
+
+  /// Worker-isolate wall time spent inside the write helper call:
+  /// Dart parameter packing, FFI entry/exit, native bind/step/reset, and
+  /// result unmarshalling for `execute`.
+  static int writerWriteCallUs = 0;
+
+  /// Worker-isolate wall time spent fetching and materializing dirty
+  /// table/column dependencies after a profiled write call.
+  static int writerDirtyFetchUs = 0;
+
+  /// Number of profiled writer execute, batch, and commit requests.
+  static int writerRequestCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -121,6 +139,10 @@ class ProfileCounters {
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'writer_roundtrip_us': writerRoundtripUs,
+    'writer_write_call_us': writerWriteCallUs,
+    'writer_dirty_fetch_us': writerDirtyFetchUs,
+    'writer_request_count': writerRequestCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -149,5 +171,9 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    writerRoundtripUs = 0;
+    writerWriteCallUs = 0;
+    writerDirtyFetchUs = 0;
+    writerRequestCount = 0;
   }
 }
