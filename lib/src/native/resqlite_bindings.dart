@@ -634,6 +634,9 @@ const int _paramStructSize = 24;
 const int _asciiBatchMinParamCount = 8;
 const int _asciiBatchMinTotalParamCount = 8192;
 
+typedef _BatchStringWriter =
+    int Function(String value, Uint8List out, int offset, int flatIndex);
+
 /// Pack params into a single buffer: `[struct0..N][text/blob bytes]`.
 ///
 /// Text and blob bytes live inline at the tail of the same buffer that
@@ -754,7 +757,17 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) {
+int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) =>
+    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+
+int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
+    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;
+
+int? _measureBatchPayloadBytes(
+  List<List<Object?>> paramSets,
+  int paramCount, {
+  required bool asciiOnly,
+}) {
   var extraBytes = 0;
   var hasString = false;
 
@@ -763,37 +776,24 @@ int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) {
       final value = set[i];
       if (value is String) {
         hasString = true;
-        final length = value.length;
-        for (var j = 0; j < length; j++) {
-          if (value.codeUnitAt(j) > 0x7f) {
-            return null;
+        if (asciiOnly) {
+          final length = value.length;
+          for (var j = 0; j < length; j++) {
+            if (value.codeUnitAt(j) > 0x7f) {
+              return null;
+            }
           }
+          extraBytes += length;
+        } else {
+          extraBytes += _utf8Length(value);
         }
-        extraBytes += length;
       } else if (value is Uint8List) {
         extraBytes += value.length;
       }
     }
   }
 
-  return hasString ? extraBytes : null;
-}
-
-int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) {
-  var extraBytes = 0;
-
-  for (final set in paramSets) {
-    for (var i = 0; i < paramCount; i++) {
-      final value = set[i];
-      if (value is String) {
-        extraBytes += _utf8Length(value);
-      } else if (value is Uint8List) {
-        extraBytes += value.length;
-      }
-    }
-  }
-
-  return extraBytes;
+  return hasString || !asciiOnly ? extraBytes : null;
 }
 
 ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
@@ -802,51 +802,18 @@ ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
   int totalCount,
   int extraBytes,
 ) {
-  final structsBytes = _paramStructSize * totalCount;
-  final totalBytes = structsBytes + extraBytes;
-  final buf = allocateReusableParamStructBuf(totalBytes);
-  final view = buf.asTypedList(totalBytes);
-  final byteData = ByteData.sublistView(view);
-  final bufAddr = buf.address;
-
-  var dataOffset = structsBytes;
-  var flatIndex = 0;
-  for (final set in paramSets) {
-    for (var i = 0; i < paramCount; i++) {
-      final offset = flatIndex * _paramStructSize;
-      final value = set[i];
-
-      if (value == null) {
-        byteData.setInt32(offset, 0, Endian.little);
-      } else if (value is int) {
-        byteData.setInt32(offset, 1, Endian.little);
-        byteData.setInt64(offset + 8, value, Endian.little);
-      } else if (value is double) {
-        byteData.setInt32(offset, 2, Endian.little);
-        byteData.setFloat64(offset + 8, value, Endian.little);
-      } else if (value is String) {
-        for (var j = 0; j < value.length; j++) {
-          view[dataOffset + j] = value.codeUnitAt(j);
-        }
-        byteData.setInt32(offset, 3, Endian.little);
-        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
-        byteData.setInt32(offset + 16, value.length, Endian.little);
-        dataOffset += value.length;
-      } else if (value is Uint8List) {
-        view.setRange(dataOffset, dataOffset + value.length, value);
-        byteData.setInt32(offset, 4, Endian.little);
-        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
-        byteData.setInt32(offset + 16, value.length, Endian.little);
-        dataOffset += value.length;
-      } else {
-        byteData.setInt32(offset, 0, Endian.little);
+  return _allocatePackedBatchParams(
+    paramSets,
+    paramCount,
+    totalCount,
+    extraBytes,
+    (value, out, offset, _) {
+      for (var j = 0; j < value.length; j++) {
+        out[offset + j] = value.codeUnitAt(j);
       }
-
-      flatIndex++;
-    }
-  }
-
-  return buf;
+      return offset + value.length;
+    },
+  );
 }
 
 ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
@@ -854,6 +821,22 @@ ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
   int paramCount,
   int totalCount,
   int extraBytes,
+) {
+  return _allocatePackedBatchParams(
+    paramSets,
+    paramCount,
+    totalCount,
+    extraBytes,
+    (value, out, offset, _) => _writeUtf8(value, out, offset),
+  );
+}
+
+ffi.Pointer<ffi.Uint8> _allocatePackedBatchParams(
+  List<List<Object?>> paramSets,
+  int paramCount,
+  int totalCount,
+  int extraBytes,
+  _BatchStringWriter writeString,
 ) {
   final structsBytes = _paramStructSize * totalCount;
   final totalBytes = structsBytes + extraBytes;
@@ -879,7 +862,7 @@ ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
         byteData.setFloat64(offset + 8, value, Endian.little);
       } else if (value is String) {
         final start = dataOffset;
-        dataOffset = _writeUtf8(value, view, dataOffset);
+        dataOffset = writeString(value, view, dataOffset, flatIndex);
         byteData.setInt32(offset, 3, Endian.little);
         byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
         byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
@@ -991,50 +974,17 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
     }
   }
 
-  final structsBytes = _paramStructSize * totalCount;
-  final totalBytes = structsBytes + extraBytes;
-  final buf = allocateReusableParamStructBuf(totalBytes);
-  final view = buf.asTypedList(totalBytes);
-  final byteData = ByteData.sublistView(view);
-  final bufAddr = buf.address;
-
-  var dataOffset = structsBytes;
-  flatIndex = 0;
-  for (final set in paramSets) {
-    for (var i = 0; i < paramCount; i++) {
-      final offset = flatIndex * _paramStructSize;
-      final value = set[i];
-
-      if (value == null) {
-        byteData.setInt32(offset, 0, Endian.little);
-      } else if (value is int) {
-        byteData.setInt32(offset, 1, Endian.little);
-        byteData.setInt64(offset + 8, value, Endian.little);
-      } else if (value is double) {
-        byteData.setInt32(offset, 2, Endian.little);
-        byteData.setFloat64(offset + 8, value, Endian.little);
-      } else if (value is String) {
-        final bytes = encodedStrings![flatIndex]!;
-        view.setRange(dataOffset, dataOffset + bytes.length, bytes);
-        byteData.setInt32(offset, 3, Endian.little);
-        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
-        byteData.setInt32(offset + 16, bytes.length, Endian.little);
-        dataOffset += bytes.length;
-      } else if (value is Uint8List) {
-        view.setRange(dataOffset, dataOffset + value.length, value);
-        byteData.setInt32(offset, 4, Endian.little);
-        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
-        byteData.setInt32(offset + 16, value.length, Endian.little);
-        dataOffset += value.length;
-      } else {
-        byteData.setInt32(offset, 0, Endian.little);
-      }
-
-      flatIndex++;
-    }
-  }
-
-  return buf;
+  return _allocatePackedBatchParams(
+    paramSets,
+    paramCount,
+    totalCount,
+    extraBytes,
+    (value, out, offset, flatIndex) {
+      final bytes = encodedStrings![flatIndex]!;
+      out.setRange(offset, offset + bytes.length, bytes);
+      return offset + bytes.length;
+    },
+  );
 }
 
 void freeParamBuffer(ffi.Pointer<ffi.Uint8> buf) {
