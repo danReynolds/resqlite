@@ -24,9 +24,9 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, invalidation, writer roundtrip, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most parked-dispatcher contention by eliding stream re-queries on the writer side before they reach the reader pool. Exp 120 closed upstream over-dispatch in StreamEngine._flushQueue; exp 122 removed the remaining async admission boundary by constructing StreamEngine with a concrete ReaderPool; exp 121 took invalidation traversal off the active target list. Exp 127 split writer roundtrip and completion/reply costs, showing excess selectIfChanged work rather than dirty fetch, parking, reply delivery, or emit cost. Exp 128 consumed that signal by batching queued stream re-queries into one reader request: Many-Streams overlap improved 65.90 -> 24.57 ms / 7,587 -> 20,347 w/s, and profile reader replies collapsed from thousands to about 31-35 after warmup. Keyed-PK remains mostly a dependency-precision problem: batching reduces replies but does not avoid table-level miss-path re-queries.",
-      "keyPriors": ["106", "120", "121", "122", "127", "128"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "119"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, invalidation, writer roundtrip, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most parked-dispatcher contention by eliding stream re-queries on the writer side before they reach the reader pool. Exp 120 closed upstream over-dispatch in StreamEngine._flushQueue; exp 122 removed the remaining async admission boundary by constructing StreamEngine with a concrete ReaderPool; exp 121 took invalidation traversal off the active target list. Exp 127 split writer roundtrip and completion/reply costs, showing excess selectIfChanged work rather than dirty fetch, parking, reply delivery, or emit cost. Exp 128 proved batching queued stream re-queries can move a narrow A11c-overlap shape (Many-Streams overlap 65.90 -> 24.57 ms / 7,587 -> 20,347 w/s; reader replies collapsed to about 31-35), but was rejected because that value depends on many overlapping streams already being dirtied and does not solve keyed-PK/table-level miss precision. Main keeps the simpler per-stream path unless a production workload shows reply fanout is the bottleneck.",
+      "keyPriors": ["106", "120", "121", "122", "127"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "119", "128"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a change prunes table-level miss-path re-queries with safe row/key dependency evidence",
@@ -34,7 +34,7 @@
       ],
       "openQuestions": [
         "Can simple primary-key or row-range dependency metadata prune unchanged keyed-PK/table-level miss re-queries without introducing a SQL parser?",
-        "Does batched stream re-query monopolization ever hurt mixed read/write fairness under non-A11c workloads?"
+        "What production workload, if any, has enough overlapping dirty streams for reply batching to justify its protocol complexity?"
       ],
       "openCandidates": [
         {
@@ -42,11 +42,6 @@
           "addedDate": "2026-05-07",
           "addedAfter": "127",
           "blockedOn": "needs a correctness design that avoids a general SQL parser"
-        },
-        {
-          "idea": "mixed read/write fairness audit for batched stream re-queries",
-          "addedDate": "2026-05-07",
-          "addedAfter": "128"
         },
         {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
@@ -64,7 +59,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. After exp 118 + exp 120 + exp 122, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on measured stream workloads, so parked-dispatcher/admission is not the active target. Exp 128 makes A11c overlap reply batching no longer the obvious next target; future stream work should either verify batched-query fairness under mixed reads or move to dependency precision for keyed/range miss paths."
+      "notesForExperimenters": "Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. After exp 118 + exp 120 + exp 122, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on measured stream workloads, so parked-dispatcher/admission is not the active target. Exp 128 showed reply batching can win on A11c overlap, but the maintainer rejected it as too conditional for the added protocol complexity. Prefer dependency precision for keyed/range miss paths before revisiting batching."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -541,15 +536,15 @@
     },
     "128": {
       "directions": ["stream-rerun-dispatch"],
-      "outcomeClass": "in_review_accepted",
+      "outcomeClass": "rejected_archived",
       "changedBeliefs": [
-        "Batched stream re-queries are a strong A11c overlap implementation target: standalone Many-Streams overlap improved 65.90 -> 24.57 ms and 7,587 -> 20,347 writes/sec",
-        "Reader reply count was the right lever for A11c overlap once exp 127 exposed completion-side work: profile reader replies collapsed from thousands to about 31-35 after warmup",
+        "Batched stream re-queries can strongly improve the narrow A11c overlap shape: standalone Many-Streams overlap improved 65.90 -> 24.57 ms and 7,587 -> 20,347 writes/sec",
+        "That win was rejected for main because it depends on many overlapping streams already being dirtied by the same table writes and adds reader-worker batch protocol/scheduling complexity",
         "Keyed-PK does not become solved by batching; it still needs row/key dependency precision because table-level miss writes re-query all watched streams"
       ],
       "nextSignals": [
-        "audit mixed read/write fairness if batched stream re-queries show read starvation in a broader workload",
-        "pursue simple primary-key or row-range dependency elision for keyed-PK/table-level miss paths before more reply batching"
+        "pursue simple primary-key or row-range dependency elision for keyed-PK/table-level miss paths before more reply batching",
+        "reopen archived batching only if a production workload shows reader reply fanout is the dominant cost and includes a mixed read/write fairness check"
       ]
     }
   }

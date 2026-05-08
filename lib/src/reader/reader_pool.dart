@@ -114,13 +114,6 @@ final class ReaderPool {
     return result as (List<Map<String, Object?>>?, int, int);
   }
 
-  Future<List<SelectIfChangedBatchReply>> selectIfChangedBatch(
-    List<SelectIfChangedBatchQuery> queries,
-  ) async {
-    final result = await _dispatch(SelectIfChangedBatchRequest(queries));
-    return result as List<SelectIfChangedBatchReply>;
-  }
-
   Future<Object?> _dispatch(ReadRequest request) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery

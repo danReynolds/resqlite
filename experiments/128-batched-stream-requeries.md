@@ -1,7 +1,8 @@
 # Experiment 128: Batched stream re-queries
 
 **Date:** 2026-05-07
-**Status:** In Review
+**Status:** Rejected
+**Archive:** [`archive/exp-128`](https://github.com/danReynolds/resqlite/compare/9a46228...archive/exp-128)
 **Direction:** `stream-rerun-dispatch`
 **Benchmark Run:** None
 
@@ -105,26 +106,31 @@ dart run benchmark/suites/keyed_pk_subscriptions.dart
 
 ## Decision
 
-**Accepted for review.**
+**Rejected — implementation rolled back, evidence retained.**
 
-This consumes exp 127's stream signal with a focused implementation. A11c
-overlap is the target and it moves strongly: standalone writer throughput rises
-from 7,587 to 20,347 writes/sec, while profile-mode reader replies collapse
-from thousands to a few dozen. The implementation keeps batching internal to
-reader workers and preserves single-stream error/cancel behavior.
+The measured overlap win is real, but too workload-specific to carry the extra
+reader-worker protocol and scheduling complexity by default. The change pays
+off when many active streams overlap on the same dirty table and the remaining
+cost is dominated by thousands of tiny `selectIfChanged` replies. That is a
+narrower condition than the general reactive workload should optimize for in
+core.
 
-Keyed-PK is not solved by this. Batching reduces reply count, but the workload
-still re-queries every watched stream for table-level miss writes. The next
-keyed-PK improvement should target row/key-range invalidation rather than
-reader reply batching.
+It also does not solve the more important keyed-PK/table-level miss problem.
+Batching reduces reply count after streams are already dirty, but still
+re-queries every watched stream for writes that could have been proven
+irrelevant with better dependency precision.
+
+Main should stay on the simpler per-stream re-query path. The implementation is
+preserved at `archive/exp-128` for future reference if a production workload
+looks like A11c overlap: dozens of active streams invalidated by the same write
+burst, with profile counters showing reader replies as the bottleneck.
 
 ## Future Notes
 
-- Watch mixed read/write fairness. A batch occupies one reader worker while it
-  serially hashes multiple stream queries; the current cap of 64 bounds that
-  monopolization.
 - Keyed-PK needs a different direction: simple primary-key/range dependency
   metadata or another safe way to avoid re-querying streams whose watched row
   could not have changed.
-- If future profiles show huge batches causing read starvation, tune the batch
-  cap by workload shape instead of reverting to per-stream replies.
+- Reopen batching only with direct workload evidence that reply fan-out, not
+  dependency precision, is the dominant cost. The archived implementation is
+  cherry-pickable, but should come with a mixed read/write fairness check before
+  reconsidering it for main.
