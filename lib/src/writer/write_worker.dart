@@ -72,6 +72,21 @@ final class CloseRequest extends WriterRequest {
   CloseRequest(super.replyPort);
 }
 
+/// Profile-mode-only request: snapshot the writer's per-isolate counters
+/// (`handlerUs`, `sqliteUs`, `handlerCount`). When [reset] is true the
+/// writer zeroes them after taking the snapshot, so callers can frame a
+/// burst with paired `reset:true` / `reset:false` calls.
+///
+/// Added by exp 127 to give audit harnesses cross-isolate visibility into
+/// the writer's own dispatch wall — the missing counter that was gating
+/// `stream-rerun-dispatch` and `measurement-system` direction work in
+/// `experiments/signals.json`. The values are populated only when
+/// [kProfileMode] is true; in release builds the response carries zeros.
+final class WriterCountersSnapshotRequest extends WriterRequest {
+  WriterCountersSnapshotRequest(this.reset, super.replyPort);
+  final bool reset;
+}
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -96,6 +111,28 @@ final class BatchResponse {
   const BatchResponse(this.modifications);
 
   final TableDependencies modifications;
+}
+
+/// Response to [WriterCountersSnapshotRequest]. All values are cumulative
+/// since the last reset (or since writer spawn). [handlerUs] is total
+/// wall the handler dispatch loop spent inside [WriterRequest] subclasses
+/// (excluding [WriterCountersSnapshotRequest] itself, which is not
+/// counted), [sqliteUs] is the subset of that wall spent specifically
+/// inside the FFI write helpers (`executeWrite`, `executeBatchWrite`,
+/// `executeNestedBatchWrite`), and [handlerCount] is the number of
+/// timed handler invocations.
+///
+/// In release builds (`kProfileMode == false`) all three fields are
+/// always zero — the writer never instruments the hot path.
+final class WriterCountersSnapshotResponse {
+  const WriterCountersSnapshotResponse({
+    required this.handlerUs,
+    required this.sqliteUs,
+    required this.handlerCount,
+  });
+  final int handlerUs;
+  final int sqliteUs;
+  final int handlerCount;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +180,29 @@ final class _WriterState {
   /// leaving both Dart's view and SQLite's savepoint stack in a consistent
   /// state so subsequent requests see predictable depth.
   int txDepth = 0;
+
+  /// Long-running monotonic clock used by the [kProfileMode] handler /
+  /// SQLite-call wall accounting. Started once at writer spawn so the
+  /// handler hot path only pays for `elapsedMicroseconds` reads, not
+  /// per-message Stopwatch construction. Idle in release.
+  final Stopwatch ticker = Stopwatch()..start();
+
+  /// Cumulative microseconds the handler dispatch loop spent inside any
+  /// [WriterRequest] subclass other than [WriterCountersSnapshotRequest].
+  /// Only mutated when [kProfileMode] is true; reset by
+  /// [WriterCountersSnapshotRequest] with `reset: true`.
+  int handlerUs = 0;
+
+  /// Cumulative microseconds the writer spent inside the FFI write
+  /// helpers (`executeWrite`, `executeBatchWrite`,
+  /// `executeNestedBatchWrite`). Subset of [handlerUs]; the difference
+  /// is the writer-side Dart wall (request decode, dirty-table read,
+  /// response build, isolate reply). Only mutated when [kProfileMode]
+  /// is true.
+  int sqliteUs = 0;
+
+  /// Number of timed handler invocations contributing to [handlerUs].
+  int handlerCount = 0;
 }
 
 void writerEntrypoint(List<Object> args) {
@@ -159,6 +219,26 @@ void writerEntrypoint(List<Object> args) {
   receivePort.handler = (Object? message) {
     if (message is! WriterRequest) return;
 
+    // Snapshot/reset requests are not part of the timed dispatch wall —
+    // they exist precisely to read the wall accounting from the outside,
+    // so counting their own handling would inflate the very metric the
+    // caller is trying to measure. Handle and return early.
+    if (message is WriterCountersSnapshotRequest) {
+      message.replyPort.send(
+        WriterCountersSnapshotResponse(
+          handlerUs: state.handlerUs,
+          sqliteUs: state.sqliteUs,
+          handlerCount: state.handlerCount,
+        ),
+      );
+      if (message.reset) {
+        state.handlerUs = 0;
+        state.sqliteUs = 0;
+        state.handlerCount = 0;
+      }
+      return;
+    }
+
     // Timeline markers scope the writer-isolate's per-message work so
     // external profilers (DevTools, `dart --observe`) can show the
     // cross-isolate breakdown without any custom protocol changes.
@@ -167,6 +247,7 @@ void writerEntrypoint(List<Object> args) {
     // tree-shakes away entirely at AOT. Build with
     // `-DRESQLITE_PROFILE=true` to enable (see lib/src/profile_mode.dart
     // and experiments/080-dispatch-budget.md).
+    final tHandler0 = kProfileMode ? state.ticker.elapsedMicroseconds : 0;
     if (kProfileMode) {
       Timeline.startSync('writer.handle.${message.runtimeType}');
     }
@@ -187,6 +268,11 @@ void writerEntrypoint(List<Object> args) {
         case CloseRequest():
           receivePort.close();
           message.replyPort.send(true);
+        case WriterCountersSnapshotRequest():
+          // Already handled by the early return above. Branch is
+          // unreachable but the switch is exhaustive over the sealed
+          // hierarchy.
+          break;
       }
     } on ResqliteException catch (e) {
       // Same-group isolates (Isolate.spawn) deep-copy objects across
@@ -206,6 +292,8 @@ void writerEntrypoint(List<Object> args) {
     } finally {
       if (kProfileMode) {
         Timeline.finishSync();
+        state.handlerUs += state.ticker.elapsedMicroseconds - tHandler0;
+        state.handlerCount++;
       }
     }
   };
@@ -216,7 +304,11 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final tSqlite0 = kProfileMode ? state.ticker.elapsedMicroseconds : 0;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  if (kProfileMode) {
+    state.sqliteUs += state.ticker.elapsedMicroseconds - tSqlite0;
+  }
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
@@ -227,13 +319,20 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final tSqlite0 = kProfileMode ? state.ticker.elapsedMicroseconds : 0;
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    if (kProfileMode) {
+      state.sqliteUs += state.ticker.elapsedMicroseconds - tSqlite0;
+    }
     msg.replyPort.send(const BatchResponse(TableDependencies.none));
   } else {
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    if (kProfileMode) {
+      state.sqliteUs += state.ticker.elapsedMicroseconds - tSqlite0;
+    }
     msg.replyPort.send(
       BatchResponse(getDirtyTableDependencies(state.dbHandle)),
     );

@@ -31,6 +31,12 @@ import 'dart:math' as math;
 
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
+// `WriterCountersSnapshotResponse` is the typed reply from
+// `Database.profileSnapshotWriterCounters`; the audit does not need to
+// reference it by name, but the import keeps the field-access type
+// resolution explicit for tooling.
+// ignore: implementation_imports, unused_import
+import 'package:resqlite/src/writer/write_worker.dart';
 
 /// A11c shared shape — same row count and stream count exp 119 / 121
 /// agreed on. Keep these in sync with the values used in benchmarks
@@ -152,6 +158,12 @@ Future<AuditScenarioResult> runA11cScenario(
     }
 
     ProfileCounters.reset();
+    // Reset writer-isolate counters (exp 127) inside the same warm-up
+    // window — needs a round-trip to the writer, so we drop it before
+    // the wall stopwatch starts. The reset zeroes the writer's
+    // accumulators, so the post-burst snapshot is already the
+    // workload-scoped delta.
+    await db.profileSnapshotWriterCounters(reset: true);
     final sw = Stopwatch()..start();
     for (var w = 0; w < a11cWriteCount; w++) {
       await db.execute(updateSql, [valueFor(w), w % a11cRowCount]);
@@ -160,6 +172,10 @@ Future<AuditScenarioResult> runA11cScenario(
     }
     sw.stop();
     final counters = ProfileCounters.snapshot();
+    final writerAfter = await db.profileSnapshotWriterCounters();
+    counters['writer_handler_us'] = writerAfter.handlerUs;
+    counters['writer_sqlite_us'] = writerAfter.sqliteUs;
+    counters['writer_handler_count'] = writerAfter.handlerCount;
 
     // Drain emissions without inflating wall_us.
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -236,6 +252,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       final prng = math.Random(keyedPkPrngSeed);
 
       ProfileCounters.reset();
+      // Reset writer-isolate counters before the wall stopwatch starts;
+      // see exp 127 / `runA11cScenario` for the same pattern.
+      await db.profileSnapshotWriterCounters(reset: true);
       final sw = Stopwatch()..start();
       for (var w = 0; w < keyedPkWriteCount; w++) {
         final pk = prng.nextInt(keyedPkRowCount) + 1;
@@ -247,6 +266,10 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       }
       sw.stop();
       final counters = ProfileCounters.snapshot();
+      final writerAfter = await db.profileSnapshotWriterCounters();
+      counters['writer_handler_us'] = writerAfter.handlerUs;
+      counters['writer_sqlite_us'] = writerAfter.sqliteUs;
+      counters['writer_handler_count'] = writerAfter.handlerCount;
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.
@@ -331,6 +354,11 @@ Future<AuditScenarioResult> runDirectReadControl() async {
         'intersection_entries': 0,
         'rows_decoded': 0,
         'cells_decoded': 0,
+        // Direct-read scenarios don't touch the writer; report zeros so
+        // consumers can read the writer counters uniformly.
+        'writer_handler_us': 0,
+        'writer_sqlite_us': 0,
+        'writer_handler_count': 0,
       },
     );
   } finally {

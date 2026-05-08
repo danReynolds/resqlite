@@ -168,6 +168,26 @@ final class Writer {
     return result;
   }
 
+  /// Profile-mode-only: snapshot the writer isolate's per-isolate
+  /// counters (`handlerUs`, `sqliteUs`, `handlerCount`).
+  ///
+  /// When [reset] is true the writer zeroes the counters after taking
+  /// the snapshot, so audit harnesses can frame a workload with a
+  /// `reset: true` call before the burst and a `reset: false` call
+  /// after. The values are populated only when [kProfileMode] is true;
+  /// in release builds the response carries zeros.
+  ///
+  /// Added by exp 127 to give cross-isolate visibility into the writer's
+  /// own dispatch wall — the missing measurement that was gating
+  /// `stream-rerun-dispatch` direction work in `experiments/signals.json`.
+  Future<WriterCountersSnapshotResponse> profileSnapshotCounters({
+    bool reset = false,
+  }) {
+    return _request<WriterCountersSnapshotResponse>(
+      (replyPort) => WriterCountersSnapshotRequest(reset, replyPort),
+    );
+  }
+
   Future<void> close() async {
     _closed = true;
 

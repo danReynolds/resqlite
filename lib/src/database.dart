@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
+import 'package:resqlite/src/writer/write_worker.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
@@ -496,6 +497,20 @@ final class Database {
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
     );
+  }
+
+  /// Profile-mode-only: snapshot the writer isolate's per-isolate
+  /// counters. See [Writer.profileSnapshotCounters].
+  ///
+  /// Surfaced on [Database] so audit harnesses can pair this with the
+  /// main-isolate `ProfileCounters` snapshot inside a single workload
+  /// scenario without needing access to the private writer field.
+  Future<WriterCountersSnapshotResponse> profileSnapshotWriterCounters({
+    bool reset = false,
+  }) async {
+    _ensureOpen();
+    final _DatabaseRuntime(:writer) = await _runtime;
+    return writer.profileSnapshotCounters(reset: reset);
   }
 }
 
