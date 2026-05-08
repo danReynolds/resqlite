@@ -76,6 +76,7 @@ moved them.
 | [127](127-writer-wall-split-audit.md) | Writer wall split audit | Measurement-only: profile-mode counters split writer roundtrip, write-helper wall, dirty dependency fetch, residual roundtrip, and invalidation on A11c/keyed-PK/wide-batch shapes. Dirty fetch is <1% after warmup; A11c overlap is residual/completion-shaped; Wide Batch Insert remains write-helper dominated |  |
 | [129](129-wide-batch-write-helper-split.md) | Wide-batch write-helper split | Measurement-only: profile-mode batch counters split Dart parameter matrix packing from `resqlite_run_batch*`. After warmup, wide mixed batches are native-call dominated: packing is ~25-37% of write-helper wall, native bind/step/reset/transaction work is ~63-74% |  |
 | [130](130-wide-batch-native-call-split.md) | Wide-batch native call split | Measurement-only: profile-mode native batch counters split `resqlite_run_batch*` into stmt, transaction, bind, step, reset, and preupdate wall. Wide mixed batches are step/COMMIT dominated; bind is ~9-15% of native wall, reset and stmt lookup are tiny |  |
+| [131](131-wide-batch-transaction-shape.md) | Wide-batch transaction shape | Measurement-only: compares top-level `resqlite_run_batch_profiled` with explicit BEGIN + nested profiled batch + COMMIT. The COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact |  |
 
 ## Rejected
 
