@@ -670,6 +670,26 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    test('executeBatch reports original SQL when optimized insert fails', () async {
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      );
+
+      const sql = 'INSERT INTO t(name) VALUES (?)';
+      try {
+        await db.executeBatch(sql, [
+          for (var i = 0; i < 2000; i++) [i == 1000 ? null : 'name_$i'],
+        ]);
+        fail('expected a query exception');
+      } on ResqliteQueryException catch (e) {
+        expect(e.sql, sql);
+        expect(e.sqliteCode, isNotNull);
+      }
+
+      final rows = await db.select('SELECT * FROM t');
+      expect(rows, isEmpty);
+    });
+
     // ----- Transactions -----
 
     test('transaction commits on success', () async {

@@ -20,6 +20,7 @@ import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
+import 'batch_insert_chunker.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -384,19 +385,28 @@ void _sendBatchResponse(
 void _handleBatch(_WriterState state, BatchRequest msg) {
   final profileEnabled = kProfileMode;
   final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
+  final batch = chunkSimpleInsertBatch(msg.sql, msg.paramSets);
+  final sql = batch?.sql ?? msg.sql;
+  final paramSets = batch?.paramSets ?? msg.paramSets;
 
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    final batchProfile = profileEnabled
-        ? executeNestedBatchWriteProfiled(
-            state.dbHandle,
-            msg.sql,
-            msg.paramSets,
-          )
-        : null;
-    if (!profileEnabled) {
-      executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    BatchWriteProfile? batchProfile;
+    try {
+      batchProfile = profileEnabled
+          ? executeNestedBatchWriteProfiled(state.dbHandle, sql, paramSets)
+          : null;
+      if (!profileEnabled) {
+        executeNestedBatchWrite(state.dbHandle, sql, paramSets);
+      }
+    } on ResqliteQueryException catch (e) {
+      if (batch == null) rethrow;
+      throw ResqliteQueryException(
+        e.message,
+        sql: msg.sql,
+        sqliteCode: e.sqliteCode,
+      );
     }
     writeSw?.stop();
     _sendBatchResponse(
@@ -408,11 +418,21 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       batchProfile: batchProfile,
     );
   } else {
-    final batchProfile = profileEnabled
-        ? executeBatchWriteProfiled(state.dbHandle, msg.sql, msg.paramSets)
-        : null;
-    if (!profileEnabled) {
-      executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    BatchWriteProfile? batchProfile;
+    try {
+      batchProfile = profileEnabled
+          ? executeBatchWriteProfiled(state.dbHandle, sql, paramSets)
+          : null;
+      if (!profileEnabled) {
+        executeBatchWrite(state.dbHandle, sql, paramSets);
+      }
+    } on ResqliteQueryException catch (e) {
+      if (batch == null) rethrow;
+      throw ResqliteQueryException(
+        e.message,
+        sql: msg.sql,
+        sqliteCode: e.sqliteCode,
+      );
     }
     writeSw?.stop();
     final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
