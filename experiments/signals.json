@@ -24,35 +24,24 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, invalidation, writer roundtrip, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most parked-dispatcher contention by eliding stream re-queries on the writer side before they reach the reader pool. Exp 115 made the parked-dispatcher path directly observable; exp 118 removed wake retries; exp 119 measured the surviving parking signal; exp 120 closed upstream over-dispatch in StreamEngine._flushQueue; exp 122 then removed the remaining async admission boundary by constructing StreamEngine with a concrete ReaderPool. Exp 121 audited invalidation traversal and found it at the decision-threshold edge, not a clear active target. Exp 127 split writer roundtrip and added completion/reply counters on current main: dirty dependency fetch is not material, A11c overlap/keyed-PK are residual-heavy after the writer reply, dispatcher parks remain zero, reader reply delivery is about 8 us/reply after warmup, and controller emit is tiny. The live stream signal is excess selectIfChanged work: A11c overlap still completes about 3.1k-3.3k re-queries per 500 writes after warmup, with about 1.8k stale/discarded completions and about 1.3k-1.4k unchanged completions. Future stream-rerun work should target duplicate/stale re-query work before another reader-pool wake or reply-delivery change.",
-      "keyPriors": ["106", "119", "120", "121", "122", "127"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, invalidation, writer roundtrip, and completion-side churn. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most parked-dispatcher contention by eliding stream re-queries on the writer side before they reach the reader pool. Exp 120 closed upstream over-dispatch in StreamEngine._flushQueue; exp 122 removed the remaining async admission boundary by constructing StreamEngine with a concrete ReaderPool; exp 121 took invalidation traversal off the active target list. Exp 127 split writer roundtrip and completion/reply costs, showing excess selectIfChanged work rather than dirty fetch, parking, reply delivery, or emit cost. Exp 128 proved batching queued stream re-queries can move a narrow A11c-overlap shape (Many-Streams overlap 65.90 -> 24.57 ms / 7,587 -> 20,347 w/s; reader replies collapsed to about 31-35), but was rejected because that value depends on many overlapping streams already being dirtied and does not solve keyed-PK/table-level miss precision. Main keeps the simpler per-stream path unless a production workload shows reply fanout is the bottleneck.",
+      "keyPriors": ["106", "120", "121", "122", "127"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "119", "128"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
-        "a trace shows completion-side churn dominating a many-stream workload",
+        "a change prunes table-level miss-path re-queries with safe row/key dependency evidence",
         "a scheduler policy improves fan-out without harming unrelated reads"
       ],
       "openQuestions": [
-        "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
-        "Can generation-aware scheduling or a bounded quiet window reduce discarded re-query completions without hurting invalidation latency?",
-        "Can simple primary-key or row-range dependency metadata prune unchanged overlap re-queries without introducing a SQL parser?"
+        "Can simple primary-key or row-range dependency metadata prune unchanged keyed-PK/table-level miss re-queries without introducing a SQL parser?",
+        "What production workload, if any, has enough overlapping dirty streams for reply batching to justify its protocol complexity?"
       ],
       "openCandidates": [
-        {
-          "idea": "generation-aware stream re-query burst coalescing after dirty in-flight completions",
-          "addedDate": "2026-05-07",
-          "addedAfter": "127"
-        },
         {
           "idea": "simple primary-key or row-range dependency elision for partitioned stream predicates",
           "addedDate": "2026-05-07",
           "addedAfter": "127",
           "blockedOn": "needs a correctness design that avoids a general SQL parser"
-        },
-        {
-          "idea": "cross-stream selectIfChanged batching",
-          "addedDate": "2026-05-07",
-          "addedAfter": "127"
         },
         {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
@@ -70,7 +59,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120 + exp 122, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher/admission signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe). Exp 127 takes dirty dependency fetch, writer-wall split, and generic reply-delivery speculation off the blocked list. Current stream implementation candidates should explain how they reduce stale/discarded or unchanged `selectIfChanged` work, then measure invalidation latency and mixed read/write fairness alongside A11c overlap."
+      "notesForExperimenters": "Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. After exp 118 + exp 120 + exp 122, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on measured stream workloads, so parked-dispatcher/admission is not the active target. Exp 128 showed reply batching can win on A11c overlap, but the maintainer rejected it as too conditional for the added protocol complexity. Prefer dependency precision for keyed/range miss paths before revisiting batching."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -543,6 +532,19 @@
         "try an implementation that reduces stale/discarded or unchanged selectIfChanged work, such as generation-aware burst coalescing, simple row-range invalidation elision, or cross-stream selectIfChanged batching",
         "split Dart parameter packing from native write-call wall before another wide-batch encoder experiment",
         "treat exact SQLite statement timing as a separate build-config/profileability experiment because the current build uses `SQLITE_OMIT_TRACE`"
+      ]
+    },
+    "128": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "rejected_archived",
+      "changedBeliefs": [
+        "Batched stream re-queries can strongly improve the narrow A11c overlap shape: standalone Many-Streams overlap improved 65.90 -> 24.57 ms and 7,587 -> 20,347 writes/sec",
+        "That win was rejected for main because it depends on many overlapping streams already being dirtied by the same table writes and adds reader-worker batch protocol/scheduling complexity",
+        "Keyed-PK does not become solved by batching; it still needs row/key dependency precision because table-level miss writes re-query all watched streams"
+      ],
+      "nextSignals": [
+        "pursue simple primary-key or row-range dependency elision for keyed-PK/table-level miss paths before more reply batching",
+        "reopen archived batching only if a production workload shows reader reply fanout is the dominant cost and includes a mixed read/write fairness check"
       ]
     }
   }
