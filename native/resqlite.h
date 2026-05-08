@@ -112,6 +112,45 @@ int resqlite_run_batch_nested(
     int set_count
 );
 
+typedef struct {
+    long long stmt_us;
+    long long tx_begin_us;
+    long long tx_commit_us;
+    long long tx_rollback_us;
+    long long bind_us;
+    long long step_us;
+    long long reset_us;
+    long long preupdate_us;
+    long long set_count;
+    long long bind_count;
+    long long step_count;
+    long long reset_count;
+    long long preupdate_count;
+} resqlite_batch_profile;
+
+// Profiled variants of `resqlite_run_batch*`.
+//
+// These preserve the normal batch semantics but fill `out_profile` with
+// native-side timing buckets. They exist for experiment/profile mode and should
+// not be used by the production Dart write path.
+int resqlite_run_batch_profiled(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count,
+    resqlite_batch_profile* out_profile
+);
+
+int resqlite_run_batch_nested_profiled(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count,
+    resqlite_batch_profile* out_profile
+);
+
 // ---------------------------------------------------------------------------
 // Dirty table tracking (for stream invalidation)
 // ---------------------------------------------------------------------------

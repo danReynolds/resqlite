@@ -4,10 +4,29 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
+
+static long long profile_now_us(void) {
+#if defined(_WIN32)
+    LARGE_INTEGER freq;
+    LARGE_INTEGER counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    return (long long)((counter.QuadPart * 1000000LL) / freq.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000LL + (long long)(ts.tv_nsec / 1000);
+#endif
+}
 
 // ---------------------------------------------------------------------------
 // Growable buffer
@@ -341,6 +360,10 @@ struct resqlite_db {
     // merge the stmt's pre-captured `dep_columns` into `dirty_columns`
     // whenever a row is actually modified. NULL outside of stepping.
     resqlite_cached_stmt* writer_active_entry;
+    // Profile-only native batch counters. Set only around profiled
+    // `sqlite3_step` calls so the preupdate hook can report its own wall as a
+    // subset of the measured step time. NULL in production.
+    resqlite_batch_profile* batch_profile;
     int writer_checkpoint_running;
 
     // Reader pool.
@@ -443,6 +466,11 @@ static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
     }
 }
 
+static void preupdate_hook_body(resqlite_db* sdb, const char* table_name) {
+    resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
+    dirty_columns_add_for_active_stmt(sdb, table_name);
+}
+
 static void preupdate_hook(
     void* user_data,
     sqlite3* db,
@@ -453,9 +481,27 @@ static void preupdate_hook(
     sqlite3_int64 new_rowid
 ) {
     (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
+    preupdate_hook_body((resqlite_db*)user_data, table_name);
+}
+
+static void preupdate_hook_profiled(
+    void* user_data,
+    sqlite3* db,
+    int op,
+    const char* db_name,
+    const char* table_name,
+    sqlite3_int64 old_rowid,
+    sqlite3_int64 new_rowid
+) {
+    (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
-    resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
-    dirty_columns_add_for_active_stmt(sdb, table_name);
+    resqlite_batch_profile* profile = sdb->batch_profile;
+    long long t0 = profile ? profile_now_us() : 0;
+    preupdate_hook_body(sdb, table_name);
+    if (profile) {
+        profile->preupdate_us += profile_now_us() - t0;
+        profile->preupdate_count++;
+    }
 }
 
 static int writer_wal_hook(
@@ -736,6 +782,30 @@ static int run_cached_tx_stmt(sqlite3_stmt* stmt) {
     return rc;
 }
 
+static int run_cached_tx_stmt_profiled(
+    sqlite3_stmt* stmt,
+    resqlite_batch_profile* profile,
+    long long* target_us
+) {
+    if (!profile) return run_cached_tx_stmt(stmt);
+    long long t0 = profile_now_us();
+    int rc = run_cached_tx_stmt(stmt);
+    *target_us += profile_now_us() - t0;
+    return rc;
+}
+
+static int sqlite3_reset_profiled(
+    sqlite3_stmt* stmt,
+    resqlite_batch_profile* profile
+) {
+    if (!profile) return sqlite3_reset(stmt);
+    long long t0 = profile_now_us();
+    int rc = sqlite3_reset(stmt);
+    profile->reset_us += profile_now_us() - t0;
+    profile->reset_count++;
+    return rc;
+}
+
 int resqlite_tx_begin_immediate(resqlite_db* db) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
         return SQLITE_MISUSE;
@@ -948,6 +1018,86 @@ static int run_batch_locked(
     return SQLITE_OK;
 }
 
+static int run_batch_locked_profiled(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count,
+    resqlite_batch_profile* profile
+) {
+    long long t_stmt0 = profile ? profile_now_us() : 0;
+    resqlite_cached_stmt* entry = stmt_cache_lookup_entry(
+        &db->writer_cache, sql, (int)strlen(sql));
+    sqlite3_stmt* stmt;
+    if (entry) {
+        stmt = entry->stmt;
+        if (profile) {
+            profile->stmt_us += profile_now_us() - t_stmt0;
+        }
+        sqlite3_reset_profiled(stmt, profile);
+    } else {
+        resqlite_column_set_reset(&db->writer_authz_scratch);
+        int rc = sqlite3_prepare_v3(
+            db->writer, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            if (profile) profile->stmt_us += profile_now_us() - t_stmt0;
+            return rc;
+        }
+        entry =
+            stmt_cache_insert(&db->writer_cache, sql, (int)strlen(sql), stmt);
+        if (!entry) {
+            sqlite3_finalize(stmt);
+            if (profile) profile->stmt_us += profile_now_us() - t_stmt0;
+            return SQLITE_NOMEM;
+        }
+        // [EXP-106](../experiments/106-column-level-deps.md): drain authz
+        // scratch into the cache entry once prepare returns. The per-set step
+        // loop below benefits from the pre-captured column set on every row.
+        stmt_cache_entry_set_dep_columns(entry, &db->writer_authz_scratch);
+        if (profile) profile->stmt_us += profile_now_us() - t_stmt0;
+    }
+    const int expected = entry->param_count;
+    if (profile) profile->set_count += set_count;
+
+    for (int i = 0; i < set_count; i++) {
+        sqlite3_reset_profiled(stmt, profile);
+
+        long long t_bind0 = profile ? profile_now_us() : 0;
+        int rc = bind_params(
+            stmt, &param_sets[i * param_count], param_count, expected);
+        if (profile) {
+            profile->bind_us += profile_now_us() - t_bind0;
+            profile->bind_count++;
+        }
+        if (rc != SQLITE_OK) {
+            sqlite3_reset_profiled(stmt, profile);
+            return rc;
+        }
+
+        // [EXP-106](../experiments/106-column-level-deps.md): tag the active
+        // entry so the preupdate hook can merge cached columns. Cleared after
+        // step on every iteration.
+        db->writer_active_entry = entry;
+        db->batch_profile = profile;
+        long long t_step0 = profile ? profile_now_us() : 0;
+        rc = sqlite3_step(stmt);
+        if (profile) {
+            profile->step_us += profile_now_us() - t_step0;
+            profile->step_count++;
+        }
+        db->batch_profile = NULL;
+        db->writer_active_entry = NULL;
+        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+            sqlite3_reset_profiled(stmt, profile);
+            return rc;
+        }
+    }
+
+    sqlite3_reset_profiled(stmt, profile);
+    return SQLITE_OK;
+}
+
 int resqlite_run_batch(
     resqlite_db* db,
     const char* sql,
@@ -981,6 +1131,47 @@ int resqlite_run_batch(
     return rc;
 }
 
+int resqlite_run_batch_profiled(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count,
+    resqlite_batch_profile* out_profile
+) {
+    if (!out_profile) {
+        return resqlite_run_batch(db, sql, param_sets, param_count, set_count);
+    }
+    if (out_profile) memset(out_profile, 0, sizeof(*out_profile));
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+
+    int rc = run_cached_tx_stmt_profiled(
+        db->tx_begin_stmt, out_profile, &out_profile->tx_begin_us);
+    if (rc != SQLITE_OK) {
+        sqlite3_mutex_leave(db->writer_mutex);
+        return rc;
+    }
+
+    sqlite3_preupdate_hook(db->writer, preupdate_hook_profiled, db);
+    rc = run_batch_locked_profiled(
+        db, sql, param_sets, param_count, set_count, out_profile);
+    sqlite3_preupdate_hook(db->writer, preupdate_hook, db);
+    db->batch_profile = NULL;
+    if (rc != SQLITE_OK) {
+        run_cached_tx_stmt_profiled(
+            db->tx_rollback_stmt, out_profile, &out_profile->tx_rollback_us);
+    } else {
+        rc = run_cached_tx_stmt_profiled(
+            db->tx_commit_stmt, out_profile, &out_profile->tx_commit_us);
+    }
+
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
 int resqlite_run_batch_nested(
     resqlite_db* db,
     const char* sql,
@@ -997,6 +1188,32 @@ int resqlite_run_batch_nested(
     // or ROLLBACK TO a savepoint.
     sqlite3_mutex_enter(db->writer_mutex);
     int rc = run_batch_locked(db, sql, param_sets, param_count, set_count);
+    sqlite3_mutex_leave(db->writer_mutex);
+    return rc;
+}
+
+int resqlite_run_batch_nested_profiled(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* param_sets,
+    int param_count,
+    int set_count,
+    resqlite_batch_profile* out_profile
+) {
+    if (!out_profile) {
+        return resqlite_run_batch_nested(
+            db, sql, param_sets, param_count, set_count);
+    }
+    if (out_profile) memset(out_profile, 0, sizeof(*out_profile));
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+    sqlite3_preupdate_hook(db->writer, preupdate_hook_profiled, db);
+    int rc = run_batch_locked_profiled(
+        db, sql, param_sets, param_count, set_count, out_profile);
+    sqlite3_preupdate_hook(db->writer, preupdate_hook, db);
+    db->batch_profile = NULL;
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
 }

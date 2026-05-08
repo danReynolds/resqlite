@@ -224,6 +224,8 @@ const _exportedSymbols = [
   'resqlite_tx_rollback',
   'resqlite_run_batch',
   'resqlite_run_batch_nested',
+  'resqlite_run_batch_profiled',
+  'resqlite_run_batch_nested_profiled',
   'resqlite_get_dirty_tables',
   'resqlite_get_read_tables',
   'resqlite_get_dirty_columns',

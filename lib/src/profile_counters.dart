@@ -134,6 +134,30 @@ class ProfileCounters {
   /// excludes Dart-side parameter packing.
   static int writerBatchNativeWriteUs = 0;
 
+  /// Native-side statement lookup / prepare / cache insertion wall inside
+  /// profiled `resqlite_run_batch*`.
+  static int writerBatchNativeStmtUs = 0;
+
+  /// Native-side transaction-control wall around a top-level profiled batch.
+  static int writerBatchNativeTxBeginUs = 0;
+  static int writerBatchNativeTxCommitUs = 0;
+  static int writerBatchNativeTxRollbackUs = 0;
+
+  /// Native-side per-row bind / step / reset wall inside profiled batches.
+  static int writerBatchNativeBindUs = 0;
+  static int writerBatchNativeStepUs = 0;
+  static int writerBatchNativeResetUs = 0;
+
+  /// Native preupdate-hook wall, counted as a subset of step wall.
+  static int writerBatchNativePreupdateUs = 0;
+
+  /// Native-side loop counters for profiled batch calls.
+  static int writerBatchNativeSetCount = 0;
+  static int writerBatchNativeBindCount = 0;
+  static int writerBatchNativeStepCount = 0;
+  static int writerBatchNativeResetCount = 0;
+  static int writerBatchNativePreupdateCount = 0;
+
   /// Worker-isolate wall time spent fetching and materializing dirty
   /// table/column dependencies after a profiled write call.
   static int writerDirtyFetchUs = 0;
@@ -185,6 +209,19 @@ class ProfileCounters {
     'writer_write_call_us': writerWriteCallUs,
     'writer_batch_param_pack_us': writerBatchParamPackUs,
     'writer_batch_native_write_us': writerBatchNativeWriteUs,
+    'writer_batch_native_stmt_us': writerBatchNativeStmtUs,
+    'writer_batch_native_tx_begin_us': writerBatchNativeTxBeginUs,
+    'writer_batch_native_tx_commit_us': writerBatchNativeTxCommitUs,
+    'writer_batch_native_tx_rollback_us': writerBatchNativeTxRollbackUs,
+    'writer_batch_native_bind_us': writerBatchNativeBindUs,
+    'writer_batch_native_step_us': writerBatchNativeStepUs,
+    'writer_batch_native_reset_us': writerBatchNativeResetUs,
+    'writer_batch_native_preupdate_us': writerBatchNativePreupdateUs,
+    'writer_batch_native_set_count': writerBatchNativeSetCount,
+    'writer_batch_native_bind_count': writerBatchNativeBindCount,
+    'writer_batch_native_step_count': writerBatchNativeStepCount,
+    'writer_batch_native_reset_count': writerBatchNativeResetCount,
+    'writer_batch_native_preupdate_count': writerBatchNativePreupdateCount,
     'writer_dirty_fetch_us': writerDirtyFetchUs,
     'writer_request_count': writerRequestCount,
     'stream_requery_await_us': streamRequeryAwaitUs,
@@ -229,6 +266,19 @@ class ProfileCounters {
     writerWriteCallUs = 0;
     writerBatchParamPackUs = 0;
     writerBatchNativeWriteUs = 0;
+    writerBatchNativeStmtUs = 0;
+    writerBatchNativeTxBeginUs = 0;
+    writerBatchNativeTxCommitUs = 0;
+    writerBatchNativeTxRollbackUs = 0;
+    writerBatchNativeBindUs = 0;
+    writerBatchNativeStepUs = 0;
+    writerBatchNativeResetUs = 0;
+    writerBatchNativePreupdateUs = 0;
+    writerBatchNativeSetCount = 0;
+    writerBatchNativeBindCount = 0;
+    writerBatchNativeStepCount = 0;
+    writerBatchNativeResetCount = 0;
+    writerBatchNativePreupdateCount = 0;
     writerDirtyFetchUs = 0;
     writerRequestCount = 0;
     streamRequeryAwaitUs = 0;

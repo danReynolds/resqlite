@@ -120,6 +120,44 @@ external int resqliteRunBatchNested(
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'resqlite_run_batch_profiled', isLeaf: true)
+external int resqliteRunBatchProfiled(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+  ffi.Pointer<ffi.Uint8> outProfile,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'resqlite_run_batch_nested_profiled', isLeaf: true)
+external int resqliteRunBatchNestedProfiled(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+  ffi.Pointer<ffi.Uint8> outProfile,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
     ffi.Pointer<ffi.Pointer<Utf8>>,
     ffi.Int,
   )
@@ -135,6 +173,22 @@ const int _writeResultSize = 16;
 const int _writeResultOffAffected = 0;
 const int _writeResultOffLastId = 8;
 const int _sqliteRange = 25;
+const int _batchProfileFieldSize = 8;
+const int _batchProfileFieldCount = 13;
+const int _batchProfileSize = _batchProfileFieldSize * _batchProfileFieldCount;
+const int _batchProfileOffStmtUs = 0;
+const int _batchProfileOffTxBeginUs = 8;
+const int _batchProfileOffTxCommitUs = 16;
+const int _batchProfileOffTxRollbackUs = 24;
+const int _batchProfileOffBindUs = 32;
+const int _batchProfileOffStepUs = 40;
+const int _batchProfileOffResetUs = 48;
+const int _batchProfileOffPreupdateUs = 56;
+const int _batchProfileOffSetCount = 64;
+const int _batchProfileOffBindCount = 72;
+const int _batchProfileOffStepCount = 80;
+const int _batchProfileOffResetCount = 88;
+const int _batchProfileOffPreupdateCount = 96;
 
 String _queryErrorMessage(
   ffi.Pointer<ffi.Void> dbHandle,
@@ -169,6 +223,19 @@ final class BatchWriteProfile {
   const BatchWriteProfile({
     required this.paramPackUs,
     required this.nativeWriteUs,
+    required this.nativeStmtUs,
+    required this.nativeTxBeginUs,
+    required this.nativeTxCommitUs,
+    required this.nativeTxRollbackUs,
+    required this.nativeBindUs,
+    required this.nativeStepUs,
+    required this.nativeResetUs,
+    required this.nativePreupdateUs,
+    required this.nativeSetCount,
+    required this.nativeBindCount,
+    required this.nativeStepCount,
+    required this.nativeResetCount,
+    required this.nativePreupdateCount,
   });
 
   /// Time spent flattening Dart parameter rows into the native matrix buffer.
@@ -176,6 +243,20 @@ final class BatchWriteProfile {
 
   /// Time spent inside `resqlite_run_batch*` after params are packed.
   final int nativeWriteUs;
+
+  final int nativeStmtUs;
+  final int nativeTxBeginUs;
+  final int nativeTxCommitUs;
+  final int nativeTxRollbackUs;
+  final int nativeBindUs;
+  final int nativeStepUs;
+  final int nativeResetUs;
+  final int nativePreupdateUs;
+  final int nativeSetCount;
+  final int nativeBindCount;
+  final int nativeStepCount;
+  final int nativeResetCount;
+  final int nativePreupdateCount;
 }
 
 /// Execute a write statement. Returns affected rows + last insert ID.
@@ -339,7 +420,7 @@ BatchWriteProfile _executeBatchWriteProfiled(
   required bool nested,
 }) {
   if (paramSets.isEmpty) {
-    return const BatchWriteProfile(paramPackUs: 0, nativeWriteUs: 0);
+    return _emptyBatchWriteProfile;
   }
   final paramCount = paramSets.first.length;
 
@@ -348,38 +429,106 @@ BatchWriteProfile _executeBatchWriteProfiled(
   final paramsNative = allocateBatchParams(paramSets);
   paramSw.stop();
   try {
-    final nativeSw = Stopwatch()..start();
-    final rc = nested
-        ? resqliteRunBatchNested(
-            dbHandle,
-            sqlNative,
-            paramsNative,
-            paramCount,
-            paramSets.length,
-          )
-        : resqliteRunBatch(
-            dbHandle,
-            sqlNative,
-            paramsNative,
-            paramCount,
-            paramSets.length,
-          );
-    nativeSw.stop();
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        _queryErrorMessage(dbHandle, rc, paramCount),
-        sql: sql,
-        sqliteCode: rc,
+    final profileBuf = calloc<ffi.Uint8>(_batchProfileSize);
+    try {
+      final nativeSw = Stopwatch()..start();
+      final rc = nested
+          ? resqliteRunBatchNestedProfiled(
+              dbHandle,
+              sqlNative,
+              paramsNative,
+              paramCount,
+              paramSets.length,
+              profileBuf,
+            )
+          : resqliteRunBatchProfiled(
+              dbHandle,
+              sqlNative,
+              paramsNative,
+              paramCount,
+              paramSets.length,
+              profileBuf,
+            );
+      nativeSw.stop();
+      if (rc != 0) {
+        throw ResqliteQueryException(
+          _queryErrorMessage(dbHandle, rc, paramCount),
+          sql: sql,
+          sqliteCode: rc,
+        );
+      }
+      final profile = ByteData.sublistView(
+        profileBuf.asTypedList(_batchProfileSize),
       );
+      return BatchWriteProfile(
+        paramPackUs: paramSw.elapsedMicroseconds,
+        nativeWriteUs: nativeSw.elapsedMicroseconds,
+        nativeStmtUs: profile.getInt64(_batchProfileOffStmtUs, Endian.little),
+        nativeTxBeginUs: profile.getInt64(
+          _batchProfileOffTxBeginUs,
+          Endian.little,
+        ),
+        nativeTxCommitUs: profile.getInt64(
+          _batchProfileOffTxCommitUs,
+          Endian.little,
+        ),
+        nativeTxRollbackUs: profile.getInt64(
+          _batchProfileOffTxRollbackUs,
+          Endian.little,
+        ),
+        nativeBindUs: profile.getInt64(_batchProfileOffBindUs, Endian.little),
+        nativeStepUs: profile.getInt64(_batchProfileOffStepUs, Endian.little),
+        nativeResetUs: profile.getInt64(_batchProfileOffResetUs, Endian.little),
+        nativePreupdateUs: profile.getInt64(
+          _batchProfileOffPreupdateUs,
+          Endian.little,
+        ),
+        nativeSetCount: profile.getInt64(
+          _batchProfileOffSetCount,
+          Endian.little,
+        ),
+        nativeBindCount: profile.getInt64(
+          _batchProfileOffBindCount,
+          Endian.little,
+        ),
+        nativeStepCount: profile.getInt64(
+          _batchProfileOffStepCount,
+          Endian.little,
+        ),
+        nativeResetCount: profile.getInt64(
+          _batchProfileOffResetCount,
+          Endian.little,
+        ),
+        nativePreupdateCount: profile.getInt64(
+          _batchProfileOffPreupdateCount,
+          Endian.little,
+        ),
+      );
+    } finally {
+      calloc.free(profileBuf);
     }
-    return BatchWriteProfile(
-      paramPackUs: paramSw.elapsedMicroseconds,
-      nativeWriteUs: nativeSw.elapsedMicroseconds,
-    );
   } finally {
     freeParamBuffer(paramsNative);
   }
 }
+
+const _emptyBatchWriteProfile = BatchWriteProfile(
+  paramPackUs: 0,
+  nativeWriteUs: 0,
+  nativeStmtUs: 0,
+  nativeTxBeginUs: 0,
+  nativeTxCommitUs: 0,
+  nativeTxRollbackUs: 0,
+  nativeBindUs: 0,
+  nativeStepUs: 0,
+  nativeResetUs: 0,
+  nativePreupdateUs: 0,
+  nativeSetCount: 0,
+  nativeBindCount: 0,
+  nativeStepCount: 0,
+  nativeResetCount: 0,
+  nativePreupdateCount: 0,
+);
 
 /// Per-worker persistent buffer for dirty-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte calloc/free

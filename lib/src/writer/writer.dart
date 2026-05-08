@@ -224,10 +224,37 @@ void _recordWriterProfile(Stopwatch? roundtripSw, WriterProfileSample? sample) {
     :final dirtyFetchUs,
     :final batchParamPackUs,
     :final batchNativeWriteUs,
+    :final batchNativeStmtUs,
+    :final batchNativeTxBeginUs,
+    :final batchNativeTxCommitUs,
+    :final batchNativeTxRollbackUs,
+    :final batchNativeBindUs,
+    :final batchNativeStepUs,
+    :final batchNativeResetUs,
+    :final batchNativePreupdateUs,
+    :final batchNativeSetCount,
+    :final batchNativeBindCount,
+    :final batchNativeStepCount,
+    :final batchNativeResetCount,
+    :final batchNativePreupdateCount,
   )) {
     ProfileCounters.writerWriteCallUs += writeCallUs;
     ProfileCounters.writerDirtyFetchUs += dirtyFetchUs;
     ProfileCounters.writerBatchParamPackUs += batchParamPackUs;
     ProfileCounters.writerBatchNativeWriteUs += batchNativeWriteUs;
+    ProfileCounters.writerBatchNativeStmtUs += batchNativeStmtUs;
+    ProfileCounters.writerBatchNativeTxBeginUs += batchNativeTxBeginUs;
+    ProfileCounters.writerBatchNativeTxCommitUs += batchNativeTxCommitUs;
+    ProfileCounters.writerBatchNativeTxRollbackUs += batchNativeTxRollbackUs;
+    ProfileCounters.writerBatchNativeBindUs += batchNativeBindUs;
+    ProfileCounters.writerBatchNativeStepUs += batchNativeStepUs;
+    ProfileCounters.writerBatchNativeResetUs += batchNativeResetUs;
+    ProfileCounters.writerBatchNativePreupdateUs += batchNativePreupdateUs;
+    ProfileCounters.writerBatchNativeSetCount += batchNativeSetCount;
+    ProfileCounters.writerBatchNativeBindCount += batchNativeBindCount;
+    ProfileCounters.writerBatchNativeStepCount += batchNativeStepCount;
+    ProfileCounters.writerBatchNativeResetCount += batchNativeResetCount;
+    ProfileCounters.writerBatchNativePreupdateCount +=
+        batchNativePreupdateCount;
   }
 }

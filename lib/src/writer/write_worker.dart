@@ -129,12 +129,64 @@ final class WriterProfileSample {
     required this.dirtyFetchUs,
     required this.batchParamPackUs,
     required this.batchNativeWriteUs,
+    required this.batchNativeStmtUs,
+    required this.batchNativeTxBeginUs,
+    required this.batchNativeTxCommitUs,
+    required this.batchNativeTxRollbackUs,
+    required this.batchNativeBindUs,
+    required this.batchNativeStepUs,
+    required this.batchNativeResetUs,
+    required this.batchNativePreupdateUs,
+    required this.batchNativeSetCount,
+    required this.batchNativeBindCount,
+    required this.batchNativeStepCount,
+    required this.batchNativeResetCount,
+    required this.batchNativePreupdateCount,
   });
 
   final int writeCallUs;
   final int dirtyFetchUs;
   final int batchParamPackUs;
   final int batchNativeWriteUs;
+  final int batchNativeStmtUs;
+  final int batchNativeTxBeginUs;
+  final int batchNativeTxCommitUs;
+  final int batchNativeTxRollbackUs;
+  final int batchNativeBindUs;
+  final int batchNativeStepUs;
+  final int batchNativeResetUs;
+  final int batchNativePreupdateUs;
+  final int batchNativeSetCount;
+  final int batchNativeBindCount;
+  final int batchNativeStepCount;
+  final int batchNativeResetCount;
+  final int batchNativePreupdateCount;
+}
+
+WriterProfileSample _writerProfileSample({
+  required int writeCallUs,
+  required int dirtyFetchUs,
+  BatchWriteProfile? batchProfile,
+}) {
+  return WriterProfileSample(
+    writeCallUs: writeCallUs,
+    dirtyFetchUs: dirtyFetchUs,
+    batchParamPackUs: batchProfile?.paramPackUs ?? 0,
+    batchNativeWriteUs: batchProfile?.nativeWriteUs ?? 0,
+    batchNativeStmtUs: batchProfile?.nativeStmtUs ?? 0,
+    batchNativeTxBeginUs: batchProfile?.nativeTxBeginUs ?? 0,
+    batchNativeTxCommitUs: batchProfile?.nativeTxCommitUs ?? 0,
+    batchNativeTxRollbackUs: batchProfile?.nativeTxRollbackUs ?? 0,
+    batchNativeBindUs: batchProfile?.nativeBindUs ?? 0,
+    batchNativeStepUs: batchProfile?.nativeStepUs ?? 0,
+    batchNativeResetUs: batchProfile?.nativeResetUs ?? 0,
+    batchNativePreupdateUs: batchProfile?.nativePreupdateUs ?? 0,
+    batchNativeSetCount: batchProfile?.nativeSetCount ?? 0,
+    batchNativeBindCount: batchProfile?.nativeBindCount ?? 0,
+    batchNativeStepCount: batchProfile?.nativeStepCount ?? 0,
+    batchNativeResetCount: batchProfile?.nativeResetCount ?? 0,
+    batchNativePreupdateCount: batchProfile?.nativePreupdateCount ?? 0,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -279,11 +331,9 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
         ? ProfiledExecuteResponse(
             result,
             modifications,
-            WriterProfileSample(
+            _writerProfileSample(
               writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
               dirtyFetchUs: dirtyFetchUs,
-              batchParamPackUs: 0,
-              batchNativeWriteUs: 0,
             ),
           )
         : ExecuteResponse(result, modifications),
@@ -295,8 +345,7 @@ BatchResponse _batchResponse(
   required bool profileEnabled,
   required int writeCallUs,
   required int dirtyFetchUs,
-  int batchParamPackUs = 0,
-  int batchNativeWriteUs = 0,
+  BatchWriteProfile? batchProfile,
 }) {
   if (!profileEnabled && identical(modifications, TableDependencies.none)) {
     return const BatchResponse(TableDependencies.none);
@@ -304,11 +353,10 @@ BatchResponse _batchResponse(
   return profileEnabled
       ? ProfiledBatchResponse(
           modifications,
-          WriterProfileSample(
+          _writerProfileSample(
             writeCallUs: writeCallUs,
             dirtyFetchUs: dirtyFetchUs,
-            batchParamPackUs: batchParamPackUs,
-            batchNativeWriteUs: batchNativeWriteUs,
+            batchProfile: batchProfile,
           ),
         )
       : BatchResponse(modifications);
@@ -320,8 +368,7 @@ void _sendBatchResponse(
   required bool profileEnabled,
   required int writeCallUs,
   required int dirtyFetchUs,
-  int batchParamPackUs = 0,
-  int batchNativeWriteUs = 0,
+  BatchWriteProfile? batchProfile,
 }) {
   msg.replyPort.send(
     _batchResponse(
@@ -329,8 +376,7 @@ void _sendBatchResponse(
       profileEnabled: profileEnabled,
       writeCallUs: writeCallUs,
       dirtyFetchUs: dirtyFetchUs,
-      batchParamPackUs: batchParamPackUs,
-      batchNativeWriteUs: batchNativeWriteUs,
+      batchProfile: batchProfile,
     ),
   );
 }
@@ -359,8 +405,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       profileEnabled: profileEnabled,
       writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
       dirtyFetchUs: 0,
-      batchParamPackUs: batchProfile?.paramPackUs ?? 0,
-      batchNativeWriteUs: batchProfile?.nativeWriteUs ?? 0,
+      batchProfile: batchProfile,
     );
   } else {
     final batchProfile = profileEnabled
@@ -379,8 +424,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       profileEnabled: profileEnabled,
       writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
       dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
-      batchParamPackUs: batchProfile?.paramPackUs ?? 0,
-      batchNativeWriteUs: batchProfile?.nativeWriteUs ?? 0,
+      batchProfile: batchProfile,
     );
   }
 }
@@ -488,8 +532,6 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         profileEnabled: profileEnabled,
         writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
         dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
-        batchParamPackUs: 0,
-        batchNativeWriteUs: 0,
       ),
     );
   } else {
@@ -539,8 +581,6 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         profileEnabled: profileEnabled,
         writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
         dirtyFetchUs: 0,
-        batchParamPackUs: 0,
-        batchNativeWriteUs: 0,
       ),
     );
   }

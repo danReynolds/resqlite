@@ -27,6 +27,19 @@ void main() {
       'writer_write_call_us': 0,
       'writer_batch_param_pack_us': 0,
       'writer_batch_native_write_us': 0,
+      'writer_batch_native_stmt_us': 0,
+      'writer_batch_native_tx_begin_us': 0,
+      'writer_batch_native_tx_commit_us': 0,
+      'writer_batch_native_tx_rollback_us': 0,
+      'writer_batch_native_bind_us': 0,
+      'writer_batch_native_step_us': 0,
+      'writer_batch_native_reset_us': 0,
+      'writer_batch_native_preupdate_us': 0,
+      'writer_batch_native_set_count': 0,
+      'writer_batch_native_bind_count': 0,
+      'writer_batch_native_step_count': 0,
+      'writer_batch_native_reset_count': 0,
+      'writer_batch_native_preupdate_count': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
       'stream_requery_await_us': 0,
@@ -57,6 +70,19 @@ void main() {
       'writer_write_call_us': 0,
       'writer_batch_param_pack_us': 0,
       'writer_batch_native_write_us': 0,
+      'writer_batch_native_stmt_us': 0,
+      'writer_batch_native_tx_begin_us': 0,
+      'writer_batch_native_tx_commit_us': 0,
+      'writer_batch_native_tx_rollback_us': 0,
+      'writer_batch_native_bind_us': 0,
+      'writer_batch_native_step_us': 0,
+      'writer_batch_native_reset_us': 0,
+      'writer_batch_native_preupdate_us': 0,
+      'writer_batch_native_set_count': 0,
+      'writer_batch_native_bind_count': 0,
+      'writer_batch_native_step_count': 0,
+      'writer_batch_native_reset_count': 0,
+      'writer_batch_native_preupdate_count': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
       'stream_requery_await_us': 0,
@@ -94,6 +120,19 @@ void main() {
     ProfileCounters.writerWriteCallUs = 70;
     ProfileCounters.writerBatchParamPackUs = 40;
     ProfileCounters.writerBatchNativeWriteUs = 25;
+    ProfileCounters.writerBatchNativeStmtUs = 1;
+    ProfileCounters.writerBatchNativeTxBeginUs = 2;
+    ProfileCounters.writerBatchNativeTxCommitUs = 3;
+    ProfileCounters.writerBatchNativeTxRollbackUs = 4;
+    ProfileCounters.writerBatchNativeBindUs = 5;
+    ProfileCounters.writerBatchNativeStepUs = 6;
+    ProfileCounters.writerBatchNativeResetUs = 7;
+    ProfileCounters.writerBatchNativePreupdateUs = 8;
+    ProfileCounters.writerBatchNativeSetCount = 9;
+    ProfileCounters.writerBatchNativeBindCount = 10;
+    ProfileCounters.writerBatchNativeStepCount = 11;
+    ProfileCounters.writerBatchNativeResetCount = 12;
+    ProfileCounters.writerBatchNativePreupdateCount = 13;
     ProfileCounters.writerDirtyFetchUs = 3;
     ProfileCounters.writerRequestCount = 2;
 
@@ -102,6 +141,19 @@ void main() {
     expect(snap['writer_write_call_us'], 70);
     expect(snap['writer_batch_param_pack_us'], 40);
     expect(snap['writer_batch_native_write_us'], 25);
+    expect(snap['writer_batch_native_stmt_us'], 1);
+    expect(snap['writer_batch_native_tx_begin_us'], 2);
+    expect(snap['writer_batch_native_tx_commit_us'], 3);
+    expect(snap['writer_batch_native_tx_rollback_us'], 4);
+    expect(snap['writer_batch_native_bind_us'], 5);
+    expect(snap['writer_batch_native_step_us'], 6);
+    expect(snap['writer_batch_native_reset_us'], 7);
+    expect(snap['writer_batch_native_preupdate_us'], 8);
+    expect(snap['writer_batch_native_set_count'], 9);
+    expect(snap['writer_batch_native_bind_count'], 10);
+    expect(snap['writer_batch_native_step_count'], 11);
+    expect(snap['writer_batch_native_reset_count'], 12);
+    expect(snap['writer_batch_native_preupdate_count'], 13);
     expect(snap['writer_dirty_fetch_us'], 3);
     expect(snap['writer_request_count'], 2);
 
@@ -110,6 +162,19 @@ void main() {
     expect(ProfileCounters.writerWriteCallUs, 0);
     expect(ProfileCounters.writerBatchParamPackUs, 0);
     expect(ProfileCounters.writerBatchNativeWriteUs, 0);
+    expect(ProfileCounters.writerBatchNativeStmtUs, 0);
+    expect(ProfileCounters.writerBatchNativeTxBeginUs, 0);
+    expect(ProfileCounters.writerBatchNativeTxCommitUs, 0);
+    expect(ProfileCounters.writerBatchNativeTxRollbackUs, 0);
+    expect(ProfileCounters.writerBatchNativeBindUs, 0);
+    expect(ProfileCounters.writerBatchNativeStepUs, 0);
+    expect(ProfileCounters.writerBatchNativeResetUs, 0);
+    expect(ProfileCounters.writerBatchNativePreupdateUs, 0);
+    expect(ProfileCounters.writerBatchNativeSetCount, 0);
+    expect(ProfileCounters.writerBatchNativeBindCount, 0);
+    expect(ProfileCounters.writerBatchNativeStepCount, 0);
+    expect(ProfileCounters.writerBatchNativeResetCount, 0);
+    expect(ProfileCounters.writerBatchNativePreupdateCount, 0);
     expect(ProfileCounters.writerDirtyFetchUs, 0);
     expect(ProfileCounters.writerRequestCount, 0);
   });
