@@ -78,7 +78,7 @@ moved them.
 | [130](130-wide-batch-native-call-split.md) | Wide-batch native call split | Measurement-only: profile-mode native batch counters split `resqlite_run_batch*` into stmt, transaction, bind, step, reset, and preupdate wall. Wide mixed batches are step/COMMIT dominated; bind is ~9-15% of native wall, reset and stmt lookup are tiny |  |
 | [131](131-wide-batch-transaction-shape.md) | Wide-batch transaction shape | Measurement-only: compares top-level `resqlite_run_batch_profiled` with explicit BEGIN + nested profiled batch + COMMIT. The COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact |  |
 | [132](132-wide-batch-wal-checkpoint-threshold.md) | Wide-batch WAL checkpoint threshold | Raises the writer passive checkpoint threshold 500 -> 1000 pages. Focused 10k x20 emoji batch improves 20.74 -> 17.26 ms by avoiding inline checkpoint work; reader and stream guardrails stay healthy while 2000/5000/off policies are rejected for WAL growth or tail spikes |  |
-| [133](133-multi-row-insert-chunking.md) | Multi-row INSERT chunking | Large simple positional INSERT batches use generated multi-row VALUES chunks. Public 10k-row guard medians improve narrow 4.68 -> 3.14 ms, wide ASCII 16.34 -> 14.76 ms, and blob-heavy 10.41 -> 9.41 ms while small batches stay on the old path |  |
+| [133](133-multi-row-insert-chunking.md) | Multi-row INSERT chunking | Large simple positional INSERT batches use generated multi-row VALUES chunks, including quoted identifiers and odd tails. 21-pass public guard medians improve narrow 4.48 -> 3.22 ms, wide ASCII 18.11 -> 17.30 ms, and blob-heavy 12.33 -> 10.93 ms while small/complex batches stay on the old path |  |
 
 ## Rejected
 

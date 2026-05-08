@@ -9,6 +9,7 @@ import 'package:ffi/ffi.dart';
 
 import '../dependency_tracking.dart';
 import '../exceptions.dart';
+import 'batch_param_source.dart';
 import 'request_cache.dart';
 
 // ---------------------------------------------------------------------------
@@ -1015,6 +1016,9 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
 }
 
 ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
+  if (paramSets is ChunkedBatchParamSets) {
+    return _allocateChunkedBatchParams(paramSets);
+  }
   if (paramSets.isEmpty) return ffi.nullptr.cast();
   final paramCount = paramSets.first.length;
   final totalCount = paramSets.length * paramCount;
@@ -1045,6 +1049,33 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
 }
 
+ffi.Pointer<ffi.Uint8> _allocateChunkedBatchParams(
+  ChunkedBatchParamSets paramSets,
+) {
+  if (paramSets.isEmpty) return ffi.nullptr.cast();
+  final paramCount = paramSets.chunkParamCount;
+  final totalCount = paramSets.length * paramCount;
+  if (totalCount == 0) return ffi.nullptr.cast();
+
+  if (paramCount >= _asciiBatchMinParamCount &&
+      totalCount >= _asciiBatchMinTotalParamCount &&
+      _firstChunkedBatchSetHasString(paramSets)) {
+    final asciiBytes = _tryMeasureChunkedBatchBytes(paramSets, asciiOnly: true);
+    if (asciiBytes != null) {
+      return _allocateAsciiChunkedBatchParams(
+        paramSets,
+        totalCount,
+        asciiBytes,
+      );
+    }
+
+    final utf8Bytes = _measureChunkedUtf8BatchBytes(paramSets);
+    return _allocateUtf8ChunkedBatchParams(paramSets, totalCount, utf8Bytes);
+  }
+
+  return _allocateChunkedBatchParamsGeneric(paramSets, totalCount);
+}
+
 bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   for (var i = 0; i < paramCount; i++) {
     if (params[i] is String) return true;
@@ -1059,6 +1090,9 @@ int? _tryMeasureAsciiBatchBytes(
 
 int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
     _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;
+
+int _measureChunkedUtf8BatchBytes(ChunkedBatchParamSets paramSets) =>
+    _measureChunkedBatchBytes(paramSets, asciiOnly: false)!;
 
 int? _measureBatchPayloadBytes(
   List<List<Object?>> paramSets,
@@ -1093,6 +1127,59 @@ int? _measureBatchPayloadBytes(
   return hasString || !asciiOnly ? extraBytes : null;
 }
 
+bool _firstChunkedBatchSetHasString(ChunkedBatchParamSets paramSets) {
+  final endRow = paramSets.startRow + paramSets.rowsPerStep;
+  for (var rowIndex = paramSets.startRow; rowIndex < endRow; rowIndex++) {
+    final row = paramSets.paramSets[rowIndex];
+    for (var param = 0; param < paramSets.paramCount; param++) {
+      if (row[param] is String) return true;
+    }
+  }
+  return false;
+}
+
+int? _tryMeasureChunkedBatchBytes(
+  ChunkedBatchParamSets paramSets, {
+  required bool asciiOnly,
+}) => _measureChunkedBatchBytes(paramSets, asciiOnly: asciiOnly);
+
+int? _measureChunkedBatchBytes(
+  ChunkedBatchParamSets paramSets, {
+  required bool asciiOnly,
+}) {
+  var extraBytes = 0;
+  var hasString = false;
+
+  for (var chunk = 0; chunk < paramSets.length; chunk++) {
+    final startRow = paramSets.startRow + chunk * paramSets.rowsPerStep;
+    final endRow = startRow + paramSets.rowsPerStep;
+    for (var rowIndex = startRow; rowIndex < endRow; rowIndex++) {
+      final row = paramSets.paramSets[rowIndex];
+      for (var param = 0; param < paramSets.paramCount; param++) {
+        final value = row[param];
+        if (value is String) {
+          hasString = true;
+          if (asciiOnly) {
+            final length = value.length;
+            for (var j = 0; j < length; j++) {
+              if (value.codeUnitAt(j) > 0x7f) {
+                return null;
+              }
+            }
+            extraBytes += length;
+          } else {
+            extraBytes += _utf8Length(value);
+          }
+        } else if (value is Uint8List) {
+          extraBytes += value.length;
+        }
+      }
+    }
+  }
+
+  return hasString || !asciiOnly ? extraBytes : null;
+}
+
 ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
   List<List<Object?>> paramSets,
   int paramCount,
@@ -1113,6 +1200,24 @@ ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
   );
 }
 
+ffi.Pointer<ffi.Uint8> _allocateAsciiChunkedBatchParams(
+  ChunkedBatchParamSets paramSets,
+  int totalCount,
+  int extraBytes,
+) {
+  return _allocatePackedChunkedBatchParams(paramSets, totalCount, extraBytes, (
+    value,
+    out,
+    offset,
+    _,
+  ) {
+    for (var j = 0; j < value.length; j++) {
+      out[offset + j] = value.codeUnitAt(j);
+    }
+    return offset + value.length;
+  });
+}
+
 ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
   List<List<Object?>> paramSets,
   int paramCount,
@@ -1122,6 +1227,19 @@ ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
   return _allocatePackedBatchParams(
     paramSets,
     paramCount,
+    totalCount,
+    extraBytes,
+    (value, out, offset, _) => _writeUtf8(value, out, offset),
+  );
+}
+
+ffi.Pointer<ffi.Uint8> _allocateUtf8ChunkedBatchParams(
+  ChunkedBatchParamSets paramSets,
+  int totalCount,
+  int extraBytes,
+) {
+  return _allocatePackedChunkedBatchParams(
+    paramSets,
     totalCount,
     extraBytes,
     (value, out, offset, _) => _writeUtf8(value, out, offset),
@@ -1174,6 +1292,62 @@ ffi.Pointer<ffi.Uint8> _allocatePackedBatchParams(
       }
 
       flatIndex++;
+    }
+  }
+
+  return buf;
+}
+
+ffi.Pointer<ffi.Uint8> _allocatePackedChunkedBatchParams(
+  ChunkedBatchParamSets paramSets,
+  int totalCount,
+  int extraBytes,
+  _BatchStringWriter writeString,
+) {
+  final structsBytes = _paramStructSize * totalCount;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  var flatIndex = 0;
+  for (var chunk = 0; chunk < paramSets.length; chunk++) {
+    final startRow = paramSets.startRow + chunk * paramSets.rowsPerStep;
+    final endRow = startRow + paramSets.rowsPerStep;
+    for (var rowIndex = startRow; rowIndex < endRow; rowIndex++) {
+      final row = paramSets.paramSets[rowIndex];
+      for (var param = 0; param < paramSets.paramCount; param++) {
+        final offset = flatIndex * _paramStructSize;
+        final value = row[param];
+
+        if (value == null) {
+          byteData.setInt32(offset, 0, Endian.little);
+        } else if (value is int) {
+          byteData.setInt32(offset, 1, Endian.little);
+          byteData.setInt64(offset + 8, value, Endian.little);
+        } else if (value is double) {
+          byteData.setInt32(offset, 2, Endian.little);
+          byteData.setFloat64(offset + 8, value, Endian.little);
+        } else if (value is String) {
+          final start = dataOffset;
+          dataOffset = writeString(value, view, dataOffset, flatIndex);
+          byteData.setInt32(offset, 3, Endian.little);
+          byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
+          byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
+        } else if (value is Uint8List) {
+          view.setRange(dataOffset, dataOffset + value.length, value);
+          byteData.setInt32(offset, 4, Endian.little);
+          byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+          byteData.setInt32(offset + 16, value.length, Endian.little);
+          dataOffset += value.length;
+        } else {
+          byteData.setInt32(offset, 0, Endian.little);
+        }
+
+        flatIndex++;
+      }
     }
   }
 
@@ -1282,6 +1456,45 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
       return offset + bytes.length;
     },
   );
+}
+
+ffi.Pointer<ffi.Uint8> _allocateChunkedBatchParamsGeneric(
+  ChunkedBatchParamSets paramSets,
+  int totalCount,
+) {
+  List<Uint8List?>? encodedStrings;
+  var extraBytes = 0;
+  var flatIndex = 0;
+  for (var chunk = 0; chunk < paramSets.length; chunk++) {
+    final startRow = paramSets.startRow + chunk * paramSets.rowsPerStep;
+    final endRow = startRow + paramSets.rowsPerStep;
+    for (var rowIndex = startRow; rowIndex < endRow; rowIndex++) {
+      final row = paramSets.paramSets[rowIndex];
+      for (var param = 0; param < paramSets.paramCount; param++) {
+        final value = row[param];
+        if (value is String) {
+          encodedStrings ??= List<Uint8List?>.filled(totalCount, null);
+          final bytes = utf8.encode(value);
+          encodedStrings[flatIndex] = bytes;
+          extraBytes += bytes.length;
+        } else if (value is Uint8List) {
+          extraBytes += value.length;
+        }
+        flatIndex++;
+      }
+    }
+  }
+
+  return _allocatePackedChunkedBatchParams(paramSets, totalCount, extraBytes, (
+    value,
+    out,
+    offset,
+    flatIndex,
+  ) {
+    final bytes = encodedStrings![flatIndex]!;
+    out.setRange(offset, offset + bytes.length, bytes);
+    return offset + bytes.length;
+  });
 }
 
 void freeParamBuffer(ffi.Pointer<ffi.Uint8> buf) {

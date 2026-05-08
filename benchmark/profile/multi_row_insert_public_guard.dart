@@ -3,8 +3,9 @@
 // Public executeBatch A/B for exp 133.
 //
 // Compares the guarded simple-INSERT chunker against the same public API with
-// quoted identifiers, which intentionally force the fallback one-row-per-step
-// path while preserving the same logical table and values.
+// a comment-forced fallback path while preserving the same logical table and
+// values. Quoted identifiers are measured separately because exp 133 now
+// recognizes them.
 //
 //   dart run benchmark/profile/multi_row_insert_public_guard.dart --markdown
 
@@ -18,6 +19,7 @@ final class _Workload {
     required this.name,
     required this.createSql,
     required this.optimizedSql,
+    required this.quotedOptimizedSql,
     required this.fallbackSql,
     required this.row,
   });
@@ -25,6 +27,7 @@ final class _Workload {
   final String name;
   final String createSql;
   final String optimizedSql;
+  final String quotedOptimizedSql;
   final String fallbackSql;
   final List<Object?> Function(int row) row;
 }
@@ -59,14 +62,18 @@ CREATE TABLE narrow_batch(
 )
 ''',
     optimizedSql: 'INSERT INTO narrow_batch(text_0, int_1) VALUES (?, ?)',
-    fallbackSql: 'INSERT INTO "narrow_batch"(text_0, int_1) VALUES (?, ?)',
+    quotedOptimizedSql:
+        'INSERT INTO "narrow_batch"("text_0", "int_1") VALUES (?, ?)',
+    fallbackSql:
+        'INSERT INTO narrow_batch(text_0, int_1) /* fallback */ VALUES (?, ?)',
     row: (i) => ['text_$i', i],
   ),
   _Workload(
     name: 'wide mixed ASCII',
     createSql: _wideBatchCreateSql,
     optimizedSql: _wideBatchInsertSql('wide_batch'),
-    fallbackSql: _wideBatchInsertSql('"wide_batch"'),
+    quotedOptimizedSql: _wideBatchInsertSql('"wide_batch"', quoteColumns: true),
+    fallbackSql: _wideBatchInsertSql('wide_batch', fallbackComment: true),
     row: (i) => _wideBatchRow(i),
   ),
   _Workload(
@@ -83,10 +90,9 @@ CREATE TABLE blob_batch(
   blob_7 BLOB NOT NULL
 )
 ''',
-    optimizedSql:
-        'INSERT INTO blob_batch(blob_0, blob_1, blob_2, blob_3, blob_4, blob_5, blob_6, blob_7) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    fallbackSql:
-        'INSERT INTO "blob_batch"(blob_0, blob_1, blob_2, blob_3, blob_4, blob_5, blob_6, blob_7) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    optimizedSql: _blobBatchInsertSql('blob_batch'),
+    quotedOptimizedSql: _blobBatchInsertSql('"blob_batch"', quoteColumns: true),
+    fallbackSql: _blobBatchInsertSql('blob_batch', fallbackComment: true),
     row: (i) => [
       _wideBlob(i, 0),
       _wideBlob(i, 1),
@@ -113,7 +119,7 @@ Future<void> main(List<String> args) async {
         await _runScenario(
           pass: pass,
           workload: workload,
-          mode: 'fallback quoted',
+          mode: 'fallback comment',
           sql: workload.fallbackSql,
           paramSets: paramSets,
         ),
@@ -124,6 +130,15 @@ Future<void> main(List<String> args) async {
           workload: workload,
           mode: 'optimized',
           sql: workload.optimizedSql,
+          paramSets: paramSets,
+        ),
+      );
+      results.add(
+        await _runScenario(
+          pass: pass,
+          workload: workload,
+          mode: 'optimized quoted',
+          sql: workload.quotedOptimizedSql,
           paramSets: paramSets,
         ),
       );
@@ -218,13 +233,15 @@ String _renderMarkdown(
     )
     ..writeln('```')
     ..writeln()
-    ..writeln('| workload | fallback_wall_ms | optimized_wall_ms | delta |')
-    ..writeln('|---|---:|---:|---:|');
+    ..writeln(
+      '| workload | fallback_wall_ms | optimized_wall_ms | quoted_optimized_wall_ms | optimized_delta | quoted_delta |',
+    )
+    ..writeln('|---|---:|---:|---:|---:|---:|');
 
   for (final entry in byWorkload.entries) {
     final fallback = _median(
       entry.value
-          .where((row) => row.mode == 'fallback quoted')
+          .where((row) => row.mode == 'fallback comment')
           .map((row) => row.wallUs)
           .toList(),
     );
@@ -234,9 +251,16 @@ String _renderMarkdown(
           .map((row) => row.wallUs)
           .toList(),
     );
+    final quotedOptimized = _median(
+      entry.value
+          .where((row) => row.mode == 'optimized quoted')
+          .map((row) => row.wallUs)
+          .toList(),
+    );
     buffer.writeln(
       '| ${entry.key} | ${_ms(fallback)} | ${_ms(optimized)} | '
-      '${_percent(optimized, fallback)} |',
+      '${_ms(quotedOptimized)} | ${_percent(optimized, fallback)} | '
+      '${_percent(quotedOptimized, fallback)} |',
     );
   }
 
@@ -268,14 +292,36 @@ String _percent(int value, int baseline) {
   return '$sign${delta.toStringAsFixed(1)}%';
 }
 
-String _wideBatchInsertSql(String table) {
+String _wideBatchInsertSql(
+  String table, {
+  bool quoteColumns = false,
+  bool fallbackComment = false,
+}) {
+  final columns = [for (var i = 0; i < 20; i++) quoteColumns ? '"c$i"' : 'c$i'];
+  final comment = fallbackComment ? ' /* fallback */' : '';
   return '''
 INSERT INTO $table(
-  c0, c1, c2, c3, c4,
-  c5, c6, c7, c8, c9,
-  c10, c11, c12, c13, c14,
-  c15, c16, c17, c18, c19
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ${columns.sublist(0, 5).join(', ')},
+  ${columns.sublist(5, 10).join(', ')},
+  ${columns.sublist(10, 15).join(', ')},
+  ${columns.sublist(15, 20).join(', ')}
+)$comment VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+''';
+}
+
+String _blobBatchInsertSql(
+  String table, {
+  bool quoteColumns = false,
+  bool fallbackComment = false,
+}) {
+  final columns = [
+    for (var i = 0; i < 8; i++) quoteColumns ? '"blob_$i"' : 'blob_$i',
+  ];
+  final comment = fallbackComment ? ' /* fallback */' : '';
+  return '''
+INSERT INTO $table(
+  ${columns.join(', ')}
+)$comment VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ''';
 }
 
