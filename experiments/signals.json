@@ -65,9 +65,9 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 129 split that helper and found steady-state wide mixed batches are now native-call dominated: Dart parameter packing is ~25-37% of write-helper wall after warmup, while `resqlite_run_batch*` is ~63-74%. Exp 130 split that native bucket and showed bind is only ~9-15% of native wall, reset and statement lookup are tiny, and the largest buckets are SQLite step plus COMMIT. Exp 131 showed the COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact. Exp 132 found that part of the emoji-heavy COMMIT bucket was resqlite's passive WAL checkpoint firing at 500 pages; raising the internal threshold to 1000 pages improves the 10k x20 emoji shape while preserving reader/stream guardrails. Another broad Dart encoder or small native-loop helper needs a shape-specific proof point; the next general wide-batch work should focus on SQLite row-writing or a new WAL workload beyond exp 132's threshold change.",
-      "keyPriors": ["125", "126", "129", "130", "131", "132"],
-      "archive": ["028", "076", "077", "095", "096", "109", "112", "113", "116"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 129 split that helper and found steady-state wide mixed batches are now native-call dominated: Dart parameter packing is ~25-37% of write-helper wall after warmup, while `resqlite_run_batch*` is ~63-74%. Exp 130 split that native bucket and showed bind is only ~9-15% of native wall, reset and statement lookup are tiny, and the largest buckets are SQLite step plus COMMIT. Exp 131 showed the COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact. Exp 132 found that part of the emoji-heavy COMMIT bucket was resqlite's passive WAL checkpoint firing at 500 pages; raising the internal threshold to 1000 pages improves the 10k x20 emoji shape while preserving reader/stream guardrails. Exp 133 proved that reducing SQLite step count with multi-row INSERT chunks can move large simple INSERT batches, especially narrow/blob-heavy shapes, but rejected the production implementation as too complex for a conditional win; wide ASCII improved only modestly.",
+      "keyPriors": ["125", "126", "130", "131", "132"],
+      "archive": ["028", "076", "077", "095", "096", "109", "112", "113", "116", "129", "133"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -75,7 +75,8 @@
       ],
       "openQuestions": [
         "Are there remaining blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
-        "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?"
+        "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?",
+        "Is there production evidence for frequent large simple narrow/blob INSERT batches that would justify revisiting multi-row INSERT chunking complexity?"
       ],
       "openCandidates": [
         {
@@ -84,7 +85,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 129 says the measured steady-state wide mixed shapes are no longer primarily Dart-packing-bound; exp 130 says the native remainder is step/COMMIT dominated, not reset/statement-lookup dominated; exp 131 says moving the same batch through the nested path does not remove COMMIT cost; exp 132 says the safe WAL policy win is a small 500->1000 page threshold bump, not disabling checkpointing or pushing it to multi-thousand-page spikes."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 130 says the native remainder is step/COMMIT dominated, not reset/statement-lookup dominated; exp 131 says moving the same batch through the nested path does not remove COMMIT cost; exp 132 says the safe WAL policy win is a small 500->1000 page threshold bump, not disabling checkpointing or pushing it to multi-thousand-page spikes. Exp 133 says multi-row INSERT chunking has real step-count headroom, but the archived implementation is too complex for the current breadth of win. Reopen only for real large simple INSERT workload evidence or a much simpler implementation. Do not use generic ListBase views as a presumed free direct-packing substitute in the batch encoder; exp 133 found view indexing erased the wide signal."
     },
     {
       "id": "long-text-stream-hashing",
@@ -214,8 +215,8 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a clear wall-time target, exp 127 split writer roundtrip plus stream completion/reply cost enough to remove dirty dependency fetch, writer-wall attribution, and generic reply-delivery speculation from the blocked list, exp 129 split wide-batch Dart parameter packing from the native write call, exp 130 split that native wide-batch call into statement, transaction, bind, step, reset, and preupdate wall, exp 131 compared top-level vs explicit transaction shape for the same native wide batch, and exp 132 split WAL checkpoint wall out of COMMIT with reader/stream guardrails.",
-      "keyPriors": ["121", "127", "129", "130", "131", "132"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a clear wall-time target, exp 127 split writer roundtrip plus stream completion/reply cost enough to remove dirty dependency fetch, writer-wall attribution, and generic reply-delivery speculation from the blocked list, exp 129 split wide-batch Dart parameter packing from the native write call, exp 130 split that native wide-batch call into statement, transaction, bind, step, reset, and preupdate wall, exp 131 compared top-level vs explicit transaction shape for the same native wide batch, exp 132 split WAL checkpoint wall out of COMMIT with reader/stream guardrails, and exp 133 paired a direct native ceiling sweep with a public optimized-vs-fallback guard for multi-row INSERT chunking.",
+      "keyPriors": ["127", "129", "130", "131", "132", "133"],
       "archive": ["055", "088", "102", "108", "110", "111", "113", "115", "116", "119"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
@@ -606,6 +607,26 @@
         "watch release Wide Batch Insert plus any non-ASCII large-batch workload after the threshold change",
         "only revisit checkpoint policy with the exp 132 sustained sweep and reader/stream guardrails",
         "continue wide-batch investigation on SQLite row-step behavior rather than reset, stmt lookup, wrapper shape, or broad checkpoint deferral"
+      ]
+    },
+    "133": {
+      "directions": [
+        "parameter-encoding-and-binding",
+        "measurement-system"
+      ],
+      "outcomeClass": "rejected_complexity",
+      "changedBeliefs": [
+        "The remaining SQLite step bucket can be reduced for large simple INSERT batches by grouping many user rows into one generated multi-row VALUES statement",
+        "The production value is conditional: small batches, complex SQL, named parameters, and trailing clauses should keep the old one-row-per-step path",
+        "Quoted identifiers and non-divisible batch lengths can be supported without widening the public API when the writer keeps multi-segment plans atomic",
+        "Public 10k-row guard medians over 21 passes improved narrow 4.48 -> 3.22 ms, wide ASCII 18.11 -> 17.30 ms, and blob-heavy 12.33 -> 10.93 ms",
+        "A generic ListBase view over the original row matrix is not free enough for the hot encoder loop; direct matrix packing was needed to retain signal",
+        "The archived implementation is not worth shipping as a default because SQL recognition, multi-segment transaction handling, profile aggregation, and specialized chunked packing are too much complexity for a narrow win"
+      ],
+      "nextSignals": [
+        "reopen only with real workload evidence for frequent large simple narrow/blob INSERT batches",
+        "reopen if a simpler implementation can preserve most of the narrow/blob win without a broad SQL recognizer or duplicated encoder path",
+        "do not expand the SQL recognizer speculatively"
       ]
     }
   }
