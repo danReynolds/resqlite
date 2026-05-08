@@ -19,10 +19,10 @@ message.
 
 ## Hypothesis
 
-If `StreamEngine._flushQueue` ships the current dirty queue to one reader worker
-as a bounded batch, A11c overlap should improve because 50 stream re-queries no
-longer require 50 main-isolate reader replies. Disjoint writes should stay
-unchanged because column-level dependency elision still keeps the queue empty.
+If `StreamEngine._flushQueue` ships the current dirty queue as bounded reader
+batches, A11c overlap should improve because 50 stream re-queries no longer
+require 50 main-isolate reader replies. Disjoint writes should stay unchanged
+because column-level dependency elision still keeps the queue empty.
 
 Accept if the focused A11c profile and standalone many-streams suite both show a
 clear overlap win, with no stream coalescing or reader-pool correctness
@@ -37,10 +37,10 @@ contains a bounded list of stream re-query inputs. One reader worker executes
 them serially and returns per-query results, including per-item errors so one
 bad stream does not poison unrelated entries in the batch.
 
-`StreamEngine._flushQueue` now sends up to 64 queued stream entries in a single
-batch when at least one reader worker is available. Single-entry queues still
-use the existing `selectIfChanged` path. The batch completion path preserves the
-same dirty/in-flight semantics as the single-entry path:
+`StreamEngine._flushQueue` now sends up to one 64-entry batch per available
+reader worker. Single-entry queues still use the existing `selectIfChanged`
+path. The batch completion path preserves the same dirty/in-flight semantics as
+the single-entry path:
 
 - if the entry was dirtied again while the batch was in-flight, discard the
   intermediate result and requeue the entry;
@@ -96,6 +96,7 @@ Validation:
 ```text
 dart analyze --fatal-infos lib/src/reader/read_worker.dart lib/src/reader/reader_pool.dart lib/src/stream_engine.dart
 dart test test/stream_invalidation_coalescing_test.dart test/reader_pool_test.dart --timeout 60s
+dart test test/stream_test.dart --name "batched re-query error does not block successful peer stream"
 dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart --repeats=3
 dart run build_runner build --delete-conflicting-outputs
 dart run benchmark/suites/many_streams_writer_throughput.dart
@@ -125,6 +126,5 @@ reader reply batching.
 - Keyed-PK needs a different direction: simple primary-key/range dependency
   metadata or another safe way to avoid re-querying streams whose watched row
   could not have changed.
-- If future profiles show huge batches causing read starvation, split the batch
-  cap by active reader count or workload shape instead of reverting to
-  per-stream replies.
+- If future profiles show huge batches causing read starvation, tune the batch
+  cap by workload shape instead of reverting to per-stream replies.

@@ -26,6 +26,10 @@ Standalone release-shape guardrails:
 
 ## Candidate Profile Output
 
+Post-review rerun after resolving PR #101 feedback. The A/B summary above
+remains the original baseline comparison; this detailed candidate table reflects
+the corrected per-stream `stream_requery_await_us` accounting.
+
 Profile-mode harness: `benchmark/profile/writer_wall_split_audit.dart`
 
 Reader pool size: 4 (`(Platform.numberOfProcessors - 1).clamp(2, 4)`)
@@ -33,48 +37,48 @@ Reader pool size: 4 (`(Platform.numberOfProcessors - 1).clamp(2, 4)`)
 Command:
 
 ```text
-dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart --markdown --repeats=3
+dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart --repeats=3
 ```
 
 ## Counters
 
 | pass | workload | shape | wall_ms | writer_requests | writer_roundtrip_us | writer_write_call_us | dirty_fetch_us | invalidate_us | invalidate_count |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | A11c baseline | 0 streams x 500 writes | 61.87 | 500 | 46022 | 22425 | 6147 | 0 | 0 |
-| 1 | A11c disjoint | 50 streams x 500 writes | 54.18 | 500 | 31543 | 12067 | 4083 | 9154 | 500 |
-| 1 | A11c overlap | 50 streams x 500 writes | 67.59 | 500 | 39868 | 16057 | 3973 | 12888 | 500 |
-| 1 | keyed PK subscriptions | 50 streams x 200 random writes | 17.33 | 200 | 11734 | 5543 | 770 | 3900 | 200 |
-| 1 | Wide batch insert | 10000 rows x 20 params | 53.24 | 1 | 52448 | 28499 | 16 | 0 | 0 |
-| 2 | A11c baseline | 0 streams x 500 writes | 45.41 | 500 | 36272 | 20494 | 929 | 0 | 0 |
-| 2 | A11c disjoint | 50 streams x 500 writes | 36.05 | 500 | 21015 | 10535 | 328 | 4937 | 500 |
-| 2 | A11c overlap | 50 streams x 500 writes | 57.03 | 500 | 38383 | 17966 | 645 | 7263 | 500 |
-| 2 | keyed PK subscriptions | 50 streams x 200 random writes | 22.00 | 200 | 16755 | 6208 | 146 | 2808 | 200 |
-| 2 | Wide batch insert | 10000 rows x 20 params | 29.77 | 1 | 29698 | 18799 | 15 | 0 | 0 |
-| 3 | A11c baseline | 0 streams x 500 writes | 29.09 | 500 | 23203 | 14650 | 114 | 0 | 0 |
-| 3 | A11c disjoint | 50 streams x 500 writes | 24.08 | 500 | 15750 | 7146 | 100 | 3219 | 500 |
-| 3 | A11c overlap | 50 streams x 500 writes | 37.28 | 500 | 20861 | 8547 | 125 | 5963 | 500 |
-| 3 | keyed PK subscriptions | 50 streams x 200 random writes | 14.06 | 200 | 11236 | 8255 | 38 | 1858 | 200 |
-| 3 | Wide batch insert | 10000 rows x 20 params | 16.03 | 1 | 15984 | 12361 | 11 | 0 | 0 |
+| 1 | A11c baseline | 0 streams x 500 writes | 45.89 | 500 | 34882 | 22359 | 3440 | 0 | 0 |
+| 1 | A11c disjoint | 50 streams x 500 writes | 38.36 | 500 | 20516 | 8632 | 2425 | 8154 | 500 |
+| 1 | A11c overlap | 50 streams x 500 writes | 42.52 | 500 | 21432 | 7822 | 1978 | 11706 | 500 |
+| 1 | keyed PK subscriptions | 50 streams x 200 random writes | 12.06 | 200 | 8478 | 4249 | 397 | 2290 | 200 |
+| 1 | Wide batch insert | 10000 rows x 20 params | 36.62 | 1 | 36326 | 22516 | 13 | 0 | 0 |
+| 2 | A11c baseline | 0 streams x 500 writes | 21.42 | 500 | 15904 | 8462 | 100 | 0 | 0 |
+| 2 | A11c disjoint | 50 streams x 500 writes | 22.05 | 500 | 13277 | 6263 | 55 | 2620 | 500 |
+| 2 | A11c overlap | 50 streams x 500 writes | 25.54 | 500 | 14818 | 6865 | 31 | 4350 | 500 |
+| 2 | keyed PK subscriptions | 50 streams x 200 random writes | 9.73 | 200 | 6786 | 3527 | 40 | 1929 | 200 |
+| 2 | Wide batch insert | 10000 rows x 20 params | 26.74 | 1 | 26666 | 17351 | 13 | 0 | 0 |
+| 3 | A11c baseline | 0 streams x 500 writes | 19.93 | 500 | 15023 | 7589 | 33 | 0 | 0 |
+| 3 | A11c disjoint | 50 streams x 500 writes | 20.78 | 500 | 12764 | 5835 | 29 | 2831 | 500 |
+| 3 | A11c overlap | 50 streams x 500 writes | 25.26 | 500 | 15145 | 7176 | 73 | 4539 | 500 |
+| 3 | keyed PK subscriptions | 50 streams x 200 random writes | 8.44 | 200 | 5901 | 3466 | 11 | 1683 | 200 |
+| 3 | Wide batch insert | 10000 rows x 20 params | 21.60 | 1 | 21556 | 15084 | 6 | 0 | 0 |
 
 ## Derived split
 
 | pass | workload | roundtrip / wall | write call / roundtrip | dirty fetch / roundtrip | residual / roundtrip | invalidate / wall | us per writer request |
 |---:|---|---:|---:|---:|---:|---:|---:|
-| 1 | A11c baseline | 74.38% | 48.73% | 13.36% | 37.92% | 0.00% | 92.04 |
-| 1 | A11c disjoint | 58.22% | 38.26% | 12.94% | 48.80% | 16.89% | 63.09 |
-| 1 | A11c overlap | 58.98% | 40.28% | 9.97% | 49.76% | 19.07% | 79.74 |
-| 1 | keyed PK subscriptions | 67.72% | 47.24% | 6.56% | 46.20% | 22.51% | 58.67 |
-| 1 | Wide batch insert | 98.50% | 54.34% | 0.03% | 45.63% | 0.00% | 52448.00 |
-| 2 | A11c baseline | 79.88% | 56.50% | 2.56% | 40.94% | 0.00% | 72.54 |
-| 2 | A11c disjoint | 58.29% | 50.13% | 1.56% | 48.31% | 13.69% | 42.03 |
-| 2 | A11c overlap | 67.31% | 46.81% | 1.68% | 51.51% | 12.74% | 76.77 |
-| 2 | keyed PK subscriptions | 76.16% | 37.05% | 0.87% | 62.08% | 12.76% | 83.78 |
-| 2 | Wide batch insert | 99.75% | 63.30% | 0.05% | 36.65% | 0.00% | 29698.00 |
-| 3 | A11c baseline | 79.76% | 63.14% | 0.49% | 36.37% | 0.00% | 46.41 |
-| 3 | A11c disjoint | 65.41% | 45.37% | 0.63% | 53.99% | 13.37% | 31.50 |
-| 3 | A11c overlap | 55.96% | 40.97% | 0.60% | 58.43% | 16.00% | 41.72 |
-| 3 | keyed PK subscriptions | 79.90% | 73.47% | 0.34% | 26.19% | 13.21% | 56.18 |
-| 3 | Wide batch insert | 99.72% | 77.33% | 0.07% | 22.60% | 0.00% | 15984.00 |
+| 1 | A11c baseline | 76.01% | 64.10% | 9.86% | 26.04% | 0.00% | 69.76 |
+| 1 | A11c disjoint | 53.48% | 42.07% | 11.82% | 46.11% | 21.26% | 41.03 |
+| 1 | A11c overlap | 50.40% | 36.50% | 9.23% | 54.27% | 27.53% | 42.86 |
+| 1 | keyed PK subscriptions | 70.27% | 50.12% | 4.68% | 45.20% | 18.98% | 42.39 |
+| 1 | Wide batch insert | 99.21% | 61.98% | 0.04% | 37.98% | 0.00% | 36326.00 |
+| 2 | A11c baseline | 74.24% | 53.21% | 0.63% | 46.16% | 0.00% | 31.81 |
+| 2 | A11c disjoint | 60.20% | 47.17% | 0.41% | 52.41% | 11.88% | 26.55 |
+| 2 | A11c overlap | 58.03% | 46.33% | 0.21% | 53.46% | 17.03% | 29.64 |
+| 2 | keyed PK subscriptions | 69.73% | 51.97% | 0.59% | 47.44% | 19.82% | 33.93 |
+| 2 | Wide batch insert | 99.72% | 65.07% | 0.05% | 34.88% | 0.00% | 26666.00 |
+| 3 | A11c baseline | 75.37% | 50.52% | 0.22% | 49.26% | 0.00% | 30.05 |
+| 3 | A11c disjoint | 61.43% | 45.71% | 0.23% | 54.06% | 13.62% | 25.53 |
+| 3 | A11c overlap | 59.95% | 47.38% | 0.48% | 52.14% | 17.97% | 30.29 |
+| 3 | keyed PK subscriptions | 69.90% | 58.74% | 0.19% | 41.08% | 19.94% | 29.50 |
+| 3 | Wide batch insert | 99.78% | 69.98% | 0.03% | 30.00% | 0.00% | 21556.00 |
 
 ## Stream completion and reader reply split
 
@@ -82,18 +86,18 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_wall_split_audit.dart 
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1 | A11c baseline | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 | 1 | A11c disjoint | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
-| 1 | A11c overlap | 2750 | 5 / 45 / 2700 | 63370 / 23.04 | 0 | 0 / 0.00 | 55 | 6229 / 113.25 | 5 | 12 / 2.40 |
-| 1 | keyed PK subscriptions | 2450 | 3 / 47 / 2400 | 16947 / 6.92 | 0 | 0 / 0.00 | 49 | 2358 / 48.12 | 3 | 12 / 4.00 |
+| 1 | A11c overlap | 2150 | 5 / 45 / 2100 | 1980450 / 921.14 | 0 | 0 / 0.00 | 43 | 2366 / 55.02 | 5 | 10 / 2.00 |
+| 1 | keyed PK subscriptions | 2050 | 3 / 47 / 2000 | 634800 / 309.66 | 0 | 0 / 0.00 | 41 | 1655 / 40.37 | 3 | 9 / 3.00 |
 | 1 | Wide batch insert | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 | 2 | A11c baseline | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 | 2 | A11c disjoint | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
-| 2 | A11c overlap | 1750 | 9 / 241 / 1500 | 59302 / 33.89 | 0 | 0 / 0.00 | 35 | 1546 / 44.17 | 9 | 58 / 6.44 |
-| 2 | keyed PK subscriptions | 2050 | 3 / 297 / 1750 | 21081 / 10.28 | 0 | 0 / 0.00 | 41 | 1370 / 33.41 | 3 | 11 / 3.67 |
+| 2 | A11c overlap | 1550 | 5 / 45 / 1500 | 1289350 / 831.84 | 0 | 0 / 0.00 | 31 | 849 / 27.39 | 5 | 6 / 1.20 |
+| 2 | keyed PK subscriptions | 2050 | 3 / 47 / 2000 | 458950 / 223.88 | 0 | 0 / 0.00 | 41 | 915 / 22.32 | 3 | 10 / 3.33 |
 | 2 | Wide batch insert | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 | 3 | A11c baseline | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 | 3 | A11c disjoint | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
-| 3 | A11c overlap | 1550 | 7 / 143 / 1400 | 36880 / 23.79 | 0 | 0 / 0.00 | 31 | 1128 / 36.39 | 7 | 46 / 6.57 |
-| 3 | keyed PK subscriptions | 2050 | 3 / 47 / 2000 | 11193 / 5.46 | 0 | 0 / 0.00 | 41 | 897 / 21.88 | 3 | 12 / 4.00 |
+| 3 | A11c overlap | 1500 | 5 / 45 / 1450 | 1277000 / 851.33 | 0 | 0 / 0.00 | 30 | 750 / 25.00 | 5 | 7 / 1.40 |
+| 3 | keyed PK subscriptions | 2000 | 3 / 47 / 1950 | 416800 / 208.40 | 0 | 0 / 0.00 | 40 | 769 / 19.23 | 3 | 4 / 1.33 |
 | 3 | Wide batch insert | 0 | 0 / 0 / 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 | 0 | 0 / 0.00 |
 
 ## Reading the table

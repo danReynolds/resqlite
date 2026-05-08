@@ -183,16 +183,18 @@ final class StreamEngine {
       return;
     }
 
-    final dequeued = _requeryQueue.take(64).toList();
+    for (var i = 0; i < availableWorkers && _requeryQueue.isNotEmpty; i++) {
+      final dequeued = _requeryQueue.take(64).toList();
 
-    for (final entry in dequeued) {
-      _requeryQueue.remove(entry);
-    }
+      for (final entry in dequeued) {
+        _requeryQueue.remove(entry);
+      }
 
-    if (dequeued.length == 1) {
-      _requery(dequeued.single);
-    } else {
-      _requeryBatch(dequeued);
+      if (dequeued.length == 1) {
+        _requery(dequeued.single);
+      } else {
+        _requeryBatch(dequeued);
+      }
     }
   }
 
@@ -371,7 +373,8 @@ final class StreamEngine {
       ]);
       if (kProfileMode) {
         selectSw!.stop();
-        ProfileCounters.streamRequeryAwaitUs += selectSw.elapsedMicroseconds;
+        ProfileCounters.streamRequeryAwaitUs +=
+            selectSw.elapsedMicroseconds * entries.length;
         ProfileCounters.streamRequeryCount += entries.length;
       }
 
