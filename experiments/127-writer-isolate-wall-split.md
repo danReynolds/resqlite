@@ -79,15 +79,21 @@ benchmark/profile/results/exp-127-writer-isolate-wall-aggregate.md
 
 `_WriterState` now carries a long-running monotonic `Stopwatch` plus
 three `int` accumulators: `handlerUs`, `sqliteUs`, `handlerCount`. The
-writer dispatch loop wraps every non-snapshot `WriterRequest` with a
+writer dispatch loop wraps **every non-snapshot `WriterRequest`**
+(Execute / Batch / Begin / Commit / Rollback / Query / Close) with a
 `ticker.elapsedMicroseconds` pair and accumulates into `handlerUs`;
-inside `_handleExecute` and `_handleBatch`, a second pair wraps the
-FFI write helper (`executeWrite` / `executeBatchWrite` /
-`executeNestedBatchWrite`) and accumulates into `sqliteUs`. Both
-accumulators are gated behind `if (kProfileMode)` so AOT release builds
-tree-shake the instrumentation — only the `_WriterState` field
-allocation is unconditional, and that is one extra `Stopwatch` per
-writer isolate, paid once at spawn.
+`handlerCount` increments once per such message. Inside `_handleExecute`
+and `_handleBatch`, a *second* pair wraps the FFI write helper
+(`executeWrite` / `executeBatchWrite` / `executeNestedBatchWrite`) and
+accumulates into `sqliteUs`, so `sqliteUs` is narrower than `handlerUs`
+— it only covers writes, not Begin/Commit/Rollback/Query/Close. The
+audit workloads here only issue `db.execute`, so handler dispatch is
+effectively `ExecuteRequest`, and `handler_us - sqlite_us` is the
+writer-side Dart wall on that request type. Both accumulators are
+gated behind `if (kProfileMode)` so AOT release builds tree-shake the
+instrumentation — only the `_WriterState` field allocation is
+unconditional, and that is one extra `Stopwatch` per writer isolate,
+paid once at spawn.
 
 A new sealed-hierarchy member, `WriterCountersSnapshotRequest`, is
 handled inline at the top of the dispatch loop **before** the timing

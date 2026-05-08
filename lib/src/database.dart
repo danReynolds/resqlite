@@ -4,8 +4,8 @@ import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/transaction.dart';
-import 'package:resqlite/src/writer/write_worker.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
@@ -500,17 +500,33 @@ final class Database {
   }
 
   /// Profile-mode-only: snapshot the writer isolate's per-isolate
-  /// counters. See [Writer.profileSnapshotCounters].
+  /// counters. See [Writer.profileSnapshotCounters] for what each field
+  /// covers.
   ///
   /// Surfaced on [Database] so audit harnesses can pair this with the
   /// main-isolate `ProfileCounters` snapshot inside a single workload
-  /// scenario without needing access to the private writer field.
-  Future<WriterCountersSnapshotResponse> profileSnapshotWriterCounters({
-    bool reset = false,
-  }) async {
+  /// scenario without needing access to the private writer field. The
+  /// return type is a record so callers do not need to import the
+  /// internal `write_worker.dart` DTO to use it.
+  ///
+  /// In release builds (`kProfileMode == false`) the writer never
+  /// instruments the hot path, so this method short-circuits on the
+  /// main isolate and returns zeros without messaging the writer —
+  /// callers that always invoke this in profile harnesses pay zero in
+  /// release.
+  Future<({int handlerUs, int sqliteUs, int handlerCount})>
+  profileSnapshotWriterCounters({bool reset = false}) async {
     _ensureOpen();
+    if (!kProfileMode) {
+      return (handlerUs: 0, sqliteUs: 0, handlerCount: 0);
+    }
     final _DatabaseRuntime(:writer) = await _runtime;
-    return writer.profileSnapshotCounters(reset: reset);
+    final response = await writer.profileSnapshotCounters(reset: reset);
+    return (
+      handlerUs: response.handlerUs,
+      sqliteUs: response.sqliteUs,
+      handlerCount: response.handlerCount,
+    );
   }
 }
 

@@ -6,7 +6,7 @@ Reader pool size: 4 (`(Platform.numberOfProcessors - 1).clamp(2, 4)`)
 
 Wall-clock convention (inherited from `audit_workloads.dart`): `wall_us` is writer-side burst wall — the stopwatch stops on the last write. Emission drains run after the stopwatch so the wall denominator is not padded with idle waiting.
 
-Writer counters cover `ExecuteRequest` and `BatchRequest` only. `writer_handler_us` is the cumulative wall the writer dispatch loop spent inside any timed `WriterRequest`, including its Dart-side prologue/epilogue (param decode, dirty-table read, response build, reply send). `writer_sqlite_us` is the subset spent inside the FFI write helpers (`executeWrite`, `executeBatchWrite`, `executeNestedBatchWrite`). The difference is the writer-side Dart wall.
+`writer_handler_us` is the cumulative wall the writer dispatch loop spent inside *every* non-snapshot `WriterRequest` (`ExecuteRequest`, `BatchRequest`, `BeginRequest`, `CommitRequest`, `RollbackRequest`, `QueryRequest`, `CloseRequest`), including each message's Dart-side prologue/epilogue (request decode, dirty-table read, response build, reply send). `writer_sqlite_us` is narrower — it is the wall spent inside the FFI *write* helpers (`executeWrite`, `executeBatchWrite`, `executeNestedBatchWrite`), so it is incremented from `_handleExecute` and `_handleBatch` only. On the audit workloads here the user only issues `db.execute`, so handler dispatch is dominated by `ExecuteRequest` and the difference `handler_us - sqlite_us` is the writer-side Dart wall on that request type.
 
 Command:
 
@@ -18,19 +18,19 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_isolate_audit.dart --m
 
 | workload | shape | wall_ms | handler_us | sqlite_us | handler_count | parked_total | max_parked | emissions |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 0 streams x 500 writes | 33.30 | 17088 | 11242 | 500 | 0 | 0 | 0 |
-| A11c disjoint | 50 streams x 500 writes | 40.24 | 13930 | 8367 | 500 | 0 | 0 | 0 |
-| A11c overlap | 50 streams x 500 writes | 84.51 | 21400 | 11253 | 500 | 0 | 0 | 25 |
-| keyed PK subscriptions | 50 streams x 200 random writes | 19.32 | 6519 | 4400 | 200 | 0 | 0 | 3 |
+| A11c baseline | 0 streams x 500 writes | 33.63 | 17443 | 11792 | 500 | 0 | 0 | 0 |
+| A11c disjoint | 50 streams x 500 writes | 39.12 | 14293 | 8731 | 500 | 0 | 0 | 0 |
+| A11c overlap | 50 streams x 500 writes | 87.37 | 19589 | 11160 | 500 | 0 | 0 | 32 |
+| keyed PK subscriptions | 50 streams x 200 random writes | 18.94 | 6895 | 4415 | 200 | 0 | 0 | 3 |
 
 ## Derived fractions
 
 | workload | handler_us / wall_us | sqlite_us / wall_us | dart_us / wall_us | sqlite_us / handler_us | us per handler call | us per sqlite call |
 |---|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 51.32% | 33.76% | 17.56% | 65.79% | 34.18 | 22.48 |
-| A11c disjoint | 34.62% | 20.79% | 13.82% | 60.06% | 27.86 | 16.73 |
-| A11c overlap | 25.32% | 13.32% | 12.01% | 52.58% | 42.80 | 22.51 |
-| keyed PK subscriptions | 33.74% | 22.77% | 10.97% | 67.50% | 32.59 | 22.00 |
+| A11c baseline | 51.87% | 35.06% | 16.80% | 67.60% | 34.89 | 23.58 |
+| A11c disjoint | 36.53% | 22.32% | 14.22% | 61.09% | 28.59 | 17.46 |
+| A11c overlap | 22.42% | 12.77% | 9.65% | 56.97% | 39.18 | 22.32 |
+| keyed PK subscriptions | 36.41% | 23.32% | 13.10% | 64.03% | 34.48 | 22.07 |
 
 ## Reading the table
 

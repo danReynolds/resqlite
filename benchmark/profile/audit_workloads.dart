@@ -31,12 +31,6 @@ import 'dart:math' as math;
 
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
-// `WriterCountersSnapshotResponse` is the typed reply from
-// `Database.profileSnapshotWriterCounters`; the audit does not need to
-// reference it by name, but the import keeps the field-access type
-// resolution explicit for tooling.
-// ignore: implementation_imports, unused_import
-import 'package:resqlite/src/writer/write_worker.dart';
 
 /// A11c shared shape — same row count and stream count exp 119 / 121
 /// agreed on. Keep these in sync with the values used in benchmarks

@@ -114,13 +114,20 @@ final class BatchResponse {
 }
 
 /// Response to [WriterCountersSnapshotRequest]. All values are cumulative
-/// since the last reset (or since writer spawn). [handlerUs] is total
-/// wall the handler dispatch loop spent inside [WriterRequest] subclasses
-/// (excluding [WriterCountersSnapshotRequest] itself, which is not
-/// counted), [sqliteUs] is the subset of that wall spent specifically
-/// inside the FFI write helpers (`executeWrite`, `executeBatchWrite`,
-/// `executeNestedBatchWrite`), and [handlerCount] is the number of
-/// timed handler invocations.
+/// since the last reset (or since writer spawn).
+///
+/// - [handlerUs] is total wall the handler dispatch loop spent inside
+///   *every* [WriterRequest] subclass other than
+///   [WriterCountersSnapshotRequest] itself — that is, [ExecuteRequest],
+///   [BatchRequest], [BeginRequest], [CommitRequest], [RollbackRequest],
+///   [QueryRequest], and [CloseRequest]. Each timed message contributes
+///   one increment to [handlerCount].
+/// - [sqliteUs] is narrower than [handlerUs]: it is the wall spent
+///   inside the FFI *write* helpers (`executeWrite`,
+///   `executeBatchWrite`, `executeNestedBatchWrite`), incremented from
+///   `_handleExecute` and `_handleBatch` only. Begin/Commit/Rollback/
+///   Query/Close request handlers contribute to [handlerUs] but not to
+///   [sqliteUs].
 ///
 /// In release builds (`kProfileMode == false`) all three fields are
 /// always zero — the writer never instruments the hot path.

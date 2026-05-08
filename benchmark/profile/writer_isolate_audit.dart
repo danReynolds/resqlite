@@ -179,14 +179,19 @@ String _renderMarkdown(List<_AuditRow> rows) {
   );
   buf.writeln();
   buf.writeln(
-    'Writer counters cover `ExecuteRequest` and `BatchRequest` only. '
     '`writer_handler_us` is the cumulative wall the writer dispatch '
-    'loop spent inside any timed `WriterRequest`, including its Dart-'
-    'side prologue/epilogue (param decode, dirty-table read, response '
-    'build, reply send). `writer_sqlite_us` is the subset spent inside '
-    'the FFI write helpers (`executeWrite`, `executeBatchWrite`, '
-    '`executeNestedBatchWrite`). The difference is the writer-side '
-    'Dart wall.',
+    'loop spent inside *every* non-snapshot `WriterRequest` '
+    '(`ExecuteRequest`, `BatchRequest`, `BeginRequest`, `CommitRequest`, '
+    '`RollbackRequest`, `QueryRequest`, `CloseRequest`), including each '
+    'message\'s Dart-side prologue/epilogue (request decode, dirty-'
+    'table read, response build, reply send). `writer_sqlite_us` is '
+    'narrower — it is the wall spent inside the FFI *write* helpers '
+    '(`executeWrite`, `executeBatchWrite`, `executeNestedBatchWrite`), '
+    'so it is incremented from `_handleExecute` and `_handleBatch` '
+    'only. On the audit workloads here the user only issues '
+    '`db.execute`, so handler dispatch is dominated by `ExecuteRequest` '
+    'and the difference `handler_us - sqlite_us` is the writer-side '
+    'Dart wall on that request type.',
   );
   buf.writeln();
   buf.writeln('Command:');
