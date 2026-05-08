@@ -25,6 +25,8 @@ void main() {
       'dispatcher_max_parked_concurrent': 0,
       'writer_roundtrip_us': 0,
       'writer_write_call_us': 0,
+      'writer_batch_param_pack_us': 0,
+      'writer_batch_native_write_us': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
       'stream_requery_await_us': 0,
@@ -53,6 +55,8 @@ void main() {
       'dispatcher_max_parked_concurrent': 0,
       'writer_roundtrip_us': 0,
       'writer_write_call_us': 0,
+      'writer_batch_param_pack_us': 0,
+      'writer_batch_native_write_us': 0,
       'writer_dirty_fetch_us': 0,
       'writer_request_count': 0,
       'stream_requery_await_us': 0,
@@ -88,18 +92,24 @@ void main() {
   test('writer profile counters round-trip through snapshot/diff/reset', () {
     ProfileCounters.writerRoundtripUs = 100;
     ProfileCounters.writerWriteCallUs = 70;
+    ProfileCounters.writerBatchParamPackUs = 40;
+    ProfileCounters.writerBatchNativeWriteUs = 25;
     ProfileCounters.writerDirtyFetchUs = 3;
     ProfileCounters.writerRequestCount = 2;
 
     final snap = ProfileCounters.snapshot();
     expect(snap['writer_roundtrip_us'], 100);
     expect(snap['writer_write_call_us'], 70);
+    expect(snap['writer_batch_param_pack_us'], 40);
+    expect(snap['writer_batch_native_write_us'], 25);
     expect(snap['writer_dirty_fetch_us'], 3);
     expect(snap['writer_request_count'], 2);
 
     ProfileCounters.reset();
     expect(ProfileCounters.writerRoundtripUs, 0);
     expect(ProfileCounters.writerWriteCallUs, 0);
+    expect(ProfileCounters.writerBatchParamPackUs, 0);
+    expect(ProfileCounters.writerBatchNativeWriteUs, 0);
     expect(ProfileCounters.writerDirtyFetchUs, 0);
     expect(ProfileCounters.writerRequestCount, 0);
   });

@@ -74,6 +74,7 @@ moved them.
 | [125](125-wide-ascii-batch-params.md) | Wide ASCII batch parameter encoding | Direct ASCII payload packing skips temporary per-string UTF-8 lists in large wide batches; focused 10k x20 improves 17.199 → 12.760 ms and release Wide Batch Insert improves 18.201 → 13.031 ms |  |
 | [126](126-wide-utf8-batch-packing.md) | Wide UTF-8 batch parameter packing | Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 → 18.988 ms and emoji 10k x20 improves 24.187 → 17.458 ms while release write-suite guardrails remain neutral |  |
 | [127](127-writer-wall-split-audit.md) | Writer wall split audit | Measurement-only: profile-mode counters split writer roundtrip, write-helper wall, dirty dependency fetch, residual roundtrip, and invalidation on A11c/keyed-PK/wide-batch shapes. Dirty fetch is <1% after warmup; A11c overlap is residual/completion-shaped; Wide Batch Insert remains write-helper dominated |  |
+| [129](129-wide-batch-write-helper-split.md) | Wide-batch write-helper split | Measurement-only: profile-mode batch counters split Dart parameter matrix packing from `resqlite_run_batch*`. After warmup, wide mixed batches are native-call dominated: packing is ~25-37% of write-helper wall, native bind/step/reset/transaction work is ~63-74% |  |
 
 ## Rejected
 

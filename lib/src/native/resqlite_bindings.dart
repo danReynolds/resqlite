@@ -164,6 +164,20 @@ final class WriteResult {
   final int lastInsertId;
 }
 
+/// Profile-only timing split for a batch write helper call.
+final class BatchWriteProfile {
+  const BatchWriteProfile({
+    required this.paramPackUs,
+    required this.nativeWriteUs,
+  });
+
+  /// Time spent flattening Dart parameter rows into the native matrix buffer.
+  final int paramPackUs;
+
+  /// Time spent inside `resqlite_run_batch*` after params are packed.
+  final int nativeWriteUs;
+}
+
 /// Execute a write statement. Returns affected rows + last insert ID.
 ///
 /// Uses nested try/finally so each allocation is protected by the time
@@ -268,6 +282,14 @@ void executeBatchWrite(
   }
 }
 
+BatchWriteProfile executeBatchWriteProfiled(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  return _executeBatchWriteProfiled(dbHandle, sql, paramSets, nested: false);
+}
+
 /// Execute a batch inside an already-open transaction (top-level or savepoint).
 /// The caller owns BEGIN / COMMIT / ROLLBACK — on error this helper throws
 /// without issuing any rollback, so the caller can roll back at the correct
@@ -297,6 +319,63 @@ void executeNestedBatchWrite(
         sqliteCode: rc,
       );
     }
+  } finally {
+    freeParamBuffer(paramsNative);
+  }
+}
+
+BatchWriteProfile executeNestedBatchWriteProfiled(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  return _executeBatchWriteProfiled(dbHandle, sql, paramSets, nested: true);
+}
+
+BatchWriteProfile _executeBatchWriteProfiled(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets, {
+  required bool nested,
+}) {
+  if (paramSets.isEmpty) {
+    return const BatchWriteProfile(paramPackUs: 0, nativeWriteUs: 0);
+  }
+  final paramCount = paramSets.first.length;
+
+  final sqlNative = cachedSqlUtf8(sql);
+  final paramSw = Stopwatch()..start();
+  final paramsNative = allocateBatchParams(paramSets);
+  paramSw.stop();
+  try {
+    final nativeSw = Stopwatch()..start();
+    final rc = nested
+        ? resqliteRunBatchNested(
+            dbHandle,
+            sqlNative,
+            paramsNative,
+            paramCount,
+            paramSets.length,
+          )
+        : resqliteRunBatch(
+            dbHandle,
+            sqlNative,
+            paramsNative,
+            paramCount,
+            paramSets.length,
+          );
+    nativeSw.stop();
+    if (rc != 0) {
+      throw ResqliteQueryException(
+        _queryErrorMessage(dbHandle, rc, paramCount),
+        sql: sql,
+        sqliteCode: rc,
+      );
+    }
+    return BatchWriteProfile(
+      paramPackUs: paramSw.elapsedMicroseconds,
+      nativeWriteUs: nativeSw.elapsedMicroseconds,
+    );
   } finally {
     freeParamBuffer(paramsNative);
   }
@@ -757,8 +836,10 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) =>
-    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+int? _tryMeasureAsciiBatchBytes(
+  List<List<Object?>> paramSets,
+  int paramCount,
+) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
 
 int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
     _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;

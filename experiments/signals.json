@@ -65,9 +65,9 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 127's writer-wall split shows the current wide-batch shape is still write-helper dominated after exp 126: writer roundtrip is ~99.6-99.8% of wall and the write helper is ~68-70% of roundtrip. Parameter/native write-call work still has headroom, but the next measurement should split Dart parameter packing from the native write call before another encoder change.",
-      "keyPriors": ["109", "112", "113", "116", "125", "126"],
-      "archive": ["028", "076", "077", "095", "096"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 127's writer-wall split showed the current wide-batch shape is still write-helper dominated after exp 126. Exp 129 split that helper and found steady-state wide mixed batches are now native-call dominated: Dart parameter packing is ~25-37% of write-helper wall after warmup, while `resqlite_run_batch*` is ~63-74%. Another broad Dart encoder change needs a shape-specific proof point; the next general wide-batch measurement should split native binding, stepping, reset, and transaction-control work.",
+      "keyPriors": ["109", "113", "116", "125", "126", "129"],
+      "archive": ["028", "076", "077", "095", "096", "112"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -84,7 +84,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 127 confirms wide batch wall still sits inside writer roundtrip/write-helper work, but it does not split Dart parameter packing from SQLite stepping."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 129 says the measured steady-state wide mixed shapes are no longer primarily Dart-packing-bound; rerun `wide_batch_write_helper_split.dart` before pursuing another encoder change."
     },
     {
       "id": "long-text-stream-hashing",
@@ -212,9 +212,9 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a clear wall-time target, and exp 127 split writer roundtrip plus stream completion/reply cost enough to remove dirty dependency fetch, writer-wall attribution, and generic reply-delivery speculation from the blocked list. The next missing parameter signal is Dart parameter packing vs native write-call wall inside wide batches.",
-      "keyPriors": ["110", "111", "115", "119", "121", "127"],
-      "archive": ["055", "088", "102", "108", "113", "116"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a clear wall-time target, exp 127 split writer roundtrip plus stream completion/reply cost enough to remove dirty dependency fetch, writer-wall attribution, and generic reply-delivery speculation from the blocked list, and exp 129 split wide-batch Dart parameter packing from the native write call.",
+      "keyPriors": ["111", "115", "119", "121", "127", "129"],
+      "archive": ["055", "088", "102", "108", "110", "113", "116"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -228,11 +228,6 @@
         {
           "idea": "memory profiling harness with per-benchmark RSS acceptance criteria",
           "addedDate": "2026-05-02"
-        },
-        {
-          "idea": "Dart parameter packing vs native write-call split for wide batches",
-          "addedDate": "2026-05-07",
-          "addedAfter": "127"
         }
       ],
       "blockedOnMeasurement": [],
@@ -530,7 +525,7 @@
       ],
       "nextSignals": [
         "try an implementation that reduces stale/discarded or unchanged selectIfChanged work, such as generation-aware burst coalescing, simple row-range invalidation elision, or cross-stream selectIfChanged batching",
-        "split Dart parameter packing from native write-call wall before another wide-batch encoder experiment",
+        "split native wide-batch write-call wall into binding, stepping, reset, and transaction-control work before changing the C loop",
         "treat exact SQLite statement timing as a separate build-config/profileability experiment because the current build uses `SQLITE_OMIT_TRACE`"
       ]
     },
@@ -545,6 +540,20 @@
       "nextSignals": [
         "pursue simple primary-key or row-range dependency elision for keyed-PK/table-level miss paths before more reply batching",
         "reopen archived batching only if a production workload shows reader reply fanout is the dominant cost and includes a mixed read/write fairness check"
+      ]
+    },
+    "129": {
+      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "The wide-batch write helper is no longer primarily Dart-packing-bound after exp 125 and exp 126: steady-state mixed ASCII, Unicode, and emoji 10k x20 shapes spend about 25-37% of write-helper wall in parameter packing",
+        "`resqlite_run_batch*` is now the larger steady-state slice on measured wide mixed batches at about 63-74% of write-helper wall, so another broad Dart encoder tweak is ceiling-bound without a narrower proof point",
+        "The next general wide-batch measurement should move below the Dart matrix encoder and split native binding, stepping, reset, and transaction-control work"
+      ],
+      "nextSignals": [
+        "profile `resqlite_run_batch*` internals to separate native binding from SQLite step/reset/transaction wall",
+        "rerun `wide_batch_write_helper_split.dart` with production-shaped wider, blob-heavy, or larger-text batches before pursuing another encoder change",
+        "only revisit Dart parameter packing if `param_pack_us` is materially above the 25-37% steady-state band on a real workload"
       ]
     }
   }

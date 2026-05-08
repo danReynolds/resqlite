@@ -222,8 +222,12 @@ void _recordWriterProfile(Stopwatch? roundtripSw, WriterProfileSample? sample) {
   if (sample case WriterProfileSample(
     :final writeCallUs,
     :final dirtyFetchUs,
+    :final batchParamPackUs,
+    :final batchNativeWriteUs,
   )) {
     ProfileCounters.writerWriteCallUs += writeCallUs;
     ProfileCounters.writerDirtyFetchUs += dirtyFetchUs;
+    ProfileCounters.writerBatchParamPackUs += batchParamPackUs;
+    ProfileCounters.writerBatchNativeWriteUs += batchNativeWriteUs;
   }
 }

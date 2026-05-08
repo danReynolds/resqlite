@@ -121,6 +121,19 @@ class ProfileCounters {
   /// result unmarshalling for `execute`.
   static int writerWriteCallUs = 0;
 
+  /// Profile-only split of [writerWriteCallUs] for `executeBatch`: time spent
+  /// flattening Dart parameter rows into the native batch matrix buffer.
+  ///
+  /// This is zero for `execute` and transaction `commit` requests.
+  static int writerBatchParamPackUs = 0;
+
+  /// Profile-only split of [writerWriteCallUs] for `executeBatch`: time spent
+  /// inside `resqlite_run_batch*` after the parameter matrix has been packed.
+  ///
+  /// This includes native bind / step / reset / transaction-control work and
+  /// excludes Dart-side parameter packing.
+  static int writerBatchNativeWriteUs = 0;
+
   /// Worker-isolate wall time spent fetching and materializing dirty
   /// table/column dependencies after a profiled write call.
   static int writerDirtyFetchUs = 0;
@@ -170,6 +183,8 @@ class ProfileCounters {
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
     'writer_roundtrip_us': writerRoundtripUs,
     'writer_write_call_us': writerWriteCallUs,
+    'writer_batch_param_pack_us': writerBatchParamPackUs,
+    'writer_batch_native_write_us': writerBatchNativeWriteUs,
     'writer_dirty_fetch_us': writerDirtyFetchUs,
     'writer_request_count': writerRequestCount,
     'stream_requery_await_us': streamRequeryAwaitUs,
@@ -212,6 +227,8 @@ class ProfileCounters {
     dispatcherCurrentParked = 0;
     writerRoundtripUs = 0;
     writerWriteCallUs = 0;
+    writerBatchParamPackUs = 0;
+    writerBatchNativeWriteUs = 0;
     writerDirtyFetchUs = 0;
     writerRequestCount = 0;
     streamRequeryAwaitUs = 0;

@@ -127,10 +127,14 @@ final class WriterProfileSample {
   const WriterProfileSample({
     required this.writeCallUs,
     required this.dirtyFetchUs,
+    required this.batchParamPackUs,
+    required this.batchNativeWriteUs,
   });
 
   final int writeCallUs;
   final int dirtyFetchUs;
+  final int batchParamPackUs;
+  final int batchNativeWriteUs;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +282,8 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
             WriterProfileSample(
               writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
               dirtyFetchUs: dirtyFetchUs,
+              batchParamPackUs: 0,
+              batchNativeWriteUs: 0,
             ),
           )
         : ExecuteResponse(result, modifications),
@@ -289,6 +295,8 @@ BatchResponse _batchResponse(
   required bool profileEnabled,
   required int writeCallUs,
   required int dirtyFetchUs,
+  int batchParamPackUs = 0,
+  int batchNativeWriteUs = 0,
 }) {
   if (!profileEnabled && identical(modifications, TableDependencies.none)) {
     return const BatchResponse(TableDependencies.none);
@@ -299,6 +307,8 @@ BatchResponse _batchResponse(
           WriterProfileSample(
             writeCallUs: writeCallUs,
             dirtyFetchUs: dirtyFetchUs,
+            batchParamPackUs: batchParamPackUs,
+            batchNativeWriteUs: batchNativeWriteUs,
           ),
         )
       : BatchResponse(modifications);
@@ -310,6 +320,8 @@ void _sendBatchResponse(
   required bool profileEnabled,
   required int writeCallUs,
   required int dirtyFetchUs,
+  int batchParamPackUs = 0,
+  int batchNativeWriteUs = 0,
 }) {
   msg.replyPort.send(
     _batchResponse(
@@ -317,6 +329,8 @@ void _sendBatchResponse(
       profileEnabled: profileEnabled,
       writeCallUs: writeCallUs,
       dirtyFetchUs: dirtyFetchUs,
+      batchParamPackUs: batchParamPackUs,
+      batchNativeWriteUs: batchNativeWriteUs,
     ),
   );
 }
@@ -328,7 +342,16 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    final batchProfile = profileEnabled
+        ? executeNestedBatchWriteProfiled(
+            state.dbHandle,
+            msg.sql,
+            msg.paramSets,
+          )
+        : null;
+    if (!profileEnabled) {
+      executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    }
     writeSw?.stop();
     _sendBatchResponse(
       msg,
@@ -336,9 +359,16 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       profileEnabled: profileEnabled,
       writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
       dirtyFetchUs: 0,
+      batchParamPackUs: batchProfile?.paramPackUs ?? 0,
+      batchNativeWriteUs: batchProfile?.nativeWriteUs ?? 0,
     );
   } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    final batchProfile = profileEnabled
+        ? executeBatchWriteProfiled(state.dbHandle, msg.sql, msg.paramSets)
+        : null;
+    if (!profileEnabled) {
+      executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    }
     writeSw?.stop();
     final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
     final modifications = getDirtyTableDependencies(state.dbHandle);
@@ -349,6 +379,8 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       profileEnabled: profileEnabled,
       writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
       dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
+      batchParamPackUs: batchProfile?.paramPackUs ?? 0,
+      batchNativeWriteUs: batchProfile?.nativeWriteUs ?? 0,
     );
   }
 }
@@ -456,6 +488,8 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         profileEnabled: profileEnabled,
         writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
         dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
+        batchParamPackUs: 0,
+        batchNativeWriteUs: 0,
       ),
     );
   } else {
@@ -505,6 +539,8 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         profileEnabled: profileEnabled,
         writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
         dirtyFetchUs: 0,
+        batchParamPackUs: 0,
+        batchNativeWriteUs: 0,
       ),
     );
   }
