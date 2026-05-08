@@ -12,8 +12,6 @@ High-performance, reactive SQLite for Dart and Flutter.
 
 Write plain SQL. Stream anything. No main isolate jank. No ORM. No codegen.
 
-Visit the [project site](https://danreynolds.github.io/resqlite/) to browse interactive experiments and benchmarks.
-
 ```dart
 final db = await Database.open('app.db');
 
@@ -34,6 +32,8 @@ await db.transaction((tx) async {
   print('total: ${rows.first['c']}');
 });
 ```
+
+Visit the [project site](https://danreynolds.github.io/resqlite/) to browse interactive experiments and benchmarks.
 
 ## Features
 
