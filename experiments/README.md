@@ -77,6 +77,7 @@ moved them.
 | [129](129-wide-batch-write-helper-split.md) | Wide-batch write-helper split | Measurement-only: profile-mode batch counters split Dart parameter matrix packing from `resqlite_run_batch*`. After warmup, wide mixed batches are native-call dominated: packing is ~25-37% of write-helper wall, native bind/step/reset/transaction work is ~63-74% |  |
 | [130](130-wide-batch-native-call-split.md) | Wide-batch native call split | Measurement-only: profile-mode native batch counters split `resqlite_run_batch*` into stmt, transaction, bind, step, reset, and preupdate wall. Wide mixed batches are step/COMMIT dominated; bind is ~9-15% of native wall, reset and stmt lookup are tiny |  |
 | [131](131-wide-batch-transaction-shape.md) | Wide-batch transaction shape | Measurement-only: compares top-level `resqlite_run_batch_profiled` with explicit BEGIN + nested profiled batch + COMMIT. The COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact |  |
+| [132](132-wide-batch-wal-checkpoint-threshold.md) | Wide-batch WAL checkpoint threshold | Raises the writer passive checkpoint threshold 500 -> 1000 pages. Focused 10k x20 emoji batch improves 20.74 -> 17.26 ms by avoiding inline checkpoint work; reader and stream guardrails stay healthy while 2000/5000/off policies are rejected for WAL growth or tail spikes |  |
 
 ## Rejected
 

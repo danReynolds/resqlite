@@ -155,6 +155,15 @@ external int resqliteRunBatchNestedProfiled(
   ffi.Pointer<ffi.Uint8> outProfile,
 );
 
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
+  symbol: 'resqlite_set_writer_checkpoint_pages',
+  isLeaf: true,
+)
+external int resqliteSetWriterCheckpointPages(
+  ffi.Pointer<ffi.Void> db,
+  int pages,
+);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
@@ -174,7 +183,7 @@ const int _writeResultOffAffected = 0;
 const int _writeResultOffLastId = 8;
 const int _sqliteRange = 25;
 const int _batchProfileFieldSize = 8;
-const int _batchProfileFieldCount = 13;
+const int _batchProfileFieldCount = 19;
 const int _batchProfileSize = _batchProfileFieldSize * _batchProfileFieldCount;
 const int _batchProfileOffStmtUs = 0;
 const int _batchProfileOffTxBeginUs = 8;
@@ -189,6 +198,12 @@ const int _batchProfileOffBindCount = 72;
 const int _batchProfileOffStepCount = 80;
 const int _batchProfileOffResetCount = 88;
 const int _batchProfileOffPreupdateCount = 96;
+const int _batchProfileOffWalHookCount = 104;
+const int _batchProfileOffWalPagesMax = 112;
+const int _batchProfileOffCheckpointCount = 120;
+const int _batchProfileOffCheckpointBusyCount = 128;
+const int _batchProfileOffCheckpointPages = 136;
+const int _batchProfileOffCheckpointUs = 144;
 
 String _queryErrorMessage(
   ffi.Pointer<ffi.Void> dbHandle,
@@ -236,6 +251,12 @@ final class BatchWriteProfile {
     required this.nativeStepCount,
     required this.nativeResetCount,
     required this.nativePreupdateCount,
+    required this.nativeWalHookCount,
+    required this.nativeWalPagesMax,
+    required this.nativeCheckpointCount,
+    required this.nativeCheckpointBusyCount,
+    required this.nativeCheckpointPages,
+    required this.nativeCheckpointUs,
   });
 
   /// Time spent flattening Dart parameter rows into the native matrix buffer.
@@ -257,6 +278,22 @@ final class BatchWriteProfile {
   final int nativeStepCount;
   final int nativeResetCount;
   final int nativePreupdateCount;
+  final int nativeWalHookCount;
+  final int nativeWalPagesMax;
+  final int nativeCheckpointCount;
+  final int nativeCheckpointBusyCount;
+  final int nativeCheckpointPages;
+  final int nativeCheckpointUs;
+}
+
+void setWriterCheckpointPagesForProfile(
+  ffi.Pointer<ffi.Void> dbHandle,
+  int pages,
+) {
+  final rc = resqliteSetWriterCheckpointPages(dbHandle, pages);
+  if (rc != 0) {
+    throw ResqliteException('Failed to set writer checkpoint pages ($rc)');
+  }
 }
 
 /// Execute a write statement. Returns affected rows + last insert ID.
@@ -503,6 +540,30 @@ BatchWriteProfile _executeBatchWriteProfiled(
           _batchProfileOffPreupdateCount,
           Endian.little,
         ),
+        nativeWalHookCount: profile.getInt64(
+          _batchProfileOffWalHookCount,
+          Endian.little,
+        ),
+        nativeWalPagesMax: profile.getInt64(
+          _batchProfileOffWalPagesMax,
+          Endian.little,
+        ),
+        nativeCheckpointCount: profile.getInt64(
+          _batchProfileOffCheckpointCount,
+          Endian.little,
+        ),
+        nativeCheckpointBusyCount: profile.getInt64(
+          _batchProfileOffCheckpointBusyCount,
+          Endian.little,
+        ),
+        nativeCheckpointPages: profile.getInt64(
+          _batchProfileOffCheckpointPages,
+          Endian.little,
+        ),
+        nativeCheckpointUs: profile.getInt64(
+          _batchProfileOffCheckpointUs,
+          Endian.little,
+        ),
       );
     } finally {
       calloc.free(profileBuf);
@@ -528,6 +589,12 @@ const _emptyBatchWriteProfile = BatchWriteProfile(
   nativeStepCount: 0,
   nativeResetCount: 0,
   nativePreupdateCount: 0,
+  nativeWalHookCount: 0,
+  nativeWalPagesMax: 0,
+  nativeCheckpointCount: 0,
+  nativeCheckpointBusyCount: 0,
+  nativeCheckpointPages: 0,
+  nativeCheckpointUs: 0,
 );
 
 /// Per-worker persistent buffer for dirty-table pointer marshalling.

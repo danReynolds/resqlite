@@ -364,11 +364,12 @@ struct resqlite_db {
     // merge the stmt's pre-captured `dep_columns` into `dirty_columns`
     // whenever a row is actually modified. NULL outside of stepping.
     resqlite_cached_stmt* writer_active_entry;
-    // Profile-only native batch counters. Set only around profiled
-    // `sqlite3_step` calls so the preupdate hook can report its own wall as a
-    // subset of the measured step time. NULL in production.
+    // Profile-only native batch counters. Set around profiled `sqlite3_step`
+    // calls and profiled COMMIT so hooks can report their own wall as subsets
+    // of the measured step/commit time. NULL in production.
     resqlite_batch_profile* batch_profile;
     int writer_checkpoint_running;
+    int writer_checkpoint_pages;
 
     // Reader pool.
     resqlite_reader readers[MAX_READERS];
@@ -379,7 +380,7 @@ struct resqlite_db {
     char* path;
 };
 
-#define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 500
+#define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 1000
 
 // ---------------------------------------------------------------------------
 // Authorizer callback — records read tables/columns (stream deps) or, on
@@ -515,12 +516,22 @@ static int writer_wal_hook(
     int pages_in_wal
 ) {
     resqlite_db* sdb = (resqlite_db*)user_data;
-    if (pages_in_wal < RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES ||
+    resqlite_batch_profile* profile = sdb->batch_profile;
+    if (profile) {
+        profile->wal_hook_count++;
+        if (pages_in_wal > profile->wal_pages_max) {
+            profile->wal_pages_max = pages_in_wal;
+        }
+    }
+
+    if (sdb->writer_checkpoint_pages <= 0 ||
+        pages_in_wal < sdb->writer_checkpoint_pages ||
         sdb->writer_checkpoint_running) {
         return SQLITE_OK;
     }
 
     sdb->writer_checkpoint_running = 1;
+    long long t0 = profile ? profile_now_us() : 0;
     int rc = sqlite3_wal_checkpoint_v2(
         db,
         db_name,
@@ -528,6 +539,12 @@ static int writer_wal_hook(
         NULL,
         NULL
     );
+    if (profile) {
+        profile->checkpoint_us += profile_now_us() - t0;
+        profile->checkpoint_count++;
+        profile->checkpoint_pages += pages_in_wal;
+        if (rc == SQLITE_BUSY) profile->checkpoint_busy_count++;
+    }
     sdb->writer_checkpoint_running = 0;
 
     // PASSIVE checkpoints can legitimately report BUSY if readers pin the WAL.
@@ -650,6 +667,7 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     db->writer_active_entry = NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
+    db->writer_checkpoint_pages = RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES;
 
     // Pre-prepare transaction-control stmts
     // ([EXP-101](../experiments/101-tx-stmt-cache.md)). These are
@@ -760,6 +778,16 @@ const char* resqlite_errmsg(resqlite_db* db) {
 sqlite3* resqlite_writer_handle(resqlite_db* db) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return NULL;
     return db->writer;
+}
+
+int resqlite_set_writer_checkpoint_pages(resqlite_db* db, int pages) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return SQLITE_MISUSE;
+    }
+    sqlite3_mutex_enter(db->writer_mutex);
+    db->writer_checkpoint_pages = pages;
+    sqlite3_mutex_leave(db->writer_mutex);
+    return SQLITE_OK;
 }
 
 int resqlite_exec(resqlite_db* db, const char* sql) {
@@ -1165,11 +1193,15 @@ int resqlite_run_batch_profiled(
     sqlite3_preupdate_hook(db->writer, preupdate_hook, db);
     db->batch_profile = NULL;
     if (rc != SQLITE_OK) {
+        db->batch_profile = out_profile;
         run_cached_tx_stmt_profiled(
             db->tx_rollback_stmt, out_profile, &out_profile->tx_rollback_us);
+        db->batch_profile = NULL;
     } else {
+        db->batch_profile = out_profile;
         rc = run_cached_tx_stmt_profiled(
             db->tx_commit_stmt, out_profile, &out_profile->tx_commit_us);
+        db->batch_profile = NULL;
     }
 
     sqlite3_mutex_leave(db->writer_mutex);

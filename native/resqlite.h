@@ -126,6 +126,12 @@ typedef struct {
     long long step_count;
     long long reset_count;
     long long preupdate_count;
+    long long wal_hook_count;
+    long long wal_pages_max;
+    long long checkpoint_count;
+    long long checkpoint_busy_count;
+    long long checkpoint_pages;
+    long long checkpoint_us;
 } resqlite_batch_profile;
 
 // Profiled variants of `resqlite_run_batch*`.
@@ -150,6 +156,11 @@ int resqlite_run_batch_nested_profiled(
     int set_count,
     resqlite_batch_profile* out_profile
 );
+
+// Profile/experiment helper: override the writer's passive WAL checkpoint
+// threshold. `pages <= 0` disables the hook-triggered checkpoint for this
+// connection. Production opens use RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES.
+int resqlite_set_writer_checkpoint_pages(resqlite_db* db, int pages);
 
 // ---------------------------------------------------------------------------
 // Dirty table tracking (for stream invalidation)
