@@ -84,17 +84,17 @@ The first pass is warmup-heavy. Passes 2-5 are the useful steady-state band.
 
 | workload | steady native_write_us | bind / native | step / native | tx commit / native | reset / native | stmt / native | residual / native |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| mixed ASCII text | 9002-9391 | 14.32-14.60% | 46.04-48.29% | 23.57-27.69% | 2.37-3.07% | 0.31-0.51% | 8.58-11.76% |
-| mixed Unicode text | 9589-10601 | 12.37-14.24% | 39.23-45.26% | 29.97-38.68% | 2.18-2.43% | 0.24-0.44% | 7.07-7.54% |
-| mixed emoji text | 13044-13848 | 9.26-10.77% | 32.11-35.62% | 46.25-51.00% | 1.57-1.83% | 0.20-0.25% | 5.50-5.79% |
+| mixed ASCII text | 9280-9800 | 13.84-14.78% | 44.98-49.43% | 25.08-29.48% | 2.49-2.60% | 0.28-0.45% | 7.80-10.95% |
+| mixed Unicode text | 9898-10655 | 12.73-13.74% | 42.78-45.46% | 31.22-34.21% | 2.07-2.41% | 0.29-0.38% | 7.33-7.61% |
+| mixed emoji text | 12607-13754 | 9.96-11.01% | 32.31-35.84% | 44.57-50.01% | 1.56-1.83% | 0.19-0.26% | 5.42-6.33% |
 
 Per-set steady bands:
 
 | workload | bind_us / set | step_us / set | reset_us / set | preupdate / step |
 |---|---:|---:|---:|---:|
-| mixed ASCII text | 0.130-0.135 | 0.415-0.442 | 0.022-0.028 | 6.67-7.43% |
-| mixed Unicode text | 0.131-0.137 | 0.416-0.439 | 0.021-0.023 | 6.43-7.29% |
-| mixed emoji text | 0.128-0.142 | 0.444-0.465 | 0.021-0.024 | 6.54-7.28% |
+| mixed ASCII text | 0.130-0.143 | 0.423-0.475 | 0.024-0.025 | 6.29-7.06% |
+| mixed Unicode text | 0.135-0.137 | 0.439-0.470 | 0.022-0.024 | 6.44-7.69% |
+| mixed emoji text | 0.132-0.141 | 0.443-0.455 | 0.021-0.024 | 6.19-6.75% |
 
 Raw committed output:
 
@@ -109,7 +109,7 @@ benchmark/profile/results/exp-130-wide-batch-native-call-split.md
 The native call is not reset-bound or statement-cache-bound. Those buckets are
 too small to justify a broad implementation pass:
 
-- reset is about 1.6-3.1% of native wall;
+- reset is about 1.6-2.6% of native wall;
 - statement lookup / prepare is about 0.2-0.5% after warmup.
 
 Binding is real but not the dominant remaining cost. On the measured mixed
@@ -120,8 +120,8 @@ remaining wide-batch native wall by itself.
 The largest buckets are `sqlite3_step` and COMMIT:
 
 - `sqlite3_step` is the largest loop-local bucket for ASCII and Unicode
-  batches, about 39-48% of native wall;
-- COMMIT is large on every shape and dominates emoji, about 24-51% of native
+  batches, about 32-49% of native wall across the measured shapes;
+- COMMIT is large on every shape and dominates emoji, about 25-50% of native
   wall.
 
 That shifts the next useful work away from small loop helpers and toward

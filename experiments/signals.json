@@ -548,10 +548,10 @@
       "changedBeliefs": [
         "The wide-batch write helper is no longer primarily Dart-packing-bound after exp 125 and exp 126: steady-state mixed ASCII, Unicode, and emoji 10k x20 shapes spend about 25-37% of write-helper wall in parameter packing",
         "`resqlite_run_batch*` is now the larger steady-state slice on measured wide mixed batches at about 63-74% of write-helper wall, so another broad Dart encoder tweak is ceiling-bound without a narrower proof point",
-        "The next general wide-batch measurement should move below the Dart matrix encoder and split native binding, stepping, reset, and transaction-control work"
+        "Exp 130 consumed the next native split, so future wide-batch work should use that result instead of adding another broad diagnostic layer"
       ],
       "nextSignals": [
-        "use exp 130's native split before deciding whether the next wide-batch pass targets binding, SQLite step, or transaction commit behavior",
+        "use exp 130's native split to choose between binding, SQLite step, or transaction commit behavior",
         "rerun `wide_batch_write_helper_split.dart` with production-shaped wider, blob-heavy, or larger-text batches before pursuing another encoder change",
         "only revisit Dart parameter packing if `param_pack_us` is materially above the 25-37% steady-state band on a real workload"
       ]
@@ -560,9 +560,9 @@
       "directions": ["parameter-encoding-and-binding", "measurement-system"],
       "outcomeClass": "in_review_measurement",
       "changedBeliefs": [
-        "The native wide-batch call is not reset-bound or statement-cache-bound: reset is about 1.6-3.1% of native wall and statement lookup / prepare is about 0.2-0.5% after warmup",
+        "The native wide-batch call is not reset-bound or statement-cache-bound: reset is about 1.6-2.6% of native wall and statement lookup / prepare is about 0.2-0.5% after warmup",
         "Native binding is real but ceiling-limited on measured wide mixed batches at about 9-15% of native wall, so a binding micro-optimization needs a narrower workload proof point",
-        "SQLite `step` and top-level COMMIT are the dominant native buckets: step is about 32-48% of native wall and COMMIT is about 24-51%, with COMMIT largest on emoji-heavy rows"
+        "SQLite `step` and top-level COMMIT are the dominant native buckets: step is about 32-49% of native wall and COMMIT is about 25-50%, with COMMIT largest on emoji-heavy rows"
       ],
       "nextSignals": [
         "compare top-level `executeBatch` against in-transaction or nested batch shapes to separate row stepping from commit/WAL behavior",

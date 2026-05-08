@@ -16,11 +16,15 @@ static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
 
 static long long profile_now_us(void) {
 #if defined(_WIN32)
-    LARGE_INTEGER freq;
     LARGE_INTEGER counter;
-    QueryPerformanceFrequency(&freq);
+    static long long qpc_frequency = 0;
+    if (qpc_frequency == 0) {
+        LARGE_INTEGER freq;
+        QueryPerformanceFrequency(&freq);
+        qpc_frequency = freq.QuadPart;
+    }
     QueryPerformanceCounter(&counter);
-    return (long long)((counter.QuadPart * 1000000LL) / freq.QuadPart);
+    return (long long)((counter.QuadPart * 1000000LL) / qpc_frequency);
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -1035,7 +1039,7 @@ static int run_batch_locked_profiled(
         if (profile) {
             profile->stmt_us += profile_now_us() - t_stmt0;
         }
-        sqlite3_reset_profiled(stmt, profile);
+        sqlite3_reset(stmt);
     } else {
         resqlite_column_set_reset(&db->writer_authz_scratch);
         int rc = sqlite3_prepare_v3(
@@ -1071,7 +1075,7 @@ static int run_batch_locked_profiled(
             profile->bind_count++;
         }
         if (rc != SQLITE_OK) {
-            sqlite3_reset_profiled(stmt, profile);
+            sqlite3_reset(stmt);
             return rc;
         }
 
@@ -1089,12 +1093,12 @@ static int run_batch_locked_profiled(
         db->batch_profile = NULL;
         db->writer_active_entry = NULL;
         if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-            sqlite3_reset_profiled(stmt, profile);
+            sqlite3_reset(stmt);
             return rc;
         }
     }
 
-    sqlite3_reset_profiled(stmt, profile);
+    sqlite3_reset(stmt);
     return SQLITE_OK;
 }
 
