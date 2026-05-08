@@ -10,7 +10,6 @@ library;
 import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
-import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
 
@@ -21,7 +20,6 @@ import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
-import 'batch_insert_chunker.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -386,32 +384,19 @@ void _sendBatchResponse(
 void _handleBatch(_WriterState state, BatchRequest msg) {
   final profileEnabled = kProfileMode;
   final writeSw = profileEnabled ? (Stopwatch()..start()) : null;
-  final plan = chunkSimpleInsertBatch(msg.sql, msg.paramSets);
 
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    BatchWriteProfile? batchProfile;
-    try {
-      batchProfile = plan == null
-          ? _executeSingleNestedBatch(
-              state.dbHandle,
-              msg.sql,
-              msg.paramSets,
-              profileEnabled: profileEnabled,
-            )
-          : _executeBatchPlanNested(
-              state.dbHandle,
-              plan,
-              profileEnabled: profileEnabled,
-            );
-    } on ResqliteQueryException catch (e) {
-      if (plan == null) rethrow;
-      throw ResqliteQueryException(
-        e.message,
-        sql: msg.sql,
-        sqliteCode: e.sqliteCode,
-      );
+    final batchProfile = profileEnabled
+        ? executeNestedBatchWriteProfiled(
+            state.dbHandle,
+            msg.sql,
+            msg.paramSets,
+          )
+        : null;
+    if (!profileEnabled) {
+      executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     }
     writeSw?.stop();
     _sendBatchResponse(
@@ -423,27 +408,11 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       batchProfile: batchProfile,
     );
   } else {
-    BatchWriteProfile? batchProfile;
-    try {
-      batchProfile = plan == null
-          ? _executeSingleTopLevelBatch(
-              state.dbHandle,
-              msg.sql,
-              msg.paramSets,
-              profileEnabled: profileEnabled,
-            )
-          : _executeBatchPlanTopLevel(
-              state.dbHandle,
-              plan,
-              profileEnabled: profileEnabled,
-            );
-    } on ResqliteQueryException catch (e) {
-      if (plan == null) rethrow;
-      throw ResqliteQueryException(
-        e.message,
-        sql: msg.sql,
-        sqliteCode: e.sqliteCode,
-      );
+    final batchProfile = profileEnabled
+        ? executeBatchWriteProfiled(state.dbHandle, msg.sql, msg.paramSets)
+        : null;
+    if (!profileEnabled) {
+      executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     }
     writeSw?.stop();
     final dirtySw = profileEnabled ? (Stopwatch()..start()) : null;
@@ -456,205 +425,6 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       writeCallUs: writeSw?.elapsedMicroseconds ?? 0,
       dirtyFetchUs: dirtySw?.elapsedMicroseconds ?? 0,
       batchProfile: batchProfile,
-    );
-  }
-}
-
-BatchWriteProfile? _executeSingleNestedBatch(
-  ffi.Pointer<ffi.Void> dbHandle,
-  String sql,
-  List<List<Object?>> paramSets, {
-  required bool profileEnabled,
-}) {
-  if (profileEnabled) {
-    return executeNestedBatchWriteProfiled(dbHandle, sql, paramSets);
-  }
-  executeNestedBatchWrite(dbHandle, sql, paramSets);
-  return null;
-}
-
-BatchWriteProfile? _executeSingleTopLevelBatch(
-  ffi.Pointer<ffi.Void> dbHandle,
-  String sql,
-  List<List<Object?>> paramSets, {
-  required bool profileEnabled,
-}) {
-  if (profileEnabled) {
-    return executeBatchWriteProfiled(dbHandle, sql, paramSets);
-  }
-  executeBatchWrite(dbHandle, sql, paramSets);
-  return null;
-}
-
-BatchWriteProfile? _executeBatchPlanNested(
-  ffi.Pointer<ffi.Void> dbHandle,
-  BatchInsertPlan plan, {
-  required bool profileEnabled,
-}) {
-  final profile = profileEnabled ? _BatchProfileAccumulator() : null;
-  for (final segment in plan.segments) {
-    if (profileEnabled) {
-      profile!.add(
-        executeNestedBatchWriteProfiled(
-          dbHandle,
-          segment.sql,
-          segment.paramSets,
-        ),
-      );
-    } else {
-      executeNestedBatchWrite(dbHandle, segment.sql, segment.paramSets);
-    }
-  }
-  return profile?.toProfile();
-}
-
-BatchWriteProfile? _executeBatchPlanTopLevel(
-  ffi.Pointer<ffi.Void> dbHandle,
-  BatchInsertPlan plan, {
-  required bool profileEnabled,
-}) {
-  if (plan.segments.length == 1) {
-    final segment = plan.segments.single;
-    return _executeSingleTopLevelBatch(
-      dbHandle,
-      segment.sql,
-      segment.paramSets,
-      profileEnabled: profileEnabled,
-    );
-  }
-
-  final profile = profileEnabled ? _BatchProfileAccumulator() : null;
-  var txActive = false;
-  try {
-    final beginSw = profileEnabled ? (Stopwatch()..start()) : null;
-    final beginRc = resqliteTxBeginImmediate(dbHandle);
-    beginSw?.stop();
-    final beginUs = beginSw?.elapsedMicroseconds ?? 0;
-    profile
-      ?..nativeWriteUs += beginUs
-      ..nativeTxBeginUs += beginUs;
-    if (beginRc != 0) {
-      throw ResqliteQueryException(
-        resqliteErrmsg(dbHandle).toDartString(),
-        sql: plan.segments.first.sql,
-        sqliteCode: beginRc,
-      );
-    }
-    txActive = true;
-
-    for (final segment in plan.segments) {
-      if (profileEnabled) {
-        profile!.add(
-          executeNestedBatchWriteProfiled(
-            dbHandle,
-            segment.sql,
-            segment.paramSets,
-          ),
-        );
-      } else {
-        executeNestedBatchWrite(dbHandle, segment.sql, segment.paramSets);
-      }
-    }
-
-    final commitSw = profileEnabled ? (Stopwatch()..start()) : null;
-    final commitRc = resqliteTxCommit(dbHandle);
-    commitSw?.stop();
-    final commitUs = commitSw?.elapsedMicroseconds ?? 0;
-    profile
-      ?..nativeWriteUs += commitUs
-      ..nativeTxCommitUs += commitUs;
-    txActive = false;
-    if (commitRc != 0) {
-      final message = resqliteErrmsg(dbHandle).toDartString();
-      resqliteTxRollback(dbHandle);
-      discardDirtyTableDependencies(dbHandle);
-      throw ResqliteQueryException(
-        message,
-        sql: plan.segments.first.sql,
-        sqliteCode: commitRc,
-      );
-    }
-
-    return profile?.toProfile();
-  } catch (_) {
-    if (txActive) {
-      resqliteTxRollback(dbHandle);
-      discardDirtyTableDependencies(dbHandle);
-    }
-    rethrow;
-  }
-}
-
-final class _BatchProfileAccumulator {
-  int paramPackUs = 0;
-  int nativeWriteUs = 0;
-  int nativeStmtUs = 0;
-  int nativeTxBeginUs = 0;
-  int nativeTxCommitUs = 0;
-  int nativeTxRollbackUs = 0;
-  int nativeBindUs = 0;
-  int nativeStepUs = 0;
-  int nativeResetUs = 0;
-  int nativePreupdateUs = 0;
-  int nativeSetCount = 0;
-  int nativeBindCount = 0;
-  int nativeStepCount = 0;
-  int nativeResetCount = 0;
-  int nativePreupdateCount = 0;
-  int nativeWalHookCount = 0;
-  int nativeWalPagesMax = 0;
-  int nativeCheckpointCount = 0;
-  int nativeCheckpointBusyCount = 0;
-  int nativeCheckpointPages = 0;
-  int nativeCheckpointUs = 0;
-
-  void add(BatchWriteProfile profile) {
-    paramPackUs += profile.paramPackUs;
-    nativeWriteUs += profile.nativeWriteUs;
-    nativeStmtUs += profile.nativeStmtUs;
-    nativeTxBeginUs += profile.nativeTxBeginUs;
-    nativeTxCommitUs += profile.nativeTxCommitUs;
-    nativeTxRollbackUs += profile.nativeTxRollbackUs;
-    nativeBindUs += profile.nativeBindUs;
-    nativeStepUs += profile.nativeStepUs;
-    nativeResetUs += profile.nativeResetUs;
-    nativePreupdateUs += profile.nativePreupdateUs;
-    nativeSetCount += profile.nativeSetCount;
-    nativeBindCount += profile.nativeBindCount;
-    nativeStepCount += profile.nativeStepCount;
-    nativeResetCount += profile.nativeResetCount;
-    nativePreupdateCount += profile.nativePreupdateCount;
-    nativeWalHookCount += profile.nativeWalHookCount;
-    nativeWalPagesMax = math.max(nativeWalPagesMax, profile.nativeWalPagesMax);
-    nativeCheckpointCount += profile.nativeCheckpointCount;
-    nativeCheckpointBusyCount += profile.nativeCheckpointBusyCount;
-    nativeCheckpointPages += profile.nativeCheckpointPages;
-    nativeCheckpointUs += profile.nativeCheckpointUs;
-  }
-
-  BatchWriteProfile toProfile() {
-    return BatchWriteProfile(
-      paramPackUs: paramPackUs,
-      nativeWriteUs: nativeWriteUs,
-      nativeStmtUs: nativeStmtUs,
-      nativeTxBeginUs: nativeTxBeginUs,
-      nativeTxCommitUs: nativeTxCommitUs,
-      nativeTxRollbackUs: nativeTxRollbackUs,
-      nativeBindUs: nativeBindUs,
-      nativeStepUs: nativeStepUs,
-      nativeResetUs: nativeResetUs,
-      nativePreupdateUs: nativePreupdateUs,
-      nativeSetCount: nativeSetCount,
-      nativeBindCount: nativeBindCount,
-      nativeStepCount: nativeStepCount,
-      nativeResetCount: nativeResetCount,
-      nativePreupdateCount: nativePreupdateCount,
-      nativeWalHookCount: nativeWalHookCount,
-      nativeWalPagesMax: nativeWalPagesMax,
-      nativeCheckpointCount: nativeCheckpointCount,
-      nativeCheckpointBusyCount: nativeCheckpointBusyCount,
-      nativeCheckpointPages: nativeCheckpointPages,
-      nativeCheckpointUs: nativeCheckpointUs,
     );
   }
 }

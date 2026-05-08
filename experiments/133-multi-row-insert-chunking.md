@@ -1,9 +1,10 @@
 # Experiment 133: Multi-row INSERT chunking
 
 **Date:** 2026-05-08
-**Status:** In Review
+**Status:** Rejected
 **Direction:** `parameter-encoding-and-binding`, `measurement-system`
 **Benchmark Run:** None (focused profile/public guard harnesses)
+**Archive:** `archive/exp-133`
 
 ## Problem
 
@@ -39,7 +40,9 @@ small-batch regressions.
 ## Approach
 
 Added `benchmark/profile/multi_row_insert_ceiling.dart` to measure the direct
-native ceiling across rows-per-step values.
+native ceiling across rows-per-step values. The harness and implementation are
+preserved at `archive/exp-133`; this PR keeps the aggregate result artifacts
+and experiment record, not the production code.
 
 Then added a guarded writer-side implementation in
 `lib/src/writer/batch_insert_chunker.dart`:
@@ -66,7 +69,7 @@ matrix. That removed temporary chunk-list copies, but the indexed view overhead
 flattened the wide-batch signal. The retained version adds
 `lib/src/native/batch_param_source.dart`: the writer still passes a list-shaped
 chunk source, but the native parameter encoder recognizes it and walks the
-original row matrix directly.
+original row matrix directly. That implementation is archived, not shipped.
 
 Top-level multi-segment plans run inside one explicit writer transaction, so a
 tail failure rolls back earlier full chunks. Inside an existing transaction,
@@ -76,7 +79,7 @@ SQL.
 
 ## Results
 
-Ceiling command:
+Archived ceiling command:
 
 ```text
 dart run -DRESQLITE_PROFILE=true \
@@ -104,7 +107,7 @@ The prototype chunk-building cost matters, so the effective delta is the
 decision number. Narrow and blob-heavy batches have clear headroom; wide text
 batches have smaller but still positive ceiling once chunk cost is included.
 
-Public guard command:
+Archived public guard command:
 
 ```text
 dart run benchmark/profile/multi_row_insert_public_guard.dart \
@@ -147,22 +150,41 @@ batches were near the noise floor. The final guard starts at 2,000 rows.
 
 ## Decision
 
-**Accept for local branch.**
+**Reject on complexity grounds; archive for future reference.**
 
 This is the first post-exp-132 path that changes the actual step count rather
-than shaving around the write helper. The useful improvement is not universal:
-it applies to large, simple positional INSERT batches, now including common
-quoted-identifier ORM output and odd batch lengths. The guard is intentionally
-narrow so complex SQL and small batches keep the old behavior.
+than shaving around the write helper, so the performance signal is real. The
+production tradeoff is not good enough: the useful improvement is conditional,
+wide-row benefit is small, and the retained implementation adds too much writer
+and encoder complexity for a general-purpose default.
+
+The implementation touched a guarded SQL recognizer, multi-segment batch
+planning, explicit top-level transaction handling for tails, profile
+aggregation, and a specialized chunked parameter source plus encoder path. That
+is justified only if the optimized shape is common enough or the broad win is
+strong enough. The measured shape did not clear that bar:
+
+- narrow large inserts: strong win;
+- blob-heavy large inserts: moderate win;
+- wide mixed ASCII: small/noisy win;
+- small batches: must stay on the old path.
+
+The implementation was archived at `archive/exp-133` and rolled out of the
+branch net diff. Keep the results because they show that reducing
+`sqlite3_step` count can move real workloads; do not ship this implementation
+without new workload evidence or a materially simpler design.
 
 ## Future Notes
 
-- Keep the parser conservative. A broader SQL recognizer should earn its way
-  with production workload evidence, not speculative coverage.
+- Reopen only if production workloads show frequent large simple narrow/blob
+  INSERT batches, or if a much smaller implementation can keep most of the
+  narrow/blob win.
+- Keep the parser conservative. Broader SQL support, including conflict
+  clauses, should earn its way with production workload evidence.
 - Do not reintroduce generic `ListBase` view packing on this hot path. The
-  retained direct matrix packer exists because view indexing erased the wide
+  archived direct matrix packer exists because view indexing erased the wide
   signal.
 - Do not reuse this result to justify multi-row rewrites for UPDATE/DELETE or
   general SQL. The value comes from SQLite's native multi-row INSERT grammar.
-- If this survives soak, watch the wide-batch signal specifically; it is
-  positive but much less decisive than the narrow/blob results.
+- Treat wide-batch benefit as a watch item, not a headline. The retained local
+  implementation showed only a small 21-pass wide ASCII win.

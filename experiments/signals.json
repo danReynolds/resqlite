@@ -65,9 +65,9 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 129 split that helper and found steady-state wide mixed batches are now native-call dominated: Dart parameter packing is ~25-37% of write-helper wall after warmup, while `resqlite_run_batch*` is ~63-74%. Exp 130 split that native bucket and showed bind is only ~9-15% of native wall, reset and statement lookup are tiny, and the largest buckets are SQLite step plus COMMIT. Exp 131 showed the COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact. Exp 132 found that part of the emoji-heavy COMMIT bucket was resqlite's passive WAL checkpoint firing at 500 pages; raising the internal threshold to 1000 pages improves the 10k x20 emoji shape while preserving reader/stream guardrails. Exp 133 attacks the step bucket directly for large simple INSERT batches by internally generating multi-row VALUES chunks and packing those chunks from the original row matrix. The win is real but intentionally conditional: public 10k-row guards improved narrow, wide ASCII, and blob-heavy batches, while small batches and complex SQL stay on the old one-row-per-step path.",
-      "keyPriors": ["125", "126", "130", "131", "132", "133"],
-      "archive": ["028", "076", "077", "095", "096", "109", "112", "113", "116", "129"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing. Exp 129 split that helper and found steady-state wide mixed batches are now native-call dominated: Dart parameter packing is ~25-37% of write-helper wall after warmup, while `resqlite_run_batch*` is ~63-74%. Exp 130 split that native bucket and showed bind is only ~9-15% of native wall, reset and statement lookup are tiny, and the largest buckets are SQLite step plus COMMIT. Exp 131 showed the COMMIT bucket is inherent transaction-finish/WAL behavior, not a top-level batch-wrapper artifact. Exp 132 found that part of the emoji-heavy COMMIT bucket was resqlite's passive WAL checkpoint firing at 500 pages; raising the internal threshold to 1000 pages improves the 10k x20 emoji shape while preserving reader/stream guardrails. Exp 133 proved that reducing SQLite step count with multi-row INSERT chunks can move large simple INSERT batches, especially narrow/blob-heavy shapes, but rejected the production implementation as too complex for a conditional win; wide ASCII improved only modestly.",
+      "keyPriors": ["125", "126", "130", "131", "132"],
+      "archive": ["028", "076", "077", "095", "096", "109", "112", "113", "116", "129", "133"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -76,7 +76,7 @@
       "openQuestions": [
         "Are there remaining blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
         "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?",
-        "Does a production workload need safe support for a narrow trailing-clause shape such as `ON CONFLICT DO NOTHING`, or is the current simple-INSERT recognizer enough?"
+        "Is there production evidence for frequent large simple narrow/blob INSERT batches that would justify revisiting multi-row INSERT chunking complexity?"
       ],
       "openCandidates": [
         {
@@ -85,7 +85,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 130 says the native remainder is step/COMMIT dominated, not reset/statement-lookup dominated; exp 131 says moving the same batch through the nested path does not remove COMMIT cost; exp 132 says the safe WAL policy win is a small 500->1000 page threshold bump, not disabling checkpointing or pushing it to multi-thousand-page spikes. Exp 133 says multi-row INSERT chunking is worthwhile only for large simple positional INSERTs, including quoted identifiers and odd tails; keep the recognizer conservative unless real workloads justify broader SQL support. Do not use generic ListBase views as a presumed free direct-packing substitute in the batch encoder; the retained version walks the source matrix directly."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 130 says the native remainder is step/COMMIT dominated, not reset/statement-lookup dominated; exp 131 says moving the same batch through the nested path does not remove COMMIT cost; exp 132 says the safe WAL policy win is a small 500->1000 page threshold bump, not disabling checkpointing or pushing it to multi-thousand-page spikes. Exp 133 says multi-row INSERT chunking has real step-count headroom, but the archived implementation is too complex for the current breadth of win. Reopen only for real large simple INSERT workload evidence or a much simpler implementation. Do not use generic ListBase views as a presumed free direct-packing substitute in the batch encoder; exp 133 found view indexing erased the wide signal."
     },
     {
       "id": "long-text-stream-hashing",
@@ -614,18 +614,19 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "in_review_accepted",
+      "outcomeClass": "rejected_complexity",
       "changedBeliefs": [
         "The remaining SQLite step bucket can be reduced for large simple INSERT batches by grouping many user rows into one generated multi-row VALUES statement",
-        "The production-safe value is conditional: small batches, complex SQL, named parameters, and trailing clauses should keep the old one-row-per-step path",
+        "The production value is conditional: small batches, complex SQL, named parameters, and trailing clauses should keep the old one-row-per-step path",
         "Quoted identifiers and non-divisible batch lengths can be supported without widening the public API when the writer keeps multi-segment plans atomic",
         "Public 10k-row guard medians over 21 passes improved narrow 4.48 -> 3.22 ms, wide ASCII 18.11 -> 17.30 ms, and blob-heavy 12.33 -> 10.93 ms",
-        "A generic ListBase view over the original row matrix is not free enough for the hot encoder loop; direct matrix packing is the retained implementation shape"
+        "A generic ListBase view over the original row matrix is not free enough for the hot encoder loop; direct matrix packing was needed to retain signal",
+        "The archived implementation is not worth shipping as a default because SQL recognition, multi-segment transaction handling, profile aggregation, and specialized chunked packing are too much complexity for a narrow win"
       ],
       "nextSignals": [
-        "watch release Batch Insert 10000 and Wide Batch Insert after soak",
-        "only expand the SQL recognizer with production workload evidence that the fallback path is leaving material rows unoptimized",
-        "treat trailing clauses such as conflict handlers as a separate correctness/parser experiment, not a default extension"
+        "reopen only with real workload evidence for frequent large simple narrow/blob INSERT batches",
+        "reopen if a simpler implementation can preserve most of the narrow/blob win without a broad SQL recognizer or duplicated encoder path",
+        "do not expand the SQL recognizer speculatively"
       ]
     }
   }
