@@ -62,23 +62,6 @@ typedef struct {
     int reliable;
 } resqlite_column_set;
 
-// One table/rowid dependency. `table` is borrowed from the dirty-table set and
-// is valid until the write cycle is drained.
-typedef struct {
-    const char* table;
-    sqlite3_int64 rowid;
-} resqlite_rowid_dep;
-
-// Bounded set of dirty rowids captured by the writer preupdate hook.
-// If `reliable == 0`, Dart receives no rowid entries and falls back to
-// table/column invalidation.
-typedef struct {
-    resqlite_rowid_dep deps[RESQLITE_MAX_DEP_ROWIDS];
-    int count;
-    int allocated;
-    int reliable;
-} resqlite_rowid_set;
-
 // Initialize an empty table set. Must be called before add/reset/free.
 void resqlite_read_set_init(resqlite_read_set* s);
 
@@ -116,15 +99,6 @@ void resqlite_column_set_reset(resqlite_column_set* s);
 
 // Release all retained dependency storage.
 void resqlite_column_set_free(resqlite_column_set* s);
-
-// Same lifecycle and reliability semantics as resqlite_column_set, but for
-// table/rowid pairs.
-void resqlite_rowid_set_init(resqlite_rowid_set* s);
-void resqlite_rowid_set_add(resqlite_rowid_set* s,
-                            const char* table,
-                            sqlite3_int64 rowid);
-void resqlite_rowid_set_reset(resqlite_rowid_set* s);
-void resqlite_rowid_set_free(resqlite_rowid_set* s);
 
 // Clear a cache-entry string array produced by resqlite_string_array_copy.
 void resqlite_string_array_clear(char** names, int* count);

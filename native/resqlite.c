@@ -330,10 +330,6 @@ struct resqlite_db {
     // Drained by `resqlite_get_dirty_columns()` after the writer publishes
     // the dirty set to Dart at end-of-transaction.
     resqlite_column_set dirty_columns;
-    // [EXP-134](../experiments/134-keyed-pk-dirty-elision.md): dirty rowids
-    // accumulated alongside dirty tables. This lets simple keyed streams skip
-    // re-queries when a write touched the same table but a different rowid.
-    resqlite_rowid_set dirty_rowids;
     // Per-prepare scratch space populated by the writer authorizer. The
     // authorizer fires inside `sqlite3_prepare_v3`, so this set is drained
     // into the cached stmt entry as soon as prepare returns and is reset
@@ -447,16 +443,6 @@ static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
     }
 }
 
-static const char* dirty_table_stored_name(resqlite_db* sdb,
-                                           const char* table_name) {
-    if (!table_name || !sdb->dirty_tables.reliable) return NULL;
-    for (int i = 0; i < sdb->dirty_tables.count; i++) {
-        const char* stored = sdb->dirty_tables.names[i];
-        if (stored && strcmp(stored, table_name) == 0) return stored;
-    }
-    return NULL;
-}
-
 static void preupdate_hook(
     void* user_data,
     sqlite3* db,
@@ -466,40 +452,10 @@ static void preupdate_hook(
     sqlite3_int64 old_rowid,
     sqlite3_int64 new_rowid
 ) {
-    (void)db; (void)db_name;
+    (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
     resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
     dirty_columns_add_for_active_stmt(sdb, table_name);
-    const char* stable_table_name = dirty_table_stored_name(sdb, table_name);
-    if (!stable_table_name) {
-        sdb->dirty_rowids.reliable = 0;
-        return;
-    }
-    switch (op) {
-        case SQLITE_INSERT:
-            resqlite_rowid_set_add(&sdb->dirty_rowids,
-                                   stable_table_name,
-                                   new_rowid);
-            break;
-        case SQLITE_DELETE:
-            resqlite_rowid_set_add(&sdb->dirty_rowids,
-                                   stable_table_name,
-                                   old_rowid);
-            break;
-        case SQLITE_UPDATE:
-            resqlite_rowid_set_add(&sdb->dirty_rowids,
-                                   stable_table_name,
-                                   old_rowid);
-            if (new_rowid != old_rowid) {
-                resqlite_rowid_set_add(&sdb->dirty_rowids,
-                                       stable_table_name,
-                                       new_rowid);
-            }
-            break;
-        default:
-            sdb->dirty_rowids.reliable = 0;
-            break;
-    }
 }
 
 static int writer_wal_hook(
@@ -640,7 +596,6 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     stmt_cache_init(&db->writer_cache);
     resqlite_dirty_set_init(&db->dirty_tables);
     resqlite_column_set_init(&db->dirty_columns);
-    resqlite_rowid_set_init(&db->dirty_rowids);
     resqlite_column_set_init(&db->writer_authz_scratch);
     db->writer_active_entry = NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
@@ -735,7 +690,6 @@ void resqlite_close(resqlite_db* db) {
     if (db->tx_rollback_stmt) sqlite3_finalize(db->tx_rollback_stmt);
     resqlite_dirty_set_free(&db->dirty_tables);
     resqlite_column_set_free(&db->dirty_columns);
-    resqlite_rowid_set_free(&db->dirty_rowids);
     resqlite_column_set_free(&db->writer_authz_scratch);
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
@@ -1175,32 +1129,6 @@ int resqlite_get_dirty_columns(
     }
 
     resqlite_column_set_reset(&db->dirty_columns);
-
-    return count;
-}
-
-// [EXP-134](../experiments/134-keyed-pk-dirty-elision.md): drain the dirty
-// rowids accumulated by the writer preupdate hook. Rowids are an optional
-// precision layer; if capture overflowed or hit OOM, return zero entries and
-// let Dart fall back to table/column invalidation.
-int resqlite_get_dirty_rowids(
-    resqlite_db* db,
-    const char** out_tables,
-    sqlite3_int64* out_rowids,
-    int max_rowids
-) {
-    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
-
-    int reliable = db->dirty_rowids.reliable;
-    int count = reliable ? db->dirty_rowids.count : 0;
-    if (count > max_rowids) count = max_rowids;
-
-    for (int i = 0; i < count; i++) {
-        out_tables[i] = db->dirty_rowids.deps[i].table;
-        out_rowids[i] = db->dirty_rowids.deps[i].rowid;
-    }
-
-    resqlite_rowid_set_reset(&db->dirty_rowids);
 
     return count;
 }

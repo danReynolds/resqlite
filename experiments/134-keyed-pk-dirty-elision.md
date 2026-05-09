@@ -1,8 +1,9 @@
 # Experiment 134: Keyed PK dirty rowid elision
 
 **Date:** 2026-05-09
-**Status:** In Review
+**Status:** Rejected
 **Direction:** `stream-rerun-dispatch`
+**Archive:** [`archive/exp-134`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-134)
 
 ## Problem
 
@@ -29,16 +30,18 @@ If the writer publishes dirty rowids alongside dirty tables/columns, and
 `WHERE id = ?` INTEGER PRIMARY KEY streams, then miss writes can skip before
 column intersection and reader-pool re-query admission.
 
-Accept for review if:
+The implementation would be worth revisiting if:
 
 - keyed-PK profile writer-burst wall drops materially;
 - only observed hit writes reach per-stream intersection/re-query scheduling;
 - A11c many-streams column-elision guardrails stay neutral;
-- all uncertainty falls back to existing table/column invalidation.
+- all uncertainty falls back to existing table/column invalidation;
+- the row-level dependency model is explicit enough that the production code
+  does not depend on a growing SQL-shape recognizer.
 
 ## Approach
 
-The writer preupdate hook now accumulates dirty `(table, rowid)` pairs in a
+The archived implementation accumulates dirty `(table, rowid)` pairs in a
 bounded native set. It borrows the already-stable dirty-table name storage, so
 single-row writes do not allocate another table string for rowid precision.
 Overflow or allocation uncertainty returns zero rowid details and keeps the
@@ -84,25 +87,29 @@ experiment changes.
 
 ## Decision
 
-**Accept for review.**
+**Rejected, but recorded as future evidence.**
 
-This is a real keyed-PK miss-path optimization with a narrow, conservative
-recognizer. It does not add public API surface and it falls back to existing
-table/column invalidation whenever schema or SQL shape is uncertain. The
-profile result shows the expected structural change: 10,000 per-stream
-intersection probes collapse to the 3 actual watched-row hits.
+This is a real keyed-PK miss-path optimization: 10,000 per-stream
+intersection probes collapse to the 3 actual watched-row hits. The result is
+strong enough to keep as evidence that row-level invalidation can matter for
+keyed subscriptions.
 
-The main watch item is the small native bookkeeping added to all writer
-preupdate hooks. Borrowing dirty-table storage keeps that overhead low, and
-the many-streams release guardrail stayed within normal run variance.
+The implementation shape is the problem. Making this an internal optimization
+requires `StreamEngine` to recognize and prove more SQL text shapes over time.
+That is too fragile for the value captured here, especially because aliases,
+joins, composite keys, non-`id` aliases, views, and `WITHOUT ROWID` tables all
+need conservative escape hatches. The production implementation has been
+removed from the PR; the implementation commit is preserved by the archive tag
+for future reference.
 
 ## Future Notes
 
-- Keep this as an internal optimization, not a replacement for a future
-  explicit `watchRow(table, pk)` API. The recognizer should remain narrow.
-- If a workload uses aliases, joins, non-`id` rowid aliases, composite keys, or
-  `WITHOUT ROWID` tables, it should fall back to existing invalidation.
+- Do not revive this by broadening the SQL recognizer. The next viable version
+  should start from an explicit row-observer API, trace metadata, or another
+  stronger dependency model.
+- If a real workload spends material wall time on keyed-PK miss writes, use
+  this profile result as the evidence that row-level precision is worth
+  designing deliberately.
 - If the public keyed-PK benchmark is used as the headline in the future,
   consider adding a writer-burst variant without the quiet-window drain; the
   current public suite is intentionally emission-stability oriented.
-

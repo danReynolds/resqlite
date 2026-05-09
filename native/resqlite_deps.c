@@ -260,65 +260,6 @@ void resqlite_column_set_free(resqlite_column_set* s) {
     s->allocated = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Structured rowid dependencies
-// ---------------------------------------------------------------------------
-
-static void rowid_dep_clear(resqlite_rowid_dep* dep) {
-    dep->table = NULL;
-    dep->rowid = 0;
-}
-
-void resqlite_rowid_set_init(resqlite_rowid_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
-    memset(s->deps, 0, sizeof(s->deps));
-}
-
-void resqlite_rowid_set_add(resqlite_rowid_set* s,
-                            const char* table,
-                            sqlite3_int64 rowid) {
-    if (!table) {
-        s->reliable = 0;
-        return;
-    }
-    if (!s->reliable) return;
-
-    for (int i = 0; i < s->count; i++) {
-        if (s->deps[i].table &&
-            s->deps[i].rowid == rowid &&
-            strcmp(s->deps[i].table, table) == 0) {
-            return;
-        }
-    }
-
-    if (s->count >= RESQLITE_MAX_DEP_ROWIDS) {
-        s->reliable = 0;
-        return;
-    }
-
-    if (s->count < s->allocated) rowid_dep_clear(&s->deps[s->count]);
-    s->deps[s->count].table = table;
-    s->deps[s->count].rowid = rowid;
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
-}
-
-void resqlite_rowid_set_reset(resqlite_rowid_set* s) {
-    s->count = 0;
-    s->reliable = 1;
-}
-
-void resqlite_rowid_set_free(resqlite_rowid_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        rowid_dep_clear(&s->deps[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
-}
-
 void resqlite_column_dep_array_clear(resqlite_column_dep* deps, int* count) {
     for (int i = 0; i < *count; i++) {
         column_dep_clear(&deps[i]);

@@ -52,15 +52,3 @@ final class TableColumnDependency extends TableDependency {
 
   final Set<String> columns;
 }
-
-/// Dependency on a fixed set of rowids in [table].
-///
-/// [columns] is optional. When present, both rowid and column precision can
-/// elide a re-query. When absent, rowid precision is the only optimization and
-/// column changes fall back to table-level behavior for matching rowids.
-final class TableRowDependency extends TableDependency {
-  const TableRowDependency(super.table, {required this.rowIds, this.columns});
-
-  final Set<int> rowIds;
-  final Set<String>? columns;
-}

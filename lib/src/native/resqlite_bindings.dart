@@ -370,21 +370,6 @@ external int resqliteGetDirtyColumns(
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Pointer<ffi.Int64>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_dirty_rowids', isLeaf: true)
-external int resqliteGetDirtyRowIds(
-  ffi.Pointer<ffi.Void> db,
-  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
-  ffi.Pointer<ffi.Int64> outRowIds,
-  int maxRowIds,
-);
-
-@ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
     ffi.Int,
     ffi.Int,
     ffi.Pointer<ffi.Int>,
@@ -418,7 +403,6 @@ TableDependencies _decodeTableDependencies(
   int count,
   ffi.Pointer<ffi.Pointer<Utf8>> tableBuf,
   List<TableDependency> columnDetails,
-  List<TableRowDependency> rowDetails,
 ) {
   if (count == _dependencyCountUnknown) return TableDependencies.unknown;
   if (count == 0) return TableDependencies.none;
@@ -428,11 +412,6 @@ TableDependencies _decodeTableDependencies(
       : <String, TableDependency>{
           for (final detail in columnDetails) detail.table: detail,
         };
-  final rowsByTable = rowDetails.isEmpty
-      ? null
-      : <String, TableRowDependency>{
-          for (final detail in rowDetails) detail.table: detail,
-        };
   final tables = List<TableDependency>.filled(
     count,
     const TableDependency(''),
@@ -440,20 +419,7 @@ TableDependencies _decodeTableDependencies(
   );
   for (var i = 0; i < count; i++) {
     final table = tableBuf[i].toDartString();
-    final columnDetail = byTable?[table];
-    final rowDetail = rowsByTable?[table];
-    if (rowDetail != null) {
-      tables[i] = TableRowDependency(
-        table,
-        rowIds: rowDetail.rowIds,
-        columns: switch (columnDetail) {
-          TableColumnDependency(:final columns) => columns,
-          _ => null,
-        },
-      );
-    } else {
-      tables[i] = columnDetail ?? TableDependency(table);
-    }
+    tables[i] = byTable?[table] ?? TableDependency(table);
   }
   return TableDependencies.fixed(tables);
 }
@@ -466,14 +432,6 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
-
-// [EXP-134](../../../experiments/134-keyed-pk-dirty-elision.md): rowid
-// precision uses the same table-name marshalling pattern as column precision.
-// This is writer-side only; read-side rowid filters are recognized in Dart
-// after stream setup verifies a simple INTEGER PRIMARY KEY predicate.
-final ffi.Pointer<ffi.Pointer<Utf8>> _rowIdTablesBuf =
-    calloc<ffi.Pointer<Utf8>>(512);
-final ffi.Pointer<ffi.Int64> _rowIdsBuf = calloc<ffi.Int64>(512);
 
 /// Decode table/column pointers into grouped column details.
 ///
@@ -511,21 +469,6 @@ List<TableDependency> _decodeColumnDetails(int count) {
     }
   }
   return out;
-}
-
-/// Decode dirty rowid pointers into grouped table details.
-List<TableRowDependency> _decodeRowDetails(int count) {
-  if (count <= 0) return const <TableRowDependency>[];
-  final byTable = <String, Set<int>>{};
-  for (var i = 0; i < count; i++) {
-    final table = _rowIdTablesBuf[i].toDartString();
-    final rowId = _rowIdsBuf[i];
-    (byTable[table] ??= <int>{}).add(rowId);
-  }
-  return [
-    for (final MapEntry(key: table, value: rowIds) in byTable.entries)
-      TableRowDependency(table, rowIds: rowIds),
-  ];
 }
 
 /// Get per-reader column detail for the most recent acquired statement.
@@ -579,12 +522,7 @@ TableDependencies getReadTableDependencies(
     64,
   );
   final columnDetails = _getReadColumnDetails(dbHandle, readerId);
-  return _decodeTableDependencies(
-    tableCount,
-    _readTablesBuf,
-    columnDetails,
-    const <TableRowDependency>[],
-  );
+  return _decodeTableDependencies(tableCount, _readTablesBuf, columnDetails);
 }
 
 /// Dirty dependencies for the completed write cycle, draining native state.
@@ -594,26 +532,13 @@ TableDependencies getReadTableDependencies(
 TableDependencies getDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
   final tableCount = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   final columnDetails = _getDirtyColumnDetails(dbHandle);
-  final rowCount = resqliteGetDirtyRowIds(
-    dbHandle,
-    _rowIdTablesBuf,
-    _rowIdsBuf,
-    512,
-  );
-  final rowDetails = _decodeRowDetails(rowCount);
-  return _decodeTableDependencies(
-    tableCount,
-    _dirtyTablesBuf,
-    columnDetails,
-    rowDetails,
-  );
+  return _decodeTableDependencies(tableCount, _dirtyTablesBuf, columnDetails);
 }
 
 /// Drain dirty dependency state when a write rolls back or is discarded.
 void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
   resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   resqliteGetDirtyColumns(dbHandle, _columnTablesBuf, _columnNamesBuf, 64);
-  resqliteGetDirtyRowIds(dbHandle, _rowIdTablesBuf, _rowIdsBuf, 512);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle
@@ -832,10 +757,8 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(
-  List<List<Object?>> paramSets,
-  int paramCount,
-) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) =>
+    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
 
 int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
     _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;

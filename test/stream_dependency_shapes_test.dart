@@ -29,7 +29,10 @@ final class _StreamProbe<T> {
   final _waiters = <_EventWaiter<T>>[];
   late final StreamSubscription<T> _subscription;
 
-  Future<T> event(int count, {Duration timeout = const Duration(seconds: 2)}) {
+  Future<T> event(
+    int count, {
+    Duration timeout = const Duration(seconds: 2),
+  }) {
     if (_events.length >= count) {
       return Future.value(_events[count - 1]);
     }
@@ -64,9 +67,8 @@ void main() {
     late Database db;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp(
-        'resqlite_stream_dependency_shapes_',
-      );
+      tempDir = await Directory.systemTemp
+          .createTemp('resqlite_stream_dependency_shapes_');
       db = await Database.open('${tempDir.path}/test.db');
     });
 
@@ -125,15 +127,11 @@ void main() {
       await db.execute(
         'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
       );
-      await db.execute('CREATE TABLE refs(item_id INTEGER PRIMARY KEY)');
-      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [
-        1,
-        'alpha',
-      ]);
-      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [
-        2,
-        'beta',
-      ]);
+      await db.execute(
+        'CREATE TABLE refs(item_id INTEGER PRIMARY KEY)',
+      );
+      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [1, 'alpha']);
+      await db.execute('INSERT INTO items(id, name) VALUES (?, ?)', [2, 'beta']);
       await db.execute('INSERT INTO refs(item_id) VALUES (?)', [1]);
 
       final probe = _StreamProbe(
@@ -162,16 +160,14 @@ void main() {
         'CREATE VIEW active_items AS '
         'SELECT id, name FROM items WHERE active = 1',
       );
-      await db.execute('INSERT INTO items(id, name, active) VALUES (?, ?, ?)', [
-        1,
-        'alpha',
-        1,
-      ]);
-      await db.execute('INSERT INTO items(id, name, active) VALUES (?, ?, ?)', [
-        2,
-        'beta',
-        0,
-      ]);
+      await db.execute(
+        'INSERT INTO items(id, name, active) VALUES (?, ?, ?)',
+        [1, 'alpha', 1],
+      );
+      await db.execute(
+        'INSERT INTO items(id, name, active) VALUES (?, ?, ?)',
+        [2, 'beta', 0],
+      );
 
       final probe = _StreamProbe(
         db.stream('SELECT id, name FROM active_items ORDER BY id'),
@@ -191,16 +187,14 @@ void main() {
       await db.execute(
         'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL)',
       );
-      await db.execute('INSERT INTO items(id, name, active) VALUES (?, ?, ?)', [
-        1,
-        'alpha',
-        1,
-      ]);
-      await db.execute('INSERT INTO items(id, name, active) VALUES (?, ?, ?)', [
-        2,
-        'beta',
-        0,
-      ]);
+      await db.execute(
+        'INSERT INTO items(id, name, active) VALUES (?, ?, ?)',
+        [1, 'alpha', 1],
+      );
+      await db.execute(
+        'INSERT INTO items(id, name, active) VALUES (?, ?, ?)',
+        [2, 'beta', 0],
+      );
 
       final probe = _StreamProbe(
         db.stream(
@@ -249,68 +243,6 @@ void main() {
       await probe.expectNoAdditionalEvents(const Duration(milliseconds: 150));
 
       await probe.cancel();
-    });
-
-    test(
-      'simple primary-key streams re-emit on matching rowid writes',
-      () async {
-        await db.execute(
-          'CREATE TABLE items(id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
-        );
-        await db.execute('INSERT INTO items(id, body) VALUES (?, ?)', [
-          1,
-          'one',
-        ]);
-        await db.execute('INSERT INTO items(id, body) VALUES (?, ?)', [
-          2,
-          'two',
-        ]);
-
-        final probe = _StreamProbe(
-          db.stream('SELECT id, body FROM items WHERE id = ?', [1]),
-        );
-
-        final initial = await probe.event(1);
-        expect(initial, hasLength(1));
-        expect(initial.single['body'], 'one');
-
-        await db.execute('UPDATE items SET body = ? WHERE id = ?', ['miss', 2]);
-        await probe.expectNoAdditionalEvents(const Duration(milliseconds: 150));
-
-        await db.execute('UPDATE items SET body = ? WHERE id = ?', ['hit', 1]);
-        final updated = await probe.event(2);
-        expect(updated, hasLength(1));
-        expect(updated.single['body'], 'hit');
-
-        await probe.cancel();
-      },
-    );
-
-    test('primary-key streams see rowid moves from old and new ids', () async {
-      await db.execute(
-        'CREATE TABLE items(id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
-      );
-      await db.execute('INSERT INTO items(id, body) VALUES (?, ?)', [1, 'one']);
-
-      final oldIdProbe = _StreamProbe(
-        db.stream('SELECT id, body FROM items WHERE id = ?', [1]),
-      );
-      final newIdProbe = _StreamProbe(
-        db.stream('SELECT id, body FROM items WHERE id = ?', [3]),
-      );
-
-      expect(await oldIdProbe.event(1), hasLength(1));
-      expect(await newIdProbe.event(1), isEmpty);
-
-      await db.execute('UPDATE items SET id = ? WHERE id = ?', [3, 1]);
-
-      expect(await oldIdProbe.event(2), isEmpty);
-      final moved = await newIdProbe.event(2);
-      expect(moved, hasLength(1));
-      expect(moved.single['body'], 'one');
-
-      await oldIdProbe.cancel();
-      await newIdProbe.cancel();
     });
   });
 }

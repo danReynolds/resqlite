@@ -176,10 +176,6 @@ int resqlite_get_read_tables(
 // known dirty tables.
 #define RESQLITE_MAX_DEP_COLUMNS 64
 
-// Hard cap on dirty rowids tracked per write cycle. Overflow degrades to
-// table/column invalidation by returning zero rowid entries from the getter.
-#define RESQLITE_MAX_DEP_ROWIDS 512
-
 // Get the table/column pairs read by the most recent prepared statement on
 // the given reader. Served directly from the cached stmt entry's structured
 // dependency pairs.
@@ -221,17 +217,6 @@ int resqlite_get_dirty_columns(
     const char** out_tables,
     const char** out_columns,
     int max_columns
-);
-
-// Get table/rowid pairs modified by writer activity since the last drain.
-// Rowid metadata is an optimization layer used for simple keyed streams.
-// If capture overflows or fails, this returns 0 and Dart falls back to
-// table/column invalidation for the known dirty tables.
-int resqlite_get_dirty_rowids(
-    resqlite_db* db,
-    const char** out_tables,
-    sqlite3_int64* out_rowids,
-    int max_rowids
 );
 
 int resqlite_db_status_total(
