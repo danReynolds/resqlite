@@ -7,6 +7,7 @@ import 'dependency_tracking.dart'
         FixedTableDependencies,
         TableDependencies,
         TableDependency,
+        TableRowDependency,
         UnknownTableDependencies;
 import 'extensions/set.dart';
 import 'profile_counters.dart';
@@ -60,6 +61,9 @@ final class StreamEngine {
 
   /// Index of tables to the set of stream entries that depend on that table.
   final Map<String, Set<StreamEntry>> _tableIndex = {};
+
+  /// Stream setup cache for simple `WHERE id = ?` rowid-alias checks.
+  final Map<String, Future<bool>> _integerPrimaryKeyAliasCache = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
   final _requeryQueue = LinkedHashSet<StreamEntry>();
@@ -127,29 +131,38 @@ final class StreamEngine {
 
         for (final dep in deps) {
           if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
-            switch (dep) {
-              case TableColumnDependency(columns: final changedCols):
-                for (final entry in entries) {
-                  switch (entry.dependencies[dep.table]) {
-                    case TableColumnDependency(columns: final entryCols):
-                      bool intersects;
-                      if (kProfileMode) {
-                        intersectionEntries++;
-                        intersectionSw!.start();
-                        intersects = entryCols.intersects(changedCols);
-                        intersectionSw.stop();
-                      } else {
-                        intersects = entryCols.intersects(changedCols);
-                      }
-                      if (intersects) {
-                        dirtyEntries.add(entry);
-                      }
-                    case TableDependency _:
-                      dirtyEntries.add(entry);
-                  }
+            for (final entry in entries) {
+              final entryDep = entry.dependencies[dep.table];
+              if (entryDep == null) {
+                continue;
+              }
+
+              final entryRowIds = _rowIdsOf(entryDep);
+              final changedRowIds = _rowIdsOf(dep);
+              if (entryRowIds != null &&
+                  changedRowIds != null &&
+                  !entryRowIds.intersects(changedRowIds)) {
+                continue;
+              }
+
+              final entryCols = _columnsOf(entryDep);
+              final changedCols = _columnsOf(dep);
+              if (entryCols != null && changedCols != null) {
+                bool intersects;
+                if (kProfileMode) {
+                  intersectionEntries++;
+                  intersectionSw!.start();
+                  intersects = entryCols.intersects(changedCols);
+                  intersectionSw.stop();
+                } else {
+                  intersects = entryCols.intersects(changedCols);
                 }
-              case TableDependency():
-                dirtyEntries.addAll(entries);
+                if (!intersects) {
+                  continue;
+                }
+              }
+
+              dirtyEntries.add(entry);
             }
           }
         }
@@ -240,12 +253,24 @@ final class StreamEngine {
 
         final (initialRows, dependencies, initialHash, initialRowCount) =
             result;
+        final effectiveDependencies = await _withSimpleRowIdDependency(
+          sql,
+          params,
+          dependencies,
+        );
+
+        // Cancelled while rowid precision schema checks were running.
+        if (entry.subscribers.isEmpty) {
+          return;
+        }
 
         entry.lastResult = initialRows;
         entry.lastResultHash = initialHash;
         entry.lastRowCount = initialRowCount;
 
-        if (dependencies case FixedTableDependencies(tables: final tables)) {
+        if (effectiveDependencies case FixedTableDependencies(
+          tables: final tables,
+        )) {
           _unknownDepsEntries.remove(entry);
 
           for (final dependency in tables) {
@@ -364,6 +389,161 @@ final class StreamEngine {
     }
     entry.subscribers.clear();
   }
+
+  Future<TableDependencies> _withSimpleRowIdDependency(
+    String sql,
+    List<Object?> params,
+    TableDependencies dependencies,
+  ) async {
+    final predicate = _parseSimpleRowIdPredicate(sql, params);
+    if (predicate == null) {
+      return dependencies;
+    }
+
+    switch (dependencies) {
+      case FixedTableDependencies(tables: final tables):
+        if (tables.length != 1) {
+          return dependencies;
+        }
+
+        final tableDep = tables.single;
+        if (tableDep.table.toLowerCase() != predicate.table.toLowerCase()) {
+          return dependencies;
+        }
+
+        if (!predicate.usesIntrinsicRowId) {
+          final isRowIdAlias = await _integerPrimaryKeyAliasCache.putIfAbsent(
+            '${predicate.table}\u0000${predicate.column}',
+            () => _hasIntegerPrimaryKeyAlias(predicate.table, predicate.column),
+          );
+          if (!isRowIdAlias) {
+            return dependencies;
+          }
+        }
+
+        return TableDependencies.fixed([
+          _withRowIds(tableDep, {params.single as int}),
+        ]);
+      case UnknownTableDependencies():
+        return dependencies;
+    }
+  }
+
+  Future<bool> _hasIntegerPrimaryKeyAlias(String table, String column) async {
+    final quotedTable = _quoteIdentifier(table);
+    final rows = await _pool.select('PRAGMA table_info($quotedTable)');
+    for (final row in rows) {
+      final name = row['name'];
+      if (name is! String || name.toLowerCase() != column.toLowerCase()) {
+        continue;
+      }
+      final pk = row['pk'];
+      final type = row['type'];
+      if (pk is! int ||
+          pk <= 0 ||
+          type is! String ||
+          type.toUpperCase() != 'INTEGER') {
+        return false;
+      }
+
+      try {
+        await _pool.select('SELECT rowid FROM $quotedTable LIMIT 0');
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+}
+
+Set<String>? _columnsOf(TableDependency dependency) {
+  return switch (dependency) {
+    TableRowDependency(:final columns) => columns,
+    TableColumnDependency(:final columns) => columns,
+    TableDependency() => null,
+  };
+}
+
+Set<int>? _rowIdsOf(TableDependency dependency) {
+  return switch (dependency) {
+    TableRowDependency(:final rowIds) => rowIds,
+    TableDependency() => null,
+  };
+}
+
+TableDependency _withRowIds(TableDependency dependency, Set<int> rowIds) {
+  return TableRowDependency(
+    dependency.table,
+    rowIds: rowIds,
+    columns: _columnsOf(dependency),
+  );
+}
+
+final _simpleRowIdPredicate = RegExp(
+  r'''^\s*select\b[\s\S]+?\bfrom\s+(?:"((?:[^"]|"")*)"|`([^`]*)`|\[([^\]]*)\]|([A-Za-z_][A-Za-z0-9_]*))\s+where\s+(?:"((?:[^"]|"")*)"|`([^`]*)`|\[([^\]]*)\]|(rowid|_rowid_|oid)|([A-Za-z_][A-Za-z0-9_]*))\s*=\s*\?\s*(?:limit\s+\d+\s*)?;?\s*$''',
+  caseSensitive: false,
+);
+
+final class _SimpleRowIdPredicate {
+  const _SimpleRowIdPredicate({
+    required this.table,
+    required this.column,
+    required this.usesIntrinsicRowId,
+  });
+
+  final String table;
+  final String column;
+  final bool usesIntrinsicRowId;
+}
+
+_SimpleRowIdPredicate? _parseSimpleRowIdPredicate(
+  String sql,
+  List<Object?> params,
+) {
+  if (params.length != 1 || params.single is! int) {
+    return null;
+  }
+
+  final match = _simpleRowIdPredicate.firstMatch(sql);
+  if (match == null) {
+    return null;
+  }
+
+  final table = _firstMatch(match, 1, 2, 3, 4);
+  final column = _firstMatch(match, 5, 6, 7, 8, 9);
+  if (table == null || column == null) {
+    return null;
+  }
+
+  final normalizedColumn = column.toLowerCase();
+  final usesIntrinsicRowId =
+      normalizedColumn == 'rowid' ||
+      normalizedColumn == '_rowid_' ||
+      normalizedColumn == 'oid';
+  if (!usesIntrinsicRowId && normalizedColumn != 'id') {
+    return null;
+  }
+
+  return _SimpleRowIdPredicate(
+    table: table,
+    column: column,
+    usesIntrinsicRowId: usesIntrinsicRowId,
+  );
+}
+
+String? _firstMatch(RegExpMatch match, int a, int b, int c, int d, [int? e]) {
+  for (final index in [a, b, c, d, if (e != null) e]) {
+    final value = match.group(index);
+    if (value != null) {
+      return value.replaceAll('""', '"');
+    }
+  }
+  return null;
+}
+
+String _quoteIdentifier(String identifier) {
+  return '"${identifier.replaceAll('"', '""')}"';
 }
 
 // ---------------------------------------------------------------------------
