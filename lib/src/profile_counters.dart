@@ -151,3 +151,64 @@ class ProfileCounters {
     dispatcherCurrentParked = 0;
   }
 }
+
+/// Writer-isolate-local profile counters.
+///
+/// Lives in the writer isolate, not the main isolate, so the main-isolate
+/// [ProfileCounters.snapshot] cannot see these values directly. Fetch via
+/// `Database.writerProfileCounters()`, which round-trips a
+/// `FetchWriterProfileRequest` through the writer's reply port.
+///
+/// Added by [EXP-127](../../experiments/127-writer-dispatch-wall-audit.md) to
+/// answer the question exp 121 left open: how much of writer-side burst wall
+/// is the Dart-side handler dispatch path (param encoding, FFI marshaling,
+/// dirty-tables gather, IPC framing) versus the SQLite step itself? Pre-127
+/// the only wall-time signal available was the main-isolate `_request`
+/// round-trip, which lumps every cost together.
+///
+/// Counter contract:
+///
+/// - `writerHandleUs` is the cumulative time spent inside the writer
+///   isolate's `_handle*` body for write paths (`ExecuteRequest`,
+///   `BatchRequest`). It includes `executeWrite` / `executeBatchWrite`
+///   plus dirty-tables marshalling and response-build work.
+/// - `writerStepUs` is the cumulative time spent specifically inside the
+///   `resqlite_execute` / `resqlite_run_batch` FFI call — the closest
+///   approximation to "real SQLite work" available without instrumenting
+///   the C side. Subtracting from `writerHandleUs` gives Dart-side
+///   dispatch overhead.
+/// - `writerHandleCount` counts the calls so the harness can report
+///   per-write averages.
+class WriterProfileCounters {
+  WriterProfileCounters._();
+
+  /// Cumulative wall-clock microseconds spent inside the writer isolate's
+  /// write-path `_handle*` body (`ExecuteRequest`, `BatchRequest`). Covers
+  /// param encoding + the FFI step + dirty-tables gather + response build.
+  static int writerHandleUs = 0;
+
+  /// Cumulative wall-clock microseconds spent specifically inside the
+  /// `resqlite_execute` / `resqlite_run_batch` FFI call. The "Dart-side
+  /// dispatch" portion of writer-side wall is `writerHandleUs -
+  /// writerStepUs`.
+  static int writerStepUs = 0;
+
+  /// Number of writer write-path requests whose handler completed. Use as
+  /// the denominator for `writerHandleUs / writerHandleCount` to get the
+  /// average per-write writer-side wall.
+  static int writerHandleCount = 0;
+
+  /// Take a named snapshot of all writer counter values.
+  static Map<String, int> snapshot() => {
+    'writer_handle_us': writerHandleUs,
+    'writer_step_us': writerStepUs,
+    'writer_handle_count': writerHandleCount,
+  };
+
+  /// Reset all writer counters to zero.
+  static void reset() {
+    writerHandleUs = 0;
+    writerStepUs = 0;
+    writerHandleCount = 0;
+  }
+}

@@ -497,6 +497,18 @@ final class Database {
       streamLength: streamEngine.length,
     );
   }
+
+  /// Profile-mode-only: snapshot the writer isolate's local
+  /// `WriterProfileCounters`. Used by the
+  /// [EXP-127](../../experiments/127-writer-dispatch-wall-audit.md)
+  /// audit harness to measure writer-side dispatch wall vs SQLite step
+  /// wall — values are always zero unless the package was built with
+  /// `-DRESQLITE_PROFILE=true`.
+  Future<Map<String, int>> writerProfileCounters() async {
+    _ensureOpen();
+    final _DatabaseRuntime(:writer) = await _runtime;
+    return writer.fetchProfileSnapshot();
+  }
 }
 
 typedef _DatabaseRuntime = ({

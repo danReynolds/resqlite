@@ -60,6 +60,13 @@ const int directReadBursts = 5;
 /// stream emissions. `counters` is the full `ProfileCounters.snapshot`
 /// taken right after the burst wall completes; consumers pick the
 /// fields they care about.
+///
+/// `writerCounters` is a snapshot of the writer isolate's local
+/// `WriterProfileCounters` taken via the same `Database.writerProfileCounters`
+/// round-trip used by the exp 127 audit harness. It is empty when the
+/// scenario runner did not request a writer-side snapshot — most existing
+/// audits (exp 119, exp 121) leave it empty because their counters live
+/// in the main isolate.
 class AuditScenarioResult {
   AuditScenarioResult({
     required this.workload,
@@ -68,6 +75,7 @@ class AuditScenarioResult {
     required this.emissions,
     required this.observedHits,
     required this.counters,
+    this.writerCounters = const <String, int>{},
   });
 
   final String workload;
@@ -76,6 +84,7 @@ class AuditScenarioResult {
   final int emissions;
   final int observedHits;
   final Map<String, int> counters;
+  final Map<String, int> writerCounters;
 }
 
 /// Open a temp database, create the wide A11c table, populate it, and
@@ -152,6 +161,11 @@ Future<AuditScenarioResult> runA11cScenario(
     }
 
     ProfileCounters.reset();
+    // Round-trip a writer snapshot before the burst so the exp 127 audit
+    // can compute a diff. Older audits (exp 119, exp 121) ignore the
+    // resulting `writerCounters`, so this is a small fixed-cost addition
+    // (one extra writer round-trip per scenario).
+    final writerBefore = await db.writerProfileCounters();
     final sw = Stopwatch()..start();
     for (var w = 0; w < a11cWriteCount; w++) {
       await db.execute(updateSql, [valueFor(w), w % a11cRowCount]);
@@ -160,6 +174,7 @@ Future<AuditScenarioResult> runA11cScenario(
     }
     sw.stop();
     final counters = ProfileCounters.snapshot();
+    final writerAfter = await db.writerProfileCounters();
 
     // Drain emissions without inflating wall_us.
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -172,6 +187,7 @@ Future<AuditScenarioResult> runA11cScenario(
       emissions: emissions,
       observedHits: 0,
       counters: counters,
+      writerCounters: _diffSnapshots(writerBefore, writerAfter),
     );
   } finally {
     for (final sub in subscriptions) {
@@ -236,6 +252,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       final prng = math.Random(keyedPkPrngSeed);
 
       ProfileCounters.reset();
+      final writerBefore = await db.writerProfileCounters();
       final sw = Stopwatch()..start();
       for (var w = 0; w < keyedPkWriteCount; w++) {
         final pk = prng.nextInt(keyedPkRowCount) + 1;
@@ -247,6 +264,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       }
       sw.stop();
       final counters = ProfileCounters.snapshot();
+      final writerAfter = await db.writerProfileCounters();
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.
@@ -267,6 +285,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
         emissions: lastEmissions,
         observedHits: observedHits,
         counters: counters,
+        writerCounters: _diffSnapshots(writerBefore, writerAfter),
       );
     } finally {
       for (final sub in subscriptions) {
@@ -366,3 +385,20 @@ int _median(List<int> values) {
 /// Reader pool size as configured in `ReaderPool`. Useful for the
 /// audit reports' header text.
 int readerPoolSize() => (Platform.numberOfProcessors - 1).clamp(2, 4);
+
+/// Compute `after - before` for every key in `after`. Used by the
+/// scenario runners to express writer-isolate counters as a per-burst
+/// delta — the writer counters are isolate-local cumulative totals, so
+/// subtraction is the only well-defined per-scenario value (a `reset`
+/// would conflict with concurrent writer requests if a future audit
+/// runs scenarios in parallel).
+Map<String, int> _diffSnapshots(
+  Map<String, int> before,
+  Map<String, int> after,
+) {
+  final out = <String, int>{};
+  for (final entry in after.entries) {
+    out[entry.key] = entry.value - (before[entry.key] ?? 0);
+  }
+  return out;
+}

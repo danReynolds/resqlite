@@ -9,6 +9,8 @@ import 'package:ffi/ffi.dart';
 
 import '../dependency_tracking.dart';
 import '../exceptions.dart';
+import '../profile_counters.dart';
+import '../profile_mode.dart';
 import 'request_cache.dart';
 
 // ---------------------------------------------------------------------------
@@ -180,6 +182,7 @@ WriteResult executeWrite(
   try {
     final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
     try {
+      final stepSw = kProfileMode ? (Stopwatch()..start()) : null;
       final rc = resqliteExecute(
         dbHandle,
         sqlNative,
@@ -187,6 +190,10 @@ WriteResult executeWrite(
         params.length,
         resultBuf,
       );
+      if (kProfileMode) {
+        stepSw!.stop();
+        WriterProfileCounters.writerStepUs += stepSw.elapsedMicroseconds;
+      }
       if (rc != 0) {
         throw ResqliteQueryException(
           _queryErrorMessage(dbHandle, rc, params.length),
@@ -249,6 +256,7 @@ void executeBatchWrite(
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateBatchParams(paramSets);
   try {
+    final stepSw = kProfileMode ? (Stopwatch()..start()) : null;
     final rc = resqliteRunBatch(
       dbHandle,
       sqlNative,
@@ -256,6 +264,10 @@ void executeBatchWrite(
       paramCount,
       paramSets.length,
     );
+    if (kProfileMode) {
+      stepSw!.stop();
+      WriterProfileCounters.writerStepUs += stepSw.elapsedMicroseconds;
+    }
     if (rc != 0) {
       throw ResqliteQueryException(
         _queryErrorMessage(dbHandle, rc, paramCount),
@@ -283,6 +295,7 @@ void executeNestedBatchWrite(
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateBatchParams(paramSets);
   try {
+    final stepSw = kProfileMode ? (Stopwatch()..start()) : null;
     final rc = resqliteRunBatchNested(
       dbHandle,
       sqlNative,
@@ -290,6 +303,10 @@ void executeNestedBatchWrite(
       paramCount,
       paramSets.length,
     );
+    if (kProfileMode) {
+      stepSw!.stop();
+      WriterProfileCounters.writerStepUs += stepSw.elapsedMicroseconds;
+    }
     if (rc != 0) {
       throw ResqliteQueryException(
         _queryErrorMessage(dbHandle, rc, paramCount),

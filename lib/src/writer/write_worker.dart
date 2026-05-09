@@ -17,6 +17,7 @@ import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
+import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
@@ -72,6 +73,18 @@ final class CloseRequest extends WriterRequest {
   CloseRequest(super.replyPort);
 }
 
+/// Profile-mode-only: ask the writer isolate for a snapshot of its local
+/// [WriterProfileCounters]. Sent via `Database.writerProfileCounters()` so
+/// the audit harness can compute the dispatch-wall vs SQLite-step-wall
+/// split exp 121 left as the next blocking measurement.
+///
+/// The response shape (`WriterProfileResponse`) is symmetric with the
+/// existing `BatchResponse` / `ExecuteResponse` pattern, so future
+/// counters added to `WriterProfileCounters` flow through unchanged.
+final class FetchWriterProfileRequest extends WriterRequest {
+  FetchWriterProfileRequest(super.replyPort);
+}
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -96,6 +109,15 @@ final class BatchResponse {
   const BatchResponse(this.modifications);
 
   final TableDependencies modifications;
+}
+
+/// Response to [FetchWriterProfileRequest]. Carries a snapshot of the
+/// writer isolate's local [WriterProfileCounters] across the SendPort
+/// boundary as a plain `Map<String, int>` (deep-copied by Dart).
+final class WriterProfileResponse {
+  const WriterProfileResponse(this.snapshot);
+
+  final Map<String, int> snapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +206,13 @@ void writerEntrypoint(List<Object> args) {
           _handleCommit(state, message);
         case RollbackRequest():
           _handleRollback(state, message);
+        case FetchWriterProfileRequest():
+          // Snapshot before the timeline event closes, otherwise this
+          // request's own handler wall would be missing from any later
+          // pass that compares two snapshots at handler granularity.
+          message.replyPort.send(
+            WriterProfileResponse(WriterProfileCounters.snapshot()),
+          );
         case CloseRequest():
           receivePort.close();
           message.replyPort.send(true);
@@ -216,27 +245,49 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
-  // Dirty tables and columns are only collected outside transactions.
-  // Inside a transaction they accumulate in the C-level dirty sets until
-  // the outermost transaction completes.
-  final modifications = state.txDepth > 0
-      ? TableDependencies.none
-      : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  // Profile-mode handler-wall timing pairs with `executeWrite`'s inner
+  // `writerStepUs` so the audit harness can split writer-side burst wall
+  // into "Dart-side dispatch" vs "SQLite step". See
+  // [EXP-127](../../../experiments/127-writer-dispatch-wall-audit.md).
+  final handleSw = kProfileMode ? (Stopwatch()..start()) : null;
+  try {
+    final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+    // Dirty tables and columns are only collected outside transactions.
+    // Inside a transaction they accumulate in the C-level dirty sets until
+    // the outermost transaction completes.
+    final modifications = state.txDepth > 0
+        ? TableDependencies.none
+        : getDirtyTableDependencies(state.dbHandle);
+    msg.replyPort.send(ExecuteResponse(result, modifications));
+  } finally {
+    if (kProfileMode) {
+      handleSw!.stop();
+      WriterProfileCounters.writerHandleUs += handleSw.elapsedMicroseconds;
+      WriterProfileCounters.writerHandleCount++;
+    }
+  }
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
-  if (state.txDepth > 0) {
-    // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
-    // let the dirty set accumulate until the outermost commit.
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
-  } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
-    );
+  final handleSw = kProfileMode ? (Stopwatch()..start()) : null;
+  try {
+    if (state.txDepth > 0) {
+      // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
+      // let the dirty set accumulate until the outermost commit.
+      executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+      msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    } else {
+      executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+      msg.replyPort.send(
+        BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      );
+    }
+  } finally {
+    if (kProfileMode) {
+      handleSw!.stop();
+      WriterProfileCounters.writerHandleUs += handleSw.elapsedMicroseconds;
+      WriterProfileCounters.writerHandleCount++;
+    }
   }
 }
 
