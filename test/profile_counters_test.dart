@@ -56,4 +56,39 @@ void main() {
     expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
     expect(ProfileCounters.dispatcherCurrentParked, 0);
   });
+
+  group('WriterProfileCounters', () {
+    tearDown(WriterProfileCounters.reset);
+
+    test('snapshot exposes the documented key set with current values', () {
+      WriterProfileCounters.writerHandleUs = 1234;
+      WriterProfileCounters.writerStepUs = 567;
+      WriterProfileCounters.writerHandleCount = 8;
+
+      // The audit harness reads these by name; locking the key set
+      // protects callers from accidental contract drift.
+      expect(WriterProfileCounters.snapshot(), {
+        'writer_handle_us': 1234,
+        'writer_step_us': 567,
+        'writer_handle_count': 8,
+      });
+    });
+
+    test('reset clears every field exposed via snapshot', () {
+      WriterProfileCounters.writerHandleUs = 99;
+      WriterProfileCounters.writerStepUs = 11;
+      WriterProfileCounters.writerHandleCount = 3;
+
+      WriterProfileCounters.reset();
+
+      expect(WriterProfileCounters.writerHandleUs, 0);
+      expect(WriterProfileCounters.writerStepUs, 0);
+      expect(WriterProfileCounters.writerHandleCount, 0);
+      expect(WriterProfileCounters.snapshot(), {
+        'writer_handle_us': 0,
+        'writer_step_us': 0,
+        'writer_handle_count': 0,
+      });
+    });
+  });
 }

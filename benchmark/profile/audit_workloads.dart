@@ -31,6 +31,7 @@ import 'dart:math' as math;
 
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 
 /// A11c shared shape — same row count and stream count exp 119 / 121
 /// agreed on. Keep these in sync with the values used in benchmarks
@@ -63,10 +64,12 @@ const int directReadBursts = 5;
 ///
 /// `writerCounters` is a snapshot of the writer isolate's local
 /// `WriterProfileCounters` taken via the same `Database.writerProfileCounters`
-/// round-trip used by the exp 127 audit harness. It is empty when the
-/// scenario runner did not request a writer-side snapshot — most existing
-/// audits (exp 119, exp 121) leave it empty because their counters live
-/// in the main isolate.
+/// round-trip used by the exp 127 audit harness. It is empty unless
+/// `kProfileMode` is true at compile time — the scenario runners skip
+/// the round-trip entirely in release builds, so existing audits (exp 119,
+/// exp 121) keep their original cost profile and only see this field
+/// populated when they care to inspect it under the same flag the
+/// rest of profile-mode instrumentation requires.
 class AuditScenarioResult {
   AuditScenarioResult({
     required this.workload,
@@ -161,11 +164,15 @@ Future<AuditScenarioResult> runA11cScenario(
     }
 
     ProfileCounters.reset();
-    // Round-trip a writer snapshot before the burst so the exp 127 audit
-    // can compute a diff. Older audits (exp 119, exp 121) ignore the
-    // resulting `writerCounters`, so this is a small fixed-cost addition
-    // (one extra writer round-trip per scenario).
-    final writerBefore = await db.writerProfileCounters();
+    // In profile mode round-trip a writer snapshot before/after the burst
+    // so the exp 127 audit can compute a diff. Gated on `kProfileMode` so
+    // release builds and audits that ignore writer counters (exp 119,
+    // exp 121) keep their original cost profile — the writer-side
+    // increments are themselves gated on `kProfileMode`, so reading them
+    // outside profile mode would produce nothing but isolate round-trips.
+    final writerBefore = kProfileMode
+        ? await db.writerProfileCounters()
+        : const <String, int>{};
     final sw = Stopwatch()..start();
     for (var w = 0; w < a11cWriteCount; w++) {
       await db.execute(updateSql, [valueFor(w), w % a11cRowCount]);
@@ -174,7 +181,9 @@ Future<AuditScenarioResult> runA11cScenario(
     }
     sw.stop();
     final counters = ProfileCounters.snapshot();
-    final writerAfter = await db.writerProfileCounters();
+    final writerAfter = kProfileMode
+        ? await db.writerProfileCounters()
+        : const <String, int>{};
 
     // Drain emissions without inflating wall_us.
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -252,7 +261,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       final prng = math.Random(keyedPkPrngSeed);
 
       ProfileCounters.reset();
-      final writerBefore = await db.writerProfileCounters();
+      final writerBefore = kProfileMode
+          ? await db.writerProfileCounters()
+          : const <String, int>{};
       final sw = Stopwatch()..start();
       for (var w = 0; w < keyedPkWriteCount; w++) {
         final pk = prng.nextInt(keyedPkRowCount) + 1;
@@ -264,7 +275,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       }
       sw.stop();
       final counters = ProfileCounters.snapshot();
-      final writerAfter = await db.writerProfileCounters();
+      final writerAfter = kProfileMode
+          ? await db.writerProfileCounters()
+          : const <String, int>{};
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.

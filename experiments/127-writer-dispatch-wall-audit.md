@@ -89,10 +89,14 @@ returns the snapshot map. Every increment is gated on `kProfileMode`,
 so release builds keep the existing zero-cost contract.
 
 Also extended `benchmark/profile/audit_workloads.dart` to capture the
-writer snapshot before and after each scenario's burst, computing the
-diff into a new `AuditScenarioResult.writerCounters` map. Existing
-audits (exp 119, exp 121) ignore the field, so the only added cost is
-one extra writer round-trip per scenario.
+writer snapshot before and after each scenario's burst (gated on
+`kProfileMode`, so existing audits in release mode pay no extra
+round-trip), computing the diff into a new
+`AuditScenarioResult.writerCounters` map. The writer-side increments
+are themselves gated on `kProfileMode`, so reading them outside
+profile mode would only produce isolate round-trips with zero useful
+data — gating the call matches that invariant. Existing audits (exp
+119, exp 121) ignore the field unchanged.
 
 The new audit harness lives at
 `benchmark/profile/writer_dispatch_audit.dart` and reuses the shared

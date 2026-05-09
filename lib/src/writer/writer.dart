@@ -168,16 +168,19 @@ final class Writer {
     return result;
   }
 
-  /// Profile-mode-only: fetch a snapshot of the writer isolate's local
+  /// Fetch a snapshot of the writer isolate's local
   /// `WriterProfileCounters` (writer-side dispatch wall vs SQLite step
   /// wall — see
   /// [EXP-127](../../../experiments/127-writer-dispatch-wall-audit.md)).
   ///
-  /// Always round-trips a `FetchWriterProfileRequest`. In release builds
-  /// the writer-side counters are never incremented (their increments
-  /// are gated on `kProfileMode`), so the snapshot reads zeros — but
-  /// the call shape stays uniform with the audit harness, which only
-  /// invokes it when running under `-DRESQLITE_PROFILE=true`.
+  /// Always round-trips a `FetchWriterProfileRequest` regardless of
+  /// `kProfileMode` — the request handler is unconditional so the call
+  /// shape stays uniform across builds. In release builds the
+  /// writer-side counters are never incremented (their increments are
+  /// gated on `kProfileMode`), so the snapshot reads zeros. The audit
+  /// harness's scenario runners gate the call on `kProfileMode` so the
+  /// extra round-trip is only paid when profile-mode counters are also
+  /// being incremented.
   Future<Map<String, int>> fetchProfileSnapshot() async {
     final response = await _request<WriterProfileResponse>(
       (replyPort) => FetchWriterProfileRequest(replyPort),
