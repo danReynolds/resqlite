@@ -63,6 +63,9 @@ final class StreamEngine {
   final Map<String, Set<StreamEntry>> _tableIndex = {};
 
   /// Stream setup cache for simple `WHERE id = ?` rowid-alias checks.
+  ///
+  /// Bounded because table names can be dynamic in tests/tools even though
+  /// application schemas are usually stable.
   final Map<String, Future<bool>> _integerPrimaryKeyAliasCache = {};
 
   /// Stream entries scheduled to be requeried when an available reader opens up.
@@ -131,6 +134,9 @@ final class StreamEngine {
 
         for (final dep in deps) {
           if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
+            final changedRowIds = _rowIdsOf(dep);
+            final changedCols = _columnsOf(dep);
+
             for (final entry in entries) {
               final entryDep = entry.dependencies[dep.table];
               if (entryDep == null) {
@@ -138,7 +144,6 @@ final class StreamEngine {
               }
 
               final entryRowIds = _rowIdsOf(entryDep);
-              final changedRowIds = _rowIdsOf(dep);
               if (entryRowIds != null &&
                   changedRowIds != null &&
                   !entryRowIds.intersects(changedRowIds)) {
@@ -146,7 +151,6 @@ final class StreamEngine {
               }
 
               final entryCols = _columnsOf(entryDep);
-              final changedCols = _columnsOf(dep);
               if (entryCols != null && changedCols != null) {
                 bool intersects;
                 if (kProfileMode) {
@@ -215,6 +219,7 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
+    _integerPrimaryKeyAliasCache.clear();
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -412,9 +417,9 @@ final class StreamEngine {
         }
 
         if (!predicate.usesIntrinsicRowId) {
-          final isRowIdAlias = await _integerPrimaryKeyAliasCache.putIfAbsent(
-            '${predicate.table}\u0000${predicate.column}',
-            () => _hasIntegerPrimaryKeyAlias(predicate.table, predicate.column),
+          final isRowIdAlias = await _cachedIntegerPrimaryKeyAlias(
+            predicate.table,
+            predicate.column,
           );
           if (!isRowIdAlias) {
             return dependencies;
@@ -427,6 +432,19 @@ final class StreamEngine {
       case UnknownTableDependencies():
         return dependencies;
     }
+  }
+
+  Future<bool> _cachedIntegerPrimaryKeyAlias(String table, String column) {
+    const maxEntries = 64;
+    final key = '$table\u0000$column';
+    if (!_integerPrimaryKeyAliasCache.containsKey(key) &&
+        _integerPrimaryKeyAliasCache.length >= maxEntries) {
+      _integerPrimaryKeyAliasCache.clear();
+    }
+    return _integerPrimaryKeyAliasCache.putIfAbsent(
+      key,
+      () => _hasIntegerPrimaryKeyAlias(table, column),
+    );
   }
 
   Future<bool> _hasIntegerPrimaryKeyAlias(String table, String column) async {

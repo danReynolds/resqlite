@@ -516,18 +516,16 @@ List<TableDependency> _decodeColumnDetails(int count) {
 /// Decode dirty rowid pointers into grouped table details.
 List<TableRowDependency> _decodeRowDetails(int count) {
   if (count <= 0) return const <TableRowDependency>[];
-  final out = <TableRowDependency>[];
+  final byTable = <String, Set<int>>{};
   for (var i = 0; i < count; i++) {
     final table = _rowIdTablesBuf[i].toDartString();
     final rowId = _rowIdsBuf[i];
-    final existingIndex = out.indexWhere((entry) => entry.table == table);
-    if (existingIndex == -1) {
-      out.add(TableRowDependency(table, rowIds: <int>{rowId}));
-    } else {
-      out[existingIndex].rowIds.add(rowId);
-    }
+    (byTable[table] ??= <int>{}).add(rowId);
   }
-  return out;
+  return [
+    for (final MapEntry(key: table, value: rowIds) in byTable.entries)
+      TableRowDependency(table, rowIds: rowIds),
+  ];
 }
 
 /// Get per-reader column detail for the most recent acquired statement.
