@@ -152,6 +152,7 @@ Future<AuditScenarioResult> runA11cScenario(
     }
 
     ProfileCounters.reset();
+    await db.resetWriterProfileCounters();
     final sw = Stopwatch()..start();
     for (var w = 0; w < a11cWriteCount; w++) {
       await db.execute(updateSql, [valueFor(w), w % a11cRowCount]);
@@ -159,7 +160,7 @@ Future<AuditScenarioResult> runA11cScenario(
       await Future<void>.delayed(Duration.zero);
     }
     sw.stop();
-    final counters = ProfileCounters.snapshot();
+    final counters = await _mergedCountersSnapshot(db);
 
     // Drain emissions without inflating wall_us.
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -236,6 +237,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       final prng = math.Random(keyedPkPrngSeed);
 
       ProfileCounters.reset();
+      await db.resetWriterProfileCounters();
       final sw = Stopwatch()..start();
       for (var w = 0; w < keyedPkWriteCount; w++) {
         final pk = prng.nextInt(keyedPkRowCount) + 1;
@@ -246,7 +248,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
         );
       }
       sw.stop();
-      final counters = ProfileCounters.snapshot();
+      final counters = await _mergedCountersSnapshot(db);
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.
@@ -331,6 +333,13 @@ Future<AuditScenarioResult> runDirectReadControl() async {
         'intersection_entries': 0,
         'rows_decoded': 0,
         'cells_decoded': 0,
+        // Direct-read workload exercises the reader pool exclusively;
+        // the writer-isolate counters from EXP-135 stay at zero by
+        // construction, but the keys must be present so downstream
+        // consumers can read them uniformly across scenarios.
+        'writer_handler_us': 0,
+        'writer_sqlite_us': 0,
+        'writer_handler_count': 0,
       },
     );
   } finally {
@@ -361,6 +370,22 @@ Future<AuditScenarioResult> _readerBurst(Database db) async {
 int _median(List<int> values) {
   final sorted = [...values]..sort();
   return sorted[sorted.length ~/ 2];
+}
+
+/// Snapshot the main-isolate `ProfileCounters` and merge in the
+/// writer-isolate counters obtained over the snapshot RPC. The
+/// `writer_*` keys are populated only inside the writer isolate
+/// ([EXP-135](../../experiments/135-writer-step-wall-audit.md)) and
+/// would otherwise stay at zero in the main snapshot.
+Future<Map<String, int>> _mergedCountersSnapshot(Database db) async {
+  final main = ProfileCounters.snapshot();
+  final writer = await db.snapshotWriterProfileCounters();
+  return {
+    ...main,
+    'writer_handler_us': writer['writer_handler_us'] ?? 0,
+    'writer_sqlite_us': writer['writer_sqlite_us'] ?? 0,
+    'writer_handler_count': writer['writer_handler_count'] ?? 0,
+  };
 }
 
 /// Reader pool size as configured in `ReaderPool`. Useful for the

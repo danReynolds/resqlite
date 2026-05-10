@@ -23,6 +23,9 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'writer_handler_us': 0,
+      'writer_sqlite_us': 0,
+      'writer_handler_count': 0,
     });
 
     ProfileCounters.reset();
@@ -37,6 +40,9 @@ void main() {
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
+      'writer_handler_us': 0,
+      'writer_sqlite_us': 0,
+      'writer_handler_count': 0,
     });
   });
 
@@ -55,5 +61,24 @@ void main() {
     expect(ProfileCounters.dispatcherWakeRetryTotal, 0);
     expect(ProfileCounters.dispatcherMaxParkedConcurrent, 0);
     expect(ProfileCounters.dispatcherCurrentParked, 0);
+  });
+
+  // Writer-isolate counters added by EXP-135. Snapshot/reset round-trip
+  // is exercised here; cross-isolate population is covered by the
+  // benchmark/profile audit harnesses.
+  test('writer dispatch counters round-trip through snapshot/reset', () {
+    ProfileCounters.writerHandlerUs = 1234;
+    ProfileCounters.writerSqliteUs = 800;
+    ProfileCounters.writerHandlerCount = 50;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['writer_handler_us'], 1234);
+    expect(snap['writer_sqlite_us'], 800);
+    expect(snap['writer_handler_count'], 50);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.writerHandlerUs, 0);
+    expect(ProfileCounters.writerSqliteUs, 0);
+    expect(ProfileCounters.writerHandlerCount, 0);
   });
 }

@@ -110,6 +110,30 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative wall-clock microseconds the writer-isolate spent
+  /// handling each request, measured from receipt of the message to the
+  /// `replyPort.send` call. Includes Dart-side dispatch (param
+  /// allocation, dirty-table marshalling, message decode/build) and the
+  /// FFI calls that actually drive SQLite. Populated only inside the
+  /// writer isolate; reachable from main via `Writer.snapshotProfileCounters`.
+  ///
+  /// Added by [EXP-135](../../experiments/135-writer-step-wall-audit.md)
+  /// to provide the writer-side wall counter named in
+  /// `signals.json#stream-rerun-dispatch.blockedOnMeasurement`.
+  static int writerHandlerUs = 0;
+
+  /// Cumulative wall-clock microseconds the writer-isolate spent inside
+  /// SQLite-driving FFI calls (`resqliteExecute`, `resqliteRunBatch`,
+  /// `resqliteRunBatchNested`, transaction-control calls, and the
+  /// step+decode portion of transaction reads). Subtracting this from
+  /// [writerHandlerUs] yields the writer-side Dart dispatch wall.
+  static int writerSqliteUs = 0;
+
+  /// Number of writer-isolate requests counted. One increment per
+  /// handled message. Lets the audit harness compute per-request
+  /// averages without tracking type-specific counts.
+  static int writerHandlerCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -121,6 +145,9 @@ class ProfileCounters {
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'writer_handler_us': writerHandlerUs,
+    'writer_sqlite_us': writerSqliteUs,
+    'writer_handler_count': writerHandlerCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -149,5 +176,8 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    writerHandlerUs = 0;
+    writerSqliteUs = 0;
+    writerHandlerCount = 0;
   }
 }

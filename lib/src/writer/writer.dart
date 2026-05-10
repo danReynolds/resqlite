@@ -168,6 +168,27 @@ final class Writer {
     return result;
   }
 
+  /// Snapshot the writer-isolate's `ProfileCounters` map. Profile-mode
+  /// only meaningful — release builds tree-shake the increments and
+  /// always return the zero-initialized snapshot. Used by audit
+  /// harnesses to read writer-side dispatch counters
+  /// ([EXP-135](../../experiments/135-writer-step-wall-audit.md)).
+  Future<Map<String, int>> snapshotWriterCounters() async {
+    final response = await _request<WriterCountersSnapshotResponse>(
+      (replyPort) => WriterCountersSnapshotRequest(replyPort),
+    );
+    return response.counters;
+  }
+
+  /// Reset the writer-isolate's `ProfileCounters` to zero. Profile-mode
+  /// audit harnesses call this between setup and the measured workload
+  /// so the snapshot reflects only the bracketed work.
+  Future<void> resetWriterCounters() async {
+    await _request<bool>(
+      (replyPort) => WriterCountersResetRequest(replyPort),
+    );
+  }
+
   Future<void> close() async {
     _closed = true;
 

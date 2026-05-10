@@ -117,6 +117,28 @@ main before claiming acceptance — and ask, before opening, whether the
 contention path the change targets is still reachable on current main
 or whether some recently-accepted experiment now elides it.*
 
+### Cross-isolate counters need a snapshot RPC, but it's a one-time cost
+
+`ProfileCounters` started as main-isolate-only by design — Dart isolates
+don't share top-level state, so a writer-isolate counter increment is
+invisible to the main snapshot. [Exp 135](135-writer-step-wall-audit.md)
+needed writer-side dispatch wall counters and added the missing piece:
+two new request types (`WriterCountersSnapshotRequest`,
+`WriterCountersResetRequest`) on the writer protocol and a
+`Database.snapshotWriterProfileCounters()` accessor. The snapshot RPC
+itself is excluded from the per-handler stopwatch so it doesn't
+contaminate the measured wall.
+
+Once the snapshot path exists, additional writer-side counters cost
+only their own field. The same pattern can extend to reader-pool
+isolates if a future experiment needs reader-internal counters
+(e.g., per-reader cache hit rate, time inside `decodeQuery`).
+
+*Reapplies whenever a measurement experiment wants per-isolate state
+visible from the main audit harness. Adding the snapshot-RPC scaffolding
+is a one-time protocol addition; subsequent counters in that isolate
+get exported for free.*
+
 ### Admission loops need concrete resources before checking capacity
 
 [Exp 122](122-concrete-reader-pool-stream-admission.md) found a subtle async admission

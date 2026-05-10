@@ -17,6 +17,7 @@ import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
+import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
@@ -72,6 +73,24 @@ final class CloseRequest extends WriterRequest {
   CloseRequest(super.replyPort);
 }
 
+/// Snapshot the writer-isolate's `ProfileCounters` and return them to
+/// main. Used by profile-mode audit harnesses to read writer-side
+/// counters that live in the writer isolate's per-isolate top-level
+/// state ([EXP-135](../../experiments/135-writer-step-wall-audit.md)).
+/// Replies with a [WriterCountersSnapshotResponse]. Cheap regardless
+/// of build mode — it just builds a small map.
+final class WriterCountersSnapshotRequest extends WriterRequest {
+  WriterCountersSnapshotRequest(super.replyPort);
+}
+
+/// Reset the writer-isolate's `ProfileCounters` to zero. Used by
+/// profile-mode audit harnesses to bracket a workload measurement
+/// without dragging in counter values from setup or warmup.
+/// Replies with `true` once the reset has executed.
+final class WriterCountersResetRequest extends WriterRequest {
+  WriterCountersResetRequest(super.replyPort);
+}
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -96,6 +115,14 @@ final class BatchResponse {
   const BatchResponse(this.modifications);
 
   final TableDependencies modifications;
+}
+
+/// Response to [WriterCountersSnapshotRequest]. Carries the
+/// writer-isolate's `ProfileCounters.snapshot()` map back to main. The
+/// map is value-typed so the SendPort deep-copy is cheap.
+final class WriterCountersSnapshotResponse {
+  const WriterCountersSnapshotResponse(this.counters);
+  final Map<String, int> counters;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +194,17 @@ void writerEntrypoint(List<Object> args) {
     // tree-shakes away entirely at AOT. Build with
     // `-DRESQLITE_PROFILE=true` to enable (see lib/src/profile_mode.dart
     // and experiments/080-dispatch-budget.md).
+    //
+    // Per-message handler stopwatch covers the work between message
+    // receipt and `replyPort.send`. Snapshot-style requests are
+    // bookkeeping only and do not contribute to the writer wall;
+    // exclude them from the counter ([EXP-135]) so the audit fraction
+    // reflects the SQL-driving handlers exclusively.
+    final Stopwatch? handlerSw =
+        kProfileMode && message is! WriterCountersSnapshotRequest &&
+                message is! WriterCountersResetRequest
+            ? (Stopwatch()..start())
+            : null;
     if (kProfileMode) {
       Timeline.startSync('writer.handle.${message.runtimeType}');
     }
@@ -184,6 +222,13 @@ void writerEntrypoint(List<Object> args) {
           _handleCommit(state, message);
         case RollbackRequest():
           _handleRollback(state, message);
+        case WriterCountersSnapshotRequest():
+          message.replyPort.send(
+            WriterCountersSnapshotResponse(ProfileCounters.snapshot()),
+          );
+        case WriterCountersResetRequest():
+          ProfileCounters.reset();
+          message.replyPort.send(true);
         case CloseRequest():
           receivePort.close();
           message.replyPort.send(true);
@@ -206,6 +251,11 @@ void writerEntrypoint(List<Object> args) {
     } finally {
       if (kProfileMode) {
         Timeline.finishSync();
+        if (handlerSw != null) {
+          handlerSw.stop();
+          ProfileCounters.writerHandlerUs += handlerSw.elapsedMicroseconds;
+          ProfileCounters.writerHandlerCount++;
+        }
       }
     }
   };
@@ -215,8 +265,26 @@ void writerEntrypoint(List<Object> args) {
 // Per-request handlers
 // ---------------------------------------------------------------------------
 
+/// Run [body] under a profile-mode stopwatch and accumulate the
+/// elapsed time into [ProfileCounters.writerSqliteUs]. The wrapper is
+/// only meaningful inside the writer isolate; release builds skip it
+/// entirely via the `kProfileMode` const-false branch
+/// ([EXP-135](../../experiments/135-writer-step-wall-audit.md)).
+@pragma('vm:prefer-inline')
+T _measureSqlite<T>(T Function() body) {
+  if (!kProfileMode) return body();
+  final sw = Stopwatch()..start();
+  try {
+    return body();
+  } finally {
+    sw.stop();
+    ProfileCounters.writerSqliteUs += sw.elapsedMicroseconds;
+  }
+}
+
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  final result =
+      _measureSqlite(() => executeWrite(state.dbHandle, msg.sql, msg.params));
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
@@ -230,10 +298,14 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    _measureSqlite(
+      () => executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets),
+    );
     msg.replyPort.send(const BatchResponse(TableDependencies.none));
   } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    _measureSqlite(
+      () => executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets),
+    );
     msg.replyPort.send(
       BatchResponse(getDirtyTableDependencies(state.dbHandle)),
     );
@@ -246,20 +318,22 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
   final sqlNative = cachedSqlUtf8(msg.sql);
   final paramsNative = allocateParams(msg.params);
   try {
-    final stmt = _resqliteStmtAcquireWriter(
-      state.dbHandle,
-      sqlNative.cast(),
-      paramsNative,
-      msg.params.length,
-    );
-    if (stmt == ffi.nullptr) {
-      throw ResqliteQueryException(
-        resqliteErrmsg(state.dbHandle).toDartString(),
-        sql: msg.sql,
-        parameters: msg.params,
+    final raw = _measureSqlite(() {
+      final stmt = _resqliteStmtAcquireWriter(
+        state.dbHandle,
+        sqlNative.cast(),
+        paramsNative,
+        msg.params.length,
       );
-    }
-    final raw = decodeQuery(stmt, msg.sql);
+      if (stmt == ffi.nullptr) {
+        throw ResqliteQueryException(
+          resqliteErrmsg(state.dbHandle).toDartString(),
+          sql: msg.sql,
+          parameters: msg.params,
+        );
+      }
+      return decodeQuery(stmt, msg.sql);
+    });
     msg.replyPort.send(
       QueryResponse(ResultSet(raw.values, raw.schema, raw.rowCount)),
     );
@@ -278,7 +352,7 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   // propagates — _runTransaction on the main isolate will never have
   // entered its body, so there is nothing to roll back.
   if (state.txDepth == 0) {
-    final rc = resqliteTxBeginImmediate(state.dbHandle);
+    final rc = _measureSqlite(() => resqliteTxBeginImmediate(state.dbHandle));
     if (rc != 0) {
       throw ResqliteTransactionException(
         resqliteErrmsg(state.dbHandle).toDartString(),
@@ -289,7 +363,7 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   } else {
     final sp = 'SAVEPOINT s${state.txDepth}'.toNativeUtf8();
     try {
-      final rc = resqliteExec(state.dbHandle, sp);
+      final rc = _measureSqlite(() => resqliteExec(state.dbHandle, sp));
       if (rc != 0) {
         throw ResqliteTransactionException(
           resqliteErrmsg(state.dbHandle).toDartString(),
@@ -311,7 +385,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // longer active. The next request sees a predictable state.
   final newDepth = state.txDepth - 1;
   if (newDepth == 0) {
-    final rc = resqliteTxCommit(state.dbHandle);
+    final rc = _measureSqlite(() => resqliteTxCommit(state.dbHandle));
     if (rc != 0) {
       // Capture the error message BEFORE any further sqlite calls — the
       // errmsg pointer is only stable until the next call.
@@ -320,7 +394,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // back, but behavior depends on the error (deferred FK, I/O, etc.).
       // Issue a best-effort ROLLBACK and ignore its return — it may
       // legitimately fail with "no transaction active".
-      resqliteTxRollback(state.dbHandle);
+      _measureSqlite(() => resqliteTxRollback(state.dbHandle));
       // Drop any tables/columns dirtied by the aborted transaction.
       discardDirtyTableDependencies(state.dbHandle);
       state.txDepth = newDepth;
@@ -336,7 +410,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
-    final rc = resqliteExec(state.dbHandle, sp);
+    final rc = _measureSqlite(() => resqliteExec(state.dbHandle, sp));
     calloc.free(sp);
     if (rc != 0) {
       final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
@@ -358,8 +432,8 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       // returning an error and cannot surface two.
       final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
       final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
-      resqliteExec(state.dbHandle, rollbackSp);
-      resqliteExec(state.dbHandle, releaseSp);
+      _measureSqlite(() => resqliteExec(state.dbHandle, rollbackSp));
+      _measureSqlite(() => resqliteExec(state.dbHandle, releaseSp));
       calloc.free(rollbackSp);
       calloc.free(releaseSp);
       state.txDepth = newDepth;
@@ -383,7 +457,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   // SQLite reports a rollback failure.
   final newDepth = state.txDepth - 1;
   if (newDepth == 0) {
-    final rc = resqliteTxRollback(state.dbHandle);
+    final rc = _measureSqlite(() => resqliteTxRollback(state.dbHandle));
     // Clear the dirty sets — rolled-back changes don't count for stream
     // invalidation, even if SQLite reported a rollback error.
     discardDirtyTableDependencies(state.dbHandle);
@@ -400,8 +474,8 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     // removes the savepoint from SQLite's stack.
     final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
     final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
-    final rc1 = resqliteExec(state.dbHandle, rollbackSp);
-    final rc2 = resqliteExec(state.dbHandle, releaseSp);
+    final rc1 = _measureSqlite(() => resqliteExec(state.dbHandle, rollbackSp));
+    final rc2 = _measureSqlite(() => resqliteExec(state.dbHandle, releaseSp));
     calloc.free(rollbackSp);
     calloc.free(releaseSp);
     state.txDepth = newDepth;

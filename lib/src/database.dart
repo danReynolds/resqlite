@@ -497,6 +497,31 @@ final class Database {
       streamLength: streamEngine.length,
     );
   }
+
+  /// Snapshot the writer-isolate's `ProfileCounters` map. Profile-mode
+  /// only meaningful — release builds tree-shake the increments and
+  /// always return zero values for the writer-isolate counters.
+  ///
+  /// Provided so cross-isolate audit harnesses can read writer-side
+  /// dispatch counters that would otherwise be invisible: Dart isolates
+  /// do not share top-level state, so the main isolate's
+  /// `ProfileCounters` snapshot would only ever return its own copy.
+  /// See [EXP-135](../../experiments/135-writer-step-wall-audit.md).
+  Future<Map<String, int>> snapshotWriterProfileCounters() async {
+    _ensureOpen();
+    final _DatabaseRuntime(:writer) = await _runtime;
+    return writer.snapshotWriterCounters();
+  }
+
+  /// Reset the writer-isolate's `ProfileCounters` to zero. Profile-mode
+  /// audit harnesses bracket measured workloads with this so the
+  /// snapshot reflects only the bracketed work
+  /// ([EXP-135](../../experiments/135-writer-step-wall-audit.md)).
+  Future<void> resetWriterProfileCounters() async {
+    _ensureOpen();
+    final _DatabaseRuntime(:writer) = await _runtime;
+    await writer.resetWriterCounters();
+  }
 }
 
 typedef _DatabaseRuntime = ({
