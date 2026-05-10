@@ -115,7 +115,9 @@ class ProfileCounters {
   /// `replyPort.send` call. Includes Dart-side dispatch (param
   /// allocation, dirty-table marshalling, message decode/build) and the
   /// FFI calls that actually drive SQLite. Populated only inside the
-  /// writer isolate; reachable from main via `Writer.snapshotProfileCounters`.
+  /// writer isolate; reachable from main via
+  /// `Database.snapshotWriterProfileCounters` (which routes through
+  /// `Writer.snapshotWriterCounters`).
   ///
   /// Added by [EXP-135](../../experiments/135-writer-step-wall-audit.md)
   /// to provide the writer-side wall counter named in

@@ -988,5 +988,36 @@ void main() {
 
       await closedDir.delete(recursive: true);
     });
+
+    // ----- Writer profile counter exposure -----
+
+    // EXP-135 added cross-isolate access to writer-side ProfileCounters.
+    // These tests guard the request/response wiring: even in non-profile
+    // builds the snapshot must round-trip the counter keys (with zero
+    // values, since the increments are gated behind kProfileMode).
+    test(
+      'snapshotWriterProfileCounters returns the EXP-135 keys',
+      () async {
+        final snap = await db.snapshotWriterProfileCounters();
+        expect(snap, contains('writer_handler_us'));
+        expect(snap, contains('writer_sqlite_us'));
+        expect(snap, contains('writer_handler_count'));
+      },
+    );
+
+    test(
+      'resetWriterProfileCounters round-trips and follows snapshot',
+      () async {
+        await db.resetWriterProfileCounters();
+        final after = await db.snapshotWriterProfileCounters();
+        // Increments are gated behind kProfileMode (compile-time const).
+        // In a default test build that flag is off, so reset+snapshot
+        // returns zero for the new keys; we still assert the wiring did
+        // not throw and the keys are populated.
+        expect(after['writer_handler_us'], isNonNegative);
+        expect(after['writer_sqlite_us'], isNonNegative);
+        expect(after['writer_handler_count'], isNonNegative);
+      },
+    );
   });
 }

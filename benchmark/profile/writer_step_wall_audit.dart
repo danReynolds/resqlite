@@ -82,7 +82,14 @@ final class _AuditRow {
   final int maxParked;
   final int emissions;
 
-  int get dispatchUs => handlerUs - sqliteUs;
+  // `handlerUs` and `sqliteUs` come from independently-running
+  // stopwatches inside the writer isolate, so a marginal handler that
+  // happens to nest entirely inside its `_measureSqlite` call could
+  // briefly produce `sqliteUs > handlerUs` from clock-resolution
+  // rounding. Clamp at zero so the derived fractions and the rendered
+  // markdown never report a negative dispatch share — a value < 0 would
+  // be a measurement artifact rather than a real signal.
+  int get dispatchUs => handlerUs > sqliteUs ? handlerUs - sqliteUs : 0;
   double get wallMs => wallUs / 1000.0;
   double get handlerFractionPct =>
       wallUs == 0 ? 0.0 : (handlerUs / wallUs) * 100.0;

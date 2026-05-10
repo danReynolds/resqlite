@@ -507,20 +507,31 @@ final class Database {
   /// do not share top-level state, so the main isolate's
   /// `ProfileCounters` snapshot would only ever return its own copy.
   /// See [EXP-135](../../experiments/135-writer-step-wall-audit.md).
+  ///
+  /// Acquires the writer mutex for the duration of the snapshot RPC so
+  /// the read sits at a well-defined point in writer history — the same
+  /// "no interleaving with other writer traffic" guarantee that
+  /// `execute()` / `transaction()` rely on. Without the mutex a
+  /// snapshot could land between the `BEGIN` and `COMMIT` messages of
+  /// an in-flight `transaction()`, sampling partial-transaction state.
   Future<Map<String, int>> snapshotWriterProfileCounters() async {
     _ensureOpen();
     final _DatabaseRuntime(:writer) = await _runtime;
-    return writer.snapshotWriterCounters();
+    return writer.locked(() => writer.snapshotWriterCounters());
   }
 
   /// Reset the writer-isolate's `ProfileCounters` to zero. Profile-mode
   /// audit harnesses bracket measured workloads with this so the
   /// snapshot reflects only the bracketed work
   /// ([EXP-135](../../experiments/135-writer-step-wall-audit.md)).
+  ///
+  /// Like [snapshotWriterProfileCounters], runs under the writer mutex
+  /// so the reset point is well-defined relative to other writer
+  /// traffic.
   Future<void> resetWriterProfileCounters() async {
     _ensureOpen();
     final _DatabaseRuntime(:writer) = await _runtime;
-    await writer.resetWriterCounters();
+    await writer.locked(() => writer.resetWriterCounters());
   }
 }
 
