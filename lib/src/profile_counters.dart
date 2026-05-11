@@ -136,6 +136,40 @@ class ProfileCounters {
   /// averages without tracking type-specific counts.
   static int writerHandlerCount = 0;
 
+  /// Cumulative wall-clock microseconds the main isolate spent inside
+  /// the synchronous post-`await` body of `StreamEngine._requery` —
+  /// dirty/in-flight bookkeeping, hash-changed shortcut, `entry.emit`,
+  /// and the trailing `_flushQueue` re-entry. Captures the per-
+  /// re-query main-isolate completion cost after the reader pool
+  /// resolves, the cost that exp 135 left unmeasured when ruling
+  /// writer-side Dart dispatch off the candidate list.
+  ///
+  /// Added by [EXP-136](../../experiments/136-stream-completion-counter.md)
+  /// to close the `completion-side microtask scheduling cost counter`
+  /// entry in `signals.json#stream-rerun-dispatch.blockedOnMeasurement`.
+  static int streamCompleteUs = 0;
+
+  /// Number of `StreamEngine._requery` completions counted. One
+  /// increment per resolved re-query — including completions where the
+  /// hash-changed shortcut suppressed emission, since the bookkeeping
+  /// and `_flushQueue` re-entry still execute.
+  static int streamCompleteCount = 0;
+
+  /// Cumulative wall-clock microseconds spent inside
+  /// `StreamEntry.emit` — the per-subscriber `StreamController.add`
+  /// fan-out only, not the surrounding `_requery` bookkeeping. Sum is
+  /// bounded by `streamCompleteUs` since every call site for `emit`
+  /// runs inside that wall on the re-query path.
+  static int streamEmitUs = 0;
+
+  /// Number of `StreamEntry.emit` invocations. Each call delivers to
+  /// every still-open subscriber controller; `streamEmitUs /
+  /// streamEmitCount` averages per-emit wall, while individual
+  /// subscriber-add cost is `streamEmitUs / (streamEmitCount *
+  /// subscribers)` when the workload has a fixed subscriber-per-stream
+  /// shape.
+  static int streamEmitCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -150,6 +184,10 @@ class ProfileCounters {
     'writer_handler_us': writerHandlerUs,
     'writer_sqlite_us': writerSqliteUs,
     'writer_handler_count': writerHandlerCount,
+    'stream_complete_us': streamCompleteUs,
+    'stream_complete_count': streamCompleteCount,
+    'stream_emit_us': streamEmitUs,
+    'stream_emit_count': streamEmitCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -181,5 +219,9 @@ class ProfileCounters {
     writerHandlerUs = 0;
     writerSqliteUs = 0;
     writerHandlerCount = 0;
+    streamCompleteUs = 0;
+    streamCompleteCount = 0;
+    streamEmitUs = 0;
+    streamEmitCount = 0;
   }
 }

@@ -278,6 +278,12 @@ final class StreamEngine {
 
   /// Re-query a single stream on the reader pool.
   Future<void> _requery(StreamEntry entry) async {
+    // Post-await main-isolate completion wall: bookkeeping, hash-
+    // changed shortcut, emit, and the trailing `_flushQueue` re-entry.
+    // Stopwatch is started after the `selectIfChanged` await resolves
+    // so the cross-isolate round-trip never inflates it. Profile-only
+    // (exp 136); a release build keeps `completeSw` null.
+    Stopwatch? completeSw;
     try {
       entry.inFlight = true;
       entry.dirty = false;
@@ -288,6 +294,8 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
       );
+
+      if (kProfileMode) completeSw = Stopwatch()..start();
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
@@ -317,6 +325,11 @@ final class StreamEngine {
     } finally {
       entry.inFlight = false;
       _flushQueue();
+      if (completeSw != null) {
+        completeSw.stop();
+        ProfileCounters.streamCompleteUs += completeSw.elapsedMicroseconds;
+        ProfileCounters.streamCompleteCount++;
+      }
     }
   }
 
@@ -431,8 +444,14 @@ final class StreamEntry {
   }
 
   void emit(List<Map<String, Object?>> rows) {
+    final emitSw = kProfileMode ? (Stopwatch()..start()) : null;
     for (final sub in subscribers) {
       if (!sub.isClosed) sub.add(rows);
+    }
+    if (kProfileMode) {
+      emitSw!.stop();
+      ProfileCounters.streamEmitUs += emitSw.elapsedMicroseconds;
+      ProfileCounters.streamEmitCount++;
     }
   }
 

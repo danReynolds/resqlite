@@ -24,26 +24,31 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Exp 134 proved a rowid precision layer can halve keyed-PK writer-burst wall for verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams (25.54 → 12.45 ms, intersection probes 10,000 → 3), but it is rejected as a production implementation because the merge path depends on fragile internal SQL text recognition. Exp 135 ships the writer-isolate dispatch wall counter the direction's `blockedOnMeasurement` listed: on A11c overlap the writer handler is only ~22-25% of burst wall (rest is main-isolate microtask scheduling), and within the writer, SQLite step is ~55-58% with Dart dispatch ~42-45%. The structural ceiling for removing all writer-side Dart dispatch on overlap is ~9-11% of wall — same per-benchmark decision threshold edge as exp 121's invalidation traversal ceiling. Future reader-pool dispatch work should target completion-side scheduling on the main isolate (still gated on its own counter); writer-side dispatch, admission, invalidation traversal, and SQL-recognizer-based keyed-PK miss paths are not active implementation targets on currently-measured workloads.",
-      "keyPriors": ["106", "120", "121", "122", "134", "135"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 audited invalidation traversal under a writer-side burst wall convention and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%). Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool. Exp 134 proved a rowid precision layer can halve keyed-PK writer-burst wall (25.54 → 12.45 ms) but is rejected as a production implementation because the merge path depends on fragile internal SQL text recognition. Exp 135 then split the writer-isolate handler wall and found the writer handler is only ~22-25% of A11c overlap burst wall (Dart dispatch ~42-45% of that). Exp 136 ships the final piece: `streamCompleteUs` / `streamEmitUs` counters in the main isolate prove that the synchronous post-`await` body of `_requery` accounts for a stable ~29.5-31.7% of A11c overlap wall across 4 passes, and `entry.emit` for-loop fanout is <0.3% of wall (hash-suppression keeps emissions to ~20-35 per 500-write overlap burst). Combined with exp 121's `invalidate_us` (~15%), synchronous main-isolate stream-engine code accounts for ~45% of A11c overlap wall; the remaining ~55% is framework microtask scheduling, async/await chaining, reader-pool internals, and subscriber callback dispatch the counters cannot reach. A11c disjoint stays at 0% complete because column elision filters every re-query at invalidation time before `_requery` fires; keyed-PK is ~20-22% complete + ~14-15% invalidate. The direction's `blockedOnMeasurement` is now empty: the next dispatch implementation experiment can target either the per-handler `_requery` completion path (~30% of wall, ~7 µs of ~3,750 handlers per overlap burst) or the unaccounted ~55%, but writer-side dispatch, admission, invalidation traversal, and SQL-recognizer-based keyed-PK miss paths are not active implementation targets on currently-measured workloads.",
+      "keyPriors": ["106", "120", "121", "122", "134", "135", "136"],
       "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118", "119"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a workload shows row-level precision is worth explicit API or metadata design outside a SQL text recognizer",
-        "a trace shows completion-side churn dominating a many-stream workload",
+        "a change drops per-handler `complete_us` on A11c overlap reproducibly past the per-benchmark decision threshold",
         "a scheduler policy improves fan-out without harming unrelated reads"
       ],
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
         "Should explicit row-observer APIs cover aliases, joins, composite keys, or WITHOUT ROWID tables that exp 134 could not cover cleanly as an internal recognizer?",
-        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, the exp 121 invalidation-traversal audit, and exp 134's rejected rowid proof, where does remaining stream-fanout wall sit — completion-side scheduling, writer-side dispatch, or reader work itself?"
+        "Is the ~55% unaccounted main-isolate share of A11c overlap wall structurally reachable by Dart-side instrumentation, or is most of it inside the dart:async / SendPort layer?"
       ],
       "openCandidates": [
         {
-          "idea": "completion-side microtask churn audit on A11c overlap",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no current counter for completion-side scheduling cost"
+          "idea": "collapse the `_flushQueue` re-entry inside the `finally` of `_requery` into a microtask hop or cooperative scheduler",
+          "addedDate": "2026-05-11",
+          "addedAfter": "136",
+          "blockedOn": "needs a sketch showing `complete_us` drops without re-introducing parked dispatchers"
+        },
+        {
+          "idea": "hash-suppressed completion fast-path that skips bookkeeping for the >99% of A11c overlap completions that never emit",
+          "addedDate": "2026-05-11",
+          "addedAfter": "136"
         },
         {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
@@ -59,10 +64,8 @@
           "addedDate": "2026-05-02"
         }
       ],
-      "blockedOnMeasurement": [
-        "completion-side microtask scheduling cost counter"
-      ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119/135 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe). Exp 135 then took writer-side Dart dispatch off the candidate list: on A11c overlap the writer handler is only ~22-25% of burst wall, and Dart dispatch is ~42-45% of writer handler — structural ceiling for removing all writer-side Dart dispatch is ~9-11% of overlap wall, the same per-benchmark decision threshold edge as exp 121. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. Exp 134 is proof that row-level precision can win, but its SQL-recognizer implementation is rejected; revive it only with explicit API/design or real workload evidence. The remaining open dispatch-area target is the ~75% of A11c overlap wall that lives on the main isolate; a new dispatch experiment needs the completion-side scheduling counter showing nonzero headroom on the workload before the change is worth trying."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119/135/136 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall). Exp 135 took writer-side Dart dispatch off the candidate list (~9-11% structural ceiling on overlap wall). Exp 136 closes the last `blockedOnMeasurement` entry: synchronous main-isolate stream-engine code (invalidate + complete) accounts for ~45% of A11c overlap wall, the directly addressable narrower target (`_requery` post-await body) is ~30% of wall, and the unaccounted ~55% lives in framework / async boundaries the counters cannot reach. The next dispatch implementation experiment must clear a per-handler `complete_us` target on A11c overlap (~7 µs of ~3,750 handlers per burst) reproducibly across a 5-run release suite — exp 135 showed how easily a structurally real change can sit at the per-benchmark decision threshold edge."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -215,8 +218,8 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121/135 are the recent examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target (10–15% of overlap wall), and exp 135 ruled out writer-side Dart dispatch (~9-11% structural ceiling on overlap wall) by adding cross-isolate writer-handler / SQLite-step counters and reading them on the same A11c / keyed-PK scenarios.",
-      "keyPriors": ["099", "110", "111", "115", "121", "135"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121/135/136 are the recent dispatch-area examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target (10–15% of overlap wall), exp 135 ruled out writer-side Dart dispatch (~9-11% structural ceiling on overlap wall) by adding cross-isolate writer-handler / SQLite-step counters, and exp 136 closed the loop with main-isolate `streamCompleteUs` / `streamEmitUs` counters showing that synchronous main-isolate stream-engine code accounts for ~45% of A11c overlap wall (`_requery` post-await ~30%, `onDependencyChanges` ~15%) with the remaining ~55% in framework microtask scheduling and async boundaries.",
+      "keyPriors": ["099", "110", "111", "115", "121", "135", "136"],
       "archive": ["055", "088", "102", "108", "113", "116", "119"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
@@ -225,7 +228,7 @@
       ],
       "openQuestions": [
         "Which allocation-oriented ideas need memory/RSS acceptance criteria?",
-        "Which stream workloads are missing from the current suite?"
+        "Can the ~55% unaccounted main-isolate share of A11c overlap wall (framework microtasks / async boundaries) be reached without instrumenting dart:async itself?"
       ],
       "openCandidates": [
         {
@@ -233,9 +236,10 @@
           "addedDate": "2026-05-02"
         },
         {
-          "idea": "completion-side scheduling cost counter (microtasks / event loop)",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
+          "idea": "Timeline / event-loop trace around the unaccounted ~55% of A11c overlap wall",
+          "addedDate": "2026-05-11",
+          "addedAfter": "136",
+          "blockedOn": "needs a way to attribute time inside dart:async / SendPort scheduling cleanly enough to act on"
         }
       ],
       "blockedOnMeasurement": [],
@@ -544,6 +548,22 @@
         "future writer-side dispatch experiments need to clear the ~9-11% overlap wall ceiling reproducibly on a 5-run release suite, given the per-benchmark decision threshold edge",
         "the remaining `completion-side microtask scheduling cost counter` open candidate is the next gating measurement for stream-rerun-dispatch implementation work",
         "cross-isolate counter pattern (snapshot RPC + Database.snapshotWriterProfileCounters) lets future experiments add other writer-isolate counters cheaply"
+      ]
+    },
+    "136": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "On A11c overlap the synchronous post-`await` body of `StreamEngine._requery` accounts for a stable ~29.5-31.7% of writer-burst wall across 4 passes, with per-handler completion at ~6.8-7.4 µs across ~3,750 handlers per burst",
+        "Hash-suppression keeps `entry.emit` fanout to ~20-35 emissions per 500-write A11c overlap burst, so `streamEmitUs` is <0.3% of overlap wall — emit is not the cost; bookkeeping plus the trailing `_flushQueue` re-entry is",
+        "Combined with exp 121's `invalidate_us` (~15%), synchronous main-isolate stream-engine code accounts for ~45% of A11c overlap wall. The remaining ~55% lives in framework microtask scheduling, async/await chaining, reader-pool internals, and subscriber callback dispatch — the counters cannot reach it without instrumenting dart:async",
+        "A11c disjoint reports `complete_us = 0` (column elision filters every re-query at invalidation time, so `_requery` never fires). Keyed-PK is ~20-22% complete plus ~14-15% invalidate (~33-37% accounted), with per-handler completion ~4 µs across ~1,050 handlers per 200-write burst — half the A11c overlap per-handler figure",
+        "`signals.json#stream-rerun-dispatch.blockedOnMeasurement` is now empty. Exp 135 + 136 between them ship both the writer-isolate wall split and the main-isolate completion counter that were gating the next dispatch implementation experiment"
+      ],
+      "nextSignals": [
+        "the next dispatch implementation experiment must clear a per-handler `complete_us` target on A11c overlap (~7 µs of ~3,750 handlers per burst) reproducibly across a 5-run release suite",
+        "speculative follow-ups that the new counter now lets a future runner evaluate quickly: `_flushQueue` re-entry collapse, hash-suppressed completion fast-path, per-completion batching — none committed",
+        "to reach the unaccounted ~55%, a follow-up measurement would need Timeline / event-loop traces around dart:async / SendPort scheduling; counters alone bottom out at the synchronous code share"
       ]
     }
   }

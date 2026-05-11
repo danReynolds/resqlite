@@ -26,6 +26,10 @@ void main() {
       'writer_handler_us': 0,
       'writer_sqlite_us': 0,
       'writer_handler_count': 0,
+      'stream_complete_us': 0,
+      'stream_complete_count': 0,
+      'stream_emit_us': 0,
+      'stream_emit_count': 0,
     });
 
     ProfileCounters.reset();
@@ -43,6 +47,10 @@ void main() {
       'writer_handler_us': 0,
       'writer_sqlite_us': 0,
       'writer_handler_count': 0,
+      'stream_complete_us': 0,
+      'stream_complete_count': 0,
+      'stream_emit_us': 0,
+      'stream_emit_count': 0,
     });
   });
 
@@ -80,5 +88,27 @@ void main() {
     expect(ProfileCounters.writerHandlerUs, 0);
     expect(ProfileCounters.writerSqliteUs, 0);
     expect(ProfileCounters.writerHandlerCount, 0);
+  });
+
+  // Stream completion counters added by EXP-136. Same round-trip
+  // shape as the writer counters above; cross-workload population
+  // lives in `benchmark/profile/stream_completion_audit.dart`.
+  test('stream completion counters round-trip through snapshot/reset', () {
+    ProfileCounters.streamCompleteUs = 4500;
+    ProfileCounters.streamCompleteCount = 200;
+    ProfileCounters.streamEmitUs = 800;
+    ProfileCounters.streamEmitCount = 25;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['stream_complete_us'], 4500);
+    expect(snap['stream_complete_count'], 200);
+    expect(snap['stream_emit_us'], 800);
+    expect(snap['stream_emit_count'], 25);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.streamCompleteUs, 0);
+    expect(ProfileCounters.streamCompleteCount, 0);
+    expect(ProfileCounters.streamEmitUs, 0);
+    expect(ProfileCounters.streamEmitCount, 0);
   });
 }
