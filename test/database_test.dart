@@ -1019,5 +1019,29 @@ void main() {
         expect(after['writer_handler_count'], isNonNegative);
       },
     );
+
+    // EXP-136: snapshot/reset call into `writer.locked`, whose mutex is
+    // non-reentrant. Calling either from inside a `Database.transaction`
+    // body would deadlock, so the methods refuse at the call site
+    // instead of as a stuck future.
+    test(
+      'snapshotWriterProfileCounters rejects in-transaction calls',
+      () async {
+        await expectLater(
+          db.transaction((_) => db.snapshotWriterProfileCounters()),
+          throwsStateError,
+        );
+      },
+    );
+
+    test(
+      'resetWriterProfileCounters rejects in-transaction calls',
+      () async {
+        await expectLater(
+          db.transaction((_) => db.resetWriterProfileCounters()),
+          throwsStateError,
+        );
+      },
+    );
   });
 }

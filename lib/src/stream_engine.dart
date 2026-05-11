@@ -297,7 +297,7 @@ final class StreamEngine {
 
       if (kProfileMode) completeSw = Stopwatch()..start();
 
-      // If the entry has already been marked dirty again from an invalidation that ocurred
+      // If the entry has already been marked dirty again from an invalidation that occurred
       // while it was requerying, then this intermediate result should be discarded and instead
       // the entry should be re-scheduled for requery.
       if (entry.dirty) {

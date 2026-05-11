@@ -514,7 +514,20 @@ final class Database {
   /// `execute()` / `transaction()` rely on. Without the mutex a
   /// snapshot could land between the `BEGIN` and `COMMIT` messages of
   /// an in-flight `transaction()`, sampling partial-transaction state.
+  ///
+  /// Throws [StateError] if called from inside a `Database.transaction`
+  /// body — the writer mutex is non-reentrant, so awaiting it while
+  /// already holding it would deadlock the whole writer pipeline.
+  /// Profile-mode audit harnesses bracket their workloads from outside
+  /// transactions; this guard surfaces accidental in-transaction calls
+  /// at the call site instead of as a stuck future.
   Future<Map<String, int>> snapshotWriterProfileCounters() async {
+    if (Transaction.current != null) {
+      throw StateError(
+        'snapshotWriterProfileCounters cannot be called from inside a '
+        'Database.transaction body — the writer mutex is non-reentrant.',
+      );
+    }
     _ensureOpen();
     final _DatabaseRuntime(:writer) = await _runtime;
     return writer.locked(() => writer.snapshotWriterCounters());
@@ -527,8 +540,16 @@ final class Database {
   ///
   /// Like [snapshotWriterProfileCounters], runs under the writer mutex
   /// so the reset point is well-defined relative to other writer
-  /// traffic.
+  /// traffic, and refuses to run from inside an active
+  /// `Database.transaction` body to avoid deadlocking on the
+  /// non-reentrant mutex.
   Future<void> resetWriterProfileCounters() async {
+    if (Transaction.current != null) {
+      throw StateError(
+        'resetWriterProfileCounters cannot be called from inside a '
+        'Database.transaction body — the writer mutex is non-reentrant.',
+      );
+    }
     _ensureOpen();
     final _DatabaseRuntime(:writer) = await _runtime;
     await writer.locked(() => writer.resetWriterCounters());
