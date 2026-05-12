@@ -62,26 +62,37 @@ Added one profile-mode harness:
 benchmark/profile/long_text_scaling_audit.dart
 ```
 
-The harness reuses exp 110's workload shape — 8 unchanged streams
-projecting `id, body, sid` with `WHERE id < 256` predicates, one
-barrier stream projecting the full table, 256 seed rows, one INSERT
-per iteration with a row outside every unchanged stream's predicate
-— and sweeps the per-cell byte size across `[4KB, 16KB, 32KB, 64KB,
+The harness mirrors exp 110's unchanged-fanout shape — 8 unchanged
+streams projecting `id, body, sid` with `WHERE id < 256` predicates —
+and sweeps the per-cell byte size across `[4KB, 16KB, 32KB, 64KB,
 128KB]`. Each cell size runs 3 warmup iterations followed by 30
-timed iterations; the per-iteration wall is the `Stopwatch` around
-`db.execute(insert)` plus the wait for the barrier stream to
-re-emit. The unchanged streams must not emit (the hash-only fast
-path is supposed to suppress re-delivery); the harness asserts
-this on every iteration.
+timed iterations.
+
+The fanout *trigger* differs from exp 110 to keep per-iteration
+hashed-byte work constant. Exp 110's release benchmark inserts a new
+row each iteration and the barrier stream selects the full table, so
+the barrier's hashed payload grows by one row per iteration (~1.3%
+drift on the per-iteration denominator over 30 timed iterations,
+biasing later iterations heavier). This audit uses a fixed barrier
+row at `id = 999999` (well outside every unchanged stream's
+predicate) and UPDATEs that row's `body` each iteration. The barrier
+stream's `WHERE id = ?` projection therefore stays at exactly one
+row across every iteration; the unchanged streams stay at exactly
+256 rows. Per-iteration hashed payload is constant within each cell
+size.
+
+The per-iteration wall is a `Stopwatch` around `db.execute(update)`
+plus the wait for the barrier stream to re-emit. The unchanged
+streams must not emit (the hash-only fast path is supposed to
+suppress re-delivery); the harness asserts this on every iteration
+and fails loudly if it sees one.
 
 The `ns_per_byte` column divides the median wall by
-`cell_bytes × (unchanged_streams × row_count + (row_count + 1))`.
-Each unchanged stream re-hashes its full 256-row result every
-fanout wave; the barrier stream re-hashes 257 rows after the new
-row lands. At 16KB cells that is ~38 MB of hashed payload per
-iteration; at 128KB it is ~302 MB. `ns_per_byte` is the per-byte
-cost averaged across that payload, so it isolates hash-loop
-throughput from the per-iteration overhead floor.
+`cell_bytes × (unchanged_streams × row_count + 1)`. At 16KB cells
+that is ~33 MB of hashed payload per iteration; at 128KB it is
+~270 MB. `ns_per_byte` is the per-byte cost averaged across that
+payload, isolating hash-loop throughput from the per-iteration
+overhead floor.
 
 The harness does not require `kProfileMode` to produce a useful
 report (the scaling decision rests on end-to-end wall, not
@@ -96,42 +107,45 @@ Per-iteration wall:
 
 | cell size | median_ms (a/b/c)        | p90_ms       | p99_ms       |
 |-----------|--------------------------:|-------------:|-------------:|
-| 4KB       | 2.11 / 2.23 / 2.11        | 2.89 – 3.45  | 3.23 – 4.62  |
-| 16KB      | 4.50 / 4.28 / 4.52        | 5.27 – 5.55  | 6.25 – 7.14  |
-| 32KB      | 9.49 / 9.62 / 9.47        | 10.38 – 10.67| 11.66 – 12.87|
-| 64KB      | 27.52 / 28.13 / 25.26     | 33.72 – 35.16| 34.72 – 36.09|
-| 128KB     | 44.51 / 42.91 / 47.41     | 53.92 – 55.60| 55.84 – 62.64|
+| 4KB       | 1.35 / 1.29 / 1.35        | 1.83 – 2.15  | 2.39 – 2.66  |
+| 16KB      | 2.46 / 2.49 / 2.42        | 2.89 – 3.41  | 3.68 – 4.29  |
+| 32KB      | 5.28 / 5.03 / 5.24        | 5.60 – 6.11  | 5.85 – 8.76  |
+| 64KB      | 9.21 / 8.92 / 9.11        | 9.35 – 10.88 | 15.19 – 18.73|
+| 128KB     | 17.40 / 18.85 / 17.31     | 18.78 – 27.93| 21.98 – 32.93|
 
 Per-byte cost:
 
 | cell size | hashed_bytes_per_iter | ns_per_byte (median, a/b/c) |
 |-----------|----------------------:|----------------------------:|
-| 4KB       |             9,441,280 | 0.224 / 0.236 / 0.223       |
-| 16KB      |            37,765,120 | 0.119 / 0.113 / 0.120       |
-| 32KB      |            75,530,240 | 0.126 / 0.127 / 0.125       |
-| 64KB      |           151,060,480 | 0.182 / 0.186 / 0.167       |
-| 128KB     |           302,120,960 | 0.147 / 0.142 / 0.157       |
+| 4KB       |             8,392,704 | 0.160 / 0.154 / 0.161       |
+| 16KB      |            33,570,816 | 0.073 / 0.074 / 0.072       |
+| 32KB      |            67,141,632 | 0.079 / 0.075 / 0.078       |
+| 64KB      |           134,283,264 | 0.069 / 0.066 / 0.068       |
+| 128KB     |           268,566,528 | 0.065 / 0.070 / 0.064       |
 
 Aggregate file:
 [`benchmark/profile/results/exp-137-long-text-scaling-aggregate.md`](../benchmark/profile/results/exp-137-long-text-scaling-aggregate.md).
 
 The 4KB row sits ~2x above the larger-size band because the
 per-iteration overhead (writer round-trip, microtask scheduling,
-isolate dispatch, the per-iteration String allocation in the harness
-itself) is comparable in absolute terms to the hashing work at small
-sizes. From 16KB upward the per-byte cost converges to the **0.12 –
-0.19 ns/byte** band — the implied hash-loop throughput is roughly
-~6 GB/s per stream, about what the 8-byte FNV chunked loop should
-sustain on a modern desktop CPU.
+isolate dispatch) is comparable in absolute terms to the hashing
+work at small sizes. From 16KB upward the per-byte cost converges to
+the **0.065 – 0.080 ns/byte** band — the implied hash-loop throughput
+is roughly ~13 – 15 GB/s per stream, in line with what the 8-byte FNV
+chunked loop should sustain on a modern desktop CPU.
 
-The 64KB row carries a small per-byte hump (~0.17 – 0.19 ns/byte vs
-~0.13 – 0.16 ns/byte at 32KB and 128KB) and a wider min-to-max spread
-(min 15 – 16 ms vs median 25 – 28 ms vs max 34 – 36 ms). The
-per-iteration String allocation crosses an old-generation GC threshold
-at that size on this VM build; the 32KB and 128KB rows happen to land
-on cleaner sides of that boundary. The hump sits inside the broader
-0.12 – 0.19 ns/byte band and does not change the linear-scaling
-verdict.
+The 64KB and 128KB rows carry wider min-to-max spreads (e.g. 64KB
+min 5.81 ms vs median 9.21 ms vs max 18.73 ms; 128KB min 10.30 ms
+vs median 17.40 ms vs max 32.93 ms). The per-iteration String
+allocation built by `_longTextPayload` itself crosses Dart VM
+old-generation heap-region thresholds at those sizes; the harness's
+median is robust against the spread, but the p99 is not. The
+medians sit cleanly in the 0.065 – 0.080 ns/byte band and do not
+change the linear-scaling verdict.
+
+Wall scales linearly with bytes from 16KB up: 16→32 doubles bytes
+and roughly doubles wall (2.15x median), 32→64 doubles bytes and
+1.74x wall, 64→128 doubles bytes and 1.89x wall.
 
 ## Decision
 
@@ -143,9 +157,10 @@ The audit answers the open `signals.json` question for the
 > long-payload streaming workload at sizes beyond exp 110's 4KB cells
 
 Wall scales **linearly** with bytes from 16KB up, with per-byte cost
-in a stable 0.12 – 0.19 ns/byte band. Hashing — not SQLite text-fetch,
-not Dart-side allocation, not isolate transfer — is the dominant cost
-on long-cell unchanged-fanout workloads at meaningful cell sizes.
+in a stable 0.065 – 0.080 ns/byte band. Hashing — not SQLite
+text-fetch, not Dart-side allocation, not isolate transfer — is the
+dominant cost on long-cell unchanged-fanout workloads at meaningful
+cell sizes.
 
 What the resolution changes:
 
@@ -186,16 +201,23 @@ What the resolution does *not* change:
 - A future workload at ≥16KB cells (long content streams, document
   archives, large JSON blobs) is the natural trigger for revisiting
   hash-loop work. Without one, removing the entire byte-stream hash
-  loop would still only save ~0.12 – 0.19 ns per byte hashed, which
-  is below the ±10% per-benchmark decision threshold for the
-  current 4KB release-suite shape.
+  loop would still only save ~0.07 ns per byte hashed, which is
+  below the ±10% per-benchmark decision threshold for the current
+  4KB release-suite shape.
 - A future BLOB-shape audit at the same sweep sizes would confirm
   TEXT/BLOB symmetry; the underlying C path is shared, so a
   divergence between TEXT and BLOB at the same cell size would point
   at a SQLite text-fetch difference rather than a hash difference.
-- The 64KB GC-spread observation (min 16 ms / max 36 ms / median ~26
-  ms across passes) suggests the harness's per-iteration String
-  payload allocation is itself a measurable signal at that size. A
+- The 64KB / 128KB GC-spread observation (max ~2x median across
+  passes) suggests the harness's per-iteration String payload
+  allocation is itself a measurable signal at those sizes. A
   pre-built payload pool variant of this harness would reduce the
-  spread; deferred because the `ns_per_byte` band is already stable
+  spread; deferred because the median per-byte band is already stable
   enough to support the linear-scaling verdict.
+- The fixed-barrier-row trigger this audit uses (UPDATE against
+  `id = 999999`, picked outside every unchanged stream's predicate)
+  is the right shape for any future per-iteration-constant hashing
+  audit. Exp 110's INSERT-driven release benchmark grows the barrier
+  stream's hashed payload by one row per iteration; that is fine for
+  the per-benchmark shape but biases per-byte audit denominators by
+  ~1.3% over 30 iterations.

@@ -69,146 +69,171 @@ class _ScalingResult {
 
   // Per-byte wall is a stand-in for "would 2x the bytes give 2x the
   // wall?". The fanout wave hashes:
-  //   - every unchanged stream's full result (rowCount rows), times
+  //   - every unchanged stream's full result (`rowCount` rows), times
   //     `unchangedStreamCount` streams,
-  //   - plus the barrier stream's full result (rowCount + 1 rows after
-  //     the INSERT lands).
+  //   - plus the barrier stream's single fixed row (its body changes
+  //     each iteration so the barrier emits, but the result-set size
+  //     stays at exactly one row — the unchanged streams remain the
+  //     dominant hashed-payload source).
   // SQLite TEXT cells stored on the same row as INTEGER columns return
   // the full payload pointer for hashing, so per-row hashed bytes are
   // approximately `cellBytes` (id/marker integer columns add a few
   // bytes of fold work each — kept in the formula as cellBytes only
   // because the integer-column contribution is negligible at >=4KB).
   double get totalHashedBytes =>
-      cellBytes.toDouble() *
-      (unchangedStreamCount * rowCount + (rowCount + 1));
+      cellBytes.toDouble() * (unchangedStreamCount * rowCount + 1);
   double get nsPerByte => (medianUs * 1000.0) / totalHashedBytes;
 }
+
+// Fixed primary key for the barrier row. Sits well outside every
+// unchanged stream's `id < rowCount` predicate so the unchanged
+// streams never observe a column change from the barrier UPDATE,
+// while the barrier stream's `id = $barrierRowId` predicate keeps
+// the result set at exactly one row across every iteration. This
+// matters for `ns_per_byte`: an INSERT-driven barrier would grow
+// the barrier's hashed payload by one row per iteration, drifting
+// the per-iteration hashed-bytes denominator by ~1.3% over 30
+// timed iterations and biasing later iterations heavier.
+const int barrierRowId = 999999;
 
 Future<_ScalingResult> runOneSize(int cellBytes) async {
   final tempDir = await Directory.systemTemp.createTemp(
     'long_text_scaling_${cellBytes}_',
   );
-  final db = await resqlite.Database.open('${tempDir.path}/r.db');
   try {
-    const createSql =
-        'CREATE TABLE long_items('
-        'id INTEGER PRIMARY KEY, '
-        'body TEXT NOT NULL, '
-        'marker INTEGER NOT NULL)';
-    const insertSql =
-        'INSERT INTO long_items(id, body, marker) VALUES (?, ?, ?)';
-
-    await db.execute(createSql);
-    await db.executeBatch(insertSql, [
-      for (var i = 0; i < rowCount; i++)
-        [i, _longTextPayload(cellBytes, i), i],
-    ]);
-
-    final unchangedSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
-    StreamSubscription<List<Map<String, Object?>>>? barrierSub;
-
+    final db = await resqlite.Database.open('${tempDir.path}/r.db');
     try {
-      final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
-      final unchangedReady = <Completer<void>>[
-        for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
-      ];
+      const createSql =
+          'CREATE TABLE long_items('
+          'id INTEGER PRIMARY KEY, '
+          'body TEXT NOT NULL, '
+          'marker INTEGER NOT NULL)';
+      const insertSql =
+          'INSERT INTO long_items(id, body, marker) VALUES (?, ?, ?)';
+      const updateBarrierSql =
+          'UPDATE long_items SET body = ? WHERE id = ?';
 
-      for (var s = 0; s < unchangedStreamCount; s++) {
-        final idx = s;
-        unchangedSubs.add(
-          db
-              .stream(
-                'SELECT id, body, $s as sid FROM long_items '
-                'WHERE id < $rowCount ORDER BY id',
-              )
-              .listen((_) {
-                unchangedEmissions[idx]++;
-                if (!unchangedReady[idx].isCompleted) {
-                  unchangedReady[idx].complete();
-                }
-              }),
-        );
-      }
+      await db.execute(createSql);
+      await db.executeBatch(insertSql, [
+        for (var i = 0; i < rowCount; i++)
+          [i, _longTextPayload(cellBytes, i), i],
+      ]);
+      // Seed the fixed barrier row outside every unchanged stream's
+      // predicate. Subsequent iterations UPDATE this row to trigger
+      // the barrier emission without growing any result set.
+      await db.execute(insertSql, [
+        barrierRowId,
+        _longTextPayload(cellBytes, barrierRowId),
+        0,
+      ]);
 
-      final barrierStream = db.stream(
-        'SELECT id, body FROM long_items ORDER BY id',
-      );
-      final barrierReady = Completer<void>();
-      Completer<void>? waitBarrier;
-      barrierSub = barrierStream.listen((_) {
-        if (!barrierReady.isCompleted) {
-          barrierReady.complete();
-        } else if (waitBarrier != null && !waitBarrier.isCompleted) {
-          waitBarrier.complete();
-        }
-      });
+      final unchangedSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
+      StreamSubscription<List<Map<String, Object?>>>? barrierSub;
 
-      await Future.wait(
-        unchangedReady.map((c) => c.future),
-      ).timeout(const Duration(seconds: 30));
-      await barrierReady.future.timeout(const Duration(seconds: 30));
-
-      var counter = 100000;
-      final wallUs = <int>[];
-
-      // Warmups stabilize cache state and Dart JIT/AOT hot paths so the
-      // first measured iteration is not an outlier. Discarded from the
-      // result.
-      for (var w = 0; w < warmupIterations; w++) {
-        waitBarrier = Completer<void>();
-        await db.execute(insertSql, [
-          counter,
-          _longTextPayload(cellBytes, counter),
-          w,
-        ]);
-        counter++;
-        await waitBarrier.future.timeout(const Duration(seconds: 30));
-      }
-
-      for (var i = 0; i < iterationsPerSize; i++) {
-        waitBarrier = Completer<void>();
-        final before = List<int>.from(unchangedEmissions);
-
-        final sw = Stopwatch()..start();
-        await db.execute(insertSql, [
-          counter,
-          _longTextPayload(cellBytes, counter),
-          i,
-        ]);
-        counter++;
-        await waitBarrier.future.timeout(const Duration(seconds: 30));
-        sw.stop();
-        wallUs.add(sw.elapsedMicroseconds);
+      try {
+        final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+        final unchangedReady = <Completer<void>>[
+          for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+        ];
 
         for (var s = 0; s < unchangedStreamCount; s++) {
-          if (unchangedEmissions[s] != before[s]) {
-            throw StateError(
-              'Long-text unchanged stream $s emitted at cell size '
-              '$cellBytes; the unchanged-fanout invariant has been '
-              'broken (the hash-only fast path is supposed to suppress '
-              'this stream).',
-            );
+          final idx = s;
+          unchangedSubs.add(
+            db
+                .stream(
+                  'SELECT id, body, $s as sid FROM long_items '
+                  'WHERE id < $rowCount ORDER BY id',
+                )
+                .listen((_) {
+                  unchangedEmissions[idx]++;
+                  if (!unchangedReady[idx].isCompleted) {
+                    unchangedReady[idx].complete();
+                  }
+                }),
+          );
+        }
+
+        final barrierStream = db.stream(
+          'SELECT id, body FROM long_items WHERE id = ?',
+          [barrierRowId],
+        );
+        final barrierReady = Completer<void>();
+        Completer<void>? waitBarrier;
+        barrierSub = barrierStream.listen((_) {
+          if (!barrierReady.isCompleted) {
+            barrierReady.complete();
+          } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+            waitBarrier.complete();
+          }
+        });
+
+        await Future.wait(
+          unchangedReady.map((c) => c.future),
+        ).timeout(const Duration(seconds: 30));
+        await barrierReady.future.timeout(const Duration(seconds: 30));
+
+        var counter = 100000;
+        final wallUs = <int>[];
+
+        // Warmups stabilize cache state and Dart JIT/AOT hot paths so the
+        // first measured iteration is not an outlier. Discarded from the
+        // result.
+        for (var w = 0; w < warmupIterations; w++) {
+          waitBarrier = Completer<void>();
+          await db.execute(updateBarrierSql, [
+            _longTextPayload(cellBytes, counter),
+            barrierRowId,
+          ]);
+          counter++;
+          await waitBarrier.future.timeout(const Duration(seconds: 30));
+        }
+
+        for (var i = 0; i < iterationsPerSize; i++) {
+          waitBarrier = Completer<void>();
+          final before = List<int>.from(unchangedEmissions);
+
+          final sw = Stopwatch()..start();
+          await db.execute(updateBarrierSql, [
+            _longTextPayload(cellBytes, counter),
+            barrierRowId,
+          ]);
+          counter++;
+          await waitBarrier.future.timeout(const Duration(seconds: 30));
+          sw.stop();
+          wallUs.add(sw.elapsedMicroseconds);
+
+          for (var s = 0; s < unchangedStreamCount; s++) {
+            if (unchangedEmissions[s] != before[s]) {
+              throw StateError(
+                'Long-text unchanged stream $s emitted at cell size '
+                '$cellBytes; the unchanged-fanout invariant has been '
+                'broken (the hash-only fast path is supposed to suppress '
+                'this stream).',
+              );
+            }
           }
         }
-      }
 
-      final sorted = [...wallUs]..sort();
-      return _ScalingResult(
-        cellBytes: cellBytes,
-        medianUs: sorted[sorted.length ~/ 2],
-        p90Us: sorted[(sorted.length * 0.9).floor().clamp(0, sorted.length - 1)],
-        p99Us: sorted[(sorted.length * 0.99).floor().clamp(0, sorted.length - 1)],
-        minUs: sorted.first,
-        maxUs: sorted.last,
-      );
-    } finally {
-      await barrierSub?.cancel();
-      for (final sub in unchangedSubs) {
-        await sub.cancel();
+        final sorted = [...wallUs]..sort();
+        return _ScalingResult(
+          cellBytes: cellBytes,
+          medianUs: sorted[sorted.length ~/ 2],
+          p90Us:
+              sorted[(sorted.length * 0.9).floor().clamp(0, sorted.length - 1)],
+          p99Us: sorted[(sorted.length * 0.99).floor().clamp(0, sorted.length - 1)],
+          minUs: sorted.first,
+          maxUs: sorted.last,
+        );
+      } finally {
+        await barrierSub?.cancel();
+        for (final sub in unchangedSubs) {
+          await sub.cancel();
+        }
       }
+    } finally {
+      await db.close();
     }
   } finally {
-    await db.close();
     await tempDir.delete(recursive: true);
   }
 }
@@ -267,17 +292,21 @@ String _renderMarkdown(List<_ScalingResult> results) {
   buf.writeln();
   buf.writeln(
     'Workload shape: $unchangedStreamCount unchanged streams x $rowCount '
-    'rows, one barrier stream, $iterationsPerSize timed INSERT '
-    'iterations per cell size after $warmupIterations warmups.',
+    'rows, one fixed-row barrier stream (id = $barrierRowId, outside '
+    'every unchanged stream\'s `id < $rowCount` predicate), '
+    '$iterationsPerSize timed UPDATE iterations against the barrier '
+    'row per cell size after $warmupIterations warmups.',
   );
   buf.writeln();
   buf.writeln(
-    'Wall convention: per-iteration `Stopwatch` brackets the INSERT '
+    'Wall convention: per-iteration `Stopwatch` brackets the UPDATE '
     'plus the wait for the barrier stream to re-emit. The unchanged '
     'streams must not emit (their hash-only fast path is supposed to '
     'suppress re-delivery); the harness asserts this on every '
-    'iteration. The hash-loop work the unchanged streams do during '
-    'each iteration is the cost the scaling sweep is targeting.',
+    'iteration. Using UPDATE against a fixed barrier row keeps every '
+    'result set at constant size across iterations, so per-iteration '
+    'hashed-byte work is constant and the median is not biased toward '
+    'later (heavier) iterations.',
   );
   buf.writeln();
   buf.writeln('Command:');
@@ -313,11 +342,11 @@ String _renderMarkdown(List<_ScalingResult> results) {
   buf.writeln(
     'The fanout wave hashes every unchanged stream\'s full result '
     '($rowCount rows x $unchangedStreamCount unchanged streams) plus '
-    'the barrier stream\'s full result (${rowCount + 1} rows after '
-    'the INSERT lands). `hashed_bytes_per_iter ≈ cell_bytes x '
-    '(${unchangedStreamCount * rowCount} + ${rowCount + 1})`. '
-    '`ns_per_byte` divides the median wall by the total hashed bytes '
-    'to isolate the per-byte cost from the per-iteration overhead.',
+    'the barrier stream\'s single fixed row. '
+    '`hashed_bytes_per_iter = cell_bytes x '
+    '(${unchangedStreamCount * rowCount} + 1)`. `ns_per_byte` '
+    'divides the median wall by the total hashed bytes to isolate '
+    'the per-byte cost from the per-iteration overhead.',
   );
   buf.writeln();
   buf.writeln(
@@ -335,8 +364,9 @@ String _renderMarkdown(List<_ScalingResult> results) {
   buf.writeln('## Reading the table');
   buf.writeln();
   buf.writeln(
-    '- `median_ms` is the per-iteration wall: one INSERT plus the '
-    'fanout wave that re-hashes every unchanged stream\'s result.',
+    '- `median_ms` is the per-iteration wall: one UPDATE against the '
+    'fixed barrier row plus the fanout wave that re-hashes every '
+    'unchanged stream\'s result.',
   );
   buf.writeln(
     '- `ns_per_byte` is the per-byte cost averaged across the full '

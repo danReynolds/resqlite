@@ -2,9 +2,9 @@
 
 Profile-mode harness: `benchmark/profile/long_text_scaling_audit.dart`
 
-Workload shape: 8 unchanged streams x 256 rows, one barrier stream, 30 timed INSERT iterations per cell size after 3 warmups.
+Workload shape: 8 unchanged streams x 256 rows, one fixed-row barrier stream (id = 999999, outside every unchanged stream's `id < 256` predicate), 30 timed UPDATE iterations against the barrier row per cell size after 3 warmups.
 
-Wall convention: per-iteration `Stopwatch` brackets the INSERT plus the wait for the barrier stream to re-emit. The unchanged streams must not emit (their hash-only fast path is supposed to suppress re-delivery); the harness asserts this on every iteration. The hash-loop work the unchanged streams do during each iteration is the cost the scaling sweep is targeting.
+Wall convention: per-iteration `Stopwatch` brackets the UPDATE plus the wait for the barrier stream to re-emit. The unchanged streams must not emit (their hash-only fast path is supposed to suppress re-delivery); the harness asserts this on every iteration. Using UPDATE against a fixed barrier row keeps every result set at constant size across iterations, so per-iteration hashed-byte work is constant and the median is not biased toward later (heavier) iterations.
 
 Command:
 
@@ -16,27 +16,27 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/long_text_scaling_audit.dart 
 
 | cell size | median_ms | p90_ms | p99_ms | min_ms | max_ms |
 |---|---:|---:|---:|---:|---:|
-| 4KB | 2.11 | 3.09 | 3.23 | 1.82 | 3.23 |
-| 16KB | 4.50 | 5.53 | 6.98 | 4.00 | 6.98 |
-| 32KB | 9.49 | 10.67 | 12.87 | 8.40 | 12.87 |
-| 64KB | 27.52 | 33.72 | 34.72 | 16.01 | 34.72 |
-| 128KB | 44.51 | 53.92 | 55.84 | 35.07 | 55.84 |
+| 4KB | 1.35 | 1.98 | 2.66 | 1.02 | 2.66 |
+| 16KB | 2.46 | 2.89 | 3.94 | 2.10 | 3.94 |
+| 32KB | 5.28 | 5.60 | 5.85 | 5.00 | 5.85 |
+| 64KB | 9.21 | 10.88 | 15.69 | 8.80 | 15.69 |
+| 128KB | 17.40 | 18.78 | 21.98 | 16.83 | 21.98 |
 
 ## Per-byte cost
 
-The fanout wave hashes every unchanged stream's full result (256 rows x 8 unchanged streams) plus the barrier stream's full result (257 rows after the INSERT lands). `hashed_bytes_per_iter ≈ cell_bytes x (2048 + 257)`. `ns_per_byte` divides the median wall by the total hashed bytes to isolate the per-byte cost from the per-iteration overhead.
+The fanout wave hashes every unchanged stream's full result (256 rows x 8 unchanged streams) plus the barrier stream's single fixed row. `hashed_bytes_per_iter = cell_bytes x (2048 + 1)`. `ns_per_byte` divides the median wall by the total hashed bytes to isolate the per-byte cost from the per-iteration overhead.
 
 | cell size | hashed_bytes_per_iter | ns_per_byte (median) |
 |---|---:|---:|
-| 4KB | 9441280 | 0.224 |
-| 16KB | 37765120 | 0.119 |
-| 32KB | 75530240 | 0.126 |
-| 64KB | 151060480 | 0.182 |
-| 128KB | 302120960 | 0.147 |
+| 4KB | 8392704 | 0.160 |
+| 16KB | 33570816 | 0.073 |
+| 32KB | 67141632 | 0.079 |
+| 64KB | 134283264 | 0.069 |
+| 128KB | 268566528 | 0.065 |
 
 ## Reading the table
 
-- `median_ms` is the per-iteration wall: one INSERT plus the fanout wave that re-hashes every unchanged stream's result.
+- `median_ms` is the per-iteration wall: one UPDATE against the fixed barrier row plus the fanout wave that re-hashes every unchanged stream's result.
 - `ns_per_byte` is the per-byte cost averaged across the full hashed payload. If hashing is the bottleneck, this number stays roughly flat across cell sizes.
 - Drift downward as cell sizes grow points to a per-iteration overhead floor (mutex acquisition, microtask scheduling, isolate dispatch) hiding the per-byte cost at small sizes.
 - Drift upward at large sizes points to a non-hash cost emerging — allocation, GC pressure, page cache misses, or SQLite text fetch stalling on disk.

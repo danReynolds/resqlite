@@ -100,7 +100,7 @@
       "id": "long-text-stream-hashing",
       "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark plus a 4KB→128KB scaling audit. Exp 110 produced a -76% targeted win on the 4KB shape with the 8-byte FNV chunked loop. Exp 137 then swept the same workload across [4KB, 16KB, 32KB, 64KB, 128KB] and found wall scales linearly with bytes from 16KB up, with per-byte cost in a stable 0.12–0.19 ns/byte band. The 4KB shape sits ~2x above the band because per-iteration overhead (writer round-trip, mutex, microtask scheduling) is comparable to the hashing work at that size. Hash-loop variants are workload-dependent: the 4KB release-suite shape is per-iteration-overhead-bound and would barely move under a faster hash; ≥16KB workloads are per-byte-bound and would see a hash variant pay proportional to bytes.",
+      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark plus a 4KB→128KB scaling audit. Exp 110 produced a -76% targeted win on the 4KB shape with the 8-byte FNV chunked loop. Exp 137 then swept the same workload across [4KB, 16KB, 32KB, 64KB, 128KB] using a fixed-row UPDATE-driven barrier (so per-iteration hashed payload stays constant, unlike exp 110's growing-row INSERT) and found wall scales linearly with bytes from 16KB up, with per-byte cost in a stable 0.065–0.080 ns/byte band (~13–15 GB/s implied per-stream throughput). The 4KB shape sits ~2x above the band because per-iteration overhead (writer round-trip, mutex, microtask scheduling) is comparable to the hashing work at that size. Hash-loop variants are workload-dependent: the 4KB release-suite shape is per-iteration-overhead-bound and would barely move under a faster hash; ≥16KB workloads are per-byte-bound and would see a hash variant pay proportional to bytes.",
       "keyPriors": ["075", "099", "110", "137"],
       "archive": ["033"],
       "interestingIf": [
@@ -126,7 +126,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Compare hash-loop variants against the exp 137 16KB+ band, not against exp 110's 4KB benchmark — the 4KB shape is per-iteration-overhead-bound and will not move proportionally to a per-byte hash improvement. The structural ceiling for removing all byte-stream hashing on the current release shape is ~0.22 ns/byte × 4KB × 256 rows × 8 streams ≈ 1.8 ms per fanout wave (vs ~2.1 ms median wall) — a faster hash would save almost all of that, but the absolute saving is below the ±10% per-benchmark decision threshold."
+      "notesForExperimenters": "Compare hash-loop variants against the exp 137 16KB+ band (0.065–0.080 ns/byte), not against exp 110's 4KB benchmark — the 4KB shape is per-iteration-overhead-bound and will not move proportionally to a per-byte hash improvement. Per-iteration hashing on the current 4KB release shape totals ~0.16 ns/byte × 4KB × 256 rows × 8 streams ≈ 1.3 ms per fanout wave (vs ~1.4 ms exp 137 median wall once row-growth bias is removed) — a faster hash would save most of that, but the absolute saving is below the ±10% per-benchmark decision threshold. When designing a new long-cell audit, prefer a fixed-row UPDATE trigger (exp 137 pattern) over an INSERT trigger (exp 110 release pattern) — INSERT grows the barrier stream's hashed payload by one row per iteration and biases the per-byte denominator."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -550,9 +550,10 @@
       "directions": ["long-text-stream-hashing", "measurement-system"],
       "outcomeClass": "in_review_measurement",
       "changedBeliefs": [
-        "Long-cell unchanged-fanout wall scales linearly with bytes from 16KB up; per-byte cost converges to a stable 0.12–0.19 ns/byte band on the 8-byte FNV chunked loop",
+        "Long-cell unchanged-fanout wall scales linearly with bytes from 16KB up; per-byte cost converges to a stable 0.065–0.080 ns/byte band on the 8-byte FNV chunked loop (~13–15 GB/s implied per-stream throughput)",
         "Exp 110's 4KB release shape sits ~2x above the per-byte band because per-iteration overhead (writer round-trip, mutex, microtask scheduling) is comparable to the hashing work at that size — a faster hash would barely move it",
-        "Hash-loop variants (wider unroll, SIMD probe) are interesting only for ≥16KB workloads; current release-suite shape is per-iteration-overhead-bound, not hash-bound"
+        "Hash-loop variants (wider unroll, SIMD probe) are interesting only for ≥16KB workloads; current release-suite shape is per-iteration-overhead-bound, not hash-bound",
+        "Per-byte hashing audits should use a fixed-row UPDATE trigger (constant per-iteration denominator) rather than an INSERT trigger (drifts the denominator by ~1.3% over 30 iterations)"
       ],
       "nextSignals": [
         "compare any future hash-loop variant against the exp 137 16KB+ band, not the exp 110 4KB benchmark",
