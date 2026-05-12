@@ -100,30 +100,33 @@
       "id": "long-text-stream-hashing",
       "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark. Chunked byte-stream folding produced a large targeted win; further variants need a new profile signal or a broader long-payload workload.",
-      "keyPriors": ["075", "099", "110"],
+      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark plus a 4KB→128KB scaling audit. Exp 110 produced a -76% targeted win on the 4KB shape with the 8-byte FNV chunked loop. Exp 137 then swept the same workload across [4KB, 16KB, 32KB, 64KB, 128KB] and found wall scales linearly with bytes from 16KB up, with per-byte cost in a stable 0.12–0.19 ns/byte band. The 4KB shape sits ~2x above the band because per-iteration overhead (writer round-trip, mutex, microtask scheduling) is comparable to the hashing work at that size. Hash-loop variants are workload-dependent: the 4KB release-suite shape is per-iteration-overhead-bound and would barely move under a faster hash; ≥16KB workloads are per-byte-bound and would see a hash variant pay proportional to bytes.",
+      "keyPriors": ["075", "099", "110", "137"],
       "archive": ["033"],
       "interestingIf": [
-        "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
-        "the workload includes unchanged fan-out with larger text payloads",
-        "a hash-loop variant improves the long-text benchmark without hurting short-cell streams"
+        "a production profile or shipped workload uses ≥16KB TEXT/BLOB cells in unchanged fan-out",
+        "a hash-loop variant (wider unroll, SIMD probe) improves the exp 137 16KB+ band without hurting short-cell streams",
+        "a benchmark surfaces a non-hash long-cell cost (SQLite overflow page IO, allocation, GC) the exp 137 audit could not see"
       ],
       "openQuestions": [
         "What text sizes appear in realistic stream workloads?",
-        "Does the remaining long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
+        "Do BLOB cells share the same per-byte band as TEXT cells at the same sizes (the underlying C path is shared, so divergence would indicate a SQLite text-fetch difference)?"
       ],
       "openCandidates": [
         {
-          "idea": "broader long-payload workload (≥ 32KB TEXT cells, mixed BLOB/TEXT)",
-          "addedDate": "2026-04-29",
-          "addedAfter": "110",
-          "blockedOn": "no benchmark covers payloads larger than the exp 110 4KB shape"
+          "idea": "wider FNV unroll or SIMD (AVX2/NEON) probe for the byte-stream loop",
+          "addedDate": "2026-05-12",
+          "addedAfter": "137",
+          "blockedOn": "no shipped workload uses ≥16KB cells; exp 110's 4KB release-suite shape is per-iteration-overhead-bound and would not measurably move"
+        },
+        {
+          "idea": "BLOB-shape companion of the exp 137 sweep to confirm TEXT/BLOB symmetry",
+          "addedDate": "2026-05-12",
+          "addedAfter": "137"
         }
       ],
-      "blockedOnMeasurement": [
-        "long-payload streaming workload at sizes beyond exp 110's 4KB cells"
-      ],
-      "notesForExperimenters": "Use the long-text unchanged-fanout benchmark before trying another hash-loop change. The direction is no longer blocked on measurement, but the obvious 8-byte fold has already been tried."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Compare hash-loop variants against the exp 137 16KB+ band, not against exp 110's 4KB benchmark — the 4KB shape is per-iteration-overhead-bound and will not move proportionally to a per-byte hash improvement. The structural ceiling for removing all byte-stream hashing on the current release shape is ~0.22 ns/byte × 4KB × 256 rows × 8 streams ≈ 1.8 ms per fanout wave (vs ~2.1 ms median wall) — a faster hash would save almost all of that, but the absolute saving is below the ±10% per-benchmark decision threshold."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -541,6 +544,20 @@
       "nextSignals": [
         "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
         "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
+      ]
+    },
+    "137": {
+      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "Long-cell unchanged-fanout wall scales linearly with bytes from 16KB up; per-byte cost converges to a stable 0.12–0.19 ns/byte band on the 8-byte FNV chunked loop",
+        "Exp 110's 4KB release shape sits ~2x above the per-byte band because per-iteration overhead (writer round-trip, mutex, microtask scheduling) is comparable to the hashing work at that size — a faster hash would barely move it",
+        "Hash-loop variants (wider unroll, SIMD probe) are interesting only for ≥16KB workloads; current release-suite shape is per-iteration-overhead-bound, not hash-bound"
+      ],
+      "nextSignals": [
+        "compare any future hash-loop variant against the exp 137 16KB+ band, not the exp 110 4KB benchmark",
+        "trigger a wider FNV / SIMD probe only when a real workload ships ≥16KB cells",
+        "confirm TEXT/BLOB symmetry with a BLOB-shape companion sweep before generalizing the band to non-text cells"
       ]
     }
   }
