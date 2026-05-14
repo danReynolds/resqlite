@@ -12,6 +12,9 @@ docs/
 experiments/
 overnight-experiments/
 
+# Local generated outputs from tests, native builds, and benchmark smokes.
+build/
+
 # Benchmark suite — separate directory for cross-library performance
 # comparison; not part of the library API. Users who want to run them
 # can clone the repo.

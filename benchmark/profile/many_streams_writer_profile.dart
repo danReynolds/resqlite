@@ -43,6 +43,7 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
+import 'package:resqlite/src/tracelite_profile.dart';
 
 // Workload constants — match suite when reasonable, but cut iterations
 // because we want per-write samples, not throughput medians. The
@@ -90,16 +91,16 @@ class _Sample {
   final int intersectionEntries;
 
   Map<String, Object?> toJson() => {
-    'scenario': scenario,
-    'iter': iter,
-    'i': writeIndex,
-    'writer_us': writerUs,
-    'yield_us': yieldUs,
-    'total_us': totalUs,
-    'invalidate_us': invalidateUs,
-    'intersection_us': intersectionUs,
-    'intersection_entries': intersectionEntries,
-  };
+        'scenario': scenario,
+        'iter': iter,
+        'i': writeIndex,
+        'writer_us': writerUs,
+        'yield_us': yieldUs,
+        'total_us': totalUs,
+        'invalidate_us': invalidateUs,
+        'intersection_us': intersectionUs,
+        'intersection_entries': intersectionEntries,
+      };
 }
 
 Future<void> main(List<String> args) async {
@@ -134,12 +135,10 @@ Future<void> main(List<String> args) async {
   final colNames = [
     for (var i = 0; i < 20; i++) String.fromCharCode('a'.codeUnitAt(0) + i),
   ];
-  final createSql =
-      'CREATE TABLE wide(id INTEGER PRIMARY KEY, ' +
+  final createSql = 'CREATE TABLE wide(id INTEGER PRIMARY KEY, ' +
       colNames.map((c) => '$c TEXT NOT NULL').join(', ') +
       ')';
-  final insertSql =
-      'INSERT INTO wide(id, ${colNames.join(', ')}) '
+  final insertSql = 'INSERT INTO wide(id, ${colNames.join(', ')}) '
       'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
 
   try {
@@ -205,11 +204,8 @@ Future<void> main(List<String> args) async {
       );
     }
 
-    final ts = DateTime.now()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .split('.')
-        .first;
+    final ts =
+        DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
     final prefix = outPrefix ?? 'benchmark/profile/results/a11c_writer_profile';
     final outDir = Directory(File(prefix).parent.path);
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
@@ -249,137 +245,172 @@ Future<List<_Sample>> _runScenario(
   required String Function(int writeIndex, int iteration) valueFor,
 }) async {
   final samples = <_Sample>[];
+  final traceCorrelationId =
+      TraceliteProfile.isEnabled ? TraceliteProfile.nextCorrelationId() : null;
+  final traceNameId = traceCorrelationId == null
+      ? null
+      : TraceliteProfile.internString(scenario);
+  var traceOpen = false;
+  var traceSamples = 0;
 
-  for (var iter = 0; iter < _warmup + _iterations; iter++) {
-    final isWarmup = iter < _warmup;
-
-    final initialCompleters = <Completer<void>>[];
-    final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
-    final emitCounts = List<int>.filled(streamCount, 0);
-
-    for (var i = 0; i < streamCount; i++) {
-      final idx = i;
-      final initial = Completer<void>();
-      initialCompleters.add(initial);
-      final partWidth = _rowCount ~/ streamCount;
-      final partStart = idx * partWidth;
-      final partEnd = partStart + partWidth;
-      final sub = db
-          .stream(
-            'SELECT id, a, b FROM wide WHERE id >= ? AND id < ? ORDER BY id',
-            [partStart, partEnd],
-          )
-          .listen((_) {
-            if (!initial.isCompleted) {
-              initial.complete();
-            } else {
-              emitCounts[idx]++;
-            }
-          });
-      subs.add(sub);
-    }
-
-    try {
-      // Drain initial emissions before timing.
-      if (streamCount > 0) {
-        await _waitUntil(
-          predicate: () => initialCompleters.every((c) => c.isCompleted),
-          timeout: const Duration(seconds: 60),
+  try {
+    for (var iter = 0; iter < _warmup + _iterations; iter++) {
+      final isWarmup = iter < _warmup;
+      if (!isWarmup && traceCorrelationId != null && !traceOpen) {
+        TraceliteProfile.asyncBegin(
+          TraceliteResqliteSpans.profileWorkload,
+          correlationId: traceCorrelationId,
+          args: [traceNameId!, _iterations],
         );
+        traceOpen = true;
       }
 
-      // Per-write breakdown.
-      //
-      // db.execute() awaits the writer-isolate round-trip. Once the
-      // writer returns, Database.execute() synchronously calls
-      // _streamEngine.onDependencyChanges(...) which runs the dirty-set
-      // fanout (cheap: hash-set unions over _tableIndex), enqueues all
-      // dirty entries, and *kicks off* _flushQueue() — but the per-stream
-      // selectIfChanged dispatches actually run on awaits inside
-      // _flushQueue, which means they land during the yields below.
-      //
-      //   t_writer = await db.execute(...) — writer round-trip + the
-      //              synchronous prefix of invalidate. Cheap fanout
-      //              bookkeeping but NOT the per-stream re-query work.
-      //   t_yield  = 2× Future.delayed(Duration.zero). The microtask
-      //              queue drains here; reader-pool selectIfChanged
-      //              dispatches and listener microtasks fire. This is
-      //              where the bulk of the per-stream fanout cost lives.
-      //   t_total  = both, await-to-await wall per write.
-      //
-      // The "fanout cost N streams add" is recovered as
-      // `scenario.t_total - baseline.t_total`, decomposed by which of
-      // (writer, yield) absorbed the extra work.
-      final writerSw = Stopwatch();
-      final yieldSw = Stopwatch();
-      final totalSw = Stopwatch();
+      final initialCompleters = <Completer<void>>[];
+      final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
+      final emitCounts = List<int>.filled(streamCount, 0);
 
-      for (var w = 0; w < _writeCount; w++) {
-        totalSw
-          ..reset()
-          ..start();
+      for (var i = 0; i < streamCount; i++) {
+        final idx = i;
+        final initial = Completer<void>();
+        initialCompleters.add(initial);
+        final partWidth = _rowCount ~/ streamCount;
+        final partStart = idx * partWidth;
+        final partEnd = partStart + partWidth;
+        final sub = db.stream(
+          'SELECT id, a, b FROM wide WHERE id >= ? AND id < ? ORDER BY id',
+          [partStart, partEnd],
+        ).listen((_) {
+          if (!initial.isCompleted) {
+            initial.complete();
+          } else {
+            emitCounts[idx]++;
+          }
+        });
+        subs.add(sub);
+      }
 
-        // Snapshot ProfileCounters before the write. The synchronous
-        // body of StreamEngine.onDependencyChanges runs *inside* db.execute()
-        // before the future resolves, so the counter delta is captured
-        // entirely between these two snapshots.
-        final invalUsBefore = ProfileCounters.invalidateUs;
-        final isectUsBefore = ProfileCounters.intersectionUs;
-        final isectEntriesBefore = ProfileCounters.intersectionEntries;
-
-        writerSw
-          ..reset()
-          ..start();
-        await db.execute(updateSql, [valueFor(w, iter), w % _rowCount]);
-        writerSw.stop();
-
-        final invalUs = ProfileCounters.invalidateUs - invalUsBefore;
-        final isectUs = ProfileCounters.intersectionUs - isectUsBefore;
-        final isectEntries =
-            ProfileCounters.intersectionEntries - isectEntriesBefore;
-
-        yieldSw
-          ..reset()
-          ..start();
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
-        yieldSw.stop();
-
-        totalSw.stop();
-
-        if (!isWarmup) {
-          samples.add(
-            _Sample(
-              scenario: scenario,
-              iter: iter - _warmup,
-              writeIndex: w,
-              writerUs: writerSw.elapsedMicroseconds,
-              yieldUs: yieldSw.elapsedMicroseconds,
-              totalUs: totalSw.elapsedMicroseconds,
-              invalidateUs: invalUs,
-              intersectionUs: isectUs,
-              intersectionEntries: isectEntries,
-            ),
+      try {
+        // Drain initial emissions before timing.
+        if (streamCount > 0) {
+          await _waitUntil(
+            predicate: () => initialCompleters.every((c) => c.isCompleted),
+            timeout: const Duration(seconds: 60),
           );
         }
-      }
 
-      if (streamCount > 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
+        // Per-write breakdown.
+        //
+        // db.execute() awaits the writer-isolate round-trip. Once the
+        // writer returns, Database.execute() synchronously calls
+        // _streamEngine.onDependencyChanges(...) which runs the dirty-set
+        // fanout (cheap: hash-set unions over _tableIndex), enqueues all
+        // dirty entries, and *kicks off* _flushQueue() — but the per-stream
+        // selectIfChanged dispatches actually run on awaits inside
+        // _flushQueue, which means they land during the yields below.
+        //
+        //   t_writer = await db.execute(...) — writer round-trip + the
+        //              synchronous prefix of invalidate. Cheap fanout
+        //              bookkeeping but NOT the per-stream re-query work.
+        //   t_yield  = 2× Future.delayed(Duration.zero). The microtask
+        //              queue drains here; reader-pool selectIfChanged
+        //              dispatches and listener microtasks fire. This is
+        //              where the bulk of the per-stream fanout cost lives.
+        //   t_total  = both, await-to-await wall per write.
+        //
+        // The "fanout cost N streams add" is recovered as
+        // `scenario.t_total - baseline.t_total`, decomposed by which of
+        // (writer, yield) absorbed the extra work.
+        final writerSw = Stopwatch();
+        final yieldSw = Stopwatch();
+        final totalSw = Stopwatch();
 
-      var totalEmissions = 0;
-      for (final c in emitCounts) {
-        totalEmissions += c;
+        for (var w = 0; w < _writeCount; w++) {
+          totalSw
+            ..reset()
+            ..start();
+
+          // Snapshot ProfileCounters before the write. The synchronous
+          // body of StreamEngine.onDependencyChanges runs *inside* db.execute()
+          // before the future resolves, so the counter delta is captured
+          // entirely between these two snapshots.
+          final invalUsBefore = ProfileCounters.invalidateUs;
+          final isectUsBefore = ProfileCounters.intersectionUs;
+          final isectEntriesBefore = ProfileCounters.intersectionEntries;
+
+          writerSw
+            ..reset()
+            ..start();
+          await db.execute(updateSql, [valueFor(w, iter), w % _rowCount]);
+          writerSw.stop();
+
+          final invalUs = ProfileCounters.invalidateUs - invalUsBefore;
+          final isectUs = ProfileCounters.intersectionUs - isectUsBefore;
+          final isectEntries =
+              ProfileCounters.intersectionEntries - isectEntriesBefore;
+
+          yieldSw
+            ..reset()
+            ..start();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          yieldSw.stop();
+
+          totalSw.stop();
+
+          if (!isWarmup) {
+            samples.add(
+              _Sample(
+                scenario: scenario,
+                iter: iter - _warmup,
+                writeIndex: w,
+                writerUs: writerSw.elapsedMicroseconds,
+                yieldUs: yieldSw.elapsedMicroseconds,
+                totalUs: totalSw.elapsedMicroseconds,
+                invalidateUs: invalUs,
+                intersectionUs: isectUs,
+                intersectionEntries: isectEntries,
+              ),
+            );
+            if (traceCorrelationId != null) {
+              TraceliteProfile.fanoutSample(
+                writerUs: writerSw.elapsedMicroseconds,
+                yieldUs: yieldSw.elapsedMicroseconds,
+                totalUs: totalSw.elapsedMicroseconds,
+                invalidateUs: invalUs,
+                intersectionUs: isectUs,
+                intersectionEntries: isectEntries,
+                correlationId: traceCorrelationId,
+              );
+            }
+            traceSamples++;
+          }
+        }
+
+        if (streamCount > 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+
+        var totalEmissions = 0;
+        for (final c in emitCounts) {
+          totalEmissions += c;
+        }
+        print(
+          '  iter ${iter - _warmup}${isWarmup ? ' (warmup)' : ''}: '
+          'emissions=$totalEmissions ${streamCount == 0 ? '(no streams)' : ''}',
+        );
+      } finally {
+        for (final s in subs) {
+          await s.cancel();
+        }
       }
-      print(
-        '  iter ${iter - _warmup}${isWarmup ? ' (warmup)' : ''}: '
-        'emissions=$totalEmissions ${streamCount == 0 ? '(no streams)' : ''}',
+    }
+  } finally {
+    if (traceOpen && traceCorrelationId != null) {
+      TraceliteProfile.asyncEnd(
+        TraceliteResqliteSpans.profileWorkload,
+        correlationId: traceCorrelationId,
+        args: [traceSamples],
       );
-    } finally {
-      for (final s in subs) {
-        await s.cancel();
-      }
     }
   }
 

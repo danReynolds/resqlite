@@ -52,6 +52,8 @@ jobs:
         run: dart analyze --fatal-infos
       - name: Run tests
         run: dart test --timeout 60s
+      - name: Verify trace_sqlite native hook mode
+        run: dart run tool/trace_sqlite_smoke.dart
 
   benchmark-generated-data:
     name: Benchmark generated data freshness

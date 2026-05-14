@@ -59,6 +59,7 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
+import 'package:resqlite/src/tracelite_profile.dart';
 
 import 'profile/profile_reporting.dart';
 import 'profile/profiled_database.dart';
@@ -229,21 +230,65 @@ Future<ProfileWorkloadResult> _runWorkload({
   _churnHeap();
   _churnHeap();
 
-  final rssBefore = _rssMB();
+  final rssBeforeBytes = _rssBytes();
+  final rssBefore = _rssMB(rssBeforeBytes);
   final diagBefore = await profiled.raw.diagnostics();
   final countersBefore = kProfileMode ? ProfileCounters.snapshot() : null;
-  var peakRss = rssBefore;
+  final traceCorrelationId =
+      TraceliteProfile.isEnabled ? TraceliteProfile.nextCorrelationId() : null;
+  final traceNameId =
+      traceCorrelationId == null ? null : TraceliteProfile.internString(name);
+  if (traceCorrelationId != null) {
+    TraceliteProfile.diagnostics(diagBefore, correlationId: traceCorrelationId);
+    if (countersBefore != null) {
+      TraceliteProfile.profileCounters(
+        countersBefore,
+        correlationId: traceCorrelationId,
+      );
+    }
+  }
+  var peakRssBytes = rssBeforeBytes;
 
   profiled.samples.clear();
-  for (var iter = 0; iter < iterations; iter++) {
-    await body(iter);
-    final rssNow = _rssMB();
-    if (rssNow > peakRss) peakRss = rssNow;
+  Future<void> runMeasuredLoop() async {
+    for (var iter = 0; iter < iterations; iter++) {
+      await body(iter);
+      final rssNow = _rssBytes();
+      if (rssNow > peakRssBytes) peakRssBytes = rssNow;
+    }
   }
 
-  final rssAfter = _rssMB();
+  if (traceCorrelationId == null) {
+    await runMeasuredLoop();
+  } else {
+    await TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.profileWorkload,
+      runMeasuredLoop,
+      correlationId: traceCorrelationId,
+      beginArgs: [traceNameId!, iterations],
+      endArgs: (_) => [profiled.samples.length],
+    );
+  }
+
+  final rssAfterBytes = _rssBytes();
+  final rssAfter = _rssMB(rssAfterBytes);
   final diagAfter = await profiled.raw.diagnostics();
   final countersAfter = kProfileMode ? ProfileCounters.snapshot() : null;
+  if (traceCorrelationId != null) {
+    TraceliteProfile.diagnostics(diagAfter, correlationId: traceCorrelationId);
+    if (countersAfter != null) {
+      TraceliteProfile.profileCounters(
+        countersAfter,
+        correlationId: traceCorrelationId,
+      );
+    }
+    TraceliteProfile.rss(
+      beforeBytes: rssBeforeBytes,
+      afterBytes: rssAfterBytes,
+      peakBytes: peakRssBytes,
+      correlationId: traceCorrelationId,
+    );
+  }
 
   return ProfileWorkloadResult(
     name: name,
@@ -251,7 +296,7 @@ Future<ProfileWorkloadResult> _runWorkload({
     samples: List.of(profiled.samples),
     rssBeforeMB: rssBefore,
     rssAfterMB: rssAfter,
-    rssPeakMB: peakRss,
+    rssPeakMB: _rssMB(peakRssBytes),
     diagnosticsBefore: diagBefore,
     diagnosticsAfter: diagAfter,
     countersBefore: countersBefore,
@@ -259,7 +304,9 @@ Future<ProfileWorkloadResult> _runWorkload({
   );
 }
 
-double _rssMB() => ProcessInfo.currentRss / (1024 * 1024);
+int _rssBytes() => ProcessInfo.currentRss;
+
+double _rssMB(int bytes) => bytes / (1024 * 1024);
 
 /// Pre-measurement churn loop. Allocates + drops small maps to stabilize
 /// the heap before baseline capture. Without this, heap pages retained
@@ -309,11 +356,8 @@ _Options _parseOptions(List<String> args) {
 }
 
 String _defaultOutPath() {
-  final ts = DateTime.now()
-      .toIso8601String()
-      .replaceAll(':', '-')
-      .split('.')
-      .first;
+  final ts =
+      DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
   return 'benchmark/profile/results/run_profile_$ts.json';
 }
 

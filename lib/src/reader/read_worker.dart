@@ -20,6 +20,7 @@ import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
+import '../tracelite_profile.dart';
 
 // ---------------------------------------------------------------------------
 // Request types — sent from pool to worker via SendPort
@@ -27,25 +28,30 @@ import '../row.dart';
 
 /// Base class for read requests sent from the pool to a worker isolate.
 sealed class ReadRequest {
-  ReadRequest(this.sql, this.parameters);
+  ReadRequest(this.sql, this.parameters, {this.traceCorrelationId});
   final String sql;
   final List<Object?> parameters;
+  final int? traceCorrelationId;
 }
 
 /// Standard row query — returns a [ResultSet].
 final class SelectRequest extends ReadRequest {
-  SelectRequest(super.sql, super.parameters);
+  SelectRequest(super.sql, super.parameters, {super.traceCorrelationId});
 }
 
 /// Row query that also captures read table dependencies via the SQLite
 /// authorizer hook. Used for initial stream registration in [StreamEngine].
 final class SelectWithDepsRequest extends ReadRequest {
-  SelectWithDepsRequest(super.sql, super.parameters);
+  SelectWithDepsRequest(
+    super.sql,
+    super.parameters, {
+    super.traceCorrelationId,
+  });
 }
 
 /// JSON bytes query — serialized entirely in C, no Dart objects for result data.
 final class SelectBytesRequest extends ReadRequest {
-  SelectBytesRequest(super.sql, super.parameters);
+  SelectBytesRequest(super.sql, super.parameters, {super.traceCorrelationId});
 }
 
 /// Stream re-query with worker-side hash comparison.
@@ -54,8 +60,9 @@ final class SelectIfChangedRequest extends ReadRequest {
     super.sql,
     super.parameters,
     this.lastResultHash,
-    this.lastRowCount,
-  );
+    this.lastRowCount, {
+    super.traceCorrelationId,
+  });
   final int lastResultHash;
 
   /// Previously-emitted row count, or `-1` if unknown. Passed into
@@ -104,6 +111,14 @@ void readerEntrypoint(List<Object> args) {
     // `-DRESQLITE_PROFILE=true` to enable. See lib/src/profile_mode.dart.
     if (kProfileMode) {
       Timeline.startSync('reader.handle.${request.runtimeType}');
+      final typeId = TraceliteProfile.internString(
+        request.runtimeType.toString(),
+      );
+      TraceliteProfile.begin(
+        TraceliteResqliteSpans.readerHandle,
+        args: [typeId, readerId],
+        correlationId: request.traceCorrelationId,
+      );
     }
     try {
       final Object? result;
@@ -139,11 +154,11 @@ void readerEntrypoint(List<Object> args) {
           result = bytes;
 
         case SelectIfChangedRequest(
-          :final sql,
-          :final parameters,
-          :final lastResultHash,
-          :final lastRowCount,
-        ):
+            :final sql,
+            :final parameters,
+            :final lastResultHash,
+            :final lastRowCount,
+          ):
           // Two-pass selectIfChanged
           // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)).
           // Row-count short-circuit
@@ -168,6 +183,10 @@ void readerEntrypoint(List<Object> args) {
         // Isolate.exit skips `finally`; close the timeline span manually.
         if (kProfileMode) {
           Timeline.finishSync();
+          TraceliteProfile.end(
+            TraceliteResqliteSpans.readerHandle,
+            correlationId: request.traceCorrelationId,
+          );
         }
         Isolate.exit(eventPort, (result, true, null));
       }
@@ -188,6 +207,10 @@ void readerEntrypoint(List<Object> args) {
     } finally {
       if (kProfileMode) {
         Timeline.finishSync();
+        TraceliteProfile.end(
+          TraceliteResqliteSpans.readerHandle,
+          correlationId: request.traceCorrelationId,
+        );
       }
     }
   };
@@ -199,14 +222,13 @@ void readerEntrypoint(List<Object> args) {
 
 // Dedicated reader variant — no pool mutex.
 @ffi.Native<
-  ffi.Pointer<ffi.Void> Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
+    ffi.Pointer<ffi.Void> Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Int,
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+    )>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -268,13 +290,14 @@ RawQueryResult executeQuery(
   int readerId,
   String sql,
   List<Object?> parameters,
-) => _withAcquiredStmt(
-  handleAddr,
-  readerId,
-  sql,
-  parameters,
-  (_, stmt) => decodeQuery(stmt, sql),
-);
+) =>
+    _withAcquiredStmt(
+      handleAddr,
+      readerId,
+      sql,
+      parameters,
+      (_, stmt) => decodeQuery(stmt, sql),
+    );
 
 /// Execute a query returning JSON-encoded bytes on a dedicated reader.
 Uint8List executeQueryBytes(
@@ -303,16 +326,17 @@ Uint8List executeQueryBytes(
   int readerId,
   String sql,
   List<Object?> parameters,
-) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
-  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
-  // Collect dependency metadata from the reader's most recent cached stmt entry.
-  return (
-    raw,
-    getReadTableDependencies(dbHandle, readerId),
-    hash,
-    raw.rowCount,
-  );
-});
+) =>
+    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
+      final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
+      // Collect dependency metadata from the reader's most recent cached stmt entry.
+      return (
+        raw,
+        getReadTableDependencies(dbHandle, readerId),
+        hash,
+        raw.rowCount,
+      );
+    });
 
 /// Two-pass selectIfChanged
 /// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md) +
@@ -335,10 +359,11 @@ Uint8List executeQueryBytes(
   List<Object?> parameters,
   int lastResultHash,
   int lastRowCount,
-) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-  final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
-  if (newHash == lastResultHash && newRowCount == lastRowCount) {
-    return (newHash, newRowCount, null);
-  }
-  return (newHash, newRowCount, decodeQuery(stmt, sql));
-});
+) =>
+    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+      final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
+      if (newHash == lastResultHash && newRowCount == lastRowCount) {
+        return (newHash, newRowCount, null);
+      }
+      return (newHash, newRowCount, decodeQuery(stmt, sql));
+    });

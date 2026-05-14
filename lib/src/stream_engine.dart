@@ -12,6 +12,7 @@ import 'extensions/set.dart';
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+import 'tracelite_profile.dart';
 
 // ---------------------------------------------------------------------------
 // Stream dependency tracking contract
@@ -104,9 +105,10 @@ final class StreamEngine {
       return;
     }
 
-    if (changes case FixedTableDependencies(
-      :final tables,
-    ) when tables.isEmpty) {
+    if (changes
+        case FixedTableDependencies(
+          :final tables,
+        ) when tables.isEmpty) {
       return;
     }
 
@@ -115,61 +117,86 @@ final class StreamEngine {
     final intersectionSw = kProfileMode ? Stopwatch() : null;
     var intersectionEntries = 0;
     final dirtyEntries = <StreamEntry>{};
+    if (kProfileMode) {
+      TraceliteProfile.begin(TraceliteResqliteSpans.streamInvalidate);
+    }
 
-    switch (changes) {
-      case UnknownTableDependencies():
-        dirtyEntries.addAll(_unknownDepsEntries);
-        for (final entries in _tableIndex.values) {
-          dirtyEntries.addAll(entries);
-        }
-      case FixedTableDependencies(tables: final deps):
-        dirtyEntries.addAll(_unknownDepsEntries);
+    try {
+      switch (changes) {
+        case UnknownTableDependencies():
+          dirtyEntries.addAll(_unknownDepsEntries);
+          for (final entries in _tableIndex.values) {
+            dirtyEntries.addAll(entries);
+          }
+        case FixedTableDependencies(tables: final deps):
+          dirtyEntries.addAll(_unknownDepsEntries);
 
-        for (final dep in deps) {
-          if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
-            switch (dep) {
-              case TableColumnDependency(columns: final changedCols):
-                for (final entry in entries) {
-                  switch (entry.dependencies[dep.table]) {
-                    case TableColumnDependency(columns: final entryCols):
-                      bool intersects;
-                      if (kProfileMode) {
-                        intersectionEntries++;
-                        intersectionSw!.start();
-                        intersects = entryCols.intersects(changedCols);
-                        intersectionSw.stop();
-                      } else {
-                        intersects = entryCols.intersects(changedCols);
-                      }
-                      if (intersects) {
+          for (final dep in deps) {
+            if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
+              switch (dep) {
+                case TableColumnDependency(columns: final changedCols):
+                  for (final entry in entries) {
+                    switch (entry.dependencies[dep.table]) {
+                      case TableColumnDependency(columns: final entryCols):
+                        bool intersects;
+                        if (kProfileMode) {
+                          intersectionEntries++;
+                          intersectionSw!.start();
+                          intersects = entryCols.intersects(changedCols);
+                          intersectionSw.stop();
+                        } else {
+                          intersects = entryCols.intersects(changedCols);
+                        }
+                        if (intersects) {
+                          dirtyEntries.add(entry);
+                        }
+                      case TableDependency _:
                         dirtyEntries.add(entry);
-                      }
-                    case TableDependency _:
-                      dirtyEntries.add(entry);
+                    }
                   }
-                }
-              case TableDependency():
-                dirtyEntries.addAll(entries);
+                case TableDependency():
+                  dirtyEntries.addAll(entries);
+              }
             }
           }
-        }
-    }
-
-    for (final entry in dirtyEntries) {
-      entry.dirty = true;
-      if (!entry.inFlight) {
-        _requeryQueue.add(entry);
       }
-    }
 
-    _flushQueue();
+      for (final entry in dirtyEntries) {
+        entry.dirty = true;
+        if (!entry.inFlight) {
+          _requeryQueue.add(entry);
+        }
+      }
 
-    if (kProfileMode) {
-      invalidateSw!.stop();
-      ProfileCounters.invalidateUs += invalidateSw.elapsedMicroseconds;
-      ProfileCounters.invalidateCount++;
-      ProfileCounters.intersectionUs += intersectionSw!.elapsedMicroseconds;
-      ProfileCounters.intersectionEntries += intersectionEntries;
+      _flushQueue();
+    } finally {
+      if (kProfileMode) {
+        invalidateSw!.stop();
+        ProfileCounters.invalidateUs += invalidateSw.elapsedMicroseconds;
+        ProfileCounters.invalidateCount++;
+        ProfileCounters.intersectionUs += intersectionSw!.elapsedMicroseconds;
+        ProfileCounters.intersectionEntries += intersectionEntries;
+        TraceliteProfile.end(
+          TraceliteResqliteSpans.streamInvalidate,
+          args: [dirtyEntries.length, intersectionEntries],
+        );
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.invalidateUs,
+          ProfileCounters.invalidateUs,
+        );
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.invalidateCount,
+          ProfileCounters.invalidateCount,
+        );
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.intersectionUs,
+          ProfileCounters.intersectionUs,
+        );
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.intersectionEntries,
+          ProfileCounters.intersectionEntries,
+        );
+      }
     }
   }
 

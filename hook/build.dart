@@ -39,6 +39,19 @@ void main(List<String> args) async {
 
     final packageRoot = input.packageRoot.path;
     final targetOS = input.config.code.targetOS;
+    final traceSqlite = _isEnabled(input.userDefines['trace_sqlite']);
+    final traceliteRoot = traceSqlite
+        ? input.userDefines.path('tracelite_root')?.toFilePath()
+        : null;
+
+    if (traceSqlite) {
+      if (traceliteRoot == null || !Directory(traceliteRoot).existsSync()) {
+        throw StateError(
+          'resqlite trace_sqlite=true requires user define '
+          '`tracelite_root` pointing at a tracelite checkout.',
+        );
+      }
+    }
 
     // -----------------------------------------------------------------------
     // Linux: generate a linker version script to control symbol exports.
@@ -55,16 +68,30 @@ void main(List<String> args) async {
     // -----------------------------------------------------------------------
     String? linkerScript;
     if (targetOS == OS.linux) {
+      final exportedSymbols = [
+        ..._exportedSymbols,
+        if (traceSqlite)
+          for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
+      ];
       linkerScript = input.outputDirectory.resolve('resqlite.map').path;
       await File(linkerScript).writeAsString('''
 {
   global:
-${_exportedSymbols.map((s) => '    $s;').join('\n')}
+${exportedSymbols.map((s) => '    $s;').join('\n')}
   local:
     *;
 };
 ''');
     }
+
+    final sqliteSource = traceSqlite
+        ? await _writeTracedSqliteSource(input, packageRoot)
+        : p.join(
+            packageRoot,
+            'third_party',
+            'sqlite3mc',
+            'sqlite3mc_amalgamation.c',
+          );
 
     final library = CBuilder.library(
       name: 'resqlite',
@@ -74,13 +101,18 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         // sqlite3mc: SQLite with Multiple Ciphers — drop-in replacement
         // for plain SQLite that adds encryption support. Zero runtime
         // overhead when no encryption key is set.
-        p.join(packageRoot, 'third_party', 'sqlite3mc', 'sqlite3mc_amalgamation.c'),
+        sqliteSource,
+        if (traceSqlite) ...[
+          p.join(traceliteRoot!, 'native', 'tracelite_runtime.c'),
+          p.join(traceliteRoot, 'native', 'shim_sqlite3.c'),
+        ],
         p.join(packageRoot, 'native', 'resqlite_deps.c'),
         p.join(packageRoot, 'native', 'resqlite.c'),
       ],
       includes: [
         p.join(packageRoot, 'third_party', 'sqlite3mc'),
         p.join(packageRoot, 'native'),
+        if (traceSqlite) p.join(traceliteRoot!, 'native'),
       ],
       defines: {
         // -----------------------------------------------------------------
@@ -102,7 +134,6 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         // power loss; only uncommitted data is at risk).
         'SQLITE_DEFAULT_WAL_SYNCHRONOUS': '1',
 
-
         // Platform hints for sqlite3mc — tell SQLite which C library
         // functions are available. Required for correct operation.
         'SQLITE_HAVE_ISNAN': null,
@@ -118,14 +149,16 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         'SQLITE_THREADSAFE': '2',
 
         // Features we use.
-        'SQLITE_ENABLE_BATCH_ATOMIC_WRITE': null, // F2FS (Android 9+): eliminates journal I/O for 2-3x write speedup
+        'SQLITE_ENABLE_BATCH_ATOMIC_WRITE':
+            null, // F2FS (Android 9+): eliminates journal I/O for 2-3x write speedup
         'SQLITE_ENABLE_FTS5': null,
         'SQLITE_ENABLE_MATH_FUNCTIONS': null,
         'SQLITE_ENABLE_PREUPDATE_HOOK': null,
         'SQLITE_ENABLE_STAT4': null,
 
         // Features we don't use — strip from binary.
-        'SQLITE_OMIT_AUTOINIT': null, // we call sqlite3_initialize() once in resqlite_open
+        'SQLITE_OMIT_AUTOINIT':
+            null, // we call sqlite3_initialize() once in resqlite_open
         'SQLITE_OMIT_COMPLETE': null,
         'SQLITE_OMIT_DECLTYPE': null,
         'SQLITE_OMIT_DEPRECATED': null,
@@ -135,6 +168,7 @@ ${_exportedSymbols.map((s) => '    $s;').join('\n')}
         'SQLITE_OMIT_TCL_VARIABLE': null,
         'SQLITE_OMIT_TRACE': null,
         'SQLITE_OMIT_UTF16': null, // we only use UTF-8 via FFI
+        if (traceSqlite) 'TRACELITE_SQLITE3_EMBEDDED': null,
       },
       flags: [
         // ---------------------------------------------------------------
@@ -239,4 +273,86 @@ const _exportedSymbols = [
   'resqlite_step_row_hash',
   'resqlite_query_hash',
   'resqlite_free',
+];
+
+bool _isEnabled(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is String) {
+    switch (value.toLowerCase()) {
+      case '1':
+      case 'true':
+      case 'yes':
+      case 'on':
+        return true;
+    }
+  }
+  return false;
+}
+
+Future<String> _writeTracedSqliteSource(
+  BuildInput input,
+  String packageRoot,
+) async {
+  final sourcePath = p.join(
+    packageRoot,
+    'third_party',
+    'sqlite3mc',
+    'sqlite3mc_amalgamation.c',
+  );
+  final generatedPath =
+      input.outputDirectory.resolve('sqlite3mc_tracelite.c').path;
+
+  final buffer = StringBuffer()
+    ..writeln('// Generated by resqlite hook/build.dart.')
+    ..writeln('// Compiles sqlite3mc with selected public SQLite symbols')
+    ..writeln('// renamed so tracelite wrappers can own those ABI names.')
+    ..writeln();
+  for (final symbol in _tracedSqliteSymbols) {
+    buffer.writeln('#define $symbol tlt_$symbol');
+  }
+  buffer
+    ..writeln()
+    ..writeln('#include ${_cStringLiteral(sourcePath)}');
+
+  await File(generatedPath).writeAsString(buffer.toString());
+  return generatedPath;
+}
+
+String _cStringLiteral(String value) {
+  return '"${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
+}
+
+const _tracedSqliteSymbols = [
+  'sqlite3_open',
+  'sqlite3_open_v2',
+  'sqlite3_close',
+  'sqlite3_close_v2',
+  'sqlite3_prepare_v2',
+  'sqlite3_prepare_v3',
+  'sqlite3_finalize',
+  'sqlite3_step',
+  'sqlite3_reset',
+  'sqlite3_bind_null',
+  'sqlite3_bind_int',
+  'sqlite3_bind_int64',
+  'sqlite3_bind_double',
+  'sqlite3_bind_text',
+  'sqlite3_bind_blob',
+  'sqlite3_bind_blob64',
+  'sqlite3_clear_bindings',
+  'sqlite3_column_count',
+  'sqlite3_column_int',
+  'sqlite3_column_int64',
+  'sqlite3_column_double',
+  'sqlite3_column_text',
+  'sqlite3_column_blob',
+  'sqlite3_column_bytes',
+  'sqlite3_exec',
+  'sqlite3_changes',
+  'sqlite3_total_changes',
+  'sqlite3_last_insert_rowid',
+  'sqlite3_errcode',
+  'sqlite3_errmsg',
 ];

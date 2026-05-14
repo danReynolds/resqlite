@@ -27,6 +27,10 @@
 ///   (`benchmark/profile/profiled_database.dart`). The counters
 ///   themselves live in `lib/src/profile_counters.dart` and are
 ///   public API — but increments only fire when the flag is on.
+/// - Optional tracelite spans and counters when the run also passes
+///   `-DRESQLITE_TRACELITE=true` and attaches to a runtime region via
+///   `TRACELITE_REGION`. Tracelite remains disabled for ordinary profile
+///   runs unless both flags are present.
 ///
 /// **Design contract.** This flag exists so the main peer-comparison
 /// benchmarks (`run_release.dart`) can measure resqlite's actual
@@ -50,5 +54,7 @@
 /// Never introduce unconditional instrumentation to production code
 /// paths unless the cost is provably sub-nanosecond per call AND
 /// symmetric across all peers being compared.
-const bool kProfileMode =
-    bool.fromEnvironment('RESQLITE_PROFILE', defaultValue: false);
+const bool kProfileMode = bool.fromEnvironment(
+  'RESQLITE_PROFILE',
+  defaultValue: false,
+);

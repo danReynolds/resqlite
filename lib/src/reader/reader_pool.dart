@@ -13,6 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
+import '../tracelite_profile.dart';
 import 'read_worker.dart';
 
 /// A pool of persistent reader isolates with automatic replacement.
@@ -69,8 +70,11 @@ final class ReaderPool {
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
-    final result = await _dispatch(SelectRequest(sql, parameters));
+    final result = await _dispatch(
+      SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
+    );
     return result as List<Map<String, Object?>>;
   }
 
@@ -85,8 +89,18 @@ final class ReaderPool {
   /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
   /// column detail under each table dependency.
   Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
-  selectWithDeps(String sql, [List<Object?> parameters = const []]) async {
-    final result = await _dispatch(SelectWithDepsRequest(sql, parameters));
+      selectWithDeps(
+    String sql, [
+    List<Object?> parameters = const [],
+    int? traceCorrelationId,
+  ]) async {
+    final result = await _dispatch(
+      SelectWithDepsRequest(
+        sql,
+        parameters,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
     return result as (List<Map<String, Object?>>, TableDependencies, int, int);
   }
 
@@ -94,8 +108,15 @@ final class ReaderPool {
   Future<Uint8List> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
-    final result = await _dispatch(SelectBytesRequest(sql, parameters));
+    final result = await _dispatch(
+      SelectBytesRequest(
+        sql,
+        parameters,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
     return result as Uint8List;
   }
 
@@ -106,10 +127,17 @@ final class ReaderPool {
     String sql,
     List<Object?> parameters,
     int lastResultHash,
-    int lastRowCount,
-  ) async {
+    int lastRowCount, [
+    int? traceCorrelationId,
+  ]) async {
     final result = await _dispatch(
-      SelectIfChangedRequest(sql, parameters, lastResultHash, lastRowCount),
+      SelectIfChangedRequest(
+        sql,
+        parameters,
+        lastResultHash,
+        lastRowCount,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
     return result as (List<Map<String, Object?>>?, int, int);
   }
@@ -131,6 +159,18 @@ final class ReaderPool {
         final slot = _workers[_next % count];
         _next++;
         if (slot.isAvailable) {
+          if (kProfileMode && kTraceliteProfileMode) {
+            final typeId = TraceliteProfile.internString(
+              request.runtimeType.toString(),
+            );
+            return TraceliteProfile.traceAsync(
+              TraceliteResqliteSpans.readerPoolDispatch,
+              () => slot.request(request),
+              correlationId: request.traceCorrelationId ??
+                  TraceliteProfile.nextCorrelationId(),
+              beginArgs: [typeId],
+            );
+          }
           return slot.request(request);
         }
       }
@@ -142,6 +182,10 @@ final class ReaderPool {
       // once per re-park, not per scan.
       if (kProfileMode && hasPreviouslyParked) {
         ProfileCounters.dispatcherWakeRetryTotal++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherWakeRetryTotal,
+          ProfileCounters.dispatcherWakeRetryTotal,
+        );
       }
 
       // All workers busy or dead. Wait for a worker-free event.
@@ -149,11 +193,23 @@ final class ReaderPool {
       _dispatchWaiters.add(waiter);
       if (kProfileMode) {
         ProfileCounters.dispatcherParkedTotal++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherParkedTotal,
+          ProfileCounters.dispatcherParkedTotal,
+        );
         ProfileCounters.dispatcherCurrentParked++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherCurrentParked,
+          ProfileCounters.dispatcherCurrentParked,
+        );
         if (ProfileCounters.dispatcherCurrentParked >
             ProfileCounters.dispatcherMaxParkedConcurrent) {
           ProfileCounters.dispatcherMaxParkedConcurrent =
               ProfileCounters.dispatcherCurrentParked;
+          TraceliteProfile.counter(
+            TraceliteResqliteCounters.dispatcherMaxParkedConcurrent,
+            ProfileCounters.dispatcherMaxParkedConcurrent,
+          );
         }
       }
       try {
@@ -161,6 +217,10 @@ final class ReaderPool {
       } finally {
         if (kProfileMode) {
           ProfileCounters.dispatcherCurrentParked--;
+          TraceliteProfile.counter(
+            TraceliteResqliteCounters.dispatcherCurrentParked,
+            ProfileCounters.dispatcherCurrentParked,
+          );
         }
       }
       hasPreviouslyParked = true;
@@ -319,11 +379,14 @@ class _WorkerSlot {
       }
     };
 
-    await Isolate.spawn(readerEntrypoint, [
-      dbHandleAddr,
-      _readerId,
-      workerPort.sendPort,
-    ], onExit: workerPort.sendPort);
+    await Isolate.spawn(
+        readerEntrypoint,
+        [
+          dbHandleAddr,
+          _readerId,
+          workerPort.sendPort,
+        ],
+        onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

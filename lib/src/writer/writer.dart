@@ -80,16 +80,23 @@ final class Writer {
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
     return _request<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      (replyPort) => ExecuteRequest(
+        sql,
+        parameters,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
   }
 
   Future<BatchResponse?> executeBatch(
     String sql,
-    List<List<Object?>> paramSets,
-  ) async {
+    List<List<Object?>> paramSets, {
+    int? traceCorrelationId,
+  }) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -101,16 +108,27 @@ final class Writer {
     assertUniformParamSets(sql, paramSets);
 
     return _request<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
+      (replyPort) => BatchRequest(
+        sql,
+        paramSets,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
   }
 
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
     final response = await _request<QueryResponse>(
-      (replyPort) => QueryRequest(sql, parameters, replyPort),
+      (replyPort) => QueryRequest(
+        sql,
+        parameters,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
     return response.rows;
   }

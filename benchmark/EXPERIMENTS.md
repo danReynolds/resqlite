@@ -65,13 +65,100 @@ Currently gated:
   `benchmark/profile/profiled_database.dart` wrapper's `select()`
   method. The counter fields themselves live in
   `lib/src/profile_counters.dart` and cost nothing unless incremented.
+- Optional tracelite mirror events when both `RESQLITE_PROFILE` and
+  `RESQLITE_TRACELITE` are enabled. These cover public database
+  operation spans, reader/writer handling, reader-pool dispatch,
+  stream invalidation, profile counters, and embedded SQLite calls
+  when `trace_sqlite` is enabled. The runtime attach is best-effort;
+  missing `TRACELITE_REGION` or runtime symbols leave the normal
+  profile harness unchanged.
 
 If you add new diagnostic instrumentation, gate it the same way.
 Never add unconditional instrumentation to production code paths
 unless the cost is provably sub-nanosecond per call AND symmetric
 across all peers being compared.
 
+## Tracelite capture
+
+Tracelite capture is an optional overlay on profile mode. Use it when
+you need one trace file that can line up resqlite's database, worker,
+counter, fanout, and native spans with another library or a native
+SQLite shim.
+
+The preferred workflow is the wrapper:
+
+```bash
+dart run benchmark/profile/run_tracelite_profile.dart \
+  --tracelite-root=/path/to/tracelite \
+  --label=exp-N
+```
+
+By default it writes `build/tracelite-profile/exp-N/`:
+
+- `profile.json`: the legacy `run_profile.dart` artifact, for existing
+  diff tools and experiment notes.
+- `profile.tlt-region`: the raw tracelite region.
+- `workload-summary.json` and `workload-summary.md`: tracelite's
+  resqlite workload summary export.
+- `graph-data/`: normalized JSON datasets for downstream dashboards.
+- `parity-diff.txt`: `benchmark/profile/diff.dart` comparing the legacy
+  JSON against tracelite's workload summary.
+
+The wrapper deliberately shells out to a local tracelite checkout instead
+of adding tracelite as a resqlite dependency. The package code only keeps
+the compile-time trace emitters.
+
+For GitHub Pages, keep raw traces and legacy JSON in `build/` but write the
+small graph-data bundle directly to the dashboard input location:
+
+```bash
+dart run benchmark/profile/run_tracelite_profile.dart \
+  --tracelite-root=/path/to/tracelite \
+  --label=exp-N \
+  --graph-data-dir=docs/benchmarks/data/tracelite/latest
+```
+
+The dashboard treats `docs/benchmarks/data/tracelite/latest/index.json` as
+the canonical tracelite data source when present. New profiling views should
+use this graph-data bundle, not the legacy profile JSON compatibility shape.
+The wrapper runs `tracelite validate-graph-data` after export so malformed
+graph data fails before it can be committed for Pages.
+
+You can still run the low-level harness directly when a region is already
+active:
+
+```bash
+TRACELITE_REGION=/tmp/resqlite.trace \
+TRACELITE_RUNTIME=/path/to/libtracelite_runtime.dylib \
+dart run \
+  -DRESQLITE_PROFILE=true \
+  -DRESQLITE_TRACELITE=true \
+  benchmark/run_profile.dart \
+  --out=benchmark/profile/results/tracelite.json
+```
+
+For SQLite-level timing inside resqlite's embedded sqlite3mc build,
+enable the native asset hook path from the consuming package:
+
+```yaml
+hooks:
+  user_defines:
+    resqlite:
+      trace_sqlite: true
+      tracelite_root: /path/to/tracelite
+```
+
+`trace_sqlite` rewrites the embedded sqlite3mc public SQLite symbols
+behind `tlt_` names, compiles the tracelite runtime and SQLite shim
+into `libresqlite`, and lets the shim own the normal SQLite ABI
+symbols. Keep this out of release benchmark runs; it is for trace
+capture, not public dashboard numbers.
+
 ## The three-command workflow
+
+Use this direct legacy workflow when you only need old JSON A/B diffing.
+Use the tracelite wrapper above when the run should also produce trace,
+workload-summary, and graph-data artifacts.
 
 ```bash
 # 1. On main (baseline)
@@ -216,8 +303,10 @@ for new fields.
 
 When you finalize an experiment (accept or reject), create
 `experiments/NNN-my-experiment.md`. Include the diff output inline and
-commit the `*.json` files to `benchmark/profile/results/` so the
-measurement is reproducible.
+link the generated tracelite or profile artifacts. Do not commit raw
+profile JSONs from `benchmark/profile/results/`; the CI guard rejects
+those because they are large, local, and hardware-specific. Commit the
+aggregate markdown or experiment writeup instead.
 
 Template:
 
