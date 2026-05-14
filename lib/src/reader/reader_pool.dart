@@ -285,6 +285,14 @@ class _WorkerSlot {
         return;
       }
 
+      // [EXP-136](../../../experiments/136-completion-microtask-counter.md):
+      // measure the main-isolate completion-side wall per reader reply.
+      // `_WorkerSlot.request` uses `Completer<Object?>.sync()`, so
+      // `pending.complete(result)` runs the entire `_dispatch` /
+      // `_requery` / `entry.emit` / `_flushQueue` chain synchronously
+      // inside this handler. Profile-mode only.
+      final completionSw = kProfileMode ? (Stopwatch()..start()) : null;
+
       final (result, sacrificed, error) =
           msg as (Object?, bool, ResqliteException?);
 
@@ -316,6 +324,13 @@ class _WorkerSlot {
         } else {
           pending.completeError(error);
         }
+      }
+
+      if (kProfileMode) {
+        completionSw!.stop();
+        ProfileCounters.completionHandlerUs +=
+            completionSw.elapsedMicroseconds;
+        ProfileCounters.completionHandlerCount++;
       }
     };
 

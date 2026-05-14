@@ -110,6 +110,47 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative wall-clock microseconds spent inside the main-isolate
+  /// reader worker port handler synchronous body — from the moment a
+  /// reader reply arrives at `_WorkerSlot._workerPort` to the point the
+  /// handler returns control to the event loop. Because
+  /// `_WorkerSlot.request` uses `Completer<Object?>.sync()`, the
+  /// downstream `await _pool.selectIfChanged(...)` continuation in
+  /// `StreamEngine._requery` (hash compare, `entry.emit`,
+  /// `_flushQueue`) runs synchronously inside this handler — so the
+  /// counter captures the full main-isolate completion-side wall per
+  /// reader reply.
+  ///
+  /// Only the normal-reply branch is counted. Startup-handshake (first
+  /// SendPort message) and onExit (`msg == null`) branches are
+  /// excluded. Sacrifice replies are counted because they still drive
+  /// the same `pending.complete(result)` chain.
+  ///
+  /// Added by [EXP-136](../../experiments/136-completion-microtask-counter.md)
+  /// to land the completion-side scheduling cost counter named in
+  /// `signals.json#stream-rerun-dispatch.blockedOnMeasurement` — the
+  /// remaining piece after exp 120 / exp 121 narrowed the main-isolate
+  /// wall to "everything not in the writer-handler".
+  static int completionHandlerUs = 0;
+
+  /// Number of reader-reply completions handled. One increment per
+  /// normal-reply pass through the worker port handler.
+  static int completionHandlerCount = 0;
+
+  /// Cumulative wall-clock microseconds spent inside
+  /// `StreamEntry.emit` — the loop that hands each result list to every
+  /// subscriber controller via `controller.add`. A subset of
+  /// [completionHandlerUs] when the emit is driven by a reader reply
+  /// (the common case for stream re-queries). Lets the audit split
+  /// reader-completion wall into subscriber-fanout cost
+  /// (`streamEmitUs`) and rest-of-completion cost
+  /// (`completionHandlerUs - streamEmitUs`).
+  static int streamEmitUs = 0;
+
+  /// Number of `StreamEntry.emit` calls. One per re-query emission and
+  /// one per initial result emission.
+  static int streamEmitCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -121,6 +162,10 @@ class ProfileCounters {
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'completion_handler_us': completionHandlerUs,
+    'completion_handler_count': completionHandlerCount,
+    'stream_emit_us': streamEmitUs,
+    'stream_emit_count': streamEmitCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -149,5 +194,9 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    completionHandlerUs = 0;
+    completionHandlerCount = 0;
+    streamEmitUs = 0;
+    streamEmitCount = 0;
   }
 }
