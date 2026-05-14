@@ -484,8 +484,20 @@ final class StreamEntry {
   }
 
   void emit(List<Map<String, Object?>> rows) {
+    // [EXP-136](../../experiments/136-completion-microtask-counter.md):
+    // sub-counter of `completionHandlerUs` covering the subscriber
+    // fanout cost — `controller.add` schedules a microtask per
+    // subscriber, so the inline wall here is the loop plus the
+    // `StreamController.add` synchronous portion (event enqueue, not
+    // listener callback). Profile-mode only.
+    final emitSw = kProfileMode ? (Stopwatch()..start()) : null;
     for (final sub in subscribers) {
       if (!sub.isClosed) sub.add(rows);
+    }
+    if (kProfileMode) {
+      emitSw!.stop();
+      ProfileCounters.streamEmitUs += emitSw.elapsedMicroseconds;
+      ProfileCounters.streamEmitCount++;
     }
   }
 

@@ -117,6 +117,63 @@ main before claiming acceptance — and ask, before opening, whether the
 contention path the change targets is still reachable on current main
 or whether some recently-accepted experiment now elides it.*
 
+### Wall-convention and counter-snapshot timing must match the work being measured
+
+[Exp 121](121-invalidation-traversal-audit.md) established a strict
+writer-side burst-wall convention — stopwatch stops on the last write —
+so `invalidate_us / wall_us` was a stable denominator for invalidation
+traversal, which fires entirely inside the writer-reply handler chain
+during the burst.
+
+[Exp 136](136-completion-microtask-counter.md) initially inherited the
+same audit harness verbatim and read **zero** for its completion-side
+counter — even though the instrumentation was correct and `kProfileMode`
+was on. The cause: reader-pool replies on the same A11c overlap workload
+mostly land on the main isolate AFTER the last write, during the drain.
+The audit's counter snapshot ran at burst-end, so it missed almost all
+of the work the counter was designed to measure. Adding a second
+post-drain snapshot (`countersAfterDrain`) brought the counter to life
+and produced the 22–27% completion-fraction reading.
+
+The wall denominator itself doesn't need to change between writer-side
+and completion-side audits — keep `wall_us` writer-burst wall so
+fractions stay directly comparable across experiments — but the
+*counter snapshot timing* must match where the measured work actually
+fires. For drain-phase counters (reader-pool completion, post-burst
+subscriber delivery, anything driven by Future resolution of an async
+I/O), snapshot after the quiet-window drain finishes and report it as
+a fraction of total (burst + drain) wall, not as a fraction of burst
+wall alone.
+
+*Reapplies whenever instrumenting an event-loop-driven path. Before
+running the audit, predict which phase the counter increments fire in
+— if any meaningful fraction lands in the drain, the harness needs a
+post-drain snapshot or the result will look like the counter is dead.*
+
+### A worktree's `dart pub get` is mandatory before edited library code is observable
+
+A scheduled-experiment worktree under `.claude/worktrees/` shares the
+parent repo's `.dart_tool/package_config.json` by default. That config
+resolves the `resqlite` package to `..` (the parent repo's `lib/`),
+*not* the worktree's. [Exp 136](136-completion-microtask-counter.md)
+hit this directly: a counter added to `lib/src/profile_counters.dart`
+in the worktree was invisible because the audit harness compiled
+against the parent repo's older copy of that file — which happened to
+already contain a different in-flight branch's counters (exp 135's
+writer-handler counters), making the symptom look like wrong-branch
+contamination rather than a path-resolution issue.
+
+The first sign is the `ProfileCounters.snapshot()` output disagreeing
+with the static field list in the code you just edited. Running
+`dart pub get` from inside the worktree creates a worktree-local
+`.dart_tool/` that binds the toolchain to the worktree's `lib/`.
+
+*Reapplies any time a scheduled experiment runs inside a fresh
+worktree and instruments library code. Run `dart pub get` once
+before the first profile-mode invocation. If a counter shows zeros
+that you expected to be nonzero, check the snapshot map for
+unexpected keys from a different branch.*
+
 ### Admission loops need concrete resources before checking capacity
 
 [Exp 122](122-concrete-reader-pool-stream-admission.md) found a subtle async admission
