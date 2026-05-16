@@ -15,11 +15,22 @@ import 'package:resqlite/resqlite.dart' as resqlite;
 ///   dart run benchmark/experiments/batch_param_flatten.dart
 ///   dart run benchmark/experiments/batch_param_flatten.dart --iterations=80
 ///   dart run benchmark/experiments/batch_param_flatten.dart --text-mode=unicode
+///   dart run benchmark/experiments/batch_param_flatten.dart \
+///     --cell-mode=blob --blob-size=256
+///
+/// `--cell-mode=mixed` keeps the historical 25%/25%/25%/25% TEXT/INT/REAL/BLOB
+/// shape (exp 113 / 125 / 126). `--cell-mode=blob` switches to BLOB-only
+/// columns, sized by `--blob-size`, so future runs can answer the
+/// parameter-encoding-and-binding open question: "Are there remaining
+/// blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?"
+/// ([EXP-138](../../experiments/138-blob-param-shape-audit.md)).
 const _defaultWarmup = 8;
 const _defaultIterations = 30;
+const _defaultBlobSize = 4;
 const _batchSizes = [100, 1000, 10000];
 const _paramWidths = [2, 8, 20];
 const _textModes = {'ascii', 'unicode', 'emoji', 'nul'};
+const _cellModes = {'mixed', 'blob'};
 
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
@@ -29,7 +40,12 @@ Future<void> main(List<String> args) async {
   print('');
   print('Warmup: ${options.warmup}');
   print('Iterations: ${options.iterations}');
-  print('Text mode: ${options.textMode}');
+  print('Cell mode: ${options.cellMode}');
+  if (options.cellMode == 'blob') {
+    print('Blob size: ${options.blobSize} bytes');
+  } else {
+    print('Text mode: ${options.textMode}');
+  }
   print('');
 
   for (final paramWidth in _paramWidths) {
@@ -39,7 +55,9 @@ Future<void> main(List<String> args) async {
         paramWidth: paramWidth,
         warmup: options.warmup,
         iterations: options.iterations,
+        cellMode: options.cellMode,
         textMode: options.textMode,
+        blobSize: options.blobSize,
       );
     }
   }
@@ -50,7 +68,9 @@ Future<void> _runBatchShape({
   required int paramWidth,
   required int warmup,
   required int iterations,
+  required String cellMode,
   required String textMode,
+  required int blobSize,
 }) async {
   final tempDir = await Directory.systemTemp.createTemp(
     'bench_batch_flatten_${paramWidth}_',
@@ -58,9 +78,15 @@ Future<void> _runBatchShape({
   try {
     final db = await resqlite.Database.open('${tempDir.path}/test.db');
     try {
-      await db.execute(_createTableSql(paramWidth));
+      await db.execute(_createTableSql(paramWidth, cellMode));
 
-      final paramSets = _buildParamSets(batchSize, paramWidth, textMode);
+      final paramSets = _buildParamSets(
+        batchSize,
+        paramWidth,
+        cellMode,
+        textMode,
+        blobSize,
+      );
       final insertSql = _insertSql(paramWidth);
 
       for (var i = 0; i < warmup; i++) {
@@ -99,10 +125,10 @@ Future<void> _runBatchShape({
   }
 }
 
-String _createTableSql(int paramWidth) {
+String _createTableSql(int paramWidth, String cellMode) {
   final columns = [
     'id INTEGER PRIMARY KEY',
-    for (var i = 0; i < paramWidth; i++) 'c$i ${_sqliteTypeFor(i)}',
+    for (var i = 0; i < paramWidth; i++) 'c$i ${_sqliteTypeFor(i, cellMode)}',
   ];
   return 'CREATE TABLE items(${columns.join(', ')})';
 }
@@ -117,25 +143,63 @@ String _insertSql(int paramWidth) {
 List<List<Object?>> _buildParamSets(
   int batchSize,
   int paramWidth,
+  String cellMode,
   String textMode,
+  int blobSize,
 ) => [
   for (var row = 0; row < batchSize; row++)
-    [for (var col = 0; col < paramWidth; col++) _valueFor(row, col, textMode)],
+    [
+      for (var col = 0; col < paramWidth; col++)
+        _valueFor(row, col, cellMode, textMode, blobSize),
+    ],
 ];
 
-String _sqliteTypeFor(int col) => switch (col % 4) {
-  0 => 'TEXT',
-  1 => 'INTEGER',
-  2 => 'REAL',
-  _ => 'BLOB',
-};
+String _sqliteTypeFor(int col, String cellMode) {
+  if (cellMode == 'blob') return 'BLOB';
+  return switch (col % 4) {
+    0 => 'TEXT',
+    1 => 'INTEGER',
+    2 => 'REAL',
+    _ => 'BLOB',
+  };
+}
 
-Object? _valueFor(int row, int col, String textMode) => switch (col % 4) {
-  0 => _textValueFor(row, col, textMode),
-  1 => row * 31 + col,
-  2 => row * 1.5 + col / 10,
-  _ => Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, col & 0xff, 0xA5]),
-};
+Object? _valueFor(
+  int row,
+  int col,
+  String cellMode,
+  String textMode,
+  int blobSize,
+) {
+  if (cellMode == 'blob') return _blobValueFor(row, col, blobSize);
+  return switch (col % 4) {
+    0 => _textValueFor(row, col, textMode),
+    1 => row * 31 + col,
+    2 => row * 1.5 + col / 10,
+    _ => _smallBlobValue(row, col),
+  };
+}
+
+Uint8List _smallBlobValue(int row, int col) =>
+    Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, col & 0xff, 0xA5]);
+
+/// Deterministic blob of `size` bytes for `--cell-mode=blob`. Content
+/// varies with `row` and `col` so the SQLite engine cannot collapse
+/// values into a shared cached representation (which would understate
+/// per-row encoding cost).
+Uint8List _blobValueFor(int row, int col, int size) {
+  final bytes = Uint8List(size);
+  // Two-byte seed from row+col plus a position-dependent step so each
+  // byte differs from its neighbours. Cheap to fill but enough variation
+  // to avoid any all-zero buffer optimization in SQLite or page-store
+  // compaction.
+  final seedLo = (row & 0xff) ^ (col & 0xff);
+  final seedHi = ((row >> 8) & 0xff) ^ ((col >> 1) & 0xff);
+  for (var i = 0; i < size; i++) {
+    bytes[i] = (seedLo + i * 13 + (seedHi ^ (i >> 3))) & 0xff;
+  }
+  return bytes;
+}
 
 String _textValueFor(int row, int col, String textMode) => switch (textMode) {
   'ascii' => 'item_${row}_$col',
@@ -156,16 +220,22 @@ final class _Options {
     required this.warmup,
     required this.iterations,
     required this.textMode,
+    required this.cellMode,
+    required this.blobSize,
   });
 
   final int warmup;
   final int iterations;
   final String textMode;
+  final String cellMode;
+  final int blobSize;
 
   static _Options parse(List<String> args) {
     var warmup = _defaultWarmup;
     var iterations = _defaultIterations;
     var textMode = 'ascii';
+    var cellMode = 'mixed';
+    var blobSize = _defaultBlobSize;
     for (final arg in args) {
       if (arg.startsWith('--warmup=')) {
         warmup = int.parse(arg.substring('--warmup='.length));
@@ -180,11 +250,28 @@ final class _Options {
           );
           exit(2);
         }
+      } else if (arg.startsWith('--cell-mode=')) {
+        cellMode = arg.substring('--cell-mode='.length);
+        if (!_cellModes.contains(cellMode)) {
+          stderr.writeln(
+            'Unknown cell mode: $cellMode '
+            '(expected one of ${_cellModes.join(', ')})',
+          );
+          exit(2);
+        }
+      } else if (arg.startsWith('--blob-size=')) {
+        blobSize = int.parse(arg.substring('--blob-size='.length));
+        if (blobSize <= 0) {
+          stderr.writeln('--blob-size must be positive (got $blobSize)');
+          exit(2);
+        }
       } else if (arg == '--help' || arg == '-h') {
         print(
           'Usage: dart run benchmark/experiments/batch_param_flatten.dart '
           '[--warmup=N] [--iterations=N] '
-          '[--text-mode=${_textModes.join('|')}]',
+          '[--text-mode=${_textModes.join('|')}] '
+          '[--cell-mode=${_cellModes.join('|')}] '
+          '[--blob-size=N]',
         );
         exit(0);
       } else {
@@ -192,6 +279,12 @@ final class _Options {
         exit(2);
       }
     }
-    return _Options(warmup: warmup, iterations: iterations, textMode: textMode);
+    return _Options(
+      warmup: warmup,
+      iterations: iterations,
+      textMode: textMode,
+      cellMode: cellMode,
+      blobSize: blobSize,
+    );
   }
 }
