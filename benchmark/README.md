@@ -182,16 +182,17 @@ The decision path also rejected a known injected read-path regression:
 ```bash
 dart run benchmark/decide_tracelite.dart \
   --tracelite-root=/path/to/tracelite \
-  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
+  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/run-001-20260531T154622Z/manifest.json \
   --candidate=build/tracelite-decisions/known-read-delay-regression/candidate/manifest.json \
-  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
-  --label=known-read-delay-regression
+  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/policy-calibration.json \
+  --label=known-read-delay-regression-pinned-policy
 ```
 
 That artifact reported `rejected`: trace health passed, while primary and
 guardrail gates rejected the delayed candidate on `chat-sim`,
 `narrow-batch-insert`, and `sqlite-diagnostics`. Its graph-data bundle
-validated.
+validated. The decision wrapper manifest recorded the pinned tracelite source as
+clean and matching.
 
 This is now credible as the primary resqlite pre-publish profiling path. The
 source pin is enforced by the wrapper instead of living only in operator notes.
