@@ -67,9 +67,10 @@ Currently gated:
   `lib/src/profile_counters.dart` and cost nothing unless incremented.
 - Optional tracelite mirror events when both `RESQLITE_PROFILE` and
   `RESQLITE_TRACELITE` are enabled. These cover public database
-  operation spans, reader/writer handling, reader-pool dispatch,
-  stream invalidation, profile counters, and embedded SQLite calls
-  when `trace_sqlite` is enabled. The runtime attach is best-effort;
+  operation spans, transaction bodies, reader/writer handling,
+  reader-pool dispatch, correlated stream invalidation and re-query,
+  profile counters, and embedded SQLite calls when `trace_sqlite` is
+  enabled. The runtime attach is best-effort;
   missing `TRACELITE_REGION` or runtime symbols leave the normal
   profile harness unchanged.
 

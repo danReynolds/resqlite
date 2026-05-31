@@ -106,6 +106,7 @@ git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
 ```bash
 dart run benchmark/run_tracelite.dart \
   --tracelite-root=/path/to/tracelite \
+  --resqlite-root="$PWD" \
   --label=prepublish-YYYY-MM-DD \
   --graph-data-dir=docs/benchmarks/data/tracelite/latest
 ```
@@ -114,8 +115,13 @@ The default pin is
 `bcb3f3f419a09aa682948595fdb8ab002af637dc`
 (`resqlite-profiling-gate-2026-05-31`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
-revision or is dirty. Use `--allow-unpinned-tracelite` or
-`--allow-dirty-tracelite` only for local tracelite development.
+revision or is dirty. It also records `resqlite_source` and verifies that
+Tracelite's resolved `resqlite` package points at the checkout under test. If
+`/path/to/tracelite/pubspec_overrides.yaml` is missing, the wrapper creates an
+ignored override for `--resqlite-root`; if an existing override points anywhere
+else, the gate fails before running the suite. Use
+`--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
+tracelite development.
 
 The wrapper runs `tracelite suite-history --profile=production --runs=5`.
 It separates suite coverage from release-gate policy:
@@ -156,7 +162,9 @@ Current evidence: the strict pinned-source
 `sole-gate-2026-05-31-resqlite-pinned-source` run completed 5/5 production
 suite histories, exported graph data, and passed graph-data validation. Its
 manifest recorded `tracelite_source.source_ok=true` and
-`revision_matches_pin=true`. Its release-lane `policy-calibration.json` was
+`revision_matches_pin=true`, with `tracelite_resqlite_dependency`
+matching the resqlite checkout under test. Its release-lane
+`policy-calibration.json` was
 `ready` for 5/5 groups with a 27.5% primary threshold, 20.5% max regression
 guardrail, and 20.5% max-CV gate. The gate uses the p75 within-run noise policy
 and the outlier ceilings listed above.

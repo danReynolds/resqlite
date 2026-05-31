@@ -100,7 +100,10 @@ final class StreamEngine {
   /// [TableDependencies.none] means there are no stream-visible changes for
   /// this writer response. [TableDependencies.unknown] means native dirty-table
   /// tracking was unreliable, so every active stream must re-query.
-  Future<void> onDependencyChanges(TableDependencies changes) async {
+  Future<void> onDependencyChanges(
+    TableDependencies changes, {
+    int? traceCorrelationId,
+  }) async {
     if (_entries.isEmpty) {
       return;
     }
@@ -118,7 +121,10 @@ final class StreamEngine {
     var intersectionEntries = 0;
     final dirtyEntries = <StreamEntry>{};
     if (kProfileMode) {
-      TraceliteProfile.begin(TraceliteResqliteSpans.streamInvalidate);
+      TraceliteProfile.begin(
+        TraceliteResqliteSpans.streamInvalidate,
+        correlationId: traceCorrelationId,
+      );
     }
 
     try {
@@ -163,6 +169,9 @@ final class StreamEngine {
 
       for (final entry in dirtyEntries) {
         entry.dirty = true;
+        if (traceCorrelationId != null) {
+          entry.pendingTraceCorrelationId = traceCorrelationId;
+        }
         if (!entry.inFlight) {
           _requeryQueue.add(entry);
         }
@@ -179,22 +188,27 @@ final class StreamEngine {
         TraceliteProfile.end(
           TraceliteResqliteSpans.streamInvalidate,
           args: [dirtyEntries.length, intersectionEntries],
+          correlationId: traceCorrelationId,
         );
         TraceliteProfile.counter(
           TraceliteResqliteCounters.invalidateUs,
           ProfileCounters.invalidateUs,
+          correlationId: traceCorrelationId,
         );
         TraceliteProfile.counter(
           TraceliteResqliteCounters.invalidateCount,
           ProfileCounters.invalidateCount,
+          correlationId: traceCorrelationId,
         );
         TraceliteProfile.counter(
           TraceliteResqliteCounters.intersectionUs,
           ProfileCounters.intersectionUs,
+          correlationId: traceCorrelationId,
         );
         TraceliteProfile.counter(
           TraceliteResqliteCounters.intersectionEntries,
           ProfileCounters.intersectionEntries,
+          correlationId: traceCorrelationId,
         );
       }
     }
@@ -305,6 +319,8 @@ final class StreamEngine {
 
   /// Re-query a single stream on the reader pool.
   Future<void> _requery(StreamEntry entry) async {
+    final traceCorrelationId = entry.pendingTraceCorrelationId;
+    entry.pendingTraceCorrelationId = null;
     try {
       entry.inFlight = true;
       entry.dirty = false;
@@ -314,12 +330,16 @@ final class StreamEngine {
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
+        traceCorrelationId,
       );
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
       // the entry should be re-scheduled for requery.
       if (entry.dirty) {
+        if (entry.pendingTraceCorrelationId == null) {
+          entry.pendingTraceCorrelationId = traceCorrelationId;
+        }
         _requeryQueue.add(entry);
         return;
       }
@@ -446,6 +466,13 @@ final class StreamEntry {
 
   /// Whether the stream is currently being queried (and we are waiting for the result).
   bool inFlight = false;
+
+  /// Trace correlation for the write that most recently dirtied this stream.
+  ///
+  /// Multiple writes may collapse into one re-query; in that case the latest
+  /// non-null correlation is retained so the re-query can still be connected
+  /// to a triggering write in tracelite.
+  int? pendingTraceCorrelationId;
 
   @override
   int get hashCode => key;

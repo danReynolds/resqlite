@@ -401,7 +401,10 @@ final class Database {
       );
     }
 
-    streamEngine.onDependencyChanges(response.modifications);
+    streamEngine.onDependencyChanges(
+      response.modifications,
+      traceCorrelationId: correlationId,
+    );
 
     return response.result;
   }
@@ -462,7 +465,10 @@ final class Database {
     }
 
     if (response != null) {
-      streamEngine.onDependencyChanges(response.modifications);
+      streamEngine.onDependencyChanges(
+        response.modifications,
+        traceCorrelationId: correlationId,
+      );
     }
   }
 
@@ -498,7 +504,20 @@ final class Database {
 
     final runtime = await _runtime;
     final writer = runtime.writer;
-    return writer.locked(() => writer.transaction(body));
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    Future<T> run() => writer.locked(
+          () => writer.transaction(body, traceCorrelationId: correlationId),
+        );
+    if (correlationId == null) {
+      return run();
+    }
+    return TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseTransaction,
+      run,
+      correlationId: correlationId,
+    );
   }
 
   // -------------------------------------------------------------------------

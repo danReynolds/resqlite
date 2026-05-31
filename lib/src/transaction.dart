@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/profile_mode.dart';
+import 'package:resqlite/src/tracelite_profile.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 /// A transaction proxy object for executing writes and reads atomically.
@@ -28,10 +30,12 @@ import 'package:resqlite/src/writer/writer.dart';
 /// ```
 final class Transaction {
   final Writer _writer;
+  final int? _traceCorrelationId;
 
   bool _active = true;
 
-  Transaction(this._writer);
+  Transaction(this._writer, {int? traceCorrelationId})
+      : _traceCorrelationId = traceCorrelationId;
 
   /// Zone key storing the active [Transaction] when inside a transaction body.
   /// Database methods check this to transparently route through the transaction
@@ -66,7 +70,23 @@ final class Transaction {
     List<Object?> parameters = const [],
   ]) async {
     _ensureActive();
-    final response = await _writer.execute(sql, parameters);
+    final correlationId = _traceCorrelationId;
+    if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
+      final response = await _writer.execute(
+        sql,
+        parameters,
+        correlationId,
+      );
+      return response.result;
+    }
+    final sqlId = TraceliteProfile.internString(sql);
+    final response = await TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseExecute,
+      () => _writer.execute(sql, parameters, correlationId),
+      correlationId: correlationId,
+      beginArgs: [sqlId, parameters.length],
+      endArgs: (response) => [response.result.affectedRows],
+    );
     return response.result;
   }
 
@@ -82,7 +102,18 @@ final class Transaction {
     List<Object?> parameters = const [],
   ]) async {
     _ensureActive();
-    return _writer.select(sql, parameters);
+    final correlationId = _traceCorrelationId;
+    if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
+      return _writer.select(sql, parameters, correlationId);
+    }
+    final sqlId = TraceliteProfile.internString(sql);
+    return TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseSelect,
+      () => _writer.select(sql, parameters, correlationId),
+      correlationId: correlationId,
+      beginArgs: [sqlId, parameters.length],
+      endArgs: (rows) => [rows.length],
+    );
   }
 
   /// Executes one SQL statement across many parameter sets within this
@@ -110,7 +141,27 @@ final class Transaction {
     List<List<Object?>> paramSets,
   ) async {
     _ensureActive();
-    await _writer.executeBatch(sql, paramSets);
+    final correlationId = _traceCorrelationId;
+    if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
+      await _writer.executeBatch(
+        sql,
+        paramSets,
+        traceCorrelationId: correlationId,
+      );
+      return;
+    }
+    final sqlId = TraceliteProfile.internString(sql);
+    final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
+    await TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseExecuteBatch,
+      () => _writer.executeBatch(
+        sql,
+        paramSets,
+        traceCorrelationId: correlationId,
+      ),
+      correlationId: correlationId,
+      beginArgs: [sqlId, paramCount, paramSets.length],
+    );
   }
 
   /// Initiates a nested transaction as a new savepoint. If [body] completes normally,
@@ -133,7 +184,7 @@ final class Transaction {
   /// ```
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
     _ensureActive();
-    return _writer.transaction(body);
+    return _writer.transaction(body, traceCorrelationId: _traceCorrelationId);
   }
 
   void close() {

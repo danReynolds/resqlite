@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 const pinnedTraceliteRepository = 'https://github.com/danReynolds/tracelite';
 const pinnedTraceliteRevision = 'bcb3f3f419a09aa682948595fdb8ab002af637dc';
 const pinnedTraceliteTag = 'resqlite-profiling-gate-2026-05-31';
@@ -22,8 +24,43 @@ Future<Map<String, Object?>> traceliteSourceState(
   String traceliteRoot, {
   required TraceliteSourcePolicy policy,
 }) async {
+  final gitState = await _gitSourceState(traceliteRoot);
+  final revision = gitState['revision'] as String?;
+  final dirty = gitState['dirty'] as bool?;
+  final revisionMatches =
+      revision != null && revision == policy.expectedRevision;
+  final sourceOk = !policy.requiresPin ||
+      (revisionMatches && (dirty != true || policy.allowDirty));
+
+  return {
+    'path': traceliteRoot,
+    'pinned_repository': pinnedTraceliteRepository,
+    'pinned_revision': policy.expectedRevision,
+    'pinned_tag': pinnedTraceliteTag,
+    'pin_required': policy.requiresPin,
+    'allow_dirty': policy.allowDirty,
+    ...gitState,
+    if (policy.requiresPin) 'revision_matches_pin': revisionMatches,
+    'source_ok': sourceOk,
+  };
+}
+
+Future<Map<String, Object?>> resqliteSourceState(String resqliteRoot) async {
+  final root = Directory(resqliteRoot).absolute.path;
+  final pubspec = File(p.join(root, 'pubspec.yaml'));
+  return {
+    'path': root,
+    if (pubspec.existsSync()) ...{
+      'package_name': _readPubspecScalar(pubspec, 'name'),
+      'version': _readPubspecScalar(pubspec, 'version'),
+    },
+    ...await _gitSourceState(root),
+  };
+}
+
+Future<Map<String, Object?>> _gitSourceState(String root) async {
   Future<String?> git(List<String> args) async {
-    final result = await Process.run('git', ['-C', traceliteRoot, ...args]);
+    final result = await Process.run('git', ['-C', root, ...args]);
     if (result.exitCode != 0) return null;
     return result.stdout.toString().trim();
   }
@@ -36,33 +73,30 @@ Future<Map<String, Object?>> traceliteSourceState(
   final tags = tagsText == null || tagsText.isEmpty
       ? <String>[]
       : tagsText
-            .split('\n')
-            .map((value) => value.trim())
-            .where((value) => value.isNotEmpty)
-            .toList();
+          .split('\n')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
   final dirty = status == null ? null : status.isNotEmpty;
-  final revisionMatches =
-      revision != null && revision == policy.expectedRevision;
-  final sourceOk =
-      !policy.requiresPin ||
-      (revisionMatches && (dirty != true || policy.allowDirty));
 
   return {
-    'path': traceliteRoot,
-    'pinned_repository': pinnedTraceliteRepository,
-    'pinned_revision': policy.expectedRevision,
-    'pinned_tag': pinnedTraceliteTag,
-    'pin_required': policy.requiresPin,
-    'allow_dirty': policy.allowDirty,
     'git_available': revision != null,
     if (remote != null) 'remote': remote,
     if (revision != null) 'revision': revision,
     if (branch != null) 'branch': branch,
     if (tags.isNotEmpty) 'tags': tags,
     if (dirty != null) 'dirty': dirty,
-    if (policy.requiresPin) 'revision_matches_pin': revisionMatches,
-    'source_ok': sourceOk,
   };
+}
+
+String? _readPubspecScalar(File pubspec, String key) {
+  final prefix = '$key:';
+  for (final line in pubspec.readAsLinesSync()) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith(prefix)) continue;
+    return trimmed.substring(prefix.length).trim();
+  }
+  return null;
 }
 
 void printTraceliteSource(Map<String, Object?> source) {
@@ -83,6 +117,24 @@ void printTraceliteSource(Map<String, Object?> source) {
   print('tracelite_branch: ${source['branch']}');
   print('tracelite_dirty: ${source['dirty']}');
   print('tracelite_source_ok: ${source['source_ok']}');
+}
+
+void printResqliteSource(Map<String, Object?> source) {
+  print('resqlite_root: ${source['path']}');
+  if (source['package_name'] != null) {
+    print('resqlite_package: ${source['package_name']}');
+  }
+  if (source['version'] != null) {
+    print('resqlite_version: ${source['version']}');
+  }
+  if (source['git_available'] != true) {
+    print('resqlite_git: unavailable');
+    return;
+  }
+  print('resqlite_remote: ${source['remote']}');
+  print('resqlite_revision: ${source['revision']}');
+  print('resqlite_branch: ${source['branch']}');
+  print('resqlite_dirty: ${source['dirty']}');
 }
 
 void validateTraceliteSource(Map<String, Object?> source) {
@@ -124,15 +176,12 @@ TraceliteSourcePolicy traceliteSourcePolicyFromOptions({
   required String? revision,
   required Set<String> flags,
 }) {
-  final allowUnpinned =
-      flags.contains('allow-unpinned-tracelite') ||
+  final allowUnpinned = flags.contains('allow-unpinned-tracelite') ||
       Platform.environment['TRACELITE_ALLOW_UNPINNED'] == 'true';
-  final allowDirty =
-      flags.contains('allow-dirty-tracelite') ||
+  final allowDirty = flags.contains('allow-dirty-tracelite') ||
       Platform.environment['TRACELITE_ALLOW_DIRTY'] == 'true';
   return TraceliteSourcePolicy(
-    expectedRevision:
-        revision ??
+    expectedRevision: revision ??
         Platform.environment['TRACELITE_REVISION'] ??
         pinnedTraceliteRevision,
     allowUnpinned: allowUnpinned,

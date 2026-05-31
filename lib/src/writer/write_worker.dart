@@ -71,17 +71,17 @@ final class BatchRequest extends WriterRequest {
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
 final class BeginRequest extends WriterRequest {
-  BeginRequest(super.replyPort);
+  BeginRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(super.replyPort);
+  CommitRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
 final class RollbackRequest extends WriterRequest {
-  RollbackRequest(super.replyPort);
+  RollbackRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Shut down the writer isolate.

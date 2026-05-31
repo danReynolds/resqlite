@@ -5,7 +5,9 @@
 // This is the resqlite-facing entry point for cross-library benchmark runs.
 // It delegates execution, policy calibration, and graph-data export to a local
 // tracelite checkout while keeping the stable resqlite release-gate scope
-// explicit in this repository.
+// explicit in this repository. Before running the suite it binds Tracelite's
+// resqlite dependency to the checkout under test and records both source
+// revisions in the manifest.
 
 import 'dart:convert';
 import 'dart:io';
@@ -16,6 +18,8 @@ import 'tracelite_source.dart';
 
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
+const _resolveDependenciesStepName = 'resolve tracelite dependencies';
+const _validateDependencyStepName = 'validate tracelite resqlite dependency';
 const _defaultReleasePolicyScenarios = [
   'chat-sim',
   'high-cardinality-fanout',
@@ -59,12 +63,15 @@ Future<void> main(List<String> args) async {
   }
 
   _validateTraceliteRoot(options.traceliteRoot);
+  _validateResqliteRoot(options.resqliteRoot);
   outDir.createSync(recursive: true);
   final traceliteSource = await traceliteSourceState(
     options.traceliteRoot,
     policy: options.traceliteSourcePolicy,
   );
   validateTraceliteSource(traceliteSource);
+  final resqliteSource = await resqliteSourceState(options.resqliteRoot);
+  var dependencyBinding = _prepareTraceliteResqliteOverride(options);
 
   print('# resqlite tracelite benchmark');
   print('');
@@ -72,6 +79,8 @@ Future<void> main(List<String> args) async {
   print('out_dir: ${outDir.path}');
   print('tracelite_root: ${options.traceliteRoot}');
   printTraceliteSource(traceliteSource);
+  printResqliteSource(resqliteSource);
+  _printDependencyBinding(dependencyBinding);
   print('profile: ${options.profile}');
   print('runs: ${options.runs}');
   print('interfaces: ${options.interfaces}');
@@ -120,7 +129,29 @@ Future<void> main(List<String> args) async {
 
   final stepResults = <_StepResult>[];
   for (final step in steps) {
-    stepResults.add(await _runStep(step));
+    final result = await _runStep(step);
+    stepResults.add(result);
+    if (result.exitCode != 0) break;
+
+    if (step.name == _resolveDependenciesStepName) {
+      dependencyBinding = _verifyTraceliteResqliteDependency(
+        options,
+        dependencyBinding,
+      );
+      _printDependencyBinding(dependencyBinding);
+      if (!dependencyBinding.matchesRequestedRoot) {
+        _printDependencyBindingFailure(dependencyBinding);
+        stepResults.add(
+          _StepResult(
+            name: _validateDependencyStepName,
+            command: 'read ${dependencyBinding.packageConfigPath}',
+            workingDirectory: options.traceliteRoot,
+            exitCode: 64,
+          ),
+        );
+        break;
+      }
+    }
   }
 
   await _writeManifest(
@@ -128,6 +159,8 @@ Future<void> main(List<String> args) async {
     paths,
     stepResults,
     traceliteSource: traceliteSource,
+    resqliteSource: resqliteSource,
+    dependencyBinding: dependencyBinding,
   );
 
   print('');
@@ -140,9 +173,8 @@ Future<void> main(List<String> args) async {
     print('  graph data: ${paths.graphDataDir}');
   }
 
-  final failedSteps = stepResults
-      .where((result) => result.exitCode != 0)
-      .toList();
+  final failedSteps =
+      stepResults.where((result) => result.exitCode != 0).toList();
   if (failedSteps.isNotEmpty) {
     stderr.writeln('');
     stderr.writeln(
@@ -155,6 +187,7 @@ Future<void> main(List<String> args) async {
 final class _Options {
   const _Options({
     required this.traceliteRoot,
+    required this.resqliteRoot,
     required this.dartExecutable,
     required this.label,
     required this.outDir,
@@ -187,6 +220,7 @@ final class _Options {
   });
 
   final String traceliteRoot;
+  final String resqliteRoot;
   final String dartExecutable;
   final String label;
   final String outDir;
@@ -223,6 +257,9 @@ final class _Options {
       final traceliteRoot = Platform.environment['TRACELITE_ROOT'] ?? '';
       return _Options(
         traceliteRoot: traceliteRoot,
+        resqliteRoot: Directory(Platform.environment['RESQLITE_ROOT'] ?? '.')
+            .absolute
+            .path,
         dartExecutable: Platform.resolvedExecutable,
         label: label,
         outDir: p.join('build', 'tracelite-benchmarks', label),
@@ -275,13 +312,16 @@ final class _Options {
     }
 
     final label = values['label'] ?? _defaultLabel();
-    final rawTraceliteRoot =
-        values['tracelite-root'] ??
+    final rawTraceliteRoot = values['tracelite-root'] ??
         Platform.environment['TRACELITE_ROOT'] ??
         '';
     final traceliteRoot = rawTraceliteRoot.isEmpty
         ? ''
         : Directory(rawTraceliteRoot).absolute.path;
+    final rawResqliteRoot = values['resqlite-root'] ??
+        Platform.environment['RESQLITE_ROOT'] ??
+        Directory.current.path;
+    final resqliteRoot = Directory(rawResqliteRoot).absolute.path;
     final graphDataDir = values['graph-data-dir'] == null
         ? null
         : Directory(values['graph-data-dir']!).absolute.path;
@@ -297,6 +337,7 @@ final class _Options {
 
     return _Options(
       traceliteRoot: traceliteRoot,
+      resqliteRoot: resqliteRoot,
       dartExecutable: values['dart'] ?? Platform.resolvedExecutable,
       label: label,
       outDir:
@@ -304,14 +345,12 @@ final class _Options {
       profile: values['profile'] ?? 'production',
       runs: _positiveInt(values['runs'], 5),
       interfaces: values['interfaces'] ?? 'sqlite3,drift,sqlite_async,resqlite',
-      suiteScenarios:
-          values['suite-scenarios'] ??
+      suiteScenarios: values['suite-scenarios'] ??
           values['scenarios'] ??
           _defaultSuiteScenarios.join(','),
       policyMetric: values['policy-metric'] ?? _defaultReleaseMetric,
       policyPeers: values['policy-peers'] ?? _defaultPolicyPeer,
-      policyScenarios:
-          values['policy-scenarios'] ??
+      policyScenarios: values['policy-scenarios'] ??
           _defaultReleasePolicyScenarios.join(','),
       minRepetitions: minRepetitions,
       maxRepetitions: maxRepetitions,
@@ -367,11 +406,11 @@ final class _Options {
 
 final class _Paths {
   _Paths(String outDir, {String? graphDataDir})
-    : manifest = p.join(outDir, 'resqlite-tracelite-benchmark.json'),
-      history = p.join(outDir, 'history.json'),
-      policyJson = p.join(outDir, 'policy-calibration.json'),
-      policyMarkdown = p.join(outDir, 'policy-calibration.md'),
-      graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
+      : manifest = p.join(outDir, 'resqlite-tracelite-benchmark.json'),
+        history = p.join(outDir, 'history.json'),
+        policyJson = p.join(outDir, 'policy-calibration.json'),
+        policyMarkdown = p.join(outDir, 'policy-calibration.md'),
+        graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
   final String manifest;
   final String history;
@@ -397,8 +436,47 @@ final class _Step {
       [executable, for (final arg in arguments) _quoteIfNeeded(arg)].join(' ');
 }
 
+final class _TraceliteResqliteDependencyBinding {
+  const _TraceliteResqliteDependencyBinding({
+    required this.overridePath,
+    required this.overrideExisted,
+    required this.overrideCreated,
+    required this.expectedRoot,
+    this.packageConfigPath,
+    this.resolvedRoot,
+    this.matchesRequestedRoot = false,
+    this.error,
+  });
+
+  final String overridePath;
+  final bool overrideExisted;
+  final bool overrideCreated;
+  final String expectedRoot;
+  final String? packageConfigPath;
+  final String? resolvedRoot;
+  final bool matchesRequestedRoot;
+  final String? error;
+
+  Map<String, Object?> toJson() => {
+        'override_path': overridePath,
+        'override_existed': overrideExisted,
+        'override_created': overrideCreated,
+        'expected_resqlite_root': expectedRoot,
+        'package_config_path': packageConfigPath,
+        'resolved_resqlite_root': resolvedRoot,
+        'matches_requested_root': matchesRequestedRoot,
+        if (error != null) 'error': error,
+      };
+}
+
 List<_Step> _plannedSteps(_Options options, _Paths paths) {
   final steps = <_Step>[
+    _Step(
+      name: _resolveDependenciesStepName,
+      executable: options.dartExecutable,
+      arguments: const ['pub', 'get'],
+      workingDirectory: options.traceliteRoot,
+    ),
     _Step(
       name: 'run tracelite suite history',
       executable: options.dartExecutable,
@@ -481,12 +559,12 @@ final class _StepResult {
   String get status => exitCode == 0 ? 'ok' : 'failed';
 
   Map<String, Object?> toJson() => {
-    'name': name,
-    'command': command,
-    'working_directory': workingDirectory,
-    'exit_code': exitCode,
-    'status': status,
-  };
+        'name': name,
+        'command': command,
+        'working_directory': workingDirectory,
+        'exit_code': exitCode,
+        'status': status,
+      };
 }
 
 Future<_StepResult> _runStep(_Step step) async {
@@ -521,10 +599,11 @@ Future<void> _writeManifest(
   _Paths paths,
   List<_StepResult> stepResults, {
   required Map<String, Object?> traceliteSource,
+  required Map<String, Object?> resqliteSource,
+  required _TraceliteResqliteDependencyBinding dependencyBinding,
 }) async {
-  final failedSteps = stepResults
-      .where((result) => result.exitCode != 0)
-      .toList();
+  final failedSteps =
+      stepResults.where((result) => result.exitCode != 0).toList();
   final manifest = {
     'schema': 'resqlite.tracelite_benchmark_run.v1',
     'generated_at': DateTime.now().toUtc().toIso8601String(),
@@ -532,23 +611,20 @@ Future<void> _writeManifest(
     'label': options.label,
     'tracelite_root': options.traceliteRoot,
     'tracelite_source': traceliteSource,
+    'resqlite_root': options.resqliteRoot,
+    'resqlite_source': resqliteSource,
+    'tracelite_resqlite_dependency': dependencyBinding.toJson(),
     'profile': options.profile,
     'runs': options.runs,
-    'suite_scenarios': options.suiteScenarios
-        .split(',')
-        .map((value) => value.trim())
-        .toList(),
+    'suite_scenarios':
+        options.suiteScenarios.split(',').map((value) => value.trim()).toList(),
     'diagnostic_scenarios': _defaultDiagnosticScenarios,
-    'interfaces': options.interfaces
-        .split(',')
-        .map((value) => value.trim())
-        .toList(),
+    'interfaces':
+        options.interfaces.split(',').map((value) => value.trim()).toList(),
     'policy': {
       'metric': options.policyMetric,
-      'peers': options.policyPeers
-          .split(',')
-          .map((value) => value.trim())
-          .toList(),
+      'peers':
+          options.policyPeers.split(',').map((value) => value.trim()).toList(),
       'scenarios': options.policyScenarios
           .split(',')
           .map((value) => value.trim())
@@ -588,6 +664,11 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('label: ${options.label}');
   print('out_dir: ${Directory(options.outDir).path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  print('resqlite_root: ${options.resqliteRoot}');
+  print(
+    'tracelite_resqlite_override: '
+    '${p.join(options.traceliteRoot, 'pubspec_overrides.yaml')}',
+  );
   print(
     'tracelite_revision_pin: ${options.traceliteSourcePolicy.expectedRevision}',
   );
@@ -614,6 +695,130 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   }
 }
 
+_TraceliteResqliteDependencyBinding _prepareTraceliteResqliteOverride(
+  _Options options,
+) {
+  final override =
+      File(p.join(options.traceliteRoot, 'pubspec_overrides.yaml'));
+  final existed = override.existsSync();
+  if (!existed) {
+    override.writeAsStringSync(
+      'dependency_overrides:\n'
+      '  resqlite:\n'
+      '    path: ${jsonEncode(options.resqliteRoot)}\n',
+    );
+  }
+
+  return _TraceliteResqliteDependencyBinding(
+    overridePath: override.path,
+    overrideExisted: existed,
+    overrideCreated: !existed,
+    expectedRoot: _canonicalDirectory(options.resqliteRoot),
+  );
+}
+
+_TraceliteResqliteDependencyBinding _verifyTraceliteResqliteDependency(
+  _Options options,
+  _TraceliteResqliteDependencyBinding current,
+) {
+  final packageConfigPath = p.join(
+    options.traceliteRoot,
+    '.dart_tool',
+    'package_config.json',
+  );
+  final packageConfig = File(packageConfigPath);
+  String? resolvedRoot;
+  String? error;
+  try {
+    resolvedRoot = _resolvedPackageRoot(packageConfig, 'resqlite');
+  } on Object catch (e) {
+    error = e.toString();
+  }
+
+  final expectedRoot = _canonicalDirectory(options.resqliteRoot);
+  final resolvedCanonical =
+      resolvedRoot == null ? null : _canonicalDirectory(resolvedRoot);
+  return _TraceliteResqliteDependencyBinding(
+    overridePath: current.overridePath,
+    overrideExisted: current.overrideExisted,
+    overrideCreated: current.overrideCreated,
+    expectedRoot: expectedRoot,
+    packageConfigPath: packageConfigPath,
+    resolvedRoot: resolvedCanonical,
+    matchesRequestedRoot: resolvedCanonical == expectedRoot,
+    error: error,
+  );
+}
+
+String? _resolvedPackageRoot(File packageConfig, String packageName) {
+  if (!packageConfig.existsSync()) {
+    return null;
+  }
+  final decoded =
+      jsonDecode(packageConfig.readAsStringSync()) as Map<String, Object?>;
+  final packages = decoded['packages'];
+  if (packages is! List<Object?>) {
+    throw const FormatException('package_config.json has no packages list');
+  }
+
+  for (final package in packages) {
+    if (package is! Map) continue;
+    if (package['name'] != packageName) continue;
+    final rootUriText = package['rootUri'];
+    if (rootUriText is! String || rootUriText.isEmpty) {
+      throw FormatException('$packageName has no rootUri in package_config');
+    }
+    var rootUri = Uri.parse(rootUriText);
+    if (!rootUri.isAbsolute) {
+      rootUri = packageConfig.parent.uri.resolveUri(rootUri);
+    }
+    if (rootUri.scheme != 'file') {
+      throw FormatException(
+        '$packageName resolved to non-file URI $rootUriText',
+      );
+    }
+    return Directory.fromUri(rootUri).path;
+  }
+  return null;
+}
+
+void _printDependencyBinding(_TraceliteResqliteDependencyBinding binding) {
+  print('tracelite_resqlite_override: ${binding.overridePath}');
+  print(
+    'tracelite_resqlite_override_created: ${binding.overrideCreated}',
+  );
+  print('tracelite_resqlite_expected_root: ${binding.expectedRoot}');
+  if (binding.packageConfigPath != null) {
+    print('tracelite_package_config: ${binding.packageConfigPath}');
+  }
+  if (binding.resolvedRoot != null) {
+    print('tracelite_resqlite_resolved_root: ${binding.resolvedRoot}');
+  }
+  print(
+    'tracelite_resqlite_matches_requested_root: '
+    '${binding.packageConfigPath == null ? 'pending' : binding.matchesRequestedRoot}',
+  );
+}
+
+void _printDependencyBindingFailure(
+  _TraceliteResqliteDependencyBinding binding,
+) {
+  stderr.writeln(
+    'tracelite does not resolve resqlite to the checkout under test.',
+  );
+  stderr.writeln('expected: ${binding.expectedRoot}');
+  stderr.writeln('actual:   ${binding.resolvedRoot ?? 'not resolved'}');
+  if (binding.error != null) {
+    stderr.writeln('error:    ${binding.error}');
+  }
+  stderr.writeln(
+    'Update ${binding.overridePath} so it contains:',
+  );
+  stderr.writeln('dependency_overrides:');
+  stderr.writeln('  resqlite:');
+  stderr.writeln('    path: ${jsonEncode(binding.expectedRoot)}');
+}
+
 void _validateTraceliteRoot(String traceliteRoot) {
   if (traceliteRoot.isEmpty || !Directory(traceliteRoot).existsSync()) {
     stderr.writeln(
@@ -630,11 +835,43 @@ void _validateTraceliteRoot(String traceliteRoot) {
   }
 }
 
+void _validateResqliteRoot(String resqliteRoot) {
+  if (resqliteRoot.isEmpty || !Directory(resqliteRoot).existsSync()) {
+    stderr.writeln(
+      'missing resqlite checkout. Pass --resqlite-root=/path/to/resqlite '
+      'or set RESQLITE_ROOT.',
+    );
+    exit(64);
+  }
+  final pubspec = File(p.join(resqliteRoot, 'pubspec.yaml'));
+  final library = File(p.join(resqliteRoot, 'lib', 'resqlite.dart'));
+  if (!pubspec.existsSync() || !library.existsSync()) {
+    stderr.writeln('not a resqlite checkout: $resqliteRoot');
+    stderr.writeln('expected ${pubspec.path} and ${library.path}');
+    exit(64);
+  }
+  final pubspecText = pubspec.readAsStringSync();
+  if (!pubspecText.contains(RegExp(r'(?m)^name:\s*resqlite\s*$'))) {
+    stderr.writeln('not a resqlite package: $resqliteRoot');
+    stderr.writeln('expected pubspec.yaml to declare "name: resqlite"');
+    exit(64);
+  }
+}
+
+String _canonicalDirectory(String path) {
+  final directory = Directory(path);
+  try {
+    return directory.resolveSymbolicLinksSync();
+  } on Object {
+    return p.normalize(directory.absolute.path);
+  }
+}
+
 String _defaultLabel() {
   return DateTime.now().toUtc().toIso8601String().replaceAll(
-    RegExp(r'[:.]'),
-    '-',
-  );
+        RegExp(r'[:.]'),
+        '-',
+      );
 }
 
 int _positiveInt(String? value, int fallback) {
@@ -693,6 +930,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
   stderr.writeln('  dart run benchmark/run_tracelite.dart');
   stderr.writeln('    --tracelite-root=/path/to/tracelite [--label=run-id]');
+  stderr.writeln('    [--resqlite-root=/path/to/resqlite]');
   stderr.writeln('    [--out-dir=build/tracelite-benchmarks/run-id]');
   stderr.writeln(
     '    [--runs=5] [--interfaces=sqlite3,drift,sqlite_async,resqlite]',
@@ -724,5 +962,6 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--no-graph-data] [--no-strict] [--dry-run]');
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');
+  stderr.writeln('RESQLITE_ROOT can be used instead of --resqlite-root.');
   exit(exitCode);
 }

@@ -35,6 +35,7 @@ abstract final class TraceliteResqliteSpans {
   static const int databaseSelectBytes = 0x4001;
   static const int databaseExecute = 0x4002;
   static const int databaseExecuteBatch = 0x4003;
+  static const int databaseTransaction = 0x4004;
   static const int writerHandle = 0x4010;
   static const int readerHandle = 0x4011;
   static const int readerPoolDispatch = 0x4012;
@@ -87,6 +88,7 @@ const Map<int, String> _spanNames = {
   TraceliteResqliteSpans.databaseExecute: 'resqlite.database.execute',
   TraceliteResqliteSpans.databaseExecuteBatch:
       'resqlite.database.execute_batch',
+  TraceliteResqliteSpans.databaseTransaction: 'resqlite.database.transaction',
   TraceliteResqliteSpans.writerHandle: 'resqlite.writer.handle',
   TraceliteResqliteSpans.readerHandle: 'resqlite.reader.handle',
   TraceliteResqliteSpans.readerPoolDispatch: 'resqlite.reader_pool.dispatch',
