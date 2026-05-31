@@ -115,7 +115,9 @@ dart run benchmark/run_tracelite.dart \
 `run_tracelite.dart` has three presets. Every preset still records
 `tracelite_source`, `resqlite_source`, and the resolved Tracelite dependency
 binding, exports graph data, and validates that graph-data bundle. Explicit CLI
-flags override preset defaults.
+flags override preset defaults. The wrapper also rebuilds Tracelite's
+`build/libsqlite_traced.dylib` SQLite shim for fresh macOS checkouts before any
+preset runs, so CI does not depend on a pre-warmed Tracelite build directory.
 
 | Preset | Use when | Default shape |
 |---|---|---|
@@ -188,7 +190,9 @@ Use the default strict mode for CI and publish gates. `--no-strict` is only for
 local exploratory runs where the requested history is intentionally too small to
 pass the repetition and noise gates. Suite failures and trace diagnostics still
 make the wrapper manifest invalid; graph data is exported when possible so the
-failed run can be inspected.
+failed run can be inspected. If a failed suite produced no compare artifacts,
+graph export is skipped with an explicit wrapper step instead of masking the
+suite failure with a secondary export crash.
 
 `point-select`, `feed-paging`, `sync-burst`, `large-working-set`, and
 `keyed-pk-subscriptions` are diagnostic suite workloads by default: they are

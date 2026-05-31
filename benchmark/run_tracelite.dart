@@ -20,6 +20,7 @@ const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
 const _resolveDependenciesStepName = 'resolve tracelite dependencies';
 const _validateDependencyStepName = 'validate tracelite resqlite dependency';
+const _prepareSqliteShimStepName = 'prepare tracelite sqlite shim';
 const _suiteHistoryStepName = 'run tracelite suite history';
 const _validateSuiteHistoryStepName = 'validate tracelite suite history';
 const _exportGraphDataStepName = 'export tracelite graph data';
@@ -167,6 +168,10 @@ Future<void> main(List<String> args) async {
   }
 
   if (stepResults.every((result) => result.exitCode == 0)) {
+    stepResults.add(await _buildTraceliteSqliteShim(options));
+  }
+
+  if (stepResults.every((result) => result.exitCode == 0)) {
     final suiteResult = await _runStep(_suiteHistoryStep(options, paths));
     stepResults.add(suiteResult);
     if (suiteResult.exitCode == 0) {
@@ -178,6 +183,10 @@ Future<void> main(List<String> args) async {
       stepResults.any((result) => result.name == _suiteHistoryStepName)) {
     final graphStep = _graphDataExportStep(options, paths);
     if (graphStep == null) {
+      stderr.writeln(
+        'no graphable tracelite suite artifacts found; '
+        'graph-data export skipped',
+      );
       stepResults.add(
         _StepResult(
           name: _exportGraphDataStepName,
@@ -678,6 +687,7 @@ List<_Step> _plannedSteps(
 }) {
   final steps = <_Step>[
     _resolveDependenciesStep(options),
+    _buildSqliteShimStep(options),
     _suiteHistoryStep(options, paths),
   ];
 
@@ -699,6 +709,24 @@ _Step _resolveDependenciesStep(_Options options) {
     name: _resolveDependenciesStepName,
     executable: options.dartExecutable,
     arguments: const ['pub', 'get'],
+    workingDirectory: options.traceliteRoot,
+  );
+}
+
+_Step _buildSqliteShimStep(_Options options) {
+  return _Step(
+    name: _prepareSqliteShimStepName,
+    executable: 'cc',
+    arguments: const [
+      '-dynamiclib',
+      '-O2',
+      '-Inative',
+      'native/tracelite_runtime.c',
+      'native/shim_sqlite3.c',
+      '-Wl,-reexport-lsqlite3',
+      '-o',
+      'build/libsqlite_traced.dylib',
+    ],
     workingDirectory: options.traceliteRoot,
   );
 }
@@ -844,6 +872,26 @@ Future<_StepResult> _runStep(_Step step) async {
   );
 }
 
+Future<_StepResult> _buildTraceliteSqliteShim(_Options options) async {
+  if (Platform.operatingSystem != 'macos') {
+    print('== $_prepareSqliteShimStepName');
+    stderr.writeln(
+      'tracelite SQLite shim auto-build is currently configured for macOS; '
+      'this wrapper expects build/libsqlite_traced.dylib.',
+    );
+    print('');
+    return _StepResult(
+      name: _prepareSqliteShimStepName,
+      command: 'build ${_traceliteSqliteShimPath(options)}',
+      workingDirectory: options.traceliteRoot,
+      exitCode: 64,
+    );
+  }
+
+  Directory(p.join(options.traceliteRoot, 'build')).createSync(recursive: true);
+  return _runStep(_buildSqliteShimStep(options));
+}
+
 _StepResult _validateSuiteHistory(_Paths paths) {
   const name = _validateSuiteHistoryStepName;
   final historyFile = File(paths.history);
@@ -924,19 +972,70 @@ List<String> _graphDataInputArgs(String historyPath) {
       if (run is! Map<String, Object?>) continue;
       final manifest = run['manifest'];
       if (manifest is! String || manifest.isEmpty) continue;
-      if (!File(manifest).existsSync()) continue;
-      manifests.add(manifest);
-      if (run['status'] == 'ok') successfulManifests.add(manifest);
+      final manifestPath = _resolveManifestArtifactPath(historyPath, manifest);
+      if (!File(manifestPath).existsSync()) continue;
+      manifests.add(manifestPath);
+      if (run['status'] == 'ok') successfulManifests.add(manifestPath);
     }
     if (successfulManifests.isNotEmpty) {
       return ['--suite-history=${p.absolute(historyPath)}'];
     }
+    final filteredManifests = [
+      for (final manifest in manifests)
+        if (_writeGraphableSuiteManifest(historyPath, manifest)
+            case final path?)
+          path,
+    ];
     return [
-      for (final manifest in manifests) '--suite=${p.absolute(manifest)}',
+      for (final manifest in filteredManifests)
+        '--suite=${p.absolute(manifest)}',
     ];
   } on Object {
     return const [];
   }
+}
+
+String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
+  final artifact = File(artifactPath);
+  if (artifact.isAbsolute || artifact.existsSync()) return artifact.path;
+  return File(manifestPath).parent.uri.resolve(artifactPath).toFilePath();
+}
+
+String? _writeGraphableSuiteManifest(String historyPath, String manifestPath) {
+  try {
+    final file = File(manifestPath);
+    final decoded = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+    if (decoded['schema'] != 'tracelite.suite.v1') return null;
+    final runs = decoded['runs'];
+    if (runs is! List<Object?>) return null;
+
+    final graphableRuns = <Map<String, Object?>>[];
+    for (final run in runs) {
+      if (run is! Map<String, Object?> || run['status'] != 'ok') continue;
+      final artifact = run['artifact'];
+      if (artifact is! String || artifact.isEmpty) continue;
+      final artifactPath = _resolveManifestArtifactPath(manifestPath, artifact);
+      if (!File(artifactPath).existsSync()) continue;
+      graphableRuns.add({...run, 'artifact': p.absolute(artifactPath)});
+    }
+    if (graphableRuns.isEmpty) return null;
+
+    final outDir = Directory(
+      p.join(p.dirname(historyPath), 'graph-data-inputs'),
+    )..createSync(recursive: true);
+    final runName = p.basename(p.dirname(manifestPath));
+    final outFile = File(p.join(outDir.path, '$runName-manifest.json'));
+    outFile.writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert({...decoded, 'runs': graphableRuns})}\n',
+    );
+    return outFile.path;
+  } on Object {
+    return null;
+  }
+}
+
+String _traceliteSqliteShimPath(_Options options) {
+  return p.join(options.traceliteRoot, 'build', 'libsqlite_traced.dylib');
 }
 
 Future<void> _writeManifest(
