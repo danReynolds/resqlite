@@ -42,12 +42,14 @@ Future<void> main(List<String> args) async {
 
   _validateInputs(options);
   outDir.createSync(recursive: true);
+  final traceliteSource = await _traceliteSourceState(options.traceliteRoot);
 
   print('# resqlite tracelite decision');
   print('');
   print('label: ${options.label}');
   print('out_dir: ${outDir.path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  _printTraceliteSource(traceliteSource);
   print('baseline: ${options.baseline}');
   print('candidate: ${options.candidate}');
   print('policy: ${options.policy}');
@@ -66,7 +68,12 @@ Future<void> main(List<String> args) async {
     stepResults.add(await _runStep(graphStep));
   }
 
-  await _writeManifest(options, paths, stepResults);
+  await _writeManifest(
+    options,
+    paths,
+    stepResults,
+    traceliteSource: traceliteSource,
+  );
 
   print('');
   print('Artifacts written:');
@@ -371,8 +378,9 @@ Future<_StepResult> _runStep(_Step step) async {
 Future<void> _writeManifest(
   _Options options,
   _Paths paths,
-  List<_StepResult> stepResults,
-) async {
+  List<_StepResult> stepResults, {
+  required Map<String, Object?> traceliteSource,
+}) async {
   final failedSteps = stepResults
       .where((result) => result.exitCode != 0)
       .toList();
@@ -382,6 +390,7 @@ Future<void> _writeManifest(
     'status': failedSteps.isEmpty ? 'ok' : 'failed',
     'label': options.label,
     'tracelite_root': options.traceliteRoot,
+    'tracelite_source': traceliteSource,
     'baseline': options.baseline,
     'candidate': options.candidate,
     'policy': options.policy,
@@ -418,6 +427,35 @@ Future<void> _writeManifest(
   await file.writeAsString(
     '${const JsonEncoder.withIndent('  ').convert(manifest)}\n',
   );
+}
+
+Future<Map<String, Object?>> _traceliteSourceState(String traceliteRoot) async {
+  Future<String?> git(List<String> args) async {
+    final result = await Process.run('git', ['-C', traceliteRoot, ...args]);
+    if (result.exitCode != 0) return null;
+    return result.stdout.toString().trim();
+  }
+
+  final revision = await git(['rev-parse', 'HEAD']);
+  final branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
+  final status = await git(['status', '--porcelain']);
+  return {
+    'path': traceliteRoot,
+    'git_available': revision != null,
+    if (revision != null) 'revision': revision,
+    if (branch != null) 'branch': branch,
+    if (status != null) 'dirty': status.isNotEmpty,
+  };
+}
+
+void _printTraceliteSource(Map<String, Object?> source) {
+  if (source['git_available'] != true) {
+    print('tracelite_git: unavailable');
+    return;
+  }
+  print('tracelite_revision: ${source['revision']}');
+  print('tracelite_branch: ${source['branch']}');
+  print('tracelite_dirty: ${source['dirty']}');
 }
 
 void _printPlan(_Options options, _Paths paths, List<_Step> steps) {

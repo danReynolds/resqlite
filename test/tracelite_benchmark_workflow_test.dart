@@ -104,6 +104,14 @@ void main() {
     final manifest =
         jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
     expect(manifest['status'], 'failed');
+    expect(
+      manifest['tracelite_source'],
+      containsPair('path', fakeRoot.absolute.path),
+    );
+    expect(
+      manifest['tracelite_source'],
+      containsPair('git_available', isFalse),
+    );
     final steps = manifest['steps']! as List<Object?>;
     expect(steps, hasLength(1));
     expect(steps.single as Map<String, Object?>, containsPair('exit_code', 65));
@@ -199,6 +207,14 @@ void main() {
     final manifest =
         jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
     expect(manifest['status'], 'failed');
+    expect(
+      manifest['tracelite_source'],
+      containsPair('path', fakeRoot.absolute.path),
+    );
+    expect(
+      manifest['tracelite_source'],
+      containsPair('git_available', isFalse),
+    );
     final steps = manifest['steps']! as List<Object?>;
     expect(steps, hasLength(1));
     expect(steps.single as Map<String, Object?>, containsPair('exit_code', 65));
