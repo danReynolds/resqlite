@@ -12,6 +12,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'tracelite_source.dart';
+
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
 const _defaultReleasePolicyScenarios = [
@@ -58,14 +60,18 @@ Future<void> main(List<String> args) async {
 
   _validateTraceliteRoot(options.traceliteRoot);
   outDir.createSync(recursive: true);
-  final traceliteSource = await _traceliteSourceState(options.traceliteRoot);
+  final traceliteSource = await traceliteSourceState(
+    options.traceliteRoot,
+    policy: options.traceliteSourcePolicy,
+  );
+  validateTraceliteSource(traceliteSource);
 
   print('# resqlite tracelite benchmark');
   print('');
   print('label: ${options.label}');
   print('out_dir: ${outDir.path}');
   print('tracelite_root: ${options.traceliteRoot}');
-  _printTraceliteSource(traceliteSource);
+  printTraceliteSource(traceliteSource);
   print('profile: ${options.profile}');
   print('runs: ${options.runs}');
   print('interfaces: ${options.interfaces}');
@@ -172,6 +178,7 @@ final class _Options {
     required this.noiseGateMultiplier,
     required this.maxOutlierPercent,
     required this.maxRunOutlierPercent,
+    required this.traceliteSourcePolicy,
     required this.graphDataDir,
     required this.exportGraphData,
     required this.strict,
@@ -203,6 +210,7 @@ final class _Options {
   final double noiseGateMultiplier;
   final double maxOutlierPercent;
   final double maxRunOutlierPercent;
+  final TraceliteSourcePolicy traceliteSourcePolicy;
   final String? graphDataDir;
   final bool exportGraphData;
   final bool strict;
@@ -238,6 +246,11 @@ final class _Options {
         noiseGateMultiplier: 1.5,
         maxOutlierPercent: 10,
         maxRunOutlierPercent: 20,
+        traceliteSourcePolicy: const TraceliteSourcePolicy(
+          expectedRevision: pinnedTraceliteRevision,
+          allowUnpinned: false,
+          allowDirty: false,
+        ),
         graphDataDir: null,
         exportGraphData: true,
         strict: true,
@@ -338,6 +351,10 @@ final class _Options {
       maxRunOutlierPercent: _positiveDouble(
         values['max-run-outlier-percent'],
         20,
+      ),
+      traceliteSourcePolicy: traceliteSourcePolicyFromOptions(
+        revision: values['tracelite-revision'],
+        flags: flags,
       ),
       graphDataDir: graphDataDir,
       exportGraphData: !flags.contains('no-graph-data'),
@@ -565,41 +582,18 @@ Future<void> _writeManifest(
   );
 }
 
-Future<Map<String, Object?>> _traceliteSourceState(String traceliteRoot) async {
-  Future<String?> git(List<String> args) async {
-    final result = await Process.run('git', ['-C', traceliteRoot, ...args]);
-    if (result.exitCode != 0) return null;
-    return result.stdout.toString().trim();
-  }
-
-  final revision = await git(['rev-parse', 'HEAD']);
-  final branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
-  final status = await git(['status', '--porcelain']);
-  return {
-    'path': traceliteRoot,
-    'git_available': revision != null,
-    if (revision != null) 'revision': revision,
-    if (branch != null) 'branch': branch,
-    if (status != null) 'dirty': status.isNotEmpty,
-  };
-}
-
-void _printTraceliteSource(Map<String, Object?> source) {
-  if (source['git_available'] != true) {
-    print('tracelite_git: unavailable');
-    return;
-  }
-  print('tracelite_revision: ${source['revision']}');
-  print('tracelite_branch: ${source['branch']}');
-  print('tracelite_dirty: ${source['dirty']}');
-}
-
 void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('# resqlite tracelite benchmark plan');
   print('');
   print('label: ${options.label}');
   print('out_dir: ${Directory(options.outDir).path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  print(
+    'tracelite_revision_pin: ${options.traceliteSourcePolicy.expectedRevision}',
+  );
+  print(
+    'allow_unpinned_tracelite: ${options.traceliteSourcePolicy.allowUnpinned}',
+  );
   print('suite_scenarios: ${options.suiteScenarios}');
   print('policy_scenarios: ${options.policyScenarios}');
   print('');
@@ -722,9 +716,11 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--noise-gate-multiplier=1.5]');
   stderr.writeln('    [--max-outlier-percent=10]');
   stderr.writeln('    [--max-run-outlier-percent=20]');
+  stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');
   stderr.writeln(
     '    [--graph-data-dir=docs/benchmarks/data/tracelite/latest]',
   );
+  stderr.writeln('    [--allow-unpinned-tracelite] [--allow-dirty-tracelite]');
   stderr.writeln('    [--no-graph-data] [--no-strict] [--dry-run]');
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');

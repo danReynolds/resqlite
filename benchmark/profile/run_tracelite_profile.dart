@@ -17,6 +17,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../tracelite_source.dart';
+
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (options.showHelp) {
@@ -34,6 +36,11 @@ Future<void> main(List<String> args) async {
 
   _validateTraceliteRoot(options.traceliteRoot);
   _validateRuntime(options.runtimePath);
+  final traceliteSource = await traceliteSourceState(
+    options.traceliteRoot,
+    policy: options.traceliteSourcePolicy,
+  );
+  validateTraceliteSource(traceliteSource);
 
   outDir.createSync(recursive: true);
 
@@ -42,6 +49,7 @@ Future<void> main(List<String> args) async {
   print('label: ${options.label}');
   print('out_dir: ${outDir.path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  printTraceliteSource(traceliteSource);
   print('runtime: ${options.runtimePath}');
   print('');
 
@@ -49,7 +57,7 @@ Future<void> main(List<String> args) async {
     await _runStep(step);
   }
 
-  await _writeManifest(options, paths);
+  await _writeManifest(options, paths, traceliteSource: traceliteSource);
 
   print('');
   print('Artifacts written:');
@@ -75,6 +83,7 @@ class _Options {
     required this.outDir,
     required this.ringDataWords,
     required this.maxProducers,
+    required this.traceliteSourcePolicy,
     required this.graphDataDir,
     required this.exportGraphData,
     required this.writeParityDiff,
@@ -89,6 +98,7 @@ class _Options {
   final String outDir;
   final int ringDataWords;
   final int maxProducers;
+  final TraceliteSourcePolicy traceliteSourcePolicy;
   final String? graphDataDir;
   final bool exportGraphData;
   final bool writeParityDiff;
@@ -107,6 +117,11 @@ class _Options {
         outDir: p.join('build', 'tracelite-profile', label),
         ringDataWords: 4194304,
         maxProducers: 8,
+        traceliteSourcePolicy: const TraceliteSourcePolicy(
+          expectedRevision: pinnedTraceliteRevision,
+          allowUnpinned: false,
+          allowDirty: false,
+        ),
         graphDataDir: null,
         exportGraphData: true,
         writeParityDiff: true,
@@ -131,7 +146,8 @@ class _Options {
     }
 
     final label = values['label'] ?? _defaultLabel();
-    final rawTraceliteRoot = values['tracelite-root'] ??
+    final rawTraceliteRoot =
+        values['tracelite-root'] ??
         Platform.environment['TRACELITE_ROOT'] ??
         '';
     final traceliteRoot = rawTraceliteRoot.isEmpty
@@ -151,6 +167,10 @@ class _Options {
       outDir: values['out-dir'] ?? p.join('build', 'tracelite-profile', label),
       ringDataWords: _positiveInt(values['ring-data-words'], 4194304),
       maxProducers: _positiveInt(values['max-producers'], 8),
+      traceliteSourcePolicy: traceliteSourcePolicyFromOptions(
+        revision: values['tracelite-revision'],
+        flags: flags,
+      ),
       graphDataDir: graphDataDir,
       exportGraphData: !flags.contains('no-graph-data'),
       writeParityDiff: !flags.contains('no-parity-diff'),
@@ -162,13 +182,13 @@ class _Options {
 
 class _ArtifactPaths {
   _ArtifactPaths(String outDir, {String? graphDataDir})
-      : manifest = p.join(outDir, 'manifest.json'),
-        region = p.join(outDir, 'profile.tlt-region'),
-        legacyProfileJson = p.join(outDir, 'profile.json'),
-        workloadSummaryJson = p.join(outDir, 'workload-summary.json'),
-        workloadSummaryMarkdown = p.join(outDir, 'workload-summary.md'),
-        graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data'),
-        parityDiff = p.join(outDir, 'parity-diff.txt');
+    : manifest = p.join(outDir, 'manifest.json'),
+      region = p.join(outDir, 'profile.tlt-region'),
+      legacyProfileJson = p.join(outDir, 'profile.json'),
+      workloadSummaryJson = p.join(outDir, 'workload-summary.json'),
+      workloadSummaryMarkdown = p.join(outDir, 'workload-summary.md'),
+      graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data'),
+      parityDiff = p.join(outDir, 'parity-diff.txt');
 
   final String manifest;
   final String region;
@@ -331,12 +351,17 @@ Future<void> _runStep(_Step step) async {
   print('');
 }
 
-Future<void> _writeManifest(_Options options, _ArtifactPaths paths) async {
+Future<void> _writeManifest(
+  _Options options,
+  _ArtifactPaths paths, {
+  required Map<String, Object?> traceliteSource,
+}) async {
   final manifest = {
     'schema': 'resqlite.tracelite_profile_run.v1',
     'generated_at': DateTime.now().toUtc().toIso8601String(),
     'label': options.label,
     'tracelite_root': options.traceliteRoot,
+    'tracelite_source': traceliteSource,
     'runtime': options.runtimePath,
     'profile_flags': {'RESQLITE_PROFILE': true, 'RESQLITE_TRACELITE': true},
     'artifacts': {
@@ -361,6 +386,12 @@ void _printPlan(_Options options, _ArtifactPaths paths, List<_Step> steps) {
   print('label: ${options.label}');
   print('out_dir: ${Directory(options.outDir).path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  print(
+    'tracelite_revision_pin: ${options.traceliteSourcePolicy.expectedRevision}',
+  );
+  print(
+    'allow_unpinned_tracelite: ${options.traceliteSourcePolicy.allowUnpinned}',
+  );
   print('runtime: ${options.runtimePath}');
   print('');
   print('artifacts:');
@@ -422,9 +453,9 @@ void _validateRuntime(String runtimePath) {
 
 String _defaultLabel() {
   return DateTime.now().toUtc().toIso8601String().replaceAll(
-        RegExp(r'[:.]'),
-        '-',
-      );
+    RegExp(r'[:.]'),
+    '-',
+  );
 }
 
 String _defaultRuntimePath(String traceliteRoot) {
@@ -470,6 +501,8 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--runtime=/path/to/libtracelite_runtime.dylib]');
   stderr.writeln('    [--dart=/path/to/dart]');
   stderr.writeln('    [--ring-data-words=4194304] [--max-producers=8]');
+  stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');
+  stderr.writeln('    [--allow-unpinned-tracelite] [--allow-dirty-tracelite]');
   stderr.writeln('    [--no-graph-data] [--no-parity-diff] [--dry-run]');
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');

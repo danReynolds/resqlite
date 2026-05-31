@@ -11,18 +11,15 @@ void main() {
     );
     addTearDown(() => temp.delete(recursive: true));
 
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/profile/run_tracelite_profile.dart',
-          '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
-          '--runtime=${p.join(temp.path, 'libtracelite_runtime.test')}',
-          '--label=unit-run',
-          '--out-dir=${p.join(temp.path, 'profile')}',
-          '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite')}',
-          '--dry-run',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/profile/run_tracelite_profile.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--runtime=${p.join(temp.path, 'libtracelite_runtime.test')}',
+      '--label=unit-run',
+      '--out-dir=${p.join(temp.path, 'profile')}',
+      '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite')}',
+      '--dry-run',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,

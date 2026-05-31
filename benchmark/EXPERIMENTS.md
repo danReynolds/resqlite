@@ -88,6 +88,9 @@ SQLite shim.
 The preferred workflow is the wrapper:
 
 ```bash
+git clone https://github.com/danReynolds/tracelite /path/to/tracelite
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
+
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
   --label=exp-N
@@ -104,9 +107,13 @@ By default it writes `build/tracelite-profile/exp-N/`:
 - `parity-diff.txt`: `benchmark/profile/diff.dart` comparing the legacy
   JSON against tracelite's workload summary.
 
-The wrapper deliberately shells out to a local tracelite checkout instead
-of adding tracelite as a resqlite dependency. The package code only keeps
-the compile-time trace emitters.
+The wrapper deliberately shells out to a pinned local tracelite checkout instead
+of adding tracelite as a resqlite dependency. It records `tracelite_source` in
+the manifest and fails if the checkout is not at the default production pin
+`bcb3f3f419a09aa682948595fdb8ab002af637dc` or is dirty. Use
+`--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
+tracelite development. The package code only keeps the compile-time trace
+emitters.
 
 For GitHub Pages, keep raw traces and legacy JSON in `build/` but write the
 small graph-data bundle directly to the dashboard input location:

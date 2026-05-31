@@ -22,9 +22,8 @@ If you're running the release gate for resqlite itself, use
 `run_tracelite.dart`. It runs tracelite's cross-library production suite,
 calibrates the resqlite release policy from repeated history, and can export the
 graph-data bundle consumed by the benchmark dashboard. This is the preferred
-pre-publish benchmark/profiling entry point once a local tracelite checkout is
-available, but this PR should not delete the old regular profiling path until
-the tracelite sole-framework gate has current production evidence.
+pre-publish benchmark/profiling entry point. The wrapper requires the local
+tracelite checkout to match the pinned production source revision by default.
 
 If you already have baseline and candidate tracelite suite manifests, use
 `decide_tracelite.dart`. It applies the calibrated release-lane policy to
@@ -96,8 +95,13 @@ Recommended workflow for performance decisions:
 
 ## Tracelite Production Gate
 
-Trace-backed release benchmarking uses the local tracelite checkout as the
+Trace-backed release benchmarking uses the pinned tracelite checkout as the
 runner and artifact owner:
+
+```bash
+git clone https://github.com/danReynolds/tracelite /path/to/tracelite
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
+```
 
 ```bash
 dart run benchmark/run_tracelite.dart \
@@ -105,6 +109,13 @@ dart run benchmark/run_tracelite.dart \
   --label=prepublish-YYYY-MM-DD \
   --graph-data-dir=docs/benchmarks/data/tracelite/latest
 ```
+
+The default pin is
+`bcb3f3f419a09aa682948595fdb8ab002af637dc`
+(`resqlite-profiling-gate-2026-05-31`). The wrapper records
+`tracelite_source` in its manifest and fails if the checkout is not at that
+revision or is dirty. Use `--allow-unpinned-tracelite` or
+`--allow-dirty-tracelite` only for local tracelite development.
 
 The wrapper runs `tracelite suite-history --profile=production --runs=5`.
 It separates suite coverage from release-gate policy:
@@ -179,10 +190,10 @@ guardrail gates rejected the delayed candidate on `chat-sim`,
 `narrow-batch-insert`, and `sqlite-diagnostics`. Its graph-data bundle
 validated.
 
-This is now credible as the primary resqlite pre-publish profiling path, but it
-is still not the only accepted framework. Before removing the old path as a
-fallback, pin resqlite to a stable tracelite source state and keep CI green on
-the pinned integration.
+This is now credible as the primary resqlite pre-publish profiling path. The
+source pin is enforced by the wrapper instead of living only in operator notes.
+`run_profile.dart` remains as the low-level compatibility/parity harness, but
+routine regression decisions should use the tracelite gate or decision wrapper.
 
 The remaining noisy workloads stay in the diagnostic lane until they have stable
 workload definitions or separate calibrated thresholds.
@@ -199,6 +210,9 @@ dart run benchmark/decide_tracelite.dart \
   --policy=build/tracelite-benchmarks/prepublish/policy-calibration.json \
   --label=exp-123-no-regression
 ```
+
+`decide_tracelite.dart` uses the same tracelite source pin and writes the same
+`tracelite_source` manifest block as the production gate wrapper.
 
 Defaults:
 
@@ -246,6 +260,9 @@ dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
   --label=exp-N
 ```
+
+`run_tracelite_profile.dart` also validates the pinned tracelite checkout before
+creating a region or exporting graph data.
 
 It writes `build/tracelite-profile/exp-N/` with the legacy profile JSON,
 the `.tlt-region`, `workload-summary.json`, `workload-summary.md`,

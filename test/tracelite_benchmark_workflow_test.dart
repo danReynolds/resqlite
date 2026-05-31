@@ -89,6 +89,7 @@ void main() {
       '--policy=${policy.path}',
       '--label=failing-decision',
       '--out-dir=$outDir',
+      '--allow-unpinned-tracelite',
     ], workingDirectory: root);
 
     expect(
@@ -192,6 +193,7 @@ void main() {
       '--label=failing-benchmark',
       '--out-dir=$outDir',
       '--no-graph-data',
+      '--allow-unpinned-tracelite',
     ], workingDirectory: root);
 
     expect(
@@ -218,5 +220,35 @@ void main() {
     final steps = manifest['steps']! as List<Object?>;
     expect(steps, hasLength(1));
     expect(steps.single as Map<String, Object?>, containsPair('exit_code', 65));
+  });
+
+  test('tracelite benchmark workflow rejects unpinned checkout', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_unpinned_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final fakeRoot = Directory(p.join(temp.path, 'tracelite_root'));
+    Directory(p.join(fakeRoot.path, 'bin')).createSync(recursive: true);
+    File(p.join(fakeRoot.path, 'bin', 'tracelite.dart')).writeAsStringSync('');
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--label=unpinned-benchmark',
+      '--out-dir=${p.join(temp.path, 'benchmark')}',
+      '--no-graph-data',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      64,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+    expect(
+      result.stderr.toString(),
+      contains('tracelite source pin cannot be verified'),
+    );
   });
 }
