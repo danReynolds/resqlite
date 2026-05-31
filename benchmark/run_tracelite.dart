@@ -14,15 +14,31 @@ import 'package:path/path.dart' as p;
 
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
-const _defaultPolicyScenarios = [
+const _defaultReleasePolicyScenarios = [
   'chat-sim',
-  'feed-paging',
   'high-cardinality-fanout',
-  'large-working-set',
   'many-streams-writer-throughput',
   'narrow-batch-insert',
   'sqlite-diagnostics',
+];
+const _defaultDiagnosticScenarios = [
+  'point-select',
+  'feed-paging',
   'sync-burst',
+  'large-working-set',
+  'keyed-pk-subscriptions',
+];
+const _defaultSuiteScenarios = [
+  'narrow-batch-insert',
+  'point-select',
+  'feed-paging',
+  'sync-burst',
+  'chat-sim',
+  'large-working-set',
+  'keyed-pk-subscriptions',
+  'high-cardinality-fanout',
+  'many-streams-writer-throughput',
+  'sqlite-diagnostics',
 ];
 
 Future<void> main(List<String> args) async {
@@ -51,12 +67,17 @@ Future<void> main(List<String> args) async {
   print('profile: ${options.profile}');
   print('runs: ${options.runs}');
   print('interfaces: ${options.interfaces}');
+  print('suite_scenarios: ${options.suiteScenarios}');
   print('policy_metric: ${options.policyMetric}');
   print('policy_peers: ${options.policyPeers}');
   print('policy_scenarios: ${options.policyScenarios}');
   print('min_repetitions: ${options.minRepetitions}');
   print('max_repetitions: ${options.maxRepetitions}');
   print('target_rse_percent: ${_trimDouble(options.targetRsePercent)}');
+  print(
+    'within_run_noise_percentile: '
+    '${_trimDouble(options.withinRunNoisePercentile)}',
+  );
   print(
     'threshold_floor_percent: '
     '${_trimDouble(options.thresholdFloorPercent)}',
@@ -82,6 +103,11 @@ Future<void> main(List<String> args) async {
     '${_trimNullableDouble(options.noiseGateCeilingPercent)}',
   );
   print('noise_gate_multiplier: ${_trimDouble(options.noiseGateMultiplier)}');
+  print('max_outlier_percent: ${_trimDouble(options.maxOutlierPercent)}');
+  print(
+    'max_run_outlier_percent: '
+    '${_trimDouble(options.maxRunOutlierPercent)}',
+  );
   print('');
 
   final stepResults = <_StepResult>[];
@@ -122,12 +148,14 @@ final class _Options {
     required this.profile,
     required this.runs,
     required this.interfaces,
+    required this.suiteScenarios,
     required this.policyMetric,
     required this.policyPeers,
     required this.policyScenarios,
     required this.minRepetitions,
     required this.maxRepetitions,
     required this.targetRsePercent,
+    required this.withinRunNoisePercentile,
     required this.thresholdFloorPercent,
     required this.thresholdCeilingPercent,
     required this.guardrailFloorPercent,
@@ -135,6 +163,8 @@ final class _Options {
     required this.noiseGateFloorPercent,
     required this.noiseGateCeilingPercent,
     required this.noiseGateMultiplier,
+    required this.maxOutlierPercent,
+    required this.maxRunOutlierPercent,
     required this.graphDataDir,
     required this.exportGraphData,
     required this.strict,
@@ -149,12 +179,14 @@ final class _Options {
   final String profile;
   final int runs;
   final String interfaces;
+  final String suiteScenarios;
   final String policyMetric;
   final String policyPeers;
   final String policyScenarios;
   final int minRepetitions;
   final int maxRepetitions;
   final double targetRsePercent;
+  final double withinRunNoisePercentile;
   final double thresholdFloorPercent;
   final double thresholdCeilingPercent;
   final double guardrailFloorPercent;
@@ -162,6 +194,8 @@ final class _Options {
   final double noiseGateFloorPercent;
   final double? noiseGateCeilingPercent;
   final double noiseGateMultiplier;
+  final double maxOutlierPercent;
+  final double maxRunOutlierPercent;
   final String? graphDataDir;
   final bool exportGraphData;
   final bool strict;
@@ -180,12 +214,14 @@ final class _Options {
         profile: 'production',
         runs: 5,
         interfaces: 'sqlite3,drift,sqlite_async,resqlite',
+        suiteScenarios: _defaultSuiteScenarios.join(','),
         policyMetric: _defaultReleaseMetric,
         policyPeers: _defaultPolicyPeer,
-        policyScenarios: _defaultPolicyScenarios.join(','),
+        policyScenarios: _defaultReleasePolicyScenarios.join(','),
         minRepetitions: 5,
         maxRepetitions: 30,
         targetRsePercent: 10,
+        withinRunNoisePercentile: 0.75,
         thresholdFloorPercent: 5,
         thresholdCeilingPercent: 50,
         guardrailFloorPercent: 3,
@@ -193,6 +229,8 @@ final class _Options {
         noiseGateFloorPercent: 5,
         noiseGateCeilingPercent: 50,
         noiseGateMultiplier: 1.5,
+        maxOutlierPercent: 10,
+        maxRunOutlierPercent: 20,
         graphDataDir: null,
         exportGraphData: true,
         strict: true,
@@ -246,13 +284,22 @@ final class _Options {
       profile: values['profile'] ?? 'production',
       runs: _positiveInt(values['runs'], 5),
       interfaces: values['interfaces'] ?? 'sqlite3,drift,sqlite_async,resqlite',
+      suiteScenarios:
+          values['suite-scenarios'] ??
+          values['scenarios'] ??
+          _defaultSuiteScenarios.join(','),
       policyMetric: values['policy-metric'] ?? _defaultReleaseMetric,
       policyPeers: values['policy-peers'] ?? _defaultPolicyPeer,
       policyScenarios:
-          values['policy-scenarios'] ?? _defaultPolicyScenarios.join(','),
+          values['policy-scenarios'] ??
+          _defaultReleasePolicyScenarios.join(','),
       minRepetitions: minRepetitions,
       maxRepetitions: maxRepetitions,
       targetRsePercent: _positiveDouble(values['target-rse-percent'], 10),
+      withinRunNoisePercentile: _positiveDouble(
+        values['within-run-noise-percentile'],
+        0.75,
+      ),
       thresholdFloorPercent: _positiveDouble(
         values['threshold-floor-percent'],
         5,
@@ -279,6 +326,11 @@ final class _Options {
       noiseGateMultiplier: _positiveDouble(
         values['noise-gate-multiplier'],
         1.5,
+      ),
+      maxOutlierPercent: _positiveDouble(values['max-outlier-percent'], 10),
+      maxRunOutlierPercent: _positiveDouble(
+        values['max-run-outlier-percent'],
+        20,
       ),
       graphDataDir: graphDataDir,
       exportGraphData: !flags.contains('no-graph-data'),
@@ -333,13 +385,15 @@ List<_Step> _plannedSteps(_Options options, _Paths paths) {
         '--profile=${options.profile}',
         '--runs=${options.runs}',
         '--interfaces=${options.interfaces}',
-        '--scenarios=${options.policyScenarios}',
+        '--scenarios=${options.suiteScenarios}',
         '--metrics=${options.policyMetric}',
         '--policy-peers=${options.policyPeers}',
         '--policy-scenarios=${options.policyScenarios}',
         '--min-repetitions=${options.minRepetitions}',
         '--max-repetitions=${options.maxRepetitions}',
         '--target-rse-percent=${_trimDouble(options.targetRsePercent)}',
+        '--within-run-noise-percentile='
+            '${_trimDouble(options.withinRunNoisePercentile)}',
         '--threshold-floor-percent='
             '${_trimDouble(options.thresholdFloorPercent)}',
         '--threshold-ceiling-percent='
@@ -356,6 +410,9 @@ List<_Step> _plannedSteps(_Options options, _Paths paths) {
               '${_trimDouble(options.noiseGateCeilingPercent!)}',
         '--noise-gate-multiplier='
             '${_trimDouble(options.noiseGateMultiplier)}',
+        '--max-outlier-percent=${_trimDouble(options.maxOutlierPercent)}',
+        '--max-run-outlier-percent='
+            '${_trimDouble(options.maxRunOutlierPercent)}',
         '--strict=${options.strict}',
         '--out-dir=${p.dirname(paths.history)}',
       ],
@@ -451,6 +508,11 @@ Future<void> _writeManifest(
     'tracelite_root': options.traceliteRoot,
     'profile': options.profile,
     'runs': options.runs,
+    'suite_scenarios': options.suiteScenarios
+        .split(',')
+        .map((value) => value.trim())
+        .toList(),
+    'diagnostic_scenarios': _defaultDiagnosticScenarios,
     'interfaces': options.interfaces
         .split(',')
         .map((value) => value.trim())
@@ -468,6 +530,7 @@ Future<void> _writeManifest(
       'min_repetitions': options.minRepetitions,
       'max_repetitions': options.maxRepetitions,
       'target_rse_percent': options.targetRsePercent,
+      'within_run_noise_percentile': options.withinRunNoisePercentile,
       'threshold_floor_percent': options.thresholdFloorPercent,
       'threshold_ceiling_percent': options.thresholdCeilingPercent,
       'guardrail_floor_percent': options.guardrailFloorPercent,
@@ -475,6 +538,8 @@ Future<void> _writeManifest(
       'noise_gate_floor_percent': options.noiseGateFloorPercent,
       'noise_gate_ceiling_percent': options.noiseGateCeilingPercent,
       'noise_gate_multiplier': options.noiseGateMultiplier,
+      'max_outlier_percent': options.maxOutlierPercent,
+      'max_run_outlier_percent': options.maxRunOutlierPercent,
     },
     'artifacts': {
       'suite_history': paths.history,
@@ -497,6 +562,8 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('label: ${options.label}');
   print('out_dir: ${Directory(options.outDir).path}');
   print('tracelite_root: ${options.traceliteRoot}');
+  print('suite_scenarios: ${options.suiteScenarios}');
+  print('policy_scenarios: ${options.policyScenarios}');
   print('');
   print('artifacts:');
   print('  manifest: ${paths.manifest}');
@@ -598,11 +665,16 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln(
     '    [--runs=5] [--interfaces=sqlite3,drift,sqlite_async,resqlite]',
   );
+  stderr.writeln('    [--suite-scenarios=chat-sim,...]');
+  stderr.writeln(
+    '    [--scenarios=chat-sim,...]  # alias for --suite-scenarios',
+  );
   stderr.writeln('    [--policy-peers=resqlite]');
   stderr.writeln('    [--policy-scenarios=chat-sim,...]');
   stderr.writeln('    [--policy-metric=measured_elapsed_ns]');
   stderr.writeln('    [--min-repetitions=5] [--max-repetitions=30]');
   stderr.writeln('    [--target-rse-percent=10]');
+  stderr.writeln('    [--within-run-noise-percentile=0.75]');
   stderr.writeln('    [--threshold-floor-percent=5]');
   stderr.writeln('    [--threshold-ceiling-percent=50]');
   stderr.writeln('    [--guardrail-floor-percent=3]');
@@ -610,6 +682,8 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--noise-gate-floor-percent=5]');
   stderr.writeln('    [--noise-gate-ceiling-percent=50]');
   stderr.writeln('    [--noise-gate-multiplier=1.5]');
+  stderr.writeln('    [--max-outlier-percent=10]');
+  stderr.writeln('    [--max-run-outlier-percent=20]');
   stderr.writeln(
     '    [--graph-data-dir=docs/benchmarks/data/tracelite/latest]',
   );

@@ -8,6 +8,7 @@ code path you measure differs between them.
 |---|---|---|
 | **Peer comparison / public dashboard** | [`run_release.dart`](./run_release.dart) | **No** — pristine, zero diagnostic overhead |
 | **Trace-backed production gate** | [`run_tracelite.dart`](./run_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
+| **Trace-backed baseline/candidate decision** | [`decide_tracelite.dart`](./decide_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Experiment vs baseline (resqlite-only A/B)** | [`run_profile.dart`](./run_profile.dart) | **Yes** — Timeline markers + per-call profiling |
 | **Cross-library comparison via verifier harness** | `sqlite_reactive_verifier` | N/A (separate package) |
 
@@ -24,6 +25,13 @@ graph-data bundle consumed by the benchmark dashboard. This is the preferred
 pre-publish benchmark/profiling entry point once a local tracelite checkout is
 available, but this PR should not delete the old regular profiling path until
 the tracelite sole-framework gate has current production evidence.
+
+If you already have baseline and candidate tracelite suite manifests, use
+`decide_tracelite.dart`. It applies the calibrated release-lane policy to
+`tracelite decision`, writes a durable decision artifact, and exports graph data
+for the dashboard. The wrapper intentionally defaults guardrails to
+`measured_elapsed_ns`; lower-level timing totals are still useful diagnostics,
+but they are not calibrated release blockers yet.
 
 If you're running an experiment on a branch and want to know whether
 your change helped or hurt, use `run_profile.dart` — it compiles in
@@ -98,20 +106,25 @@ dart run benchmark/run_tracelite.dart \
   --graph-data-dir=docs/benchmarks/data/tracelite/latest
 ```
 
-The wrapper runs `tracelite suite-history --profile=production --runs=5` with
-the calibrated resqlite release-gate scope:
+The wrapper runs `tracelite suite-history --profile=production --runs=5`.
+It separates suite coverage from release-gate policy:
 
 - metric: `measured_elapsed_ns`
 - peer: `resqlite`
-- scenarios: chat simulation, feed paging, high-cardinality fanout,
-  large working set, many-streams writer throughput, narrow batch insert,
-  sqlite diagnostics, and sync burst
+- default suite scenarios: narrow batch insert, point select, feed paging,
+  sync burst, chat simulation, large working set, keyed-PK subscriptions,
+  high-cardinality fanout, many-streams writer throughput, and sqlite
+  diagnostics
+- default strict policy scenarios: chat simulation, high-cardinality fanout,
+  many-streams writer throughput, narrow batch insert, and sqlite diagnostics
 - repetition bounds: `--min-repetitions=5 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
+- robust within-run noise percentile: `--within-run-noise-percentile=0.75`
 - threshold gate: `--threshold-floor-percent=5 --threshold-ceiling-percent=50`
 - guardrail gate: `--guardrail-floor-percent=3`
 - noise gate: `--noise-gate-floor-percent=5 --noise-gate-ceiling-percent=50
   --noise-gate-multiplier=1.5`
+- outlier gates: `--max-outlier-percent=10 --max-run-outlier-percent=20`
 
 It writes `build/tracelite-benchmarks/<label>/history.json`,
 `policy-calibration.json`, `policy-calibration.md`, and `graph-data/`. The
@@ -122,23 +135,67 @@ Use the default strict mode for a publish gate. `--no-strict` is only for
 local smoke runs where the requested history is intentionally too small to pass
 the repetition and noise gates.
 
-`point-select` and `keyed-pk-subscriptions` remain diagnostic workloads until
-their current variance fits under the 50% release-gate threshold ceiling.
+`point-select`, `feed-paging`, `sync-burst`, `large-working-set`, and
+`keyed-pk-subscriptions` are diagnostic suite workloads by default: they are
+still measured and exported to graph data, but they do not block the strict
+publish policy until their current variance fits under the 50% release-gate
+threshold ceiling.
 
-This gate is the candidate replacement for routine resqlite profiling, not yet
-the only accepted framework. Before removing the old path as a fallback, keep
-the PR draft until the scoped production history, policy calibration, graph-data
-validation, and at least one real baseline/candidate decision are recorded from
-current artifacts.
+Current evidence: the strict
+`sole-gate-2026-05-31-resqlite-p75-ready-probe` run completed 5/5 production
+suite histories, exported graph data, and passed graph-data validation. Its
+release-lane `policy-calibration.json` was `ready` for 5/5 groups with a 48%
+primary threshold, 36% max regression guardrail, and 36% max-CV gate. The gate
+uses the p75 within-run noise policy and the outlier ceilings listed above.
 
-Current evidence: strict 2026-05-31 scoped runs against this PR completed 5/5
-production suite histories, but policy calibration was still `not_ready`.
-The first run rejected `feed-paging`, `large-working-set`, and
-`narrow-batch-insert`. Row-sizing probes made those three pass in isolation, but
-the full retuned gate still rejected `feed-paging`, `large-working-set`, and
-`sync-burst`. The remaining noisy workloads need more stable definitions, a
-documented diagnostic-lane split, or an explicit outlier policy before this
-becomes the sole regular profiling workflow.
+The same artifacts also produced an accepted routine no-regression decision:
+
+```bash
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
+  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
+  --candidate=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-005-20260531T144920Z/manifest.json \
+  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
+  --label=sole-gate-2026-05-31-resqlite-no-regression-decision
+```
+
+That decision passed trace health, primary, and guardrail gates for the
+release-lane `measured_elapsed_ns` metric and exported validated graph data with
+suite and decision rows.
+
+This is now credible as the primary resqlite pre-publish profiling path, but it
+is still not the only accepted framework. Before removing the old path as a
+fallback, finish a known code-change baseline/candidate experiment, pin
+resqlite to a stable tracelite source state, and land the PR with green CI.
+
+The remaining noisy workloads stay in the diagnostic lane until they have stable
+workload definitions or separate calibrated thresholds.
+
+## Tracelite Baseline/Candidate Decision
+
+Use this after collecting baseline and candidate suite manifests:
+
+```bash
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
+  --baseline=build/tracelite-baseline/manifest.json \
+  --candidate=build/tracelite-candidate/manifest.json \
+  --policy=build/tracelite-benchmarks/prepublish/policy-calibration.json \
+  --label=exp-123-no-regression
+```
+
+Defaults:
+
+- expectation: `no_regression`
+- primary peer: `resqlite`
+- primary metric: `measured_elapsed_ns`
+- primary scenarios: the five release-lane scenarios from the production gate
+- guardrail metrics: `measured_elapsed_ns`
+
+It writes `build/tracelite-decisions/<label>/decision.json`,
+`decision.md`, `resqlite-tracelite-decision.json`, and `graph-data/`. Exit code
+`0` means accepted. Rejected and inconclusive decisions preserve artifacts and
+exit non-zero.
 
 ## Profile Mode (experiment vs baseline)
 
