@@ -70,6 +70,37 @@ jobs:
       - name: Verify experiment research map is valid
         run: dart run benchmark/check_experiment_signals.dart
 
+  tracelite-smoke:
+    name: Tracelite smoke
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+      - name: Checkout pinned tracelite
+        run: |
+          git clone https://github.com/danReynolds/tracelite /tmp/tracelite
+          git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-05-31
+      - name: Run tracelite CI preset
+        run: |
+          dart run benchmark/run_tracelite.dart \
+            --preset=ci \
+            --tracelite-root=/tmp/tracelite \
+            --resqlite-root="$PWD" \
+            --label="ci-${{ github.sha }}" \
+            --out-dir=build/tracelite-benchmarks/ci-${{ github.sha }}
+      - name: Upload tracelite smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracelite-smoke
+          path: build/tracelite-benchmarks/ci-${{ github.sha }}
+          retention-days: 14
+
   benchmark:
     name: Benchmarks (main)
     runs-on: macos-latest

@@ -5,8 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
-  test('tracelite decision workflow dry-run prints release lane plan',
-      () async {
+  test('tracelite decision workflow dry-run prints release lane plan', () async {
     final root = Directory.current.path;
     final temp = await Directory.systemTemp.createTemp(
       'resqlite_tracelite_decision_test_',
@@ -20,20 +19,17 @@ void main() {
     final policy = File(p.join(temp.path, 'policy-calibration.json'))
       ..writeAsStringSync('{}');
 
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/decide_tracelite.dart',
-          '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
-          '--baseline=${baseline.path}',
-          '--candidate=${candidate.path}',
-          '--policy=${policy.path}',
-          '--label=unit-decision',
-          '--out-dir=${p.join(temp.path, 'decision')}',
-          '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite-decision')}',
-          '--dry-run',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/decide_tracelite.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--baseline=${baseline.path}',
+      '--candidate=${candidate.path}',
+      '--policy=${policy.path}',
+      '--label=unit-decision',
+      '--out-dir=${p.join(temp.path, 'decision')}',
+      '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite-decision')}',
+      '--dry-run',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,
@@ -84,20 +80,17 @@ void main() {
       ..writeAsStringSync('{}');
     final outDir = p.join(temp.path, 'decision');
 
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/decide_tracelite.dart',
-          '--tracelite-root=${fakeRoot.path}',
-          '--dart=${fakeDart.path}',
-          '--baseline=${baseline.path}',
-          '--candidate=${candidate.path}',
-          '--policy=${policy.path}',
-          '--label=failing-decision',
-          '--out-dir=$outDir',
-          '--allow-unpinned-tracelite',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/decide_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--dart=${fakeDart.path}',
+      '--baseline=${baseline.path}',
+      '--candidate=${candidate.path}',
+      '--policy=${policy.path}',
+      '--label=failing-decision',
+      '--out-dir=$outDir',
+      '--allow-unpinned-tracelite',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,
@@ -134,18 +127,15 @@ void main() {
       );
       addTearDown(() => temp.delete(recursive: true));
 
-      final result = await Process.run(
-          Platform.resolvedExecutable,
-          [
-            'benchmark/run_tracelite.dart',
-            '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
-            '--label=unit-benchmark',
-            '--out-dir=${p.join(temp.path, 'benchmark')}',
-            '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite')}',
-            '--runs=2',
-            '--dry-run',
-          ],
-          workingDirectory: root);
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'benchmark/run_tracelite.dart',
+        '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+        '--label=unit-benchmark',
+        '--out-dir=${p.join(temp.path, 'benchmark')}',
+        '--graph-data-dir=${p.join(temp.path, 'pages', 'tracelite')}',
+        '--runs=2',
+        '--dry-run',
+      ], workingDirectory: root);
 
       expect(
         result.exitCode,
@@ -155,10 +145,14 @@ void main() {
 
       final stdoutText = result.stdout.toString();
       expect(stdoutText, contains('resqlite tracelite benchmark plan'));
-      expect(stdoutText,
-          contains('resqlite_root: ${Directory(root).absolute.path}'));
+      expect(stdoutText, contains('preset: production'));
+      expect(
+        stdoutText,
+        contains('resqlite_root: ${Directory(root).absolute.path}'),
+      );
       expect(stdoutText, contains('pub get'));
       expect(stdoutText, contains('suite-history'));
+      expect(stdoutText, contains('--profile=production'));
       expect(
         stdoutText,
         contains('--scenarios=narrow-batch-insert,point-select,feed-paging,'),
@@ -180,9 +174,49 @@ void main() {
       expect(stdoutText, contains('--max-run-outlier-percent=20'));
       expect(stdoutText, contains('export-graph-data'));
       expect(stdoutText, contains('--suite-history='));
+      expect(stdoutText, contains('validate-graph-data'));
       expect(stdoutText, contains(p.join('pages', 'tracelite', 'index.json')));
     },
   );
+
+  test('tracelite benchmark workflow ci preset stays small', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_benchmark_ci_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--preset=ci',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--label=unit-ci-benchmark',
+      '--out-dir=${p.join(temp.path, 'benchmark')}',
+      '--dry-run',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('preset: ci'));
+    expect(stdoutText, contains('--profile=ci'));
+    expect(stdoutText, contains('--runs=1'));
+    expect(stdoutText, contains('--interfaces=resqlite'));
+    expect(
+      stdoutText,
+      contains(
+        '--scenarios=narrow-batch-insert,point-select,'
+        'keyed-pk-subscriptions,sqlite-diagnostics',
+      ),
+    );
+    expect(stdoutText, contains('--min-repetitions=1'));
+    expect(stdoutText, contains('--max-repetitions=3'));
+    expect(stdoutText, contains('validate-graph-data'));
+  });
 
   test('tracelite benchmark workflow preserves manifest on failure', () async {
     final root = Directory.current.path;
@@ -199,18 +233,15 @@ void main() {
     await Process.run('chmod', ['+x', fakeDart.path]);
 
     final outDir = p.join(temp.path, 'benchmark');
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/run_tracelite.dart',
-          '--tracelite-root=${fakeRoot.path}',
-          '--dart=${fakeDart.path}',
-          '--label=failing-benchmark',
-          '--out-dir=$outDir',
-          '--no-graph-data',
-          '--allow-unpinned-tracelite',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--dart=${fakeDart.path}',
+      '--label=failing-benchmark',
+      '--out-dir=$outDir',
+      '--no-graph-data',
+      '--allow-unpinned-tracelite',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,
@@ -276,18 +307,15 @@ exit 0
     await Process.run('chmod', ['+x', fakeDart.path]);
 
     final outDir = p.join(temp.path, 'benchmark');
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/run_tracelite.dart',
-          '--tracelite-root=${fakeRoot.path}',
-          '--dart=${fakeDart.path}',
-          '--label=dependency-mismatch',
-          '--out-dir=$outDir',
-          '--no-graph-data',
-          '--allow-unpinned-tracelite',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--dart=${fakeDart.path}',
+      '--label=dependency-mismatch',
+      '--out-dir=$outDir',
+      '--no-graph-data',
+      '--allow-unpinned-tracelite',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,
@@ -309,8 +337,10 @@ exit 0
     final binding =
         manifest['tracelite_resqlite_dependency'] as Map<String, Object?>;
     expect(binding['matches_requested_root'], isFalse);
-    expect(binding['resolved_resqlite_root'],
-        isNot(Directory(root).absolute.path));
+    expect(
+      binding['resolved_resqlite_root'],
+      isNot(Directory(root).absolute.path),
+    );
     final steps = manifest['steps']! as List<Object?>;
     expect(steps, hasLength(2));
     expect(steps.last as Map<String, Object?>, containsPair('exit_code', 64));
@@ -327,16 +357,13 @@ exit 0
     Directory(p.join(fakeRoot.path, 'bin')).createSync(recursive: true);
     File(p.join(fakeRoot.path, 'bin', 'tracelite.dart')).writeAsStringSync('');
 
-    final result = await Process.run(
-        Platform.resolvedExecutable,
-        [
-          'benchmark/run_tracelite.dart',
-          '--tracelite-root=${fakeRoot.path}',
-          '--label=unpinned-benchmark',
-          '--out-dir=${p.join(temp.path, 'benchmark')}',
-          '--no-graph-data',
-        ],
-        workingDirectory: root);
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--label=unpinned-benchmark',
+      '--out-dir=${p.join(temp.path, 'benchmark')}',
+      '--no-graph-data',
+    ], workingDirectory: root);
 
     expect(
       result.exitCode,

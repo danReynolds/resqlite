@@ -93,7 +93,7 @@ Recommended workflow for performance decisions:
 2. Run at least `--repeat=5`
 3. Trust stable cases first; treat `Repeat Stability: noisy` rows as advisory
 
-## Tracelite Production Gate
+## Tracelite Presets
 
 Trace-backed release benchmarking uses the pinned tracelite checkout as the
 runner and artifact owner:
@@ -105,10 +105,45 @@ git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
 
 ```bash
 dart run benchmark/run_tracelite.dart \
+  --preset=production \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
   --label=prepublish-YYYY-MM-DD \
   --graph-data-dir=docs/benchmarks/data/tracelite/latest
+```
+
+`run_tracelite.dart` has three presets. Every preset still records
+`tracelite_source`, `resqlite_source`, and the resolved Tracelite dependency
+binding, exports graph data, and validates that graph-data bundle. Explicit CLI
+flags override preset defaults.
+
+| Preset | Use when | Default shape |
+|---|---|---|
+| `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios |
+| `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions` |
+| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, full peer matrix and full suite |
+
+Routine CI should use:
+
+```bash
+dart run benchmark/run_tracelite.dart \
+  --preset=ci \
+  --tracelite-root=/path/to/tracelite \
+  --resqlite-root="$PWD" \
+  --label=ci-smoke
+```
+
+Perf experiments should start focused, then override scenarios to match the
+change:
+
+```bash
+dart run benchmark/run_tracelite.dart \
+  --preset=experiment \
+  --tracelite-root=/path/to/tracelite \
+  --resqlite-root="$PWD" \
+  --label=exp-123-baseline \
+  --suite-scenarios=high-cardinality-fanout,many-streams-writer-throughput \
+  --policy-scenarios=high-cardinality-fanout,many-streams-writer-throughput
 ```
 
 The default pin is
@@ -123,16 +158,17 @@ else, the gate fails before running the suite. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development.
 
-The wrapper runs `tracelite suite-history --profile=production --runs=5`.
-It separates suite coverage from release-gate policy:
+The `production` preset runs
+`tracelite suite-history --profile=production --runs=5`. It separates suite
+coverage from release-gate policy:
 
 - metric: `measured_elapsed_ns`
 - peer: `resqlite`
-- default suite scenarios: narrow batch insert, point select, feed paging,
+- production suite scenarios: narrow batch insert, point select, feed paging,
   sync burst, chat simulation, large working set, keyed-PK subscriptions,
   high-cardinality fanout, many-streams writer throughput, and sqlite
   diagnostics
-- default strict policy scenarios: chat simulation, high-cardinality fanout,
+- production strict policy scenarios: chat simulation, high-cardinality fanout,
   many-streams writer throughput, narrow batch insert, and sqlite diagnostics
 - repetition bounds: `--min-repetitions=5 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
@@ -148,9 +184,11 @@ It writes `build/tracelite-benchmarks/<label>/history.json`,
 dashboard can read `docs/benchmarks/data/tracelite/latest/index.json` when the
 graph-data output is published there.
 
-Use the default strict mode for a publish gate. `--no-strict` is only for
-local smoke runs where the requested history is intentionally too small to pass
-the repetition and noise gates.
+Use the default strict mode for CI and publish gates. `--no-strict` is only for
+local exploratory runs where the requested history is intentionally too small to
+pass the repetition and noise gates. Suite failures and trace diagnostics still
+make the wrapper manifest invalid; graph data is exported when possible so the
+failed run can be inspected.
 
 `point-select`, `feed-paging`, `sync-burst`, `large-working-set`, and
 `keyed-pk-subscriptions` are diagnostic suite workloads by default: they are
