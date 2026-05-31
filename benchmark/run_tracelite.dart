@@ -851,7 +851,8 @@ void _validateResqliteRoot(String resqliteRoot) {
     exit(64);
   }
   final pubspecText = pubspec.readAsStringSync();
-  if (!pubspecText.contains(RegExp(r'(?m)^name:\s*resqlite\s*$'))) {
+  if (!pubspecText
+      .contains(RegExp(r'^name:\s*resqlite\s*$', multiLine: true))) {
     stderr.writeln('not a resqlite package: $resqliteRoot');
     stderr.writeln('expected pubspec.yaml to declare "name: resqlite"');
     exit(64);
