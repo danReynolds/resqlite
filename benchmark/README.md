@@ -152,27 +152,30 @@ still measured and exported to graph data, but they do not block the strict
 publish policy until their current variance fits under the 50% release-gate
 threshold ceiling.
 
-Current evidence: the strict
-`sole-gate-2026-05-31-resqlite-p75-ready-probe` run completed 5/5 production
+Current evidence: the strict pinned-source
+`sole-gate-2026-05-31-resqlite-pinned-source` run completed 5/5 production
 suite histories, exported graph data, and passed graph-data validation. Its
-release-lane `policy-calibration.json` was `ready` for 5/5 groups with a 48%
-primary threshold, 36% max regression guardrail, and 36% max-CV gate. The gate
-uses the p75 within-run noise policy and the outlier ceilings listed above.
+manifest recorded `tracelite_source.source_ok=true` and
+`revision_matches_pin=true`. Its release-lane `policy-calibration.json` was
+`ready` for 5/5 groups with a 27.5% primary threshold, 20.5% max regression
+guardrail, and 20.5% max-CV gate. The gate uses the p75 within-run noise policy
+and the outlier ceilings listed above.
 
 The same artifacts also produced an accepted routine no-regression decision:
 
 ```bash
 dart run benchmark/decide_tracelite.dart \
   --tracelite-root=/path/to/tracelite \
-  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
-  --candidate=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-005-20260531T144920Z/manifest.json \
-  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
-  --label=sole-gate-2026-05-31-resqlite-no-regression-decision
+  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/run-001-20260531T154622Z/manifest.json \
+  --candidate=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/run-005-20260531T155915Z/manifest.json \
+  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/policy-calibration.json \
+  --label=sole-gate-2026-05-31-resqlite-pinned-no-regression
 ```
 
 That decision passed trace health, primary, and guardrail gates for the
 release-lane `measured_elapsed_ns` metric and exported validated graph data with
-suite and decision rows.
+suite and decision rows. Its wrapper manifest also recorded
+`tracelite_source.source_ok=true` and `revision_matches_pin=true`.
 
 The decision path also rejected a known injected read-path regression:
 
