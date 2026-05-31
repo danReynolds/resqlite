@@ -163,10 +163,26 @@ That decision passed trace health, primary, and guardrail gates for the
 release-lane `measured_elapsed_ns` metric and exported validated graph data with
 suite and decision rows.
 
+The decision path also rejected a known injected read-path regression:
+
+```bash
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
+  --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
+  --candidate=build/tracelite-decisions/known-read-delay-regression/candidate/manifest.json \
+  --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
+  --label=known-read-delay-regression
+```
+
+That artifact reported `rejected`: trace health passed, while primary and
+guardrail gates rejected the delayed candidate on `chat-sim`,
+`narrow-batch-insert`, and `sqlite-diagnostics`. Its graph-data bundle
+validated.
+
 This is now credible as the primary resqlite pre-publish profiling path, but it
 is still not the only accepted framework. Before removing the old path as a
-fallback, finish a known code-change baseline/candidate experiment, pin
-resqlite to a stable tracelite source state, and land the PR with green CI.
+fallback, pin resqlite to a stable tracelite source state and keep CI green on
+the pinned integration.
 
 The remaining noisy workloads stay in the diagnostic lane until they have stable
 workload definitions or separate calibrated thresholds.
