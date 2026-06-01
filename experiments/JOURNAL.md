@@ -132,6 +132,20 @@ slots, writer locks, or native buffers. Prefer giving the admission owner a
 concrete handle to the resource over layering a second queue around a future;
 otherwise the check is only advisory.*
 
+### Cross-isolate wall timers can blame the wrong side
+
+[Exp 135](135-writer-sqlite-wall-split.md) split A11c overlap writer request
+wall into main-isolate request/response wall, writer-isolate native write-call
+wall, and dirty-dependency drain. The native write call was only 20.03 ms of
+61.95 ms writer request wall, while most of the stream-added cost lived in
+writer response residual and post-write completion/yield time. A timer around
+`await db.execute()` would have made this look like writer or SQLite work even
+though the live target is completion-side scheduling pressure.
+
+*Reapplies whenever a benchmark crosses isolates or event-loop queues. Add a
+worker-side timer before attributing main-isolate wall time to native work,
+SQLite stepping, or the worker itself.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

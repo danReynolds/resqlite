@@ -110,6 +110,25 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative main-isolate wall-clock microseconds spent waiting for
+  /// successful writer-isolate requests after the write mutex is already held.
+  /// This covers send-port dispatch, writer-isolate request handling, native
+  /// write work, dirty-dependency drain, and response delivery, but not
+  /// `StreamEngine.onDependencyChanges`.
+  static int writerRequestUs = 0;
+  static int writerRequestCount = 0;
+
+  /// Cumulative writer-isolate microseconds spent inside the native write call
+  /// (`resqlite_execute`, `resqlite_run_batch`, or transaction-control SQL).
+  /// This is the SQLite-side proxy for writer audits: prepare/cache lookup,
+  /// bind, step/commit, reset, and native result extraction all land here.
+  static int writerSqliteUs = 0;
+
+  /// Cumulative writer-isolate microseconds spent draining dirty table/column
+  /// metadata after a successful write. This is separate from the SQLite write
+  /// call because it drives stream invalidation but is not part of stepping.
+  static int writerDirtyDrainUs = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -121,6 +140,10 @@ class ProfileCounters {
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'writer_request_us': writerRequestUs,
+    'writer_request_count': writerRequestCount,
+    'writer_sqlite_us': writerSqliteUs,
+    'writer_dirty_drain_us': writerDirtyDrainUs,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -149,5 +172,9 @@ class ProfileCounters {
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    writerRequestUs = 0;
+    writerRequestCount = 0;
+    writerSqliteUs = 0;
+    writerDirtyDrainUs = 0;
   }
 }

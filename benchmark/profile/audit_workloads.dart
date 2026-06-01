@@ -96,8 +96,7 @@ Future<({Database db, Directory tempDir})> setupA11cDb({
       'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
   await db.execute(createSql);
   await db.executeBatch(insertSql, [
-    for (var i = 0; i < a11cRowCount; i++)
-      [i, for (final _ in colNames) 'v$i'],
+    for (var i = 0; i < a11cRowCount; i++) [i, for (final _ in colNames) 'v$i'],
   ]);
   return (db: db, tempDir: tempDir);
 }
@@ -186,9 +185,7 @@ Future<AuditScenarioResult> runA11cScenario(
 /// drain runs after the stopwatch stops, so emission count is stable
 /// without padding the wall denominator with idle wait.
 Future<AuditScenarioResult> runKeyedPkScenario() async {
-  final tempDir = await Directory.systemTemp.createTemp(
-    'audit_workloads_pk_',
-  );
+  final tempDir = await Directory.systemTemp.createTemp('audit_workloads_pk_');
   final db = await Database.open('${tempDir.path}/test.db');
   try {
     await db.execute(
@@ -198,10 +195,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       'updated_at INTEGER NOT NULL'
       ')',
     );
-    await db.executeBatch(
-      'INSERT INTO items(body, updated_at) VALUES (?, ?)',
-      [for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0]],
-    );
+    await db.executeBatch('INSERT INTO items(body, updated_at) VALUES (?, ?)', [
+      for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0],
+    ]);
 
     final watchedIds = _pickKeyedPkWatchedIds();
     final watchedSet = watchedIds.toSet();
@@ -331,6 +327,10 @@ Future<AuditScenarioResult> runDirectReadControl() async {
         'intersection_entries': 0,
         'rows_decoded': 0,
         'cells_decoded': 0,
+        'writer_request_us': 0,
+        'writer_request_count': 0,
+        'writer_sqlite_us': 0,
+        'writer_dirty_drain_us': 0,
       },
     );
   } finally {

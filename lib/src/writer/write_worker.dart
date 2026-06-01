@@ -98,6 +98,24 @@ final class BatchResponse {
   final TableDependencies modifications;
 }
 
+/// Profile-mode timing metadata sent alongside writer responses.
+///
+/// This is wrapped around normal responses only when `kProfileMode` is true,
+/// so production message shapes stay unchanged.
+final class WriterProfile {
+  const WriterProfile({required this.sqliteUs, required this.dirtyDrainUs});
+
+  final int sqliteUs;
+  final int dirtyDrainUs;
+}
+
+final class ProfiledWriterResponse {
+  const ProfiledWriterResponse(this.response, this.profile);
+
+  final Object response;
+  final WriterProfile profile;
+}
+
 // ---------------------------------------------------------------------------
 // Writer-specific FFI binding
 // ---------------------------------------------------------------------------
@@ -216,26 +234,55 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  sqliteSw?.stop();
+
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
+  final dirtySw = kProfileMode ? (Stopwatch()..start()) : null;
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  dirtySw?.stop();
+
+  _sendWriterResponse(
+    msg,
+    ExecuteResponse(result, modifications),
+    sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+    dirtyDrainUs: dirtySw?.elapsedMicroseconds ?? 0,
+  );
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final sqliteSw = kProfileMode ? Stopwatch() : null;
+  final dirtySw = kProfileMode ? Stopwatch() : null;
+
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
+    sqliteSw?.start();
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    sqliteSw?.stop();
+    _sendWriterResponse(
+      msg,
+      const BatchResponse(TableDependencies.none),
+      sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+      dirtyDrainUs: 0,
+    );
   } else {
+    sqliteSw?.start();
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+    sqliteSw?.stop();
+    dirtySw?.start();
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
+    _sendWriterResponse(
+      msg,
+      BatchResponse(modifications),
+      sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+      dirtyDrainUs: dirtySw?.elapsedMicroseconds ?? 0,
     );
   }
 }
@@ -277,8 +324,11 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   // On failure, txDepth stays at its current value and the error
   // propagates — _runTransaction on the main isolate will never have
   // entered its body, so there is nothing to roll back.
+  final sqliteSw = kProfileMode ? Stopwatch() : null;
   if (state.txDepth == 0) {
+    sqliteSw?.start();
     final rc = resqliteTxBeginImmediate(state.dbHandle);
+    sqliteSw?.stop();
     if (rc != 0) {
       throw ResqliteTransactionException(
         resqliteErrmsg(state.dbHandle).toDartString(),
@@ -289,7 +339,9 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   } else {
     final sp = 'SAVEPOINT s${state.txDepth}'.toNativeUtf8();
     try {
+      sqliteSw?.start();
       final rc = resqliteExec(state.dbHandle, sp);
+      sqliteSw?.stop();
       if (rc != 0) {
         throw ResqliteTransactionException(
           resqliteErrmsg(state.dbHandle).toDartString(),
@@ -302,7 +354,12 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
     }
   }
   state.txDepth++;
-  msg.replyPort.send(true);
+  _sendWriterResponse(
+    msg,
+    true,
+    sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+    dirtyDrainUs: 0,
+  );
 }
 
 void _handleCommit(_WriterState state, CommitRequest msg) {
@@ -310,8 +367,11 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // is reduced by exactly one and the corresponding SQLite scope is no
   // longer active. The next request sees a predictable state.
   final newDepth = state.txDepth - 1;
+  final sqliteSw = kProfileMode ? Stopwatch() : null;
   if (newDepth == 0) {
+    sqliteSw?.start();
     final rc = resqliteTxCommit(state.dbHandle);
+    sqliteSw?.stop();
     if (rc != 0) {
       // Capture the error message BEFORE any further sqlite calls — the
       // errmsg pointer is only stable until the next call.
@@ -331,12 +391,20 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       );
     }
     state.txDepth = newDepth;
-    msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+    final dirtySw = kProfileMode ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    dirtySw?.stop();
+    _sendWriterResponse(
+      msg,
+      BatchResponse(modifications),
+      sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+      dirtyDrainUs: dirtySw?.elapsedMicroseconds ?? 0,
     );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
+    sqliteSw?.start();
     final rc = resqliteExec(state.dbHandle, sp);
+    sqliteSw?.stop();
     calloc.free(sp);
     if (rc != 0) {
       final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
@@ -372,7 +440,12 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    _sendWriterResponse(
+      msg,
+      const BatchResponse(TableDependencies.none),
+      sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+      dirtyDrainUs: 0,
+    );
   }
 }
 
@@ -382,8 +455,11 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   // succeeded. That keeps the writer usable for the next caller even if
   // SQLite reports a rollback failure.
   final newDepth = state.txDepth - 1;
+  final sqliteSw = kProfileMode ? Stopwatch() : null;
   if (newDepth == 0) {
+    sqliteSw?.start();
     final rc = resqliteTxRollback(state.dbHandle);
+    sqliteSw?.stop();
     // Clear the dirty sets — rolled-back changes don't count for stream
     // invalidation, even if SQLite reported a rollback error.
     discardDirtyTableDependencies(state.dbHandle);
@@ -400,8 +476,10 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     // removes the savepoint from SQLite's stack.
     final rollbackSp = 'ROLLBACK TO s$newDepth'.toNativeUtf8();
     final releaseSp = 'RELEASE s$newDepth'.toNativeUtf8();
+    sqliteSw?.start();
     final rc1 = resqliteExec(state.dbHandle, rollbackSp);
     final rc2 = resqliteExec(state.dbHandle, releaseSp);
+    sqliteSw?.stop();
     calloc.free(rollbackSp);
     calloc.free(releaseSp);
     state.txDepth = newDepth;
@@ -420,5 +498,29 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
       );
     }
   }
-  msg.replyPort.send(true);
+  _sendWriterResponse(
+    msg,
+    true,
+    sqliteUs: sqliteSw?.elapsedMicroseconds ?? 0,
+    dirtyDrainUs: 0,
+  );
+}
+
+void _sendWriterResponse(
+  WriterRequest request,
+  Object response, {
+  required int sqliteUs,
+  required int dirtyDrainUs,
+}) {
+  if (!kProfileMode) {
+    request.replyPort.send(response);
+    return;
+  }
+
+  request.replyPort.send(
+    ProfiledWriterResponse(
+      response,
+      WriterProfile(sqliteUs: sqliteUs, dirtyDrainUs: dirtyDrainUs),
+    ),
+  );
 }

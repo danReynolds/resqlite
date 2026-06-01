@@ -5,6 +5,8 @@ import 'dart:isolate';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
+import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -53,16 +55,36 @@ final class Writer {
     final sendPort = await _workerPort.future;
     final port = RawReceivePort();
     final completer = Completer<T>();
+    final requestSw = kProfileMode ? (Stopwatch()..start()) : null;
     port.handler = (Object? response) {
+      requestSw?.stop();
       port.close();
       if (response is ResqliteException) {
         completer.completeError(response);
+      } else if (response is ProfiledWriterResponse) {
+        _recordWriterProfile(
+          requestUs: requestSw?.elapsedMicroseconds ?? 0,
+          profile: response.profile,
+        );
+        completer.complete(response.response as T);
       } else {
         completer.complete(response as T);
       }
     };
     sendPort.send(build(port.sendPort));
     return completer.future;
+  }
+
+  void _recordWriterProfile({
+    required int requestUs,
+    required WriterProfile profile,
+  }) {
+    if (!kProfileMode) return;
+
+    ProfileCounters.writerRequestUs += requestUs;
+    ProfileCounters.writerRequestCount++;
+    ProfileCounters.writerSqliteUs += profile.sqliteUs;
+    ProfileCounters.writerDirtyDrainUs += profile.dirtyDrainUs;
   }
 
   Future<T> locked<T>(Future<T> Function() body) async {
