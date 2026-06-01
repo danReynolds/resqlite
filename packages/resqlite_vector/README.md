@@ -43,5 +43,19 @@ must already exist before `Database.open` runs this setup. If migrations create
 the table, run those migrations first, close that bootstrap connection, then
 reopen with `sqliteVectorExtension(indexes: [...])`.
 
+Advanced setup can be added with `onRegister`:
+
+```dart
+sqliteVectorExtension(
+  onRegister: (ext) {
+    ext.execute('SELECT vector_init(?, ?, ?)', parameters: [
+      'items',
+      'embedding',
+      'type=FLOAT32,dimension=1536',
+    ]);
+  },
+);
+```
+
 The bundled native binaries are derived from the `sqlite_vector` Dart package
 and are covered by the license in `LICENSE`.

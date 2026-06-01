@@ -242,12 +242,28 @@ The extension package pattern is intentionally small:
 3. Return `ResqliteExtension(Native.addressOf<ResqliteExtensionEntrypoint>(...))`.
 4. Pass the extension to `Database.open(extensions: [...])`.
 
-Extensions that need per-connection SQL setup attach declarative
-`ResqliteConnectionSetup.sql(...)` entries to their `ResqliteExtension`.
-resqlite runs setup during `Database.open`, after native loading and before the
+Extensions that need per-connection SQL setup use `onRegister`:
+
+```dart
+ResqliteExtension(
+  entrypoint,
+  name: 'sqlite_example',
+  onRegister: (ext) {
+    ext.execute(
+      'SELECT example_init(?)',
+      parameters: ['items'],
+      scope: ResqliteConnectionScope.all,
+    );
+  },
+);
+```
+
+`onRegister` is synchronous and `ext.execute(...)` returns `void`; those calls
+enqueue ordered setup SQL. resqlite runs extension native load/setup on a
+bootstrap isolate during `Database.open`, after native loading and before the
 writer/reader workers start. Companion packages should expose domain-specific
-options for common setup, like `SqliteVectorIndex`, and reserve raw setup for
-advanced escape hatches.
+options for common setup, like `SqliteVectorIndex`, and reserve raw
+`onRegister` setup for advanced escape hatches.
 
 This keeps extension support tied to resqlite's SQLite image and avoids the
 `package:sqlite3` native asset split that existing sqlite3-specific wrappers

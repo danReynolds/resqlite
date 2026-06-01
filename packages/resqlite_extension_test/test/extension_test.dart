@@ -71,11 +71,9 @@ void main() {
       '${tempDir.path}/setup_all.db',
       extensions: [
         sqliteVectorExtension(
-          setup: [
-            ResqliteConnectionSetup.sql(
-              'CREATE TEMP TABLE setup_all(value TEXT)',
-            ),
-          ],
+          onRegister: (ext) {
+            ext.execute('CREATE TEMP TABLE setup_all(value TEXT)');
+          },
         ),
       ],
     );
@@ -97,16 +95,16 @@ void main() {
       '${tempDir.path}/setup_scope.db',
       extensions: [
         sqliteVectorExtension(
-          setup: [
-            ResqliteConnectionSetup.sql(
+          onRegister: (ext) {
+            ext.execute(
               'CREATE TEMP TABLE writer_only(value TEXT)',
-              scope: ResqliteConnectionSetupScope.writer,
-            ),
-            ResqliteConnectionSetup.sql(
+              scope: ResqliteConnectionScope.writer,
+            );
+            ext.execute(
               'CREATE TEMP TABLE readers_only(value TEXT)',
-              scope: ResqliteConnectionSetupScope.readers,
-            ),
-          ],
+              scope: ResqliteConnectionScope.readers,
+            );
+          },
         ),
       ],
     );
@@ -138,18 +136,14 @@ void main() {
       '${tempDir.path}/setup_duplicates.db',
       extensions: [
         sqliteVectorExtension(
-          setup: [
-            ResqliteConnectionSetup.sql(
-              'CREATE TEMP TABLE setup_a(value TEXT)',
-            ),
-          ],
+          onRegister: (ext) {
+            ext.execute('CREATE TEMP TABLE setup_a(value TEXT)');
+          },
         ),
         sqliteVectorExtension(
-          setup: [
-            ResqliteConnectionSetup.sql(
-              'CREATE TEMP TABLE setup_b(value TEXT)',
-            ),
-          ],
+          onRegister: (ext) {
+            ext.execute('CREATE TEMP TABLE setup_b(value TEXT)');
+          },
         ),
       ],
     );
@@ -173,7 +167,9 @@ void main() {
           '${tempDir.path}/setup_failure.db',
           extensions: [
             sqliteVectorExtension(
-              setup: [ResqliteConnectionSetup.sql('SELECT 1; SELECT 2')],
+              onRegister: (ext) {
+                ext.execute('SELECT 1; SELECT 2');
+              },
             ),
           ],
         ),
@@ -199,6 +195,42 @@ void main() {
       );
     },
   );
+
+  test('runs onRegister setup in extension list order', () async {
+    final db = await Database.open(
+      '${tempDir.path}/setup_order.db',
+      extensions: [
+        sqliteVectorExtension(
+          onRegister: (ext) {
+            ext.execute(
+              'CREATE TEMP TABLE registration_order(value TEXT)',
+              scope: ResqliteConnectionScope.writer,
+            );
+            ext.execute(
+              'INSERT INTO registration_order(value) VALUES (?)',
+              parameters: ['vector'],
+              scope: ResqliteConnectionScope.writer,
+            );
+          },
+        ),
+        sqliteJsExtension(
+          onRegister: (ext) {
+            ext.execute(
+              'INSERT INTO registration_order(value) VALUES (?)',
+              parameters: ['js'],
+              scope: ResqliteConnectionScope.writer,
+            );
+          },
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    final values = await db.transaction((tx) {
+      return tx.select('SELECT value FROM registration_order ORDER BY rowid');
+    });
+    expect(values.map((row) => row['value']), ['vector', 'js']);
+  });
 
   test('initializes configured vector indexes on every connection', () async {
     final path = '${tempDir.path}/vector_index.db';
@@ -249,7 +281,13 @@ void main() {
   test('loads an unrelated extension through the same pattern', () async {
     final db = await Database.open(
       '${tempDir.path}/js.db',
-      extensions: [sqliteJsExtension()],
+      extensions: [
+        sqliteJsExtension(
+          onRegister: (ext) {
+            ext.execute('CREATE TEMP TABLE js_setup(value TEXT)');
+          },
+        ),
+      ],
     );
     addTearDown(db.close);
 
@@ -260,6 +298,15 @@ void main() {
     await db.execute('INSERT INTO scripts (value) VALUES (js_version())');
     final stored = await db.select('SELECT value FROM scripts');
     expect(stored.single['value'], isA<String>());
+
+    await db.execute('INSERT INTO js_setup(value) VALUES (?)', ['writer']);
+    for (var i = 0; i < 8; i++) {
+      final setupRows = await db.select(
+        "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        ['js_setup'],
+      );
+      expect(setupRows.single['name'], 'js_setup');
+    }
   });
 
   test('loads an extension from a dynamic library symbol', () async {

@@ -13,9 +13,10 @@ external int sqlite3JsInit(
 );
 
 /// Loads SQLite JS on every connection opened by resqlite.
-ResqliteExtension sqliteJsExtension() {
+ResqliteExtension sqliteJsExtension({ResqliteExtensionRegister? onRegister}) {
   return ResqliteExtension(
     Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3JsInit),
     name: 'sqlite_js',
+    onRegister: onRegister,
   );
 }

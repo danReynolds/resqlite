@@ -69,7 +69,7 @@ const char* resqlite_errmsg(resqlite_db* db);
 sqlite3* resqlite_writer_handle(resqlite_db* db);
 
 // Open-time extension setup scopes. These values are mirrored by
-// ResqliteConnectionSetupScope in Dart.
+// ResqliteConnectionScope in Dart.
 #define RESQLITE_SETUP_SCOPE_ALL     0
 #define RESQLITE_SETUP_SCOPE_WRITER  1
 #define RESQLITE_SETUP_SCOPE_READERS 2
@@ -78,8 +78,8 @@ sqlite3* resqlite_writer_handle(resqlite_db* db);
 //
 // This is intended for Database.open() before Dart reader/writer isolates are
 // spawned. Setup SQL must be a single statement; multi-statement setup should
-// be represented as multiple ResqliteConnectionSetup entries so resqlite can
-// preserve ordering and attribute failures.
+// be represented as multiple ext.execute calls so resqlite can preserve
+// ordering and attribute failures.
 int resqlite_run_connection_setup(
     resqlite_db* db,
     const char* sql,

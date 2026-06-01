@@ -4,11 +4,12 @@ export 'src/database.dart' show Database;
 export 'src/diagnostics.dart' show Diagnostics;
 export 'src/extension.dart'
     show
-        ResqliteConnectionSetup,
-        ResqliteConnectionSetupScope,
+        ResqliteConnectionScope,
         ResqliteExtension,
         ResqliteExtensionEntrypoint,
-        ResqliteExtensionInitNative;
+        ResqliteExtensionInitNative,
+        ResqliteExtensionRegister,
+        ResqliteExtensionRegistrar;
 export 'src/transaction.dart' show Transaction;
 export 'src/exceptions.dart'
     show

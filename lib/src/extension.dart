@@ -17,52 +17,43 @@ typedef ResqliteExtensionInitNative =
 typedef ResqliteExtensionEntrypoint =
     ffi.NativeFunction<ResqliteExtensionInitNative>;
 
-/// Which native resqlite connections should run an extension setup statement.
-enum ResqliteConnectionSetupScope {
-  /// Run setup on the writer and every reader connection.
+/// Which native resqlite connections should execute registration SQL.
+enum ResqliteConnectionScope {
+  /// Execute on the writer and every reader connection.
   all,
 
-  /// Run setup only on the writer connection.
+  /// Execute only on the writer connection.
   writer,
 
-  /// Run setup only on reader connections.
+  /// Execute only on reader connections.
   readers,
 }
 
-/// SQL to run on native connections after an extension is loaded.
+/// Callback used by extension packages to configure per-connection setup.
 ///
 /// Most SQLite extensions only need their native `sqlite3_xxx_init` function
 /// called per connection. Some extensions also expose connection-local setup
 /// SQL, such as registering ICU collations or initializing vector metadata.
-/// Extension packages should hide these generic setup objects behind
-/// domain-specific options where possible.
 ///
-/// Setup is run by `Database.open` after native extension entrypoints have been
-/// loaded on the writer/reader pool and before Dart workers are spawned. Each
-/// setup entry must contain exactly one SQL statement. Use multiple entries
-/// when ordering multiple statements matters.
-final class ResqliteConnectionSetup {
-  factory ResqliteConnectionSetup.sql(
+/// The callback is synchronous by design. Calls to
+/// [ResqliteExtensionRegistrar.execute] enqueue setup SQL; resqlite executes
+/// the queued statements during `Database.open`, after native extension
+/// entrypoints have loaded and before the database is returned.
+typedef ResqliteExtensionRegister =
+    void Function(ResqliteExtensionRegistrar ext);
+
+/// Registrar exposed to [ResqliteExtension.onRegister].
+abstract interface class ResqliteExtensionRegistrar {
+  /// Enqueues one setup SQL statement.
+  ///
+  /// Result rows are discarded, so this can be used for side-effecting
+  /// `SELECT` calls such as `SELECT vector_init(...)`, PRAGMAs, and DDL. Use
+  /// multiple calls when ordering multiple statements matters.
+  void execute(
     String sql, {
     List<Object?> parameters = const [],
-    ResqliteConnectionSetupScope scope = ResqliteConnectionSetupScope.all,
-  }) {
-    if (sql.trim().isEmpty) {
-      throw ArgumentError.value(sql, 'sql', 'must not be empty');
-    }
-    return ResqliteConnectionSetup._(sql, List.unmodifiable(parameters), scope);
-  }
-
-  const ResqliteConnectionSetup._(this.sql, this.parameters, this.scope);
-
-  /// Single SQL statement to execute.
-  final String sql;
-
-  /// Bound parameters for [sql].
-  final List<Object?> parameters;
-
-  /// Native connections that should execute [sql].
-  final ResqliteConnectionSetupScope scope;
+    ResqliteConnectionScope scope = ResqliteConnectionScope.all,
+  });
 }
 
 /// A SQLite loadable extension to register on every resqlite connection.
@@ -73,11 +64,7 @@ final class ResqliteConnectionSetup {
 /// extension functions and virtual tables.
 final class ResqliteExtension {
   /// Creates an extension from a typed SQLite extension init pointer.
-  ResqliteExtension(
-    this.entrypoint, {
-    this.name,
-    Iterable<ResqliteConnectionSetup> setup = const [],
-  }) : setup = List.unmodifiable(setup) {
+  ResqliteExtension(this.entrypoint, {this.name, this.onRegister}) {
     if (entrypoint == ffi.nullptr) {
       throw ArgumentError.value(entrypoint, 'entrypoint', 'must not be null');
     }
@@ -90,12 +77,12 @@ final class ResqliteExtension {
   factory ResqliteExtension.fromAddress(
     ffi.Pointer<ffi.Void> entrypoint, {
     String? name,
-    Iterable<ResqliteConnectionSetup> setup = const [],
+    ResqliteExtensionRegister? onRegister,
   }) {
     return ResqliteExtension(
       entrypoint.cast<ResqliteExtensionEntrypoint>(),
       name: name,
-      setup: setup,
+      onRegister: onRegister,
     );
   }
 
@@ -108,12 +95,12 @@ final class ResqliteExtension {
     ffi.DynamicLibrary library,
     String symbol, {
     String? name,
-    Iterable<ResqliteConnectionSetup> setup = const [],
+    ResqliteExtensionRegister? onRegister,
   }) {
     return ResqliteExtension(
       library.lookup<ResqliteExtensionEntrypoint>(symbol),
       name: name ?? symbol,
-      setup: setup,
+      onRegister: onRegister,
     );
   }
 
@@ -123,8 +110,13 @@ final class ResqliteExtension {
   /// Optional debug name used in diagnostics and error messages.
   final String? name;
 
-  /// Open-time SQL setup to run after the extension is loaded.
-  final List<ResqliteConnectionSetup> setup;
+  /// Open-time registration setup.
+  ///
+  /// Called by `Database.open` to enqueue per-connection SQL setup for this
+  /// extension. The callback itself must not do async work; its
+  /// [ResqliteExtensionRegistrar.execute] calls are executed before
+  /// `Database.open` completes.
+  final ResqliteExtensionRegister? onRegister;
 
   /// Untyped native entrypoint address passed to SQLite.
   ffi.Pointer<ffi.Void> get entrypointAddress => entrypoint.cast();

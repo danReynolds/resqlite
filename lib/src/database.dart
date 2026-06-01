@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io' show File, Platform;
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -116,79 +117,57 @@ final class Database {
     String? encryptionKey,
     Iterable<ResqliteExtension> extensions = const [],
   }) async {
-    final pathNative = path.toNativeUtf8();
-    final keyNative = encryptionKey != null
-        ? encryptionKey.toNativeUtf8()
-        : ffi.nullptr.cast<Utf8>();
     final extensionList = extensions.toList(growable: false);
-    final extensionEntrypointList = _dedupeExtensionEntrypoints(extensionList);
-    final extensionSetup = _collectExtensionSetup(extensionList);
-    final extensionEntrypoints = extensionEntrypointList.isEmpty
-        ? ffi.nullptr
-        : calloc<ffi.Pointer<ffi.Void>>(extensionEntrypointList.length);
-    try {
-      for (var i = 0; i < extensionEntrypointList.length; i++) {
-        extensionEntrypoints[i] = extensionEntrypointList[i].entrypointAddress;
-      }
+    final extensionEntrypoints = _dedupeExtensionEntrypoints(extensionList);
+    final setup = _collectExtensionSetup(extensionList);
 
-      // Determine the number of reader isolates to spawn.
-      // cores - 1: leave one core for the main isolate (UI thread in Flutter).
-      // min 2: so one worker sacrifice doesn't leave zero capacity.
-      // max 4: benchmarked 2/4/8/16 workers
-      // ([EXP-105](../../experiments/105-reader-pool-sizing.md)).
-      // Concurrent query
-      //   throughput plateaus at 4; raising past that regresses A11c
-      //   many-streams-writer-throughput by ~55% and high-cardinality
-      //   stream fan-out (A11b) by ~88% because each completed
-      //   selectIfChanged reply queues another microtask ahead of the
-      //   next pending write. Each idle worker costs ~30KB + one C
-      //   reader connection.
-      final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
+    // Determine the number of reader isolates to spawn.
+    // cores - 1: leave one core for the main isolate (UI thread in Flutter).
+    // min 2: so one worker sacrifice doesn't leave zero capacity.
+    // max 4: benchmarked 2/4/8/16 workers
+    // ([EXP-105](../../experiments/105-reader-pool-sizing.md)).
+    // Concurrent query
+    //   throughput plateaus at 4; raising past that regresses A11c
+    //   many-streams-writer-throughput by ~55% and high-cardinality
+    //   stream fan-out (A11b) by ~88% because each completed
+    //   selectIfChanged reply queues another microtask ahead of the
+    //   next pending write. Each idle worker costs ~30KB + one C
+    //   reader connection.
+    final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
 
-      final handle = extensionEntrypointList.isEmpty
-          ? resqliteOpen(pathNative, readerCount, keyNative)
-          : resqliteOpenWithExtensions(
-              pathNative,
-              readerCount,
-              keyNative,
-              extensionEntrypoints,
-              extensionEntrypointList.length,
-            );
-      if (handle == ffi.nullptr) {
-        final extensionNames = extensionEntrypointList
-            .map((e) => e.debugName)
-            .join(', ');
-        throw ResqliteConnectionException(
-          'Failed to open database at "$path"'
-          '${encryptionKey != null ? ' (check encryption key)' : ''}'
-          '${extensionEntrypointList.isNotEmpty ? ' with extensions: $extensionNames' : ''}',
-        );
-      }
+    final request = _NativeOpenRequest(
+      path: path,
+      encryptionKey: encryptionKey,
+      readerCount: readerCount,
+      extensionEntrypoints: extensionEntrypoints,
+      setup: setup,
+    );
+    final hasExtensions = extensionEntrypoints.isNotEmpty || setup.isNotEmpty;
+    final handleAddress = hasExtensions
+        ? await Isolate.run(
+            () => _openNativeDatabase(request),
+            debugName: 'resqlite.open',
+          )
+        : _openNativeDatabase(request);
 
-      try {
-        _runExtensionSetup(handle, extensionSetup);
-        return Database._(handle, path, readerCount);
-      } catch (_) {
-        resqliteClose(handle);
-        rethrow;
-      }
-    } finally {
-      calloc.free(pathNative);
-      if (encryptionKey != null) calloc.free(keyNative);
-      if (extensionEntrypoints != ffi.nullptr) {
-        calloc.free(extensionEntrypoints);
-      }
-    }
+    return Database._(
+      ffi.Pointer<ffi.Void>.fromAddress(handleAddress),
+      path,
+      readerCount,
+    );
   }
 
-  static List<ResqliteExtension> _dedupeExtensionEntrypoints(
+  static List<_ExtensionEntrypoint> _dedupeExtensionEntrypoints(
     Iterable<ResqliteExtension> extensions,
   ) {
-    final unique = <ResqliteExtension>[];
+    final unique = <_ExtensionEntrypoint>[];
     final seenEntrypoints = <int>{};
     for (final extension in extensions) {
-      if (seenEntrypoints.add(extension.entrypointAddress.address)) {
-        unique.add(extension);
+      final address = extension.entrypointAddress.address;
+      if (seenEntrypoints.add(address)) {
+        unique.add(
+          _ExtensionEntrypoint(address: address, name: extension.debugName),
+        );
       }
     }
     return List.unmodifiable(unique);
@@ -199,16 +178,76 @@ final class Database {
   ) {
     final setup = <_ExtensionConnectionSetup>[];
     for (final extension in extensions) {
-      for (final step in extension.setup) {
-        setup.add(
-          _ExtensionConnectionSetup(
-            extensionName: extension.debugName,
-            setup: step,
+      final onRegister = extension.onRegister;
+      if (onRegister == null) continue;
+
+      final registrar = _ExtensionRegistrar(
+        extensionName: extension.debugName,
+        setup: setup,
+      );
+      try {
+        onRegister(registrar);
+      } catch (error, stackTrace) {
+        Error.throwWithStackTrace(
+          ResqliteConnectionException(
+            'Failed to register extension ${extension.debugName}: $error',
           ),
+          stackTrace,
         );
       }
     }
     return List.unmodifiable(setup);
+  }
+
+  static int _openNativeDatabase(_NativeOpenRequest request) {
+    final pathNative = request.path.toNativeUtf8();
+    final keyNative = request.encryptionKey != null
+        ? request.encryptionKey!.toNativeUtf8()
+        : ffi.nullptr.cast<Utf8>();
+    final extensionEntrypoints = request.extensionEntrypoints.isEmpty
+        ? ffi.nullptr
+        : calloc<ffi.Pointer<ffi.Void>>(request.extensionEntrypoints.length);
+    try {
+      for (var i = 0; i < request.extensionEntrypoints.length; i++) {
+        extensionEntrypoints[i] = ffi.Pointer<ffi.Void>.fromAddress(
+          request.extensionEntrypoints[i].address,
+        );
+      }
+
+      final handle = request.extensionEntrypoints.isEmpty
+          ? resqliteOpen(pathNative, request.readerCount, keyNative)
+          : resqliteOpenWithExtensions(
+              pathNative,
+              request.readerCount,
+              keyNative,
+              extensionEntrypoints,
+              request.extensionEntrypoints.length,
+            );
+      if (handle == ffi.nullptr) {
+        final extensionNames = request.extensionEntrypoints
+            .map((entrypoint) => entrypoint.name)
+            .join(', ');
+        throw ResqliteConnectionException(
+          'Failed to open database at "${request.path}"'
+          '${request.encryptionKey != null ? ' (check encryption key)' : ''}'
+          '${request.extensionEntrypoints.isNotEmpty ? ' with extensions: $extensionNames' : ''}',
+        );
+      }
+
+      try {
+        _runExtensionSetup(handle, request.setup);
+        return handle.address;
+      } catch (_) {
+        resqliteClose(handle);
+        rethrow;
+      }
+    } finally {
+      calloc.free(pathNative);
+      if (request.encryptionKey != null) calloc.free(keyNative);
+      if (extensionEntrypoints != ffi.nullptr) {
+        calloc.free(extensionEntrypoints);
+      }
+    }
   }
 
   static void _runExtensionSetup(
@@ -216,8 +255,8 @@ final class Database {
     List<_ExtensionConnectionSetup> setup,
   ) {
     for (final step in setup) {
-      final setupSql = step.setup.sql;
-      final params = step.setup.parameters;
+      final setupSql = step.sql;
+      final params = step.parameters;
       final sqlNative = setupSql.toNativeUtf8();
       try {
         final paramsNative = allocateParams(params);
@@ -227,7 +266,7 @@ final class Database {
             sqlNative,
             paramsNative,
             params.length,
-            _setupScopeCode(step.setup.scope),
+            _setupScopeCode(step.scope),
           );
           if (rc != 0) {
             final message = resqliteErrmsg(handle).toDartString();
@@ -247,11 +286,11 @@ final class Database {
     }
   }
 
-  static int _setupScopeCode(ResqliteConnectionSetupScope scope) {
+  static int _setupScopeCode(ResqliteConnectionScope scope) {
     return switch (scope) {
-      ResqliteConnectionSetupScope.all => 0,
-      ResqliteConnectionSetupScope.writer => 1,
-      ResqliteConnectionSetupScope.readers => 2,
+      ResqliteConnectionScope.all => 0,
+      ResqliteConnectionScope.writer => 1,
+      ResqliteConnectionScope.readers => 2,
     };
   }
 
@@ -619,9 +658,65 @@ typedef _DatabaseRuntime = ({
 final class _ExtensionConnectionSetup {
   const _ExtensionConnectionSetup({
     required this.extensionName,
-    required this.setup,
+    required this.sql,
+    required this.parameters,
+    required this.scope,
   });
 
   final String extensionName;
-  final ResqliteConnectionSetup setup;
+  final String sql;
+  final List<Object?> parameters;
+  final ResqliteConnectionScope scope;
+}
+
+final class _ExtensionEntrypoint {
+  const _ExtensionEntrypoint({required this.address, required this.name});
+
+  final int address;
+  final String name;
+}
+
+final class _NativeOpenRequest {
+  const _NativeOpenRequest({
+    required this.path,
+    required this.encryptionKey,
+    required this.readerCount,
+    required this.extensionEntrypoints,
+    required this.setup,
+  });
+
+  final String path;
+  final String? encryptionKey;
+  final int readerCount;
+  final List<_ExtensionEntrypoint> extensionEntrypoints;
+  final List<_ExtensionConnectionSetup> setup;
+}
+
+final class _ExtensionRegistrar implements ResqliteExtensionRegistrar {
+  _ExtensionRegistrar({
+    required this.extensionName,
+    required List<_ExtensionConnectionSetup> setup,
+  }) : _setup = setup;
+
+  final String extensionName;
+  final List<_ExtensionConnectionSetup> _setup;
+
+  @override
+  void execute(
+    String sql, {
+    List<Object?> parameters = const [],
+    ResqliteConnectionScope scope = ResqliteConnectionScope.all,
+  }) {
+    if (sql.trim().isEmpty) {
+      throw ArgumentError.value(sql, 'sql', 'must not be empty');
+    }
+    _setup.add(
+      _ExtensionConnectionSetup(
+        extensionName: extensionName,
+        sql: sql,
+        parameters: List.unmodifiable(parameters),
+        scope: scope,
+      ),
+    );
+  }
 }

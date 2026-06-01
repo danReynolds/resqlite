@@ -73,34 +73,39 @@ For example, SQLite Vector exposes `vector_init(table, column, options)` for
 each indexed vector column. ICU-style extensions may expose SQL functions that
 register a collation for the current connection.
 
-Represent that as declarative setup on the `ResqliteExtension`:
+Represent that as `onRegister` setup on the `ResqliteExtension`:
 
 ```dart
 ResqliteExtension sqliteExampleExtension() {
   return ResqliteExtension(
     Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3ExampleInit),
     name: 'sqlite_example',
-    setup: [
-      ResqliteConnectionSetup.sql(
+    onRegister: (ext) {
+      ext.execute(
         'SELECT example_init(?, ?)',
         parameters: ['table_name', 'column_name'],
-      ),
-    ],
+      );
+    },
   );
 }
 ```
 
-Setup runs during `Database.open`, after native extension loading and before the
-database is returned. The default scope is `ResqliteConnectionSetupScope.all`,
-which runs on the writer and every reader connection. Use
-`ResqliteConnectionSetupScope.writer` for writer-only PRAGMAs or temporary
-writer state, and `ResqliteConnectionSetupScope.readers` for reader-only state.
+`onRegister` is synchronous. Calls to `ext.execute(...)` enqueue setup SQL;
+they do not return rows and there is nothing to `await`. resqlite executes the
+queued setup during `Database.open`, after native extension loading and before
+the database is returned. Extension opens run native load/setup on a bootstrap
+isolate so a heavy extension init does not block the caller isolate.
 
-Each setup item is exactly one SQL statement. Use multiple setup entries for
-multi-step setup so resqlite can preserve order and report the failing extension
-and statement. Native entrypoints are de-duped by address before crossing into
-C, but setup entries are preserved in declaration order even when two extension
-objects point at the same native entrypoint.
+The default scope is `ResqliteConnectionScope.all`, which runs on the writer and
+every reader connection. Use `ResqliteConnectionScope.writer` for writer-only
+PRAGMAs or temporary writer state, and `ResqliteConnectionScope.readers` for
+reader-only state.
+
+Each `execute` call must contain exactly one SQL statement. Use multiple calls
+for multi-step setup so resqlite can preserve order and report the failing
+extension and statement. Native entrypoints are de-duped by address before
+crossing into C, but registration setup is preserved in extension-list order
+even when two extension objects point at the same native entrypoint.
 
 Prefer domain-specific options over exposing raw setup for common cases. The
 vector wrapper follows that pattern:
