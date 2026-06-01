@@ -66,6 +66,8 @@ Future<void> main(List<String> args) async {
   print('  tracelite region: ${paths.region}');
   print('  workload summary JSON: ${paths.workloadSummaryJson}');
   print('  workload summary markdown: ${paths.workloadSummaryMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data: ${paths.graphDataDir}');
   }
@@ -187,6 +189,8 @@ class _ArtifactPaths {
       legacyProfileJson = p.join(outDir, 'profile.json'),
       workloadSummaryJson = p.join(outDir, 'workload-summary.json'),
       workloadSummaryMarkdown = p.join(outDir, 'workload-summary.md'),
+      insightsJson = p.join(outDir, 'insights.json'),
+      insightsMarkdown = p.join(outDir, 'insights.md'),
       graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data'),
       parityDiff = p.join(outDir, 'parity-diff.txt');
 
@@ -195,6 +199,8 @@ class _ArtifactPaths {
   final String legacyProfileJson;
   final String workloadSummaryJson;
   final String workloadSummaryMarkdown;
+  final String insightsJson;
+  final String insightsMarkdown;
   final String graphDataDir;
   final String parityDiff;
 }
@@ -298,6 +304,22 @@ List<_Step> _plannedSteps(_Options options, _ArtifactPaths paths) {
     );
   }
 
+  steps.add(
+    _Step(
+      name: 'explain tracelite workload summary',
+      executable: options.dartExecutable,
+      arguments: [
+        'run',
+        'bin/tracelite.dart',
+        'explain',
+        p.absolute(paths.workloadSummaryJson),
+        '--out-json=${p.absolute(paths.insightsJson)}',
+      ],
+      workingDirectory: options.traceliteRoot,
+      stdoutPath: paths.insightsMarkdown,
+    ),
+  );
+
   if (options.writeParityDiff) {
     steps.add(
       _Step(
@@ -369,6 +391,8 @@ Future<void> _writeManifest(
       'legacy_profile_json': paths.legacyProfileJson,
       'workload_summary_json': paths.workloadSummaryJson,
       'workload_summary_markdown': paths.workloadSummaryMarkdown,
+      'insights_json': paths.insightsJson,
+      'insights_markdown': paths.insightsMarkdown,
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
       'parity_diff': options.writeParityDiff ? paths.parityDiff : null,
     },
@@ -400,6 +424,8 @@ void _printPlan(_Options options, _ArtifactPaths paths, List<_Step> steps) {
   print('  tracelite region: ${paths.region}');
   print('  workload summary JSON: ${paths.workloadSummaryJson}');
   print('  workload summary markdown: ${paths.workloadSummaryMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data index: ${p.join(paths.graphDataDir, 'index.json')}');
   }

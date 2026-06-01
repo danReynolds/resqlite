@@ -32,7 +32,10 @@ void main() {
     expect(stdoutText, contains('profile.tlt-region'));
     expect(stdoutText, contains('profile.json'));
     expect(stdoutText, contains('workload-summary.json'));
+    expect(stdoutText, contains('insights.json'));
+    expect(stdoutText, contains('insights.md'));
     expect(stdoutText, contains(p.join('pages', 'tracelite', 'index.json')));
+    expect(stdoutText, contains('explain'));
     expect(stdoutText, contains('parity-diff.txt'));
     expect(stdoutText, contains('validate-graph-data'));
     expect(stdoutText, contains('RESQLITE_TRACELITE=true'));

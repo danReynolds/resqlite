@@ -84,7 +84,7 @@ jobs:
       - name: Checkout pinned tracelite
         run: |
           git clone https://github.com/danReynolds/tracelite /tmp/tracelite
-          git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-05-31
+          git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-06-01
       - name: Run tracelite CI preset
         run: |
           dart run benchmark/run_tracelite.dart \

@@ -25,6 +25,7 @@ const _suiteHistoryStepName = 'run tracelite suite history';
 const _validateSuiteHistoryStepName = 'validate tracelite suite history';
 const _exportGraphDataStepName = 'export tracelite graph data';
 const _validateGraphDataStepName = 'validate tracelite graph data';
+const _explainArtifactsStepName = 'explain tracelite artifacts';
 const _defaultReleasePolicyScenarios = [
   'chat-sim',
   'high-cardinality-fanout',
@@ -204,6 +205,15 @@ Future<void> main(List<String> args) async {
     }
   }
 
+  if (File(paths.history).existsSync()) {
+    stepResults.add(
+      await _runMarkdownStep(
+        _explainArtifactsStep(options, paths),
+        paths.insightsMarkdown,
+      ),
+    );
+  }
+
   await _writeManifest(
     options,
     paths,
@@ -219,6 +229,8 @@ Future<void> main(List<String> args) async {
   print('  suite history: ${paths.history}');
   print('  policy JSON: ${paths.policyJson}');
   print('  policy markdown: ${paths.policyMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data: ${paths.graphDataDir}');
     if (Directory(paths.graphDataInputsDir).existsSync()) {
@@ -624,6 +636,8 @@ final class _Paths {
       history = p.join(outDir, 'history.json'),
       policyJson = p.join(outDir, 'policy-calibration.json'),
       policyMarkdown = p.join(outDir, 'policy-calibration.md'),
+      insightsJson = p.join(outDir, 'insights.json'),
+      insightsMarkdown = p.join(outDir, 'insights.md'),
       graphDataInputsDir = p.join(outDir, 'graph-data-inputs'),
       graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
@@ -631,6 +645,8 @@ final class _Paths {
   final String history;
   final String policyJson;
   final String policyMarkdown;
+  final String insightsJson;
+  final String insightsMarkdown;
   final String graphDataInputsDir;
   final String graphDataDir;
 }
@@ -705,6 +721,7 @@ List<_Step> _plannedSteps(
     );
     steps.add(_validateGraphDataStep(options, paths));
   }
+  steps.add(_explainArtifactsStep(options, paths));
 
   return steps;
 }
@@ -826,6 +843,21 @@ _Step _validateGraphDataStep(_Options options, _Paths paths) {
   );
 }
 
+_Step _explainArtifactsStep(_Options options, _Paths paths) {
+  return _Step(
+    name: _explainArtifactsStepName,
+    executable: options.dartExecutable,
+    arguments: [
+      'run',
+      'bin/tracelite.dart',
+      'explain',
+      p.absolute(paths.history),
+      '--out-json=${p.absolute(paths.insightsJson)}',
+    ],
+    workingDirectory: options.traceliteRoot,
+  );
+}
+
 final class _StepResult {
   const _StepResult({
     required this.name,
@@ -863,6 +895,36 @@ Future<_StepResult> _runStep(_Step step) async {
 
   final stdoutText = _cleanDartToolOutput(result.stdout.toString());
   final stderrText = _cleanDartToolOutput(result.stderr.toString());
+  if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
+  if (stderrText.trim().isNotEmpty) stderr.write(stderrText);
+  if (result.exitCode != 0) {
+    stderr.writeln('step failed: ${step.name} (exit ${result.exitCode})');
+  }
+  print('');
+  return _StepResult(
+    name: step.name,
+    command: step.displayCommand,
+    workingDirectory: step.workingDirectory,
+    exitCode: result.exitCode,
+  );
+}
+
+Future<_StepResult> _runMarkdownStep(_Step step, String stdoutPath) async {
+  print('== ${step.name}');
+  print(step.displayCommand);
+
+  final result = await Process.run(
+    step.executable,
+    step.arguments,
+    workingDirectory: step.workingDirectory,
+    environment: Platform.environment,
+  );
+
+  final stdoutText = _cleanDartToolOutput(result.stdout.toString());
+  final stderrText = _cleanDartToolOutput(result.stderr.toString());
+  File(stdoutPath)
+    ..parent.createSync(recursive: true)
+    ..writeAsStringSync(stdoutText);
   if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
   if (stderrText.trim().isNotEmpty) stderr.write(stderrText);
   if (result.exitCode != 0) {
@@ -1103,6 +1165,8 @@ Future<void> _writeManifest(
       'suite_history': paths.history,
       'policy_json': paths.policyJson,
       'policy_markdown': paths.policyMarkdown,
+      'insights_json': paths.insightsJson,
+      'insights_markdown': paths.insightsMarkdown,
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
       'graph_data_inputs_dir':
           options.exportGraphData &&
@@ -1149,6 +1213,8 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('  suite history: ${paths.history}');
   print('  policy JSON: ${paths.policyJson}');
   print('  policy markdown: ${paths.policyMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data index: ${p.join(paths.graphDataDir, 'index.json')}');
   }

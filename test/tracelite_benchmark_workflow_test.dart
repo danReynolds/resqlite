@@ -52,6 +52,8 @@ void main() {
     expect(stdoutText, contains('--suite=${baseline.absolute.path}'));
     expect(stdoutText, contains('--suite=${candidate.absolute.path}'));
     expect(stdoutText, contains('--decision='));
+    expect(stdoutText, contains('explain'));
+    expect(stdoutText, contains('insights.json'));
     expect(
       stdoutText,
       contains(p.join('pages', 'tracelite-decision', 'index.json')),
@@ -177,6 +179,8 @@ void main() {
       expect(stdoutText, contains('export-graph-data'));
       expect(stdoutText, contains('--suite-history='));
       expect(stdoutText, contains('validate-graph-data'));
+      expect(stdoutText, contains('explain'));
+      expect(stdoutText, contains('insights.json'));
       expect(stdoutText, contains(p.join('pages', 'tracelite', 'index.json')));
     },
   );
@@ -318,14 +322,18 @@ exit 0
       final manifest =
           jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
       final steps = manifest['steps']! as List<Object?>;
-      expect(steps, hasLength(4));
+      expect(steps, hasLength(5));
       expect(
         steps[1] as Map<String, Object?>,
         containsPair('name', 'prepare tracelite sqlite shim'),
       );
       expect(
-        steps.last as Map<String, Object?>,
+        steps[3] as Map<String, Object?>,
         containsPair('command', contains('inspect')),
+      );
+      expect(
+        steps.last as Map<String, Object?>,
+        containsPair('name', 'explain tracelite artifacts'),
       );
     },
   );
@@ -455,6 +463,8 @@ exit 0
       final manifest =
           jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
       final artifacts = manifest['artifacts'] as Map<String, Object?>;
+      expect(artifacts['insights_json'], p.join(outDir, 'insights.json'));
+      expect(artifacts['insights_markdown'], p.join(outDir, 'insights.md'));
       expect(
         artifacts['graph_data_inputs_dir'],
         p.join(outDir, 'graph-data-inputs'),

@@ -33,11 +33,13 @@ Future<void> main(List<String> args) async {
   final paths = _Paths(outDir.path, graphDataDir: options.graphDataDir);
   final decisionStep = _decisionStep(options, paths);
   final graphStep = _graphDataStep(options, paths);
+  final explainStep = _explainStep(options, paths);
 
   if (options.dryRun) {
     _printPlan(options, paths, [
       decisionStep,
       if (graphStep != null) graphStep,
+      explainStep,
     ]);
     return;
   }
@@ -73,6 +75,11 @@ Future<void> main(List<String> args) async {
   if (graphStep != null && File(paths.decisionJson).existsSync()) {
     stepResults.add(await _runStep(graphStep));
   }
+  if (File(paths.decisionJson).existsSync()) {
+    stepResults.add(
+      await _runMarkdownStep(explainStep, paths.insightsMarkdown),
+    );
+  }
 
   await _writeManifest(
     options,
@@ -86,6 +93,8 @@ Future<void> main(List<String> args) async {
   print('  manifest: ${paths.manifest}');
   print('  decision JSON: ${paths.decisionJson}');
   print('  decision markdown: ${paths.decisionMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data: ${paths.graphDataDir}');
   }
@@ -243,11 +252,15 @@ final class _Paths {
     : manifest = p.join(outDir, 'resqlite-tracelite-decision.json'),
       decisionJson = p.join(outDir, 'decision.json'),
       decisionMarkdown = p.join(outDir, 'decision.md'),
+      insightsJson = p.join(outDir, 'insights.json'),
+      insightsMarkdown = p.join(outDir, 'insights.md'),
       graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
   final String manifest;
   final String decisionJson;
   final String decisionMarkdown;
+  final String insightsJson;
+  final String insightsMarkdown;
   final String graphDataDir;
 }
 
@@ -335,6 +348,21 @@ _Step? _graphDataStep(_Options options, _Paths paths) {
   );
 }
 
+_Step _explainStep(_Options options, _Paths paths) {
+  return _Step(
+    name: 'explain tracelite decision',
+    executable: options.dartExecutable,
+    arguments: [
+      'run',
+      'bin/tracelite.dart',
+      'explain',
+      p.absolute(paths.decisionJson),
+      '--out-json=${p.absolute(paths.insightsJson)}',
+    ],
+    workingDirectory: options.traceliteRoot,
+  );
+}
+
 Future<_StepResult> _runDecisionStep(_Step step, _Paths paths) async {
   print('== ${step.name}');
   print(step.displayCommand);
@@ -349,6 +377,36 @@ Future<_StepResult> _runDecisionStep(_Step step, _Paths paths) async {
   final stdoutText = _cleanDartToolOutput(result.stdout.toString());
   final stderrText = _cleanDartToolOutput(result.stderr.toString());
   File(paths.decisionMarkdown)
+    ..parent.createSync(recursive: true)
+    ..writeAsStringSync(stdoutText);
+  if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
+  if (stderrText.trim().isNotEmpty) stderr.write(stderrText);
+  if (result.exitCode != 0) {
+    stderr.writeln('step failed: ${step.name} (exit ${result.exitCode})');
+  }
+  print('');
+  return _StepResult(
+    name: step.name,
+    command: step.displayCommand,
+    workingDirectory: step.workingDirectory,
+    exitCode: result.exitCode,
+  );
+}
+
+Future<_StepResult> _runMarkdownStep(_Step step, String stdoutPath) async {
+  print('== ${step.name}');
+  print(step.displayCommand);
+
+  final result = await Process.run(
+    step.executable,
+    step.arguments,
+    workingDirectory: step.workingDirectory,
+    environment: Platform.environment,
+  );
+
+  final stdoutText = _cleanDartToolOutput(result.stdout.toString());
+  final stderrText = _cleanDartToolOutput(result.stderr.toString());
+  File(stdoutPath)
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(stdoutText);
   if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
@@ -435,6 +493,8 @@ Future<void> _writeManifest(
     'artifacts': {
       'decision_json': paths.decisionJson,
       'decision_markdown': paths.decisionMarkdown,
+      'insights_json': paths.insightsJson,
+      'insights_markdown': paths.insightsMarkdown,
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
     },
     'steps': stepResults.map((result) => result.toJson()).toList(),
@@ -468,6 +528,8 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('  manifest: ${paths.manifest}');
   print('  decision JSON: ${paths.decisionJson}');
   print('  decision markdown: ${paths.decisionMarkdown}');
+  print('  insights JSON: ${paths.insightsJson}');
+  print('  insights markdown: ${paths.insightsMarkdown}');
   if (options.exportGraphData) {
     print('  graph data index: ${p.join(paths.graphDataDir, 'index.json')}');
   }

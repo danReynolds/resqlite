@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 const pinnedTraceliteRepository = 'https://github.com/danReynolds/tracelite';
-const pinnedTraceliteRevision = 'bcb3f3f419a09aa682948595fdb8ab002af637dc';
-const pinnedTraceliteTag = 'resqlite-profiling-gate-2026-05-31';
+const pinnedTraceliteRevision = '1fc321113c5a3a1598fc2908b52ed401eb65737c';
+const pinnedTraceliteTag = 'resqlite-profiling-gate-2026-06-01';
 
 final class TraceliteSourcePolicy {
   const TraceliteSourcePolicy({

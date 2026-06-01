@@ -100,7 +100,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-01
 ```
 
 ```bash
@@ -113,9 +113,10 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 `run_tracelite.dart` has three presets. Every preset still records
-`tracelite_source`, `resqlite_source`, and the resolved Tracelite dependency
-binding, exports graph data, and validates that graph-data bundle. Explicit CLI
-flags override preset defaults. The wrapper also rebuilds Tracelite's
+`tracelite_source`, `resqlite_source`, the resolved Tracelite dependency
+binding, graph data, and Tracelite insight artifacts that explain trace health,
+noise, and bottleneck signals. Explicit CLI flags override preset defaults. The
+wrapper also rebuilds Tracelite's
 `build/libsqlite_traced.dylib` SQLite shim for fresh macOS checkouts before any
 preset runs, so CI does not depend on a pre-warmed Tracelite build directory.
 
@@ -149,8 +150,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`bcb3f3f419a09aa682948595fdb8ab002af637dc`
-(`resqlite-profiling-gate-2026-05-31`). The wrapper records
+`1fc321113c5a3a1598fc2908b52ed401eb65737c`
+(`resqlite-profiling-gate-2026-06-01`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -182,9 +183,10 @@ coverage from release-gate policy:
 - outlier gates: `--max-outlier-percent=10 --max-run-outlier-percent=20`
 
 It writes `build/tracelite-benchmarks/<label>/history.json`,
-`policy-calibration.json`, `policy-calibration.md`, and `graph-data/`. The
-dashboard can read `docs/benchmarks/data/tracelite/latest/index.json` when the
-graph-data output is published there.
+`policy-calibration.json`, `policy-calibration.md`, `insights.json`,
+`insights.md`, and `graph-data/`. The dashboard can read
+`docs/benchmarks/data/tracelite/latest/index.json` when the graph-data output is
+published there.
 
 Use the default strict mode for CI and publish gates. `--no-strict` is only for
 local exploratory runs where the requested history is intentionally too small to
@@ -277,9 +279,10 @@ Defaults:
 - guardrail metrics: `measured_elapsed_ns`
 
 It writes `build/tracelite-decisions/<label>/decision.json`,
-`decision.md`, `resqlite-tracelite-decision.json`, and `graph-data/`. Exit code
-`0` means accepted. Rejected and inconclusive decisions preserve artifacts and
-exit non-zero.
+`decision.md`, `insights.json`, `insights.md`,
+`resqlite-tracelite-decision.json`, and `graph-data/`. Exit code `0` means
+accepted. Rejected and inconclusive decisions preserve artifacts and exit
+non-zero.
 
 ## Profile Mode (experiment vs baseline)
 
@@ -320,10 +323,10 @@ creating a region or exporting graph data.
 
 It writes `build/tracelite-profile/exp-N/` with the legacy profile JSON,
 the `.tlt-region`, `workload-summary.json`, `workload-summary.md`,
-`graph-data/`, and a parity diff between the legacy JSON and tracelite's
-workload summary. `run_profile.dart` remains the direct low-level harness;
-the wrapper is the preferred path when the result should feed tracelite or
-resqlite Pages data.
+`insights.json`, `insights.md`, `graph-data/`, and a parity diff between the
+legacy JSON and tracelite's workload summary. `run_profile.dart` remains the
+direct low-level harness; the wrapper is the preferred path when the result
+should feed tracelite or resqlite Pages data.
 
 To publish only graphable data to GitHub Pages while keeping raw traces and
 legacy JSON out of `docs/`, add:

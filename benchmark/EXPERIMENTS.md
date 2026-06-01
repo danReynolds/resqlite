@@ -90,7 +90,7 @@ The preferred workflow is the wrapper:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-05-31
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-01
 
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
@@ -104,6 +104,8 @@ By default it writes `build/tracelite-profile/exp-N/`:
 - `profile.tlt-region`: the raw tracelite region.
 - `workload-summary.json` and `workload-summary.md`: tracelite's
   resqlite workload summary export.
+- `insights.json` and `insights.md`: Tracelite's interpretation of trace
+  health, workload coverage, and bottleneck signals.
 - `graph-data/`: normalized JSON datasets for downstream dashboards.
 - `parity-diff.txt`: `benchmark/profile/diff.dart` comparing the legacy
   JSON against tracelite's workload summary.
@@ -111,7 +113,7 @@ By default it writes `build/tracelite-profile/exp-N/`:
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
-`bcb3f3f419a09aa682948595fdb8ab002af637dc` or is dirty. Use
+`1fc321113c5a3a1598fc2908b52ed401eb65737c` or is dirty. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development. The package code only keeps the compile-time trace
 emitters.

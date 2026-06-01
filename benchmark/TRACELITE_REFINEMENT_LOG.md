@@ -112,3 +112,26 @@ Outcome:
 - Remaining future cleanup: the benchmark workflow tests now contain repeated
   fake Tracelite-root setup. If this area grows again, extract a small test
   fixture helper rather than adding more inline shell-script setup.
+
+## 2026-06-01 pass
+
+### Loop 6 - Artifact interpretation handoff
+
+Tried:
+
+- Bumped the production Tracelite pin to the first commit that includes the
+  shared `tracelite explain` artifact interpreter.
+- Added `insights.json` and `insights.md` to the benchmark, decision, and
+  profile wrappers instead of making operators run a separate interpretation
+  command by hand.
+- Updated wrapper plans, manifests, docs, and workflow tests so the new insight
+  artifacts are part of the audited handoff.
+
+Outcome:
+
+- Resqlite's profiling workflow now preserves both the machine decision artifact
+  and the human explanation artifact for trace health, noise, and bottleneck
+  signals.
+- Future pass should keep the insight step non-authoritative: acceptance still
+  comes from `decision`/policy gates, while `explain` is for operator
+  investigation and review.
