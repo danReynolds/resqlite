@@ -9,7 +9,8 @@ code path you measure differs between them.
 | **Peer comparison / public dashboard** | [`run_release.dart`](./run_release.dart) | **No** — pristine, zero diagnostic overhead |
 | **Trace-backed production gate** | [`run_tracelite.dart`](./run_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Trace-backed baseline/candidate decision** | [`decide_tracelite.dart`](./decide_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
-| **Experiment vs baseline (resqlite-only A/B)** | [`run_profile.dart`](./run_profile.dart) | **Yes** — Timeline markers + per-call profiling |
+| **Trace-backed experiment profile** | [`profile/run_tracelite_profile.dart`](./profile/run_tracelite_profile.dart) | **Yes** — Timeline markers, per-call profiling, tracelite spans, workload summaries, insights, graph data |
+| **Legacy profile JSON compatibility** | [`run_profile.dart`](./run_profile.dart) | **Yes** — Timeline markers + per-call profiling only |
 | **Cross-library comparison via verifier harness** | `sqlite_reactive_verifier` | N/A (separate package) |
 
 **Rule of thumb.** If you're publishing a number that will end up on
@@ -32,13 +33,12 @@ for the dashboard. The wrapper intentionally defaults guardrails to
 `measured_elapsed_ns`; lower-level timing totals are still useful diagnostics,
 but they are not calibrated release blockers yet.
 
-If you're running an experiment on a branch and want to know whether
-your change helped or hurt, use `run_profile.dart` — it compiles in
-Timeline markers and wraps every call in `ProfiledDatabase`, so you
-see dispatch-vs-work split, p99/max, cross-isolate timelines in
-DevTools, and per-call JSON you can diff against a baseline. Both
-your experiment branch AND its baseline run under the same profile
-build, so the diagnostic overhead cancels out in the A/B delta.
+If you're running an experiment on a branch and want trace-backed local
+diagnostics, use `profile/run_tracelite_profile.dart`. It runs the profile
+workloads with `RESQLITE_PROFILE` and `RESQLITE_TRACELITE`, then makes
+tracelite workload summaries, insights, graph data, and parity evidence from the
+same run. `run_profile.dart` remains available as the direct legacy JSON
+harness when an old experiment note or diff tool specifically needs that shape.
 
 See [EXPERIMENTS.md](./EXPERIMENTS.md) for the experiment-mode
 workflow and A/B tabulation tools.
@@ -49,7 +49,7 @@ workflow and A/B tabulation tools.
 - [`SCOPE.md`](./SCOPE.md) — exact peer versions, hardware tested, known gaps, what we test and what we don't
 - [`AUDIT.md`](./AUDIT.md) — how benchmark results propagate from Dart code to the public dashboard (parsers, generators, chart builders)
 - [`HARDWARE_RESULTS.md`](./HARDWARE_RESULTS.md) — device registry pointing at canonical result files per device
-- [`EXPERIMENTS.md`](./EXPERIMENTS.md) — experiment-mode workflow using `run_profile.dart` and diff tools
+- [`EXPERIMENTS.md`](./EXPERIMENTS.md) — experiment-mode workflow using tracelite profile artifacts, with legacy JSON compatibility where needed
 
 ## Release Mode (peer comparison)
 
@@ -286,31 +286,8 @@ non-zero.
 
 ## Profile Mode (experiment vs baseline)
 
-See [`EXPERIMENTS.md`](./EXPERIMENTS.md) for the full workflow. Short
-version:
-
-```bash
-# On main (baseline)
-dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
-  --out=benchmark/profile/results/baseline.json
-
-# On exp-N branch
-dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
-  --out=benchmark/profile/results/exp-N.json
-
-# Compare
-dart run benchmark/profile/diff.dart \
-  benchmark/profile/results/baseline.json \
-  benchmark/profile/results/exp-N.json
-```
-
-The `-DRESQLITE_PROFILE=true` flag compiles in Timeline markers and
-wraps scenarios in `ProfiledDatabase`. Because both runs use the
-same flag, any diagnostic overhead cancels out in the delta — what
-you see is the signal of your actual change.
-
-For a tracelite-backed run that also emits graphable artifacts, use the
-workflow wrapper:
+See [`EXPERIMENTS.md`](./EXPERIMENTS.md) for the full workflow. The preferred
+profile path is tracelite-backed:
 
 ```bash
 dart run benchmark/profile/run_tracelite_profile.dart \
@@ -318,15 +295,18 @@ dart run benchmark/profile/run_tracelite_profile.dart \
   --label=exp-N
 ```
 
-`run_tracelite_profile.dart` also validates the pinned tracelite checkout before
-creating a region or exporting graph data.
+`run_tracelite_profile.dart` validates the pinned tracelite checkout before
+creating a region or exporting graph data. It writes
+`build/tracelite-profile/exp-N/` with:
 
-It writes `build/tracelite-profile/exp-N/` with the legacy profile JSON,
-the `.tlt-region`, `workload-summary.json`, `workload-summary.md`,
-`insights.json`, `insights.md`, `graph-data/`, and a parity diff between the
-legacy JSON and tracelite's workload summary. `run_profile.dart` remains the
-direct low-level harness; the wrapper is the preferred path when the result
-should feed tracelite or resqlite Pages data.
+- primary tracelite artifacts: `workload-summary.json`,
+  `workload-summary.md`, `insights.json`, `insights.md`, `graph-data/`, and
+  the raw `.tlt-region`;
+- compatibility/parity artifacts: the legacy `profile.json` and
+  `parity-diff.txt`.
+
+Use direct `run_profile.dart` only when you intentionally need the old standalone
+JSON A/B flow without tracelite artifacts.
 
 To publish only graphable data to GitHub Pages while keeping raw traces and
 legacy JSON out of `docs/`, add:

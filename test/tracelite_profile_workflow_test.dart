@@ -29,6 +29,8 @@ void main() {
 
     final stdoutText = result.stdout.toString();
     expect(stdoutText, contains('resqlite tracelite profile plan'));
+    expect(stdoutText, contains('primary tracelite artifacts'));
+    expect(stdoutText, contains('compatibility/parity artifacts'));
     expect(stdoutText, contains('profile.tlt-region'));
     expect(stdoutText, contains('profile.json'));
     expect(stdoutText, contains('workload-summary.json'));

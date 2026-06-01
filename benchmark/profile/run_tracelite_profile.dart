@@ -62,8 +62,8 @@ Future<void> main(List<String> args) async {
   print('');
   print('Artifacts written:');
   print('  manifest: ${paths.manifest}');
-  print('  legacy profile JSON: ${paths.legacyProfileJson}');
-  print('  tracelite region: ${paths.region}');
+  print('');
+  print('Primary tracelite artifacts:');
   print('  workload summary JSON: ${paths.workloadSummaryJson}');
   print('  workload summary markdown: ${paths.workloadSummaryMarkdown}');
   print('  insights JSON: ${paths.insightsJson}');
@@ -71,6 +71,10 @@ Future<void> main(List<String> args) async {
   if (options.exportGraphData) {
     print('  graph data: ${paths.graphDataDir}');
   }
+  print('  tracelite region: ${paths.region}');
+  print('');
+  print('Compatibility/parity artifacts:');
+  print('  legacy profile JSON: ${paths.legacyProfileJson}');
   if (options.writeParityDiff) {
     print('  parity diff: ${paths.parityDiff}');
   }
@@ -386,6 +390,18 @@ Future<void> _writeManifest(
     'tracelite_source': traceliteSource,
     'runtime': options.runtimePath,
     'profile_flags': {'RESQLITE_PROFILE': true, 'RESQLITE_TRACELITE': true},
+    'primary_artifacts': {
+      'workload_summary_json': paths.workloadSummaryJson,
+      'workload_summary_markdown': paths.workloadSummaryMarkdown,
+      'insights_json': paths.insightsJson,
+      'insights_markdown': paths.insightsMarkdown,
+      'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
+      'region': paths.region,
+    },
+    'compatibility_artifacts': {
+      'legacy_profile_json': paths.legacyProfileJson,
+      'parity_diff': options.writeParityDiff ? paths.parityDiff : null,
+    },
     'artifacts': {
       'region': paths.region,
       'legacy_profile_json': paths.legacyProfileJson,
@@ -418,10 +434,8 @@ void _printPlan(_Options options, _ArtifactPaths paths, List<_Step> steps) {
   );
   print('runtime: ${options.runtimePath}');
   print('');
-  print('artifacts:');
+  print('primary tracelite artifacts:');
   print('  manifest: ${paths.manifest}');
-  print('  legacy profile JSON: ${paths.legacyProfileJson}');
-  print('  tracelite region: ${paths.region}');
   print('  workload summary JSON: ${paths.workloadSummaryJson}');
   print('  workload summary markdown: ${paths.workloadSummaryMarkdown}');
   print('  insights JSON: ${paths.insightsJson}');
@@ -429,6 +443,10 @@ void _printPlan(_Options options, _ArtifactPaths paths, List<_Step> steps) {
   if (options.exportGraphData) {
     print('  graph data index: ${p.join(paths.graphDataDir, 'index.json')}');
   }
+  print('  tracelite region: ${paths.region}');
+  print('');
+  print('compatibility/parity artifacts:');
+  print('  legacy profile JSON: ${paths.legacyProfileJson}');
   if (options.writeParityDiff) {
     print('  parity diff: ${paths.parityDiff}');
   }

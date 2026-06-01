@@ -34,10 +34,11 @@ opposite. You want rich diagnostics:
   typed arrays and similar memory-targeted experiments live on —
   wins there are invisible to time-only benchmarks.
 
-Profile mode gives you all of this. Because both your experiment
-branch AND the baseline it's compared against run under the same
-`-DRESQLITE_PROFILE=true` build, the diagnostic overhead cancels out
-in the delta — what you see is the signal of your change.
+The default profile workflow now runs this through tracelite, so the same run
+also produces a trace, workload summary, insight artifacts, graph data, and
+legacy JSON parity evidence. Because both your experiment branch AND the
+baseline it's compared against run under the same profile build, the diagnostic
+overhead cancels out in the delta — what you see is the signal of your change.
 
 ## The compile-time gate
 
@@ -79,12 +80,12 @@ Never add unconditional instrumentation to production code paths
 unless the cost is provably sub-nanosecond per call AND symmetric
 across all peers being compared.
 
-## Tracelite capture
+## Tracelite profile workflow
 
-Tracelite capture is an optional overlay on profile mode. Use it when
-you need one trace file that can line up resqlite's database, worker,
-counter, fanout, and native spans with another library or a native
-SQLite shim.
+Tracelite is the preferred profile workflow for new experiments. It gives one
+trace file that can line up resqlite's database, worker, counter, fanout, and
+native spans with workload summaries, insight artifacts, graph data, and a
+compatibility diff against the old JSON shape.
 
 The preferred workflow is the wrapper:
 
@@ -97,16 +98,21 @@ dart run benchmark/profile/run_tracelite_profile.dart \
   --label=exp-N
 ```
 
-By default it writes `build/tracelite-profile/exp-N/`:
+By default it writes `build/tracelite-profile/exp-N/`.
 
-- `profile.json`: the legacy `run_profile.dart` artifact, for existing
-  diff tools and experiment notes.
+Primary tracelite artifacts:
+
 - `profile.tlt-region`: the raw tracelite region.
 - `workload-summary.json` and `workload-summary.md`: tracelite's
   resqlite workload summary export.
 - `insights.json` and `insights.md`: Tracelite's interpretation of trace
   health, workload coverage, and bottleneck signals.
 - `graph-data/`: normalized JSON datasets for downstream dashboards.
+
+Compatibility/parity artifacts:
+
+- `profile.json`: the legacy `run_profile.dart` artifact, for existing
+  diff tools and older experiment notes.
 - `parity-diff.txt`: `benchmark/profile/diff.dart` comparing the legacy
   JSON against tracelite's workload summary.
 
@@ -135,7 +141,7 @@ The wrapper runs `tracelite validate-graph-data` after export so malformed
 graph data fails before it can be committed for Pages.
 
 You can still run the low-level harness directly when a region is already
-active:
+active or when an older note specifically needs raw legacy profile JSON:
 
 ```bash
 TRACELITE_REGION=/tmp/resqlite.trace \
@@ -164,11 +170,11 @@ into `libresqlite`, and lets the shim own the normal SQLite ABI
 symbols. Keep this out of release benchmark runs; it is for trace
 capture, not public dashboard numbers.
 
-## The three-command workflow
+## Legacy three-command workflow
 
-Use this direct legacy workflow when you only need old JSON A/B diffing.
-Use the tracelite wrapper above when the run should also produce trace,
-workload-summary, and graph-data artifacts.
+Use this direct legacy workflow only when you need old JSON A/B diffing without
+tracelite artifacts. New experiment notes should prefer the tracelite wrapper
+above and link the workload summary, insights, graph data, and parity diff.
 
 ```bash
 # 1. On main (baseline)
