@@ -221,6 +221,9 @@ Future<void> main(List<String> args) async {
   print('  policy markdown: ${paths.policyMarkdown}');
   if (options.exportGraphData) {
     print('  graph data: ${paths.graphDataDir}');
+    if (Directory(paths.graphDataInputsDir).existsSync()) {
+      print('  graph data inputs: ${paths.graphDataInputsDir}');
+    }
   }
 
   final failedSteps = stepResults
@@ -621,12 +624,14 @@ final class _Paths {
       history = p.join(outDir, 'history.json'),
       policyJson = p.join(outDir, 'policy-calibration.json'),
       policyMarkdown = p.join(outDir, 'policy-calibration.md'),
+      graphDataInputsDir = p.join(outDir, 'graph-data-inputs'),
       graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
   final String manifest;
   final String history;
   final String policyJson;
   final String policyMarkdown;
+  final String graphDataInputsDir;
   final String graphDataDir;
 }
 
@@ -790,7 +795,7 @@ _Step _graphDataExportPlanStep(_Options options, _Paths paths) {
 }
 
 _Step? _graphDataExportStep(_Options options, _Paths paths) {
-  final inputs = _graphDataInputArgs(paths.history);
+  final inputs = _graphDataInputArgs(paths);
   if (inputs.isEmpty) return null;
   return _Step(
     name: _exportGraphDataStepName,
@@ -958,7 +963,8 @@ _StepResult _validateSuiteHistory(_Paths paths) {
   );
 }
 
-List<String> _graphDataInputArgs(String historyPath) {
+List<String> _graphDataInputArgs(_Paths paths) {
+  final historyPath = paths.history;
   final historyFile = File(historyPath);
   if (!historyFile.existsSync()) return const [];
   try {
@@ -982,8 +988,7 @@ List<String> _graphDataInputArgs(String historyPath) {
     }
     final filteredManifests = [
       for (final manifest in manifests)
-        if (_writeGraphableSuiteManifest(historyPath, manifest)
-            case final path?)
+        if (_writeGraphableSuiteManifest(paths, manifest) case final path?)
           path,
     ];
     return [
@@ -1001,7 +1006,7 @@ String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
   return File(manifestPath).parent.uri.resolve(artifactPath).toFilePath();
 }
 
-String? _writeGraphableSuiteManifest(String historyPath, String manifestPath) {
+String? _writeGraphableSuiteManifest(_Paths paths, String manifestPath) {
   try {
     final file = File(manifestPath);
     final decoded = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
@@ -1020,9 +1025,8 @@ String? _writeGraphableSuiteManifest(String historyPath, String manifestPath) {
     }
     if (graphableRuns.isEmpty) return null;
 
-    final outDir = Directory(
-      p.join(p.dirname(historyPath), 'graph-data-inputs'),
-    )..createSync(recursive: true);
+    final outDir = Directory(paths.graphDataInputsDir)
+      ..createSync(recursive: true);
     final runName = p.basename(p.dirname(manifestPath));
     final outFile = File(p.join(outDir.path, '$runName-manifest.json'));
     outFile.writeAsStringSync(
@@ -1100,6 +1104,11 @@ Future<void> _writeManifest(
       'policy_json': paths.policyJson,
       'policy_markdown': paths.policyMarkdown,
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
+      'graph_data_inputs_dir':
+          options.exportGraphData &&
+              Directory(paths.graphDataInputsDir).existsSync()
+          ? paths.graphDataInputsDir
+          : null,
     },
     'steps': stepResults.map((result) => result.toJson()).toList(),
   };

@@ -330,6 +330,148 @@ exit 0
     },
   );
 
+  test(
+    'tracelite benchmark workflow exports graphable partial suite artifacts',
+    () async {
+      final root = Directory.current.path;
+      final temp = await Directory.systemTemp.createTemp(
+        'resqlite_tracelite_benchmark_partial_graph_test_',
+      );
+      addTearDown(() => temp.delete(recursive: true));
+
+      final fakeRoot = Directory(p.join(temp.path, 'tracelite_root'));
+      Directory(p.join(fakeRoot.path, 'bin')).createSync(recursive: true);
+      Directory(p.join(fakeRoot.path, 'native')).createSync(recursive: true);
+      File(
+        p.join(fakeRoot.path, 'bin', 'tracelite.dart'),
+      ).writeAsStringSync('');
+      File(
+        p.join(fakeRoot.path, 'native', 'tracelite_runtime.c'),
+      ).writeAsStringSync('');
+      File(
+        p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
+      ).writeAsStringSync('');
+
+      final packageConfig = jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {
+            'name': 'resqlite',
+            'rootUri': Directory(root).absolute.uri.toString(),
+            'packageUri': 'lib/',
+            'languageVersion': '3.10',
+          },
+        ],
+        'generator': 'fake',
+      });
+
+      final fakeDart = File(p.join(temp.path, 'fake-dart'));
+      fakeDart.writeAsStringSync('''#!/bin/sh
+set -eu
+if [ "\$1" = "pub" ] && [ "\$2" = "get" ]; then
+  mkdir -p .dart_tool
+  cat > .dart_tool/package_config.json <<'JSON'
+$packageConfig
+JSON
+  exit 0
+fi
+if [ "\$1" = "run" ] && [ "\$3" = "suite-history" ]; then
+  out=""
+  for arg in "\$@"; do
+    case "\$arg" in
+      --out-dir=*) out="\${arg#--out-dir=}" ;;
+    esac
+  done
+  mkdir -p "\$out/run-001"
+  cat > "\$out/run-001/ok.json" <<JSON
+{"schema":"tracelite.compare.v1","rows":[]}
+JSON
+  cat > "\$out/history.json" <<JSON
+{"schema":"tracelite.suite_history.v1","runs":[{"run":1,"name":"run-001","status":"failed","manifest":"\$out/run-001/manifest.json"}]}
+JSON
+  cat > "\$out/run-001/manifest.json" <<JSON
+{"schema":"tracelite.suite.v1","runs":[{"scenario":"narrow-batch-insert","status":"ok","artifact":"\$out/run-001/ok.json"},{"scenario":"point-select","status":"failed","artifact":"\$out/run-001/missing.json"}]}
+JSON
+  exit 65
+fi
+if [ "\$1" = "run" ] && [ "\$3" = "export-graph-data" ]; then
+  graph_out=""
+  suites=""
+  for arg in "\$@"; do
+    case "\$arg" in
+      --out=*) graph_out="\${arg#--out=}" ;;
+      --suite=*) suites="\$suites\${arg#--suite=}\\n" ;;
+    esac
+  done
+  mkdir -p "\$graph_out"
+  printf "%b" "\$suites" > "\$graph_out/export-suites.txt"
+  exit 0
+fi
+if [ "\$1" = "run" ] && [ "\$3" = "validate-graph-data" ]; then
+  exit 0
+fi
+exit 0
+''');
+      await Process.run('chmod', ['+x', fakeDart.path]);
+
+      final outDir = p.join(temp.path, 'benchmark');
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'benchmark/run_tracelite.dart',
+        '--tracelite-root=${fakeRoot.path}',
+        '--dart=${fakeDart.path}',
+        '--label=partial-artifacts',
+        '--out-dir=$outDir',
+        '--allow-unpinned-tracelite',
+      ], workingDirectory: root);
+
+      expect(
+        result.exitCode,
+        65,
+        reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+      );
+
+      final filteredManifest = File(
+        p.join(outDir, 'graph-data-inputs', 'run-001-manifest.json'),
+      );
+      expect(filteredManifest.existsSync(), isTrue);
+      final filtered =
+          jsonDecode(filteredManifest.readAsStringSync())
+              as Map<String, Object?>;
+      final runs = filtered['runs']! as List<Object?>;
+      expect(runs, hasLength(1));
+      final run = runs.single as Map<String, Object?>;
+      expect(run['scenario'], 'narrow-batch-insert');
+      expect(run['status'], 'ok');
+      expect(File(run['artifact']! as String).isAbsolute, isTrue);
+
+      final exportSuites = File(
+        p.join(outDir, 'graph-data', 'export-suites.txt'),
+      ).readAsStringSync();
+      expect(exportSuites, contains(filteredManifest.path));
+
+      final manifestFile = File(
+        p.join(outDir, 'resqlite-tracelite-benchmark.json'),
+      );
+      final manifest =
+          jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
+      final artifacts = manifest['artifacts'] as Map<String, Object?>;
+      expect(
+        artifacts['graph_data_inputs_dir'],
+        p.join(outDir, 'graph-data-inputs'),
+      );
+      final steps = manifest['steps']! as List<Object?>;
+      expect(
+        steps.any(
+          (step) =>
+              step is Map<String, Object?> &&
+              step['name'] == 'export tracelite graph data' &&
+              step['exit_code'] == 0,
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test('tracelite benchmark workflow preserves manifest on failure', () async {
     final root = Directory.current.path;
     final temp = await Directory.systemTemp.createTemp(

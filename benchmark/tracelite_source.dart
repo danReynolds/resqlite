@@ -27,10 +27,21 @@ Future<Map<String, Object?>> traceliteSourceState(
   final gitState = await _gitSourceState(traceliteRoot);
   final revision = gitState['revision'] as String?;
   final dirty = gitState['dirty'] as bool?;
+  final remote = gitState['remote'] as String?;
+  final normalizedRemote = _normalizeGitRemote(remote);
+  final normalizedPinnedRepository = _normalizeGitRemote(
+    pinnedTraceliteRepository,
+  );
+  final repositoryMatches =
+      normalizedRemote != null &&
+      normalizedRemote == normalizedPinnedRepository;
   final revisionMatches =
       revision != null && revision == policy.expectedRevision;
-  final sourceOk = !policy.requiresPin ||
-      (revisionMatches && (dirty != true || policy.allowDirty));
+  final sourceOk =
+      !policy.requiresPin ||
+      (revisionMatches &&
+          (remote == null || repositoryMatches) &&
+          (dirty != true || policy.allowDirty));
 
   return {
     'path': traceliteRoot,
@@ -40,6 +51,9 @@ Future<Map<String, Object?>> traceliteSourceState(
     'pin_required': policy.requiresPin,
     'allow_dirty': policy.allowDirty,
     ...gitState,
+    if (normalizedRemote != null) 'remote_normalized': normalizedRemote,
+    if (policy.requiresPin && remote != null)
+      'repository_matches_pin': repositoryMatches,
     if (policy.requiresPin) 'revision_matches_pin': revisionMatches,
     'source_ok': sourceOk,
   };
@@ -73,10 +87,10 @@ Future<Map<String, Object?>> _gitSourceState(String root) async {
   final tags = tagsText == null || tagsText.isEmpty
       ? <String>[]
       : tagsText
-          .split('\n')
-          .map((value) => value.trim())
-          .where((value) => value.isNotEmpty)
-          .toList();
+            .split('\n')
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty)
+            .toList();
   final dirty = status == null ? null : status.isNotEmpty;
 
   return {
@@ -113,6 +127,15 @@ void printTraceliteSource(Map<String, Object?> source) {
     return;
   }
   print('tracelite_remote: ${source['remote']}');
+  if (source['remote_normalized'] != null) {
+    print('tracelite_remote_normalized: ${source['remote_normalized']}');
+  }
+  if (source['repository_matches_pin'] != null) {
+    print(
+      'tracelite_repository_matches_pin: '
+      '${source['repository_matches_pin']}',
+    );
+  }
   print('tracelite_revision: ${source['revision']}');
   print('tracelite_branch: ${source['branch']}');
   print('tracelite_dirty: ${source['dirty']}');
@@ -163,6 +186,20 @@ void validateTraceliteSource(Map<String, Object?> source) {
     exit(64);
   }
 
+  if (source['repository_matches_pin'] == false) {
+    stderr.writeln(
+      'tracelite checkout remote does not match the pinned production '
+      'repository.',
+    );
+    stderr.writeln('expected: ${source['pinned_repository']}');
+    stderr.writeln('actual:   ${source['remote']}');
+    stderr.writeln(
+      'Use $pinnedTraceliteRepository at tag $pinnedTraceliteTag, or pass '
+      '--allow-unpinned-tracelite for local development only.',
+    );
+    exit(64);
+  }
+
   if (source['dirty'] == true && source['allow_dirty'] != true) {
     stderr.writeln(
       'tracelite checkout is dirty at the pinned revision. Commit or stash '
@@ -176,15 +213,49 @@ TraceliteSourcePolicy traceliteSourcePolicyFromOptions({
   required String? revision,
   required Set<String> flags,
 }) {
-  final allowUnpinned = flags.contains('allow-unpinned-tracelite') ||
+  final allowUnpinned =
+      flags.contains('allow-unpinned-tracelite') ||
       Platform.environment['TRACELITE_ALLOW_UNPINNED'] == 'true';
-  final allowDirty = flags.contains('allow-dirty-tracelite') ||
+  final allowDirty =
+      flags.contains('allow-dirty-tracelite') ||
       Platform.environment['TRACELITE_ALLOW_DIRTY'] == 'true';
   return TraceliteSourcePolicy(
-    expectedRevision: revision ??
+    expectedRevision:
+        revision ??
         Platform.environment['TRACELITE_REVISION'] ??
         pinnedTraceliteRevision,
     allowUnpinned: allowUnpinned,
     allowDirty: allowDirty,
   );
+}
+
+String? _normalizeGitRemote(String? remote) {
+  if (remote == null) return null;
+  var value = remote.trim();
+  if (value.isEmpty) return null;
+
+  final sshMatch = RegExp(
+    r'^git@github\.com:([^/]+)/(.+?)(?:\.git)?$',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (sshMatch != null) {
+    value = 'https://github.com/${sshMatch.group(1)}/${sshMatch.group(2)}';
+  }
+
+  final sshUrlMatch = RegExp(
+    r'^ssh://git@github\.com/([^/]+)/(.+?)(?:\.git)?$',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (sshUrlMatch != null) {
+    value =
+        'https://github.com/${sshUrlMatch.group(1)}/${sshUrlMatch.group(2)}';
+  }
+
+  value = value.replaceFirst(RegExp(r'\.git$'), '');
+  value = value.replaceFirst(RegExp(r'/+$'), '');
+  if (value.toLowerCase().startsWith('https://github.com/')) {
+    final suffix = value.substring('https://github.com/'.length);
+    return 'https://github.com/${suffix.toLowerCase()}';
+  }
+  return value;
 }
