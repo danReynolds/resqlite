@@ -15,7 +15,7 @@ void main() {
     );
   });
 
-  test('compares extensions by native entrypoint address', () {
+  test('exposes stable debug names without collapsing setup identity', () {
     final first = ResqliteExtension.fromAddress(
       ffi.Pointer.fromAddress(1),
       name: 'first',
@@ -23,17 +23,31 @@ void main() {
     final sameEntrypoint = ResqliteExtension.fromAddress(
       ffi.Pointer.fromAddress(1),
       name: 'same',
-    );
-    final differentEntrypoint = ResqliteExtension.fromAddress(
-      ffi.Pointer.fromAddress(2),
-      name: 'different',
+      setup: [
+        ResqliteConnectionSetup.sql(
+          'SELECT ?',
+          parameters: ['setup'],
+          scope: ResqliteConnectionSetupScope.writer,
+        ),
+      ],
     );
 
-    expect(first, sameEntrypoint);
-    expect(first.hashCode, sameEntrypoint.hashCode);
-    expect(first, isNot(differentEntrypoint));
+    expect(
+      first.entrypointAddress.address,
+      sameEntrypoint.entrypointAddress.address,
+    );
+    expect(first, isNot(sameEntrypoint));
+    expect(sameEntrypoint.setup.single.parameters, ['setup']);
+    expect(
+      sameEntrypoint.setup.single.scope,
+      ResqliteConnectionSetupScope.writer,
+    );
     expect(first.debugName, 'first');
     expect(first.toString(), 'ResqliteExtension(first)');
+  });
+
+  test('rejects empty setup SQL', () {
+    expect(() => ResqliteConnectionSetup.sql(' '), throwsArgumentError);
   });
 
   test('reports a missing entrypoint from an existing dynamic library', () {

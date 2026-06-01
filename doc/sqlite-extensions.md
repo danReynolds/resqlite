@@ -66,6 +66,67 @@ native asset and export the asset id used by `@Native`. Existing wrappers in
 this repo, such as `packages/resqlite_vector` and `packages/resqlite_js`, use
 this pattern.
 
+## Connection setup
+
+Some extensions need per-connection SQL after the native entrypoint has loaded.
+For example, SQLite Vector exposes `vector_init(table, column, options)` for
+each indexed vector column. ICU-style extensions may expose SQL functions that
+register a collation for the current connection.
+
+Represent that as declarative setup on the `ResqliteExtension`:
+
+```dart
+ResqliteExtension sqliteExampleExtension() {
+  return ResqliteExtension(
+    Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3ExampleInit),
+    name: 'sqlite_example',
+    setup: [
+      ResqliteConnectionSetup.sql(
+        'SELECT example_init(?, ?)',
+        parameters: ['table_name', 'column_name'],
+      ),
+    ],
+  );
+}
+```
+
+Setup runs during `Database.open`, after native extension loading and before the
+database is returned. The default scope is `ResqliteConnectionSetupScope.all`,
+which runs on the writer and every reader connection. Use
+`ResqliteConnectionSetupScope.writer` for writer-only PRAGMAs or temporary
+writer state, and `ResqliteConnectionSetupScope.readers` for reader-only state.
+
+Each setup item is exactly one SQL statement. Use multiple setup entries for
+multi-step setup so resqlite can preserve order and report the failing extension
+and statement. Native entrypoints are de-duped by address before crossing into
+C, but setup entries are preserved in declaration order even when two extension
+objects point at the same native entrypoint.
+
+Prefer domain-specific options over exposing raw setup for common cases. The
+vector wrapper follows that pattern:
+
+```dart
+final db = await Database.open(
+  'app.db',
+  extensions: [
+    sqliteVectorExtension(
+      indexes: [
+        SqliteVectorIndex(
+          table: 'items',
+          column: 'embedding',
+          dimension: 1536,
+        ),
+      ],
+    ),
+  ],
+);
+```
+
+For setup that depends on schema created by migrations, create the schema first,
+close the bootstrap connection, then reopen with the extension setup configured.
+Deferred setup on an already-open database can be considered later, but the
+current API keeps extension initialization deterministic at open time.
+
 ## Compatibility contract
 
 An extension package must expose an init function with SQLite's loadable

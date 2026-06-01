@@ -17,5 +17,31 @@ final db = await Database.open(
 final version = await db.select('SELECT vector_version() AS version');
 ```
 
+To initialize vector indexes on every writer and reader connection, pass
+`SqliteVectorIndex` entries:
+
+```dart
+final db = await Database.open(
+  'app.db',
+  extensions: [
+    sqliteVectorExtension(
+      indexes: [
+        SqliteVectorIndex(
+          table: 'items',
+          column: 'embedding',
+          dimension: 1536,
+        ),
+      ],
+    ),
+  ],
+);
+```
+
+`SqliteVectorIndex` maps to SQLite Vector's
+`vector_init(table, column, options)` setup SQL. The target table and column
+must already exist before `Database.open` runs this setup. If migrations create
+the table, run those migrations first, close that bootstrap connection, then
+reopen with `sqliteVectorExtension(indexes: [...])`.
+
 The bundled native binaries are derived from the `sqlite_vector` Dart package
 and are covered by the license in `LICENSE`.

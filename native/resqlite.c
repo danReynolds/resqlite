@@ -8,6 +8,12 @@
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
+static int run_setup_sql(
+    sqlite3* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count
+);
 
 // ---------------------------------------------------------------------------
 // Growable buffer
@@ -349,6 +355,7 @@ struct resqlite_db {
     sqlite3_mutex* pool_mutex;
     // No condition variable — Dart retries if no reader available.
 
+    char setup_error[512];
     char* path;
 };
 
@@ -770,6 +777,9 @@ const char* resqlite_errmsg(resqlite_db* db) {
     if (!db || !db->writer || atomic_load_explicit(&db->closed, memory_order_acquire)) {
         return "database not open";
     }
+    if (db->setup_error[0] != '\0') {
+        return db->setup_error;
+    }
     return sqlite3_errmsg(db->writer);
 }
 
@@ -786,6 +796,104 @@ int resqlite_exec(resqlite_db* db, const char* sql) {
     int rc = sqlite3_exec(db->writer, sql, NULL, NULL, NULL);
     sqlite3_mutex_leave(db->writer_mutex);
     return rc;
+}
+
+static void set_setup_error(
+    resqlite_db* db,
+    const char* role,
+    int index,
+    sqlite3* connection
+) {
+    const char* detail = sqlite3_errmsg(connection);
+    if (index >= 0) {
+        snprintf(db->setup_error, sizeof(db->setup_error),
+                 "%s connection %d: %s", role, index, detail);
+    } else {
+        snprintf(db->setup_error, sizeof(db->setup_error),
+                 "%s connection: %s", role, detail);
+    }
+}
+
+static void set_setup_error_message(
+    resqlite_db* db,
+    const char* role,
+    int index,
+    const char* detail
+) {
+    if (index >= 0) {
+        snprintf(db->setup_error, sizeof(db->setup_error),
+                 "%s connection %d: %s", role, index, detail);
+    } else {
+        snprintf(db->setup_error, sizeof(db->setup_error),
+                 "%s connection: %s", role, detail);
+    }
+}
+
+int resqlite_run_connection_setup(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count,
+    int scope
+) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire) || !sql) {
+        return SQLITE_MISUSE;
+    }
+    if (param_count < 0) return SQLITE_MISUSE;
+    if (param_count > 0 && !params) return SQLITE_MISUSE;
+
+    switch (scope) {
+        case RESQLITE_SETUP_SCOPE_ALL:
+        case RESQLITE_SETUP_SCOPE_WRITER:
+        case RESQLITE_SETUP_SCOPE_READERS:
+            break;
+        default:
+            return SQLITE_MISUSE;
+    }
+
+    db->setup_error[0] = '\0';
+    int rc = SQLITE_OK;
+    if (scope == RESQLITE_SETUP_SCOPE_ALL ||
+        scope == RESQLITE_SETUP_SCOPE_WRITER) {
+        sqlite3_mutex_enter(db->writer_mutex);
+        rc = run_setup_sql(db->writer, sql, params, param_count);
+        sqlite3_mutex_leave(db->writer_mutex);
+        if (rc != SQLITE_OK) {
+            if (rc == SQLITE_MISUSE) {
+                set_setup_error_message(
+                    db, "writer", -1,
+                    "setup SQL must contain exactly one statement");
+            } else {
+                set_setup_error(db, "writer", -1, db->writer);
+            }
+            return rc;
+        }
+        // Setup happens before Dart workers and streams exist. Do not let
+        // setup DDL/DML leak into the first user-visible write invalidation.
+        resqlite_dirty_set_reset(&db->dirty_tables);
+        resqlite_column_set_reset(&db->dirty_columns);
+        resqlite_column_set_reset(&db->writer_authz_scratch);
+        db->writer_active_entry = NULL;
+    }
+
+    if (scope == RESQLITE_SETUP_SCOPE_ALL ||
+        scope == RESQLITE_SETUP_SCOPE_READERS) {
+        for (int i = 0; i < db->reader_count; i++) {
+            rc = run_setup_sql(db->readers[i].db, sql, params, param_count);
+            if (rc != SQLITE_OK) {
+                if (rc == SQLITE_MISUSE) {
+                    set_setup_error_message(
+                        db, "reader", i,
+                        "setup SQL must contain exactly one statement");
+                } else {
+                    set_setup_error(db, "reader", i, db->readers[i].db);
+                }
+                return rc;
+            }
+        }
+    }
+
+    return SQLITE_OK;
 }
 
 // Run one of the cached transaction-control statements on the writer
@@ -1341,6 +1449,46 @@ static resqlite_cached_stmt* get_or_prepare_reader(
 // ---------------------------------------------------------------------------
 // Internal: bind parameters
 // ---------------------------------------------------------------------------
+
+static int has_non_empty_tail(const char* tail) {
+    if (!tail) return 0;
+    while (*tail == ' ' || *tail == '\t' || *tail == '\n' ||
+           *tail == '\r' || *tail == ';') {
+        tail++;
+    }
+    return *tail != '\0';
+}
+
+static int run_setup_sql(
+    sqlite3* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count
+) {
+    sqlite3_stmt* stmt = NULL;
+    const char* tail = NULL;
+    int rc = sqlite3_prepare_v3(db, sql, -1, 0, &stmt, &tail);
+    if (rc != SQLITE_OK) return rc;
+    if (!stmt) return SQLITE_OK;
+
+    if (has_non_empty_tail(tail)) {
+        sqlite3_finalize(stmt);
+        return SQLITE_MISUSE;
+    }
+
+    rc = bind_params(
+        stmt, params, param_count, sqlite3_bind_parameter_count(stmt));
+    if (rc != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        return rc;
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {}
+
+    int finalize_rc = sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) return rc;
+    return finalize_rc == SQLITE_OK ? SQLITE_OK : finalize_rc;
+}
 
 // Caller provides `expected` — it's a property of the prepared SQL and
 // the cache tracks it alongside the stmt

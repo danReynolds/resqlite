@@ -3,6 +3,8 @@
 - Added open-scoped SQLite extension loading via `Database.open(extensions: ...)`
   and `ResqliteExtension`, plus companion package wrappers for SQLite Vector
   and SQLite JS.
+- Added declarative open-time extension setup with writer/reader/all connection
+  scopes, plus `SqliteVectorIndex` helpers for SQLite Vector's `vector_init`.
 
 ## 0.3.1
 

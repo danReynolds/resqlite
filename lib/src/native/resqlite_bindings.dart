@@ -59,6 +59,23 @@ external ffi.Pointer<Utf8> resqliteErrmsg(ffi.Pointer<ffi.Void> db);
 )
 external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
 
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_run_connection_setup', isLeaf: true)
+external int resqliteRunConnectionSetup(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> params,
+  int paramCount,
+  int scope,
+);
+
 // Transaction-control fast path: pre-prepared BEGIN IMMEDIATE / COMMIT /
 // ROLLBACK stmts in C, run via sqlite3_reset + sqlite3_step instead of
 // sqlite3_exec's prepare+step+finalize per call

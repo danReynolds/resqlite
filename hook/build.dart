@@ -216,6 +216,7 @@ const _exportedSymbols = [
   // resqlite custom functions
   'resqlite_open',
   'resqlite_open_with_extensions',
+  'resqlite_run_connection_setup',
   'resqlite_close',
   'resqlite_errmsg',
   'resqlite_exec',

@@ -34,8 +34,14 @@ void main() {
       );
       addTearDown(db.close);
 
-      expect(sqliteVectorExtension(), sqliteVectorExtension());
-      expect(sqliteVectorExtension().debugName, 'sqlite_vector');
+      final firstVector = sqliteVectorExtension();
+      final secondVector = sqliteVectorExtension();
+      expect(
+        firstVector.entrypointAddress.address,
+        secondVector.entrypointAddress.address,
+      );
+      expect(firstVector, isNot(secondVector));
+      expect(firstVector.debugName, 'sqlite_vector');
 
       final version = await db.select('SELECT vector_version() AS version');
       expect(version.single['version'], isA<String>());
@@ -59,6 +65,186 @@ void main() {
       );
     },
   );
+
+  test('runs extension setup SQL on writer and reader connections', () async {
+    final db = await Database.open(
+      '${tempDir.path}/setup_all.db',
+      extensions: [
+        sqliteVectorExtension(
+          setup: [
+            ResqliteConnectionSetup.sql(
+              'CREATE TEMP TABLE setup_all(value TEXT)',
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    await db.execute('INSERT INTO setup_all(value) VALUES (?)', ['writer']);
+
+    for (var i = 0; i < 8; i++) {
+      final rows = await db.select(
+        "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        ['setup_all'],
+      );
+      expect(rows.single['name'], 'setup_all');
+    }
+  });
+
+  test('runs setup SQL only on the requested connection scope', () async {
+    final db = await Database.open(
+      '${tempDir.path}/setup_scope.db',
+      extensions: [
+        sqliteVectorExtension(
+          setup: [
+            ResqliteConnectionSetup.sql(
+              'CREATE TEMP TABLE writer_only(value TEXT)',
+              scope: ResqliteConnectionSetupScope.writer,
+            ),
+            ResqliteConnectionSetup.sql(
+              'CREATE TEMP TABLE readers_only(value TEXT)',
+              scope: ResqliteConnectionSetupScope.readers,
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    await db.execute('INSERT INTO writer_only(value) VALUES (?)', ['ok']);
+    await expectLater(
+      db.execute('INSERT INTO readers_only(value) VALUES (?)', ['missing']),
+      throwsA(isA<ResqliteQueryException>()),
+    );
+
+    for (var i = 0; i < 8; i++) {
+      final readerRows = await db.select(
+        "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        ['readers_only'],
+      );
+      expect(readerRows.single['name'], 'readers_only');
+
+      final writerRows = await db.select(
+        "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        ['writer_only'],
+      );
+      expect(writerRows, isEmpty);
+    }
+  });
+
+  test('preserves setup from duplicate extension entrypoints', () async {
+    final db = await Database.open(
+      '${tempDir.path}/setup_duplicates.db',
+      extensions: [
+        sqliteVectorExtension(
+          setup: [
+            ResqliteConnectionSetup.sql(
+              'CREATE TEMP TABLE setup_a(value TEXT)',
+            ),
+          ],
+        ),
+        sqliteVectorExtension(
+          setup: [
+            ResqliteConnectionSetup.sql(
+              'CREATE TEMP TABLE setup_b(value TEXT)',
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    for (final table in ['setup_a', 'setup_b']) {
+      await db.execute('INSERT INTO $table(value) VALUES (?)', ['writer']);
+      final rows = await db.select(
+        "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        [table],
+      );
+      expect(rows.single['name'], table);
+    }
+  });
+
+  test(
+    'reports setup failures with extension and connection context',
+    () async {
+      await expectLater(
+        Database.open(
+          '${tempDir.path}/setup_failure.db',
+          extensions: [
+            sqliteVectorExtension(
+              setup: [ResqliteConnectionSetup.sql('SELECT 1; SELECT 2')],
+            ),
+          ],
+        ),
+        throwsA(
+          isA<ResqliteConnectionException>()
+              .having((e) => e.message, 'message', contains('sqlite_vector'))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('writer connection'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                contains('exactly one statement'),
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                contains('SELECT 1; SELECT 2'),
+              ),
+        ),
+      );
+    },
+  );
+
+  test('initializes configured vector indexes on every connection', () async {
+    final path = '${tempDir.path}/vector_index.db';
+    final bootstrap = await Database.open(
+      path,
+      extensions: [sqliteVectorExtension()],
+    );
+    await bootstrap.execute(
+      'CREATE TABLE items(id INTEGER PRIMARY KEY, embedding BLOB)',
+    );
+    await bootstrap.close();
+
+    final db = await Database.open(
+      path,
+      extensions: [
+        sqliteVectorExtension(
+          indexes: [
+            SqliteVectorIndex(
+              table: 'items',
+              column: 'embedding',
+              dimension: 4,
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    await db.execute('INSERT INTO items(embedding) VALUES (vector_as_f32(?))', [
+      '[1.0, 2.0, 3.0, 4.0]',
+    ]);
+    final rows = await db.select(
+      '''
+      SELECT i.id, v.distance
+      FROM items AS i
+      JOIN vector_full_scan(
+        'items',
+        'embedding',
+        vector_as_f32(?),
+        1
+      ) AS v ON i.rowid = v.rowid
+      ''',
+      ['[1.0, 2.0, 3.0, 4.0]'],
+    );
+    expect(rows.single['id'], 1);
+  });
 
   test('loads an unrelated extension through the same pattern', () async {
     final db = await Database.open(
