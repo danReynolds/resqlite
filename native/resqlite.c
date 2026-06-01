@@ -695,15 +695,26 @@ resqlite_db* resqlite_open_with_extensions(
     if (mutex) sqlite3_mutex_enter(mutex);
 
     int rc = SQLITE_OK;
-    int registered = 0;
+    int unique_count = 0;
     for (int i = 0; i < extension_count; i++) {
         if (!extension_entrypoints[i]) {
             rc = SQLITE_MISUSE;
             break;
         }
+        int seen = 0;
+        for (int j = 0; j < unique_count; j++) {
+            if (extension_entrypoints[j] == extension_entrypoints[i]) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen) continue;
         rc = sqlite3_auto_extension((void(*)(void))extension_entrypoints[i]);
         if (rc != SQLITE_OK) break;
-        registered++;
+        // Compact unique entrypoints into the front of the caller-provided
+        // scratch array so cancellation only visits each pointer once.
+        extension_entrypoints[unique_count] = extension_entrypoints[i];
+        unique_count++;
     }
 
     resqlite_db* db = NULL;
@@ -711,7 +722,7 @@ resqlite_db* resqlite_open_with_extensions(
         db = resqlite_open_impl(path, max_readers, encryption_key_hex);
     }
 
-    for (int i = 0; i < registered; i++) {
+    for (int i = 0; i < unique_count; i++) {
         sqlite3_cancel_auto_extension(
             (void(*)(void))extension_entrypoints[i]);
     }

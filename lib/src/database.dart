@@ -120,13 +120,13 @@ final class Database {
     final keyNative = encryptionKey != null
         ? encryptionKey.toNativeUtf8()
         : ffi.nullptr.cast<Utf8>();
-    final extensionList = extensions.toList(growable: false);
+    final extensionList = _dedupeExtensions(extensions);
     final extensionEntrypoints = extensionList.isEmpty
         ? ffi.nullptr
         : calloc<ffi.Pointer<ffi.Void>>(extensionList.length);
     try {
       for (var i = 0; i < extensionList.length; i++) {
-        extensionEntrypoints[i] = extensionList[i].opaqueEntrypoint;
+        extensionEntrypoints[i] = extensionList[i].entrypointAddress;
       }
 
       // Determine the number of reader isolates to spawn.
@@ -153,9 +153,7 @@ final class Database {
               extensionList.length,
             );
       if (handle == ffi.nullptr) {
-        final extensionNames = extensionList
-            .map((e) => e.name ?? '0x${e.entrypoint.address.toRadixString(16)}')
-            .join(', ');
+        final extensionNames = extensionList.map((e) => e.debugName).join(', ');
         throw ResqliteConnectionException(
           'Failed to open database at "$path"'
           '${encryptionKey != null ? ' (check encryption key)' : ''}'
@@ -171,6 +169,19 @@ final class Database {
         calloc.free(extensionEntrypoints);
       }
     }
+  }
+
+  static List<ResqliteExtension> _dedupeExtensions(
+    Iterable<ResqliteExtension> extensions,
+  ) {
+    final unique = <ResqliteExtension>[];
+    final seenEntrypoints = <int>{};
+    for (final extension in extensions) {
+      if (seenEntrypoints.add(extension.entrypointAddress.address)) {
+        unique.add(extension);
+      }
+    }
+    return List.unmodifiable(unique);
   }
 
   /// Closes this database, shutting down all worker isolates and releasing

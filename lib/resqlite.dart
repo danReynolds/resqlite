@@ -2,7 +2,11 @@ library;
 
 export 'src/database.dart' show Database;
 export 'src/diagnostics.dart' show Diagnostics;
-export 'src/extension.dart' show ResqliteExtension, ResqliteExtensionInitNative;
+export 'src/extension.dart'
+    show
+        ResqliteExtension,
+        ResqliteExtensionEntrypoint,
+        ResqliteExtensionInitNative;
 export 'src/transaction.dart' show Transaction;
 export 'src/exceptions.dart'
     show

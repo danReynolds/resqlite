@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
@@ -29,9 +30,12 @@ void main() {
 
       final db = await Database.open(
         '${tempDir.path}/vector.db',
-        extensions: [sqliteVectorExtension()],
+        extensions: [sqliteVectorExtension(), sqliteVectorExtension()],
       );
       addTearDown(db.close);
+
+      expect(sqliteVectorExtension(), sqliteVectorExtension());
+      expect(sqliteVectorExtension().debugName, 'sqlite_vector');
 
       final version = await db.select('SELECT vector_version() AS version');
       expect(version.single['version'], isA<String>());
@@ -71,4 +75,53 @@ void main() {
     final stored = await db.select('SELECT value FROM scripts');
     expect(stored.single['value'], isA<String>());
   });
+
+  test('loads an extension from a dynamic library symbol', () async {
+    final vectorLibraryPath = _vectorLibraryPath();
+    if (vectorLibraryPath == null) {
+      markTestSkipped('No checked-in vector binary for ${Abi.current()}.');
+      return;
+    }
+
+    final vectorLibrary = File(vectorLibraryPath);
+    if (!vectorLibrary.existsSync()) {
+      markTestSkipped('Missing vector binary: ${vectorLibrary.path}');
+      return;
+    }
+
+    final db = await Database.open(
+      '${tempDir.path}/vector_library.db',
+      extensions: [
+        ResqliteExtension.inLibrary(
+          DynamicLibrary.open(vectorLibrary.absolute.path),
+          'sqlite3_vector_init',
+          name: 'sqlite_vector',
+        ),
+      ],
+    );
+    addTearDown(db.close);
+
+    final version = await db.select('SELECT vector_version() AS version');
+    expect(version.single['version'], isA<String>());
+  });
+}
+
+String? _vectorLibraryPath() {
+  final abi = Abi.current();
+  if (abi == Abi.macosArm64) {
+    return '../resqlite_vector/native_libraries/mac/vector_mac_arm64.dylib';
+  }
+  if (abi == Abi.macosX64) {
+    return '../resqlite_vector/native_libraries/mac/vector_mac_x64.dylib';
+  }
+  if (abi == Abi.linuxArm64) {
+    return '../resqlite_vector/native_libraries/linux/vector_linux_arm64.so';
+  }
+  if (abi == Abi.linuxX64) {
+    return '../resqlite_vector/native_libraries/linux/vector_linux_x64.so';
+  }
+  if (abi == Abi.windowsX64) {
+    return '../resqlite_vector/native_libraries/windows/vector_windows_x64.dll';
+  }
+  return null;
 }

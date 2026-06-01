@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:resqlite/resqlite.dart';
 
-@Native<Int Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
+@Native<ResqliteExtensionInitNative>(
   assetId: 'package:resqlite_vector/src/native/sqlite_vector_extension.dart',
   symbol: 'sqlite3_vector_init',
 )
@@ -15,9 +15,7 @@ external int sqlite3VectorInit(
 /// Loads SQLite Vector on every connection opened by resqlite.
 ResqliteExtension sqliteVectorExtension() {
   return ResqliteExtension(
-    Native.addressOf<NativeFunction<ResqliteExtensionInitNative>>(
-      sqlite3VectorInit,
-    ),
+    Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3VectorInit),
     name: 'sqlite_vector',
   );
 }

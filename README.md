@@ -230,13 +230,19 @@ final jsVersion = await db.select('SELECT js_version() AS version');
 The extension package pattern is intentionally small:
 
 1. Bundle or build the native SQLite extension with a `hook/build.dart`.
-2. Expose the extension init symbol with `@Native`.
-3. Return `ResqliteExtension(Native.addressOf(...), name: 'extension_name')`.
+2. Expose the extension init symbol with `@Native<ResqliteExtensionInitNative>`.
+3. Return `ResqliteExtension(Native.addressOf<ResqliteExtensionEntrypoint>(...))`.
 4. Pass the extension to `Database.open(extensions: [...])`.
 
 This keeps extension support tied to resqlite's SQLite image and avoids the
 `package:sqlite3` native asset split that existing sqlite3-specific wrappers
 use.
+
+Unlike `package:sqlite3`, extension loading is open-scoped instead of global:
+the extension list belongs to the database pool being opened, and resqlite
+registers it on the writer and every reader connection. See
+[SQLite extension authoring](./doc/sqlite-extensions.md) for the package
+template and compatibility contract.
 
 ## Architecture
 
