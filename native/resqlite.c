@@ -576,8 +576,8 @@ static sqlite3* open_connection(const char* path, int read_only,
     return db;
 }
 
-resqlite_db* resqlite_open(const char* path, int max_readers,
-                          const char* encryption_key_hex) {
+static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
+                                       const char* encryption_key_hex) {
     // Required when compiled with SQLITE_OMIT_AUTOINIT — call once before
     // any other SQLite API. Subsequent calls are harmless no-ops.
     sqlite3_initialize();
@@ -663,6 +663,61 @@ resqlite_db* resqlite_open(const char* path, int max_readers,
     }
 
     return db;
+}
+
+resqlite_db* resqlite_open(const char* path, int max_readers,
+                           const char* encryption_key_hex) {
+    return resqlite_open_with_extensions(
+        path, max_readers, encryption_key_hex, NULL, 0);
+}
+
+resqlite_db* resqlite_open_with_extensions(
+    const char* path,
+    int max_readers,
+    const char* encryption_key_hex,
+    void** extension_entrypoints,
+    int extension_count
+) {
+    if (extension_count < 0) return NULL;
+    if (extension_count == 0) {
+        return resqlite_open_impl(path, max_readers, encryption_key_hex);
+    }
+    if (!extension_entrypoints) return NULL;
+
+    // Required when compiled with SQLITE_OMIT_AUTOINIT. We also need SQLite's
+    // mutex subsystem before taking the application mutex below.
+    sqlite3_initialize();
+
+    // sqlite3_auto_extension() is process-global for this SQLite image. Hold
+    // an application mutex across register/open/cancel so concurrent resqlite
+    // opens cannot observe each other's temporary extension list.
+    sqlite3_mutex* mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_APP1);
+    if (mutex) sqlite3_mutex_enter(mutex);
+
+    int rc = SQLITE_OK;
+    int registered = 0;
+    for (int i = 0; i < extension_count; i++) {
+        if (!extension_entrypoints[i]) {
+            rc = SQLITE_MISUSE;
+            break;
+        }
+        rc = sqlite3_auto_extension((void(*)(void))extension_entrypoints[i]);
+        if (rc != SQLITE_OK) break;
+        registered++;
+    }
+
+    resqlite_db* db = NULL;
+    if (rc == SQLITE_OK) {
+        db = resqlite_open_impl(path, max_readers, encryption_key_hex);
+    }
+
+    for (int i = 0; i < registered; i++) {
+        sqlite3_cancel_auto_extension(
+            (void(*)(void))extension_entrypoints[i]);
+    }
+
+    if (mutex) sqlite3_mutex_leave(mutex);
+    return rc == SQLITE_OK ? db : NULL;
 }
 
 void resqlite_close(resqlite_db* db) {

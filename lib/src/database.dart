@@ -9,6 +9,7 @@ import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
+import 'extension.dart';
 import 'native/resqlite_bindings.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
@@ -110,12 +111,24 @@ final class Database {
   ///
   /// The returned [Database] must be closed with [close] when no longer
   /// needed to release native resources.
-  static Future<Database> open(String path, {String? encryptionKey}) async {
+  static Future<Database> open(
+    String path, {
+    String? encryptionKey,
+    Iterable<ResqliteExtension> extensions = const [],
+  }) async {
     final pathNative = path.toNativeUtf8();
     final keyNative = encryptionKey != null
         ? encryptionKey.toNativeUtf8()
         : ffi.nullptr.cast<Utf8>();
+    final extensionList = extensions.toList(growable: false);
+    final extensionEntrypoints = extensionList.isEmpty
+        ? ffi.nullptr
+        : calloc<ffi.Pointer<ffi.Void>>(extensionList.length);
     try {
+      for (var i = 0; i < extensionList.length; i++) {
+        extensionEntrypoints[i] = extensionList[i].opaqueEntrypoint;
+      }
+
       // Determine the number of reader isolates to spawn.
       // cores - 1: leave one core for the main isolate (UI thread in Flutter).
       // min 2: so one worker sacrifice doesn't leave zero capacity.
@@ -130,11 +143,23 @@ final class Database {
       //   reader connection.
       final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
 
-      final handle = resqliteOpen(pathNative, readerCount, keyNative);
+      final handle = extensionList.isEmpty
+          ? resqliteOpen(pathNative, readerCount, keyNative)
+          : resqliteOpenWithExtensions(
+              pathNative,
+              readerCount,
+              keyNative,
+              extensionEntrypoints,
+              extensionList.length,
+            );
       if (handle == ffi.nullptr) {
+        final extensionNames = extensionList
+            .map((e) => e.name ?? '0x${e.entrypoint.address.toRadixString(16)}')
+            .join(', ');
         throw ResqliteConnectionException(
           'Failed to open database at "$path"'
-          '${encryptionKey != null ? ' (check encryption key)' : ''}',
+          '${encryptionKey != null ? ' (check encryption key)' : ''}'
+          '${extensionList.isNotEmpty ? ' with extensions: $extensionNames' : ''}',
         );
       }
 
@@ -142,6 +167,9 @@ final class Database {
     } finally {
       calloc.free(pathNative);
       if (encryptionKey != null) calloc.free(keyNative);
+      if (extensionEntrypoints != ffi.nullptr) {
+        calloc.free(extensionEntrypoints);
+      }
     }
   }
 
@@ -307,8 +335,9 @@ final class Database {
     List<Object?> parameters = const [],
   ]) {
     _ensureOpen();
-    return Stream.fromFuture(_runtime)
-        .asyncExpand((runtime) => runtime.streamEngine.stream(sql, parameters));
+    return Stream.fromFuture(
+      _runtime,
+    ).asyncExpand((runtime) => runtime.streamEngine.stream(sql, parameters));
   }
 
   // -------------------------------------------------------------------------
@@ -502,5 +531,5 @@ final class Database {
 typedef _DatabaseRuntime = ({
   ReaderPool readerPool,
   StreamEngine streamEngine,
-  Writer writer
+  Writer writer,
 });

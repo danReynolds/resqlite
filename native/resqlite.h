@@ -45,6 +45,23 @@ typedef struct {
 // encryption_key_hex: hex-encoded encryption key, or NULL for no encryption.
 // max_readers: number of read connections (0 = default 8).
 resqlite_db* resqlite_open(const char* path, int max_readers, const char* encryption_key_hex);
+
+// Open a database with SQLite loadable extensions registered on every
+// connection in the writer/reader pool.
+//
+// extension_entrypoints points at an array of native extension init functions
+// with SQLite's standard loadable-extension signature:
+//   int xInit(sqlite3*, char**, const sqlite3_api_routines*)
+//
+// The entrypoints are temporarily registered with sqlite3_auto_extension()
+// while resqlite opens the pool, then cancelled before this function returns.
+resqlite_db* resqlite_open_with_extensions(
+    const char* path,
+    int max_readers,
+    const char* encryption_key_hex,
+    void** extension_entrypoints,
+    int extension_count
+);
 void resqlite_close(resqlite_db* db);
 const char* resqlite_errmsg(resqlite_db* db);
 

@@ -5,6 +5,9 @@ build/
 *.dylib
 *.so
 *.dll
+!packages/**/native_libraries/**/*.dylib
+!packages/**/native_libraries/**/*.so
+!packages/**/native_libraries/**/*.dll
 .claude/worktrees/
 
 # Cached seed databases for Large Working Set (A9) — recreated on demand.

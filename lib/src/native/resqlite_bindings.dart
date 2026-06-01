@@ -24,6 +24,23 @@ external ffi.Pointer<ffi.Void> resqliteOpen(
   ffi.Pointer<Utf8> encryptionKeyHex,
 );
 
+@ffi.Native<
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<Utf8>,
+    ffi.Int,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Pointer<ffi.Void>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_open_with_extensions', isLeaf: true)
+external ffi.Pointer<ffi.Void> resqliteOpenWithExtensions(
+  ffi.Pointer<Utf8> path,
+  int maxReaders,
+  ffi.Pointer<Utf8> encryptionKeyHex,
+  ffi.Pointer<ffi.Pointer<ffi.Void>> extensionEntrypoints,
+  int extensionCount,
+);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'resqlite_close',
   isLeaf: true,
@@ -757,8 +774,10 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) =>
-    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+int? _tryMeasureAsciiBatchBytes(
+  List<List<Object?>> paramSets,
+  int paramCount,
+) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
 
 int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
     _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;

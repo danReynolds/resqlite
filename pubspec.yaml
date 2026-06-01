@@ -14,6 +14,11 @@ topics:
 environment:
   sdk: ^3.10.4
 
+workspace:
+  - packages/resqlite_vector
+  - packages/resqlite_js
+  - packages/resqlite_extension_test
+
 dependencies:
   ffi: ^2.1.4
   hooks: ^1.0.0

@@ -1,0 +1,15 @@
+name: resqlite_extension_test
+publish_to: none
+
+environment:
+  sdk: ^3.10.4
+
+resolution: workspace
+
+dependencies:
+  resqlite: ^0.3.1
+  resqlite_js: ^0.1.0
+  resqlite_vector: ^0.1.0
+
+dev_dependencies:
+  test: ^1.26.3

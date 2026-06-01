@@ -195,6 +195,49 @@ await db.executeBatch(
 
 1,000 rows in **~0.4ms**. All-or-nothing atomicity — a crash mid-import leaves zero partial rows. Streams watching the table fire once on commit, not per row.
 
+## SQLite Extensions
+
+resqlite supports SQLite loadable extensions through small companion packages
+that expose native extension entrypoints as `ResqliteExtension` values. These
+packages do not depend on `package:sqlite3`; they bundle or build the extension
+native asset and let resqlite register it on every writer and reader connection
+opened for the database.
+
+```yaml
+dependencies:
+  resqlite: ^0.3.1
+  resqlite_vector: ^0.1.0
+  resqlite_js: ^0.1.0
+```
+
+```dart
+import 'package:resqlite/resqlite.dart';
+import 'package:resqlite_js/resqlite_js.dart';
+import 'package:resqlite_vector/resqlite_vector.dart';
+
+final db = await Database.open(
+  'app.db',
+  extensions: [
+    sqliteVectorExtension(),
+    sqliteJsExtension(),
+  ],
+);
+
+final vectorVersion = await db.select('SELECT vector_version() AS version');
+final jsVersion = await db.select('SELECT js_version() AS version');
+```
+
+The extension package pattern is intentionally small:
+
+1. Bundle or build the native SQLite extension with a `hook/build.dart`.
+2. Expose the extension init symbol with `@Native`.
+3. Return `ResqliteExtension(Native.addressOf(...), name: 'extension_name')`.
+4. Pass the extension to `Database.open(extensions: [...])`.
+
+This keeps extension support tied to resqlite's SQLite image and avoids the
+`package:sqlite3` native asset split that existing sqlite3-specific wrappers
+use.
+
 ## Architecture
 
 - **Reads** go through a [persistent reader pool](./lib/src/reader/reader_pool.dart) (2-4 workers with dedicated C connections)
