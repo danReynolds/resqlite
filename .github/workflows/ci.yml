@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   guard-raw-profile-json:
     # Block raw per-sample profile JSONs (~15 MB each) from landing on main.
@@ -16,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Check PR diff for benchmark/profile/results/*.json
@@ -35,7 +38,7 @@ jobs:
     name: Tests
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -59,7 +62,7 @@ jobs:
     name: Benchmark generated data freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -75,7 +78,7 @@ jobs:
     runs-on: macos-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -108,7 +111,7 @@ jobs:
     # Trend-tracking artifact upload. Only runs on pushes to main.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
