@@ -212,3 +212,9 @@ Outcome:
 - A focused Tracelite worker compare for `keyed-pk-subscriptions` passed 3/3
   repetitions with trace diagnostics `0/0/0`, replacing the r9 caveat that
   worker mode was investigation-only for reactive suites.
+- Production evidence `production-pin-r10-resqlite-policy-2026-06-02-r1`
+  passed with clean Tracelite source
+  `d058647a123df0f4af223a110564b862de2eda05`, clean resqlite source
+  `6affacd4d3b83e16d73fafa0c5232f578f25dde4`, dependency binding matched the
+  PR worktree, warmup passed, 5/5 recorded runs were `ok`, policy calibration
+  was `ready`, graph data validated, and explain completed.

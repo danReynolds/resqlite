@@ -245,15 +245,16 @@ suite before recorded history and uses a 15% total-outlier gate so tiny IQR
 outliers do not reject otherwise sub-1% noise runs.
 
 Latest full production evidence:
-`production-pin-r9-resqlite-policy-2026-06-02-r4`
+`production-pin-r10-resqlite-policy-2026-06-02-r1`
 passed with Tracelite source
-`f56ecb8d4f2df5bdb3646f2cf3439450fd64272d`, resqlite source
-`76cab05cd7f8cc06c6899991602a511214e55b1b`, arm64 Dart on an arm64 host,
-`warmup-runs=1`, 5/5 recorded `suite-history` runs `ok`, policy calibration
-`ready`, graph-data export and validation `ok`, and explain completed. The
-warmup phase took about 42.8 seconds, the recorded suite-history phase took
-about 209.2 seconds, and the wrapper manifest recorded
-`tracelite_resqlite_dependency.matches_requested_root=true`.
+`d058647a123df0f4af223a110564b862de2eda05`, resqlite source
+`6affacd4d3b83e16d73fafa0c5232f578f25dde4`, clean source on both
+checkouts, arm64 Dart on an arm64 host, `warmup-runs=1`, 5/5 recorded
+`suite-history` runs `ok`, policy calibration `ready`, graph-data export and
+validation `ok`, and explain completed. The policy covered
+`high-cardinality-fanout` and `many-streams-writer-throughput`; observed noise
+was 0.5% and 1.04% respectively, both within the 5% max-CV gate. The wrapper
+manifest recorded `tracelite_resqlite_dependency.matches_requested_root=true`.
 
 Current worker evidence: local Tracelite r10 worker checks passed
 `keyed-pk-subscriptions` for `resqlite` with 3/3 repetitions, preflight
