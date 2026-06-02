@@ -1,14 +1,6 @@
-import 'dart:ffi' as ffi;
-import 'dart:isolate';
+part of '../database.dart';
 
-import 'package:ffi/ffi.dart';
-
-import '../exceptions.dart';
-import '../extensions/extension.dart';
-import '../extensions/registration.dart';
-import 'resqlite_bindings.dart';
-
-Future<ffi.Pointer<ffi.Void>> openNativeDatabase({
+Future<ffi.Pointer<ffi.Void>> _openNativeDatabase({
   required String path,
   required String? encryptionKey,
   required int readerCount,
@@ -81,7 +73,7 @@ int _openNativeDatabaseOnWorker(_NativeOpenRequest request) {
 
 void _runExtensionSetup(
   ffi.Pointer<ffi.Void> handle,
-  List<ExtensionSetupStep> setup,
+  List<_ExtensionSetupStep> setup,
 ) {
   for (final step in setup) {
     final setupSql = step.sql;
@@ -141,7 +133,7 @@ final class _NativeOpenRequest {
       path: path,
       encryptionKey: encryptionKey,
       readerCount: readerCount,
-      registration: ExtensionRegistrationPlan.from(extensions),
+      registration: _ExtensionRegistrationPlan.from(extensions),
     );
   }
 
@@ -150,5 +142,5 @@ final class _NativeOpenRequest {
   final int readerCount;
   // This request crosses an Isolate.run boundary. Keep fields sendable: no
   // FFI pointers, handles, DynamicLibrary instances, or callbacks.
-  final ExtensionRegistrationPlan registration;
+  final _ExtensionRegistrationPlan registration;
 }

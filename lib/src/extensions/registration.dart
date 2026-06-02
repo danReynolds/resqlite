@@ -1,40 +1,34 @@
-import 'package:meta/meta.dart';
+part of '../database.dart';
 
-import '../exceptions.dart';
-import 'extension.dart';
-
-@internal
-final class ExtensionRegistrationPlan {
-  ExtensionRegistrationPlan._({
+final class _ExtensionRegistrationPlan {
+  _ExtensionRegistrationPlan._({
     required this.entrypoints,
     required this.setupSteps,
   });
 
-  factory ExtensionRegistrationPlan.from(
+  factory _ExtensionRegistrationPlan.from(
     Iterable<ResqliteExtension> extensions,
   ) {
     final extensionList = extensions.toList(growable: false);
-    return ExtensionRegistrationPlan._(
+    return _ExtensionRegistrationPlan._(
       entrypoints: _collectExtensionEntrypoints(extensionList),
       setupSteps: _collectExtensionSetup(extensionList),
     );
   }
 
-  final List<ExtensionEntrypoint> entrypoints;
-  final List<ExtensionSetupStep> setupSteps;
+  final List<_ExtensionEntrypoint> entrypoints;
+  final List<_ExtensionSetupStep> setupSteps;
 }
 
-@internal
-final class ExtensionEntrypoint {
-  const ExtensionEntrypoint({required this.address, required this.name});
+final class _ExtensionEntrypoint {
+  const _ExtensionEntrypoint({required this.address, required this.name});
 
   final int address;
   final String name;
 }
 
-@internal
-final class ExtensionSetupStep {
-  const ExtensionSetupStep({
+final class _ExtensionSetupStep {
+  const _ExtensionSetupStep({
     required this.extensionName,
     required this.sql,
     required this.parameters,
@@ -47,10 +41,10 @@ final class ExtensionSetupStep {
   final ResqliteConnectionScope scope;
 }
 
-List<ExtensionEntrypoint> _collectExtensionEntrypoints(
+List<_ExtensionEntrypoint> _collectExtensionEntrypoints(
   Iterable<ResqliteExtension> extensions,
 ) {
-  final entrypoints = <ExtensionEntrypoint>[];
+  final entrypoints = <_ExtensionEntrypoint>[];
   final seenEntrypoints = <int, String>{};
   for (final extension in extensions) {
     final address = extension.entrypointAddress.address;
@@ -64,16 +58,16 @@ List<ExtensionEntrypoint> _collectExtensionEntrypoints(
     }
     seenEntrypoints[address] = extension.debugName;
     entrypoints.add(
-      ExtensionEntrypoint(address: address, name: extension.debugName),
+      _ExtensionEntrypoint(address: address, name: extension.debugName),
     );
   }
   return List.unmodifiable(entrypoints);
 }
 
-List<ExtensionSetupStep> _collectExtensionSetup(
+List<_ExtensionSetupStep> _collectExtensionSetup(
   Iterable<ResqliteExtension> extensions,
 ) {
-  final setup = <ExtensionSetupStep>[];
+  final setup = <_ExtensionSetupStep>[];
   for (final extension in extensions) {
     final onRegister = extension.onRegister;
     if (onRegister == null) continue;
@@ -99,11 +93,11 @@ List<ExtensionSetupStep> _collectExtensionSetup(
 final class _ExtensionRegistrar implements ResqliteExtensionRegistrar {
   _ExtensionRegistrar({
     required this.extensionName,
-    required List<ExtensionSetupStep> setup,
+    required List<_ExtensionSetupStep> setup,
   }) : _setup = setup;
 
   final String extensionName;
-  final List<ExtensionSetupStep> _setup;
+  final List<_ExtensionSetupStep> _setup;
 
   @override
   void execute(
@@ -115,7 +109,7 @@ final class _ExtensionRegistrar implements ResqliteExtensionRegistrar {
       throw ArgumentError.value(sql, 'sql', 'must not be empty');
     }
     _setup.add(
-      ExtensionSetupStep(
+      _ExtensionSetupStep(
         extensionName: extensionName,
         sql: sql,
         parameters: List.unmodifiable(parameters),

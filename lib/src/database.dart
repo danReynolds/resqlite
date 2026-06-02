@@ -1,18 +1,22 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
+import 'dart:isolate';
 import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
+import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
-import 'native/open_database.dart';
 import 'native/resqlite_bindings.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
+
+part 'extensions/registration.dart';
+part 'native/open_database.dart';
 
 /// A high-performance SQLite database with reactive queries.
 ///
@@ -131,7 +135,7 @@ final class Database {
     //   reader connection.
     final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
 
-    final handle = await openNativeDatabase(
+    final handle = await _openNativeDatabase(
       path: path,
       encryptionKey: encryptionKey,
       readerCount: readerCount,
