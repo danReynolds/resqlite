@@ -52,6 +52,10 @@ final class SqliteExampleExtension extends ResqliteExtension {
 }
 ```
 
+`ResqliteExtension` is a `base` class, so extension subclasses outside
+`package:resqlite` must be declared `base`, `final`, or `sealed`. Companion
+packages should normally use `final class` as shown above.
+
 The package's `hook/build.dart` should compile or bundle the extension as a
 native asset and export the asset id used by `@Native`. Existing wrappers in
 this repo use this shape. `packages/resqlite_js` is the minimal reference; it
@@ -106,7 +110,9 @@ not block the caller isolate.
 The default scope is `ResqliteConnectionScope.all`, which runs on the writer and
 every reader connection. Use `ResqliteConnectionScope.writer` for writer-only
 PRAGMAs or temporary writer state, and `ResqliteConnectionScope.readers` for
-reader-only state.
+reader-only state. TEMP tables and other connection-local state are not shared
+between the writer and readers; use `all` when setup must be visible to both
+`execute` and `select` calls.
 
 Each `execute` call must contain exactly one SQL statement. Use multiple calls
 for multi-step setup so resqlite can preserve order and report the failing

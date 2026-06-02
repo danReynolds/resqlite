@@ -150,6 +150,8 @@ final class _NativeOpenRequest {
   final String path;
   final String? encryptionKey;
   final int readerCount;
+  // This request crosses an Isolate.run boundary. Keep fields sendable: no
+  // FFI pointers, handles, DynamicLibrary instances, or callbacks.
   final List<_ExtensionEntrypoint> extensionEntrypoints;
   final List<_ExtensionConnectionSetup> setup;
 }

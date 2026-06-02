@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.0
 
 - Added open-scoped SQLite extension loading via `Database.open(extensions: ...)`
   and `ResqliteExtension`, plus companion package wrappers for SQLite Vector

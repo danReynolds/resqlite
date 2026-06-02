@@ -691,6 +691,12 @@ resqlite_db* resqlite_open_with_extensions(
     }
     if (!extension_entrypoints) return NULL;
 
+    void** unique_entrypoints = (void**)calloc(
+        (size_t)extension_count,
+        sizeof(void*)
+    );
+    if (!unique_entrypoints) return NULL;
+
     // Required when compiled with SQLITE_OMIT_AUTOINIT. We also need SQLite's
     // mutex subsystem before taking the application mutex below.
     sqlite3_initialize();
@@ -710,7 +716,7 @@ resqlite_db* resqlite_open_with_extensions(
         }
         int seen = 0;
         for (int j = 0; j < unique_count; j++) {
-            if (extension_entrypoints[j] == extension_entrypoints[i]) {
+            if (unique_entrypoints[j] == extension_entrypoints[i]) {
                 seen = 1;
                 break;
             }
@@ -718,9 +724,9 @@ resqlite_db* resqlite_open_with_extensions(
         if (seen) continue;
         rc = sqlite3_auto_extension((void(*)(void))extension_entrypoints[i]);
         if (rc != SQLITE_OK) break;
-        // Compact unique entrypoints into the front of the caller-provided
-        // scratch array so cancellation only visits each pointer once.
-        extension_entrypoints[unique_count] = extension_entrypoints[i];
+        // Keep a private scratch list so direct C callers retain ownership of
+        // their pointer array unchanged.
+        unique_entrypoints[unique_count] = extension_entrypoints[i];
         unique_count++;
     }
 
@@ -731,10 +737,11 @@ resqlite_db* resqlite_open_with_extensions(
 
     for (int i = 0; i < unique_count; i++) {
         sqlite3_cancel_auto_extension(
-            (void(*)(void))extension_entrypoints[i]);
+            (void(*)(void))unique_entrypoints[i]);
     }
 
     if (mutex) sqlite3_mutex_leave(mutex);
+    free(unique_entrypoints);
     return rc == SQLITE_OK ? db : NULL;
 }
 
@@ -893,6 +900,7 @@ int resqlite_run_connection_setup(
         }
     }
 
+    db->setup_error[0] = '\0';
     return SQLITE_OK;
 }
 
@@ -1469,7 +1477,7 @@ static int run_setup_sql(
     const char* tail = NULL;
     int rc = sqlite3_prepare_v3(db, sql, -1, 0, &stmt, &tail);
     if (rc != SQLITE_OK) return rc;
-    if (!stmt) return SQLITE_OK;
+    if (!stmt) return SQLITE_MISUSE;
 
     if (has_non_empty_tail(tail)) {
         sqlite3_finalize(stmt);

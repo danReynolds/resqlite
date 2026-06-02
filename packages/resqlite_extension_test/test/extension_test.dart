@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:isolate';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
@@ -116,6 +117,8 @@ void main() {
       throwsA(isA<ResqliteQueryException>()),
     );
 
+    // The exact iteration count is not load-bearing. Each reader receives this
+    // setup; repeated selects just exercise the pool dispatch path a few times.
     for (var i = 0; i < 8; i++) {
       final readerRows = await db.select(
         "SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
@@ -207,6 +210,31 @@ void main() {
       );
     },
   );
+
+  test('rejects setup SQL without an executable statement', () async {
+    await expectLater(
+      Database.open(
+        '${tempDir.path}/setup_no_statement.db',
+        extensions: [
+          SqliteVectorExtension(
+            onRegister: (ext) {
+              ext.execute(' ; ');
+            },
+          ),
+        ],
+      ),
+      throwsA(
+        isA<ResqliteConnectionException>()
+            .having((e) => e.message, 'message', contains('sqlite_vector'))
+            .having(
+              (e) => e.message,
+              'message',
+              contains('exactly one statement'),
+            )
+            .having((e) => e.message, 'message', contains(' ; ')),
+      ),
+    );
+  });
 
   test('runs onRegister setup in extension list order', () async {
     final db = await Database.open(
@@ -361,7 +389,7 @@ void main() {
   });
 
   test('loads an extension from a dynamic library symbol', () async {
-    final vectorLibraryPath = _vectorLibraryPath();
+    final vectorLibraryPath = await _vectorLibraryPath();
     if (vectorLibraryPath == null) {
       markTestSkipped('No checked-in vector binary for ${Abi.current()}.');
       return;
@@ -390,22 +418,28 @@ void main() {
   });
 }
 
-String? _vectorLibraryPath() {
+Future<String?> _vectorLibraryPath() async {
   final abi = Abi.current();
+  final vectorPackageUri = await Isolate.resolvePackageUri(
+    Uri.parse('package:resqlite_vector/resqlite_vector.dart'),
+  );
+  if (vectorPackageUri == null) return null;
+
+  final packageRoot = vectorPackageUri.resolve('../');
+  String? binaryPath;
   if (abi == Abi.macosArm64) {
-    return '../resqlite_vector/native_libraries/mac/vector_mac_arm64.dylib';
+    binaryPath = 'native_libraries/mac/vector_mac_arm64.dylib';
+  } else if (abi == Abi.macosX64) {
+    binaryPath = 'native_libraries/mac/vector_mac_x64.dylib';
+  } else if (abi == Abi.linuxArm64) {
+    binaryPath = 'native_libraries/linux/vector_linux_arm64.so';
+  } else if (abi == Abi.linuxX64) {
+    binaryPath = 'native_libraries/linux/vector_linux_x64.so';
+  } else if (abi == Abi.windowsX64) {
+    binaryPath = 'native_libraries/windows/vector_windows_x64.dll';
   }
-  if (abi == Abi.macosX64) {
-    return '../resqlite_vector/native_libraries/mac/vector_mac_x64.dylib';
-  }
-  if (abi == Abi.linuxArm64) {
-    return '../resqlite_vector/native_libraries/linux/vector_linux_arm64.so';
-  }
-  if (abi == Abi.linuxX64) {
-    return '../resqlite_vector/native_libraries/linux/vector_linux_x64.so';
-  }
-  if (abi == Abi.windowsX64) {
-    return '../resqlite_vector/native_libraries/windows/vector_windows_x64.dll';
-  }
-  return null;
+
+  return binaryPath == null
+      ? null
+      : packageRoot.resolve(binaryPath).toFilePath();
 }

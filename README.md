@@ -204,7 +204,7 @@ each extension on the writer and reader connections in that database pool.
 
 ```yaml
 dependencies:
-  resqlite: ^0.3.1
+  resqlite: ^0.4.0
   resqlite_vector: ^0.1.0
   resqlite_js: ^0.1.0
 ```
@@ -245,6 +245,10 @@ Use `packages/resqlite_js` as the minimal package template; extension hooks are
 specific enough that resqlite documents the pattern instead of shipping a
 generic scaffold.
 
+Pass each native extension once per `Database.open`. If multiple app modules
+need the same extension, centralize their setup into one extension value; passing
+the same native entrypoint twice is rejected so setup order is explicit.
+
 Extensions that need per-connection SQL setup can record it during registration:
 
 ```dart
@@ -280,7 +284,7 @@ See the [full architecture breakdown](./doc/arch/architecture.md) for how the re
 
 ```yaml
 dependencies:
-  resqlite: ^0.3.1
+  resqlite: ^0.4.0
 ```
 
 Or via the CLI:
