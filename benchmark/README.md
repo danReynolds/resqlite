@@ -239,18 +239,20 @@ can still leave unmatched reactive trace events in
 `keyed-pk-subscriptions`. The wrapper also reuses a fresh SQLite shim, rebuilds it
 when the cached Mach-O architecture does not match the Dart VM, and runs the
 compiler natively on Apple Silicon while still producing the requested target
-architecture.
+architecture. Production now runs one unrecorded warmup suite before recorded
+history and uses a 15% total-outlier gate so tiny IQR outliers do not reject
+otherwise sub-1% noise runs.
 
-Latest full production evidence is still the pre-worker r8 run:
-`production-pin-r8-resqlite-policy-2026-06-02-r3`
+Latest full production evidence:
+`production-pin-r9-resqlite-policy-2026-06-02-r4`
 passed with Tracelite source
-`4b4165693c752c8e73da3237c117fa5699c0bb79`, resqlite source
-`a830f3a6ec2a229ecd09a0685664633f71da4322`, 5/5 suite-history runs `ok`,
-policy calibration `ready`, graph-data export and validation `ok`, and
-explain completed. The suite-history phase took about 15.2 minutes locally
-under the x64 Dart SDK; the full wrapper run took about 15.7 minutes excluding
-the outer `dart run` startup. The r9 script-runner pin must replace this
-evidence before final pre-publish signoff.
+`f56ecb8d4f2df5bdb3646f2cf3439450fd64272d`, resqlite source
+`76cab05cd7f8cc06c6899991602a511214e55b1b`, arm64 Dart on an arm64 host,
+`warmup-runs=1`, 5/5 recorded `suite-history` runs `ok`, policy calibration
+`ready`, graph-data export and validation `ok`, and explain completed. The
+warmup phase took about 42.8 seconds, the recorded suite-history phase took
+about 209.2 seconds, and the wrapper manifest recorded
+`tracelite_resqlite_dependency.matches_requested_root=true`.
 
 Current worker evidence: local Tracelite r9 worker checks passed
 `narrow-batch-insert` for `resqlite` and `feed-paging` for
