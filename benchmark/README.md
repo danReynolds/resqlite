@@ -120,10 +120,11 @@ wrapper also builds Tracelite's `build/libsqlite_traced.dylib` SQLite shim for
 fresh macOS checkouts, then reuses it while it is newer than the shim sources,
 so CI does not depend on a pre-warmed Tracelite build directory and local runs
 do not repeatedly pay toolchain startup.
-After dependency resolution, wrapper steps invoke Tracelite as
-`dart bin/tracelite.dart ...` from the source checkout instead of repeatedly
-using `dart run`; this avoids repeated native-assets startup during graph export,
-validation, and explanation steps.
+After dependency resolution, the wrapper launches `suite-history` with
+`dart run bin/tracelite.dart ...` so Dart regenerates native-assets metadata for
+the configured SDK architecture before peer runs start. Graph export,
+validation, and explanation then invoke Tracelite as `dart bin/tracelite.dart
+...` from the source checkout to avoid paying native-assets startup again.
 
 | Preset | Use when | Default shape |
 |---|---|---|
