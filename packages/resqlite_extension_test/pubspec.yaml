@@ -1,6 +1,9 @@
 name: resqlite_extension_test
 publish_to: none
 
+# Private workspace package for cross-package extension smoke tests. Keeping
+# this outside the root package avoids a dependency cycle: companion packages
+# depend on resqlite, so resqlite itself cannot dev-depend on them.
 environment:
   sdk: ^3.10.4
 

@@ -234,6 +234,17 @@ final vectorVersion = await db.select('SELECT vector_version() AS version');
 final jsVersion = await db.select('SELECT js_version() AS version');
 ```
 
+Available extension-related capabilities:
+
+| Category | Capability | Package | What it adds | How to enable |
+| --- | --- | --- | --- | --- |
+| Built in | FTS5 | `resqlite` | Full-text virtual tables, tokenizers, ranking helpers. | Use `CREATE VIRTUAL TABLE ... USING fts5(...)`. |
+| Built in | JSON functions | `resqlite` | JSON extraction, construction, and table-valued JSON traversal. | Call functions such as `json_extract` and `json_each` from SQL. |
+| Built in | Math functions | `resqlite` | SQLite scalar math functions for scoring and analytics. | Call functions such as `sqrt`, `sin`, and `pow` from SQL. |
+| Companion package | SQLite Vector | `resqlite_vector` | Vector conversion functions and vector search helpers. | Add `SqliteVectorExtension(...)`; use `SqliteVectorIndex` for `vector_init` setup. |
+| Companion package | SQLite JS | `resqlite_js` | JavaScript-backed SQLite functions, aggregates, window functions, and collations. | Add `SqliteJsExtension(...)`. |
+| Custom package | Native SQLite extension | `resqlite` plus your package | Any SQLite ABI-compatible loadable extension. | Expose a `ResqliteExtension` subclass, or use `ResqliteExtension.inLibrary(...)` / `fromAddress(...)`. |
+
 The extension package pattern is intentionally small:
 
 1. Bundle or build the native SQLite extension with a `hook/build.dart`.

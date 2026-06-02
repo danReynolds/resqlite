@@ -8,8 +8,8 @@ import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
-import 'extension.dart';
-import 'extension_initializer.dart';
+import 'extensions/extension.dart';
+import 'extensions/extension_initializer.dart';
 import 'native/resqlite_bindings.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';

@@ -2,7 +2,7 @@ library;
 
 export 'src/database.dart' show Database;
 export 'src/diagnostics.dart' show Diagnostics;
-export 'src/extension.dart'
+export 'src/extensions/extension.dart'
     show
         ResqliteConnectionScope,
         ResqliteExtension,

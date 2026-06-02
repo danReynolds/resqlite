@@ -3,9 +3,9 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-import 'exceptions.dart';
+import '../exceptions.dart';
 import 'extension.dart';
-import 'native/resqlite_bindings.dart';
+import '../native/resqlite_bindings.dart';
 
 Future<ffi.Pointer<ffi.Void>> openNativeDatabaseForResqlite({
   required String path,
