@@ -198,10 +198,9 @@ await db.executeBatch(
 ## SQLite Extensions
 
 resqlite supports SQLite loadable extensions through small companion packages
-that expose native extension entrypoints as `ResqliteExtension` values. These
-packages do not depend on `package:sqlite3`; they bundle or build the extension
-native asset and let resqlite register it on every writer and reader connection
-opened for the database.
+that expose native extension entrypoints as `ResqliteExtension` values. The
+extension list belongs to the database being opened, and resqlite registers
+each extension on the writer and reader connections in that database pool.
 
 ```yaml
 dependencies:
@@ -218,7 +217,7 @@ import 'package:resqlite_vector/resqlite_vector.dart';
 final db = await Database.open(
   'app.db',
   extensions: [
-    sqliteVectorExtension(
+    SqliteVectorExtension(
       indexes: [
         SqliteVectorIndex(
           table: 'items',
@@ -227,7 +226,7 @@ final db = await Database.open(
         ),
       ],
     ),
-    sqliteJsExtension(),
+    SqliteJsExtension(),
   ],
 );
 
@@ -239,41 +238,30 @@ The extension package pattern is intentionally small:
 
 1. Bundle or build the native SQLite extension with a `hook/build.dart`.
 2. Expose the extension init symbol with `@Native<ResqliteExtensionInitNative>`.
-3. Return `ResqliteExtension(Native.addressOf<ResqliteExtensionEntrypoint>(...))`.
+3. Expose a small `ResqliteExtension` subclass for app code to pass around.
 4. Pass the extension to `Database.open(extensions: [...])`.
 
-Extensions that need per-connection SQL setup use `onRegister`:
+Extensions that need per-connection SQL setup can record it during registration:
 
 ```dart
-ResqliteExtension(
-  entrypoint,
-  name: 'sqlite_example',
-  onRegister: (ext) {
-    ext.execute(
-      'SELECT example_init(?)',
-      parameters: ['items'],
-      scope: ResqliteConnectionScope.all,
-    );
-  },
-);
+final class SqliteExampleExtension extends ResqliteExtension {
+  SqliteExampleExtension()
+    : super(
+        Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3ExampleInit),
+        name: 'sqlite_example',
+        onRegister: (ext) {
+          ext.execute('SELECT example_init(?)', parameters: ['items']);
+        },
+      );
+}
 ```
 
-`onRegister` is synchronous and `ext.execute(...)` returns `void`; those calls
-enqueue ordered setup SQL. resqlite runs extension native load/setup on a
-bootstrap isolate during `Database.open`, after native loading and before the
-writer/reader workers start. Companion packages should expose domain-specific
-options for common setup, like `SqliteVectorIndex`, and reserve raw
-`onRegister` setup for advanced escape hatches.
-
-This keeps extension support tied to resqlite's SQLite image and avoids the
-`package:sqlite3` native asset split that existing sqlite3-specific wrappers
-use.
-
-Unlike `package:sqlite3`, extension loading is open-scoped instead of global:
-the extension list belongs to the database pool being opened, and resqlite
-registers it on the writer and every reader connection. See
-[SQLite extension authoring](./doc/sqlite-extensions.md) for the package
-template and compatibility contract.
+resqlite runs extension native load and setup during `Database.open`, before
+the database is returned and before normal reader/writer workers start.
+Companion packages should expose domain-specific options for common setup, like
+`SqliteVectorIndex`, and reserve raw `onRegister` setup for advanced escape
+hatches. See [SQLite extension authoring](./doc/sqlite-extensions.md) for the
+package pattern and compatibility contract.
 
 ## Architecture
 

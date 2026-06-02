@@ -3,7 +3,7 @@
 SQLite Vector extension support for `package:resqlite`.
 
 This package exposes SQLite Vector's native entrypoint as a
-`ResqliteExtension`. It does not depend on `package:sqlite3`.
+`ResqliteExtension` value for `Database.open`.
 
 ```dart
 import 'package:resqlite/resqlite.dart';
@@ -11,7 +11,7 @@ import 'package:resqlite_vector/resqlite_vector.dart';
 
 final db = await Database.open(
   'app.db',
-  extensions: [sqliteVectorExtension()],
+  extensions: [SqliteVectorExtension()],
 );
 
 final version = await db.select('SELECT vector_version() AS version');
@@ -24,7 +24,7 @@ To initialize vector indexes on every writer and reader connection, pass
 final db = await Database.open(
   'app.db',
   extensions: [
-    sqliteVectorExtension(
+    SqliteVectorExtension(
       indexes: [
         SqliteVectorIndex(
           table: 'items',
@@ -41,12 +41,12 @@ final db = await Database.open(
 `vector_init(table, column, options)` setup SQL. The target table and column
 must already exist before `Database.open` runs this setup. If migrations create
 the table, run those migrations first, close that bootstrap connection, then
-reopen with `sqliteVectorExtension(indexes: [...])`.
+reopen with `SqliteVectorExtension(indexes: [...])`.
 
 Advanced setup can be added with `onRegister`:
 
 ```dart
-sqliteVectorExtension(
+SqliteVectorExtension(
   onRegister: (ext) {
     ext.execute('SELECT vector_init(?, ?, ?)', parameters: [
       'items',

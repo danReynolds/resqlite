@@ -58,11 +58,11 @@ abstract interface class ResqliteExtensionRegistrar {
 
 /// A SQLite loadable extension to register on every resqlite connection.
 ///
-/// Extension packages should expose a small factory returning this value and
-/// avoid importing `package:sqlite3`. resqlite registers the native entrypoint
-/// while it opens the writer and reader pool so each connection sees the same
-/// extension functions and virtual tables.
-final class ResqliteExtension {
+/// Extension packages can expose either this value directly or a small
+/// subclass with extension-specific options. resqlite registers the native
+/// entrypoint while it opens the writer and reader pool so each connection sees
+/// the same extension functions and virtual tables.
+base class ResqliteExtension {
   /// Creates an extension from a typed SQLite extension init pointer.
   ResqliteExtension(this.entrypoint, {this.name, this.onRegister}) {
     if (entrypoint == ffi.nullptr) {
@@ -88,9 +88,8 @@ final class ResqliteExtension {
 
   /// Looks up an extension init symbol in an already-open dynamic library.
   ///
-  /// This mirrors `package:sqlite3`'s `SqliteExtension.inLibrary` escape hatch,
-  /// while keeping the resulting extension tied to resqlite's open-scoped
-  /// connection-pool loading.
+  /// Use this when an application needs to resolve an extension symbol from a
+  /// dynamic library itself.
   factory ResqliteExtension.inLibrary(
     ffi.DynamicLibrary library,
     String symbol, {

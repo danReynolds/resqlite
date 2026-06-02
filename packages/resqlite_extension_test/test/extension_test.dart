@@ -30,12 +30,12 @@ void main() {
 
       final db = await Database.open(
         '${tempDir.path}/vector.db',
-        extensions: [sqliteVectorExtension(), sqliteVectorExtension()],
+        extensions: [SqliteVectorExtension()],
       );
       addTearDown(db.close);
 
-      final firstVector = sqliteVectorExtension();
-      final secondVector = sqliteVectorExtension();
+      final firstVector = SqliteVectorExtension();
+      final secondVector = SqliteVectorExtension();
       expect(
         firstVector.entrypointAddress.address,
         secondVector.entrypointAddress.address,
@@ -70,7 +70,7 @@ void main() {
     final db = await Database.open(
       '${tempDir.path}/setup_all.db',
       extensions: [
-        sqliteVectorExtension(
+        SqliteVectorExtension(
           onRegister: (ext) {
             ext.execute('CREATE TEMP TABLE setup_all(value TEXT)');
           },
@@ -94,7 +94,7 @@ void main() {
     final db = await Database.open(
       '${tempDir.path}/setup_scope.db',
       extensions: [
-        sqliteVectorExtension(
+        SqliteVectorExtension(
           onRegister: (ext) {
             ext.execute(
               'CREATE TEMP TABLE writer_only(value TEXT)',
@@ -131,17 +131,13 @@ void main() {
     }
   });
 
-  test('preserves setup from duplicate extension entrypoints', () async {
+  test('runs multiple setup statements from one extension value', () async {
     final db = await Database.open(
-      '${tempDir.path}/setup_duplicates.db',
+      '${tempDir.path}/setup_multiple.db',
       extensions: [
-        sqliteVectorExtension(
+        SqliteVectorExtension(
           onRegister: (ext) {
             ext.execute('CREATE TEMP TABLE setup_a(value TEXT)');
-          },
-        ),
-        sqliteVectorExtension(
-          onRegister: (ext) {
             ext.execute('CREATE TEMP TABLE setup_b(value TEXT)');
           },
         ),
@@ -159,6 +155,22 @@ void main() {
     }
   });
 
+  test('rejects duplicate extension entrypoints', () async {
+    await expectLater(
+      Database.open(
+        '${tempDir.path}/duplicate_entrypoints.db',
+        extensions: [SqliteVectorExtension(), SqliteVectorExtension()],
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Duplicate resqlite extension entrypoint'),
+        ),
+      ),
+    );
+  });
+
   test(
     'reports setup failures with extension and connection context',
     () async {
@@ -166,7 +178,7 @@ void main() {
         Database.open(
           '${tempDir.path}/setup_failure.db',
           extensions: [
-            sqliteVectorExtension(
+            SqliteVectorExtension(
               onRegister: (ext) {
                 ext.execute('SELECT 1; SELECT 2');
               },
@@ -200,7 +212,7 @@ void main() {
     final db = await Database.open(
       '${tempDir.path}/setup_order.db',
       extensions: [
-        sqliteVectorExtension(
+        SqliteVectorExtension(
           onRegister: (ext) {
             ext.execute(
               'CREATE TEMP TABLE registration_order(value TEXT)',
@@ -213,7 +225,7 @@ void main() {
             );
           },
         ),
-        sqliteJsExtension(
+        SqliteJsExtension(
           onRegister: (ext) {
             ext.execute(
               'INSERT INTO registration_order(value) VALUES (?)',
@@ -236,7 +248,7 @@ void main() {
     final path = '${tempDir.path}/vector_index.db';
     final bootstrap = await Database.open(
       path,
-      extensions: [sqliteVectorExtension()],
+      extensions: [SqliteVectorExtension()],
     );
     await bootstrap.execute(
       'CREATE TABLE items(id INTEGER PRIMARY KEY, embedding BLOB)',
@@ -246,7 +258,7 @@ void main() {
     final db = await Database.open(
       path,
       extensions: [
-        sqliteVectorExtension(
+        SqliteVectorExtension(
           indexes: [
             SqliteVectorIndex(
               table: 'items',
@@ -282,7 +294,7 @@ void main() {
     final db = await Database.open(
       '${tempDir.path}/js.db',
       extensions: [
-        sqliteJsExtension(
+        SqliteJsExtension(
           onRegister: (ext) {
             ext.execute('CREATE TEMP TABLE js_setup(value TEXT)');
           },
