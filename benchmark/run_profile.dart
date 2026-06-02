@@ -1,10 +1,15 @@
 // ignore_for_file: avoid_print
 //
-// Profile-mode benchmark entry point.
+// Legacy profile JSON compatibility harness.
 //
-// Unlike `run_release.dart` (which runs the pristine peer-comparison
-// suite against drift/sqlite_async/sqlite3), this harness runs
-// resqlite ONLY under full diagnostic instrumentation:
+// The preferred experiment-profile entry point is now
+// `benchmark/profile/run_tracelite_profile.dart`. That wrapper runs this
+// harness to preserve the old JSON shape, then adds the tracelite region,
+// workload summaries, insights, graph data, and parity diff that new
+// experiments should use.
+//
+// This direct harness still runs resqlite ONLY under full diagnostic
+// instrumentation:
 //
 //   TIME
 //     - `ProfiledDatabase` wraps every call with per-op Stopwatch timing.
@@ -28,13 +33,18 @@
 //       for memory-axis work where RSS and SQLite diagnostics do not
 //       explain Dart-side materialization cost.
 //
-// Purpose: A/B experiments between a branch and its baseline. Both runs
-// use the same profile build, so any diagnostic overhead cancels out
-// in the delta — what you see is the signal of the change under test.
+// Purpose: compatibility with old A/B experiment notes and diff tools that
+// need the historical `profile.json` shape. Both runs use the same profile
+// build, so any diagnostic overhead cancels out in the delta.
 //
 // Usage:
 //
-//   # Baseline
+//   # Preferred trace-backed workflow for new experiments:
+//   dart run benchmark/profile/run_tracelite_profile.dart \
+//     --tracelite-root=/path/to/tracelite \
+//     --label=exp-N
+//
+//   # Direct legacy JSON workflow, when an old note/tool requires it:
 //   dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
 //     --out=benchmark/profile/results/baseline.json
 //
@@ -51,7 +61,7 @@
 //   dart --observe --profile-period=100 \
 //     -DRESQLITE_PROFILE=true benchmark/run_profile.dart
 //
-// See benchmark/EXPERIMENTS.md for the full workflow.
+// See benchmark/EXPERIMENTS.md for the full migration workflow.
 
 import 'dart:convert';
 import 'dart:io';
@@ -75,8 +85,16 @@ Future<void> main(List<String> args) async {
     extra: {'benchmarkMode': 'profile', 'profileModeEnabled': kProfileMode},
   );
 
-  print('resqlite Profile-Mode Benchmark');
-  print('================================');
+  print('resqlite Legacy Profile JSON Compatibility Harness');
+  print('==================================================');
+  print('');
+  print('Primary workflow for new profile experiments:');
+  print('  dart run benchmark/profile/run_tracelite_profile.dart \\');
+  print('    --tracelite-root=/path/to/tracelite --label=exp-N');
+  print('');
+  print(
+    'This direct command is retained for old JSON A/B diffs and parity checks.',
+  );
   print('');
   if (!kProfileMode) {
     print('⚠  kProfileMode=false (Timeline markers tree-shaken out).');
@@ -199,6 +217,11 @@ Future<void> main(List<String> args) async {
       print('  dart --observe --profile-period=100 \\');
       print('    -DRESQLITE_PROFILE=true benchmark/run_profile.dart');
     }
+    print('');
+    print('For tracelite workload summaries, insights, graph data, and parity');
+    print(
+      'evidence, use benchmark/profile/run_tracelite_profile.dart instead.',
+    );
   } finally {
     await profiled.close();
     await tempDir.delete(recursive: true);
@@ -340,12 +363,17 @@ _Options _parseOptions(List<String> args) {
         'benchmark/run_profile.dart [--out=PATH]',
       );
       print('');
-      print('  --out=PATH   Write rich JSON to PATH. Defaults to');
+      print('Legacy compatibility harness for old profile JSON A/B diffs.');
+      print('Prefer the trace-backed wrapper for new profile experiments:');
+      print('  dart run benchmark/profile/run_tracelite_profile.dart \\');
+      print('    --tracelite-root=/path/to/tracelite --label=exp-N');
+      print('');
+      print('  --out=PATH   Write legacy profile JSON to PATH. Defaults to');
       print(
         '               benchmark/profile/results/run_profile_TIMESTAMP.json',
       );
       print('');
-      print('See benchmark/EXPERIMENTS.md for the A/B workflow.');
+      print('See benchmark/EXPERIMENTS.md for the migration workflow.');
       exit(0);
     } else {
       stderr.writeln('Unknown argument: $arg');

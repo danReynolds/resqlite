@@ -31,4 +31,25 @@ void main() {
     expect(profileSample, contains('legacy `run_profile.dart` JSON shape'));
     expect(dispatchBudget, contains('legacy\n/// JSON parity artifact'));
   });
+
+  test('legacy profile command points new experiments at tracelite', () async {
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_profile.dart',
+      '--help',
+    ]);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('Legacy compatibility harness'));
+    expect(stdoutText, contains('old profile JSON A/B diffs'));
+    expect(
+      stdoutText,
+      contains('benchmark/profile/run_tracelite_profile.dart'),
+    );
+    expect(stdoutText, contains('Write legacy profile JSON'));
+  });
 }
