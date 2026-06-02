@@ -100,7 +100,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r5
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r6
 ```
 
 ```bash
@@ -119,12 +119,16 @@ noise, and bottleneck signals. Explicit CLI flags override preset defaults. The
 wrapper also rebuilds Tracelite's
 `build/libsqlite_traced.dylib` SQLite shim for fresh macOS checkouts before any
 preset runs, so CI does not depend on a pre-warmed Tracelite build directory.
+After dependency resolution, wrapper steps invoke Tracelite as
+`dart bin/tracelite.dart ...` from the source checkout instead of repeatedly
+using `dart run`; this avoids repeated native-assets startup during graph export,
+validation, and explanation steps.
 
 | Preset | Use when | Default shape |
 |---|---|---|
-| `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios |
-| `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions` |
-| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, full peer matrix and full suite |
+| `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios, 3 minute suite-run timeout |
+| `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions`, 10 minute suite-run timeout |
+| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, full peer matrix and full suite, 20 minute suite-run timeout |
 
 Routine CI should use:
 
@@ -150,8 +154,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`5d2862411a2b35d397cd7748ddef82eaeb87d9f0`
-(`resqlite-profiling-gate-2026-06-02-r5`). The wrapper records
+`e4167f50d6f552d6b540cd9bc87990a25ae20a68`
+(`resqlite-profiling-gate-2026-06-02-r6`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -202,16 +206,21 @@ suite workloads by default: they are still measured and exported to graph data,
 but they do not block the strict publish policy until their current variance
 fits under the 50% release-gate threshold ceiling.
 
-Current calibration evidence: the strict pinned-source
-`production-pin-r5-2026-06-02` run completed 5/5 production suite histories,
-exported graph data, and passed graph-data validation against tracelite
-`5d2862411a2b35d397cd7748ddef82eaeb87d9f0`
-(`resqlite-profiling-gate-2026-06-02-r5`). Its broad diagnostic policy showed
-that `chat-sim` and `narrow-batch-insert` are too noisy for the 50%
-release-gate threshold ceiling today. Recalibrating the same history against the
-release lane above produced `ready` for 3/3 groups with a 29.5% primary
-threshold, 22% max regression guardrail, and 22% max-CV gate. The gate uses the
-p75 within-run noise policy and the outlier ceilings listed above.
+Current calibration state: the r6 pin adds bounded `suite-history` execution so
+each production suite repetition fails as `timed_out` after 20 minutes instead
+of hanging indefinitely. The last completed r5 diagnostic history showed that
+`chat-sim` and `narrow-batch-insert` are too noisy for the 50% release-gate
+threshold ceiling today. Recalibrating that history against the release lane
+above produced `ready` for 3/3 groups with a 29.5% primary threshold, 22% max
+regression guardrail, and 22% max-CV gate. The gate uses the p75 within-run
+noise policy and the outlier ceilings listed above; attach final r6 production
+evidence before treating a pre-publish run as complete.
+
+Current r6 smoke evidence: `r6-ci-validation` passed the actual `ci` preset with
+Tracelite source `e4167f50d6f552d6b540cd9bc87990a25ae20a68`, 1/1 suite-history
+run `ok`, policy calibration `ready`, graph-data validation `ok`, and direct
+Tracelite export/validate/explain steps all completed inside their wrapper
+timeouts.
 
 Historical artifacts also produced an accepted routine no-regression decision:
 

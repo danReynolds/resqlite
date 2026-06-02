@@ -148,6 +148,7 @@ void main() {
       final stdoutText = result.stdout.toString();
       expect(stdoutText, contains('resqlite tracelite benchmark plan'));
       expect(stdoutText, contains('preset: production'));
+      expect(stdoutText, contains('suite_run_timeout_seconds: 1200'));
       expect(
         stdoutText,
         contains('resqlite_root: ${Directory(root).absolute.path}'),
@@ -182,6 +183,7 @@ void main() {
       expect(stdoutText, contains('--noise-gate-multiplier=1.5'));
       expect(stdoutText, contains('--max-outlier-percent=10'));
       expect(stdoutText, contains('--max-run-outlier-percent=20'));
+      expect(stdoutText, contains('--suite-run-timeout-seconds=1200'));
       expect(stdoutText, contains('export-graph-data'));
       expect(stdoutText, contains('--suite-history='));
       expect(stdoutText, contains('validate-graph-data'));
@@ -215,6 +217,7 @@ void main() {
 
     final stdoutText = result.stdout.toString();
     expect(stdoutText, contains('preset: ci'));
+    expect(stdoutText, contains('suite_run_timeout_seconds: 180'));
     expect(stdoutText, contains('--profile=ci'));
     expect(stdoutText, contains('--runs=1'));
     expect(stdoutText, contains('--interfaces=resqlite'));
@@ -227,6 +230,7 @@ void main() {
     );
     expect(stdoutText, contains('--min-repetitions=1'));
     expect(stdoutText, contains('--max-repetitions=3'));
+    expect(stdoutText, contains('--suite-run-timeout-seconds=180'));
     expect(stdoutText, contains('prepare tracelite sqlite shim'));
     expect(stdoutText, contains('validate-graph-data'));
   });
@@ -248,10 +252,10 @@ void main() {
       ).writeAsStringSync('');
       File(
         p.join(fakeRoot.path, 'native', 'tracelite_runtime.c'),
-      ).writeAsStringSync('');
+      ).writeAsStringSync('void tracelite_test_runtime(void) {}\n');
       File(
         p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
-      ).writeAsStringSync('');
+      ).writeAsStringSync('void tracelite_test_shim(void) {}\n');
 
       final packageConfig = jsonEncode({
         'configVersion': 2,
@@ -276,7 +280,7 @@ $packageConfig
 JSON
   exit 0
 fi
-if [ "\$1" = "run" ] && [ "\$3" = "suite-history" ]; then
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
   out=""
   for arg in "\$@"; do
     case "\$arg" in
@@ -292,7 +296,7 @@ JSON
 JSON
   exit 65
 fi
-if [ "\$1" = "run" ] && [ "\$3" = "export-graph-data" ]; then
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "export-graph-data" ]; then
   echo "export-called" >&2
   exit 88
 fi
@@ -361,10 +365,10 @@ exit 0
       ).writeAsStringSync('');
       File(
         p.join(fakeRoot.path, 'native', 'tracelite_runtime.c'),
-      ).writeAsStringSync('');
+      ).writeAsStringSync('void tracelite_test_runtime(void) {}\n');
       File(
         p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
-      ).writeAsStringSync('');
+      ).writeAsStringSync('void tracelite_test_shim(void) {}\n');
 
       final packageConfig = jsonEncode({
         'configVersion': 2,
@@ -389,7 +393,7 @@ $packageConfig
 JSON
   exit 0
 fi
-if [ "\$1" = "run" ] && [ "\$3" = "suite-history" ]; then
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
   out=""
   for arg in "\$@"; do
     case "\$arg" in
@@ -408,7 +412,7 @@ JSON
 JSON
   exit 65
 fi
-if [ "\$1" = "run" ] && [ "\$3" = "export-graph-data" ]; then
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "export-graph-data" ]; then
   graph_out=""
   suites=""
   for arg in "\$@"; do
@@ -421,7 +425,7 @@ if [ "\$1" = "run" ] && [ "\$3" = "export-graph-data" ]; then
   printf "%b" "\$suites" > "\$graph_out/export-suites.txt"
   exit 0
 fi
-if [ "\$1" = "run" ] && [ "\$3" = "validate-graph-data" ]; then
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "validate-graph-data" ]; then
   exit 0
 fi
 exit 0

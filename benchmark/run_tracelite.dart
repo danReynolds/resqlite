@@ -9,6 +9,7 @@
 // resqlite dependency to the checkout under test and records both source
 // revisions in the manifest.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -26,6 +27,7 @@ const _validateSuiteHistoryStepName = 'validate tracelite suite history';
 const _exportGraphDataStepName = 'export tracelite graph data';
 const _validateGraphDataStepName = 'validate tracelite graph data';
 const _explainArtifactsStepName = 'explain tracelite artifacts';
+const _defaultStepTimeout = Duration(minutes: 5);
 const _defaultReleasePolicyScenarios = [
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
@@ -99,6 +101,10 @@ Future<void> main(List<String> args) async {
   _printDependencyBinding(dependencyBinding);
   print('profile: ${options.profile}');
   print('runs: ${options.runs}');
+  print(
+    'suite_run_timeout_seconds: '
+    '${_trimDouble(options.suiteRunTimeoutSeconds)}',
+  );
   print('interfaces: ${options.interfaces}');
   print('suite_scenarios: ${options.suiteScenarios}');
   print('policy_metric: ${options.policyMetric}');
@@ -276,6 +282,7 @@ final class _Options {
     required this.noiseGateMultiplier,
     required this.maxOutlierPercent,
     required this.maxRunOutlierPercent,
+    required this.suiteRunTimeoutSeconds,
     required this.traceliteSourcePolicy,
     required this.graphDataDir,
     required this.exportGraphData,
@@ -310,6 +317,7 @@ final class _Options {
   final double noiseGateMultiplier;
   final double maxOutlierPercent;
   final double maxRunOutlierPercent;
+  final double suiteRunTimeoutSeconds;
   final TraceliteSourcePolicy traceliteSourcePolicy;
   final String? graphDataDir;
   final bool exportGraphData;
@@ -350,6 +358,7 @@ final class _Options {
         noiseGateMultiplier: 1.5,
         maxOutlierPercent: 10,
         maxRunOutlierPercent: 20,
+        suiteRunTimeoutSeconds: 1200,
         traceliteSourcePolicy: const TraceliteSourcePolicy(
           expectedRevision: pinnedTraceliteRevision,
           allowUnpinned: false,
@@ -476,6 +485,10 @@ final class _Options {
         values['max-run-outlier-percent'],
         preset.maxRunOutlierPercent,
       ),
+      suiteRunTimeoutSeconds: _positiveDouble(
+        values['suite-run-timeout-seconds'],
+        preset.suiteRunTimeoutSeconds,
+      ),
       traceliteSourcePolicy: traceliteSourcePolicyFromOptions(
         revision: values['tracelite-revision'],
         flags: flags,
@@ -516,6 +529,7 @@ final class _PresetDefaults {
     required this.noiseGateMultiplier,
     required this.maxOutlierPercent,
     required this.maxRunOutlierPercent,
+    required this.suiteRunTimeoutSeconds,
     required this.strict,
   });
 
@@ -540,6 +554,7 @@ final class _PresetDefaults {
   final double noiseGateMultiplier;
   final double maxOutlierPercent;
   final double maxRunOutlierPercent;
+  final double suiteRunTimeoutSeconds;
   final bool strict;
 }
 
@@ -567,6 +582,7 @@ _PresetDefaults _presetDefaults(String name) {
       noiseGateMultiplier: 1.5,
       maxOutlierPercent: 20,
       maxRunOutlierPercent: 40,
+      suiteRunTimeoutSeconds: 180,
       strict: true,
     ),
     'experiment' => const _PresetDefaults(
@@ -591,6 +607,7 @@ _PresetDefaults _presetDefaults(String name) {
       noiseGateMultiplier: 1.5,
       maxOutlierPercent: 10,
       maxRunOutlierPercent: 20,
+      suiteRunTimeoutSeconds: 600,
       strict: true,
     ),
     'production' => const _PresetDefaults(
@@ -615,6 +632,7 @@ _PresetDefaults _presetDefaults(String name) {
       noiseGateMultiplier: 1.5,
       maxOutlierPercent: 10,
       maxRunOutlierPercent: 20,
+      suiteRunTimeoutSeconds: 1200,
       strict: true,
     ),
     _ => _invalidPreset(name),
@@ -655,12 +673,14 @@ final class _Step {
     required this.executable,
     required this.arguments,
     required this.workingDirectory,
+    this.timeout = _defaultStepTimeout,
   });
 
   final String name;
   final String executable;
   final List<String> arguments;
   final String workingDirectory;
+  final Duration timeout;
 
   String get displayCommand =>
       [executable, for (final arg in arguments) _quoteIfNeeded(arg)].join(' ');
@@ -756,7 +776,6 @@ _Step _suiteHistoryStep(_Options options, _Paths paths) {
     name: _suiteHistoryStepName,
     executable: options.dartExecutable,
     arguments: [
-      'run',
       'bin/tracelite.dart',
       'suite-history',
       '--profile=${options.profile}',
@@ -786,10 +805,15 @@ _Step _suiteHistoryStep(_Options options, _Paths paths) {
       '--noise-gate-multiplier=${_trimDouble(options.noiseGateMultiplier)}',
       '--max-outlier-percent=${_trimDouble(options.maxOutlierPercent)}',
       '--max-run-outlier-percent=${_trimDouble(options.maxRunOutlierPercent)}',
+      '--suite-run-timeout-seconds='
+          '${_trimDouble(options.suiteRunTimeoutSeconds)}',
       '--strict=${options.strict}',
       '--out-dir=${p.dirname(paths.history)}',
     ],
     workingDirectory: options.traceliteRoot,
+    timeout: Duration(
+      seconds: (options.suiteRunTimeoutSeconds * options.runs + 600).ceil(),
+    ),
   );
 }
 
@@ -798,7 +822,6 @@ _Step _graphDataExportPlanStep(_Options options, _Paths paths) {
     name: _exportGraphDataStepName,
     executable: options.dartExecutable,
     arguments: [
-      'run',
       'bin/tracelite.dart',
       'export-graph-data',
       '--suite-history=${p.absolute(paths.history)}',
@@ -816,7 +839,6 @@ _Step? _graphDataExportStep(_Options options, _Paths paths) {
     name: _exportGraphDataStepName,
     executable: options.dartExecutable,
     arguments: [
-      'run',
       'bin/tracelite.dart',
       'export-graph-data',
       ...inputs,
@@ -832,7 +854,6 @@ _Step _validateGraphDataStep(_Options options, _Paths paths) {
     name: _validateGraphDataStepName,
     executable: options.dartExecutable,
     arguments: [
-      'run',
       'bin/tracelite.dart',
       'validate-graph-data',
       p.absolute(paths.graphDataDir),
@@ -846,7 +867,6 @@ _Step _explainArtifactsStep(_Options options, _Paths paths) {
     name: _explainArtifactsStepName,
     executable: options.dartExecutable,
     arguments: [
-      'run',
       'bin/tracelite.dart',
       'explain',
       p.absolute(paths.history),
@@ -862,14 +882,24 @@ final class _StepResult {
     required this.command,
     required this.workingDirectory,
     required this.exitCode,
+    this.timedOut = false,
+    this.timeoutSeconds = 0,
+    this.elapsedNs = 0,
   });
 
   final String name;
   final String command;
   final String workingDirectory;
   final int exitCode;
+  final bool timedOut;
+  final double timeoutSeconds;
+  final int elapsedNs;
 
-  String get status => exitCode == 0 ? 'ok' : 'failed';
+  String get status => timedOut
+      ? 'timed_out'
+      : exitCode == 0
+      ? 'ok'
+      : 'failed';
 
   Map<String, Object?> toJson() => {
     'name': name,
@@ -877,25 +907,129 @@ final class _StepResult {
     'working_directory': workingDirectory,
     'exit_code': exitCode,
     'status': status,
+    'timed_out': timedOut,
+    'timeout_seconds': timeoutSeconds,
+    'elapsed_ns': elapsedNs,
   };
+}
+
+final class _TimedProcessResult {
+  const _TimedProcessResult({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+    required this.timedOut,
+    required this.elapsed,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+  final bool timedOut;
+  final Duration elapsed;
+}
+
+Future<_TimedProcessResult> _runProcessWithTimeout(_Step step) async {
+  final process = await Process.start(
+    step.executable,
+    step.arguments,
+    workingDirectory: step.workingDirectory,
+    environment: Platform.environment,
+  );
+  final stdoutBuffer = StringBuffer();
+  final stderrBuffer = StringBuffer();
+  final stdoutDone = Completer<void>();
+  final stderrDone = Completer<void>();
+  final stdoutSubscription = process.stdout
+      .transform(utf8.decoder)
+      .listen(
+        stdoutBuffer.write,
+        onDone: () => _completeIfPending(stdoutDone),
+        onError: (_) => _completeIfPending(stdoutDone),
+      );
+  final stderrSubscription = process.stderr
+      .transform(utf8.decoder)
+      .listen(
+        stderrBuffer.write,
+        onDone: () => _completeIfPending(stderrDone),
+        onError: (_) => _completeIfPending(stderrDone),
+      );
+
+  final stopwatch = Stopwatch()..start();
+  var timedOut = false;
+  late int exitCode;
+  try {
+    exitCode = await process.exitCode.timeout(step.timeout);
+  } on TimeoutException {
+    timedOut = true;
+    process.kill(ProcessSignal.sigterm);
+    try {
+      exitCode = await process.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+      exitCode = await process.exitCode.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => -1,
+      );
+    }
+  } finally {
+    stopwatch.stop();
+  }
+
+  try {
+    await Future.wait([
+      stdoutDone.future,
+      stderrDone.future,
+    ]).timeout(const Duration(seconds: 2));
+  } on Object {
+    await stdoutSubscription.cancel();
+    await stderrSubscription.cancel();
+    stderrBuffer.writeln(
+      'resqlite tracelite wrapper: child stdio did not close after exit.',
+    );
+  }
+
+  return _TimedProcessResult(
+    exitCode: exitCode,
+    stdout: stdoutBuffer.toString(),
+    stderr: stderrBuffer.toString(),
+    timedOut: timedOut,
+    elapsed: stopwatch.elapsed,
+  );
+}
+
+void _completeIfPending(Completer<void> completer) {
+  if (!completer.isCompleted) completer.complete();
+}
+
+double _durationSeconds(Duration duration) {
+  return duration.inMicroseconds / Duration.microsecondsPerSecond;
+}
+
+String _formatDuration(Duration duration) {
+  if (duration.inMicroseconds % Duration.microsecondsPerSecond != 0) {
+    return '${_trimDouble(_durationSeconds(duration))}s';
+  }
+  if (duration.inSeconds % 60 != 0) return '${duration.inSeconds}s';
+  if (duration.inMinutes % 60 != 0) return '${duration.inMinutes}m';
+  return '${duration.inHours}h';
 }
 
 Future<_StepResult> _runStep(_Step step) async {
   print('== ${step.name}');
   print(step.displayCommand);
 
-  final result = await Process.run(
-    step.executable,
-    step.arguments,
-    workingDirectory: step.workingDirectory,
-    environment: Platform.environment,
-  );
+  final result = await _runProcessWithTimeout(step);
 
-  final stdoutText = _cleanDartToolOutput(result.stdout.toString());
-  final stderrText = _cleanDartToolOutput(result.stderr.toString());
+  final stdoutText = _cleanDartToolOutput(result.stdout);
+  final stderrText = _cleanDartToolOutput(result.stderr);
   if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
   if (stderrText.trim().isNotEmpty) stderr.write(stderrText);
-  if (result.exitCode != 0) {
+  if (result.timedOut) {
+    stderr.writeln(
+      'step timed out: ${step.name} (${_formatDuration(step.timeout)})',
+    );
+  } else if (result.exitCode != 0) {
     stderr.writeln('step failed: ${step.name} (exit ${result.exitCode})');
   }
   print('');
@@ -904,6 +1038,9 @@ Future<_StepResult> _runStep(_Step step) async {
     command: step.displayCommand,
     workingDirectory: step.workingDirectory,
     exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    timeoutSeconds: _durationSeconds(step.timeout),
+    elapsedNs: result.elapsed.inMicroseconds * 1000,
   );
 }
 
@@ -911,21 +1048,20 @@ Future<_StepResult> _runMarkdownStep(_Step step, String stdoutPath) async {
   print('== ${step.name}');
   print(step.displayCommand);
 
-  final result = await Process.run(
-    step.executable,
-    step.arguments,
-    workingDirectory: step.workingDirectory,
-    environment: Platform.environment,
-  );
+  final result = await _runProcessWithTimeout(step);
 
-  final stdoutText = _cleanDartToolOutput(result.stdout.toString());
-  final stderrText = _cleanDartToolOutput(result.stderr.toString());
+  final stdoutText = _cleanDartToolOutput(result.stdout);
+  final stderrText = _cleanDartToolOutput(result.stderr);
   File(stdoutPath)
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(stdoutText);
   if (stdoutText.trim().isNotEmpty) stdout.write(stdoutText);
   if (stderrText.trim().isNotEmpty) stderr.write(stderrText);
-  if (result.exitCode != 0) {
+  if (result.timedOut) {
+    stderr.writeln(
+      'step timed out: ${step.name} (${_formatDuration(step.timeout)})',
+    );
+  } else if (result.exitCode != 0) {
     stderr.writeln('step failed: ${step.name} (exit ${result.exitCode})');
   }
   print('');
@@ -934,6 +1070,9 @@ Future<_StepResult> _runMarkdownStep(_Step step, String stdoutPath) async {
     command: step.displayCommand,
     workingDirectory: step.workingDirectory,
     exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    timeoutSeconds: _durationSeconds(step.timeout),
+    elapsedNs: result.elapsed.inMicroseconds * 1000,
   );
 }
 
@@ -1126,6 +1265,7 @@ Future<void> _writeManifest(
     'tracelite_resqlite_dependency': dependencyBinding.toJson(),
     'profile': options.profile,
     'runs': options.runs,
+    'suite_run_timeout_seconds': options.suiteRunTimeoutSeconds,
     'suite_scenarios': options.suiteScenarios
         .split(',')
         .map((value) => value.trim())
@@ -1202,6 +1342,10 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   );
   print('profile: ${options.profile}');
   print('runs: ${options.runs}');
+  print(
+    'suite_run_timeout_seconds: '
+    '${_trimDouble(options.suiteRunTimeoutSeconds)}',
+  );
   print('interfaces: ${options.interfaces}');
   print('suite_scenarios: ${options.suiteScenarios}');
   print('policy_scenarios: ${options.policyScenarios}');
@@ -1221,6 +1365,7 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   for (final step in steps) {
     print('- ${step.name}');
     print('  cwd ${step.workingDirectory}');
+    print('  timeout ${_formatDuration(step.timeout)}');
     print('  ${step.displayCommand}');
   }
 }
@@ -1485,6 +1630,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--noise-gate-multiplier=1.5]');
   stderr.writeln('    [--max-outlier-percent=10]');
   stderr.writeln('    [--max-run-outlier-percent=20]');
+  stderr.writeln('    [--suite-run-timeout-seconds=1200]');
   stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');
   stderr.writeln(
     '    [--graph-data-dir=docs/benchmarks/data/tracelite/latest]',
