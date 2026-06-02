@@ -54,8 +54,8 @@ const bool kProfileMode =
 When you run without `-DRESQLITE_PROFILE=true`, the gate is `false`
 and Dart's AOT compiler tree-shakes every `if (kProfileMode) { ... }`
 branch away entirely. Zero bytes, zero cycles on the hot path. That's
-why `run_release.dart` can use the same resqlite source code as
-`run_profile.dart` without any overhead.
+why `run_release.dart` can use the same resqlite source code as the
+Tracelite profile workflow without any overhead.
 
 Currently gated:
 
@@ -198,10 +198,10 @@ deltas in both absolute μs and percent. Exit code is always 0 — it's
 a reporting tool, not a pass/fail gate. The experimenter interprets
 deltas against their hypothesis.
 
-## What `run_profile.dart` runs
+## What the profile workload harness runs
 
-Four workloads, each run for 100 iterations after a 50-iteration
-warmup:
+`run_tracelite_profile.dart` invokes the low-level profile harness for four
+workloads, each run for 100 iterations after a 50-iteration warmup:
 
 | Workload | What it measures | Samples |
 |---|---|---|
@@ -280,8 +280,9 @@ Three things to keep in mind when interpreting:
 
 ## Memory diagnostics in detail
 
-`run_profile.dart` captures three layers of memory data around each
-workload, each answering a different question:
+The profile harness captures three layers of memory data around each workload,
+each answering a different question. In new experiments, read these from the
+Tracelite profile wrapper's workload summary and compatibility `profile.json`.
 
 **Process RSS** (`rss_before_mb`, `rss_after_mb`, `rss_delta_mb`) —
 coarse, inclusive of everything: Dart heap, SQLite's internal
@@ -318,11 +319,12 @@ for new fields.
 ## Writing results to `experiments/NNN-*.md`
 
 When you finalize an experiment (accept or reject), create
-`experiments/NNN-my-experiment.md`. Include the diff output inline and
-link the generated tracelite or profile artifacts. Do not commit raw
-profile JSONs from `benchmark/profile/results/`; the CI guard rejects
-those because they are large, local, and hardware-specific. Commit the
-aggregate markdown or experiment writeup instead.
+`experiments/NNN-my-experiment.md`. Include the relevant Tracelite workload
+summary, insights, and parity-diff evidence inline, and link the generated
+Tracelite artifact directory. Do not commit raw profile JSONs from
+`benchmark/profile/results/`; the CI guard rejects those because they are large,
+local, and hardware-specific. Commit the aggregate markdown or experiment
+writeup instead.
 
 Template:
 
@@ -340,10 +342,12 @@ Template:
 
 ## Results
 
-Baseline: benchmark/profile/results/baseline.json
-Candidate: benchmark/profile/results/exp-NNN.json
+Tracelite profile: build/tracelite-profile/exp-NNN/
+Workload summary: build/tracelite-profile/exp-NNN/workload-summary.md
+Insights: build/tracelite-profile/exp-NNN/insights.md
+Legacy parity JSON: build/tracelite-profile/exp-NNN/profile.json
 
-[paste `diff.dart` output here]
+[paste the relevant workload-summary / insights / parity-diff excerpt here]
 
 ## Analysis
 <what the numbers mean, whether the hypothesis held, caveats>
@@ -357,7 +361,7 @@ Candidate: benchmark/profile/results/exp-NNN.json
 When `-DRESQLITE_PROFILE=true` is set, the writer and reader isolates
 emit Timeline spans named `writer.handle.<RequestType>` and
 `reader.handle.<RequestType>` around each message dispatch. To see
-them:
+them in DevTools, intentionally run the low-level harness directly:
 
 ```bash
 dart --observe --profile-period=100 \

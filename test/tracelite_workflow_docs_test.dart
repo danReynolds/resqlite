@@ -52,4 +52,29 @@ void main() {
     );
     expect(stdoutText, contains('Write legacy profile JSON'));
   });
+
+  test('experiment docs keep legacy profile JSON demoted', () {
+    final methodology = File('benchmark/METHODOLOGY.md').readAsStringSync();
+    final experimentGuide = File('benchmark/EXPERIMENTS.md').readAsStringSync();
+    final experiments = File(
+      'benchmark/experiments/README.md',
+    ).readAsStringSync();
+    final singleRunDiff = File('benchmark/profile/diff.dart').readAsStringSync();
+    final multirunDiff = File(
+      'benchmark/profile/diff_multirun.dart',
+    ).readAsStringSync();
+    final sharedStats = File('benchmark/shared/stats.dart').readAsStringSync();
+
+    for (final source in [
+      methodology,
+      experimentGuide,
+      experiments,
+      singleRunDiff,
+      multirunDiff,
+      sharedStats,
+    ]) {
+      expect(source, contains('run_tracelite_profile.dart'));
+      expect(source, contains('legacy'));
+    }
+  });
 }

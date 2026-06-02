@@ -1,6 +1,6 @@
 // ignore_for_file: avoid_print
 //
-// A/B diff tool for profile-mode benchmark runs.
+// Legacy profile JSON A/B diff tool.
 //
 // Reads two legacy profile JSON files produced by `benchmark/run_profile.dart`
 // (or `dispatch_budget.dart`) and prints a side-by-side delta table. New

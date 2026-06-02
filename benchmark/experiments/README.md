@@ -6,11 +6,12 @@ They are intentionally separate from the main release suite in
 [benchmark/run_release.dart](../run_release.dart)
 because they are narrower, more hypothesis-driven, or less apples-to-apples.
 
-For A/B comparisons across an experiment branch vs baseline, see
-[benchmark/run_profile.dart](../run_profile.dart)
-and [benchmark/EXPERIMENTS.md](../EXPERIMENTS.md)
-— that's the profile-mode harness with diagnostic instrumentation
-compiled in (gated behind `-DRESQLITE_PROFILE=true`).
+For A/B comparisons across an experiment branch vs baseline, see the
+Tracelite-backed profile workflow in
+[benchmark/profile/run_tracelite_profile.dart](../profile/run_tracelite_profile.dart)
+and [benchmark/EXPERIMENTS.md](../EXPERIMENTS.md). It runs the diagnostic
+profile harness with `-DRESQLITE_PROFILE=true`, exports Tracelite artifacts,
+and keeps the legacy `run_profile.dart` JSON shape for compatibility tools.
 
 Current experiments:
 

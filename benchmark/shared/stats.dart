@@ -202,9 +202,10 @@ final class BenchmarkTiming {
 /// in `docs/benchmarks/index.html`). Adding columns would silently
 /// break column-index-based extraction.
 ///
-/// Profile-mode harnesses (`run_profile.dart`) read these getters
-/// directly and emit their own richer JSON format for A/B diffing,
-/// where p99/max are where tail-latency regressions actually hide.
+/// Profile-mode harnesses read these getters directly. New experiments use
+/// `benchmark/profile/run_tracelite_profile.dart`; `benchmark/run_profile.dart`
+/// remains the legacy JSON compatibility producer for A/B diffing, where
+/// p99/max are where tail-latency regressions actually hide.
 final class Stats {
   Stats(List<int> raw) : _sorted = List.of(raw)..sort();
 

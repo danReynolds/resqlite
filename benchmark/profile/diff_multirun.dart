@@ -1,13 +1,15 @@
 // ignore_for_file: avoid_print
 //
-// Multi-run A/B aggregator for profile-mode benchmark runs.
+// Legacy profile JSON multi-run A/B aggregator.
 //
-// Single-run p99/max numbers from `benchmark/run_profile.dart` are noisy —
-// one GC pause or scheduler quirk can swing them 20 % or more. This tool
-// takes N baseline runs and N candidate runs, computes the MEDIAN of each
+// New profile experiments should use `benchmark/profile/run_tracelite_profile.dart`.
+// That wrapper writes tracelite artifacts plus the legacy JSON shape this tool
+// still aggregates. Single-run p99/max numbers from the legacy JSON can be
+// noisy — one GC pause or scheduler quirk can swing them 20 % or more. This
+// tool takes N baseline runs and N candidate runs, computes the MEDIAN of each
 // percentile across runs on each side, and prints candidate-median minus
-// baseline-median. That answers "are the tail wins robust?" rather than
-// "did we win this particular run?".
+// baseline-median. That answers "are the tail wins robust?" rather than "did we
+// win this particular run?".
 //
 // Methodology note: we deliberately take `median(p99 across runs)` rather
 // than `p99(all samples pooled)` or `mean(p99 across runs)`. The median
