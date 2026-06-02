@@ -211,21 +211,30 @@ normal development.
 
 Current calibration state: the r8 pin includes bounded `suite-history`
 execution, suite-run timeout recording, forwarding of the policy
-`--min-repetitions` floor into each suite run, and direct script mode for
-resqlite native-asset peer runs in Tracelite `auto` mode. The wrapper also
-reuses a fresh SQLite shim and bounds child startup and execution. A
-full-matrix r6 production probe completed one suite repetition in roughly 12
-minutes. The narrowed resqlite-only policy lane completed 5/5 suite runs in
-about 5.5 minutes, then correctly failed calibration because high-cardinality
-fanout needed 7 repetitions instead of 5. The production preset now uses that
-recommendation; attach final r8 production evidence before treating a
-pre-publish run as complete.
+`--min-repetitions` floor into each suite run, direct script mode for resqlite
+native-asset peer runs in Tracelite `auto` mode, and `dart run` suite-history
+launches so Tracelite regenerates native-assets metadata for the configured
+Dart SDK architecture. The wrapper also reuses a fresh SQLite shim, rebuilds it
+when the cached Mach-O architecture does not match the Dart VM, and runs the
+compiler natively on Apple Silicon while still producing the requested target
+architecture.
 
-Current smoke evidence: `r6-ci-validation` passed the actual `ci` preset with
-Tracelite source `e4167f50d6f552d6b540cd9bc87990a25ae20a68`, 1/1 suite-history
-run `ok`, policy calibration `ready`, graph-data validation `ok`, and direct
-Tracelite export/validate/explain steps all completed inside their wrapper
-timeouts. Refresh this with an r8 smoke run before merging the PR.
+Current production evidence: `production-pin-r8-resqlite-policy-2026-06-02-r3`
+passed with Tracelite source
+`4b4165693c752c8e73da3237c117fa5699c0bb79`, resqlite source
+`a830f3a6ec2a229ecd09a0685664633f71da4322`, 5/5 suite-history runs `ok`,
+policy calibration `ready`, graph-data export and validation `ok`, and
+explain completed. The suite-history phase took about 15.2 minutes locally
+under the x64 Dart SDK; the full wrapper run took about 15.7 minutes excluding
+the outer `dart run` startup. Explain still reports direct script runs as
+harness-dominated and some measured CVs as noisy, so runtime optimization and a
+native-assets-aware long-lived runner remain follow-up work.
+
+Current smoke evidence: `ci-pin-r8-native-assets-2026-06-02` passed the actual
+`ci` preset with 1/1 suite-history run `ok`, policy calibration `ready`,
+graph-data validation `ok`, and export/validate/explain steps all completed
+inside wrapper timeouts. The first x64 run paid the one-time resqlite
+native-asset build cost and took about 2.8 minutes for suite-history.
 
 Historical artifacts also produced an accepted routine no-regression decision:
 
