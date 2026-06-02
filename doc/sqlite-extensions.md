@@ -96,12 +96,12 @@ final class SqliteExampleExtension extends ResqliteExtension {
 }
 ```
 
-`onRegister` is synchronous. Calls to `ext.execute(...)` enqueue setup SQL;
-they do not return rows and there is nothing to `await`. resqlite executes the
-queued setup during `Database.open`, after native extension loading and before
-the database is returned. Native open work runs on one temporary open isolate,
-including extension load/setup, so heavy setup does not block the caller
-isolate.
+`onRegister` builds an open-time setup plan. Calls to `ext.execute(...)`
+enqueue setup SQL; they do not return rows and there is nothing to `await`.
+resqlite executes the queued setup during `Database.open`, after native
+extension loading and before the database is returned. Native open work runs on
+one temporary open isolate, including extension load/setup, so heavy setup does
+not block the caller isolate.
 
 The default scope is `ResqliteConnectionScope.all`, which runs on the writer and
 every reader connection. Use `ResqliteConnectionScope.writer` for writer-only

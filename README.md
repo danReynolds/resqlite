@@ -241,6 +241,10 @@ The extension package pattern is intentionally small:
 3. Expose a small `ResqliteExtension` subclass for app code to pass around.
 4. Pass the extension to `Database.open(extensions: [...])`.
 
+Use `packages/resqlite_js` as the minimal package template; extension hooks are
+specific enough that resqlite documents the pattern instead of shipping a
+generic scaffold.
+
 Extensions that need per-connection SQL setup can record it during registration:
 
 ```dart

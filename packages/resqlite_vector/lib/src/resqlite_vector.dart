@@ -66,20 +66,27 @@ final class SqliteVectorIndex {
 
 /// Loads SQLite Vector on every connection opened by resqlite.
 final class SqliteVectorExtension extends ResqliteExtension {
-  SqliteVectorExtension({
+  factory SqliteVectorExtension({
     Iterable<SqliteVectorIndex> indexes = const [],
     ResqliteExtensionRegister? onRegister,
-  }) : super(
-         Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3VectorInit),
-         name: 'sqlite_vector',
-         onRegister: (ext) {
-           for (final index in indexes) {
-             ext.execute(
-               'SELECT vector_init(?, ?, ?)',
-               parameters: [index.table, index.column, index.options],
-             );
-           }
-           onRegister?.call(ext);
-         },
-       );
+  }) {
+    return SqliteVectorExtension._(List.unmodifiable(indexes), onRegister);
+  }
+
+  SqliteVectorExtension._(
+    List<SqliteVectorIndex> indexes,
+    ResqliteExtensionRegister? onRegister,
+  ) : super(
+        Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3VectorInit),
+        name: 'sqlite_vector',
+        onRegister: (ext) {
+          for (final index in indexes) {
+            ext.execute(
+              'SELECT vector_init(?, ?, ?)',
+              parameters: [index.table, index.column, index.options],
+            );
+          }
+          onRegister?.call(ext);
+        },
+      );
 }

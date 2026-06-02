@@ -290,6 +290,45 @@ void main() {
     expect(rows.single['id'], 1);
   });
 
+  test('captures vector index setup when the extension is created', () async {
+    final path = '${tempDir.path}/vector_immutable_setup.db';
+    final bootstrap = await Database.open(
+      path,
+      extensions: [SqliteVectorExtension()],
+    );
+    await bootstrap.execute(
+      'CREATE TABLE items(id INTEGER PRIMARY KEY, embedding BLOB)',
+    );
+    await bootstrap.close();
+
+    final indexes = [
+      SqliteVectorIndex(table: 'items', column: 'embedding', dimension: 4),
+    ];
+    final extension = SqliteVectorExtension(indexes: indexes);
+    indexes.clear();
+
+    final db = await Database.open(path, extensions: [extension]);
+    addTearDown(db.close);
+
+    await db.execute('INSERT INTO items(embedding) VALUES (vector_as_f32(?))', [
+      '[1.0, 2.0, 3.0, 4.0]',
+    ]);
+    final rows = await db.select(
+      '''
+      SELECT i.id
+      FROM items AS i
+      JOIN vector_full_scan(
+        'items',
+        'embedding',
+        vector_as_f32(?),
+        1
+      ) AS v ON i.rowid = v.rowid
+      ''',
+      ['[1.0, 2.0, 3.0, 4.0]'],
+    );
+    expect(rows.single['id'], 1);
+  });
+
   test('loads an unrelated extension through the same pattern', () async {
     final db = await Database.open(
       '${tempDir.path}/js.db',
