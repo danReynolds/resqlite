@@ -100,7 +100,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r7
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r8
 ```
 
 ```bash
@@ -155,8 +155,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`b0dc437ce43b31f06c51a78de58c2d4f4d82ecdc`
-(`resqlite-profiling-gate-2026-06-02-r7`). The wrapper records
+`4b4165693c752c8e73da3237c117fa5699c0bb79`
+(`resqlite-profiling-gate-2026-06-02-r8`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -209,22 +209,23 @@ Use explicit `--interfaces=sqlite3,drift,sqlite_async,resqlite` and
 full diagnostic coverage; do not repeat the full matrix five times during
 normal development.
 
-Current calibration state: the r7 pin includes bounded `suite-history`
-execution, suite-run timeout recording, and forwarding of the policy
-`--min-repetitions` floor into each suite run. The wrapper also reuses a fresh
-SQLite shim and bounds child startup and execution. A full-matrix r6 production
-probe completed one suite repetition in roughly 12 minutes. The narrowed
-resqlite-only policy lane completed 5/5 suite runs in about 5.5 minutes, then
-correctly failed calibration because high-cardinality fanout needed 7
-repetitions instead of 5. The production preset now uses that recommendation;
-attach final r7 production evidence before treating a pre-publish run as
-complete.
+Current calibration state: the r8 pin includes bounded `suite-history`
+execution, suite-run timeout recording, forwarding of the policy
+`--min-repetitions` floor into each suite run, and direct script mode for
+resqlite native-asset peer runs in Tracelite `auto` mode. The wrapper also
+reuses a fresh SQLite shim and bounds child startup and execution. A
+full-matrix r6 production probe completed one suite repetition in roughly 12
+minutes. The narrowed resqlite-only policy lane completed 5/5 suite runs in
+about 5.5 minutes, then correctly failed calibration because high-cardinality
+fanout needed 7 repetitions instead of 5. The production preset now uses that
+recommendation; attach final r8 production evidence before treating a
+pre-publish run as complete.
 
 Current smoke evidence: `r6-ci-validation` passed the actual `ci` preset with
 Tracelite source `e4167f50d6f552d6b540cd9bc87990a25ae20a68`, 1/1 suite-history
 run `ok`, policy calibration `ready`, graph-data validation `ok`, and direct
 Tracelite export/validate/explain steps all completed inside their wrapper
-timeouts. Refresh this with an r7 smoke run before merging the PR.
+timeouts. Refresh this with an r8 smoke run before merging the PR.
 
 Historical artifacts also produced an accepted routine no-regression decision:
 
