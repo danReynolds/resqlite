@@ -9,7 +9,7 @@ import 'package:resqlite/src/writer/writer.dart';
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
-import 'extensions/extension_initializer.dart';
+import 'native/open_database.dart';
 import 'native/resqlite_bindings.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
@@ -131,7 +131,7 @@ final class Database {
     //   reader connection.
     final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
 
-    final handle = await openNativeDatabaseForResqlite(
+    final handle = await openNativeDatabase(
       path: path,
       encryptionKey: encryptionKey,
       readerCount: readerCount,
