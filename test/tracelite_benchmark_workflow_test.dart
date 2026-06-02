@@ -484,6 +484,7 @@ exit 0
 
   test('tracelite benchmark workflow preserves manifest on failure', () async {
     final root = Directory.current.path;
+    final checkoutRevision = await _currentGitRevision(root);
     final temp = await Directory.systemTemp.createTemp(
       'resqlite_tracelite_benchmark_failure_test_',
     );
@@ -497,15 +498,31 @@ exit 0
     await Process.run('chmod', ['+x', fakeDart.path]);
 
     final outDir = p.join(temp.path, 'benchmark');
-    final result = await Process.run(Platform.resolvedExecutable, [
-      'benchmark/run_tracelite.dart',
-      '--tracelite-root=${fakeRoot.path}',
-      '--dart=${fakeDart.path}',
-      '--label=failing-benchmark',
-      '--out-dir=$outDir',
-      '--no-graph-data',
-      '--allow-unpinned-tracelite',
-    ], workingDirectory: root);
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'benchmark/run_tracelite.dart',
+        '--tracelite-root=${fakeRoot.path}',
+        '--dart=${fakeDart.path}',
+        '--label=failing-benchmark',
+        '--out-dir=$outDir',
+        '--no-graph-data',
+        '--allow-unpinned-tracelite',
+      ],
+      workingDirectory: root,
+      environment: {
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_EVENT_NAME': 'pull_request',
+        'GITHUB_REPOSITORY': 'danReynolds/resqlite',
+        'GITHUB_REF': 'refs/pull/109/merge',
+        'GITHUB_REF_NAME': '109/merge',
+        'GITHUB_HEAD_REF': 'codex/tracelite-profiling-hooks',
+        'GITHUB_BASE_REF': 'main',
+        'GITHUB_SHA': checkoutRevision,
+        'RESQLITE_SOURCE_HEAD_SHA': '2361882-head',
+        'RESQLITE_SOURCE_BASE_SHA': 'main-base',
+      },
+    );
 
     expect(
       result.exitCode,
@@ -532,6 +549,15 @@ exit 0
       manifest['resqlite_source'],
       containsPair('path', Directory(root).absolute.path),
     );
+    final resqliteSource = manifest['resqlite_source'] as Map<String, Object?>;
+    final githubActions =
+        resqliteSource['github_actions'] as Map<String, Object?>;
+    expect(githubActions['event_name'], 'pull_request');
+    expect(githubActions['checkout_sha'], checkoutRevision);
+    expect(githubActions['head_sha'], '2361882-head');
+    expect(githubActions['base_sha'], 'main-base');
+    expect(githubActions['checkout_matches_github_sha'], isTrue);
+    expect(githubActions['checkout_matches_head_sha'], isFalse);
     expect(
       manifest['tracelite_resqlite_dependency'],
       containsPair('expected_resqlite_root', Directory(root).absolute.path),
@@ -639,4 +665,18 @@ exit 0
       contains('tracelite source pin cannot be verified'),
     );
   });
+}
+
+Future<String> _currentGitRevision(String root) async {
+  final result = await Process.run('git', [
+    'rev-parse',
+    'HEAD',
+  ], workingDirectory: root);
+  expect(
+    result.exitCode,
+    0,
+    reason:
+        'git rev-parse HEAD failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+  );
+  return result.stdout.toString().trim();
 }

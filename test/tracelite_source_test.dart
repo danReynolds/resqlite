@@ -60,6 +60,47 @@ void main() {
     expect(source['revision_matches_pin'], isTrue);
     expect(source['source_ok'], isFalse);
   });
+
+  test('resqlite source records GitHub Actions PR metadata', () async {
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_source_github_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final revision = await _initGitRepo(
+      temp,
+      remote: 'https://github.com/danReynolds/resqlite.git',
+    );
+    File(
+      p.join(temp.path, 'pubspec.yaml'),
+    ).writeAsStringSync('name: resqlite\nversion: 0.3.1\n');
+
+    final source = await resqliteSourceState(
+      temp.path,
+      environment: {
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_EVENT_NAME': 'pull_request',
+        'GITHUB_REPOSITORY': 'danReynolds/resqlite',
+        'GITHUB_REF': 'refs/pull/109/merge',
+        'GITHUB_REF_NAME': '109/merge',
+        'GITHUB_HEAD_REF': 'codex/tracelite-profiling-hooks',
+        'GITHUB_BASE_REF': 'main',
+        'GITHUB_SHA': revision,
+        'RESQLITE_SOURCE_HEAD_SHA': '2361882-head',
+        'RESQLITE_SOURCE_BASE_SHA': 'main-base',
+      },
+    );
+
+    expect(source['package_name'], 'resqlite');
+    expect(source['revision'], revision);
+    final githubActions = source['github_actions'] as Map<String, Object?>;
+    expect(githubActions['event_name'], 'pull_request');
+    expect(githubActions['checkout_sha'], revision);
+    expect(githubActions['head_sha'], '2361882-head');
+    expect(githubActions['base_sha'], 'main-base');
+    expect(githubActions['checkout_matches_github_sha'], isTrue);
+    expect(githubActions['checkout_matches_head_sha'], isFalse);
+  });
 }
 
 Future<String> _initGitRepo(Directory root, {required String remote}) async {

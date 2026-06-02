@@ -59,16 +59,26 @@ Future<Map<String, Object?>> traceliteSourceState(
   };
 }
 
-Future<Map<String, Object?>> resqliteSourceState(String resqliteRoot) async {
+Future<Map<String, Object?>> resqliteSourceState(
+  String resqliteRoot, {
+  Map<String, String>? environment,
+}) async {
   final root = Directory(resqliteRoot).absolute.path;
   final pubspec = File(p.join(root, 'pubspec.yaml'));
+  final gitState = await _gitSourceState(root);
+  final githubActions = _githubActionsSourceState(
+    environment ?? Platform.environment,
+    checkoutRevision: gitState['revision'] as String?,
+  );
   return {
     'path': root,
     if (pubspec.existsSync()) ...{
       'package_name': _readPubspecScalar(pubspec, 'name'),
       'version': _readPubspecScalar(pubspec, 'version'),
     },
-    ...await _gitSourceState(root),
+    ...gitState,
+    if (githubActions != null && githubActions.isNotEmpty)
+      'github_actions': githubActions,
   };
 }
 
@@ -101,6 +111,43 @@ Future<Map<String, Object?>> _gitSourceState(String root) async {
     if (tags.isNotEmpty) 'tags': tags,
     if (dirty != null) 'dirty': dirty,
   };
+}
+
+Map<String, Object?>? _githubActionsSourceState(
+  Map<String, String> environment, {
+  required String? checkoutRevision,
+}) {
+  final isGitHubActions =
+      environment['GITHUB_ACTIONS'] == 'true' ||
+      environment.containsKey('GITHUB_SHA');
+  if (!isGitHubActions) return null;
+
+  String? value(String key) {
+    final raw = environment[key]?.trim();
+    return raw == null || raw.isEmpty ? null : raw;
+  }
+
+  final githubSha = value('GITHUB_SHA');
+  final headSha = value('RESQLITE_SOURCE_HEAD_SHA');
+  final baseSha = value('RESQLITE_SOURCE_BASE_SHA');
+  return {
+    'event_name': value('GITHUB_EVENT_NAME'),
+    'repository': value('GITHUB_REPOSITORY'),
+    'workflow': value('GITHUB_WORKFLOW'),
+    'run_id': value('GITHUB_RUN_ID'),
+    'run_attempt': value('GITHUB_RUN_ATTEMPT'),
+    'ref': value('GITHUB_REF'),
+    'ref_name': value('GITHUB_REF_NAME'),
+    'head_ref': value('GITHUB_HEAD_REF'),
+    'base_ref': value('GITHUB_BASE_REF'),
+    'checkout_sha': githubSha,
+    'head_sha': headSha,
+    'base_sha': baseSha,
+    if (checkoutRevision != null && githubSha != null)
+      'checkout_matches_github_sha': checkoutRevision == githubSha,
+    if (checkoutRevision != null && headSha != null)
+      'checkout_matches_head_sha': checkoutRevision == headSha,
+  }..removeWhere((_, value) => value == null);
 }
 
 String? _readPubspecScalar(File pubspec, String key) {
@@ -158,6 +205,23 @@ void printResqliteSource(Map<String, Object?> source) {
   print('resqlite_revision: ${source['revision']}');
   print('resqlite_branch: ${source['branch']}');
   print('resqlite_dirty: ${source['dirty']}');
+  final githubActions = source['github_actions'];
+  if (githubActions is Map<String, Object?>) {
+    print('resqlite_github_event: ${githubActions['event_name']}');
+    print('resqlite_github_checkout_sha: ${githubActions['checkout_sha']}');
+    if (githubActions['head_sha'] != null) {
+      print('resqlite_github_head_sha: ${githubActions['head_sha']}');
+    }
+    if (githubActions['base_sha'] != null) {
+      print('resqlite_github_base_sha: ${githubActions['base_sha']}');
+    }
+    if (githubActions['checkout_matches_head_sha'] != null) {
+      print(
+        'resqlite_github_checkout_matches_head_sha: '
+        '${githubActions['checkout_matches_head_sha']}',
+      );
+    }
+  }
 }
 
 void validateTraceliteSource(Map<String, Object?> source) {

@@ -89,6 +89,9 @@ jobs:
           git clone https://github.com/danReynolds/tracelite /tmp/tracelite
           git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-06-01-r2
       - name: Run tracelite CI preset
+        env:
+          RESQLITE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RESQLITE_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
         run: |
           dart run benchmark/run_tracelite.dart \
             --preset=ci \
