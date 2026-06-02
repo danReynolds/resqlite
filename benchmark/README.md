@@ -100,7 +100,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-01-r2
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r3
 ```
 
 ```bash
@@ -150,8 +150,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`06c00ac126b54027c14c96deb5634e5a38104973`
-(`resqlite-profiling-gate-2026-06-01-r2`). The wrapper records
+`fb1a7ee05249a6e5a5695e6b8a6169531ec28bc9`
+(`resqlite-profiling-gate-2026-06-02-r3`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
