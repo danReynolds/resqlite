@@ -11,7 +11,7 @@ import 'dependency_tracking.dart'
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
-import 'utils/set_extensions.dart';
+import 'extensions/set.dart';
 
 // ---------------------------------------------------------------------------
 // Stream dependency tracking contract
