@@ -751,20 +751,25 @@ _Step _buildSqliteShimStep(_Options options) {
   final dartArchitecture = _dartExecutableMachOArchitecture(
     options.dartExecutable,
   );
+  final ccArguments = [
+    if (dartArchitecture != null) ...['-arch', dartArchitecture],
+    '-dynamiclib',
+    '-O2',
+    '-Inative',
+    'native/tracelite_runtime.c',
+    'native/shim_sqlite3.c',
+    '-Wl,-reexport-lsqlite3',
+    '-o',
+    'build/libsqlite_traced.dylib',
+  ];
+  final runCompilerNatively =
+      Platform.isMacOS && _hostMachineArchitecture() == 'arm64';
   return _Step(
     name: _prepareSqliteShimStepName,
-    executable: 'cc',
-    arguments: [
-      if (dartArchitecture != null) ...['-arch', dartArchitecture],
-      '-dynamiclib',
-      '-O2',
-      '-Inative',
-      'native/tracelite_runtime.c',
-      'native/shim_sqlite3.c',
-      '-Wl,-reexport-lsqlite3',
-      '-o',
-      'build/libsqlite_traced.dylib',
-    ],
+    executable: runCompilerNatively ? 'arch' : 'cc',
+    arguments: runCompilerNatively
+        ? ['-arm64', 'cc', ...ccArguments]
+        : ccArguments,
     workingDirectory: options.traceliteRoot,
     timeout: _sqliteShimBuildTimeout,
   );
@@ -1182,6 +1187,18 @@ String? _dartExecutableMachOArchitecture(String dartExecutable) {
   if (output.contains('macos_x64')) return 'x86_64';
   if (output.contains('macos_arm64')) return 'arm64';
   return null;
+}
+
+String? _hostMachineArchitecture() {
+  ProcessResult result;
+  try {
+    result = Process.runSync('uname', ['-m']);
+  } on Object {
+    return null;
+  }
+  if (result.exitCode != 0) return null;
+  final output = result.stdout.toString().trim();
+  return output.isEmpty ? null : output;
 }
 
 _StepResult _validateSuiteHistory(_Paths paths) {
