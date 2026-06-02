@@ -158,9 +158,13 @@ void main() {
       expect(stdoutText, contains('libsqlite_traced.dylib'));
       expect(stdoutText, contains('suite-history'));
       expect(stdoutText, contains('--profile=production'));
+      expect(stdoutText, contains('--interfaces=resqlite'));
       expect(
         stdoutText,
-        contains('--scenarios=narrow-batch-insert,point-select,feed-paging,'),
+        contains(
+          '--scenarios=high-cardinality-fanout,'
+          'many-streams-writer-throughput,sqlite-diagnostics',
+        ),
       );
       expect(
         stdoutText,
@@ -171,7 +175,7 @@ void main() {
       );
       expect(stdoutText, contains('--metrics=measured_elapsed_ns'));
       expect(stdoutText, contains('--policy-peers=resqlite'));
-      expect(stdoutText, contains('--min-repetitions=5'));
+      expect(stdoutText, contains('--min-repetitions=7'));
       expect(stdoutText, contains('--max-repetitions=30'));
       expect(stdoutText, contains('--target-rse-percent=10'));
       expect(stdoutText, contains('--within-run-noise-percentile=0.75'));
@@ -575,6 +579,53 @@ exit 0
     final steps = manifest['steps']! as List<Object?>;
     expect(steps, hasLength(1));
     expect(steps.single as Map<String, Object?>, containsPair('exit_code', 65));
+  });
+
+  test('tracelite benchmark workflow records child start failure', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_benchmark_start_failure_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final fakeRoot = Directory(p.join(temp.path, 'tracelite_root'));
+    Directory(p.join(fakeRoot.path, 'bin')).createSync(recursive: true);
+    File(p.join(fakeRoot.path, 'bin', 'tracelite.dart')).writeAsStringSync('');
+
+    final outDir = p.join(temp.path, 'benchmark');
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite.dart',
+      '--tracelite-root=${fakeRoot.path}',
+      '--dart=${p.join(temp.path, 'missing-dart')}',
+      '--label=start-failure',
+      '--out-dir=$outDir',
+      '--no-graph-data',
+      '--allow-unpinned-tracelite',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      127,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+    expect(
+      result.stderr.toString(),
+      contains('resqlite tracelite wrapper: failed to start child'),
+    );
+
+    final manifestFile = File(
+      p.join(outDir, 'resqlite-tracelite-benchmark.json'),
+    );
+    expect(manifestFile.existsSync(), isTrue);
+    final manifest =
+        jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
+    expect(manifest['status'], 'failed');
+    final steps = manifest['steps']! as List<Object?>;
+    expect(steps, hasLength(1));
+    expect(
+      steps.single as Map<String, Object?>,
+      containsPair('exit_code', 127),
+    );
   });
 
   test('tracelite benchmark workflow rejects dependency mismatch', () async {

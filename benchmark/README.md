@@ -116,9 +116,10 @@ dart run benchmark/run_tracelite.dart \
 `tracelite_source`, `resqlite_source`, the resolved Tracelite dependency
 binding, graph data, and Tracelite insight artifacts that explain trace health,
 noise, and bottleneck signals. Explicit CLI flags override preset defaults. The
-wrapper also rebuilds Tracelite's
-`build/libsqlite_traced.dylib` SQLite shim for fresh macOS checkouts before any
-preset runs, so CI does not depend on a pre-warmed Tracelite build directory.
+wrapper also builds Tracelite's `build/libsqlite_traced.dylib` SQLite shim for
+fresh macOS checkouts, then reuses it while it is newer than the shim sources,
+so CI does not depend on a pre-warmed Tracelite build directory and local runs
+do not repeatedly pay toolchain startup.
 After dependency resolution, wrapper steps invoke Tracelite as
 `dart bin/tracelite.dart ...` from the source checkout instead of repeatedly
 using `dart run`; this avoids repeated native-assets startup during graph export,
@@ -128,7 +129,7 @@ validation, and explanation steps.
 |---|---|---|
 | `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios, 3 minute suite-run timeout |
 | `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions`, 10 minute suite-run timeout |
-| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, full peer matrix and full suite, 20 minute suite-run timeout |
+| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, `interfaces=resqlite`, release-policy scenarios only, 20 minute suite-run timeout |
 
 Routine CI should use:
 
@@ -166,18 +167,15 @@ else, the gate fails before running the suite. Use
 tracelite development.
 
 The `production` preset runs
-`tracelite suite-history --profile=production --runs=5`. It separates suite
-coverage from release-gate policy:
+`tracelite suite-history --profile=production --runs=5`. It repeats only the
+resqlite release-policy surface needed to calibrate thresholds:
 
 - metric: `measured_elapsed_ns`
 - peer: `resqlite`
-- production suite scenarios: narrow batch insert, point select, feed paging,
-  sync burst, chat simulation, large working set, keyed-PK subscriptions,
-  high-cardinality fanout, many-streams writer throughput, and sqlite
-  diagnostics
-- production strict policy scenarios: high-cardinality fanout, many-streams
-  writer throughput, and sqlite diagnostics
-- repetition bounds: `--min-repetitions=5 --max-repetitions=30`
+- interface: `resqlite`
+- production suite and strict policy scenarios: high-cardinality fanout,
+  many-streams writer throughput, and sqlite diagnostics
+- repetition bounds: `--min-repetitions=7 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
 - robust within-run noise percentile: `--within-run-noise-percentile=0.75`
 - threshold gate: `--threshold-floor-percent=5 --threshold-ceiling-percent=50`
@@ -198,13 +196,18 @@ pass the repetition and noise gates. Suite failures and trace diagnostics still
 make the wrapper manifest invalid; graph data is exported when possible so the
 failed run can be inspected. If a failed suite produced no compare artifacts,
 graph export is skipped with an explicit wrapper step instead of masking the
-suite failure with a secondary export crash.
+suite failure with a secondary export crash. Wrapper steps also bound child
+startup and execution, and the shim build has a short dedicated timeout, so
+native-assets or toolchain stalls are recorded as failed manifest steps instead
+of leaving the gate unbounded.
 
 `narrow-batch-insert`, `point-select`, `feed-paging`, `sync-burst`,
 `chat-sim`, `large-working-set`, and `keyed-pk-subscriptions` are diagnostic
-suite workloads by default: they are still measured and exported to graph data,
-but they do not block the strict publish policy until their current variance
-fits under the 50% release-gate threshold ceiling.
+workloads. Routine CI samples a smaller diagnostic set with `--preset=ci`.
+Use explicit `--interfaces=sqlite3,drift,sqlite_async,resqlite` and
+`--suite-scenarios=...` overrides when a release investigation needs peer or
+full diagnostic coverage; do not repeat the full matrix five times during
+normal development.
 
 Current calibration state: the r6 pin adds bounded `suite-history` execution so
 each production suite repetition fails as `timed_out` after 20 minutes instead
@@ -213,8 +216,13 @@ of hanging indefinitely. The last completed r5 diagnostic history showed that
 threshold ceiling today. Recalibrating that history against the release lane
 above produced `ready` for 3/3 groups with a 29.5% primary threshold, 22% max
 regression guardrail, and 22% max-CV gate. The gate uses the p75 within-run
-noise policy and the outlier ceilings listed above; attach final r6 production
-evidence before treating a pre-publish run as complete.
+noise policy and the outlier ceilings listed above. A full-matrix r6 production
+probe completed one suite repetition in roughly 12 minutes. The narrowed
+resqlite-only policy lane completed 5/5 suite runs in about 5.5 minutes, then
+correctly failed calibration because high-cardinality fanout needed 7
+repetitions instead of 5. The production preset now uses that recommendation;
+attach final r6 production evidence before treating a pre-publish run as
+complete.
 
 Current r6 smoke evidence: `r6-ci-validation` passed the actual `ci` preset with
 Tracelite source `e4167f50d6f552d6b540cd9bc87990a25ae20a68`, 1/1 suite-history

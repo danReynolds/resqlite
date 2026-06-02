@@ -28,6 +28,12 @@ const _exportGraphDataStepName = 'export tracelite graph data';
 const _validateGraphDataStepName = 'validate tracelite graph data';
 const _explainArtifactsStepName = 'explain tracelite artifacts';
 const _defaultStepTimeout = Duration(minutes: 5);
+const _processStartTimeout = Duration(seconds: 30);
+const _sqliteShimBuildTimeout = Duration(seconds: 45);
+const _sqliteShimSources = [
+  'native/tracelite_runtime.c',
+  'native/shim_sqlite3.c',
+];
 const _defaultReleasePolicyScenarios = [
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
@@ -39,18 +45,6 @@ const _defaultDiagnosticScenarios = [
   'sync-burst',
   'large-working-set',
   'keyed-pk-subscriptions',
-];
-const _defaultSuiteScenarios = [
-  'narrow-batch-insert',
-  'point-select',
-  'feed-paging',
-  'sync-burst',
-  'chat-sim',
-  'large-working-set',
-  'keyed-pk-subscriptions',
-  'high-cardinality-fanout',
-  'many-streams-writer-throughput',
-  'sqlite-diagnostics',
 ];
 const _ciSuiteScenarios = [
   'narrow-batch-insert',
@@ -340,12 +334,12 @@ final class _Options {
         outDir: p.join('build', 'tracelite-benchmarks', label),
         profile: 'production',
         runs: 5,
-        interfaces: 'sqlite3,drift,sqlite_async,resqlite',
-        suiteScenarios: _defaultSuiteScenarios.join(','),
+        interfaces: _defaultPolicyPeer,
+        suiteScenarios: _defaultReleasePolicyScenarios.join(','),
         policyMetric: _defaultReleaseMetric,
         policyPeers: _defaultPolicyPeer,
         policyScenarios: _defaultReleasePolicyScenarios.join(','),
-        minRepetitions: 5,
+        minRepetitions: 7,
         maxRepetitions: 30,
         targetRsePercent: 10,
         withinRunNoisePercentile: 0.75,
@@ -612,14 +606,14 @@ _PresetDefaults _presetDefaults(String name) {
     ),
     'production' => const _PresetDefaults(
       name: 'production',
-      description: 'Full pre-publish production gate.',
+      description: 'Repeated pre-publish policy calibration gate.',
       profile: 'production',
       runs: 5,
-      interfaces: 'sqlite3,drift,sqlite_async,resqlite',
-      suiteScenarios: _defaultSuiteScenarios,
+      interfaces: _defaultPolicyPeer,
+      suiteScenarios: _defaultReleasePolicyScenarios,
       policyPeers: _defaultPolicyPeer,
       policyScenarios: _defaultReleasePolicyScenarios,
-      minRepetitions: 5,
+      minRepetitions: 7,
       maxRepetitions: 30,
       targetRsePercent: 10,
       withinRunNoisePercentile: 0.75,
@@ -768,6 +762,7 @@ _Step _buildSqliteShimStep(_Options options) {
       'build/libsqlite_traced.dylib',
     ],
     workingDirectory: options.traceliteRoot,
+    timeout: _sqliteShimBuildTimeout,
   );
 }
 
@@ -930,12 +925,36 @@ final class _TimedProcessResult {
 }
 
 Future<_TimedProcessResult> _runProcessWithTimeout(_Step step) async {
-  final process = await Process.start(
-    step.executable,
-    step.arguments,
-    workingDirectory: step.workingDirectory,
-    environment: Platform.environment,
-  );
+  final stopwatch = Stopwatch()..start();
+  late final Process process;
+  try {
+    process = await Process.start(
+      step.executable,
+      step.arguments,
+      workingDirectory: step.workingDirectory,
+      environment: Platform.environment,
+    ).timeout(_processStartTimeout);
+  } on TimeoutException {
+    stopwatch.stop();
+    return _TimedProcessResult(
+      exitCode: 124,
+      stdout: '',
+      stderr:
+          'resqlite tracelite wrapper: child process did not start within '
+          '${_formatDuration(_processStartTimeout)}.\n',
+      timedOut: true,
+      elapsed: stopwatch.elapsed,
+    );
+  } on ProcessException catch (error) {
+    stopwatch.stop();
+    return _TimedProcessResult(
+      exitCode: 127,
+      stdout: '',
+      stderr: 'resqlite tracelite wrapper: failed to start child: $error\n',
+      timedOut: false,
+      elapsed: stopwatch.elapsed,
+    );
+  }
   final stdoutBuffer = StringBuffer();
   final stderrBuffer = StringBuffer();
   final stdoutDone = Completer<void>();
@@ -955,7 +974,6 @@ Future<_TimedProcessResult> _runProcessWithTimeout(_Step step) async {
         onError: (_) => _completeIfPending(stderrDone),
       );
 
-  final stopwatch = Stopwatch()..start();
   var timedOut = false;
   late int exitCode;
   try {
@@ -1093,7 +1111,32 @@ Future<_StepResult> _buildTraceliteSqliteShim(_Options options) async {
   }
 
   Directory(p.join(options.traceliteRoot, 'build')).createSync(recursive: true);
+  final shimPath = _traceliteSqliteShimPath(options);
+  if (_sqliteShimIsFresh(options)) {
+    print('== $_prepareSqliteShimStepName');
+    print('reuse $shimPath');
+    print('');
+    return _StepResult(
+      name: _prepareSqliteShimStepName,
+      command: 'reuse $shimPath',
+      workingDirectory: options.traceliteRoot,
+      exitCode: 0,
+    );
+  }
   return _runStep(_buildSqliteShimStep(options));
+}
+
+bool _sqliteShimIsFresh(_Options options) {
+  final output = File(_traceliteSqliteShimPath(options));
+  if (!output.existsSync()) return false;
+
+  final outputModified = output.statSync().modified;
+  for (final sourcePath in _sqliteShimSources) {
+    final source = File(p.join(options.traceliteRoot, sourcePath));
+    if (!source.existsSync()) return false;
+    if (source.statSync().modified.isAfter(outputModified)) return false;
+  }
+  return true;
 }
 
 _StepResult _validateSuiteHistory(_Paths paths) {
@@ -1618,7 +1661,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--policy-peers=resqlite]');
   stderr.writeln('    [--policy-scenarios=chat-sim,...]');
   stderr.writeln('    [--policy-metric=measured_elapsed_ns]');
-  stderr.writeln('    [--min-repetitions=5] [--max-repetitions=30]');
+  stderr.writeln('    [--min-repetitions=7] [--max-repetitions=30]');
   stderr.writeln('    [--target-rse-percent=10]');
   stderr.writeln('    [--within-run-noise-percentile=0.75]');
   stderr.writeln('    [--threshold-floor-percent=5]');
@@ -1643,7 +1686,9 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln(
     '  experiment: focused sqlite_async/resqlite collection, runs=3.',
   );
-  stderr.writeln('  production: full peer matrix pre-publish gate, runs=5.');
+  stderr.writeln(
+    '  production: policy-scenario pre-publish calibration, runs=5.',
+  );
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');
   stderr.writeln('RESQLITE_ROOT can be used instead of --resqlite-root.');
