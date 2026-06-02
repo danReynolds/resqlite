@@ -55,7 +55,7 @@ workflow and A/B tabulation tools.
 
 Pristine code, no diagnostic overhead. Feeds the public dashboard.
 
-From [`packages/resqlite`](/Users/dan/Coding/dune_gemini/packages/resqlite):
+From this package root:
 
 ```bash
 dart run benchmark/run_release.dart my-label
@@ -85,7 +85,8 @@ That runs the package-local suites:
 - parameterized queries
 - writes
 
-Experiment-only scripts live under [benchmark/experiments](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/experiments) and are intentionally not part of the default suite.
+Experiment-only scripts live under [`benchmark/experiments`](./experiments) and
+are intentionally not part of the default suite.
 
 Recommended workflow for performance decisions:
 
@@ -298,7 +299,7 @@ Defaults:
 - expectation: `no_regression`
 - primary peer: `resqlite`
 - primary metric: `measured_elapsed_ns`
-- primary scenarios: the five release-lane scenarios from the production gate
+- primary scenarios: the production gate's release-policy scenarios
 - guardrail metrics: `measured_elapsed_ns`
 
 It writes `build/tracelite-decisions/<label>/decision.json`,
@@ -350,7 +351,7 @@ Run `resqlite` in its own process, then run the verifier for the peer libraries.
 
 ### 1. Run resqlite
 
-From [`packages/resqlite`](/Users/dan/Coding/dune_gemini/packages/resqlite):
+From this package root:
 
 ```bash
 dart run benchmark/head_to_head_worker.dart \
@@ -359,7 +360,7 @@ dart run benchmark/head_to_head_worker.dart \
 
 ### 2. Run verifier core cases
 
-From [`packages/sqlite_reactive_verifier`](/Users/dan/Coding/dune_gemini/packages/sqlite_reactive_verifier):
+From a checkout of `sqlite_reactive_verifier`:
 
 ```bash
 flutter pub run bin/sqlite_reactive_benchmark.dart \
@@ -371,7 +372,7 @@ flutter pub run bin/sqlite_reactive_benchmark.dart \
 
 ### 3. Run verifier reactive cases
 
-From [`packages/sqlite_reactive_verifier`](/Users/dan/Coding/dune_gemini/packages/sqlite_reactive_verifier):
+From a checkout of `sqlite_reactive_verifier`:
 
 ```bash
 flutter pub run bin/sqlite_reactive_benchmark.dart \
@@ -401,4 +402,4 @@ This is the preferred way to compare `resqlite` against:
 
 Latest checked-in main-only baseline:
 
-- [2026-04-08-codex-main-four-way.md](/Users/dan/Coding/dune_gemini/packages/resqlite/benchmark/results/2026-04-08-codex-main-four-way.md)
+- [`2026-04-08-codex-main-four-way.md`](./results/2026-04-08-codex-main-four-way.md)
