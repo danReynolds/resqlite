@@ -215,6 +215,8 @@ const _exportedSymbols = [
   'sqlite3_set_authorizer',
   // resqlite custom functions
   'resqlite_open',
+  'resqlite_open_with_extensions',
+  'resqlite_run_connection_setup',
   'resqlite_close',
   'resqlite_errmsg',
   'resqlite_exec',

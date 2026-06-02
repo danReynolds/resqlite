@@ -8,10 +8,10 @@ import 'dependency_tracking.dart'
         TableDependencies,
         TableDependency,
         UnknownTableDependencies;
-import 'extensions/set.dart';
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+import 'extensions/set.dart';
 
 // ---------------------------------------------------------------------------
 // Stream dependency tracking contract

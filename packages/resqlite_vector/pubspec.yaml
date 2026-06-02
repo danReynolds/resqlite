@@ -1,0 +1,18 @@
+name: resqlite_vector
+description: SQLite vector extension support for resqlite.
+version: 0.1.0
+repository: https://github.com/danReynolds/resqlite/tree/main/packages/resqlite_vector
+
+environment:
+  sdk: ^3.10.4
+
+resolution: workspace
+
+dependencies:
+  code_assets: ^1.0.0
+  hooks: ^1.0.0
+  path: ^1.9.0
+  resqlite: ^0.4.0
+
+dev_dependencies:
+  test: ^1.26.3

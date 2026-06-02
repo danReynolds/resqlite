@@ -45,11 +45,48 @@ typedef struct {
 // encryption_key_hex: hex-encoded encryption key, or NULL for no encryption.
 // max_readers: number of read connections (0 = default 8).
 resqlite_db* resqlite_open(const char* path, int max_readers, const char* encryption_key_hex);
+
+// Open a database with SQLite loadable extensions registered on every
+// connection in the writer/reader pool.
+//
+// extension_entrypoints points at an array of native extension init functions
+// with SQLite's standard loadable-extension signature:
+//   int xInit(sqlite3*, char**, const sqlite3_api_routines*)
+//
+// The entrypoints are temporarily registered with sqlite3_auto_extension()
+// while resqlite opens the pool, then cancelled before this function returns.
+resqlite_db* resqlite_open_with_extensions(
+    const char* path,
+    int max_readers,
+    const char* encryption_key_hex,
+    void** extension_entrypoints,
+    int extension_count
+);
 void resqlite_close(resqlite_db* db);
 const char* resqlite_errmsg(resqlite_db* db);
 
 // Get the raw sqlite3* writer connection handle (for direct FFI calls).
 sqlite3* resqlite_writer_handle(resqlite_db* db);
+
+// Open-time extension setup scopes. These values are mirrored by
+// ResqliteConnectionScope in Dart.
+#define RESQLITE_SETUP_SCOPE_ALL     0
+#define RESQLITE_SETUP_SCOPE_WRITER  1
+#define RESQLITE_SETUP_SCOPE_READERS 2
+
+// Run one extension setup SQL statement on the requested native connections.
+//
+// This is intended for Database.open() before Dart reader/writer isolates are
+// spawned. Setup SQL must be a single statement; multi-statement setup should
+// be represented as multiple ext.execute calls so resqlite can preserve
+// ordering and attribute failures.
+int resqlite_run_connection_setup(
+    resqlite_db* db,
+    const char* sql,
+    const resqlite_param* params,
+    int param_count,
+    int scope
+);
 
 // ---------------------------------------------------------------------------
 // Write operations (use writer connection)
