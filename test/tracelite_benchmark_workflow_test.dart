@@ -260,6 +260,7 @@ void main() {
       File(
         p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
       ).writeAsStringSync('void tracelite_test_shim(void) {}\n');
+      _writeFreshFakeShim(fakeRoot);
 
       final packageConfig = jsonEncode({
         'configVersion': 2,
@@ -373,6 +374,7 @@ exit 0
       File(
         p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
       ).writeAsStringSync('void tracelite_test_shim(void) {}\n');
+      _writeFreshFakeShim(fakeRoot);
 
       final packageConfig = jsonEncode({
         'configVersion': 2,
@@ -740,4 +742,12 @@ Future<String> _currentGitRevision(String root) async {
         'git rev-parse HEAD failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}',
   );
   return result.stdout.toString().trim();
+}
+
+void _writeFreshFakeShim(Directory fakeRoot) {
+  final buildDir = Directory(p.join(fakeRoot.path, 'build'))
+    ..createSync(recursive: true);
+  final shim = File(p.join(buildDir.path, 'libsqlite_traced.dylib'))
+    ..writeAsStringSync('fake shim\n');
+  shim.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 1)));
 }
