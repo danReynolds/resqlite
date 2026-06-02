@@ -1,3 +1,12 @@
+## 0.4.0
+
+- Added open-scoped SQLite extension loading via `Database.open(extensions: ...)`
+  and `ResqliteExtension`, plus companion package wrappers for SQLite Vector
+  and SQLite JS.
+- Added declarative open-time extension setup with `onRegister`, writer/reader/all
+  connection scopes, and `SqliteVectorIndex` helpers for SQLite Vector's
+  `vector_init`.
+
 ## 0.3.1
 
 - **Bug fix (Linux):** Fixed `undefined symbol` crashes on Linux caused by `resqlite_step_row_hash` and `sqlite3_db_handle` being omitted from the linker version script's export list ([#96](https://github.com/danReynolds/resqlite/pull/96), [#97](https://github.com/danReynolds/resqlite/pull/97)).

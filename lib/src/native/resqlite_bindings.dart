@@ -24,6 +24,23 @@ external ffi.Pointer<ffi.Void> resqliteOpen(
   ffi.Pointer<Utf8> encryptionKeyHex,
 );
 
+@ffi.Native<
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<Utf8>,
+    ffi.Int,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Pointer<ffi.Void>>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_open_with_extensions', isLeaf: true)
+external ffi.Pointer<ffi.Void> resqliteOpenWithExtensions(
+  ffi.Pointer<Utf8> path,
+  int maxReaders,
+  ffi.Pointer<Utf8> encryptionKeyHex,
+  ffi.Pointer<ffi.Pointer<ffi.Void>> extensionEntrypoints,
+  int extensionCount,
+);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
   symbol: 'resqlite_close',
   isLeaf: true,
@@ -41,6 +58,23 @@ external ffi.Pointer<Utf8> resqliteErrmsg(ffi.Pointer<ffi.Void> db);
   isLeaf: true,
 )
 external int resqliteExec(ffi.Pointer<ffi.Void> db, ffi.Pointer<Utf8> sql);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_run_connection_setup', isLeaf: true)
+external int resqliteRunConnectionSetup(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> params,
+  int paramCount,
+  int scope,
+);
 
 // Transaction-control fast path: pre-prepared BEGIN IMMEDIATE / COMMIT /
 // ROLLBACK stmts in C, run via sqlite3_reset + sqlite3_step instead of
@@ -757,8 +791,10 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(List<List<Object?>> paramSets, int paramCount) =>
-    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+int? _tryMeasureAsciiBatchBytes(
+  List<List<Object?>> paramSets,
+  int paramCount,
+) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
 
 int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
     _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;

@@ -197,6 +197,93 @@ await db.executeBatch(
 
 1,000 rows in **~0.4ms**. All-or-nothing atomicity — a crash mid-import leaves zero partial rows. Streams watching the table fire once on commit, not per row.
 
+## SQLite Extensions
+
+resqlite supports SQLite loadable extensions through small companion packages
+that expose native extension entrypoints as `ResqliteExtension` values. The
+extension list belongs to the database being opened, and resqlite registers
+each extension on the writer and reader connections in that database pool.
+
+```yaml
+dependencies:
+  resqlite: ^0.4.0
+  resqlite_vector: ^0.1.0
+  resqlite_js: ^0.1.0
+```
+
+```dart
+import 'package:resqlite/resqlite.dart';
+import 'package:resqlite_js/resqlite_js.dart';
+import 'package:resqlite_vector/resqlite_vector.dart';
+
+final db = await Database.open(
+  'app.db',
+  extensions: [
+    SqliteVectorExtension(
+      indexes: [
+        SqliteVectorIndex(
+          table: 'items',
+          column: 'embedding',
+          dimension: 1536,
+        ),
+      ],
+    ),
+    SqliteJsExtension(),
+  ],
+);
+
+final vectorVersion = await db.select('SELECT vector_version() AS version');
+final jsVersion = await db.select('SELECT js_version() AS version');
+```
+
+Available extension-related capabilities:
+
+| Category | Capability | Package | What it adds | How to enable |
+| --- | --- | --- | --- | --- |
+| Built in | FTS5 | `resqlite` | Full-text virtual tables, tokenizers, ranking helpers. | Use `CREATE VIRTUAL TABLE ... USING fts5(...)`. |
+| Built in | JSON functions | `resqlite` | JSON extraction, construction, and table-valued JSON traversal. | Call functions such as `json_extract` and `json_each` from SQL. |
+| Built in | Math functions | `resqlite` | SQLite scalar math functions for scoring and analytics. | Call functions such as `sqrt`, `sin`, and `pow` from SQL. |
+| Companion package | SQLite Vector | `resqlite_vector` | Vector conversion functions and vector search helpers. | Add `SqliteVectorExtension(...)`; use `SqliteVectorIndex` for `vector_init` setup. |
+| Companion package | SQLite JS | `resqlite_js` | JavaScript-backed SQLite functions, aggregates, window functions, and collations. | Add `SqliteJsExtension(...)`. |
+| Custom package | Native SQLite extension | `resqlite` plus your package | Any SQLite ABI-compatible loadable extension. | Expose a `ResqliteExtension` subclass, or use `ResqliteExtension.inLibrary(...)` / `fromAddress(...)`. |
+
+The extension package pattern is intentionally small:
+
+1. Bundle or build the native SQLite extension with a `hook/build.dart`.
+2. Expose the extension init symbol with `@Native<ResqliteExtensionInitNative>`.
+3. Expose a small `ResqliteExtension` subclass for app code to pass around.
+4. Pass the extension to `Database.open(extensions: [...])`.
+
+Use `packages/resqlite_js` as the minimal package template; extension hooks are
+specific enough that resqlite documents the pattern instead of shipping a
+generic scaffold.
+
+Pass each native extension once per `Database.open`. If multiple app modules
+need the same extension, centralize their setup into one extension value; passing
+the same native entrypoint twice is rejected so setup order is explicit.
+
+Extensions that need per-connection SQL setup can record it during registration:
+
+```dart
+final class SqliteExampleExtension extends ResqliteExtension {
+  SqliteExampleExtension()
+    : super(
+        Native.addressOf<ResqliteExtensionEntrypoint>(sqlite3ExampleInit),
+        name: 'sqlite_example',
+        onRegister: (ext) {
+          ext.execute('SELECT example_init(?)', parameters: ['items']);
+        },
+      );
+}
+```
+
+resqlite runs extension native load and setup during `Database.open`, before
+the database is returned and before normal reader/writer workers start.
+Companion packages should expose domain-specific options for common setup, like
+`SqliteVectorIndex`, and reserve raw `onRegister` setup for advanced escape
+hatches. See [SQLite extension authoring](./doc/sqlite-extensions.md) for the
+package pattern and compatibility contract.
+
 ## Architecture
 
 - **Reads** go through a [persistent reader pool](./lib/src/reader/reader_pool.dart) (2-4 workers with dedicated C connections)
@@ -210,7 +297,7 @@ See the [full architecture breakdown](./doc/arch/architecture.md) for how the re
 
 ```yaml
 dependencies:
-  resqlite: ^0.3.1
+  resqlite: ^0.4.0
 ```
 
 Or via the CLI:

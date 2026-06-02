@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
+import 'dart:isolate';
 import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
@@ -10,11 +11,15 @@ import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
+import 'extensions/extension.dart';
 import 'native/resqlite_bindings.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
 import 'tracelite_profile.dart';
+
+part 'extensions/registration.dart';
+part 'native/open_database.dart';
 
 /// A high-performance SQLite database with reactive queries.
 ///
@@ -92,8 +97,9 @@ final class Database {
   /// ```
   ///
   /// If the file at [path] does not exist, a new database is created.
-  /// Reader and writer isolates are spawned non-blocking during open —
-  /// the first query awaits their readiness automatically.
+  /// Native open work runs on a temporary isolate. Reader and writer isolates
+  /// are spawned non-blocking after that — the first query awaits their
+  /// readiness automatically.
   ///
   /// If [encryptionKey] is provided, the database is encrypted using
   /// SQLite3 Multiple Ciphers (AES-256). The key must be a hex-encoded
@@ -113,39 +119,33 @@ final class Database {
   ///
   /// The returned [Database] must be closed with [close] when no longer
   /// needed to release native resources.
-  static Future<Database> open(String path, {String? encryptionKey}) async {
-    final pathNative = path.toNativeUtf8();
-    final keyNative = encryptionKey != null
-        ? encryptionKey.toNativeUtf8()
-        : ffi.nullptr.cast<Utf8>();
-    try {
-      // Determine the number of reader isolates to spawn.
-      // cores - 1: leave one core for the main isolate (UI thread in Flutter).
-      // min 2: so one worker sacrifice doesn't leave zero capacity.
-      // max 4: benchmarked 2/4/8/16 workers
-      // ([EXP-105](../../experiments/105-reader-pool-sizing.md)).
-      // Concurrent query
-      //   throughput plateaus at 4; raising past that regresses A11c
-      //   many-streams-writer-throughput by ~55% and high-cardinality
-      //   stream fan-out (A11b) by ~88% because each completed
-      //   selectIfChanged reply queues another microtask ahead of the
-      //   next pending write. Each idle worker costs ~30KB + one C
-      //   reader connection.
-      final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
+  static Future<Database> open(
+    String path, {
+    String? encryptionKey,
+    Iterable<ResqliteExtension> extensions = const [],
+  }) async {
+    // Determine the number of reader isolates to spawn.
+    // cores - 1: leave one core for the main isolate (UI thread in Flutter).
+    // min 2: so one worker sacrifice doesn't leave zero capacity.
+    // max 4: benchmarked 2/4/8/16 workers
+    // ([EXP-105](../../experiments/105-reader-pool-sizing.md)).
+    // Concurrent query
+    //   throughput plateaus at 4; raising past that regresses A11c
+    //   many-streams-writer-throughput by ~55% and high-cardinality
+    //   stream fan-out (A11b) by ~88% because each completed
+    //   selectIfChanged reply queues another microtask ahead of the
+    //   next pending write. Each idle worker costs ~30KB + one C
+    //   reader connection.
+    final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
 
-      final handle = resqliteOpen(pathNative, readerCount, keyNative);
-      if (handle == ffi.nullptr) {
-        throw ResqliteConnectionException(
-          'Failed to open database at "$path"'
-          '${encryptionKey != null ? ' (check encryption key)' : ''}',
-        );
-      }
+    final handle = await _openNativeDatabase(
+      path: path,
+      encryptionKey: encryptionKey,
+      readerCount: readerCount,
+      extensions: extensions,
+    );
 
-      return Database._(handle, path, readerCount);
-    } finally {
-      calloc.free(pathNative);
-      if (encryptionKey != null) calloc.free(keyNative);
-    }
+    return Database._(handle, path, readerCount);
   }
 
   /// Closes this database, shutting down all worker isolates and releasing
