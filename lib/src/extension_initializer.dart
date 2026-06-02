@@ -19,12 +19,10 @@ Future<ffi.Pointer<ffi.Void>> openNativeDatabaseForResqlite({
     readerCount: readerCount,
     extensions: extensions,
   );
-  final handleAddress = request.requiresOpenWorker
-      ? await Isolate.run(
-          () => _openNativeDatabase(request),
-          debugName: 'resqlite.open.extensions',
-        )
-      : _openNativeDatabase(request);
+  final handleAddress = await Isolate.run(
+    () => _openNativeDatabase(request),
+    debugName: 'resqlite.open',
+  );
 
   return ffi.Pointer<ffi.Void>.fromAddress(handleAddress);
 }
@@ -154,9 +152,6 @@ final class _NativeOpenRequest {
   final int readerCount;
   final List<_ExtensionEntrypoint> extensionEntrypoints;
   final List<_ExtensionConnectionSetup> setup;
-
-  bool get requiresOpenWorker =>
-      extensionEntrypoints.isNotEmpty || setup.isNotEmpty;
 }
 
 List<_ExtensionEntrypoint> _collectExtensionEntrypoints(

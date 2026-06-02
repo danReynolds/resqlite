@@ -90,8 +90,9 @@ final class Database {
   /// ```
   ///
   /// If the file at [path] does not exist, a new database is created.
-  /// Reader and writer isolates are spawned non-blocking during open —
-  /// the first query awaits their readiness automatically.
+  /// Native open work runs on a temporary isolate. Reader and writer isolates
+  /// are spawned non-blocking after that — the first query awaits their
+  /// readiness automatically.
   ///
   /// If [encryptionKey] is provided, the database is encrypted using
   /// SQLite3 Multiple Ciphers (AES-256). The key must be a hex-encoded
