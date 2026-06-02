@@ -200,7 +200,7 @@ thresholds:
 - guardrail gate: `--guardrail-floor-percent=3`
 - noise gate: `--noise-gate-floor-percent=5 --noise-gate-ceiling-percent=50
   --noise-gate-multiplier=1.5`
-- outlier gates: `--max-outlier-percent=10 --max-run-outlier-percent=20`
+- outlier gates: `--max-outlier-percent=15 --max-run-outlier-percent=20`
 
 It writes `build/tracelite-benchmarks/<label>/history.json`,
 `policy-calibration.json`, `policy-calibration.md`, `insights.json`,

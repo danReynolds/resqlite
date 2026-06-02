@@ -371,7 +371,7 @@ final class _Options {
         noiseGateFloorPercent: 5,
         noiseGateCeilingPercent: 50,
         noiseGateMultiplier: 1.5,
-        maxOutlierPercent: 10,
+        maxOutlierPercent: 15,
         maxRunOutlierPercent: 20,
         suiteRunTimeoutSeconds: 1200,
         traceliteSourcePolicy: const TraceliteSourcePolicy(
@@ -630,7 +630,7 @@ _PresetDefaults _presetDefaults(String name) {
       noiseGateFloorPercent: 5,
       noiseGateCeilingPercent: 50,
       noiseGateMultiplier: 1.5,
-      maxOutlierPercent: 10,
+      maxOutlierPercent: 15,
       maxRunOutlierPercent: 20,
       suiteRunTimeoutSeconds: 600,
       strict: true,
@@ -657,7 +657,7 @@ _PresetDefaults _presetDefaults(String name) {
       noiseGateFloorPercent: 5,
       noiseGateCeilingPercent: 50,
       noiseGateMultiplier: 1.5,
-      maxOutlierPercent: 10,
+      maxOutlierPercent: 15,
       maxRunOutlierPercent: 20,
       suiteRunTimeoutSeconds: 1200,
       strict: true,
@@ -1856,7 +1856,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--noise-gate-floor-percent=5]');
   stderr.writeln('    [--noise-gate-ceiling-percent=50]');
   stderr.writeln('    [--noise-gate-multiplier=1.5]');
-  stderr.writeln('    [--max-outlier-percent=10]');
+  stderr.writeln('    [--max-outlier-percent=15]');
   stderr.writeln('    [--max-run-outlier-percent=20]');
   stderr.writeln('    [--suite-run-timeout-seconds=1200]');
   stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');

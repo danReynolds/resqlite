@@ -190,7 +190,7 @@ void main() {
       expect(stdoutText, contains('--noise-gate-floor-percent=5'));
       expect(stdoutText, contains('--noise-gate-ceiling-percent=50'));
       expect(stdoutText, contains('--noise-gate-multiplier=1.5'));
-      expect(stdoutText, contains('--max-outlier-percent=10'));
+      expect(stdoutText, contains('--max-outlier-percent=15'));
       expect(stdoutText, contains('--max-run-outlier-percent=20'));
       expect(stdoutText, contains('--suite-run-timeout-seconds=1200'));
       expect(stdoutText, contains('export-graph-data'));
