@@ -23,6 +23,7 @@ const _defaultRunner = 'script';
 const _resolveDependenciesStepName = 'resolve tracelite dependencies';
 const _validateDependencyStepName = 'validate tracelite resqlite dependency';
 const _prepareSqliteShimStepName = 'prepare tracelite sqlite shim';
+const _warmupSuiteStepName = 'warm up tracelite suite';
 const _suiteHistoryStepName = 'run tracelite suite history';
 const _validateSuiteHistoryStepName = 'validate tracelite suite history';
 const _exportGraphDataStepName = 'export tracelite graph data';
@@ -101,6 +102,7 @@ Future<void> main(List<String> args) async {
   print('profile: ${options.profile}');
   print('runner: ${options.runner}');
   print('runs: ${options.runs}');
+  print('warmup_runs: ${options.warmupRuns}');
   print(
     'suite_run_timeout_seconds: '
     '${_trimDouble(options.suiteRunTimeoutSeconds)}',
@@ -174,6 +176,13 @@ Future<void> main(List<String> args) async {
 
   if (stepResults.every((result) => result.exitCode == 0)) {
     stepResults.add(await _buildTraceliteSqliteShim(options));
+  }
+
+  if (stepResults.every((result) => result.exitCode == 0)) {
+    for (var run = 1; run <= options.warmupRuns; run++) {
+      stepResults.add(await _runStep(_warmupSuiteStep(options, paths, run)));
+      if (stepResults.last.exitCode != 0) break;
+    }
   }
 
   if (stepResults.every((result) => result.exitCode == 0)) {
@@ -265,6 +274,7 @@ final class _Options {
     required this.profile,
     required this.runner,
     required this.runs,
+    required this.warmupRuns,
     required this.interfaces,
     required this.suiteScenarios,
     required this.policyMetric,
@@ -301,6 +311,7 @@ final class _Options {
   final String profile;
   final String runner;
   final int runs;
+  final int warmupRuns;
   final String interfaces;
   final String suiteScenarios;
   final String policyMetric;
@@ -343,6 +354,7 @@ final class _Options {
         profile: 'production',
         runner: _defaultRunner,
         runs: 5,
+        warmupRuns: 1,
         interfaces: _defaultPolicyPeer,
         suiteScenarios: _productionSuiteScenarios.join(','),
         policyMetric: _defaultReleaseMetric,
@@ -434,6 +446,7 @@ final class _Options {
       profile: values['profile'] ?? preset.profile,
       runner: _runnerOption(values['runner'] ?? preset.runner),
       runs: _positiveInt(values['runs'], preset.runs),
+      warmupRuns: _nonNegativeInt(values['warmup-runs'], preset.warmupRuns),
       interfaces: values['interfaces'] ?? preset.interfaces,
       suiteScenarios:
           values['suite-scenarios'] ??
@@ -517,6 +530,7 @@ final class _PresetDefaults {
     required this.profile,
     required this.runner,
     required this.runs,
+    required this.warmupRuns,
     required this.interfaces,
     required this.suiteScenarios,
     required this.policyPeers,
@@ -543,6 +557,7 @@ final class _PresetDefaults {
   final String profile;
   final String runner;
   final int runs;
+  final int warmupRuns;
   final String interfaces;
   final List<String> suiteScenarios;
   final String policyPeers;
@@ -572,6 +587,7 @@ _PresetDefaults _presetDefaults(String name) {
       profile: 'ci',
       runner: _defaultRunner,
       runs: 1,
+      warmupRuns: 0,
       interfaces: 'resqlite',
       suiteScenarios: _ciSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
@@ -598,6 +614,7 @@ _PresetDefaults _presetDefaults(String name) {
       profile: 'production',
       runner: _defaultRunner,
       runs: 3,
+      warmupRuns: 0,
       interfaces: 'sqlite_async,resqlite',
       suiteScenarios: _experimentSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
@@ -624,6 +641,7 @@ _PresetDefaults _presetDefaults(String name) {
       profile: 'production',
       runner: _defaultRunner,
       runs: 5,
+      warmupRuns: 1,
       interfaces: _defaultPolicyPeer,
       suiteScenarios: _productionSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
@@ -663,6 +681,7 @@ final class _Paths {
       policyMarkdown = p.join(outDir, 'policy-calibration.md'),
       insightsJson = p.join(outDir, 'insights.json'),
       insightsMarkdown = p.join(outDir, 'insights.md'),
+      warmupDir = p.join(outDir, 'warmup'),
       graphDataInputsDir = p.join(outDir, 'graph-data-inputs'),
       graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
@@ -672,6 +691,7 @@ final class _Paths {
   final String policyMarkdown;
   final String insightsJson;
   final String insightsMarkdown;
+  final String warmupDir;
   final String graphDataInputsDir;
   final String graphDataDir;
 }
@@ -736,6 +756,8 @@ List<_Step> _plannedSteps(
   final steps = <_Step>[
     _resolveDependenciesStep(options),
     _buildSqliteShimStep(options),
+    for (var run = 1; run <= options.warmupRuns; run++)
+      _warmupSuiteStep(options, paths, run),
     _suiteHistoryStep(options, paths),
   ];
 
@@ -787,6 +809,29 @@ _Step _buildSqliteShimStep(_Options options) {
         : ccArguments,
     workingDirectory: options.traceliteRoot,
     timeout: _sqliteShimBuildTimeout,
+  );
+}
+
+_Step _warmupSuiteStep(_Options options, _Paths paths, int run) {
+  final runName = 'run-${run.toString().padLeft(3, '0')}';
+  return _Step(
+    name: options.warmupRuns == 1
+        ? _warmupSuiteStepName
+        : '$_warmupSuiteStepName $run/${options.warmupRuns}',
+    executable: options.dartExecutable,
+    arguments: [
+      'run',
+      'bin/tracelite.dart',
+      'suite',
+      '--profile=${options.profile}',
+      '--runner=${options.runner}',
+      '--interfaces=${options.interfaces}',
+      '--scenarios=${options.suiteScenarios}',
+      '--min-repetitions=${options.minRepetitions}',
+      '--out-dir=${p.join(paths.warmupDir, runName)}',
+    ],
+    workingDirectory: options.traceliteRoot,
+    timeout: Duration(seconds: (options.suiteRunTimeoutSeconds + 300).ceil()),
   );
 }
 
@@ -1401,6 +1446,7 @@ Future<void> _writeManifest(
     'profile': options.profile,
     'runner': options.runner,
     'runs': options.runs,
+    'warmup_runs': options.warmupRuns,
     'suite_run_timeout_seconds': options.suiteRunTimeoutSeconds,
     'suite_scenarios': options.suiteScenarios
         .split(',')
@@ -1480,6 +1526,7 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('profile: ${options.profile}');
   print('runner: ${options.runner}');
   print('runs: ${options.runs}');
+  print('warmup_runs: ${options.warmupRuns}');
   print(
     'suite_run_timeout_seconds: '
     '${_trimDouble(options.suiteRunTimeoutSeconds)}',
@@ -1720,6 +1767,16 @@ int _positiveInt(String? value, int fallback) {
   return parsed;
 }
 
+int _nonNegativeInt(String? value, int fallback) {
+  if (value == null) return fallback;
+  final parsed = int.tryParse(value);
+  if (parsed == null || parsed < 0) {
+    stderr.writeln('expected non-negative integer, got: $value');
+    exit(64);
+  }
+  return parsed;
+}
+
 double _positiveDouble(String? value, double fallback) {
   if (value == null) return fallback;
   final parsed = double.tryParse(value);
@@ -1780,6 +1837,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln(
     '    [--runs=5] [--interfaces=sqlite3,drift,sqlite_async,resqlite]',
   );
+  stderr.writeln('    [--warmup-runs=1]');
   stderr.writeln('    [--runner=auto|script|app-jit|worker]');
   stderr.writeln('    [--suite-scenarios=chat-sim,...]');
   stderr.writeln(
@@ -1814,7 +1872,7 @@ Never _usage({int exitCode = 64}) {
     '  experiment: focused sqlite_async/resqlite collection, runs=3.',
   );
   stderr.writeln(
-    '  production: policy-scenario pre-publish calibration, runs=5.',
+    '  production: pre-publish calibration, warmup-runs=1, runs=5.',
   );
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');

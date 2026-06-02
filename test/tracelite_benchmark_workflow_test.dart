@@ -150,6 +150,7 @@ void main() {
       expect(stdoutText, contains('preset: production'));
       expect(stdoutText, contains('suite_run_timeout_seconds: 1200'));
       expect(stdoutText, contains('runner: script'));
+      expect(stdoutText, contains('warmup_runs: 1'));
       expect(
         stdoutText,
         contains('resqlite_root: ${Directory(root).absolute.path}'),
@@ -157,6 +158,8 @@ void main() {
       expect(stdoutText, contains('pub get'));
       expect(stdoutText, contains('prepare tracelite sqlite shim'));
       expect(stdoutText, contains('libsqlite_traced.dylib'));
+      expect(stdoutText, contains('warm up tracelite suite'));
+      expect(stdoutText, contains(p.join('warmup', 'run-001')));
       expect(stdoutText, contains('suite-history'));
       expect(stdoutText, contains('--profile=production'));
       expect(stdoutText, contains('--runner=script'));
@@ -225,6 +228,7 @@ void main() {
     expect(stdoutText, contains('preset: ci'));
     expect(stdoutText, contains('suite_run_timeout_seconds: 180'));
     expect(stdoutText, contains('runner: script'));
+    expect(stdoutText, contains('warmup_runs: 0'));
     expect(stdoutText, contains('--profile=ci'));
     expect(stdoutText, contains('--runner=script'));
     expect(stdoutText, contains('--runs=1'));
@@ -499,13 +503,17 @@ exit 0
       final manifest =
           jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
       final steps = manifest['steps']! as List<Object?>;
-      expect(steps, hasLength(5));
+      expect(steps, hasLength(6));
       expect(
         steps[1] as Map<String, Object?>,
         containsPair('name', 'prepare tracelite sqlite shim'),
       );
       expect(
-        steps[3] as Map<String, Object?>,
+        steps[2] as Map<String, Object?>,
+        containsPair('name', 'warm up tracelite suite'),
+      );
+      expect(
+        steps[4] as Map<String, Object?>,
         containsPair('command', contains('inspect')),
       );
       expect(

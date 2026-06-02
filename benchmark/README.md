@@ -136,7 +136,7 @@ validation, and explanation then invoke Tracelite as `dart bin/tracelite.dart
 |---|---|---|
 | `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios, 3 minute suite-run timeout |
 | `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions`, 10 minute suite-run timeout |
-| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, `interfaces=resqlite`, release-policy workloads plus `sqlite-diagnostics` trace-health coverage, 20 minute suite-run timeout |
+| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `warmup-runs=1`, `runs=5`, `interfaces=resqlite`, release-policy workloads plus `sqlite-diagnostics` trace-health coverage, 20 minute suite-run timeout |
 
 Routine CI should use:
 
@@ -178,9 +178,13 @@ Apple Silicon, prefer an arm64 Dart SDK via `--dart=/path/to/arm64/dart`; x64
 Dart under Rosetta can make traced native-assets builds much slower and less
 useful as a routine development signal.
 
-The `production` preset runs
-`tracelite suite-history --profile=production --runs=5`. It repeats only the
-resqlite release-policy surface needed to calibrate thresholds:
+The `production` preset first runs one unrecorded
+`tracelite suite --profile=production` warmup, then runs
+`tracelite suite-history --profile=production --runs=5`. The warmup stabilizes
+native-assets, child-process, and reactive cold-start effects before the
+recorded history is used for strict policy calibration. The recorded history
+repeats only the resqlite release-policy surface needed to calibrate
+thresholds:
 
 - metric: `measured_elapsed_ns`
 - peer: `resqlite`
