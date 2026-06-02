@@ -19,6 +19,7 @@ import 'tracelite_source.dart';
 
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
+const _defaultRunner = 'script';
 const _resolveDependenciesStepName = 'resolve tracelite dependencies';
 const _validateDependencyStepName = 'validate tracelite resqlite dependency';
 const _prepareSqliteShimStepName = 'prepare tracelite sqlite shim';
@@ -29,7 +30,7 @@ const _validateGraphDataStepName = 'validate tracelite graph data';
 const _explainArtifactsStepName = 'explain tracelite artifacts';
 const _defaultStepTimeout = Duration(minutes: 5);
 const _processStartTimeout = Duration(seconds: 30);
-const _sqliteShimBuildTimeout = Duration(seconds: 45);
+const _sqliteShimBuildTimeout = Duration(minutes: 2);
 const _sqliteShimSources = [
   'native/tracelite_runtime.c',
   'native/shim_sqlite3.c',
@@ -93,7 +94,9 @@ Future<void> main(List<String> args) async {
   printTraceliteSource(traceliteSource);
   printResqliteSource(resqliteSource);
   _printDependencyBinding(dependencyBinding);
+  _printDartRuntime(options);
   print('profile: ${options.profile}');
+  print('runner: ${options.runner}');
   print('runs: ${options.runs}');
   print(
     'suite_run_timeout_seconds: '
@@ -257,6 +260,7 @@ final class _Options {
     required this.preset,
     required this.outDir,
     required this.profile,
+    required this.runner,
     required this.runs,
     required this.interfaces,
     required this.suiteScenarios,
@@ -292,6 +296,7 @@ final class _Options {
   final String preset;
   final String outDir;
   final String profile;
+  final String runner;
   final int runs;
   final String interfaces;
   final String suiteScenarios;
@@ -333,6 +338,7 @@ final class _Options {
         preset: 'production',
         outDir: p.join('build', 'tracelite-benchmarks', label),
         profile: 'production',
+        runner: _defaultRunner,
         runs: 5,
         interfaces: _defaultPolicyPeer,
         suiteScenarios: _defaultReleasePolicyScenarios.join(','),
@@ -423,6 +429,7 @@ final class _Options {
       outDir:
           values['out-dir'] ?? p.join('build', 'tracelite-benchmarks', label),
       profile: values['profile'] ?? preset.profile,
+      runner: _runnerOption(values['runner'] ?? preset.runner),
       runs: _positiveInt(values['runs'], preset.runs),
       interfaces: values['interfaces'] ?? preset.interfaces,
       suiteScenarios:
@@ -505,6 +512,7 @@ final class _PresetDefaults {
     required this.name,
     required this.description,
     required this.profile,
+    required this.runner,
     required this.runs,
     required this.interfaces,
     required this.suiteScenarios,
@@ -530,6 +538,7 @@ final class _PresetDefaults {
   final String name;
   final String description;
   final String profile;
+  final String runner;
   final int runs;
   final String interfaces;
   final List<String> suiteScenarios;
@@ -558,6 +567,7 @@ _PresetDefaults _presetDefaults(String name) {
       name: 'ci',
       description: 'Fast resqlite trace-health smoke for routine CI.',
       profile: 'ci',
+      runner: _defaultRunner,
       runs: 1,
       interfaces: 'resqlite',
       suiteScenarios: _ciSuiteScenarios,
@@ -583,6 +593,7 @@ _PresetDefaults _presetDefaults(String name) {
       name: 'experiment',
       description: 'Focused baseline/candidate collection lane.',
       profile: 'production',
+      runner: _defaultRunner,
       runs: 3,
       interfaces: 'sqlite_async,resqlite',
       suiteScenarios: _experimentSuiteScenarios,
@@ -608,6 +619,7 @@ _PresetDefaults _presetDefaults(String name) {
       name: 'production',
       description: 'Repeated pre-publish policy calibration gate.',
       profile: 'production',
+      runner: _defaultRunner,
       runs: 5,
       interfaces: _defaultPolicyPeer,
       suiteScenarios: _defaultReleasePolicyScenarios,
@@ -784,6 +796,7 @@ _Step _suiteHistoryStep(_Options options, _Paths paths) {
       'bin/tracelite.dart',
       'suite-history',
       '--profile=${options.profile}',
+      '--runner=${options.runner}',
       '--runs=${options.runs}',
       '--interfaces=${options.interfaces}',
       '--scenarios=${options.suiteScenarios}',
@@ -1191,6 +1204,18 @@ String? _dartExecutableMachOArchitecture(String dartExecutable) {
 }
 
 String? _hostMachineArchitecture() {
+  if (Platform.isMacOS) {
+    ProcessResult result;
+    try {
+      result = Process.runSync('sysctl', ['-n', 'hw.optional.arm64']);
+    } on Object {
+      result = ProcessResult(0, 1, '', '');
+    }
+    if (result.exitCode == 0 && result.stdout.toString().trim() == '1') {
+      return 'arm64';
+    }
+  }
+
   ProcessResult result;
   try {
     result = Process.runSync('uname', ['-m']);
@@ -1369,7 +1394,9 @@ Future<void> _writeManifest(
     'resqlite_root': options.resqliteRoot,
     'resqlite_source': resqliteSource,
     'tracelite_resqlite_dependency': dependencyBinding.toJson(),
+    'dart_runtime': _dartRuntimeArtifact(options),
     'profile': options.profile,
+    'runner': options.runner,
     'runs': options.runs,
     'suite_run_timeout_seconds': options.suiteRunTimeoutSeconds,
     'suite_scenarios': options.suiteScenarios
@@ -1436,6 +1463,7 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
   print('out_dir: ${Directory(options.outDir).path}');
   print('tracelite_root: ${options.traceliteRoot}');
   print('resqlite_root: ${options.resqliteRoot}');
+  _printDartRuntime(options);
   print(
     'tracelite_resqlite_override: '
     '${p.join(options.traceliteRoot, 'pubspec_overrides.yaml')}',
@@ -1447,6 +1475,7 @@ void _printPlan(_Options options, _Paths paths, List<_Step> steps) {
     'allow_unpinned_tracelite: ${options.traceliteSourcePolicy.allowUnpinned}',
   );
   print('profile: ${options.profile}');
+  print('runner: ${options.runner}');
   print('runs: ${options.runs}');
   print(
     'suite_run_timeout_seconds: '
@@ -1598,6 +1627,29 @@ void _printDependencyBindingFailure(
   stderr.writeln('    path: ${jsonEncode(binding.expectedRoot)}');
 }
 
+void _printDartRuntime(_Options options) {
+  final runtime = _dartRuntimeArtifact(options);
+  print('dart_executable: ${runtime['executable']}');
+  if (runtime['dart_macho_architecture'] != null) {
+    print('dart_macho_architecture: ${runtime['dart_macho_architecture']}');
+  }
+  if (runtime['host_machine_architecture'] != null) {
+    print('host_machine_architecture: ${runtime['host_machine_architecture']}');
+  }
+}
+
+Map<String, Object?> _dartRuntimeArtifact(_Options options) {
+  final dartArch = _dartExecutableMachOArchitecture(options.dartExecutable);
+  final hostArch = _hostMachineArchitecture();
+  return {
+    'executable': options.dartExecutable,
+    if (dartArch != null) 'dart_macho_architecture': dartArch,
+    if (hostArch != null) 'host_machine_architecture': hostArch,
+    if (Platform.isMacOS && dartArch != null && hostArch != null)
+      'dart_matches_host_architecture': dartArch == hostArch,
+  };
+}
+
 void _validateTraceliteRoot(String traceliteRoot) {
   if (traceliteRoot.isEmpty || !Directory(traceliteRoot).existsSync()) {
     stderr.writeln(
@@ -1685,6 +1737,14 @@ double? _positiveDoubleOrNull(String? value, {double? fallback}) {
   return parsed;
 }
 
+String _runnerOption(String value) {
+  if (!const {'auto', 'script', 'app-jit', 'worker'}.contains(value)) {
+    stderr.writeln('--runner must be auto, script, app-jit, or worker');
+    exit(64);
+  }
+  return value;
+}
+
 String _quoteIfNeeded(String value) {
   if (value.isEmpty || value.contains(RegExp(r'\s'))) {
     return "'${value.replaceAll("'", r"'\''")}'";
@@ -1717,6 +1777,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln(
     '    [--runs=5] [--interfaces=sqlite3,drift,sqlite_async,resqlite]',
   );
+  stderr.writeln('    [--runner=auto|script|app-jit|worker]');
   stderr.writeln('    [--suite-scenarios=chat-sim,...]');
   stderr.writeln(
     '    [--scenarios=chat-sim,...]  # alias for --suite-scenarios',

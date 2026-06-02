@@ -101,7 +101,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r8
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r9
 ```
 
 ```bash
@@ -113,11 +113,16 @@ dart run benchmark/run_tracelite.dart \
   --graph-data-dir=docs/benchmarks/data/tracelite/latest
 ```
 
-`run_tracelite.dart` has three presets. Every preset still records
+`run_tracelite.dart` has three presets. Every preset records
 `tracelite_source`, `resqlite_source`, the resolved Tracelite dependency
 binding, graph data, and Tracelite insight artifacts that explain trace health,
-noise, and bottleneck signals. Explicit CLI flags override preset defaults. The
-wrapper also builds Tracelite's `build/libsqlite_traced.dylib` SQLite shim for
+noise, and bottleneck signals. The resqlite production wrapper defaults to
+Tracelite's direct `script` runner because the long-lived `worker` runner is
+not yet accepted for multi-scenario reactive resqlite suites. Explicit
+`--runner=worker` is still useful for targeted trace investigations and records
+worker preflight/native-asset metadata, but it is not the publish gate default.
+Explicit CLI flags override preset defaults. The wrapper also builds
+Tracelite's `build/libsqlite_traced.dylib` SQLite shim for
 fresh macOS checkouts, then reuses it while it is newer than the shim sources,
 so CI does not depend on a pre-warmed Tracelite build directory and local runs
 do not repeatedly pay toolchain startup.
@@ -157,8 +162,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`4b4165693c752c8e73da3237c117fa5699c0bb79`
-(`resqlite-profiling-gate-2026-06-02-r8`). The wrapper records
+`f56ecb8d4f2df5bdb3646f2cf3439450fd64272d`
+(`resqlite-profiling-gate-2026-06-02-r9`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -167,6 +172,11 @@ ignored override for `--resqlite-root`; if an existing override points anywhere
 else, the gate fails before running the suite. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development.
+
+The wrapper records the Dart executable and architecture in its manifest. On
+Apple Silicon, prefer an arm64 Dart SDK via `--dart=/path/to/arm64/dart`; x64
+Dart under Rosetta can make traced native-assets builds much slower and less
+useful as a routine development signal.
 
 The `production` preset runs
 `tracelite suite-history --profile=production --runs=5`. It repeats only the
@@ -213,30 +223,41 @@ normal development.
 
 Current calibration state: the r8 pin includes bounded `suite-history`
 execution, suite-run timeout recording, forwarding of the policy
-`--min-repetitions` floor into each suite run, direct script mode for resqlite
-native-asset peer runs in Tracelite `auto` mode, and `dart run` suite-history
+`--min-repetitions` floor into each suite run, and `dart run` suite-history
 launches so Tracelite regenerates native-assets metadata for the configured
-Dart SDK architecture. The wrapper also reuses a fresh SQLite shim, rebuilds it
+Dart SDK architecture. The r9 pin adds the long-lived worker runner for
+native-assets-heavy peers, worker preflight trace validation, and filtered
+native-asset/runtime-library metadata. The wrapper keeps `--runner=script` as
+the default because local r9 validation found that a multi-scenario worker run
+can still leave unmatched reactive trace events in
+`keyed-pk-subscriptions`. The wrapper also reuses a fresh SQLite shim, rebuilds it
 when the cached Mach-O architecture does not match the Dart VM, and runs the
 compiler natively on Apple Silicon while still producing the requested target
 architecture.
 
-Current production evidence: `production-pin-r8-resqlite-policy-2026-06-02-r3`
+Latest full production evidence is still the pre-worker r8 run:
+`production-pin-r8-resqlite-policy-2026-06-02-r3`
 passed with Tracelite source
 `4b4165693c752c8e73da3237c117fa5699c0bb79`, resqlite source
 `a830f3a6ec2a229ecd09a0685664633f71da4322`, 5/5 suite-history runs `ok`,
 policy calibration `ready`, graph-data export and validation `ok`, and
 explain completed. The suite-history phase took about 15.2 minutes locally
 under the x64 Dart SDK; the full wrapper run took about 15.7 minutes excluding
-the outer `dart run` startup. Explain still reports direct script runs as
-harness-dominated and some measured CVs as noisy, so runtime optimization and a
-native-assets-aware long-lived runner remain follow-up work.
+the outer `dart run` startup. The r9 script-runner pin must replace this
+evidence before final pre-publish signoff.
 
-Current smoke evidence: `ci-pin-r8-native-assets-2026-06-02` passed the actual
-`ci` preset with 1/1 suite-history run `ok`, policy calibration `ready`,
-graph-data validation `ok`, and export/validate/explain steps all completed
-inside wrapper timeouts. The first x64 run paid the one-time resqlite
-native-asset build cost and took about 2.8 minutes for suite-history.
+Current worker evidence: local Tracelite r9 worker checks passed
+`narrow-batch-insert` for `resqlite` and `feed-paging` for
+`sqlite_async,resqlite`, with preflight metadata, native-asset/runtime-library
+metadata, graphable spans, and trace diagnostics `0/0/0`. The same runner is
+not yet clean for the full reactive CI scenario sequence, so keep worker as an
+explicit investigation mode.
+
+Current r9 smoke evidence:
+`ci-pin-r9-script-arm64-final-2026-06-02` passed with the arm64 Dart SDK,
+source pinning, dependency binding, script-mode `suite-history`, policy
+calibration `ready`, graph-data export and validation `ok`, explain completed,
+and manifest `dart_runtime.dart_matches_host_architecture=true`.
 
 Historical artifacts also produced an accepted routine no-regression decision:
 

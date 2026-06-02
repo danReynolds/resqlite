@@ -135,3 +135,32 @@ Outcome:
 - Future pass should keep the insight step non-authoritative: acceptance still
   comes from `decision`/policy gates, while `explain` is for operator
   investigation and review.
+
+## 2026-06-02 pass
+
+### Loop 7 - r9 pin and runner default audit
+
+Tried:
+
+- Published Tracelite pin `resqlite-profiling-gate-2026-06-02-r9`, which adds
+  worker preflight and native-asset/runtime-library metadata.
+- Updated the resqlite wrapper source pin and CI checkout to r9.
+- Tried making the wrapper default to `--runner=worker`.
+- Fixed the wrapper's local Apple Silicon compiler detection so the SQLite shim
+  build uses native `arch -arm64 cc` even when the wrapper itself runs under an
+  x64 Dart.
+
+Outcome:
+
+- Direct worker samples were clean for `resqlite` and mixed
+  `sqlite_async,resqlite` checks.
+- A multi-scenario resqlite worker suite still produced unmatched trace events
+  in `keyed-pk-subscriptions`, while the same suite passed with
+  `--runner=script`.
+- The wrapper therefore keeps `script` as the production default and leaves
+  `worker` as an explicit investigation mode until the reactive worker
+  lifecycle is fixed in Tracelite.
+- The wrapper now records Dart executable architecture in its manifest. Local
+  x64 Dart under Rosetta repeatedly made traced resqlite native-assets setup
+  slow enough to obscure the benchmark cycle, while the same r9 CI smoke passed
+  with the arm64 Dart SDK.

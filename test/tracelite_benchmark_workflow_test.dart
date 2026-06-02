@@ -149,6 +149,7 @@ void main() {
       expect(stdoutText, contains('resqlite tracelite benchmark plan'));
       expect(stdoutText, contains('preset: production'));
       expect(stdoutText, contains('suite_run_timeout_seconds: 1200'));
+      expect(stdoutText, contains('runner: script'));
       expect(
         stdoutText,
         contains('resqlite_root: ${Directory(root).absolute.path}'),
@@ -158,6 +159,7 @@ void main() {
       expect(stdoutText, contains('libsqlite_traced.dylib'));
       expect(stdoutText, contains('suite-history'));
       expect(stdoutText, contains('--profile=production'));
+      expect(stdoutText, contains('--runner=script'));
       expect(stdoutText, contains('--interfaces=resqlite'));
       expect(
         stdoutText,
@@ -222,7 +224,9 @@ void main() {
     final stdoutText = result.stdout.toString();
     expect(stdoutText, contains('preset: ci'));
     expect(stdoutText, contains('suite_run_timeout_seconds: 180'));
+    expect(stdoutText, contains('runner: script'));
     expect(stdoutText, contains('--profile=ci'));
+    expect(stdoutText, contains('--runner=script'));
     expect(stdoutText, contains('--runs=1'));
     expect(stdoutText, contains('--interfaces=resqlite'));
     expect(
