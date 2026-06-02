@@ -265,20 +265,23 @@ void main() {
       final existingShim = File(
         p.join(fakeRoot.path, 'build', 'libsqlite_traced.dylib'),
       );
-      existingShim.writeAsBytesSync(
-        File(Platform.resolvedExecutable).readAsBytesSync(),
-      );
-      final shimFileResult = await Process.run('file', [existingShim.path]);
-      if (shimFileResult.exitCode != 0 ||
-          !shimFileResult.stdout.toString().contains('x86_64')) {
-        markTestSkipped(
-          'Dart executable is not an x86_64 Mach-O fixture: '
-          '${shimFileResult.stdout}${shimFileResult.stderr}',
-        );
-      }
+      existingShim.writeAsStringSync('fake stale x86_64 shim\n');
       existingShim.setLastModifiedSync(
         DateTime.now().add(const Duration(minutes: 1)),
       );
+
+      final fakeFile = File(p.join(temp.path, 'file'));
+      fakeFile.writeAsStringSync('''#!/bin/sh
+case "\$1" in
+  *libsqlite_traced.dylib)
+    echo "\$1: Mach-O 64-bit dynamically linked shared library x86_64"
+    ;;
+  *)
+    /usr/bin/file "\$@"
+    ;;
+esac
+''');
+      await Process.run('chmod', ['+x', fakeFile.path]);
 
       final fakeCc = File(p.join(temp.path, 'cc'));
       fakeCc.writeAsStringSync(r'''#!/bin/sh
