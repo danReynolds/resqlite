@@ -196,3 +196,19 @@ Outcome:
   release gate therefore treats measured elapsed policy as authoritative and
   uses those warnings as follow-up instrumentation guidance, not as merge
   blockers.
+
+### Loop 9 - r10 worker runtime retargeting fix
+
+Tried:
+
+- Published Tracelite pin `resqlite-profiling-gate-2026-06-02-r10`, which
+  fixes long-lived worker retargeting for reused native producer threads.
+- Updated the resqlite wrapper source pin and CI checkout from r9 to r10.
+
+Outcome:
+
+- The r10 fix keeps script-runner production behavior intact while making
+  explicit `--runner=worker` reactive resqlite samples viable again.
+- A focused Tracelite worker compare for `keyed-pk-subscriptions` passed 3/3
+  repetitions with trace diagnostics `0/0/0`, replacing the r9 caveat that
+  worker mode was investigation-only for reactive suites.

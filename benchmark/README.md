@@ -101,7 +101,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r9
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r10
 ```
 
 ```bash
@@ -162,8 +162,8 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`f56ecb8d4f2df5bdb3646f2cf3439450fd64272d`
-(`resqlite-profiling-gate-2026-06-02-r9`). The wrapper records
+`d058647a123df0f4af223a110564b862de2eda05`
+(`resqlite-profiling-gate-2026-06-02-r10`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -231,17 +231,18 @@ Current calibration state: the r8 pin includes bounded `suite-history`
 execution, suite-run timeout recording, forwarding of the policy
 `--min-repetitions` floor into each suite run, and `dart run` suite-history
 launches so Tracelite regenerates native-assets metadata for the configured
-Dart SDK architecture. The r9 pin adds the long-lived worker runner for
+Dart SDK architecture. The r9 pin added the long-lived worker runner for
 native-assets-heavy peers, worker preflight trace validation, and filtered
-native-asset/runtime-library metadata. The wrapper keeps `--runner=script` as
-the default because local r9 validation found that a multi-scenario worker run
-can still leave unmatched reactive trace events in
-`keyed-pk-subscriptions`. The wrapper also reuses a fresh SQLite shim, rebuilds it
-when the cached Mach-O architecture does not match the Dart VM, and runs the
-compiler natively on Apple Silicon while still producing the requested target
-architecture. Production now runs one unrecorded warmup suite before recorded
-history and uses a 15% total-outlier gate so tiny IQR outliers do not reject
-otherwise sub-1% noise runs.
+native-asset/runtime-library metadata. The r10 pin fixes Tracelite runtime
+retargeting for reused native producer threads, so explicit worker-mode
+reactive resqlite samples no longer leave unmatched trace events. The wrapper
+still keeps `--runner=script` as the production default because that path has
+the full production calibration evidence. The wrapper also reuses a fresh
+SQLite shim, rebuilds it when the cached Mach-O architecture does not match the
+Dart VM, and runs the compiler natively on Apple Silicon while still producing
+the requested target architecture. Production now runs one unrecorded warmup
+suite before recorded history and uses a 15% total-outlier gate so tiny IQR
+outliers do not reject otherwise sub-1% noise runs.
 
 Latest full production evidence:
 `production-pin-r9-resqlite-policy-2026-06-02-r4`
@@ -254,18 +255,18 @@ warmup phase took about 42.8 seconds, the recorded suite-history phase took
 about 209.2 seconds, and the wrapper manifest recorded
 `tracelite_resqlite_dependency.matches_requested_root=true`.
 
-Current worker evidence: local Tracelite r9 worker checks passed
-`narrow-batch-insert` for `resqlite` and `feed-paging` for
-`sqlite_async,resqlite`, with preflight metadata, native-asset/runtime-library
-metadata, graphable spans, and trace diagnostics `0/0/0`. The same runner is
-not yet clean for the full reactive CI scenario sequence, so keep worker as an
-explicit investigation mode.
+Current worker evidence: local Tracelite r10 worker checks passed
+`keyed-pk-subscriptions` for `resqlite` with 3/3 repetitions, preflight
+metadata, native-asset/runtime-library metadata, graphable spans, sane trace
+durations, and trace diagnostics `0/0/0`. Worker mode is useful for fast local
+investigation, while production gates continue to use the script runner until
+worker mode has full production calibration evidence.
 
-Current r9 smoke evidence:
-`ci-pin-r9-script-arm64-final-2026-06-02` passed with the arm64 Dart SDK,
-source pinning, dependency binding, script-mode `suite-history`, policy
-calibration `ready`, graph-data export and validation `ok`, explain completed,
-and manifest `dart_runtime.dart_matches_host_architecture=true`.
+Current r10 smoke evidence:
+`ci-pin-r10-script-arm64-2026-06-02` passed with the arm64 Dart SDK, source
+pinning, dependency binding, script-mode `suite-history`, policy calibration
+`ready`, graph-data export and validation `ok`, explain completed, and manifest
+`dart_runtime.dart_matches_host_architecture=true`.
 
 Historical artifacts also produced an accepted routine no-regression decision:
 
