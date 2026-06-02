@@ -172,7 +172,7 @@ void main() {
         stdoutText,
         contains(
           '--policy-scenarios=high-cardinality-fanout,'
-          'many-streams-writer-throughput,sqlite-diagnostics',
+          'many-streams-writer-throughput',
         ),
       );
       expect(stdoutText, contains('--metrics=measured_elapsed_ns'));

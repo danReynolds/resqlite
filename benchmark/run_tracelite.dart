@@ -38,6 +38,9 @@ const _sqliteShimSources = [
 const _defaultReleasePolicyScenarios = [
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
+];
+const _productionSuiteScenarios = [
+  ..._defaultReleasePolicyScenarios,
   'sqlite-diagnostics',
 ];
 const _defaultDiagnosticScenarios = [
@@ -341,7 +344,7 @@ final class _Options {
         runner: _defaultRunner,
         runs: 5,
         interfaces: _defaultPolicyPeer,
-        suiteScenarios: _defaultReleasePolicyScenarios.join(','),
+        suiteScenarios: _productionSuiteScenarios.join(','),
         policyMetric: _defaultReleaseMetric,
         policyPeers: _defaultPolicyPeer,
         policyScenarios: _defaultReleasePolicyScenarios.join(','),
@@ -622,7 +625,7 @@ _PresetDefaults _presetDefaults(String name) {
       runner: _defaultRunner,
       runs: 5,
       interfaces: _defaultPolicyPeer,
-      suiteScenarios: _defaultReleasePolicyScenarios,
+      suiteScenarios: _productionSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
       policyScenarios: _defaultReleasePolicyScenarios,
       minRepetitions: 7,

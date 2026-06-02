@@ -136,7 +136,7 @@ validation, and explanation then invoke Tracelite as `dart bin/tracelite.dart
 |---|---|---|
 | `ci` | Routine PR smoke and trace-health checks | Tracelite `ci` profile, `runs=1`, `interfaces=resqlite`, tiny `narrow-batch-insert`, `point-select`, `keyed-pk-subscriptions`, and `sqlite-diagnostics` scenarios, 3 minute suite-run timeout |
 | `experiment` | Collect focused baseline/candidate artifacts for a perf change | Tracelite `production` profile, `runs=3`, `interfaces=sqlite_async,resqlite`, `feed-paging`, `chat-sim`, and `keyed-pk-subscriptions`, 10 minute suite-run timeout |
-| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, `interfaces=resqlite`, release-policy scenarios only, 20 minute suite-run timeout |
+| `production` | Pre-publish or major perf-change gate | Tracelite `production` profile, `runs=5`, `interfaces=resqlite`, release-policy workloads plus `sqlite-diagnostics` trace-health coverage, 20 minute suite-run timeout |
 
 Routine CI should use:
 
@@ -185,8 +185,10 @@ resqlite release-policy surface needed to calibrate thresholds:
 - metric: `measured_elapsed_ns`
 - peer: `resqlite`
 - interface: `resqlite`
-- production suite and strict policy scenarios: high-cardinality fanout,
-  many-streams writer throughput, and sqlite diagnostics
+- production suite scenarios: high-cardinality fanout, many-streams writer
+  throughput, and sqlite diagnostics
+- strict elapsed-time policy scenarios: high-cardinality fanout and
+  many-streams writer throughput
 - repetition bounds: `--min-repetitions=7 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
 - robust within-run noise percentile: `--within-run-noise-percentile=0.75`
