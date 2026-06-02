@@ -12,9 +12,10 @@
 /// Output: writes `benchmark/profile/results/dispatch_budget_TIMESTAMP.json`
 /// with per-call samples + aggregate percentile summary. Diff two such
 /// JSONs with `benchmark/profile/diff.dart` to reproduce the findings
-/// in `experiments/080-dispatch-budget.md`. For memory-axis experiments
-/// use `benchmark/run_profile.dart` instead — it's the superset of
-/// this harness and includes RSS + SQLite + allocation diagnostics.
+/// in `experiments/080-dispatch-budget.md`. For new memory-axis experiments,
+/// use `benchmark/profile/run_tracelite_profile.dart`; it preserves the legacy
+/// JSON parity artifact while adding workload summaries, graph data, and
+/// tracelite insights.
 ///
 /// Usage:
 ///   dart run benchmark/profile/dispatch_budget.dart

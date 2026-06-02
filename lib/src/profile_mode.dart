@@ -13,10 +13,10 @@
 /// # Peer-comparison benchmarks — pristine production code:
 /// dart run benchmark/run_release.dart my-label
 ///
-/// # Experiment-vs-baseline benchmarks — diagnostic instrumentation
-/// # compiled in, same flag used on both sides of the A/B:
-/// dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
-///   --out=benchmark/profile/results/baseline.json
+/// # Experiment-vs-baseline diagnostics — preferred tracelite wrapper:
+/// dart run benchmark/profile/run_tracelite_profile.dart \
+///   --tracelite-root=/path/to/tracelite \
+///   --label=exp-N
 /// ```
 ///
 /// **What the flag currently gates:**
@@ -36,11 +36,10 @@
 /// benchmarks (`run_release.dart`) can measure resqlite's actual
 /// production behavior — the same code paths downstream apps execute —
 /// without diagnostic overhead distorting the comparison against
-/// sqlite3 / sqlite_async / drift. Experiment-mode benchmarks
-/// (`run_profile.dart`) compile both the experiment branch AND its
-/// baseline with the flag on, so the per-call overhead of Timeline
-/// markers (~10–40ns when no tracer is attached) cancels out in the
-/// A/B delta.
+/// sqlite3 / sqlite_async / drift. Profile-mode diagnostics compile both the
+/// experiment branch AND its baseline with the flag on, so the per-call
+/// overhead of Timeline markers and optional tracelite emitters cancels out in
+/// the A/B delta.
 ///
 /// **If you add new diagnostic instrumentation,** gate it behind this
 /// flag the same way:

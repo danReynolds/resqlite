@@ -15,10 +15,9 @@ import 'profile_mode.dart';
 /// symbols unless the harness explicitly opts in:
 ///
 /// ```bash
-/// dart run \
-///   -DRESQLITE_PROFILE=true \
-///   -DRESQLITE_TRACELITE=true \
-///   benchmark/run_profile.dart
+/// dart run benchmark/profile/run_tracelite_profile.dart \
+///   --tracelite-root=/path/to/tracelite \
+///   --label=exp-N
 /// ```
 const bool kTraceliteProfileMode = bool.fromEnvironment(
   'RESQLITE_TRACELITE',
