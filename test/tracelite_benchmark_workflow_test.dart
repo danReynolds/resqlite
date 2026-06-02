@@ -161,7 +161,13 @@ void main() {
         stdoutText,
         contains('--scenarios=narrow-batch-insert,point-select,feed-paging,'),
       );
-      expect(stdoutText, contains('--policy-scenarios=chat-sim,'));
+      expect(
+        stdoutText,
+        contains(
+          '--policy-scenarios=high-cardinality-fanout,'
+          'many-streams-writer-throughput,sqlite-diagnostics',
+        ),
+      );
       expect(stdoutText, contains('--metrics=measured_elapsed_ns'));
       expect(stdoutText, contains('--policy-peers=resqlite'));
       expect(stdoutText, contains('--min-repetitions=5'));

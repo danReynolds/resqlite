@@ -171,8 +171,8 @@ coverage from release-gate policy:
   sync burst, chat simulation, large working set, keyed-PK subscriptions,
   high-cardinality fanout, many-streams writer throughput, and sqlite
   diagnostics
-- production strict policy scenarios: chat simulation, high-cardinality fanout,
-  many-streams writer throughput, narrow batch insert, and sqlite diagnostics
+- production strict policy scenarios: high-cardinality fanout, many-streams
+  writer throughput, and sqlite diagnostics
 - repetition bounds: `--min-repetitions=5 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
 - robust within-run noise percentile: `--within-run-noise-percentile=0.75`
@@ -196,24 +196,24 @@ failed run can be inspected. If a failed suite produced no compare artifacts,
 graph export is skipped with an explicit wrapper step instead of masking the
 suite failure with a secondary export crash.
 
-`point-select`, `feed-paging`, `sync-burst`, `large-working-set`, and
-`keyed-pk-subscriptions` are diagnostic suite workloads by default: they are
-still measured and exported to graph data, but they do not block the strict
-publish policy until their current variance fits under the 50% release-gate
-threshold ceiling.
+`narrow-batch-insert`, `point-select`, `feed-paging`, `sync-burst`,
+`chat-sim`, `large-working-set`, and `keyed-pk-subscriptions` are diagnostic
+suite workloads by default: they are still measured and exported to graph data,
+but they do not block the strict publish policy until their current variance
+fits under the 50% release-gate threshold ceiling.
 
-Current evidence: the strict pinned-source
-`sole-gate-2026-05-31-resqlite-pinned-source` run completed 5/5 production
-suite histories, exported graph data, and passed graph-data validation. Its
-manifest recorded `tracelite_source.source_ok=true` and
-`revision_matches_pin=true`, with `tracelite_resqlite_dependency`
-matching the resqlite checkout under test. Its release-lane
-`policy-calibration.json` was
-`ready` for 5/5 groups with a 27.5% primary threshold, 20.5% max regression
-guardrail, and 20.5% max-CV gate. The gate uses the p75 within-run noise policy
-and the outlier ceilings listed above.
+Current calibration evidence: the strict pinned-source
+`production-pin-r5-2026-06-02` run completed 5/5 production suite histories,
+exported graph data, and passed graph-data validation against tracelite
+`5d2862411a2b35d397cd7748ddef82eaeb87d9f0`
+(`resqlite-profiling-gate-2026-06-02-r5`). Its broad diagnostic policy showed
+that `chat-sim` and `narrow-batch-insert` are too noisy for the 50%
+release-gate threshold ceiling today. Recalibrating the same history against the
+release lane above produced `ready` for 3/3 groups with a 29.5% primary
+threshold, 22% max regression guardrail, and 22% max-CV gate. The gate uses the
+p75 within-run noise policy and the outlier ceilings listed above.
 
-The same artifacts also produced an accepted routine no-regression decision:
+Historical artifacts also produced an accepted routine no-regression decision:
 
 ```bash
 dart run benchmark/decide_tracelite.dart \
@@ -224,10 +224,9 @@ dart run benchmark/decide_tracelite.dart \
   --label=sole-gate-2026-05-31-resqlite-pinned-no-regression
 ```
 
-That decision passed trace health, primary, and guardrail gates for the
-release-lane `measured_elapsed_ns` metric and exported validated graph data with
-suite and decision rows. Its wrapper manifest also recorded
-`tracelite_source.source_ok=true` and `revision_matches_pin=true`.
+That decision passed trace health, primary, and guardrail gates and exported
+validated graph data with suite and decision rows. Its wrapper manifest also
+recorded `tracelite_source.source_ok=true` and `revision_matches_pin=true`.
 
 The decision path also rejected a known injected read-path regression:
 

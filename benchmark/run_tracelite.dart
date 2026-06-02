@@ -27,10 +27,8 @@ const _exportGraphDataStepName = 'export tracelite graph data';
 const _validateGraphDataStepName = 'validate tracelite graph data';
 const _explainArtifactsStepName = 'explain tracelite artifacts';
 const _defaultReleasePolicyScenarios = [
-  'chat-sim',
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
-  'narrow-batch-insert',
   'sqlite-diagnostics',
 ];
 const _defaultDiagnosticScenarios = [
