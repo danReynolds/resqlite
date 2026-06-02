@@ -1,6 +1,9 @@
+import 'package:meta/meta.dart';
+
 import '../exceptions.dart';
 import 'extension.dart';
 
+@internal
 final class ExtensionRegistrationPlan {
   ExtensionRegistrationPlan._({
     required this.entrypoints,
@@ -21,6 +24,7 @@ final class ExtensionRegistrationPlan {
   final List<ExtensionSetupStep> setupSteps;
 }
 
+@internal
 final class ExtensionEntrypoint {
   const ExtensionEntrypoint({required this.address, required this.name});
 
@@ -28,6 +32,7 @@ final class ExtensionEntrypoint {
   final String name;
 }
 
+@internal
 final class ExtensionSetupStep {
   const ExtensionSetupStep({
     required this.extensionName,
