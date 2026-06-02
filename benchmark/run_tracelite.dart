@@ -748,10 +748,14 @@ _Step _resolveDependenciesStep(_Options options) {
 }
 
 _Step _buildSqliteShimStep(_Options options) {
+  final dartArchitecture = _dartExecutableMachOArchitecture(
+    options.dartExecutable,
+  );
   return _Step(
     name: _prepareSqliteShimStepName,
     executable: 'cc',
-    arguments: const [
+    arguments: [
+      if (dartArchitecture != null) ...['-arch', dartArchitecture],
       '-dynamiclib',
       '-O2',
       '-Inative',
@@ -1129,6 +1133,9 @@ Future<_StepResult> _buildTraceliteSqliteShim(_Options options) async {
 bool _sqliteShimIsFresh(_Options options) {
   final output = File(_traceliteSqliteShimPath(options));
   if (!output.existsSync()) return false;
+  if (!_sqliteShimMatchesDartArchitecture(output, options.dartExecutable)) {
+    return false;
+  }
 
   final outputModified = output.statSync().modified;
   for (final sourcePath in _sqliteShimSources) {
@@ -1137,6 +1144,44 @@ bool _sqliteShimIsFresh(_Options options) {
     if (source.statSync().modified.isAfter(outputModified)) return false;
   }
   return true;
+}
+
+bool _sqliteShimMatchesDartArchitecture(File shim, String dartExecutable) {
+  final shimArchitectures = _machOArchitectures(shim);
+  if (shimArchitectures == null) return true;
+  final dartArchitecture = _dartExecutableMachOArchitecture(dartExecutable);
+  if (dartArchitecture == null) return true;
+  return shimArchitectures.contains(dartArchitecture);
+}
+
+List<String>? _machOArchitectures(File file) {
+  ProcessResult result;
+  try {
+    result = Process.runSync('file', [file.path]);
+  } on Object {
+    return null;
+  }
+  if (result.exitCode != 0) return null;
+  final output = result.stdout.toString();
+  if (!output.contains('Mach-O')) return null;
+  final architectures = <String>[
+    if (output.contains('x86_64')) 'x86_64',
+    if (output.contains('arm64')) 'arm64',
+  ];
+  return architectures;
+}
+
+String? _dartExecutableMachOArchitecture(String dartExecutable) {
+  ProcessResult result;
+  try {
+    result = Process.runSync(dartExecutable, ['--version']);
+  } on Object {
+    return null;
+  }
+  final output = '${result.stdout}\n${result.stderr}';
+  if (output.contains('macos_x64')) return 'x86_64';
+  if (output.contains('macos_arm64')) return 'arm64';
+  return null;
 }
 
 _StepResult _validateSuiteHistory(_Paths paths) {

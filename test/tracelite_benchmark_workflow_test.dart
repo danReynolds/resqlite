@@ -240,6 +240,155 @@ void main() {
   });
 
   test(
+    'tracelite benchmark workflow rebuilds wrong-arch sqlite shim',
+    () async {
+      final root = Directory.current.path;
+      final temp = await Directory.systemTemp.createTemp(
+        'resqlite_tracelite_benchmark_shim_arch_test_',
+      );
+      addTearDown(() => temp.delete(recursive: true));
+
+      final fakeRoot = Directory(p.join(temp.path, 'tracelite_root'));
+      Directory(p.join(fakeRoot.path, 'bin')).createSync(recursive: true);
+      Directory(p.join(fakeRoot.path, 'native')).createSync(recursive: true);
+      Directory(p.join(fakeRoot.path, 'build')).createSync(recursive: true);
+      File(
+        p.join(fakeRoot.path, 'bin', 'tracelite.dart'),
+      ).writeAsStringSync('');
+      File(
+        p.join(fakeRoot.path, 'native', 'tracelite_runtime.c'),
+      ).writeAsStringSync('void tracelite_test_runtime(void) {}\n');
+      File(
+        p.join(fakeRoot.path, 'native', 'shim_sqlite3.c'),
+      ).writeAsStringSync('void tracelite_test_shim(void) {}\n');
+
+      final existingShim = File(
+        p.join(fakeRoot.path, 'build', 'libsqlite_traced.dylib'),
+      );
+      existingShim.writeAsBytesSync(
+        File(Platform.resolvedExecutable).readAsBytesSync(),
+      );
+      final shimFileResult = await Process.run('file', [existingShim.path]);
+      if (shimFileResult.exitCode != 0 ||
+          !shimFileResult.stdout.toString().contains('x86_64')) {
+        markTestSkipped(
+          'Dart executable is not an x86_64 Mach-O fixture: '
+          '${shimFileResult.stdout}${shimFileResult.stderr}',
+        );
+      }
+      existingShim.setLastModifiedSync(
+        DateTime.now().add(const Duration(minutes: 1)),
+      );
+
+      final fakeCc = File(p.join(temp.path, 'cc'));
+      fakeCc.writeAsStringSync(r'''#!/bin/sh
+set -eu
+out=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "-o" ]; then
+    out="$arg"
+  fi
+  previous="$arg"
+done
+if [ -n "$out" ]; then
+  mkdir -p "$(dirname "$out")"
+  echo "fake rebuilt shim" > "$out"
+fi
+exit 0
+''');
+      await Process.run('chmod', ['+x', fakeCc.path]);
+
+      final packageConfig = jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {
+            'name': 'resqlite',
+            'rootUri': Directory(root).absolute.uri.toString(),
+            'packageUri': 'lib/',
+            'languageVersion': '3.10',
+          },
+        ],
+        'generator': 'fake',
+      });
+
+      final fakeDart = File(p.join(temp.path, 'fake-dart'));
+      fakeDart.writeAsStringSync('''#!/bin/sh
+set -eu
+if [ "\$1" = "--version" ]; then
+  echo 'Dart SDK version: 3.12.1 (stable) on "macos_arm64"' >&2
+  exit 0
+fi
+if [ "\$1" = "pub" ] && [ "\$2" = "get" ]; then
+  mkdir -p .dart_tool
+  cat > .dart_tool/package_config.json <<'JSON'
+$packageConfig
+JSON
+  exit 0
+fi
+if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
+  out=""
+  for arg in "\$@"; do
+    case "\$arg" in
+      --out-dir=*) out="\${arg#--out-dir=}" ;;
+    esac
+  done
+  mkdir -p "\$out/run-001"
+  cat > "\$out/history.json" <<JSON
+{"schema":"tracelite.suite_history.v1","runs":[{"run":1,"name":"run-001","status":"ok","manifest":"\$out/run-001/manifest.json"}]}
+JSON
+  cat > "\$out/run-001/manifest.json" <<JSON
+{"schema":"tracelite.suite.v1","runs":[]}
+JSON
+  exit 0
+fi
+exit 0
+''');
+      await Process.run('chmod', ['+x', fakeDart.path]);
+
+      final outDir = p.join(temp.path, 'benchmark');
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        [
+          'benchmark/run_tracelite.dart',
+          '--tracelite-root=${fakeRoot.path}',
+          '--dart=${fakeDart.path}',
+          '--label=shim-arch',
+          '--out-dir=$outDir',
+          '--no-graph-data',
+          '--allow-unpinned-tracelite',
+        ],
+        workingDirectory: root,
+        environment: {
+          ...Platform.environment,
+          'PATH': '${temp.path}:${Platform.environment['PATH'] ?? ''}',
+        },
+      );
+
+      expect(
+        result.exitCode,
+        0,
+        reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+      );
+      final stdoutText = result.stdout.toString();
+      expect(stdoutText, contains('cc -arch arm64'));
+      expect(stdoutText, isNot(contains('reuse ${existingShim.path}')));
+
+      final manifestFile = File(
+        p.join(outDir, 'resqlite-tracelite-benchmark.json'),
+      );
+      final manifest =
+          jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
+      final steps = manifest['steps']! as List<Object?>;
+      expect(
+        steps[1] as Map<String, Object?>,
+        containsPair('command', contains('cc -arch arm64')),
+      );
+    },
+    skip: Platform.isMacOS ? false : 'Mach-O shim architecture is macOS only',
+  );
+
+  test(
     'tracelite benchmark workflow skips graph export without artifacts',
     () async {
       final root = Directory.current.path;
