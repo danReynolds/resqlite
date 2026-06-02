@@ -780,6 +780,7 @@ _Step _suiteHistoryStep(_Options options, _Paths paths) {
     name: _suiteHistoryStepName,
     executable: options.dartExecutable,
     arguments: [
+      'run',
       'bin/tracelite.dart',
       'suite-history',
       '--profile=${options.profile}',

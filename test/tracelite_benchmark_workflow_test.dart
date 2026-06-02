@@ -326,6 +326,9 @@ $packageConfig
 JSON
   exit 0
 fi
+if [ "\$1" = "run" ]; then
+  shift
+fi
 if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
   out=""
   for arg in "\$@"; do
@@ -433,6 +436,9 @@ if [ "\$1" = "pub" ] && [ "\$2" = "get" ]; then
 $packageConfig
 JSON
   exit 0
+fi
+if [ "\$1" = "run" ]; then
+  shift
 fi
 if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
   out=""
@@ -547,6 +553,9 @@ if [ "\$1" = "pub" ] && [ "\$2" = "get" ]; then
 $packageConfig
 JSON
   exit 0
+fi
+if [ "\$1" = "run" ]; then
+  shift
 fi
 if [ "\$1" = "bin/tracelite.dart" ] && [ "\$2" = "suite-history" ]; then
   out=""
