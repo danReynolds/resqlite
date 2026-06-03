@@ -218,3 +218,36 @@ Outcome:
   `6affacd4d3b83e16d73fafa0c5232f578f25dde4`, dependency binding matched the
   PR worktree, warmup passed, 5/5 recorded runs were `ok`, policy calibration
   was `ready`, graph data validated, and explain completed.
+
+## 2026-06-03 pass
+
+### Loop 10 - r11 merged-main production pin
+
+Tried:
+
+- Published Tracelite pin `resqlite-profiling-gate-2026-06-03-r11` from merged
+  Tracelite main commit `e562d94237de9805398c584268704ab2c2b2f85b`.
+- Updated the resqlite wrapper source pin and CI checkout from r10 to r11.
+- Reran a CI-sized smoke profile against the r11 pin.
+- Reran the full production profile against a clean resqlite pin-update commit.
+
+Outcome:
+
+- CI smoke `ci-pin-r11-main-2026-06-03-r2` passed: source provenance accepted,
+  dependency binding matched the PR worktree, 1/1 `suite-history` run was `ok`,
+  policy calibration was `ready`, graph data validated, and explain completed.
+- Production evidence `production-pin-r11-resqlite-policy-2026-06-03-r1`
+  passed with clean Tracelite source
+  `e562d94237de9805398c584268704ab2c2b2f85b`, clean resqlite source
+  `387ebd1ec0fe3d876859194c7f36835298233ec1`, dependency binding matched the
+  PR worktree, arm64 Dart matched the arm64 host, warmup passed, 5/5 recorded
+  runs were `ok`, policy calibration was `ready`, graph data validated, and
+  explain completed.
+- The strict policy scenarios were both ready: `high-cardinality-fanout` had
+  0.71% observed noise and 0% outliers, while
+  `many-streams-writer-throughput` had 0.73% observed noise and 5.71% outliers,
+  all within the 5% max-CV and 15% total-outlier gates.
+- Explain still reports low traced coverage and harness-dominated child wall
+  time in some artifacts, especially `sqlite-diagnostics`. Those warnings are
+  instrumentation guidance; the release gate remains based on calibrated
+  measured elapsed policy for the two strict production workloads.

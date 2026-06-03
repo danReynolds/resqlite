@@ -91,7 +91,7 @@ The preferred workflow is the wrapper:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-02-r10
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-03-r11
 
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
@@ -119,7 +119,7 @@ Compatibility/parity artifacts:
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
-`d058647a123df0f4af223a110564b862de2eda05` or is dirty. Use
+`e562d94237de9805398c584268704ab2c2b2f85b` or is dirty. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development. The package code only keeps the compile-time trace
 emitters.

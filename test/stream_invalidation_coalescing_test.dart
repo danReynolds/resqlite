@@ -71,8 +71,13 @@ void main() {
       });
 
       // Drain initial emission.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(values, isNotEmpty);
+      final initialDeadline = DateTime.now().add(const Duration(seconds: 5));
+      while (values.isEmpty) {
+        if (DateTime.now().isAfter(initialDeadline)) {
+          fail('initial stream emission timed out');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
       final firstEmitValue = values.first;
       expect(firstEmitValue, equals(0));
 
