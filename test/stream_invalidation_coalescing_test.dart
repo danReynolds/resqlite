@@ -70,13 +70,14 @@ void main() {
         }
       });
 
-      // Drain initial emission.
+      // Drain initial emission. Poll instead of a hard wait so the test
+      // is not sensitive to reader-dispatch latency on slow runners.
       final initialDeadline = DateTime.now().add(const Duration(seconds: 5));
       while (values.isEmpty) {
         if (DateTime.now().isAfter(initialDeadline)) {
-          fail('initial stream emission timed out');
+          fail('stream never emitted an initial value');
         }
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
       }
       final firstEmitValue = values.first;
       expect(firstEmitValue, equals(0));
