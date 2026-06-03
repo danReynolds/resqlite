@@ -3,6 +3,7 @@
 **Date:** 2026-06-03
 **Status:** In Review
 **Direction:** `stream-rerun-dispatch` `measurement-system`
+**Benchmark Run:** None
 
 ## Problem
 

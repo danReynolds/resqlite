@@ -9,12 +9,16 @@
 // waiter queue is continuously refilled across many wake/admit cycles
 // while late lanes overlap early lanes' completions."
 //
-// signals.json#stream-rerun-dispatch.openCandidates lists
-// "long-running concurrent-reads workload that sustains parked
-// dispatchers past pool size" (addedAfter: 115, addedDate:
-// 2026-04-30). exp 114's archive future-notes ask the same thing:
-// dispatch-internal optimization can only be re-evaluated against a
-// workload that surfaces non-zero wake retries.
+// This harness closed the `long-running concurrent-reads workload
+// that sustains parked dispatchers past pool size` open candidate
+// previously tracked under
+// `signals.json#stream-rerun-dispatch.openCandidates` (added
+// 2026-04-30, addedAfter exp 115). It survives in the signal map as
+// the gate for any future reader-pool dispatch idea — see
+// `signals.json#stream-rerun-dispatch.notesForExperimenters` and exp
+// 114's archive future-notes: dispatch-internal optimization can
+// only be re-evaluated against a workload that surfaces non-zero
+// wake retries.
 //
 // Lane pattern. Each of `concurrency` lanes runs a loop:
 //   while (sw.elapsedMilliseconds < durationMs) await _query(...);
