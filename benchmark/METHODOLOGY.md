@@ -47,11 +47,13 @@ isolate offloading is in play.
   are the columns the public dashboard and its downstream parsers
   (`parse_results.dart`, `generate_devices.dart`) expect, so they
   stay fixed for backward compatibility.
-- **Percentiles reported in profile mode** (`run_profile.dart`):
-  median, p90, p99, and max. p99/max are where tail-latency
-  regressions (GC pauses, WAL checkpoint stalls, isolate scheduler
-  preemption) actually hide — exp 083 showed passive WAL checkpoints
-  drove merge-round p99 by 57% while p50/p90 were unchanged.
+- **Percentiles reported in profile mode**
+  (`profile/run_tracelite_profile.dart`, with `run_profile.dart` retained
+  as the legacy JSON compatibility harness): median, p90, p99, and max.
+  p99/max are where tail-latency regressions (GC pauses, WAL checkpoint
+  stalls, isolate scheduler preemption) actually hide — exp 083 showed
+  passive WAL checkpoints drove merge-round p99 by 57% while p50/p90 were
+  unchanged.
 - **Noise-aware comparison**: `run_release.dart --compare-to=<baseline>` uses
   threshold `max(10%, 3 × current MAD%, current MDE_ci)` with a `±0.02 ms`
   absolute floor. The comparison is intentionally anchored on current-run

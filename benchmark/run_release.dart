@@ -8,13 +8,11 @@
 // the public dashboard and HARDWARE_RESULTS.md.
 //
 // **If you are running an experiment** on a branch and want to know
-// whether your change helped or hurt, use `benchmark/run_profile.dart`
-// instead — that harness compiles in Timeline markers + ProfiledDatabase
-// instrumentation (gated behind `kProfileMode`) so you can see
-// dispatch-vs-work splits, p99/max regressions, and cross-isolate
-// timelines. Both your experiment branch and its baseline run under
-// the same profile build, so the diagnostic overhead cancels out in
-// the A/B delta.
+// whether your change helped or hurt, use the tracelite wrappers instead:
+// `benchmark/run_tracelite.dart` for suite-level baseline/candidate artifacts
+// and `benchmark/profile/run_tracelite_profile.dart` for profile-mode
+// diagnostics. Direct `benchmark/run_profile.dart` is retained only for legacy
+// JSON compatibility/parity checks.
 //
 // See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
 import 'dart:io' show Directory, File, Process, exit, stderr;

@@ -23,7 +23,7 @@
   body {
     background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    padding: 2rem; line-height: 1.5;
+    padding: 2rem; line-height: 1.5; overflow-x: hidden;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -35,11 +35,11 @@
   }
   .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
   .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
-  .grid.full { grid-template-columns: 1fr; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+  .grid.full { grid-template-columns: minmax(0, 1fr); }
   .card {
     background: var(--card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 1.25rem;
+    border-radius: 10px; padding: 1.25rem; min-width: 0;
   }
   .card.focused {
     border-color: rgba(88,166,255,0.65);
@@ -75,7 +75,8 @@
     white-space: nowrap;
   }
   .chart-detail-btn:hover { text-decoration: underline; }
-  .chart-wrap { position: relative; width: 100%; }
+  .chart-wrap { position: relative; width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+  canvas { max-width: 100%; }
   .chart-wrap.tall { height: 350px; }
   .chart-wrap.short { height: 280px; }
   .section-title {
@@ -94,7 +95,7 @@
   }
   .device-bar input[type=number] { width: 4rem; cursor: text; }
   .device-bar .device-meta { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
-  .mode-tabs { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .mode-tabs { display: inline-flex; max-width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; }
   .mode-tabs button {
     background: transparent; color: var(--muted); border: 0;
     padding: 0.4rem 0.85rem; font-size: 0.82rem; font-family: inherit; cursor: pointer;
@@ -143,7 +144,7 @@
     cursor: pointer;
   }
   .helper-pill:hover { text-decoration: underline; }
-  .callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+  .callouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
   .callout { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; text-align: center; }
   .callout .big { font-size: 2rem; font-weight: 700; color: var(--win); }
   .callout .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
@@ -166,6 +167,51 @@
     padding: 0.75rem 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border);
   }
   .contribute-note a { color: var(--accent); }
+  .tracelite-panel { display: none; }
+  .tracelite-meta {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .tracelite-meta-item {
+    background: rgba(88,166,255,0.06);
+    border: 1px solid rgba(88,166,255,0.18);
+    border-radius: 8px;
+    padding: 0.75rem;
+    min-width: 0;
+  }
+  .tracelite-meta-item .label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.25rem;
+  }
+  .tracelite-meta-item .value {
+    display: block;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .tracelite-table-wrap {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .tracelite-table-wrap table { min-width: 760px; }
+  .status-pill {
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+  .status-ok { background: rgba(63,185,80,0.14); color: var(--win); }
+  .status-unsupported { background: rgba(139,148,158,0.14); color: var(--muted); }
+  .status-failed { background: rgba(248,81,73,0.14); color: #ff7b72; }
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -227,8 +273,42 @@
   }
   .modal-body li + li { margin-top: 0.25rem; }
   @media (max-width: 900px) {
-    .grid { grid-template-columns: 1fr; }
-    .callouts { grid-template-columns: 1fr 1fr; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .callouts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .tracelite-meta { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    body { padding: 1rem; }
+    body > *,
+    #chartsContainer,
+    #tracelitePanel,
+    .device-bar,
+    .legend-bar,
+    .kind-tabs,
+    .helper-bar,
+    .grid,
+    .card,
+    .callouts {
+      width: 100%;
+      max-width: 100%;
+    }
+    h1 { font-size: 1.45rem; overflow-wrap: anywhere; }
+    .card { overflow: hidden; }
+    .card .desc,
+    .why {
+      overflow-wrap: anywhere;
+    }
+    .device-bar { align-items: stretch; }
+    .device-bar select { width: 100%; min-width: 0; }
+    .device-bar .device-meta { margin-left: 0; overflow-wrap: anywhere; }
+    .mode-tabs { width: 100%; }
+    .mode-tabs button { flex: 0 0 auto; }
+    .callouts { grid-template-columns: minmax(0, 1fr); }
+    .chart-wrap.tall { height: 280px; }
+    .chart-wrap.short { height: 240px; }
+    .chart-wrap canvas { min-width: 560px; }
+    .card { padding: 1rem; }
+    .tracelite-meta { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -272,6 +352,11 @@
 
 <div id="chartsContainer">
   <div class="loading">Loading benchmark data...</div>
+</div>
+
+<div id="tracelitePanel" class="tracelite-panel">
+  <h3 class="section-title">Tracelite Profile &amp; Trace Data</h3>
+  <div id="traceliteContainer"></div>
 </div>
 
 <div id="detailModalBackdrop" class="modal-backdrop hidden" role="presentation">
@@ -965,6 +1050,7 @@ function dedupeLibs(libs) {
 let allCharts = [];
 let devicesData = null;
 let historyData = null; // lazy-loaded when runs mode is first used
+let traceliteGraphData = null; // optional graph-data bundle under docs/benchmarks/data/tracelite/latest
 let currentMode = 'peer';
 let currentKind = 'micro';   // 'micro' | 'scenarios'
 let currentScenarioId = 'chatSim'; // default scenario; overwritten on dropdown change
@@ -1034,6 +1120,39 @@ async function ensureRunsModeReady() {
   }
 }
 
+const TRACELITE_GRAPH_BASE = './data/tracelite/latest';
+const TRACELITE_DATASETS = [
+  'scenario_series',
+  'peer_summary',
+  'decision_summary',
+  'decision_comparisons',
+  'workload_summary',
+  'workload_operations',
+  'workload_memory',
+  'workload_fanout',
+];
+
+async function loadTraceliteGraphData() {
+  try {
+    const indexResp = await fetch(`${TRACELITE_GRAPH_BASE}/index.json`, { cache: 'no-store' });
+    if (!indexResp.ok) return null;
+    const index = await indexResp.json();
+    const datasets = {};
+    for (const dataset of TRACELITE_DATASETS) {
+      const file = index.files?.[dataset];
+      if (!file) {
+        datasets[dataset] = { rows: [] };
+        continue;
+      }
+      const resp = await fetch(`${TRACELITE_GRAPH_BASE}/${file}`, { cache: 'no-store' });
+      datasets[dataset] = resp.ok ? await resp.json() : { rows: [] };
+    }
+    return { index, datasets };
+  } catch (_) {
+    return null;
+  }
+}
+
 async function init() {
   try {
     const resp = await fetch('./devices.json', { cache: 'no-store' });
@@ -1049,6 +1168,7 @@ async function init() {
     return;
   }
 
+  traceliteGraphData = await loadTraceliteGraphData();
   loadStateFromUrl(devices.length);
 
   const select = document.getElementById('deviceSelect');
@@ -1331,8 +1451,266 @@ function renderView(dev, view) {
   } else {
     renderMicrobenchmarksView(B);
   }
+  renderTracelitePanel();
   syncUrlState();
   requestAnimationFrame(() => applyFocusTarget());
+}
+
+function renderTracelitePanel() {
+  const panel = document.getElementById('tracelitePanel');
+  const container = document.getElementById('traceliteContainer');
+  if (!traceliteGraphData) {
+    panel.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  const index = traceliteGraphData.index;
+  const datasets = traceliteGraphData.datasets;
+  const workloadOperations = datasets.workload_operations?.rows ?? [];
+  const workloadMemory = datasets.workload_memory?.rows ?? [];
+  const peerSummary = datasets.peer_summary?.rows ?? [];
+  const decisionSummary = datasets.decision_summary?.rows ?? [];
+  const hasOperationRows = workloadOperations.length > 0;
+  const hasMemoryRows = workloadMemory.length > 0;
+  const hasProfileRows = hasOperationRows || hasMemoryRows;
+  const hasPeerRows = peerSummary.length;
+  const hasDecisionRows = decisionSummary.length;
+
+  if (!hasProfileRows && !hasPeerRows && !hasDecisionRows) {
+    panel.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  panel.style.display = 'block';
+  container.innerHTML = `
+    <div class="tracelite-meta">
+      <div class="tracelite-meta-item">
+        <span class="label">Run</span>
+        <span class="value">${escapeHtml(index.run_id || 'latest')}</span>
+      </div>
+      <div class="tracelite-meta-item">
+        <span class="label">Generated</span>
+        <span class="value">${escapeHtml(formatIsoDate(index.generated_at))}</span>
+      </div>
+      <div class="tracelite-meta-item">
+        <span class="label">Sources</span>
+        <span class="value">${index.sources?.length ?? 0}</span>
+      </div>
+      <div class="tracelite-meta-item">
+        <span class="label">Datasets</span>
+        <span class="value">${Object.values(index.counts || {}).reduce((a, b) => a + Number(b || 0), 0)} rows</span>
+      </div>
+    </div>
+    ${hasProfileRows ? `
+      <div class="grid">
+        ${hasOperationRows ? `
+          <div class="card">
+            <h2>Profile Operation Latency</h2>
+            <p class="desc">Generated from tracelite workload-summary graph data. Lower is better.</p>
+            <div class="chart-wrap short"><canvas id="cTraceliteOperations"></canvas></div>
+          </div>
+        ` : ''}
+        ${hasMemoryRows ? `
+          <div class="card">
+            <h2>Profile Memory Deltas</h2>
+            <p class="desc">RSS plus SQLite diagnostic deltas exported from tracelite gauges.</p>
+            <div class="chart-wrap short"><canvas id="cTraceliteMemory"></canvas></div>
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+    ${hasPeerRows ? renderTracelitePeerSummary(peerSummary) : ''}
+    ${hasDecisionRows ? renderTraceliteDecisionSummary(decisionSummary) : ''}
+  `;
+
+  if (workloadOperations.length) {
+    buildTraceliteOperationChart(workloadOperations, 'cTraceliteOperations');
+  }
+  if (workloadMemory.length) {
+    buildTraceliteMemoryChart(workloadMemory, 'cTraceliteMemory');
+  }
+}
+
+function renderTracelitePeerSummary(rows) {
+  const sorted = rows.slice().sort((a, b) =>
+    String(a.scenario).localeCompare(String(b.scenario)) ||
+    String(a.peer).localeCompare(String(b.peer)));
+  return `
+    <div class="card">
+      <h2>Cross-Library Trace Summary</h2>
+      <p class="desc">Measured phase, SQLite work, event volume, and trace health from tracelite compare/suite artifacts.</p>
+      <div class="tracelite-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>Peer</th>
+              <th>Status</th>
+              <th>Measured ms</th>
+              <th>SQLite ms</th>
+              <th>Steps</th>
+              <th>Events</th>
+              <th>Trace health</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.map(row => `
+              <tr>
+                <td>${escapeHtml(row.scenario)}</td>
+                <td>${escapeHtml(row.peer)}</td>
+                <td>${statusPill(row.peer_status)}</td>
+                <td>${formatNs(row.measured_elapsed_mean_ns)}</td>
+                <td>${formatNs(row.sqlite3_step_total_mean_ns)}</td>
+                <td>${formatNumber(row.sqlite3_step_count_mean)}</td>
+                <td>${formatNumber(row.events_mean)}</td>
+                <td>${traceHealth(row)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderTraceliteDecisionSummary(rows) {
+  return `
+    <div class="card">
+      <h2>Decision Artifacts</h2>
+      <p class="desc">Accepted, rejected, or inconclusive experiment decisions from tracelite decision artifacts.</p>
+      <div class="tracelite-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Decision</th>
+              <th>Expectation</th>
+              <th>Primary peer</th>
+              <th>Primary metric</th>
+              <th>Trace health</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => `
+              <tr>
+                <td>${statusPill(row.decision)}</td>
+                <td>${escapeHtml(row.expectation || '')}</td>
+                <td>${escapeHtml(row.primary_peer || '')}</td>
+                <td>${escapeHtml(row.primary_metric || '')}</td>
+                <td>${escapeHtml(row.trace_health || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function buildTraceliteOperationChart(rows, canvasId) {
+  const points = pivotRows(rows, ['workload', 'operation']);
+  const labels = points.map(p => `${p.workload} · ${p.operation}`);
+  const dataFor = metric => points.map(p => toMs(p.metrics[metric]));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'p50', data: dataFor('median_us'), backgroundColor: '#58a6ff' },
+        { label: 'p99', data: dataFor('p99_us'), backgroundColor: '#a371f7' },
+        { label: 'work median', data: dataFor('work_us_median'), backgroundColor: '#3fb950' },
+      ],
+    },
+    options: barOpts('Milliseconds (ms)', { valueLabels: true }),
+  }));
+}
+
+function buildTraceliteMemoryChart(rows, canvasId) {
+  const points = pivotRows(rows, ['workload']);
+  const labels = points.map(p => p.workload);
+  const dataFor = metric => points.map(p => memoryValueMb(metric, p.metrics[metric]));
+  allCharts.push(new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'RSS delta', data: dataFor('rss_delta_mb'), backgroundColor: '#58a6ff' },
+        { label: 'page cache delta', data: dataFor('diagnostics_delta.sqlite_page_cache_bytes_delta'), backgroundColor: '#14b8a6' },
+        { label: 'stmt delta', data: dataFor('diagnostics_delta.sqlite_stmt_bytes_delta'), backgroundColor: '#f0883e' },
+        { label: 'WAL delta', data: dataFor('diagnostics_delta.wal_bytes_delta'), backgroundColor: '#a371f7' },
+      ],
+    },
+    options: barOpts('Megabytes (MB)', { valueLabels: true }),
+  }));
+}
+
+function pivotRows(rows, keyFields) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = keyFields.map(field => row[field] ?? '').join('\u0001');
+    if (!byKey.has(key)) {
+      const point = { metrics: {} };
+      for (const field of keyFields) point[field] = row[field] ?? '';
+      byKey.set(key, point);
+    }
+    byKey.get(key).metrics[row.metric] = row.value;
+  }
+  return [...byKey.values()];
+}
+
+function toMs(value) {
+  return value == null ? null : Number(value) / 1000;
+}
+
+function memoryValueMb(metric, value) {
+  if (value == null) return null;
+  const n = Number(value);
+  return metric === 'rss_delta_mb' ? n : n / (1024 * 1024);
+}
+
+function formatNs(value) {
+  if (value == null) return '—';
+  return (Number(value) / 1000000).toFixed(2);
+}
+
+function formatNumber(value) {
+  if (value == null) return '—';
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+function formatIsoDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
+function traceHealth(row) {
+  const dropped = Number(row.dropped_events_max || 0);
+  const begin = Number(row.unmatched_begin_events_max || 0);
+  const end = Number(row.unmatched_end_events_max || 0);
+  return `${dropped}/${begin}/${end}`;
+}
+
+function statusPill(status) {
+  const raw = String(status || '');
+  const normalized = raw.toLowerCase();
+  const cls = normalized === 'ok' || normalized === 'accepted' || normalized === 'pass'
+    ? 'status-ok'
+    : normalized === 'unsupported'
+      ? 'status-unsupported'
+      : 'status-failed';
+  return `<span class="status-pill ${cls}">${escapeHtml(raw || 'unknown')}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 // ── Microbenchmarks view — the core per-API charts (select, write,

@@ -1,5 +1,6 @@
 /// Shared workload definitions, schema setup, and stats helpers for the
-/// profile-mode harnesses (`dispatch_budget.dart`, `run_profile.dart`).
+/// profile-mode harnesses (`run_tracelite_profile.dart`, `dispatch_budget.dart`,
+/// and the legacy `run_profile.dart` JSON compatibility command).
 ///
 /// Kept in one place so both entry points measure identical work, any
 /// workload change lands in a single file, and percentile / aggregate

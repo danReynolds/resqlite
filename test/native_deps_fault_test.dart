@@ -38,6 +38,7 @@ void main() {
         reason: 'stdout:\n${run.stdout}\nstderr:\n${run.stderr}',
       );
     },
+    timeout: const Timeout(Duration(minutes: 2)),
     skip: Platform.isWindows
         ? 'native dependency test expects a POSIX C compiler'
         : false,

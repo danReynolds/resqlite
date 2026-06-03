@@ -1,7 +1,8 @@
 /// Timing + meta for a single instrumented Database call.
 ///
-/// Produced by `ProfiledDatabase` and consumed by the profile-mode
-/// harnesses (`run_profile.dart`, `dispatch_budget.dart`). See
+/// Produced by `ProfiledDatabase` and consumed by the profile-mode harnesses.
+/// The preferred entry point is `run_tracelite_profile.dart`, which also
+/// preserves the legacy `run_profile.dart` JSON shape for compatibility. See
 /// `benchmark/EXPERIMENTS.md` for the full workflow.
 ///
 /// Stays entirely in `benchmark/profile/` so production code is not

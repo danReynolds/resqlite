@@ -23,3 +23,4 @@ benchmark/drift/*.g.dart
 # the aggregate markdown written by `benchmark/profile/diff_multirun.dart`
 # instead. Enforced by the `guard-raw-profile-json` job in ci.yml.
 benchmark/profile/results/*.json
+benchmark/profile/results/tracelite/

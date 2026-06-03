@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   guard-raw-profile-json:
     # Block raw per-sample profile JSONs (~15 MB each) from landing on main.
@@ -16,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Check PR diff for benchmark/profile/results/*.json
@@ -35,7 +38,7 @@ jobs:
     name: Tests
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -52,12 +55,14 @@ jobs:
         run: dart analyze --fatal-infos
       - name: Run tests
         run: dart test --timeout 60s
+      - name: Verify trace_sqlite native hook mode
+        run: dart run tool/trace_sqlite_smoke.dart
 
   benchmark-generated-data:
     name: Benchmark generated data freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -68,6 +73,40 @@ jobs:
       - name: Verify experiment research map is valid
         run: dart run benchmark/check_experiment_signals.dart
 
+  tracelite-smoke:
+    name: Tracelite smoke
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+      - name: Checkout pinned tracelite
+        run: |
+          git clone https://github.com/danReynolds/tracelite /tmp/tracelite
+          git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-06-03-r11
+      - name: Run tracelite CI preset
+        env:
+          RESQLITE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RESQLITE_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          dart run benchmark/run_tracelite.dart \
+            --preset=ci \
+            --tracelite-root=/tmp/tracelite \
+            --resqlite-root="$PWD" \
+            --label="ci-${{ github.sha }}" \
+            --out-dir=build/tracelite-benchmarks/ci-${{ github.sha }}
+      - name: Upload tracelite smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracelite-smoke
+          path: build/tracelite-benchmarks/ci-${{ github.sha }}
+          retention-days: 14
+
   benchmark:
     name: Benchmarks (main)
     runs-on: macos-latest
@@ -75,7 +114,7 @@ jobs:
     # Trend-tracking artifact upload. Only runs on pushes to main.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable

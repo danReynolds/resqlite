@@ -1,9 +1,11 @@
 // ignore_for_file: avoid_print
 //
-// A/B diff tool for profile-mode benchmark runs.
+// Legacy profile JSON A/B diff tool.
 //
-// Reads two JSON files produced by `benchmark/run_profile.dart` (or
-// `dispatch_budget.dart`) and prints a side-by-side delta table.
+// Reads two legacy profile JSON files produced by `benchmark/run_profile.dart`
+// (or `dispatch_budget.dart`) and prints a side-by-side delta table. New
+// profile experiments should prefer `run_tracelite_profile.dart`, which also
+// writes a compatibility JSON for this tool.
 //
 // Usage:
 //   dart run benchmark/profile/diff.dart <baseline.json> <candidate.json>
@@ -32,10 +34,13 @@ Future<void> main(List<String> args) async {
     print('Usage: dart run benchmark/profile/diff.dart '
         '<baseline.json> <candidate.json>');
     print('');
-    print('Both files should be produced by benchmark/run_profile.dart');
-    print('or benchmark/profile/dispatch_budget.dart. Newer run_profile.dart');
-    print('JSONs also carry RSS + SQLite memory deltas; those sections are');
-    print('skipped gracefully when absent.');
+    print('Both files should be legacy profile JSON produced by');
+    print(
+      'benchmark/run_profile.dart, benchmark/profile/dispatch_budget.dart,',
+    );
+    print('or benchmark/profile/run_tracelite_profile.dart. Newer profile');
+    print('JSONs carry RSS + SQLite memory deltas; those sections are skipped');
+    print('gracefully when absent.');
     exit(args.contains('--help') || args.contains('-h') ? 0 : 2);
   }
 

@@ -80,16 +80,23 @@ final class Writer {
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
     return _request<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(sql, parameters, replyPort),
+      (replyPort) => ExecuteRequest(
+        sql,
+        parameters,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
   }
 
   Future<BatchResponse?> executeBatch(
     String sql,
-    List<List<Object?>> paramSets,
-  ) async {
+    List<List<Object?>> paramSets, {
+    int? traceCorrelationId,
+  }) async {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -101,16 +108,27 @@ final class Writer {
     assertUniformParamSets(sql, paramSets);
 
     return _request<BatchResponse>(
-      (replyPort) => BatchRequest(sql, paramSets, replyPort),
+      (replyPort) => BatchRequest(
+        sql,
+        paramSets,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
   }
 
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
+    int? traceCorrelationId,
   ]) async {
     final response = await _request<QueryResponse>(
-      (replyPort) => QueryRequest(sql, parameters, replyPort),
+      (replyPort) => QueryRequest(
+        sql,
+        parameters,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
     return response.rows;
   }
@@ -127,10 +145,18 @@ final class Writer {
   ///    failed (best-effort rollback + `txDepth` reset), so re-sending
   ///    `RollbackRequest` would either no-op against a non-existent
   ///    transaction or, worse, roll back some *other* enclosing scope.
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) async {
-    await _request<bool>((replyPort) => BeginRequest(replyPort));
+  Future<T> transaction<T>(
+    Future<T> Function(Transaction tx) body, {
+    int? traceCorrelationId,
+  }) async {
+    await _request<bool>(
+      (replyPort) => BeginRequest(
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
 
-    final tx = Transaction(this);
+    final tx = Transaction(this, traceCorrelationId: traceCorrelationId);
     final T result;
     try {
       try {
@@ -143,7 +169,12 @@ final class Writer {
       }
     } catch (_) {
       try {
-        await _request<bool>((replyPort) => RollbackRequest(replyPort));
+        await _request<bool>(
+          (replyPort) => RollbackRequest(
+            replyPort,
+            traceCorrelationId: traceCorrelationId,
+          ),
+        );
       } catch (_) {
         // Swallow rollback errors — propagating them would mask the
         // original body error, which is what the caller actually needs
@@ -158,11 +189,17 @@ final class Writer {
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
     final response = await _request<BatchResponse>(
-      (replyPort) => CommitRequest(replyPort),
+      (replyPort) => CommitRequest(
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
 
     if (Transaction.current == null) {
-      _streamEngine.onDependencyChanges(response.modifications);
+      _streamEngine.onDependencyChanges(
+        response.modifications,
+        traceCorrelationId: traceCorrelationId,
+      );
     }
 
     return result;

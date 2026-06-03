@@ -20,19 +20,26 @@ import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
+import '../tracelite_profile.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
 // ---------------------------------------------------------------------------
 
 sealed class WriterRequest {
-  WriterRequest(this.replyPort);
+  WriterRequest(this.replyPort, {this.traceCorrelationId});
   final SendPort replyPort;
+  final int? traceCorrelationId;
 }
 
 /// Single parameterized write (INSERT, UPDATE, DELETE, DDL).
 final class ExecuteRequest extends WriterRequest {
-  ExecuteRequest(this.sql, this.params, super.replyPort);
+  ExecuteRequest(
+    this.sql,
+    this.params,
+    super.replyPort, {
+    super.traceCorrelationId,
+  });
   final String sql;
   final List<Object?> params;
 }
@@ -40,31 +47,41 @@ final class ExecuteRequest extends WriterRequest {
 /// Read query within a transaction — runs on the writer connection so it
 /// sees uncommitted writes from earlier statements in the same transaction.
 final class QueryRequest extends WriterRequest {
-  QueryRequest(this.sql, this.params, super.replyPort);
+  QueryRequest(
+    this.sql,
+    this.params,
+    super.replyPort, {
+    super.traceCorrelationId,
+  });
   final String sql;
   final List<Object?> params;
 }
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
 final class BatchRequest extends WriterRequest {
-  BatchRequest(this.sql, this.paramSets, super.replyPort);
+  BatchRequest(
+    this.sql,
+    this.paramSets,
+    super.replyPort, {
+    super.traceCorrelationId,
+  });
   final String sql;
   final List<List<Object?>> paramSets;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
 final class BeginRequest extends WriterRequest {
-  BeginRequest(super.replyPort);
+  BeginRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(super.replyPort);
+  CommitRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
 final class RollbackRequest extends WriterRequest {
-  RollbackRequest(super.replyPort);
+  RollbackRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Shut down the writer isolate.
@@ -103,13 +120,12 @@ final class BatchResponse {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-  ffi.Pointer<ffi.Void> Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
+    ffi.Pointer<ffi.Void> Function(
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Void>,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.Int,
+    )>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Void> sql,
@@ -169,6 +185,14 @@ void writerEntrypoint(List<Object> args) {
     // and experiments/080-dispatch-budget.md).
     if (kProfileMode) {
       Timeline.startSync('writer.handle.${message.runtimeType}');
+      final typeId = TraceliteProfile.internString(
+        message.runtimeType.toString(),
+      );
+      TraceliteProfile.begin(
+        TraceliteResqliteSpans.writerHandle,
+        args: [typeId],
+        correlationId: message.traceCorrelationId,
+      );
     }
     try {
       switch (message) {
@@ -206,6 +230,10 @@ void writerEntrypoint(List<Object> args) {
     } finally {
       if (kProfileMode) {
         Timeline.finishSync();
+        TraceliteProfile.end(
+          TraceliteResqliteSpans.writerHandle,
+          correlationId: message.traceCorrelationId,
+        );
       }
     }
   };

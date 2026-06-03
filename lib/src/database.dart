@@ -6,14 +6,17 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/transaction.dart';
+import 'package:resqlite/src/writer/write_worker.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
 import 'native/resqlite_bindings.dart';
+import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
+import 'tracelite_profile.dart';
 
 part 'extensions/registration.dart';
 part 'native/open_database.dart';
@@ -224,7 +227,20 @@ final class Database {
     // via the pool's drain semantics, while reads still parked on the
     // pool future bail out cleanly.
     final _DatabaseRuntime(:readerPool) = await _runtime;
-    return readerPool.select(sql, parameters);
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    if (correlationId == null) {
+      return readerPool.select(sql, parameters);
+    }
+    final sqlId = TraceliteProfile.internString(sql);
+    return TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseSelect,
+      () => readerPool.select(sql, parameters, correlationId),
+      correlationId: correlationId,
+      beginArgs: [sqlId, parameters.length],
+      endArgs: (rows) => [rows.length],
+    );
   }
 
   /// Executes a query and returns the result as JSON-encoded bytes.
@@ -264,7 +280,20 @@ final class Database {
     _ensureOpen();
 
     final _DatabaseRuntime(:readerPool) = await _runtime;
-    return readerPool.selectBytes(sql, parameters);
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    if (correlationId == null) {
+      return readerPool.selectBytes(sql, parameters);
+    }
+    final sqlId = TraceliteProfile.internString(sql);
+    return TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseSelectBytes,
+      () => readerPool.selectBytes(sql, parameters, correlationId),
+      correlationId: correlationId,
+      beginArgs: [sqlId, parameters.length],
+      endArgs: (bytes) => [bytes.length],
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -351,9 +380,31 @@ final class Database {
     _ensureOpen();
 
     final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
-    final response = await writer.locked(() => writer.execute(sql, parameters));
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
 
-    streamEngine.onDependencyChanges(response.modifications);
+    Future<ExecuteResponse> write() =>
+        writer.locked(() => writer.execute(sql, parameters, correlationId));
+
+    final ExecuteResponse response;
+    if (correlationId == null) {
+      response = await write();
+    } else {
+      final sqlId = TraceliteProfile.internString(sql);
+      response = await TraceliteProfile.traceAsync(
+        TraceliteResqliteSpans.databaseExecute,
+        write,
+        correlationId: correlationId,
+        beginArgs: [sqlId, parameters.length],
+        endArgs: (response) => [response.result.affectedRows],
+      );
+    }
+
+    streamEngine.onDependencyChanges(
+      response.modifications,
+      traceCorrelationId: correlationId,
+    );
 
     return response.result;
   }
@@ -387,12 +438,37 @@ final class Database {
 
     final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
 
-    final response = await writer.locked(
-      () => writer.executeBatch(sql, paramSets),
-    );
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+
+    Future<BatchResponse?> write() => writer.locked(
+          () => writer.executeBatch(
+            sql,
+            paramSets,
+            traceCorrelationId: correlationId,
+          ),
+        );
+
+    final BatchResponse? response;
+    if (correlationId == null) {
+      response = await write();
+    } else {
+      final sqlId = TraceliteProfile.internString(sql);
+      final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
+      response = await TraceliteProfile.traceAsync(
+        TraceliteResqliteSpans.databaseExecuteBatch,
+        write,
+        correlationId: correlationId,
+        beginArgs: [sqlId, paramCount, paramSets.length],
+      );
+    }
 
     if (response != null) {
-      streamEngine.onDependencyChanges(response.modifications);
+      streamEngine.onDependencyChanges(
+        response.modifications,
+        traceCorrelationId: correlationId,
+      );
     }
   }
 
@@ -428,7 +504,20 @@ final class Database {
 
     final runtime = await _runtime;
     final writer = runtime.writer;
-    return writer.locked(() => writer.transaction(body));
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    Future<T> run() => writer.locked(
+          () => writer.transaction(body, traceCorrelationId: correlationId),
+        );
+    if (correlationId == null) {
+      return run();
+    }
+    return TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseTransaction,
+      run,
+      correlationId: correlationId,
+    );
   }
 
   // -------------------------------------------------------------------------

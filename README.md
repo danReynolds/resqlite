@@ -61,6 +61,8 @@ Measured on a 10-core Apple M1 Pro, Dart 3.11, macOS 26.2. Results will vary by 
 
 See the full comparison in the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/), or run the benchmarks on your machine and [add your results](https://github.com/danReynolds/resqlite/blob/main/benchmark/HARDWARE_RESULTS.md).
 
+Pre-publish profiling now uses the trace-backed [`benchmark/run_tracelite.dart`](benchmark/run_tracelite.dart) gate, which preserves suite history, calibrated policy artifacts, and dashboard-ready graph data.
+
 ## Reactive Queries
 
 ```dart

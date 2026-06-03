@@ -21,6 +21,7 @@ library;
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
+import 'package:resqlite/src/tracelite_profile.dart';
 
 import 'profile_sample.dart';
 
@@ -43,16 +44,46 @@ class ProfiledDatabase {
     List<Object?> parameters = const [],
     String? tag,
   ]) async {
+    final traceCorrelationId = TraceliteProfile.isEnabled
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    final opId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString('execute');
+    final sqlId =
+        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final tagId = traceCorrelationId == null || tag == null
+        ? null
+        : TraceliteProfile.internString(tag);
+    if (traceCorrelationId != null) {
+      TraceliteProfile.asyncBegin(
+        TraceliteResqliteSpans.profileSample,
+        correlationId: traceCorrelationId,
+        args: [opId!, sqlId!, parameters.length, if (tagId != null) tagId],
+      );
+    }
     final sw = Stopwatch()..start();
-    await _db.execute(sql, parameters);
-    sw.stop();
-    samples.add(ProfileSample(
-      op: 'execute',
-      sql: sql,
-      totalMicros: sw.elapsedMicroseconds,
-      paramCount: parameters.length,
-      tag: tag,
-    ));
+    try {
+      await _db.execute(sql, parameters);
+    } finally {
+      sw.stop();
+      if (traceCorrelationId != null) {
+        TraceliteProfile.asyncEnd(
+          TraceliteResqliteSpans.profileSample,
+          correlationId: traceCorrelationId,
+          args: [sw.elapsedMicroseconds],
+        );
+      }
+    }
+    samples.add(
+      ProfileSample(
+        op: 'execute',
+        sql: sql,
+        totalMicros: sw.elapsedMicroseconds,
+        paramCount: parameters.length,
+        tag: tag,
+      ),
+    );
   }
 
   Future<void> executeBatch(
@@ -60,17 +91,54 @@ class ProfiledDatabase {
     List<List<Object?>> paramSets, {
     String? tag,
   }) async {
+    final traceCorrelationId = TraceliteProfile.isEnabled
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    final opId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString('executeBatch');
+    final sqlId =
+        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final tagId = traceCorrelationId == null || tag == null
+        ? null
+        : TraceliteProfile.internString(tag);
+    final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
+    if (traceCorrelationId != null) {
+      TraceliteProfile.asyncBegin(
+        TraceliteResqliteSpans.profileSample,
+        correlationId: traceCorrelationId,
+        args: [
+          opId!,
+          sqlId!,
+          paramCount,
+          paramSets.length,
+          if (tagId != null) tagId,
+        ],
+      );
+    }
     final sw = Stopwatch()..start();
-    await _db.executeBatch(sql, paramSets);
-    sw.stop();
-    samples.add(ProfileSample(
-      op: 'executeBatch',
-      sql: sql,
-      totalMicros: sw.elapsedMicroseconds,
-      paramCount: paramSets.isEmpty ? 0 : paramSets.first.length,
-      batchSize: paramSets.length,
-      tag: tag,
-    ));
+    try {
+      await _db.executeBatch(sql, paramSets);
+    } finally {
+      sw.stop();
+      if (traceCorrelationId != null) {
+        TraceliteProfile.asyncEnd(
+          TraceliteResqliteSpans.profileSample,
+          correlationId: traceCorrelationId,
+          args: [sw.elapsedMicroseconds],
+        );
+      }
+    }
+    samples.add(
+      ProfileSample(
+        op: 'executeBatch',
+        sql: sql,
+        totalMicros: sw.elapsedMicroseconds,
+        paramCount: paramCount,
+        batchSize: paramSets.length,
+        tag: tag,
+      ),
+    );
   }
 
   Future<List<Map<String, Object?>>> select(
@@ -78,25 +146,66 @@ class ProfiledDatabase {
     List<Object?> parameters = const [],
     String? tag,
   ]) async {
+    final traceCorrelationId = TraceliteProfile.isEnabled
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+    final opId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString('select');
+    final sqlId =
+        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final tagId = traceCorrelationId == null || tag == null
+        ? null
+        : TraceliteProfile.internString(tag);
+    if (traceCorrelationId != null) {
+      TraceliteProfile.asyncBegin(
+        TraceliteResqliteSpans.profileSample,
+        correlationId: traceCorrelationId,
+        args: [opId!, sqlId!, parameters.length, if (tagId != null) tagId],
+      );
+    }
     final sw = Stopwatch()..start();
-    final rows = await _db.select(sql, parameters);
-    sw.stop();
-    samples.add(ProfileSample(
-      op: 'select',
-      sql: sql,
-      totalMicros: sw.elapsedMicroseconds,
-      paramCount: parameters.length,
-      rowsReturned: rows.length,
-      tag: tag,
-    ));
+    List<Map<String, Object?>>? rows;
+    try {
+      rows = await _db.select(sql, parameters);
+    } finally {
+      sw.stop();
+      if (traceCorrelationId != null) {
+        TraceliteProfile.asyncEnd(
+          TraceliteResqliteSpans.profileSample,
+          correlationId: traceCorrelationId,
+          args: [sw.elapsedMicroseconds, if (rows != null) rows.length],
+        );
+      }
+    }
+    final selectedRows = rows;
+    samples.add(
+      ProfileSample(
+        op: 'select',
+        sql: sql,
+        totalMicros: sw.elapsedMicroseconds,
+        paramCount: parameters.length,
+        rowsReturned: selectedRows.length,
+        tag: tag,
+      ),
+    );
     // Feed the shared decoder-allocation counters so the harness can
     // snapshot main-visible aggregates around a workload. Tree-shaken
     // out in release builds via the `kProfileMode` const gate.
-    if (kProfileMode && rows.isNotEmpty) {
-      ProfileCounters.rowsDecoded += rows.length;
-      ProfileCounters.cellsDecoded += rows.length * rows.first.length;
+    if (kProfileMode && selectedRows.isNotEmpty) {
+      ProfileCounters.rowsDecoded += selectedRows.length;
+      ProfileCounters.cellsDecoded +=
+          selectedRows.length * selectedRows.first.length;
+      TraceliteProfile.counter(
+        TraceliteResqliteCounters.rowsDecoded,
+        ProfileCounters.rowsDecoded,
+      );
+      TraceliteProfile.counter(
+        TraceliteResqliteCounters.cellsDecoded,
+        ProfileCounters.cellsDecoded,
+      );
     }
-    return rows;
+    return selectedRows;
   }
 
   Future<void> close() async {
