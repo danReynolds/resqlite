@@ -114,6 +114,7 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
         packageFilePath(packageRoot, 'native'),
         if (traceSqlite) p.join(traceliteRoot!, 'native'),
       ],
+      std: 'c11',
       defines: {
         // -----------------------------------------------------------------
         // SQLite compile options
