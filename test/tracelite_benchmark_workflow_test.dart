@@ -44,9 +44,21 @@ void main() {
     expect(stdoutText, contains('--expect=no_regression'));
     expect(stdoutText, contains('--primary-peer=resqlite'));
     expect(stdoutText, contains('--primary-metric=measured_elapsed_ns'));
-    expect(stdoutText, contains('--primary-scenarios=chat-sim,'));
+    expect(
+      stdoutText,
+      contains(
+        '--primary-scenarios=high-cardinality-fanout,'
+        'many-streams-writer-throughput',
+      ),
+    );
     expect(stdoutText, contains('--guardrail-peers=resqlite'));
-    expect(stdoutText, contains('--guardrail-scenarios=chat-sim,'));
+    expect(
+      stdoutText,
+      contains(
+        '--guardrail-scenarios=high-cardinality-fanout,'
+        'many-streams-writer-throughput',
+      ),
+    );
     expect(stdoutText, contains('--guardrail-metrics=measured_elapsed_ns'));
     expect(stdoutText, contains('export-graph-data'));
     expect(stdoutText, contains('--suite=${baseline.absolute.path}'));

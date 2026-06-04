@@ -12,17 +12,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'tracelite_source.dart';
+import 'tracelite_workloads.dart';
 
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
-const _defaultReleasePolicyScenarios = [
-  'chat-sim',
-  'high-cardinality-fanout',
-  'many-streams-writer-throughput',
-  'narrow-batch-insert',
-  'sqlite-diagnostics',
-];
-
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (options.showHelp) {
@@ -166,9 +159,9 @@ final class _Options {
         expectation: 'no_regression',
         primaryPeer: _defaultPolicyPeer,
         primaryMetric: _defaultReleaseMetric,
-        primaryScenarios: _defaultReleasePolicyScenarios.join(','),
+        primaryScenarios: traceliteReleasePolicyScenarios.join(','),
         guardrailPeers: _defaultPolicyPeer,
-        guardrailScenarios: _defaultReleasePolicyScenarios.join(','),
+        guardrailScenarios: traceliteReleasePolicyScenarios.join(','),
         guardrailMetrics: _defaultReleaseMetric,
         traceliteSourcePolicy: const TraceliteSourcePolicy(
           expectedRevision: pinnedTraceliteRevision,
@@ -228,12 +221,12 @@ final class _Options {
       primaryMetric: values['primary-metric'] ?? _defaultReleaseMetric,
       primaryScenarios:
           values['primary-scenarios'] ??
-          _defaultReleasePolicyScenarios.join(','),
+          traceliteReleasePolicyScenarios.join(','),
       guardrailPeers: values['guardrail-peers'] ?? _defaultPolicyPeer,
       guardrailScenarios:
           values['guardrail-scenarios'] ??
           values['primary-scenarios'] ??
-          _defaultReleasePolicyScenarios.join(','),
+          traceliteReleasePolicyScenarios.join(','),
       guardrailMetrics: values['guardrail-metrics'] ?? _defaultReleaseMetric,
       traceliteSourcePolicy: traceliteSourcePolicyFromOptions(
         revision: values['tracelite-revision'],
@@ -613,9 +606,9 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--expect=no_regression|improvement]');
   stderr.writeln('    [--primary-peer=resqlite]');
   stderr.writeln('    [--primary-metric=measured_elapsed_ns]');
-  stderr.writeln('    [--primary-scenarios=chat-sim,...]');
+  stderr.writeln('    [--primary-scenarios=high-cardinality-fanout,...]');
   stderr.writeln('    [--guardrail-peers=resqlite]');
-  stderr.writeln('    [--guardrail-scenarios=chat-sim,...]');
+  stderr.writeln('    [--guardrail-scenarios=high-cardinality-fanout,...]');
   stderr.writeln('    [--guardrail-metrics=measured_elapsed_ns]');
   stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');
   stderr.writeln(
