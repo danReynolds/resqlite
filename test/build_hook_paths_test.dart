@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import '../hook/build_paths.dart';
@@ -32,5 +34,11 @@ void main() {
       path,
       r'D:\a\resqlite\resqlite\third_party\sqlite3mc\sqlite3mc_amalgamation.c',
     );
+  });
+
+  test('native hook requests C11 mode for MSVC atomics', () {
+    final source = File('hook/build.dart').readAsStringSync();
+
+    expect(source, contains("std: 'c11'"));
   });
 }
