@@ -43,6 +43,20 @@ Visit the [project site](https://danreynolds.github.io/resqlite/) to browse inte
 - **Just SQL.** [`select`](./lib/src/database.dart), [`execute`](./lib/src/database.dart), [`executeBatch`](./lib/src/database.dart), [`transaction`](./lib/src/database.dart), [`stream`](./lib/src/database.dart). No ORM, no query builder, no code generation.
 - **Encryption.** Optional AES-256 encryption via SQLite3 Multiple Ciphers. Same API — just pass a key.
 
+## Getting Started
+
+```yaml
+dependencies:
+  resqlite: ^0.4.0
+```
+
+Or via the CLI:
+
+```sh
+dart pub add resqlite
+flutter pub add resqlite
+```
+
 ## Performance
 
 resqlite is designed to work in the background and keep apps running smooth. Reads, writes, and stream queries all run on background worker isolates. The main isolate only receives finished results.
@@ -292,30 +306,6 @@ package pattern and compatibility contract.
 - **Large results** use hybrid transmission — [`SendPort`](https://api.dart.dev/dart-isolate/SendPort-class.html) for small, zero-copy [`Isolate.exit`](https://api.dart.dev/dart-isolate/Isolate/exit.html) for large
 
 See the [full architecture breakdown](./doc/arch/architecture.md) for how the reader pool, writer isolate, and stream engine fit together.
-
-## Getting Started
-
-```yaml
-dependencies:
-  resqlite: ^0.4.0
-```
-
-Or via the CLI:
-
-```sh
-dart pub add resqlite
-flutter pub add resqlite
-```
-
-Requires native Dart/Flutter builds (not web). The C code compiles automatically via Dart's native asset hooks — no manual build step.
-
-resqlite does not include a migration framework — schema management is done with plain SQL:
-
-```dart
-await db.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT)');
-```
-
-For versioned migrations, track a schema version in `PRAGMA user_version` or a metadata table and run your DDL accordingly. This keeps resqlite close to raw SQL and leaves schema tooling to your application.
 
 ## Learn More
 
