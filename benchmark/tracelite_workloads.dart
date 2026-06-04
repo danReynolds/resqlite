@@ -1,6 +1,8 @@
 const traceliteReleasePolicyScenarios = [
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
+  'point-select',
+  'keyed-pk-subscriptions',
 ];
 
 const traceliteProductionSuiteScenarios = [
@@ -9,11 +11,9 @@ const traceliteProductionSuiteScenarios = [
 ];
 
 const traceliteDiagnosticScenarios = [
-  'point-select',
   'feed-paging',
   'sync-burst',
   'large-working-set',
-  'keyed-pk-subscriptions',
 ];
 
 const traceliteCiSuiteScenarios = [
