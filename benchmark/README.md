@@ -101,7 +101,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-03-r11
+git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-04-r12
 ```
 
 ```bash
@@ -157,13 +157,13 @@ dart run benchmark/run_tracelite.dart \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
   --label=exp-123-baseline \
-  --suite-scenarios=high-cardinality-fanout,many-streams-writer-throughput \
-  --policy-scenarios=high-cardinality-fanout,many-streams-writer-throughput
+  --suite-scenarios=high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions \
+  --policy-scenarios=high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
 ```
 
 The default pin is
-`e562d94237de9805398c584268704ab2c2b2f85b`
-(`resqlite-profiling-gate-2026-06-03-r11`). The wrapper records
+`b92ec4fa8410b074f77bea840c2fa53cfdf759b4`
+(`resqlite-profiling-gate-2026-06-04-r12`). The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -190,9 +190,11 @@ thresholds:
 - peer: `resqlite`
 - interface: `resqlite`
 - production suite scenarios: high-cardinality fanout, many-streams writer
-  throughput, and sqlite diagnostics
-- strict elapsed-time policy scenarios: high-cardinality fanout and
-  many-streams writer throughput
+  throughput, point select, keyed primary-key subscriptions, and sqlite
+  diagnostics
+- strict elapsed-time policy scenarios: high-cardinality fanout,
+  many-streams writer throughput, point select, and keyed primary-key
+  subscriptions
 - repetition bounds: `--min-repetitions=7 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
 - robust within-run noise percentile: `--within-run-noise-percentile=0.75`
@@ -219,9 +221,9 @@ startup and execution, and the shim build has a short dedicated timeout, so
 native-assets or toolchain stalls are recorded as failed manifest steps instead
 of leaving the gate unbounded.
 
-`narrow-batch-insert`, `point-select`, `feed-paging`, `sync-burst`,
-`chat-sim`, `large-working-set`, and `keyed-pk-subscriptions` are diagnostic
-workloads. Routine CI samples a smaller diagnostic set with `--preset=ci`.
+`narrow-batch-insert`, `feed-paging`, `sync-burst`, `chat-sim`, and
+`large-working-set` remain diagnostic workloads. Routine CI samples a smaller
+diagnostic set with `--preset=ci`.
 Use explicit `--interfaces=sqlite3,drift,sqlite_async,resqlite` and
 `--suite-scenarios=...` overrides when a release investigation needs peer or
 full diagnostic coverage; do not repeat the full matrix five times during
@@ -237,16 +239,19 @@ native-asset/runtime-library metadata. The r10 pin fixes Tracelite runtime
 retargeting for reused native producer threads, so explicit worker-mode
 reactive resqlite samples no longer leave unmatched trace events. The r11 pin
 is the merged Tracelite main gate that carries the r10 runtime fix plus the
-visualizer release, audit, and Decision Review documentation evidence. The
-wrapper still keeps `--runner=script` as the production default because that
-path has the full production calibration evidence. The wrapper also reuses a
-fresh SQLite shim, rebuilds it when the cached Mach-O architecture does not
-match the Dart VM, and runs the compiler natively on Apple Silicon while still
-producing the requested target architecture. Production now runs one unrecorded
-warmup suite before recorded history and uses a 15% total-outlier gate so tiny
-IQR outliers do not reject otherwise sub-1% noise runs.
+visualizer release, audit, and Decision Review documentation evidence. The r12
+pin adds the Tracelite-side Drift metadata hardening, retuned production sizing
+for `point-select` and `keyed-pk-subscriptions`, and documented diagnostic lane
+calibration. The wrapper still keeps `--runner=script` as the production
+default because that path has the full production calibration evidence. The
+wrapper also reuses a fresh SQLite shim, rebuilds it when the cached Mach-O
+architecture does not match the Dart VM, and runs the compiler natively on
+Apple Silicon while still producing the requested target architecture.
+Production now runs one unrecorded warmup suite before recorded history and
+uses a 15% total-outlier gate so tiny IQR outliers do not reject otherwise
+sub-1% noise runs.
 
-Latest full production evidence:
+Latest full production evidence before r12 lane promotion:
 `production-pin-r11-resqlite-policy-2026-06-03-r1`
 passed with Tracelite source
 `e562d94237de9805398c584268704ab2c2b2f85b`, resqlite source
@@ -258,6 +263,20 @@ validation `ok`, and explain completed. The policy covered
 was 0.71% and 0.73% respectively, both within the 5% max-CV gate. Graph export
 produced 2100 scenario-series rows and 15 peer-summary rows. The wrapper
 manifest recorded `tracelite_resqlite_dependency.matches_requested_root=true`.
+
+Latest r12 lane-promotion evidence:
+`production-pin-r12-point-keyed-policy-2026-06-04-r1` passed from a fresh
+Tracelite r12 clone with source pinning, dependency binding, one production
+warmup, 5/5 recorded `suite-history` runs, policy calibration `ready`, and
+explain completed. The promoted policy covered
+`high-cardinality-fanout`, `many-streams-writer-throughput`, `point-select`,
+and `keyed-pk-subscriptions`; all 4/4 groups were ready. The aggregate policy
+recommended 7 repetitions, a 13% primary threshold, a 10% guardrail, and max CV
+10%. Observed noise was 3.05% for high-cardinality fanout, 2.14% for
+many-streams writer throughput, 6.35% for point select, and 4.87% for keyed
+primary-key subscriptions. Explain still reports low traced coverage and
+harness-dominated wall time, so measured elapsed policy remains authoritative
+and those warnings stay instrumentation guidance.
 
 Current worker evidence: local Tracelite r10 worker checks passed
 `keyed-pk-subscriptions` for `resqlite` with 3/3 repetitions, preflight

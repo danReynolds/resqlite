@@ -277,3 +277,37 @@ Outcome:
   overrides so it remains reproducible without widening the release default.
 - Local checks passed: targeted analysis, benchmark workflow tests, Tracelite
   workflow docs tests, generated-data freshness, and whitespace diff checks.
+
+### Loop 12 - r12 point/keyed policy promotion
+
+Tried:
+
+- Published Tracelite pin `resqlite-profiling-gate-2026-06-04-r12` from merged
+  Tracelite main commit `b92ec4fa8410b074f77bea840c2fa53cfdf759b4`.
+- Updated the resqlite wrapper source pin and CI checkout from r11 to r12.
+- Promoted `point-select` and `keyed-pk-subscriptions` into the downstream
+  production release-policy list while leaving `feed-paging`, `sync-burst`,
+  and `large-working-set` in the diagnostic lane.
+- Reran local CI-sized smoke against a fresh r12 clone, then reran the full
+  production wrapper profile against a fresh r12 clone.
+
+Outcome:
+
+- CI smoke `ci-pin-r12-point-keyed-local-2026-06-04-fresh` passed: source
+  provenance accepted, dependency binding matched the PR worktree, 1/1
+  `suite-history` run was `ok`, policy calibration was `ready`, and explain
+  completed.
+- Production evidence `production-pin-r12-point-keyed-policy-2026-06-04-r1`
+  passed with clean Tracelite source
+  `b92ec4fa8410b074f77bea840c2fa53cfdf759b4`, dependency binding matched the
+  PR worktree, warmup passed, 5/5 recorded runs were `ok`, policy calibration
+  was `ready`, and explain completed.
+- The promoted strict policy scenarios were all ready. Aggregate policy
+  recommended 7 repetitions, 13% primary threshold, 10% guardrail, and 10% max
+  CV. Observed noise was 3.05% for `high-cardinality-fanout`, 2.14% for
+  `many-streams-writer-throughput`, 6.35% for `point-select`, and 4.87% for
+  `keyed-pk-subscriptions`.
+- Explain still reports low traced coverage and harness-dominated child wall
+  time in the short child-process artifacts. Those warnings remain
+  instrumentation guidance; the release gate is based on calibrated measured
+  elapsed policy for the strict production workloads.

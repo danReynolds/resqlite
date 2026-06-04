@@ -48,7 +48,8 @@ void main() {
       stdoutText,
       contains(
         '--primary-scenarios=high-cardinality-fanout,'
-        'many-streams-writer-throughput',
+        'many-streams-writer-throughput,point-select,'
+        'keyed-pk-subscriptions',
       ),
     );
     expect(stdoutText, contains('--guardrail-peers=resqlite'));
@@ -56,7 +57,8 @@ void main() {
       stdoutText,
       contains(
         '--guardrail-scenarios=high-cardinality-fanout,'
-        'many-streams-writer-throughput',
+        'many-streams-writer-throughput,point-select,'
+        'keyed-pk-subscriptions',
       ),
     );
     expect(stdoutText, contains('--guardrail-metrics=measured_elapsed_ns'));
@@ -180,14 +182,16 @@ void main() {
         stdoutText,
         contains(
           '--scenarios=high-cardinality-fanout,'
-          'many-streams-writer-throughput,sqlite-diagnostics',
+          'many-streams-writer-throughput,point-select,'
+          'keyed-pk-subscriptions,sqlite-diagnostics',
         ),
       );
       expect(
         stdoutText,
         contains(
           '--policy-scenarios=high-cardinality-fanout,'
-          'many-streams-writer-throughput',
+          'many-streams-writer-throughput,point-select,'
+          'keyed-pk-subscriptions',
         ),
       );
       expect(stdoutText, contains('--metrics=measured_elapsed_ns'));
