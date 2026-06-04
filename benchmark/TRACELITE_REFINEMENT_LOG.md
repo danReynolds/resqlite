@@ -251,3 +251,29 @@ Outcome:
   time in some artifacts, especially `sqlite-diagnostics`. Those warnings are
   instrumentation guidance; the release gate remains based on calibrated
   measured elapsed policy for the two strict production workloads.
+
+## 2026-06-04 pass
+
+### Loop 11 - Decision policy alignment
+
+Tried:
+
+- Compared `benchmark/run_tracelite.dart` and `benchmark/decide_tracelite.dart`
+  after the Tracelite-side lane calibration work.
+- Found that the production wrapper still used the two strict release-policy
+  workloads, while the decision wrapper had its own broader default list
+  including diagnostic scenarios.
+- Added a shared Tracelite workload list so the run and decision wrappers use
+  the same release-policy scenario contract by default.
+- Left the newly calibrated diagnostic lanes out of downstream blocking policy
+  until the wrapper pin and policy promotion are intentionally updated.
+
+Outcome:
+
+- Decision dry-runs now default primary and guardrail scenarios to
+  `high-cardinality-fanout,many-streams-writer-throughput`, matching the
+  production gate.
+- Historical diagnostic regression documentation now passes explicit scenario
+  overrides so it remains reproducible without widening the release default.
+- Local checks passed: targeted analysis, benchmark workflow tests, Tracelite
+  workflow docs tests, generated-data freshness, and whitespace diff checks.

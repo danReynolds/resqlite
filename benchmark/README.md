@@ -296,14 +296,16 @@ dart run benchmark/decide_tracelite.dart \
   --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/run-001-20260531T154622Z/manifest.json \
   --candidate=build/tracelite-decisions/known-read-delay-regression/candidate/manifest.json \
   --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-pinned-source/policy-calibration.json \
+  --primary-scenarios=chat-sim,narrow-batch-insert,sqlite-diagnostics \
+  --guardrail-scenarios=chat-sim,narrow-batch-insert,sqlite-diagnostics \
   --label=known-read-delay-regression-pinned-policy
 ```
 
-That artifact reported `rejected`: trace health passed, while primary and
-guardrail gates rejected the delayed candidate on `chat-sim`,
-`narrow-batch-insert`, and `sqlite-diagnostics`. Its graph-data bundle
-validated. The decision wrapper manifest recorded the pinned tracelite source as
-clean and matching.
+That artifact intentionally used a broad diagnostic override and reported
+`rejected`: trace health passed, while primary and guardrail gates rejected the
+delayed candidate on `chat-sim`, `narrow-batch-insert`, and
+`sqlite-diagnostics`. Its graph-data bundle validated. The decision wrapper
+manifest recorded the pinned tracelite source as clean and matching.
 
 This is now credible as the primary resqlite pre-publish profiling path. The
 source pin is enforced by the wrapper instead of living only in operator notes.

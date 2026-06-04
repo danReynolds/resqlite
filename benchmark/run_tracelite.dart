@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'tracelite_source.dart';
+import 'tracelite_workloads.dart';
 
 const _defaultReleaseMetric = 'measured_elapsed_ns';
 const _defaultPolicyPeer = 'resqlite';
@@ -36,33 +37,6 @@ const _sqliteShimSources = [
   'native/tracelite_runtime.c',
   'native/shim_sqlite3.c',
 ];
-const _defaultReleasePolicyScenarios = [
-  'high-cardinality-fanout',
-  'many-streams-writer-throughput',
-];
-const _productionSuiteScenarios = [
-  ..._defaultReleasePolicyScenarios,
-  'sqlite-diagnostics',
-];
-const _defaultDiagnosticScenarios = [
-  'point-select',
-  'feed-paging',
-  'sync-burst',
-  'large-working-set',
-  'keyed-pk-subscriptions',
-];
-const _ciSuiteScenarios = [
-  'narrow-batch-insert',
-  'point-select',
-  'keyed-pk-subscriptions',
-  'sqlite-diagnostics',
-];
-const _experimentSuiteScenarios = [
-  'feed-paging',
-  'chat-sim',
-  'keyed-pk-subscriptions',
-];
-
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (options.showHelp) {
@@ -356,10 +330,10 @@ final class _Options {
         runs: 5,
         warmupRuns: 1,
         interfaces: _defaultPolicyPeer,
-        suiteScenarios: _productionSuiteScenarios.join(','),
+        suiteScenarios: traceliteProductionSuiteScenarios.join(','),
         policyMetric: _defaultReleaseMetric,
         policyPeers: _defaultPolicyPeer,
-        policyScenarios: _defaultReleasePolicyScenarios.join(','),
+        policyScenarios: traceliteReleasePolicyScenarios.join(','),
         minRepetitions: 7,
         maxRepetitions: 30,
         targetRsePercent: 10,
@@ -589,9 +563,9 @@ _PresetDefaults _presetDefaults(String name) {
       runs: 1,
       warmupRuns: 0,
       interfaces: 'resqlite',
-      suiteScenarios: _ciSuiteScenarios,
+      suiteScenarios: traceliteCiSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
-      policyScenarios: _ciSuiteScenarios,
+      policyScenarios: traceliteCiSuiteScenarios,
       minRepetitions: 1,
       maxRepetitions: 3,
       targetRsePercent: 25,
@@ -616,9 +590,9 @@ _PresetDefaults _presetDefaults(String name) {
       runs: 3,
       warmupRuns: 0,
       interfaces: 'sqlite_async,resqlite',
-      suiteScenarios: _experimentSuiteScenarios,
+      suiteScenarios: traceliteExperimentSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
-      policyScenarios: _experimentSuiteScenarios,
+      policyScenarios: traceliteExperimentSuiteScenarios,
       minRepetitions: 5,
       maxRepetitions: 20,
       targetRsePercent: 10,
@@ -643,9 +617,9 @@ _PresetDefaults _presetDefaults(String name) {
       runs: 5,
       warmupRuns: 1,
       interfaces: _defaultPolicyPeer,
-      suiteScenarios: _productionSuiteScenarios,
+      suiteScenarios: traceliteProductionSuiteScenarios,
       policyPeers: _defaultPolicyPeer,
-      policyScenarios: _defaultReleasePolicyScenarios,
+      policyScenarios: traceliteReleasePolicyScenarios,
       minRepetitions: 7,
       maxRepetitions: 30,
       targetRsePercent: 10,
@@ -1452,7 +1426,7 @@ Future<void> _writeManifest(
         .split(',')
         .map((value) => value.trim())
         .toList(),
-    'diagnostic_scenarios': _defaultDiagnosticScenarios,
+    'diagnostic_scenarios': traceliteDiagnosticScenarios,
     'interfaces': options.interfaces
         .split(',')
         .map((value) => value.trim())
