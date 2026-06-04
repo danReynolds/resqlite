@@ -114,7 +114,6 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
         packageFilePath(packageRoot, 'native'),
         if (traceSqlite) p.join(traceliteRoot!, 'native'),
       ],
-      std: 'c11',
       defines: {
         // -----------------------------------------------------------------
         // SQLite compile options
@@ -172,6 +171,8 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
         if (traceSqlite) 'TRACELITE_SQLITE3_EMBEDDED': null,
       },
       flags: [
+        if (targetOS == OS.windows) '/experimental:c11atomics',
+
         // ---------------------------------------------------------------
         // Linux: prevent symbol conflicts with system SQLite.
         // ---------------------------------------------------------------
@@ -193,6 +194,7 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
           '@rpath/libresqlite.dylib',
         ],
       ],
+      std: targetOS == OS.windows ? 'c11' : 'gnu11',
       libraries: [
         // ---------------------------------------------------------------
         // Android: SQLite uses math functions (ceil, floor, etc.) which

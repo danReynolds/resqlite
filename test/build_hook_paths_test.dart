@@ -36,9 +36,10 @@ void main() {
     );
   });
 
-  test('native hook requests C11 mode for MSVC atomics', () {
+  test('native hook requests platform C11-compatible modes', () {
     final source = File('hook/build.dart').readAsStringSync();
 
-    expect(source, contains("std: 'c11'"));
+    expect(source, contains("std: targetOS == OS.windows ? 'c11' : 'gnu11'"));
+    expect(source, contains("'/experimental:c11atomics'"));
   });
 }
