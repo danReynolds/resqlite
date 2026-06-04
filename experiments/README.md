@@ -73,6 +73,7 @@ moved them.
 | [122](122-concrete-reader-pool-stream-admission.md) | Concrete reader-pool stream admission | Initializes `StreamEngine` with a concrete `ReaderPool` so `_flushQueue` stays synchronous and bounded by `availableWorkerCount`; tests now use diagnostics for stream registry size, and post-rebase profile counters stay at zero parks/retries/max-parked on A11c overlap and keyed-PK workloads |  |
 | [125](125-wide-ascii-batch-params.md) | Wide ASCII batch parameter encoding | Direct ASCII payload packing skips temporary per-string UTF-8 lists in large wide batches; focused 10k x20 improves 17.199 → 12.760 ms and release Wide Batch Insert improves 18.201 → 13.031 ms |  |
 | [126](126-wide-utf8-batch-packing.md) | Wide UTF-8 batch parameter packing | Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 → 18.988 ms and emoji 10k x20 improves 24.187 → 17.458 ms while release write-suite guardrails remain neutral |  |
+| [140](140-result-consumer-cost.md) | SQLite-backed result consumer cost audit | Measurement-only: real `db.select()` results show lazy `Row` access remains a small 10k-row consumer slice (`id` lookup 3.9-4.5%, `forEach` 8.4-11.8%), while explicit `Map` materialization dominates only when callers ask for per-row maps |  |
 
 ## Rejected
 

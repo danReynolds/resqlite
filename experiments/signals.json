@@ -189,16 +189,16 @@
       "id": "result-transfer-shape",
       "status": "watch",
       "subsystems": ["results", "isolate-transfer", "api-shape"],
-      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured.",
-      "keyPriors": ["008", "063", "082", "089"],
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 140 adds the missing SQLite-backed full-consumer benchmark: at 10k rows, lazy Row id lookup is 3.9-4.5% of total wall and row.forEach is 8.4-11.8%, while explicit Map.from(row) materialization is 47.8-54.5%. Broad hidden result-shape rewrites remain weak; map-heavy callers need workload evidence for guidance or a specialized API discussion.",
+      "keyPriors": ["008", "063", "082", "089", "140"],
       "archive": ["066", "081"],
       "interestingIf": [
         "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
-        "a change preserves the lean API while removing end-to-end work",
-        "a benchmark measures full consumer cost, not just transfer or decode setup"
+        "a change preserves the lean API while removing end-to-end work outside explicit Map materialization",
+        "a real workload shows frequent full Map materialization that a specialized API could serve better than lazy Row views"
       ],
       "openQuestions": [
-        "Can a transparent internal shape change preserve Map-like ergonomics without moving decode cost to the consumer?",
+        "Do real apps frequently materialize every result row into maps, or do they mostly use lazy Row access?",
         "Will future Dart transfer semantics reopen zero-copy result transport?"
       ],
       "openCandidates": [
@@ -207,16 +207,10 @@
           "addedDate": "2026-04-24",
           "addedAfter": "089",
           "blockedOn": "Dart SDK #50068 (deeply-immutable typed-data factory) not yet shipped"
-        },
-        {
-          "idea": "full-consumer-cost benchmark that measures end-to-end Map / Row consumption",
-          "addedDate": "2026-05-02"
         }
       ],
-      "blockedOnMeasurement": [
-        "full-consumption benchmark that exercises real Map/Row access patterns end-to-end"
-      ],
-      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Be explicit about API impact. Exp 140 closes the generic full-consumer benchmark gap: lazy Row access is not the active headroom signal at 10k rows, but explicit Map materialization is costly because callers allocate per-row maps. Do not retry broad result-shape replacements unless this harness, or a comparable real workload, shows consumer cost outside forced Map copies."
     },
     {
       "id": "measurement-system",
@@ -517,6 +511,20 @@
       "nextSignals": [
         "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
         "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+      ]
+    },
+    "140": {
+      "directions": ["result-transfer-shape", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "SQLite-backed full-consumer measurement confirms normal lazy Row access is a small slice of 10k-row select wall: id lookup is 3.9-4.5% and row.forEach is 8.4-11.8%",
+        "Explicit Map materialization is the only measured consumer mode that dominates total wall, reaching 47.8-54.5% because it allocates and populates one map per row",
+        "The full-consumption benchmark blocker for result-transfer-shape is closed; broad internal result-shape rewrites need new workload evidence rather than synthetic transfer speculation"
+      ],
+      "nextSignals": [
+        "use benchmark/experiments/result_consumer_cost.dart as the acceptance gate for future result-shape proposals",
+        "reopen specialized materialized-map API discussion only if real workloads frequently force Map.from(row) over large result sets",
+        "re-check Dart SDK #50068 before revisiting deeply immutable typed-data transfer"
       ]
     },
     "125": {
