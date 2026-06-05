@@ -5,9 +5,8 @@ import 'dart:collection';
 /// Created once per query and reused by every [Row]. Contains the column
 /// names and a precomputed name-to-index map for O(1) lookups.
 final class RowSchema {
-  RowSchema(this.names) : _indexByName = {
-    for (var i = 0; i < names.length; i++) names[i]: i,
-  };
+  RowSchema(this.names)
+    : _indexByName = {for (var i = 0; i < names.length; i++) names[i]: i};
 
   /// Column names in query order, matching the SELECT clause.
   final List<String> names;
@@ -52,6 +51,20 @@ final class ResultSet with ListMixin<Row> {
   Row operator [](int index) {
     RangeError.checkValidIndex(index, this);
     return Row._(_values, _schema, index * _schema.columnCount);
+  }
+
+  @override
+  void forEach(void Function(Row element) action) {
+    final values = _values;
+    final schema = _schema;
+    final columnCount = schema.columnCount;
+    for (
+      var offset = 0, row = 0;
+      row < _rowCount;
+      row++, offset += columnCount
+    ) {
+      action(Row._(values, schema, offset));
+    }
   }
 
   @override
@@ -118,8 +131,7 @@ final class Row with MapMixin<String, Object?> {
       throw UnsupportedError('Unmodifiable row');
 
   @override
-  Object? remove(Object? key) =>
-      throw UnsupportedError('Unmodifiable row');
+  Object? remove(Object? key) => throw UnsupportedError('Unmodifiable row');
 
   @override
   void clear() => throw UnsupportedError('Unmodifiable row');

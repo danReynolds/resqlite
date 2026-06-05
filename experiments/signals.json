@@ -189,8 +189,8 @@
       "id": "result-transfer-shape",
       "status": "watch",
       "subsystems": ["results", "isolate-transfer", "api-shape"],
-      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured.",
-      "keyPriors": ["008", "063", "082", "089"],
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 141 found one narrow internal win: explicit `ResultSet.forEach` can bypass generic `ListMixin` traversal and improve lookup-heavy row consumption, but a broader custom iterator did not clear the control-stability bar.",
+      "keyPriors": ["008", "063", "082", "089", "141"],
       "archive": ["066", "081"],
       "interestingIf": [
         "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
@@ -216,7 +216,7 @@
       "blockedOnMeasurement": [
         "full-consumption benchmark that exercises real Map/Row access patterns end-to-end"
       ],
-      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal."
+      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. After exp 141, keep `ResultSet.forEach` direct but do not add a custom iterator unless a stable full-consumption benchmark shows `for-in` itself is material."
     },
     {
       "id": "measurement-system",
@@ -517,6 +517,18 @@
       "nextSignals": [
         "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
         "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+      ]
+    },
+    "141": {
+      "directions": ["result-transfer-shape"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Explicit `ResultSet.forEach` consumers can skip generic `ListMixin` traversal without changing the lazy result transport shape",
+        "A broader custom `ResultSet.iterator` did not produce clean enough control behavior to accept in this run"
+      ],
+      "nextSignals": [
+        "use full consumer-cost evidence before changing result API or storage shape",
+        "only revisit a custom iterator if `for-in` shows material cost under a stable SQLite-backed workload"
       ]
     },
     "125": {
