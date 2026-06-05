@@ -12,9 +12,8 @@ env:
 jobs:
   guard-raw-profile-json:
     # Block raw per-sample profile JSONs (~15 MB each) from landing on main.
-    # The decision-relevant signal is the aggregate markdown produced by
-    # `benchmark/profile/diff_multirun.dart`; raw JSONs are local scratch.
-    # See the resqlite-experiment skill for rationale.
+    # The maintained profile path is tracelite graph data and workload-summary
+    # artifacts; raw legacy profile JSONs are local scratch only.
     name: Guard against raw profile JSONs
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -28,7 +27,7 @@ jobs:
           added=$(git diff --name-only --diff-filter=A "$base...HEAD" \
             -- 'benchmark/profile/results/*.json' || true)
           if [ -n "$added" ]; then
-            echo "::error::Raw profile JSONs must not be committed. Commit the aggregate markdown from benchmark/profile/diff_multirun.dart instead."
+            echo "::error::Raw profile JSONs must not be committed. Use tracelite workload summaries or graph data instead."
             echo "Offending files:"
             printf '  %s\n' $added
             exit 1
@@ -87,7 +86,7 @@ jobs:
       - name: Checkout pinned tracelite
         run: |
           git clone https://github.com/danReynolds/tracelite /tmp/tracelite
-          git -C /tmp/tracelite checkout resqlite-profiling-gate-2026-06-04-r12
+          git -C /tmp/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
       - name: Run tracelite CI preset
         env:
           RESQLITE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
