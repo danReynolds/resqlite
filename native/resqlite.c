@@ -5,6 +5,20 @@
 #include <stdio.h>
 #include <stdatomic.h>
 
+#if defined(_MSC_VER)
+#define RESQLITE_HOT
+#else
+#define RESQLITE_HOT __attribute__((hot))
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define RESQLITE_LIKELY(expr) __builtin_expect(!!(expr), 1)
+#define RESQLITE_UNLIKELY(expr) __builtin_expect(!!(expr), 0)
+#else
+#define RESQLITE_LIKELY(expr) (expr)
+#define RESQLITE_UNLIKELY(expr) (expr)
+#endif
+
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
@@ -33,8 +47,8 @@ static int buf_init(resqlite_buf* b, int initial_cap) {
     return 0;
 }
 
-__attribute__((hot)) static int buf_ensure(resqlite_buf* b, int extra) {
-    if (__builtin_expect(b->len + extra <= b->cap, 1)) return 0;
+RESQLITE_HOT static int buf_ensure(resqlite_buf* b, int extra) {
+    if (RESQLITE_LIKELY(b->len + extra <= b->cap)) return 0;
     int new_cap = b->cap;
     while (new_cap < b->len + extra) new_cap *= 2;
     unsigned char* p = (unsigned char*)realloc(b->data, new_cap);
@@ -44,7 +58,7 @@ __attribute__((hot)) static int buf_ensure(resqlite_buf* b, int extra) {
     return 0;
 }
 
-__attribute__((hot)) static int buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
+RESQLITE_HOT static int buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
     if (buf_ensure(b, n) != 0) return -1;
     memcpy(b->data + b->len, src, n);
     b->len += n;
@@ -86,6 +100,14 @@ static int buf_write_char(resqlite_buf* b, char c) {
 
 static int buf_write_str(resqlite_buf* b, const char* s, int len) {
     return buf_write(b, s, len);
+}
+
+static char* resqlite_strdup(const char* s) {
+    size_t len = strlen(s) + 1;
+    char* copy = (char*)malloc(len);
+    if (!copy) return NULL;
+    memcpy(copy, s, len);
+    return copy;
 }
 
 // ---------------------------------------------------------------------------
@@ -599,7 +621,7 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     resqlite_db* db = (resqlite_db*)calloc(1, sizeof(resqlite_db));
     atomic_init(&db->closed, 0);
     db->writer = writer;
-    db->path = strdup(path);
+    db->path = resqlite_strdup(path);
     stmt_cache_init(&db->writer_cache);
     resqlite_dirty_set_init(&db->dirty_tables);
     resqlite_column_set_init(&db->dirty_columns);
@@ -1653,7 +1675,7 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
 // Fast int64-to-string (avoids snprintf format parsing overhead)
 // ---------------------------------------------------------------------------
 
-__attribute__((hot)) static int fast_i64_to_str(long long val, char* buf) {
+RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
     if (val == 0) { buf[0] = '0'; return 1; }
 
     char tmp[21]; // max int64 is 20 digits + sign
@@ -1689,7 +1711,7 @@ static const char b64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Write a base64-encoded blob as a quoted JSON string.
-__attribute__((hot)) static int json_write_base64(resqlite_buf* __restrict b,
+RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
                                                    const unsigned char* data,
                                                    int len) {
     // Output size: 4 chars per 3 bytes, rounded up, plus quotes.
@@ -1760,7 +1782,7 @@ static const char json_esc_char[256] = {
     ['\t'] = 't',
 };
 
-__attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
+RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
     if (buf_write_char(b, '"') != 0) return -1;
 
     int start = 0;
@@ -1796,7 +1818,7 @@ __attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, co
         unsigned char c = (unsigned char)s[i];
         unsigned char elen = json_esc_len[c];
 
-        if (__builtin_expect(elen == 0, 1)) continue; // Common case: safe byte.
+        if (RESQLITE_LIKELY(elen == 0)) continue; // Common case: safe byte.
 
         // Flush unescaped span before this character.
         if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
@@ -1823,7 +1845,7 @@ __attribute__((hot)) static int json_write_string(resqlite_buf* __restrict b, co
 // Macro to bail out of write_json_to_buf on OOM without leaking.
 #define JSON_CHECK(expr) do { if ((expr) != 0) { rc = SQLITE_NOMEM; goto cleanup; } } while (0)
 
-__attribute__((hot)) static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
+RESQLITE_HOT static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
     int col_count = sqlite3_column_count(stmt);
 
     // Stack-allocate for typical column counts (<=64), heap for larger.
@@ -1984,13 +2006,13 @@ int resqlite_query_bytes(
 // Batch row reader
 // ---------------------------------------------------------------------------
 
-__attribute__((hot)) int resqlite_step_row(
+RESQLITE_HOT int resqlite_step_row(
     sqlite3_stmt* stmt,
     int col_count,
     resqlite_cell* cells
 ) {
     int rc = sqlite3_step(stmt);
-    if (__builtin_expect(rc != SQLITE_ROW, 0)) return rc;
+    if (RESQLITE_UNLIKELY(rc != SQLITE_ROW)) return rc;
 
     for (int i = 0; i < col_count; i++) {
         int type = sqlite3_column_type(stmt, i);
@@ -2171,14 +2193,14 @@ long long resqlite_query_hash(
     return (long long)h;
 }
 
-__attribute__((hot)) int resqlite_step_row_hash(
+RESQLITE_HOT int resqlite_step_row_hash(
     sqlite3_stmt* stmt,
     int col_count,
     resqlite_cell* cells,
     uint64_t* hash
 ) {
     int rc = sqlite3_step(stmt);
-    if (__builtin_expect(rc != SQLITE_ROW, 0)) return rc;
+    if (RESQLITE_UNLIKELY(rc != SQLITE_ROW)) return rc;
 
     uint64_t h = *hash;
     for (int i = 0; i < col_count; i++) {
