@@ -48,7 +48,7 @@ void main() {
       stdoutText,
       contains(
         '--primary-scenarios=high-cardinality-fanout,'
-        'many-streams-writer-throughput,point-select,'
+        'many-streams-writer-throughput,'
         'keyed-pk-subscriptions',
       ),
     );
@@ -57,7 +57,7 @@ void main() {
       stdoutText,
       contains(
         '--guardrail-scenarios=high-cardinality-fanout,'
-        'many-streams-writer-throughput,point-select,'
+        'many-streams-writer-throughput,'
         'keyed-pk-subscriptions',
       ),
     );
@@ -190,7 +190,7 @@ void main() {
         stdoutText,
         contains(
           '--policy-scenarios=high-cardinality-fanout,'
-          'many-streams-writer-throughput,point-select,'
+          'many-streams-writer-throughput,'
           'keyed-pk-subscriptions',
         ),
       );

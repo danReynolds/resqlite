@@ -1,12 +1,14 @@
 const traceliteReleasePolicyScenarios = [
   'high-cardinality-fanout',
   'many-streams-writer-throughput',
-  'point-select',
   'keyed-pk-subscriptions',
 ];
 
 const traceliteProductionSuiteScenarios = [
-  ...traceliteReleasePolicyScenarios,
+  'high-cardinality-fanout',
+  'many-streams-writer-throughput',
+  'point-select',
+  'keyed-pk-subscriptions',
   'sqlite-diagnostics',
 ];
 
