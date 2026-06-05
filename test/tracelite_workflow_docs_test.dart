@@ -8,73 +8,54 @@ void main() {
 
     expect(source, contains('benchmark/run_tracelite.dart'));
     expect(source, contains('benchmark/profile/run_tracelite_profile.dart'));
-    expect(source, contains('legacy'));
-    expect(source, contains('JSON compatibility/parity checks'));
-    expect(
-      source,
-      isNot(contains('use `benchmark/run_profile.dart`\ninstead')),
-    );
+    expect(source, isNot(contains('benchmark/run_profile.dart')));
+    expect(source, isNot(contains('JSON compatibility/parity checks')));
   });
 
-  test('profile-mode comments keep tracelite as the preferred wrapper', () {
+  test('profile-mode comments keep tracelite as the maintained wrapper', () {
     final profileMode = File('lib/src/profile_mode.dart').readAsStringSync();
     final profileSample = File(
       'benchmark/profile/profile_sample.dart',
     ).readAsStringSync();
-    final dispatchBudget = File(
-      'benchmark/profile/dispatch_budget.dart',
+    final workloads = File(
+      'benchmark/profile/workloads.dart',
     ).readAsStringSync();
 
-    for (final source in [profileMode, profileSample, dispatchBudget]) {
+    for (final source in [profileMode, profileSample]) {
       expect(source, contains('run_tracelite_profile.dart'));
     }
-    expect(profileSample, contains('legacy `run_profile.dart` JSON shape'));
-    expect(dispatchBudget, contains('legacy\n/// JSON parity artifact'));
+    expect(profileSample, isNot(contains('run_profile.dart')));
+    expect(workloads, contains('tracelite workload driver'));
+    expect(workloads, isNot(contains('dispatch_budget.dart')));
   });
 
-  test('legacy profile command points new experiments at tracelite', () async {
-    final result = await Process.run(Platform.resolvedExecutable, [
+  test('legacy profile JSON commands are retired', () {
+    for (final path in [
       'benchmark/run_profile.dart',
-      '--help',
-    ]);
-
-    expect(
-      result.exitCode,
-      0,
-      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
-    );
-    final stdoutText = result.stdout.toString();
-    expect(stdoutText, contains('Legacy compatibility harness'));
-    expect(stdoutText, contains('old profile JSON A/B diffs'));
-    expect(
-      stdoutText,
-      contains('benchmark/profile/run_tracelite_profile.dart'),
-    );
-    expect(stdoutText, contains('Write legacy profile JSON'));
+      'benchmark/profile/diff.dart',
+      'benchmark/profile/diff_multirun.dart',
+      'benchmark/profile/dispatch_budget.dart',
+    ]) {
+      expect(File(path).existsSync(), isFalse, reason: path);
+    }
   });
 
-  test('experiment docs keep legacy profile JSON demoted', () {
-    final methodology = File('benchmark/METHODOLOGY.md').readAsStringSync();
-    final experimentGuide = File('benchmark/EXPERIMENTS.md').readAsStringSync();
-    final experiments = File(
+  test('experiment docs describe tracelite artifacts only', () {
+    final files = [
+      'benchmark/README.md',
+      'benchmark/METHODOLOGY.md',
+      'benchmark/EXPERIMENTS.md',
       'benchmark/experiments/README.md',
-    ).readAsStringSync();
-    final singleRunDiff = File('benchmark/profile/diff.dart').readAsStringSync();
-    final multirunDiff = File(
-      'benchmark/profile/diff_multirun.dart',
-    ).readAsStringSync();
-    final sharedStats = File('benchmark/shared/stats.dart').readAsStringSync();
+      'benchmark/shared/stats.dart',
+      'docs/benchmarks/data/tracelite/README.md',
+    ];
 
-    for (final source in [
-      methodology,
-      experimentGuide,
-      experiments,
-      singleRunDiff,
-      multirunDiff,
-      sharedStats,
-    ]) {
-      expect(source, contains('run_tracelite_profile.dart'));
-      expect(source, contains('legacy'));
+    for (final path in files) {
+      final source = File(path).readAsStringSync();
+      expect(source, contains('run_tracelite_profile.dart'), reason: path);
+      expect(source, isNot(contains('run_profile.dart')), reason: path);
+      expect(source, isNot(contains('parity-diff')), reason: path);
+      expect(source, isNot(contains('legacy profile JSON')), reason: path);
     }
   });
 }

@@ -2,8 +2,8 @@
 
 This directory is the GitHub Pages handoff for tracelite artifacts.
 
-Generate/update the latest profile graph-data bundle without copying raw trace
-or legacy profile JSON into `docs/`:
+Generate/update the latest profile graph-data bundle without copying raw traces
+into `docs/`:
 
 ```bash
 dart run benchmark/profile/run_tracelite_profile.dart \
@@ -21,5 +21,4 @@ after export. If you copy or edit graph-data manually, run that command before
 committing it for Pages.
 
 Commit graph-data JSON when it is meant to power Pages. Keep raw
-`*.tlt-region`, legacy profile JSON, and parity diffs in `build/` or another
-scratch artifact location.
+`*.tlt-region` files in `build/` or another scratch artifact location.

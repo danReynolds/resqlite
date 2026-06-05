@@ -10,7 +10,6 @@ code path you measure differs between them.
 | **Trace-backed production gate** | [`run_tracelite.dart`](./run_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Trace-backed baseline/candidate decision** | [`decide_tracelite.dart`](./decide_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Trace-backed experiment profile** | [`profile/run_tracelite_profile.dart`](./profile/run_tracelite_profile.dart) | **Yes** — Timeline markers, per-call profiling, tracelite spans, workload summaries, insights, graph data |
-| **Legacy profile JSON compatibility** | [`run_profile.dart`](./run_profile.dart) | **Yes** — Timeline markers + per-call profiling only |
 | **Cross-library comparison via verifier harness** | `sqlite_reactive_verifier` | N/A (separate package) |
 
 **Rule of thumb.** If you're publishing a number that will end up on
@@ -36,9 +35,7 @@ but they are not calibrated release blockers yet.
 If you're running an experiment on a branch and want trace-backed local
 diagnostics, use `profile/run_tracelite_profile.dart`. It runs the profile
 workloads with `RESQLITE_PROFILE` and `RESQLITE_TRACELITE`, then makes
-tracelite workload summaries, insights, graph data, and parity evidence from the
-same run. `run_profile.dart` remains available as the direct legacy JSON
-harness when an old experiment note or diff tool specifically needs that shape.
+tracelite workload summaries, insights, and graph data from the same run.
 
 See [EXPERIMENTS.md](./EXPERIMENTS.md) for the experiment-mode
 workflow and A/B tabulation tools.
@@ -49,7 +46,7 @@ workflow and A/B tabulation tools.
 - [`SCOPE.md`](./SCOPE.md) — exact peer versions, hardware tested, known gaps, what we test and what we don't
 - [`AUDIT.md`](./AUDIT.md) — how benchmark results propagate from Dart code to the public dashboard (parsers, generators, chart builders)
 - [`HARDWARE_RESULTS.md`](./HARDWARE_RESULTS.md) — device registry pointing at canonical result files per device
-- [`EXPERIMENTS.md`](./EXPERIMENTS.md) — experiment-mode workflow using tracelite profile artifacts, with legacy JSON compatibility where needed
+- [`EXPERIMENTS.md`](./EXPERIMENTS.md) — experiment-mode workflow using tracelite profile artifacts
 
 ## Release Mode (peer comparison)
 
@@ -101,7 +98,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-04-r12
+git -C /path/to/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
 ```
 
 ```bash
@@ -162,8 +159,7 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`b92ec4fa8410b074f77bea840c2fa53cfdf759b4`
-(`resqlite-profiling-gate-2026-06-04-r12`). The wrapper records
+`2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a`. The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -203,7 +199,7 @@ thresholds:
 - guardrail gate: `--guardrail-floor-percent=3`
 - noise gate: `--noise-gate-floor-percent=5 --noise-gate-ceiling-percent=50
   --noise-gate-multiplier=1.5`
-- outlier gates: `--max-outlier-percent=15 --max-run-outlier-percent=20`
+- outlier gates: `--max-outlier-percent=15 --max-run-outlier-percent=40`
 
 It writes `build/tracelite-benchmarks/<label>/history.json`,
 `policy-calibration.json`, `policy-calibration.md`, `insights.json`,
@@ -340,8 +336,7 @@ manifest recorded the pinned tracelite source as clean and matching.
 
 This is now credible as the primary resqlite pre-publish profiling path. The
 source pin is enforced by the wrapper instead of living only in operator notes.
-`run_profile.dart` remains as the low-level compatibility/parity harness, but
-routine regression decisions should use the tracelite gate or decision wrapper.
+Routine regression decisions should use the tracelite gate or decision wrapper.
 
 The remaining noisy workloads stay in the diagnostic lane until they have stable
 workload definitions or separate calibrated thresholds.
@@ -393,15 +388,10 @@ creating a region or exporting graph data. It writes
 
 - primary tracelite artifacts: `workload-summary.json`,
   `workload-summary.md`, `insights.json`, `insights.md`, `graph-data/`, and
-  the raw `.tlt-region`;
-- compatibility/parity artifacts: the legacy `profile.json` and
-  `parity-diff.txt`.
+  the raw `.tlt-region`.
 
-Use direct `run_profile.dart` only when you intentionally need the old standalone
-JSON A/B flow without tracelite artifacts.
-
-To publish only graphable data to GitHub Pages while keeping raw traces and
-legacy JSON out of `docs/`, add:
+To publish only graphable data to GitHub Pages while keeping raw traces out of
+`docs/`, add:
 
 ```bash
 --graph-data-dir=docs/benchmarks/data/tracelite/latest

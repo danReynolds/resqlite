@@ -1,10 +1,8 @@
 /// Shared workload definitions, schema setup, and stats helpers for the
-/// profile-mode harnesses (`run_tracelite_profile.dart`, `dispatch_budget.dart`,
-/// and the legacy `run_profile.dart` JSON compatibility command).
+/// profile-mode tracelite workload driver and focused audit harnesses.
 ///
-/// Kept in one place so both entry points measure identical work, any
-/// workload change lands in a single file, and percentile / aggregate
-/// reporting follows a single convention.
+/// Kept in one place so workload changes land in a single file and percentile
+/// / aggregate reporting follows a single convention.
 library;
 
 import 'dart:math' as math;
@@ -95,8 +93,7 @@ Map<String, Object?> summarizeSamples(
       'p99_us': percentileUs(sorted, 0.99),
       'max_us': sorted.last,
       'mean_us': (sorted.reduce((a, b) => a + b) / sorted.length).round(),
-      if (floor != null)
-        'work_us_median': math.max(0, medianUs - floor),
+      if (floor != null) 'work_us_median': math.max(0, medianUs - floor),
       if (floor != null) 'dispatch_floor_us': floor,
     };
   }
@@ -180,7 +177,7 @@ Future<void> workloadSingleInserts(ProfiledDatabase db, int iter) async {
   for (var i = 0; i < singleInsertCount; i++) {
     await db.execute(
       'INSERT INTO items(name, description, value, category, created_at) '
-      'VALUES (?, ?, ?, ?, ?)',
+          'VALUES (?, ?, ?, ?, ?)',
       ['s$i', 'd$i', i * 1.5, 'c', 't'],
       'iter$iter',
     );
@@ -192,11 +189,9 @@ Future<void> workloadSingleInserts(ProfiledDatabase db, int iter) async {
 /// round-robin pattern. No modifications — pure reader-side hot loop.
 Future<void> workloadPointQuery(ProfiledDatabase db, int iter) async {
   for (var i = 0; i < pointQueryCount; i++) {
-    await db.select(
-      'SELECT * FROM items WHERE id = ?',
-      [(i % seedRowCount) + 1],
-      'iter$iter',
-    );
+    await db.select('SELECT * FROM items WHERE id = ?', [
+      (i % seedRowCount) + 1,
+    ], 'iter$iter');
   }
 }
 

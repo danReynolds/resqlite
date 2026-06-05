@@ -3,9 +3,9 @@
 // End-to-end tracelite profile workflow for resqlite.
 //
 // This script keeps tracelite integration out of resqlite's package graph. It
-// shells out to a local tracelite checkout to create a region, runs the existing
-// resqlite profile harness with tracelite enabled, then exports tracelite
-// workload-summary and graph-data artifacts.
+// shells out to a local tracelite checkout to create a region, runs resqlite's
+// traced workload driver, then exports tracelite workload-summary and graph-data
+// artifacts.
 //
 // Usage:
 //   dart run benchmark/profile/run_tracelite_profile.dart \
@@ -73,11 +73,6 @@ Future<void> main(List<String> args) async {
   }
   print('  tracelite region: ${paths.region}');
   print('');
-  print('Compatibility/parity artifacts:');
-  print('  legacy profile JSON: ${paths.legacyProfileJson}');
-  if (options.writeParityDiff) {
-    print('  parity diff: ${paths.parityDiff}');
-  }
 }
 
 class _Options {
@@ -92,7 +87,6 @@ class _Options {
     required this.traceliteSourcePolicy,
     required this.graphDataDir,
     required this.exportGraphData,
-    required this.writeParityDiff,
     required this.dryRun,
     required this.showHelp,
   });
@@ -107,7 +101,6 @@ class _Options {
   final TraceliteSourcePolicy traceliteSourcePolicy;
   final String? graphDataDir;
   final bool exportGraphData;
-  final bool writeParityDiff;
   final bool dryRun;
   final bool showHelp;
 
@@ -130,7 +123,6 @@ class _Options {
         ),
         graphDataDir: null,
         exportGraphData: true,
-        writeParityDiff: true,
         dryRun: false,
         showHelp: true,
       );
@@ -179,7 +171,6 @@ class _Options {
       ),
       graphDataDir: graphDataDir,
       exportGraphData: !flags.contains('no-graph-data'),
-      writeParityDiff: !flags.contains('no-parity-diff'),
       dryRun: flags.contains('dry-run'),
       showHelp: false,
     );
@@ -190,23 +181,19 @@ class _ArtifactPaths {
   _ArtifactPaths(String outDir, {String? graphDataDir})
     : manifest = p.join(outDir, 'manifest.json'),
       region = p.join(outDir, 'profile.tlt-region'),
-      legacyProfileJson = p.join(outDir, 'profile.json'),
       workloadSummaryJson = p.join(outDir, 'workload-summary.json'),
       workloadSummaryMarkdown = p.join(outDir, 'workload-summary.md'),
       insightsJson = p.join(outDir, 'insights.json'),
       insightsMarkdown = p.join(outDir, 'insights.md'),
-      graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data'),
-      parityDiff = p.join(outDir, 'parity-diff.txt');
+      graphDataDir = graphDataDir ?? p.join(outDir, 'graph-data');
 
   final String manifest;
   final String region;
-  final String legacyProfileJson;
   final String workloadSummaryJson;
   final String workloadSummaryMarkdown;
   final String insightsJson;
   final String insightsMarkdown;
   final String graphDataDir;
-  final String parityDiff;
 }
 
 class _Step {
@@ -247,14 +234,13 @@ List<_Step> _plannedSteps(_Options options, _ArtifactPaths paths) {
       workingDirectory: options.traceliteRoot,
     ),
     _Step(
-      name: 'run resqlite profile harness',
+      name: 'run resqlite tracelite workloads',
       executable: options.dartExecutable,
       arguments: [
         'run',
         '-DRESQLITE_PROFILE=true',
         '-DRESQLITE_TRACELITE=true',
-        'benchmark/run_profile.dart',
-        '--out=${paths.legacyProfileJson}',
+        'benchmark/profile/run_tracelite_workloads.dart',
       ],
       workingDirectory: resqliteRoot,
       environment: {
@@ -324,23 +310,6 @@ List<_Step> _plannedSteps(_Options options, _ArtifactPaths paths) {
     ),
   );
 
-  if (options.writeParityDiff) {
-    steps.add(
-      _Step(
-        name: 'compare legacy JSON with tracelite workload summary',
-        executable: options.dartExecutable,
-        arguments: [
-          'run',
-          'benchmark/profile/diff.dart',
-          paths.legacyProfileJson,
-          paths.workloadSummaryJson,
-        ],
-        workingDirectory: resqliteRoot,
-        stdoutPath: paths.parityDiff,
-      ),
-    );
-  }
-
   return steps;
 }
 
@@ -383,7 +352,7 @@ Future<void> _writeManifest(
   required Map<String, Object?> traceliteSource,
 }) async {
   final manifest = {
-    'schema': 'resqlite.tracelite_profile_run.v1',
+    'schema': 'resqlite.tracelite_profile_run.v2',
     'generated_at': DateTime.now().toUtc().toIso8601String(),
     'label': options.label,
     'tracelite_root': options.traceliteRoot,
@@ -398,19 +367,13 @@ Future<void> _writeManifest(
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
       'region': paths.region,
     },
-    'compatibility_artifacts': {
-      'legacy_profile_json': paths.legacyProfileJson,
-      'parity_diff': options.writeParityDiff ? paths.parityDiff : null,
-    },
     'artifacts': {
       'region': paths.region,
-      'legacy_profile_json': paths.legacyProfileJson,
       'workload_summary_json': paths.workloadSummaryJson,
       'workload_summary_markdown': paths.workloadSummaryMarkdown,
       'insights_json': paths.insightsJson,
       'insights_markdown': paths.insightsMarkdown,
       'graph_data_dir': options.exportGraphData ? paths.graphDataDir : null,
-      'parity_diff': options.writeParityDiff ? paths.parityDiff : null,
     },
   };
   final file = File(paths.manifest);
@@ -444,12 +407,6 @@ void _printPlan(_Options options, _ArtifactPaths paths, List<_Step> steps) {
     print('  graph data index: ${p.join(paths.graphDataDir, 'index.json')}');
   }
   print('  tracelite region: ${paths.region}');
-  print('');
-  print('compatibility/parity artifacts:');
-  print('  legacy profile JSON: ${paths.legacyProfileJson}');
-  if (options.writeParityDiff) {
-    print('  parity diff: ${paths.parityDiff}');
-  }
   print('');
   print('steps:');
   for (final step in steps) {
@@ -547,7 +504,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--ring-data-words=4194304] [--max-producers=8]');
   stderr.writeln('    [--tracelite-revision=$pinnedTraceliteRevision]');
   stderr.writeln('    [--allow-unpinned-tracelite] [--allow-dirty-tracelite]');
-  stderr.writeln('    [--no-graph-data] [--no-parity-diff] [--dry-run]');
+  stderr.writeln('    [--no-graph-data] [--dry-run]');
   stderr.writeln('');
   stderr.writeln('TRACELITE_ROOT can be used instead of --tracelite-root.');
   exit(exitCode);

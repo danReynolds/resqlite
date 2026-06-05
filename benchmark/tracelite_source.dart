@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 const pinnedTraceliteRepository = 'https://github.com/danReynolds/tracelite';
-const pinnedTraceliteRevision = 'b92ec4fa8410b074f77bea840c2fa53cfdf759b4';
-const pinnedTraceliteTag = 'resqlite-profiling-gate-2026-06-04-r12';
+const pinnedTraceliteRevision = '2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a';
+const pinnedTraceliteTag = '';
 
 final class TraceliteSourcePolicy {
   const TraceliteSourcePolicy({
@@ -164,7 +164,9 @@ void printTraceliteSource(Map<String, Object?> source) {
   if (source['pin_required'] == true) {
     print('tracelite_pinned_repository: ${source['pinned_repository']}');
     print('tracelite_pinned_revision: ${source['pinned_revision']}');
-    print('tracelite_pinned_tag: ${source['pinned_tag']}');
+    if ((source['pinned_tag'] as String?)?.isNotEmpty == true) {
+      print('tracelite_pinned_tag: ${source['pinned_tag']}');
+    }
   } else {
     print('tracelite_pin: disabled');
   }
@@ -244,7 +246,8 @@ void validateTraceliteSource(Map<String, Object?> source) {
     stderr.writeln('expected: ${source['pinned_revision']}');
     stderr.writeln('actual:   ${source['revision']}');
     stderr.writeln(
-      'Use $pinnedTraceliteRepository at tag $pinnedTraceliteTag, or pass '
+      'Use $pinnedTraceliteRepository at revision '
+      '${source['pinned_revision']}, or pass '
       '--allow-unpinned-tracelite for local development only.',
     );
     exit(64);
@@ -258,7 +261,8 @@ void validateTraceliteSource(Map<String, Object?> source) {
     stderr.writeln('expected: ${source['pinned_repository']}');
     stderr.writeln('actual:   ${source['remote']}');
     stderr.writeln(
-      'Use $pinnedTraceliteRepository at tag $pinnedTraceliteTag, or pass '
+      'Use $pinnedTraceliteRepository at revision '
+      '${source['pinned_revision']}, or pass '
       '--allow-unpinned-tracelite for local development only.',
     );
     exit(64);
