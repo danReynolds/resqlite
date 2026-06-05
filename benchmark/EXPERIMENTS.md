@@ -35,10 +35,10 @@ opposite. You want rich diagnostics:
   wins there are invisible to time-only benchmarks.
 
 The default profile workflow now runs this through tracelite, so the same run
-also produces a trace, workload summary, insight artifacts, graph data, and
-legacy JSON parity evidence. Because both your experiment branch AND the
-baseline it's compared against run under the same profile build, the diagnostic
-overhead cancels out in the delta — what you see is the signal of your change.
+also produces a trace, workload summary, insight artifacts, and graph data.
+Because both your experiment branch AND the baseline it's compared against run
+under the same profile build, the diagnostic overhead cancels out in the delta
+-- what you see is the signal of your change.
 
 ## The compile-time gate
 
@@ -71,9 +71,8 @@ Currently gated:
   operation spans, transaction bodies, reader/writer handling,
   reader-pool dispatch, correlated stream invalidation and re-query,
   profile counters, and embedded SQLite calls when `trace_sqlite` is
-  enabled. The runtime attach is best-effort;
-  missing `TRACELITE_REGION` or runtime symbols leave the normal
-  profile harness unchanged.
+  enabled. The profile wrapper validates the region and runtime before
+  running the workload driver.
 
 If you add new diagnostic instrumentation, gate it the same way.
 Never add unconditional instrumentation to production code paths
@@ -82,16 +81,15 @@ across all peers being compared.
 
 ## Tracelite profile workflow
 
-Tracelite is the preferred profile workflow for new experiments. It gives one
-trace file that can line up resqlite's database, worker, counter, fanout, and
-native spans with workload summaries, insight artifacts, graph data, and a
-compatibility diff against the old JSON shape.
+Tracelite is the profile workflow for new experiments. It gives one trace file
+that can line up resqlite's database, worker, counter, fanout, and native spans
+with workload summaries, insight artifacts, and graph data.
 
 The preferred workflow is the wrapper:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout resqlite-profiling-gate-2026-06-04-r12
+git -C /path/to/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
 
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
@@ -109,23 +107,16 @@ Primary tracelite artifacts:
   health, workload coverage, and bottleneck signals.
 - `graph-data/`: normalized JSON datasets for downstream dashboards.
 
-Compatibility/parity artifacts:
-
-- `profile.json`: the legacy `run_profile.dart` artifact, for existing
-  diff tools and older experiment notes.
-- `parity-diff.txt`: `benchmark/profile/diff.dart` comparing the legacy
-  JSON against tracelite's workload summary.
-
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
-`b92ec4fa8410b074f77bea840c2fa53cfdf759b4` or is dirty. Use
+`2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a` or is dirty. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development. The package code only keeps the compile-time trace
 emitters.
 
-For GitHub Pages, keep raw traces and legacy JSON in `build/` but write the
-small graph-data bundle directly to the dashboard input location:
+For GitHub Pages, keep raw traces in `build/` but write the small graph-data
+bundle directly to the dashboard input location:
 
 ```bash
 dart run benchmark/profile/run_tracelite_profile.dart \
@@ -135,13 +126,17 @@ dart run benchmark/profile/run_tracelite_profile.dart \
 ```
 
 The dashboard treats `docs/benchmarks/data/tracelite/latest/index.json` as
-the canonical tracelite data source when present. New profiling views should
-use this graph-data bundle, not the legacy profile JSON compatibility shape.
-The wrapper runs `tracelite validate-graph-data` after export so malformed
-graph data fails before it can be committed for Pages.
+the canonical tracelite data source when present. The wrapper runs
+`tracelite validate-graph-data` after export so malformed graph data fails
+before it can be committed for Pages.
 
-You can still run the low-level harness directly when a region is already
-active or when an older note specifically needs raw legacy profile JSON:
+`benchmark/profile/run_tracelite_workloads.dart` is the child workload driver
+used by the wrapper. It is not a standalone comparison command: it only creates
+representative resqlite work and emits spans, counters, diagnostics, and RSS
+samples into the active tracelite region. Use the wrapper unless you are
+debugging the trace runtime itself.
+
+If you do need to run the child directly while debugging a pre-created region:
 
 ```bash
 TRACELITE_REGION=/tmp/resqlite.trace \
@@ -149,8 +144,7 @@ TRACELITE_RUNTIME=/path/to/libtracelite_runtime.dylib \
 dart run \
   -DRESQLITE_PROFILE=true \
   -DRESQLITE_TRACELITE=true \
-  benchmark/run_profile.dart \
-  --out=benchmark/profile/results/tracelite.json
+  benchmark/profile/run_tracelite_workloads.dart
 ```
 
 For SQLite-level timing inside resqlite's embedded sqlite3mc build,
@@ -170,37 +164,9 @@ into `libresqlite`, and lets the shim own the normal SQLite ABI
 symbols. Keep this out of release benchmark runs; it is for trace
 capture, not public dashboard numbers.
 
-## Legacy three-command workflow
+## What the profile workload driver runs
 
-Use this direct legacy workflow only when you need old JSON A/B diffing without
-tracelite artifacts. New experiment notes should prefer the tracelite wrapper
-above and link the workload summary, insights, graph data, and parity diff.
-
-```bash
-# 1. On main (baseline)
-git checkout main
-dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
-  --out=benchmark/profile/results/baseline.json
-
-# 2. On your experiment branch
-git checkout exp-N-my-change
-dart run -DRESQLITE_PROFILE=true benchmark/run_profile.dart \
-  --out=benchmark/profile/results/exp-N.json
-
-# 3. Compare
-dart run benchmark/profile/diff.dart \
-  benchmark/profile/results/baseline.json \
-  benchmark/profile/results/exp-N.json
-```
-
-The diff tool prints one table per workload with p50/p90/p99/max/work
-deltas in both absolute μs and percent. Exit code is always 0 — it's
-a reporting tool, not a pass/fail gate. The experimenter interprets
-deltas against their hypothesis.
-
-## What the profile workload harness runs
-
-`run_tracelite_profile.dart` invokes the low-level profile harness for four
+`run_tracelite_profile.dart` invokes the workload driver for four
 workloads, each run for 100 iterations after a 50-iteration warmup:
 
 | Workload | What it measures | Samples |
@@ -210,79 +176,41 @@ workloads, each run for 100 iterations after a 50-iteration warmup:
 | **Point queries** | Single-row PK lookup cost (~100% dispatch-bound on resqlite) | 50k |
 | **Merge rounds** | 100-row `INSERT OR REPLACE` batches (amortized dispatch) | 1k batches |
 
-The noop baseline runs first. Its median becomes the dispatch floor,
-and every subsequent workload's JSON includes a `work_us_median =
-total_us_median - dispatch_floor_us` column. That's the key
-methodology for distinguishing "our change saved dispatch cost" from
-"our change saved query work."
+The noop baseline runs first. Its median is printed as the dispatch floor, and
+the traced samples include enough metadata for tracelite's workload summary to
+separate dispatch-heavy work from actual query work.
 
-## Interpreting a diff
+## Interpreting Tracelite artifacts
 
-Example output from `dart run benchmark/profile/diff.dart A.json B.json`:
+Read the workload summary and insights before drawing a conclusion:
 
-```
-## merge_rounds
-  TIME executeBatch:
-    p50      110μs →    106μs      -4μs  (-3.6%)
-    p90      178μs →    131μs     -47μs  (-26.4%)
-    p99      607μs →    335μs    -272μs  (-44.8%)
-    max     4034μs →    800μs   -3234μs  (-80.2%)
-    work      99μs →     95μs      -4μs  (-4.0%)
-  MEMORY (process RSS):
-    rss Δ   1.53 MB →   0.05 MB  -1.48 MB  (-96.9%)
-  SQLITE (per-connection counters, per-workload delta):
-    page cache    21.3 KB →    21.3 KB          +0 B  (+0.0%)
-    stmt           2.0 KB →     2.0 KB          +0 B  (+0.0%)
-    wal            8.0 KB →     8.0 KB          +0 B  (+0.0%)
-  ALLOC (decoder counters, per-workload delta):
-    rows                50000 →      50000            +0
-    cells              300000 →     300000            +0
-```
-
-Reading this:
-
-- **TIME p50 barely moved** (−3.6%). The median case is unaffected.
-- **TIME p99 dropped 44.8%**. The tail shrank dramatically. Something
-  that was happening ~1% of the time — a WAL checkpoint, a GC pause,
-  a scheduler stall — is happening less often or being resolved
-  faster in the candidate build.
-- **TIME max dropped 80%**. The absolute worst case got much better.
-- **TIME work dropped 4μs**. The dispatch-subtracted time (i.e.
-  actual per-batch SQL work) is 4μs faster at the median.
-- **MEMORY rss Δ dropped 97%**. Far less process memory grew during
-  this workload — a strong allocation-reduction signal. (Note: RSS is
-  a lower bound; the Dart VM retains heap pages after GC so small
-  wins may show as zero.)
-- **SQLITE counters unchanged**. The SQLite-internal memory (page
-  cache, stmt cache, WAL) is identical across builds — the change
-  didn't affect SQLite-level memory, only Dart-heap allocation.
-- **ALLOC counters unchanged**. The decoder materialized the same
-  number of rows and cells — the workload produced the same data.
-  If an exp-055-style columnar-typed-arrays candidate were being
-  tested, you'd look for the rows/cells columns staying identical
-  (same work) while RSS Δ dropped (less allocation for that work).
+- **Workload summary**: p50/p90/p99/max timings, per-workload counters, RSS
+  samples, SQLite diagnostics, and profile counter snapshots.
+- **Insights**: trace health, workload coverage, bottleneck hints, and
+  suspicious outlier or missing-span conditions.
+- **Graph data**: the dashboard-ready normalized view. If a run is meant to
+  inform a public note or Pages view, validate and link this bundle.
 
 Three things to keep in mind when interpreting:
 
 1. **p99 and max on single runs are noisy.** Even with 1k samples, a
    single GC pause landing in one run and not the other can move p99
-   10–20%. Run the A/B multiple times if the p99 story matters to
-   your conclusion. Exp 083 used 5 runs per variant and took medians
-   of percentiles across runs.
+   10-20%. Run the A/B multiple times if the p99 story matters to
+   your conclusion.
 2. **Compare work medians, not total medians, on dispatch-hot
-   workloads.** Point queries are ~100% dispatch-bound — a "+1μs total"
+   workloads.** Point queries are ~100% dispatch-bound, so a "+1 us total"
    delta there could be pure dispatch-floor drift between runs, not
-   anything your change did. The `work` column subtracts that.
+   anything your change did.
 3. **RSS is a lower bound.** `ProcessInfo.currentRss` doesn't report
    heap space freed by GC but not returned to the OS. A visible RSS
-   reduction means the allocation reduction is *at least* that large —
+   reduction means the allocation reduction is *at least* that large --
    often much more. SQLite counters and ALLOC counters are exact.
 
 ## Memory diagnostics in detail
 
-The profile harness captures three layers of memory data around each workload,
+The profile workflow captures three layers of memory data around each workload,
 each answering a different question. In new experiments, read these from the
-Tracelite profile wrapper's workload summary and compatibility `profile.json`.
+Tracelite workload summary and insights.
 
 **Process RSS** (`rss_before_mb`, `rss_after_mb`, `rss_delta_mb`) —
 coarse, inclusive of everything: Dart heap, SQLite's internal
@@ -320,11 +248,9 @@ for new fields.
 
 When you finalize an experiment (accept or reject), create
 `experiments/NNN-my-experiment.md`. Include the relevant Tracelite workload
-summary, insights, and parity-diff evidence inline, and link the generated
-Tracelite artifact directory. Do not commit raw profile JSONs from
-`benchmark/profile/results/`; the CI guard rejects those because they are large,
-local, and hardware-specific. Commit the aggregate markdown or experiment
-writeup instead.
+summary and insights inline, and link the generated Tracelite artifact
+directory. Do not commit raw trace regions from `build/`; keep the small
+graph-data bundle only when it is meant to power Pages.
 
 Template:
 
@@ -345,9 +271,9 @@ Template:
 Tracelite profile: build/tracelite-profile/exp-NNN/
 Workload summary: build/tracelite-profile/exp-NNN/workload-summary.md
 Insights: build/tracelite-profile/exp-NNN/insights.md
-Legacy parity JSON: build/tracelite-profile/exp-NNN/profile.json
+Graph data: build/tracelite-profile/exp-NNN/graph-data/
 
-[paste the relevant workload-summary / insights / parity-diff excerpt here]
+[paste the relevant workload-summary / insights excerpt here]
 
 ## Analysis
 <what the numbers mean, whether the hypothesis held, caveats>
@@ -358,14 +284,22 @@ Legacy parity JSON: build/tracelite-profile/exp-NNN/profile.json
 
 ## DevTools cross-isolate timeline
 
-When `-DRESQLITE_PROFILE=true` is set, the writer and reader isolates
+When `-DRESQLITE_PROFILE=true` is set, the writer and reader isolates still
 emit Timeline spans named `writer.handle.<RequestType>` and
-`reader.handle.<RequestType>` around each message dispatch. To see
-them in DevTools, intentionally run the low-level harness directly:
+`reader.handle.<RequestType>` around each message dispatch. Tracelite is the
+maintained artifact path, but the Timeline markers remain useful as a local
+debugging fallback while profile-mode counters still depend on the same flag.
+
+To inspect both, create a region through `run_tracelite_profile.dart` or
+manually run the child driver with `--observe`:
 
 ```bash
+TRACELITE_REGION=/tmp/resqlite.trace \
+TRACELITE_RUNTIME=/path/to/libtracelite_runtime.dylib \
 dart --observe --profile-period=100 \
-  -DRESQLITE_PROFILE=true benchmark/run_profile.dart
+  -DRESQLITE_PROFILE=true \
+  -DRESQLITE_TRACELITE=true \
+  benchmark/profile/run_tracelite_workloads.dart
 ```
 
 Open the service URL printed on startup in DevTools → Performance tab
@@ -376,15 +310,9 @@ allocation.
 
 ## Anti-patterns
 
-- **Don't run `run_profile.dart` without `-DRESQLITE_PROFILE=true`
-  and think you're measuring the same thing.** Without the flag the
-  Timeline markers are tree-shaken out; you still get ProfiledDatabase
-  wall times but no cross-isolate breakdown. `run_profile.dart` prints
-  a warning at startup when the flag is missing.
-- **Don't mix a profile-mode JSON with a release-mode result for
-  diffing.** The output formats are different; diff.dart only reads
-  profile-mode JSON. If you're comparing release numbers, use
-  `run_release.dart --compare-to=baseline.md` instead.
+- **Don't run the workload driver directly for A/B conclusions.** It is an
+  event source for tracelite, not the artifact producer or policy decision
+  layer.
 - **Don't put `-DRESQLITE_PROFILE=true` in CI's release benchmark
   step.** The CI workflow in `.github/workflows/ci.yml` runs
   `run_release.dart` precisely because release numbers are what feed
@@ -404,8 +332,8 @@ allocation.
 - [`benchmark/profile/profiled_database.dart`](./profile/profiled_database.dart)
   — the per-call timing wrapper, also home of the main-side counter
   increments
-- [`benchmark/profile/dispatch_budget.dart`](./profile/dispatch_budget.dart)
-  — the original Phase-1 harness that `run_profile.dart` is built on
+- [`benchmark/profile/run_tracelite_workloads.dart`](./profile/run_tracelite_workloads.dart)
+  — the trace-only workload driver used by the wrapper
 - [`benchmark/suites/memory.dart`](./suites/memory.dart) — the
   release-mode peer memory comparison suite (what the dashboard
   consumes); profile mode's memory capture is a superset for

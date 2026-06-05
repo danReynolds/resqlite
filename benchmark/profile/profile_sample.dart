@@ -1,8 +1,8 @@
 /// Timing + meta for a single instrumented Database call.
 ///
 /// Produced by `ProfiledDatabase` and consumed by the profile-mode harnesses.
-/// The preferred entry point is `run_tracelite_profile.dart`, which also
-/// preserves the legacy `run_profile.dart` JSON shape for compatibility. See
+/// The maintained entry point is `run_tracelite_profile.dart`; the child
+/// workload driver emits these samples into tracelite spans and reports. See
 /// `benchmark/EXPERIMENTS.md` for the full workflow.
 ///
 /// Stays entirely in `benchmark/profile/` so production code is not
@@ -46,12 +46,12 @@ class ProfileSample {
   final String? tag;
 
   Map<String, Object?> toJson() => {
-        'op': op,
-        'sql': sql.length > 80 ? '${sql.substring(0, 77)}...' : sql,
-        'total_us': totalMicros,
-        'params': paramCount,
-        if (rowsReturned != null) 'rows': rowsReturned,
-        if (batchSize != null) 'batch_size': batchSize,
-        if (tag != null) 'tag': tag,
-      };
+    'op': op,
+    'sql': sql.length > 80 ? '${sql.substring(0, 77)}...' : sql,
+    'total_us': totalMicros,
+    'params': paramCount,
+    if (rowsReturned != null) 'rows': rowsReturned,
+    if (batchSize != null) 'batch_size': batchSize,
+    if (tag != null) 'tag': tag,
+  };
 }

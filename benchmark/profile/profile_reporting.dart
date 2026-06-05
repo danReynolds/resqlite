@@ -39,13 +39,6 @@ class ProfileWorkloadResult {
   }
 }
 
-Map<String, int> diagnosticsJson(Diagnostics d) => {
-  'sqlite_page_cache_bytes': d.sqlitePageCacheBytes,
-  'sqlite_schema_bytes': d.sqliteSchemaBytes,
-  'sqlite_stmt_bytes': d.sqliteStmtBytes,
-  'wal_bytes': d.walBytes,
-};
-
 Map<String, int> diagnosticsDelta(Diagnostics before, Diagnostics after) => {
   'sqlite_page_cache_bytes_delta':
       after.sqlitePageCacheBytes - before.sqlitePageCacheBytes,
@@ -54,49 +47,6 @@ Map<String, int> diagnosticsDelta(Diagnostics before, Diagnostics after) => {
   'sqlite_stmt_bytes_delta': after.sqliteStmtBytes - before.sqliteStmtBytes,
   'wal_bytes_delta': after.walBytes - before.walBytes,
 };
-
-Map<String, Object?> profileSamplesArtifact(
-  List<ProfileSample> samples, {
-  required int? readerFloor,
-  required int? writerFloor,
-}) {
-  return {
-    'samples': samples.map((s) => s.toJson()).toList(),
-    'summary': summarizeSamples(
-      samples,
-      readerFloor: readerFloor,
-      writerFloor: writerFloor,
-    ),
-  };
-}
-
-Map<String, Object?> profileWorkloadArtifact(
-  ProfileWorkloadResult workload, {
-  required int? readerFloor,
-  required int? writerFloor,
-}) {
-  final artifact = profileSamplesArtifact(
-    workload.samples,
-    readerFloor: readerFloor,
-    writerFloor: writerFloor,
-  );
-  artifact['iterations'] = workload.iterations;
-  artifact['memory'] = {
-    'rss_before_mb': double.parse(workload.rssBeforeMB.toStringAsFixed(3)),
-    'rss_after_mb': double.parse(workload.rssAfterMB.toStringAsFixed(3)),
-    'rss_peak_mb': double.parse(workload.rssPeakMB.toStringAsFixed(3)),
-    'rss_delta_mb': double.parse(workload.rssDeltaMB.toStringAsFixed(3)),
-    'diagnostics_before': diagnosticsJson(workload.diagnosticsBefore),
-    'diagnostics_after': diagnosticsJson(workload.diagnosticsAfter),
-    'diagnostics_delta': diagnosticsDelta(
-      workload.diagnosticsBefore,
-      workload.diagnosticsAfter,
-    ),
-    if (workload.counterDelta != null)
-      'profile_counters_delta': workload.counterDelta,
-  };
-  return artifact;
-}
 
 String formatProfileSamplesReport(
   List<ProfileSample> samples, {

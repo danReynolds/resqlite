@@ -48,8 +48,7 @@ isolate offloading is in play.
   (`parse_results.dart`, `generate_devices.dart`) expect, so they
   stay fixed for backward compatibility.
 - **Percentiles reported in profile mode**
-  (`profile/run_tracelite_profile.dart`, with `run_profile.dart` retained
-  as the legacy JSON compatibility harness): median, p90, p99, and max.
+  (`profile/run_tracelite_profile.dart`): median, p90, p99, and max.
   p99/max are where tail-latency regressions (GC pauses, WAL checkpoint
   stalls, isolate scheduler preemption) actually hide — exp 083 showed
   passive WAL checkpoints drove merge-round p99 by 57% while p50/p90 were

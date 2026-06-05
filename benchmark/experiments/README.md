@@ -11,7 +11,7 @@ Tracelite-backed profile workflow in
 [benchmark/profile/run_tracelite_profile.dart](../profile/run_tracelite_profile.dart)
 and [benchmark/EXPERIMENTS.md](../EXPERIMENTS.md). It runs the diagnostic
 profile harness with `-DRESQLITE_PROFILE=true`, exports Tracelite artifacts,
-and keeps the legacy `run_profile.dart` JSON shape for compatibility tools.
+and records workload summaries, insights, and graph data.
 
 Current experiments:
 

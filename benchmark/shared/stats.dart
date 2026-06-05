@@ -12,10 +12,9 @@ final class AggregateStats {
   static const int defaultBootstrapResamples = 2000;
 
   AggregateStats(List<double> values)
-      : runs = List<double>.from(values)..sort();
+    : runs = List<double>.from(values)..sort();
 
-  factory AggregateStats.from(List<double> samples) =>
-      AggregateStats(samples);
+  factory AggregateStats.from(List<double> samples) => AggregateStats(samples);
 
   final List<double> runs;
 
@@ -26,9 +25,8 @@ final class AggregateStats {
 
   double get madPct {
     if (runs.length == 1 || median == 0) return 0;
-    final deviations = [
-      for (final value in runs) (value - median).abs(),
-    ]..sort();
+    final deviations = [for (final value in runs) (value - median).abs()]
+      ..sort();
     return (medianOfSorted(deviations) / median) * 100;
   }
 
@@ -46,25 +44,23 @@ final class AggregateStats {
     double confidence = defaultConfidence,
     int resamples = defaultBootstrapResamples,
     int? seed,
-  }) =>
-      bootstrapMedianCI(
-        runs,
-        confidence: confidence,
-        resamples: resamples,
-        seed: seed,
-      );
+  }) => bootstrapMedianCI(
+    runs,
+    confidence: confidence,
+    resamples: resamples,
+    seed: seed,
+  );
 
   double ciMdePct({
     double confidence = defaultConfidence,
     int resamples = defaultBootstrapResamples,
     int? seed,
-  }) =>
-      minimumDetectableEffectPct(
-        runs,
-        confidence: confidence,
-        resamples: resamples,
-        seed: seed,
-      );
+  }) => minimumDetectableEffectPct(
+    runs,
+    confidence: confidence,
+    resamples: resamples,
+    seed: seed,
+  );
 
   double get madMdePct => madBasedDetectableEffectPct(runs);
 
@@ -72,15 +68,10 @@ final class AggregateStats {
     double confidence = defaultConfidence,
     int resamples = defaultBootstrapResamples,
     int? seed,
-  }) =>
-      math.max(
-        comparisonThresholdPct,
-        ciMdePct(
-          confidence: confidence,
-          resamples: resamples,
-          seed: seed,
-        ),
-      );
+  }) => math.max(
+    comparisonThresholdPct,
+    ciMdePct(confidence: confidence, resamples: resamples, seed: seed),
+  );
 }
 
 /// Median of a pre-sorted list. Returns 0 for an empty list.
@@ -130,8 +121,7 @@ double medianOfSorted(List<double> sortedValues) {
   // `tail * resamples` is integer, and stays within 1/resamples
   // otherwise. Copilot flagged the prior formulation as off-by-one.
   final lowIdx = (tail * resamples).floor().clamp(0, resamples - 1);
-  final highIdx =
-      (((1 - tail) * resamples).ceil() - 1).clamp(0, resamples - 1);
+  final highIdx = (((1 - tail) * resamples).ceil() - 1).clamp(0, resamples - 1);
   return (low: medians[lowIdx], high: medians[highIdx]);
 }
 
@@ -156,8 +146,12 @@ double minimumDetectableEffectPct(
   if (samples.length < 5) return stats.rangePct;
   final median = stats.median;
   if (median == 0) return 0;
-  final ci = bootstrapMedianCI(samples,
-      confidence: confidence, resamples: resamples, seed: seed);
+  final ci = bootstrapMedianCI(
+    samples,
+    confidence: confidence,
+    resamples: resamples,
+    seed: seed,
+  );
   final halfWidth = (ci.high - ci.low) / 2;
   return (halfWidth / median) * 100;
 }
@@ -203,9 +197,8 @@ final class BenchmarkTiming {
 /// break column-index-based extraction.
 ///
 /// Profile-mode harnesses read these getters directly. New experiments use
-/// `benchmark/profile/run_tracelite_profile.dart`; `benchmark/run_profile.dart`
-/// remains the legacy JSON compatibility producer for A/B diffing, where
-/// p99/max are where tail-latency regressions actually hide.
+/// `benchmark/profile/run_tracelite_profile.dart`; p99/max are where
+/// tail-latency regressions actually hide.
 final class Stats {
   Stats(List<int> raw) : _sorted = List.of(raw)..sort();
 
@@ -248,11 +241,13 @@ void printComparisonTable(String title, List<BenchmarkTiming> timings) {
     '${'Main med'.padLeft(10)}'
     '${'Main p90'.padLeft(10)}',
   );
-  print('${''.padRight(labelWidth, '-')}'
-      '${''.padRight(10, '-')}'
-      '${''.padRight(10, '-')}'
-      '${''.padRight(10, '-')}'
-      '${''.padRight(10, '-')}');
+  print(
+    '${''.padRight(labelWidth, '-')}'
+    '${''.padRight(10, '-')}'
+    '${''.padRight(10, '-')}'
+    '${''.padRight(10, '-')}'
+    '${''.padRight(10, '-')}',
+  );
 
   for (final t in timings) {
     print(

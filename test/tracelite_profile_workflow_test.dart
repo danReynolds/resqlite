@@ -30,18 +30,21 @@ void main() {
     final stdoutText = result.stdout.toString();
     expect(stdoutText, contains('resqlite tracelite profile plan'));
     expect(stdoutText, contains('primary tracelite artifacts'));
-    expect(stdoutText, contains('compatibility/parity artifacts'));
     expect(stdoutText, contains('profile.tlt-region'));
-    expect(stdoutText, contains('profile.json'));
     expect(stdoutText, contains('workload-summary.json'));
     expect(stdoutText, contains('insights.json'));
     expect(stdoutText, contains('insights.md'));
     expect(stdoutText, contains(p.join('pages', 'tracelite', 'index.json')));
     expect(stdoutText, contains('explain'));
-    expect(stdoutText, contains('parity-diff.txt'));
     expect(stdoutText, contains('validate-graph-data'));
+    expect(
+      stdoutText,
+      contains('benchmark/profile/run_tracelite_workloads.dart'),
+    );
     expect(stdoutText, contains('RESQLITE_TRACELITE=true'));
     expect(stdoutText, contains('TRACELITE_REGION='));
     expect(stdoutText, contains('TRACELITE_RUNTIME='));
+    expect(stdoutText, isNot(contains('profile.json')));
+    expect(stdoutText, isNot(contains('parity-diff.txt')));
   });
 }
