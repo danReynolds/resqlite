@@ -158,7 +158,7 @@ dart run benchmark/run_tracelite.dart \
   --resqlite-root="$PWD" \
   --label=exp-123-baseline \
   --suite-scenarios=high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions \
-  --policy-scenarios=high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
+  --policy-scenarios=high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions
 ```
 
 The default pin is
@@ -193,8 +193,9 @@ thresholds:
   throughput, point select, keyed primary-key subscriptions, and sqlite
   diagnostics
 - strict elapsed-time policy scenarios: high-cardinality fanout,
-  many-streams writer throughput, point select, and keyed primary-key
-  subscriptions
+  many-streams writer throughput, and keyed primary-key subscriptions. Point
+  select remains in suite coverage and graph data, but hosted macOS evidence
+  showed it is too noisy to block releases until the workload is redesigned.
 - repetition bounds: `--min-repetitions=7 --max-repetitions=30`
 - noise target: `--target-rse-percent=10`
 - robust within-run noise percentile: `--within-run-noise-percentile=0.75`
@@ -264,7 +265,18 @@ was 0.71% and 0.73% respectively, both within the 5% max-CV gate. Graph export
 produced 2100 scenario-series rows and 15 peer-summary rows. The wrapper
 manifest recorded `tracelite_resqlite_dependency.matches_requested_root=true`.
 
-Latest r12 lane-promotion evidence:
+Latest hosted-stable policy evidence:
+Tracelite's hosted production-evidence run on
+`b88ef4b9b222715d20386091194a436664f47bc5` and resqlite
+`4e9f0fbd658fc320a9847547af318cb9428e1f15` completed all five macOS and Linux
+suite-history runs. MacOS reported `point-select` as too noisy for strict
+policy, but recalibrating the preserved macOS artifacts for
+`high-cardinality-fanout`, `many-streams-writer-throughput`, and
+`keyed-pk-subscriptions` returned `ready` with 3/3 groups covered. The wrapper
+therefore keeps `point-select` as non-blocking trend evidence while using those
+hosted-stable lanes for default release policy.
+
+Latest r12 lane-promotion evidence before hosted policy narrowing:
 `production-pin-r12-point-keyed-policy-2026-06-04-r1` passed from a fresh
 Tracelite r12 clone with source pinning, dependency binding, one production
 warmup, 5/5 recorded `suite-history` runs, policy calibration `ready`, and
