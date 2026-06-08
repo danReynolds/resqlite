@@ -694,19 +694,41 @@ typedef _BatchStringWriter =
 ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
-  // Pass 1: encode strings up front so we know their byte lengths
-  // before sizing the buffer. We hold onto the encoded bytes (rather
-  // than re-encoding in pass 2) because Dart `utf8.encode` is the same
-  // work that `String.toNativeUtf8` did internally on the old path.
-  List<Uint8List?>? encodedStrings;
+  // Pass 1: measure UTF-8 byte length for strings without allocating
+  // a temporary `Uint8List` per string or a `List<Uint8List?>` to hold
+  // them. An ASCII flag is tracked across the parameter row so the
+  // write pass can choose between a tight code-unit copy and the
+  // shared `_writeUtf8` encoder used by the batch path.
+  //
+  // [EXP-125](../../../experiments/125-wide-ascii-batch-params.md) and
+  // [EXP-126](../../../experiments/126-wide-utf8-batch-packing.md)
+  // applied this pattern to wide generated-statement-style batches;
+  // this is the single-row counterpart used by every parameterized
+  // read and single-row write that does not hit the wide-batch fast
+  // path.
   var extraBytes = 0;
+  var asciiOnly = true;
   for (var i = 0; i < params.length; i++) {
     final value = params[i];
     if (value is String) {
-      encodedStrings ??= List<Uint8List?>.filled(params.length, null);
-      final bytes = utf8.encode(value);
-      encodedStrings[i] = bytes;
-      extraBytes += bytes.length;
+      final length = value.length;
+      if (asciiOnly) {
+        var nonAscii = false;
+        for (var j = 0; j < length; j++) {
+          if (value.codeUnitAt(j) > 0x7f) {
+            nonAscii = true;
+            break;
+          }
+        }
+        if (nonAscii) {
+          asciiOnly = false;
+          extraBytes += _utf8Length(value);
+        } else {
+          extraBytes += length;
+        }
+      } else {
+        extraBytes += _utf8Length(value);
+      }
     } else if (value is Uint8List) {
       extraBytes += value.length;
     }
@@ -733,12 +755,19 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
       byteData.setInt32(offset, 2, Endian.little);
       byteData.setFloat64(offset + 8, value, Endian.little);
     } else if (value is String) {
-      final bytes = encodedStrings![i]!;
-      view.setRange(dataOffset, dataOffset + bytes.length, bytes);
+      final start = dataOffset;
+      if (asciiOnly) {
+        final length = value.length;
+        for (var j = 0; j < length; j++) {
+          view[start + j] = value.codeUnitAt(j);
+        }
+        dataOffset = start + length;
+      } else {
+        dataOffset = _writeUtf8(value, view, dataOffset);
+      }
       byteData.setInt32(offset, 3, Endian.little);
-      byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
-      byteData.setInt32(offset + 16, bytes.length, Endian.little);
-      dataOffset += bytes.length;
+      byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
+      byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
     } else if (value is Uint8List) {
       view.setRange(dataOffset, dataOffset + value.length, value);
       byteData.setInt32(offset, 4, Endian.little);

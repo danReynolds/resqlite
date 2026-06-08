@@ -75,9 +75,9 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral.",
-      "keyPriors": ["109", "112", "113", "116", "125", "126"],
-      "archive": ["028", "076", "077", "095", "096"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral. Exp 142 then ports the same measure-then-write-direct pattern to the single-row `allocateParams` path used by every parameterized read and single-row write; focused 200-call INSERT shapes improve -13% to -26% on ASCII (-8% to -13% on Unicode), release Single Inserts moves 5.423 ms to 4.327 ms (-20.2%) under same-condition A/B, and the wide-batch and narrow-batch encoders are unchanged.",
+      "keyPriors": ["113", "116", "125", "126", "142"],
+      "archive": ["028", "076", "077", "095", "096", "109", "112"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -94,7 +94,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path. After exp 142, the same measure-then-write-direct pattern also covers `allocateParams` (every parameterized read and every single-row write); the only remaining `List<Uint8List?>` shape is `_allocateBatchParamsGeneric` for narrow batches that miss the wide-batch gate. Compare any future single-row encoder change against the exp 142 focused harness before claiming neutrality."
     },
     {
       "id": "long-text-stream-hashing",
@@ -541,6 +541,19 @@
       "nextSignals": [
         "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
         "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
+      ]
+    },
+    "142": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "The exp 125 / exp 126 measure-then-write-direct allocation-removal pattern scales down from wide batches to the single-row `allocateParams` path used by every parameterized read and single-row write; focused single-row INSERT shapes improve -13% to -26% on ASCII (-8% to -13% on Unicode) and the release Single Inserts row moves 5.423 ms to 4.327 ms (-20.2%) under same-condition A/B",
+        "Per-run noise on the focused single-row harness is material (~10-20% swings) but the direction is consistent across paired runs and p90 tails uniformly tighten with fewer `Uint8List` allocations on the hot path"
+      ],
+      "nextSignals": [
+        "compare any future single-row parameter encoder change against the exp 142 focused harness before claiming neutrality",
+        "revisit whether `_allocateBatchParamsGeneric` (narrow-batch fallback) carries the same removable per-string allocation pattern, but only with a workload that proves the per-cell signal at narrow widths",
+        "measure long-single-string parameter shapes (>= 256 bytes) before extending direct in-place encoding past identifier-shaped strings"
       ]
     }
   }
