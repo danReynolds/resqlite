@@ -38,7 +38,7 @@ Future<void> main(List<String> args) async {
     warmup: options.warmup,
     iterations: options.iterations,
     callsPerSample: options.batchSize,
-    paramBuilder: (i) => ['item_$i', i * 1.5],
+    paramBuilder: (i) => [_oneStringForMode(i, options.textMode), i * 1.5],
     sql: 'INSERT INTO t(name, value) VALUES (?, ?)',
     createSql:
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)',
@@ -49,7 +49,7 @@ Future<void> main(List<String> args) async {
     warmup: options.warmup,
     iterations: options.iterations,
     callsPerSample: options.batchSize,
-    paramBuilder: (i) => ['item_$i'],
+    paramBuilder: (i) => [_oneStringForMode(i, options.textMode)],
     sql: 'INSERT INTO t(name) VALUES (?)',
     createSql:
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
@@ -68,14 +68,34 @@ Future<void> main(List<String> args) async {
   );
 
   await _runSelectShape(
-    shape: 'SELECT category = ? (1 ASCII string param)',
+    shape: 'SELECT category = ? (1 string param)',
     warmup: options.warmup,
     iterations: options.iterations,
     callsPerSample: options.batchSize,
-    paramBuilder: (i) => ['cat_${i % 10}'],
+    paramBuilder: (i) => [_categoryForMode(i, options.textMode)],
     selectSql: 'SELECT id FROM items WHERE category = ?',
-    seedFn: _seedCategoryTable,
+    seedFn: (db) => _seedCategoryTable(db, options.textMode),
   );
+}
+
+String _oneStringForMode(int i, String textMode) {
+  switch (textMode) {
+    case 'unicode':
+      return 'café_$i';
+    case 'ascii':
+    default:
+      return 'item_$i';
+  }
+}
+
+String _categoryForMode(int i, String textMode) {
+  switch (textMode) {
+    case 'unicode':
+      return 'caté_${i % 10}';
+    case 'ascii':
+    default:
+      return 'cat_${i % 10}';
+  }
 }
 
 List<Object?> _buildThreeStringRow(int i, String textMode) {
@@ -203,7 +223,7 @@ Future<void> _runSelectShape({
   }
 }
 
-Future<void> _seedCategoryTable(resqlite.Database db) async {
+Future<void> _seedCategoryTable(resqlite.Database db, String textMode) async {
   await db.execute('''
     CREATE TABLE items(
       id INTEGER PRIMARY KEY,
@@ -219,7 +239,7 @@ Future<void> _seedCategoryTable(resqlite.Database db) async {
     'INSERT INTO items(name, value, category) VALUES (?, ?, ?)',
     [
       for (var i = 0; i < 5000; i++)
-        ['Item $i', i * 1.5, 'cat_${i % 10}'],
+        ['Item $i', i * 1.5, _categoryForMode(i, textMode)],
     ],
   );
 }

@@ -76,7 +76,9 @@ Added a focused harness at
 [`benchmark/experiments/single_row_param_encoding.dart`](../benchmark/experiments/single_row_param_encoding.dart)
 that times runs of N back-to-back `execute()` / `select()` calls across
 four single-row shapes, with `--text-mode=ascii|unicode` so future
-experiments can revisit either fast path directly.
+experiments can revisit either fast path directly. Every parameter
+builder honours the flag so unicode runs really do exercise the
+non-ASCII path on the 1-string shapes as well as the 3-string row.
 
 ## Results
 
@@ -96,18 +98,23 @@ Across three ASCII paired runs, candidate p10 (lower envelope) averaged
 ≈ -8% to -10% per shape; per-run variance was high but direction was
 consistent (3 of 4 shapes wins each pair, p90 tails uniformly tighter).
 
-Unicode text (mixed multi-byte strings):
+Unicode text (true non-ASCII parameters — every string is `café_…` /
+`mañana_…` / `naïve_…` / `caté_…` and routes through `_writeUtf8`):
 
 | Shape | Baseline p50 | Candidate p50 | Delta |
 |---|---:|---:|---:|
-| INSERT name+value (1 string + 1 double) | 5.95 ms | 5.79 ms | -3% |
-| INSERT name only (1 string) | 5.13 ms | 4.49 ms | -12% |
-| INSERT three strings (3 Unicode strings) | 4.51 ms | 4.17 ms | -8% |
-| SELECT category = ? (1 ASCII string param) | 10.07 ms | 8.78 ms | -13% |
+| INSERT name+value (1 string + 1 double) | 5.40 ms | 5.35 ms | -1% |
+| INSERT name only (1 string) | 4.53 ms | 4.51 ms | -0.4% |
+| INSERT three strings (3 Unicode strings) | 4.89 ms | 4.03 ms | -18% |
+| SELECT category = ? (1 Unicode string param) | 8.95 ms | 8.48 ms | -5% |
 
-The Unicode 3-string row exercises the `_writeUtf8` fallback for every
-string and still measured -8%, confirming the win comes from removing
-the allocation pair, not just the ASCII tight loop.
+For one non-ASCII string, the candidate's `_writeUtf8` walks the string
+twice (`_utf8Length` measure + inline encode) where the previous code
+ran `utf8.encode` once and bulk-copied; the two paths land inside noise
+on the single-string shapes. The three-string Unicode row stacks up the
+removed allocations and the win is clear at -18%, confirming the
+underlying signal is allocation removal — not the ASCII tight loop —
+once enough strings are present to amortize the dual-walk cost.
 
 Release write suite (same-condition A/B from `dart run benchmark/suites/writes.dart`),
 resqlite-only rows:
