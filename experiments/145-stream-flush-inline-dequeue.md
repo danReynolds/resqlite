@@ -4,6 +4,9 @@
 **Status:** Rejected
 **Direction:** `stream-rerun-dispatch`
 **Benchmark Run:** None
+**Archive:** Not created; the candidate was a two-method private cleanup, and
+the snippets below are enough to recreate it if an allocation profile ever
+names this path.
 
 ## Problem
 
