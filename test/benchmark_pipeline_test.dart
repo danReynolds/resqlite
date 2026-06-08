@@ -268,6 +268,56 @@ Keep in review.
         );
       },
     );
+
+    test('does not map Tracelite experiment docs to release runs', () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'resqlite_history_tracelite_mapping_test_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final resultsDir = Directory('${tempDir.path}/results')..createSync();
+      final experimentsDir = Directory('${tempDir.path}/experiments')
+        ..createSync();
+
+      File(
+        '${resultsDir.path}/2026-06-08T07-34-23-exp144-sqlite3mc-2-3-5.md',
+      ).writeAsStringSync(fixtureBenchmarkMarkdown);
+
+      File('${experimentsDir.path}/README.md').writeAsStringSync('''
+## Rejected
+
+| # | Experiment | Impact | PR |
+|---|---|---|---|
+| [146](146-lower-batch-pack-threshold.md) | Lower batch packing threshold | Slower/noisy under Tracelite | |
+''');
+
+      File(
+        '${experimentsDir.path}/146-lower-batch-pack-threshold.md',
+      ).writeAsStringSync('''
+# Experiment 146: Lower batch packing threshold
+
+**Date:** 2026-06-08
+**Status:** Rejected
+**Benchmark Run:** Tracelite A/B experiment, `exp-146-lower-batch-pack-threshold`
+
+## Problem
+Synthetic Tracelite fixture.
+
+## Results
+Tracelite decision artifacts live under build/.
+''');
+
+      final output = generate_history.buildHistoryData(
+        resultsDir: resultsDir,
+        experimentsDir: experimentsDir,
+        generatedAt: '2026-06-08T00:00:00.000Z',
+      );
+
+      final experiments = output['experiments'] as List<Map<String, Object?>>;
+      final experiment = experiments.single;
+      expect(experiment['id'], equals('146'));
+      expect(experiment.containsKey('benchmarkRun'), isFalse);
+    });
   });
 
   group('generate_history noise classification', () {

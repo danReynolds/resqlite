@@ -481,10 +481,13 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})',
       ).firstMatch(content);
       date = dateMatch?.group(1);
-      final benchmarkRunMatch = RegExp(
-        r'\*\*Benchmark Run:\*\*\s*None\b',
-        caseSensitive: false,
-      ).firstMatch(content);
+      final benchmarkRunHeader = _experimentHeaderValue(
+        content,
+        'Benchmark Run',
+      );
+      final skipBenchmarkRunMapping = _skipsReleaseBenchmarkRunMapping(
+        benchmarkRunHeader,
+      );
       final commitMatch = RegExp(
         r'\*\*Commit:\*\*\s*\[`?([a-f0-9]+)`?\]',
       ).firstMatch(content);
@@ -547,7 +550,7 @@ List<Map<String, Object?>> _parseExperimentsReadme(
         'status': currentStatus,
         'summary': impact,
         'commit': commit,
-        if (benchmarkRunMatch != null) '_skipBenchmarkRunMapping': true,
+        if (skipBenchmarkRunMapping) '_skipBenchmarkRunMapping': true,
         if (archive != null) 'archive': archive,
         'problem': problem,
         'hypothesis': hypothesis,
@@ -581,6 +584,28 @@ List<Map<String, Object?>> _parseExperimentsReadme(
   });
 
   return experiments;
+}
+
+String? _experimentHeaderValue(String content, String label) {
+  final match = RegExp(
+    '^\\*\\*${RegExp.escape(label)}:\\*\\*\\s*(.+)\$',
+    caseSensitive: false,
+    multiLine: true,
+  ).firstMatch(content);
+  return match?.group(1)?.trim();
+}
+
+bool _skipsReleaseBenchmarkRunMapping(String? benchmarkRun) {
+  if (benchmarkRun == null) return false;
+  final normalized = benchmarkRun.trim().toLowerCase();
+  if (normalized.isEmpty) return false;
+  if (normalized.startsWith('none')) return true;
+  if (normalized.startsWith('n/a')) return true;
+  if (normalized.startsWith('not applicable')) return true;
+  // Tracelite A/B experiments keep their structured decision artifacts under
+  // build/. They should not be auto-linked to same-day release benchmark runs.
+  if (normalized.startsWith('tracelite')) return true;
+  return false;
 }
 
 List<String> _parseMetricPatterns(String? section) {

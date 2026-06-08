@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-08T13:09:01.594776",
+  "generated": "2026-06-08T13:22:01.957795",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -19161,13 +19161,7 @@
       "hypothesis": "Lowering the ASCII batch-packing guard to `paramCount >= 2` and\n`totalParamCount >= 64` should improve the narrow batch-insert lane, or at\nleast stay neutral, because it removes temporary UTF-8 list allocation from a\nlarger set of batch writes.\n\nReject if Tracelite cannot show a primary improvement on `resqlite`\n`narrow-batch-insert`, if guardrails are too noisy to support the change, or if\nthe result merely broadens a fast path without measurable benefit.",
       "approach": "Created two resqlite worktrees from `origin/main` at\n`423a74eda5d05c2d7fc6f0ba70fd978fb6c345d0`:\n\n- Baseline: `/Users/dan/.codex/worktrees/resqlite-exp146-baseline`\n- Candidate: `/Users/dan/.codex/worktrees/resqlite-exp146-candidate`\n\nCandidate patch:\n\n```diff\n-const int _asciiBatchMinParamCount = 8;\n-const int _asciiBatchMinTotalParamCount = 8192;\n+const int _asciiBatchMinParamCount = 2;\n+const int _asciiBatchMinTotalParamCount = 64;\n```\n\nRan the integrated Tracelite A/B workflow with pinned Tracelite\n`a2bf3648836fcf680d0aceccb18c2b31a2109586` and ARM64 Dart:\n\n```text\n/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart run \\\n  benchmark/run_tracelite_experiment.dart \\\n  --dart=/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart \\\n  --tracelite-root=/Users/dan/Coding/tra...",
       "results": "The integrated wrapper completed clean baseline and candidate collection:\n\n| step | status |\n|---|---|\n| baseline suite history | ok |\n| candidate suite history | ok |\n| decision artifact | inconclusive |\n\nTracelite decision policy:\n\n| field | value |\n|---|---:|\n| expectation | improvement |\n| primary threshold | 24.0% |\n| max guardrail regression | 18.0% |\n| max CV | 18.0% |\n\nDecision comparisons:\n\n| role | scenario | peer | metric | baseline | candidate | change | max CV | p | status | effect |\n|---|---|---|---|---:|---:|---:|---:|---:|---|---|\n| primary | `narrow-batch-insert` | `resqlite` | `measured_elapsed_ns` | 11.45 ms | 11.62 ms | +1.45% | 13.2% | 0.513 | neutral | inconclusive |\n| guardrail | `narrow-batch-insert` | `sqlite_async` | `measured_elapsed_ns` | 14.93 ms | 12.28 ms ...",
-      "reasoning": "Reject.\n\nThe result does not justify lowering the ASCII batch-packing threshold. The\nprimary resqlite lane is neutral, not an improvement, and the guardrail is too\nnoisy to add confidence. Since the candidate only broadens an optimization\nguard, there is no correctness or maintainability reason to carry it without a\nclear timing win.\n\nKeep the current large-wide-batch guard from exp 125. Small and narrow batch\nwrites should stay on the generic path unless a future workload shows parameter\nencoding is a material part of wall time.",
-      "benchmarkRun": {
-        "id": "baseline-for-exp144",
-        "date": "2026-06-08",
-        "timestamp": "2026-06-08T07:16:55",
-        "source": "same-day"
-      }
+      "reasoning": "Reject.\n\nThe result does not justify lowering the ASCII batch-packing threshold. The\nprimary resqlite lane is neutral, not an improvement, and the guardrail is too\nnoisy to add confidence. Since the candidate only broadens an optimization\nguard, there is no correctness or maintainability reason to carry it without a\nclear timing win.\n\nKeep the current large-wide-batch guard from exp 125. Small and narrow batch\nwrites should stay on the generic path unless a future workload shows parameter\nencoding is a material part of wall time."
     }
   ],
   "tracked": [
