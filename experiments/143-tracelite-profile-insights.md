@@ -139,5 +139,4 @@ future runners do not need to reverse-engineer those conclusions from JSON.
 
 - Ran pinned Tracelite profile workflow with graph export and validation.
 - Ran one repeat pinned Tracelite profile workflow without graph export.
-- Verified the first run produced 4 workload summary rows, 41 operation metric
-  rows, 132 memory metric rows, and valid graph data.
+- Verified the first run produced 4 workload summary rows, 41 operation metric rows, 132 memory metric rows, and valid graph data.
