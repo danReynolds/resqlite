@@ -86,7 +86,7 @@ jobs:
       - name: Checkout pinned tracelite
         run: |
           git clone https://github.com/danReynolds/tracelite /tmp/tracelite
-          git -C /tmp/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
+          git -C /tmp/tracelite checkout a2bf3648836fcf680d0aceccb18c2b31a2109586
       - name: Run tracelite CI preset
         env:
           RESQLITE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

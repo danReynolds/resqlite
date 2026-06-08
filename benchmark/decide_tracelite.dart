@@ -324,6 +324,8 @@ _Step _decisionStep(_Options options, _Paths paths) {
 
 _Step? _graphDataStep(_Options options, _Paths paths) {
   if (!options.exportGraphData) return null;
+  final baselineArgs = _graphDataInputArgs(options.baseline);
+  final candidateArgs = _graphDataInputArgs(options.candidate);
   return _Step(
     name: 'export tracelite decision graph data',
     executable: options.dartExecutable,
@@ -331,14 +333,30 @@ _Step? _graphDataStep(_Options options, _Paths paths) {
       'run',
       'bin/tracelite.dart',
       'export-graph-data',
-      '--suite=${options.baseline}',
-      '--suite=${options.candidate}',
+      ...baselineArgs,
+      ...candidateArgs,
       '--decision=${p.absolute(paths.decisionJson)}',
       '--run-id=${options.label}',
       '--out=${p.absolute(paths.graphDataDir)}',
     ],
     workingDirectory: options.traceliteRoot,
   );
+}
+
+List<String> _graphDataInputArgs(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return ['--suite=$path'];
+
+  try {
+    final decoded = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+    return switch (decoded['schema']) {
+      'tracelite.suite_history.v1' => ['--suite-history=${p.absolute(path)}'],
+      'tracelite.compare.v1' => ['--compare=${p.absolute(path)}'],
+      _ => ['--suite=${p.absolute(path)}'],
+    };
+  } on Object {
+    return ['--suite=${p.absolute(path)}'];
+  }
 }
 
 _Step _explainStep(_Options options, _Paths paths) {

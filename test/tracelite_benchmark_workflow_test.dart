@@ -74,6 +74,181 @@ void main() {
     );
   });
 
+  test('tracelite decision workflow exports suite-history inputs', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_decision_history_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final baseline = File(p.join(temp.path, 'baseline-history.json'))
+      ..writeAsStringSync('{"schema":"tracelite.suite_history.v1","runs":[]}');
+    final candidate = File(p.join(temp.path, 'candidate-history.json'))
+      ..writeAsStringSync('{"schema":"tracelite.suite_history.v1","runs":[]}');
+    final policy = File(p.join(temp.path, 'policy-calibration.json'))
+      ..writeAsStringSync('{}');
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/decide_tracelite.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--baseline=${baseline.path}',
+      '--candidate=${candidate.path}',
+      '--policy=${policy.path}',
+      '--label=unit-decision-history',
+      '--out-dir=${p.join(temp.path, 'decision')}',
+      '--dry-run',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('--suite-history=${baseline.absolute.path}'));
+    expect(stdoutText, contains('--suite-history=${candidate.absolute.path}'));
+    expect(stdoutText, isNot(contains('--suite=${baseline.absolute.path}')));
+  });
+
+  test('tracelite experiment workflow dry-run prints direction plan', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_experiment_plan_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite_experiment.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--baseline-root=${p.join(temp.path, 'baseline')}',
+      '--candidate-root=${p.join(temp.path, 'candidate')}',
+      '--label=unit-experiment',
+      '--direction=parameter-encoding-and-binding',
+      '--out-dir=${p.join(temp.path, 'experiment')}',
+      '--dry-run',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('resqlite tracelite experiment plan'));
+    expect(stdoutText, contains('direction: parameter-encoding-and-binding'));
+    expect(stdoutText, contains('--suite-scenarios=narrow-batch-insert'));
+    expect(stdoutText, contains('--policy-scenarios=narrow-batch-insert'));
+    expect(stdoutText, contains('--interfaces=sqlite_async,resqlite'));
+    expect(stdoutText, contains('--no-strict'));
+    expect(stdoutText, contains('collect baseline history'));
+    expect(stdoutText, contains('collect candidate history'));
+    expect(stdoutText, contains('decide experiment'));
+    expect(stdoutText, contains('benchmark/run_tracelite.dart'));
+    expect(stdoutText, contains('benchmark/decide_tracelite.dart'));
+  });
+
+  test(
+    'tracelite experiment workflow preserves inconclusive evidence',
+    () async {
+      final root = Directory.current.path;
+      final temp = await Directory.systemTemp.createTemp(
+        'resqlite_tracelite_experiment_run_test_',
+      );
+      addTearDown(() => temp.delete(recursive: true));
+
+      final baselineRoot = Directory(p.join(temp.path, 'baseline'));
+      final candidateRoot = Directory(p.join(temp.path, 'candidate'));
+      Directory(
+        p.join(baselineRoot.path, 'benchmark'),
+      ).createSync(recursive: true);
+      Directory(
+        p.join(candidateRoot.path, 'benchmark'),
+      ).createSync(recursive: true);
+      File(
+        p.join(baselineRoot.path, 'benchmark', 'run_tracelite.dart'),
+      ).writeAsStringSync('');
+      File(
+        p.join(candidateRoot.path, 'benchmark', 'run_tracelite.dart'),
+      ).writeAsStringSync('');
+
+      final fakeTracelite = Directory(p.join(temp.path, 'tracelite'))
+        ..createSync();
+      final fakeDart = File(p.join(temp.path, 'fake-dart'));
+      fakeDart.writeAsStringSync(r'''#!/bin/sh
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    --out-dir=*) out="${arg#--out-dir=}" ;;
+  esac
+done
+mkdir -p "$out"
+if [ "$1" = "run" ] && [ "$2" = "benchmark/run_tracelite.dart" ]; then
+  cat > "$out/history.json" <<'JSON'
+{"schema":"tracelite.suite_history.v1","runs":[{"run":1,"name":"run-001","status":"ok","manifest":"run-001/manifest.json"}]}
+JSON
+  cat > "$out/policy-calibration.json" <<'JSON'
+{"schema":"tracelite.policy_calibration.v1","status":"ready"}
+JSON
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$2" = "benchmark/decide_tracelite.dart" ]; then
+  cat > "$out/decision.json" <<'JSON'
+{"schema":"tracelite.decision.v1","decision":"inconclusive","gates":{"primary":{"status":"inconclusive","comparisons":[{"role":"primary","scenario":"narrow-batch-insert","peer":"resqlite","metric":"measured_elapsed_ns","status":"too_noisy","change_percent":12.5,"max_cv_percent":31.2,"nonparametric_p_value":0.42,"delta_ci95_low":-1000000,"delta_ci95_high":4000000}]},"guardrails":{"status":"passed","comparisons":[]}}}
+JSON
+  echo "# decision" > "$out/decision.md"
+  echo "# insights" > "$out/insights.md"
+  exit 65
+fi
+exit 64
+''');
+      await Process.run('chmod', ['+x', fakeDart.path]);
+
+      final outDir = p.join(temp.path, 'experiment');
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'benchmark/run_tracelite_experiment.dart',
+        '--dart=${fakeDart.path}',
+        '--tracelite-root=${fakeTracelite.path}',
+        '--baseline-root=${baselineRoot.path}',
+        '--candidate-root=${candidateRoot.path}',
+        '--label=unit-inconclusive',
+        '--direction=parameter-encoding-and-binding',
+        '--out-dir=$outDir',
+        '--allow-unpinned-tracelite',
+        '--no-graph-data',
+      ], workingDirectory: root);
+
+      expect(
+        result.exitCode,
+        0,
+        reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+      );
+
+      final manifestFile = File(
+        p.join(outDir, 'resqlite-tracelite-experiment.json'),
+      );
+      expect(manifestFile.existsSync(), isTrue);
+      final manifest =
+          jsonDecode(manifestFile.readAsStringSync()) as Map<String, Object?>;
+      expect(manifest['status'], 'ok');
+      expect(manifest['decision'], isA<Map<String, Object?>>());
+      final decision = manifest['decision']! as Map<String, Object?>;
+      expect(decision['decision'], 'inconclusive');
+
+      final draft = File(p.join(outDir, 'unit-inconclusive-experiment.md'));
+      expect(draft.existsSync(), isTrue);
+      final draftText = draft.readAsStringSync();
+      expect(draftText, contains('Decision: `inconclusive`'));
+      expect(draftText, contains('narrow-batch-insert'));
+      expect(draftText, contains('too_noisy'));
+      expect(
+        File(p.join(fakeTracelite.path, 'pubspec_overrides.yaml')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
   test('tracelite decision workflow preserves manifest on failure', () async {
     final root = Directory.current.path;
     final temp = await Directory.systemTemp.createTemp(

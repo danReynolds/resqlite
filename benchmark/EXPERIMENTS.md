@@ -40,6 +40,26 @@ Because both your experiment branch AND the baseline it's compared against run
 under the same profile build, the diagnostic overhead cancels out in the delta
 -- what you see is the signal of your change.
 
+For branch-vs-baseline timing decisions, prefer the integrated A/B wrapper:
+
+```bash
+dart run benchmark/run_tracelite_experiment.dart \
+  --tracelite-root=/path/to/tracelite \
+  --baseline-root=/path/to/resqlite-baseline \
+  --candidate-root=/path/to/resqlite-candidate \
+  --label=exp-N-short-slug \
+  --direction=parameter-encoding-and-binding
+```
+
+It collects repeated Tracelite suite-history artifacts for each checkout, runs
+`tracelite decision` over the histories, writes decision insights, and creates a
+markdown experiment draft. Baseline and candidate collection use non-strict
+suite-history runs so noisy policy calibration does not block the other side
+from being measured. A rejected or inconclusive decision is still a completed
+experiment artifact when the collection was clean; the generated writeup should
+explain what was learned and whether the direction should be reopened,
+deferred, or pruned.
+
 ## The compile-time gate
 
 All profile-mode instrumentation in resqlite's production code paths
@@ -89,7 +109,7 @@ The preferred workflow is the wrapper:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
+git -C /path/to/tracelite checkout a2bf3648836fcf680d0aceccb18c2b31a2109586
 
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
@@ -110,7 +130,7 @@ Primary tracelite artifacts:
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
-`2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a` or is dirty. Use
+`a2bf3648836fcf680d0aceccb18c2b31a2109586` or is dirty. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development. The package code only keeps the compile-time trace
 emitters.
@@ -247,10 +267,12 @@ for new fields.
 ## Writing results to `experiments/NNN-*.md`
 
 When you finalize an experiment (accept or reject), create
-`experiments/NNN-my-experiment.md`. Include the relevant Tracelite workload
-summary and insights inline, and link the generated Tracelite artifact
-directory. Do not commit raw trace regions from `build/`; keep the small
-graph-data bundle only when it is meant to power Pages.
+`experiments/NNN-my-experiment.md`. Include the relevant Tracelite decision,
+workload summary, and insights inline, and link the generated Tracelite
+artifact directory. If `run_tracelite_experiment.dart` produced
+`<label>-experiment.md`, use that as the starting draft instead of rebuilding
+the result table by hand. Do not commit raw trace regions from `build/`; keep
+the small graph-data bundle only when it is meant to power Pages.
 
 Template:
 
