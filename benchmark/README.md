@@ -8,6 +8,7 @@ code path you measure differs between them.
 |---|---|---|
 | **Peer comparison / public dashboard** | [`run_release.dart`](./run_release.dart) | **No** — pristine, zero diagnostic overhead |
 | **Trace-backed production gate** | [`run_tracelite.dart`](./run_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
+| **Trace-backed A/B experiment** | [`run_tracelite_experiment.dart`](./run_tracelite_experiment.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Trace-backed baseline/candidate decision** | [`decide_tracelite.dart`](./decide_tracelite.dart) | **No for peer timing; yes for opt-in trace hooks** |
 | **Trace-backed experiment profile** | [`profile/run_tracelite_profile.dart`](./profile/run_tracelite_profile.dart) | **Yes** — Timeline markers, per-call profiling, tracelite spans, workload summaries, insights, graph data |
 | **Cross-library comparison via verifier harness** | `sqlite_reactive_verifier` | N/A (separate package) |
@@ -25,7 +26,16 @@ graph-data bundle consumed by the benchmark dashboard. This is the preferred
 pre-publish benchmark/profiling entry point. The wrapper requires the local
 tracelite checkout to match the pinned production source revision by default.
 
-If you already have baseline and candidate tracelite suite manifests, use
+If you're running a branch-vs-baseline performance experiment, use
+`run_tracelite_experiment.dart`. It runs the baseline and candidate
+`suite-history` collections, decides the result over those histories, preserves
+decision insights, and writes a markdown experiment draft with the headline
+comparison table. Rejected or inconclusive results are still valid completed
+experiment artifacts; use `--fail-on-nonaccepted` only when a script should act
+as a strict gate.
+
+If you already have baseline and candidate tracelite suite manifests or
+suite-history manifests, use
 `decide_tracelite.dart`. It applies the calibrated release-lane policy to
 `tracelite decision`, writes a durable decision artifact, and exports graph data
 for the dashboard. The wrapper intentionally defaults guardrails to
@@ -101,7 +111,7 @@ runner and artifact owner:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout 2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a
+git -C /path/to/tracelite checkout a2bf3648836fcf680d0aceccb18c2b31a2109586
 ```
 
 ```bash
@@ -148,8 +158,25 @@ dart run benchmark/run_tracelite.dart \
   --label=ci-smoke
 ```
 
-Perf experiments should start focused, then override scenarios to match the
-change:
+Perf experiments should normally use the integrated A/B wrapper. Pick a
+direction preset, then override scenarios only when the default direction does
+not match the change:
+
+```bash
+dart run benchmark/run_tracelite_experiment.dart \
+  --tracelite-root=/path/to/tracelite \
+  --baseline-root=/path/to/resqlite-baseline \
+  --candidate-root=/path/to/resqlite-candidate \
+  --label=exp-123-candidate \
+  --direction=parameter-encoding-and-binding
+```
+
+The integrated wrapper collects each side in non-strict mode so a noisy but
+complete suite history does not prevent collecting the other checkout. The
+Tracelite decision step remains the acceptance gate.
+
+For low-level collection only, start focused and override scenarios to match
+the change:
 
 ```bash
 dart run benchmark/run_tracelite.dart \
@@ -162,7 +189,7 @@ dart run benchmark/run_tracelite.dart \
 ```
 
 The default pin is
-`2e1cd54087aaef7bd7f130c2bde2fca64fc48d8a`. The wrapper records
+`a2bf3648836fcf680d0aceccb18c2b31a2109586`. The wrapper records
 `tracelite_source` in its manifest and fails if the checkout is not at that
 revision or is dirty. It also records `resqlite_source` and verifies that
 Tracelite's resolved `resqlite` package points at the checkout under test. If
@@ -346,13 +373,14 @@ workload definitions or separate calibrated thresholds.
 
 ## Tracelite Baseline/Candidate Decision
 
-Use this after collecting baseline and candidate suite manifests:
+Use this after collecting baseline and candidate suite manifests or
+suite-history manifests:
 
 ```bash
 dart run benchmark/decide_tracelite.dart \
   --tracelite-root=/path/to/tracelite \
-  --baseline=build/tracelite-baseline/manifest.json \
-  --candidate=build/tracelite-candidate/manifest.json \
+  --baseline=build/tracelite-baseline/history.json \
+  --candidate=build/tracelite-candidate/history.json \
   --policy=build/tracelite-benchmarks/prepublish/policy-calibration.json \
   --label=exp-123-no-regression
 ```

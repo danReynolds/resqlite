@@ -311,3 +311,40 @@ Outcome:
   time in the short child-process artifacts. Those warnings remain
   instrumentation guidance; the release gate is based on calibrated measured
   elapsed policy for the strict production workloads.
+
+## 2026-06-08 pass
+
+### Loop 13 - Integrated Tracelite experiment workflow
+
+Tried:
+
+- Updated the resqlite Tracelite pin and CI checkout to merged Tracelite main
+  commit `a2bf3648836fcf680d0aceccb18c2b31a2109586`.
+- Added `benchmark/run_tracelite_experiment.dart` as the branch-vs-baseline
+  A/B workflow: collect baseline suite history, collect candidate suite
+  history, run the decision wrapper, preserve logs, write a manifest, and
+  create a markdown experiment draft.
+- Retargeted `/Users/dan/Coding/tracelite/pubspec_overrides.yaml` to each
+  checkout before collection and restored the original override afterwards.
+- Routed decision graph export through `--suite-history` when the inputs are
+  repeated histories, not single suite manifests.
+- Made integrated A/B collection non-strict so noisy but complete suite
+  histories do not prevent collecting the other side. The decision artifact is
+  still the acceptance gate.
+
+Outcome:
+
+- Local validation passed: `dart analyze --fatal-infos`,
+  `dart test test/tracelite_benchmark_workflow_test.dart`,
+  `dart test test/tracelite_source_test.dart
+  test/tracelite_workflow_docs_test.dart
+  test/benchmark_generated_outputs_test.dart`, and
+  `dart run benchmark/check_experiment_signals.dart`.
+- Real exp146 collection completed end to end on ARM64 Dart with clean baseline
+  and candidate histories for `narrow-batch-insert`.
+- Tracelite decision was `inconclusive`: primary resqlite measured elapsed
+  changed +1.45% with neutral verdict, while the sqlite_async guardrail was
+  `too_noisy`.
+- Product decision for exp146 is rejected: keep the exp125 large-wide-batch
+  ASCII guard; small/narrow batches stay generic unless a new workload proves
+  parameter encoding is material.
