@@ -6,7 +6,6 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -119,16 +118,7 @@ final class Writer {
     );
   }
 
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-    int? traceCorrelationId,
-  ]) async {
-    final response = await selectResponse(sql, parameters, traceCorrelationId);
-    return response.rows;
-  }
-
-  Future<QueryResponse> selectResponse(
+  Future<QueryResponse> select(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
@@ -200,7 +190,7 @@ final class Writer {
       (replyPort) =>
           CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
-    _recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
 
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(
@@ -210,12 +200,6 @@ final class Writer {
     }
 
     return result;
-  }
-
-  void _recordWriterSqlite(int writerSqliteUs) {
-    if (!kProfileMode) return;
-    ProfileCounters.writerSqliteUs += writerSqliteUs;
-    ProfileCounters.writerSqliteCount++;
   }
 
   Future<void> close() async {

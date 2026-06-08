@@ -74,7 +74,7 @@ final class Transaction {
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.execute(sql, parameters, correlationId);
-      _recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -85,7 +85,7 @@ final class Transaction {
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.result.affectedRows],
     );
-    _recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     return response.result;
   }
 
@@ -103,23 +103,19 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = await _writer.selectResponse(
-        sql,
-        parameters,
-        correlationId,
-      );
-      _recordWriterSqlite(response.writerSqliteUs);
+      final response = await _writer.select(sql, parameters, correlationId);
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.rows;
     }
     final sqlId = TraceliteProfile.internString(sql);
     final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseSelect,
-      () => _writer.selectResponse(sql, parameters, correlationId),
+      () => _writer.select(sql, parameters, correlationId),
       correlationId: correlationId,
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.rows.length],
     );
-    _recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     return response.rows;
   }
 
@@ -152,7 +148,9 @@ final class Transaction {
         paramSets,
         traceCorrelationId: correlationId,
       );
-      if (response != null) _recordWriterSqlite(response.writerSqliteUs);
+      if (response != null) {
+        ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      }
       return;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -167,7 +165,9 @@ final class Transaction {
       correlationId: correlationId,
       beginArgs: [sqlId, paramCount, paramSets.length],
     );
-    if (response != null) _recordWriterSqlite(response.writerSqliteUs);
+    if (response != null) {
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    }
   }
 
   /// Initiates a nested transaction as a new savepoint. If [body] completes normally,
@@ -195,11 +195,5 @@ final class Transaction {
 
   void close() {
     _active = false;
-  }
-
-  void _recordWriterSqlite(int writerSqliteUs) {
-    if (!kProfileMode) return;
-    ProfileCounters.writerSqliteUs += writerSqliteUs;
-    ProfileCounters.writerSqliteCount++;
   }
 }

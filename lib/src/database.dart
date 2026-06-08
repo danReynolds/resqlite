@@ -402,7 +402,7 @@ final class Database {
       );
     }
 
-    _recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     streamEngine.onDependencyChanges(
       response.modifications,
       traceCorrelationId: correlationId,
@@ -467,7 +467,7 @@ final class Database {
     }
 
     if (response != null) {
-      _recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       streamEngine.onDependencyChanges(
         response.modifications,
         traceCorrelationId: correlationId,
@@ -521,12 +521,6 @@ final class Database {
       run,
       correlationId: correlationId,
     );
-  }
-
-  void _recordWriterSqlite(int writerSqliteUs) {
-    if (!kProfileMode) return;
-    ProfileCounters.writerSqliteUs += writerSqliteUs;
-    ProfileCounters.writerSqliteCount++;
   }
 
   // -------------------------------------------------------------------------

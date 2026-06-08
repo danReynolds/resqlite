@@ -1,9 +1,6 @@
-/// Profile-mode allocation counters.
-///
-/// All increments MUST be wrapped in `if (kProfileMode) { ... }` so
-/// Dart's AOT compiler tree-shakes them out of release builds. The
-/// counters themselves are plain `int` fields; they cost nothing when
-/// never incremented.
+/// Direct increments MUST be wrapped in `if (kProfileMode) { ... }` so Dart's
+/// AOT compiler tree-shakes them out of release builds. The counters themselves
+/// are plain `int` fields; they cost nothing when never incremented.
 ///
 /// **Purpose.** Support memory-axis experiments
 /// ([EXP-055](../../experiments/055-columnar-typed-arrays.md) columnar typed
@@ -35,6 +32,8 @@
 /// Keep additions minimal — prefer extending an existing counter's
 /// semantics over introducing a parallel one.
 library;
+
+import 'profile_mode.dart';
 
 class ProfileCounters {
   ProfileCounters._();
@@ -79,6 +78,16 @@ class ProfileCounters {
   /// protocol.
   static int writerSqliteUs = 0;
   static int writerSqliteCount = 0;
+
+  /// Adds writer-isolate SQLite-facing wall time to the profile snapshot.
+  ///
+  /// Use this helper instead of duplicating the profile-mode gate at every
+  /// writer-response call site.
+  static void recordWriterSqlite(int sqliteUs) {
+    if (!kProfileMode) return;
+    writerSqliteUs += sqliteUs;
+    writerSqliteCount++;
+  }
 
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
   /// currently available for dispatch - for example, when every worker
