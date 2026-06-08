@@ -663,10 +663,11 @@ void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
 
 const int _paramStructSize = 24;
 
-// Exp 125 targets large generated-statement-style batches; smaller/narrower
-// batches measured neutral and should avoid the ASCII probe.
-const int _asciiBatchMinParamCount = 8;
-const int _asciiBatchMinTotalParamCount = 8192;
+// Exp 125 targets large generated-statement-style batches. Exp 149 keeps the
+// narrow 2-3 parameter paths generic, but admits repeated 6+ parameter batches
+// where Tracelite profile merge rounds showed direct ASCII packing is material.
+const int _asciiBatchMinParamCount = 6;
+const int _asciiBatchMinTotalParamCount = 600;
 
 typedef _BatchStringWriter =
     int Function(String value, Uint8List out, int offset, int flatIndex);
