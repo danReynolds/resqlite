@@ -1,0 +1,4093 @@
+{
+  "schemaVersion": 3,
+  "kind": "release-benchmark-run",
+  "generatedAt": "2026-06-08T07:34:23.966190",
+  "label": "exp144-sqlite3mc-2-3-5",
+  "repeatCount": 1,
+  "environment": {
+    "cwd": "/Users/dan/Coding/resqlite/.claude/worktrees/amazing-ritchie-0103e5",
+    "hostname": "macbookpro.lan",
+    "os": "macos",
+    "osVersion": "Version 26.2 (Build 25C56)",
+    "dartVersion": "3.11.5",
+    "runtime": "dart-vm",
+    "executable": "/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart",
+    "resolvedExecutable": "/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart",
+    "script": "file:///Users/dan/Coding/resqlite/.claude/worktrees/amazing-ritchie-0103e5/benchmark/run_release.dart",
+    "processors": 10,
+    "ci": false,
+    "githubActions": false,
+    "gitSha": "423a74eda5d05c2d7fc6f0ba70fd978fb6c345d0",
+    "gitBranch": "exp-144-sqlite3mc-2-3-5",
+    "gitDirty": true,
+    "benchmarkMode": "release",
+    "includeSlow": false
+  },
+  "comparisonBaselineFile": "2026-06-08T07-16-55-baseline-for-exp144.md",
+  "comparisonBaselineMode": "explicit",
+  "comparisonBaselineCompatibility": {
+    "selectedBaselineFile": "2026-06-08T07-16-55-baseline-for-exp144.md",
+    "mode": "explicit",
+    "compatible": true,
+    "comparisonExecuted": true
+  },
+  "metrics": {
+    "Select → Maps / 10 rows / resqlite select()": 0.134,
+    "Select → Maps / 10 rows / resqlite select() [main]": 0.026,
+    "Select → Maps / 100 rows / resqlite select()": 0.082,
+    "Select → Maps / 100 rows / resqlite select() [main]": 0.01,
+    "Select → Maps / 1000 rows / resqlite select()": 0.516,
+    "Select → Maps / 1000 rows / resqlite select() [main]": 0.082,
+    "Select → Maps / 10000 rows / resqlite select()": 5.512,
+    "Select → Maps / 10000 rows / resqlite select() [main]": 0.746,
+    "Select → JSON Bytes / 10 rows / resqlite + jsonEncode": 0.099,
+    "Select → JSON Bytes / 10 rows / resqlite + jsonEncode [main]": 0.074,
+    "Select → JSON Bytes / 10 rows / resqlite selectBytes()": 0.024,
+    "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": 0.0,
+    "Select → JSON Bytes / 100 rows / resqlite + jsonEncode": 0.237,
+    "Select → JSON Bytes / 100 rows / resqlite + jsonEncode [main]": 0.183,
+    "Select → JSON Bytes / 100 rows / resqlite selectBytes()": 0.056,
+    "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": 0.0,
+    "Select → JSON Bytes / 1000 rows / resqlite + jsonEncode": 2.116,
+    "Select → JSON Bytes / 1000 rows / resqlite + jsonEncode [main]": 1.641,
+    "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": 0.382,
+    "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": 0.0,
+    "Select → JSON Bytes / 10000 rows / resqlite + jsonEncode": 24.742,
+    "Select → JSON Bytes / 10000 rows / resqlite + jsonEncode [main]": 16.885,
+    "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": 4.199,
+    "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": 0.006,
+    "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": 0.138,
+    "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": 0.042,
+    "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": 1.109,
+    "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": 0.41,
+    "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": 0.685,
+    "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": 0.154,
+    "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": 0.361,
+    "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": 0.15,
+    "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": 0.387,
+    "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": 0.151,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite": 0.016,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite [main]": 0.002,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite": 0.035,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite [main]": 0.007,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite": 0.059,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite [main]": 0.014,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite": 0.231,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite [main]": 0.071,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite": 0.459,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite [main]": 0.144,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite": 1.003,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite [main]": 0.286,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite": 3.251,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite [main]": 0.727,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite": 5.915,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite [main]": 1.449,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite": 12.93,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite [main]": 2.876,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite + jsonEncode": 0.034,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite + jsonEncode [main]": 0.034,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite selectBytes()": 0.018,
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite selectBytes() [main]": 0.018,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite + jsonEncode": 0.127,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite + jsonEncode [main]": 0.127,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite selectBytes()": 0.033,
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite selectBytes() [main]": 0.033,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite + jsonEncode": 0.224,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite + jsonEncode [main]": 0.224,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite selectBytes()": 0.056,
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite selectBytes() [main]": 0.056,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite + jsonEncode": 1.118,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite + jsonEncode [main]": 1.118,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite selectBytes()": 0.202,
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite selectBytes() [main]": 0.202,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite + jsonEncode": 2.04,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite + jsonEncode [main]": 2.04,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite selectBytes()": 0.406,
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite selectBytes() [main]": 0.406,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite + jsonEncode": 4.604,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite + jsonEncode [main]": 4.604,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite selectBytes()": 0.963,
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite selectBytes() [main]": 0.963,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite + jsonEncode": 13.452,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite + jsonEncode [main]": 13.452,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite selectBytes()": 2.202,
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite selectBytes() [main]": 2.202,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite + jsonEncode": 27.2,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite + jsonEncode [main]": 27.2,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite selectBytes()": 4.097,
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite selectBytes() [main]": 4.097,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite + jsonEncode": 44.095,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite + jsonEncode [main]": 44.095,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite selectBytes()": 8.296,
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite selectBytes() [main]": 8.296,
+    "Concurrent Reads (1000 rows per query) / 1× concurrency / resqlite": 0.31,
+    "Concurrent Reads (1000 rows per query) / 1× concurrency / resqlite [main]": 0.31,
+    "Concurrent Reads (1000 rows per query) / 2× concurrency / resqlite": 0.36,
+    "Concurrent Reads (1000 rows per query) / 2× concurrency / resqlite [main]": 0.18,
+    "Concurrent Reads (1000 rows per query) / 4× concurrency / resqlite": 0.44,
+    "Concurrent Reads (1000 rows per query) / 4× concurrency / resqlite [main]": 0.11,
+    "Concurrent Reads (1000 rows per query) / 8× concurrency / resqlite": 0.81,
+    "Concurrent Reads (1000 rows per query) / 8× concurrency / resqlite [main]": 0.1,
+    "Point Query Throughput / resqlite qps": 87321.0,
+    "Parameterized Queries / 100 queries × ~500 rows each / resqlite": 16.854,
+    "Parameterized Queries / 100 queries × ~500 rows each / resqlite [main]": 16.854,
+    "Write Performance / Single Inserts (100 sequential) / resqlite execute()": 2.158,
+    "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": 2.158,
+    "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": 0.058,
+    "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": 0.058,
+    "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": 0.47,
+    "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": 0.47,
+    "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": 4.349,
+    "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": 4.349,
+    "Write Performance / Wide Batch Insert (10000 rows x 20 params) / resqlite executeBatch()": 15.149,
+    "Write Performance / Wide Batch Insert (10000 rows x 20 params) / resqlite executeBatch() [main]": 15.149,
+    "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": 0.078,
+    "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": 0.078,
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": 0.098,
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": 0.098,
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": 0.803,
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": 0.803,
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": 0.447,
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": 0.447,
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": 8.491,
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": 8.491,
+    "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": 0.138,
+    "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": 0.138,
+    "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": 0.194,
+    "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": 0.194,
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50": 1.467,
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50 [main]": 1.467,
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5": 0.091,
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5 [main]": 0.091,
+    "Streaming / Initial Emission / resqlite stream()": 0.088,
+    "Streaming / Initial Emission / resqlite stream() [main]": 0.088,
+    "Streaming / Invalidation Latency / resqlite": 0.076,
+    "Streaming / Invalidation Latency / resqlite [main]": 0.076,
+    "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite": 0.275,
+    "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite [main]": 0.275,
+    "Streaming / Long-Text Unchanged Fanout (8 unchanged streams, 256 rows x 4KB TEXT) / resqlite": 3.473,
+    "Streaming / Long-Text Unchanged Fanout (8 unchanged streams, 256 rows x 4KB TEXT) / resqlite [main]": 3.473,
+    "Streaming / Fan-out (10 streams) / resqlite": 0.362,
+    "Streaming / Fan-out (10 streams) / resqlite [main]": 0.362,
+    "Streaming / Stream Churn (100 cycles) / resqlite": 3.216,
+    "Streaming / Stream Churn (100 cycles) / resqlite [main]": 3.216,
+    "Streaming / No-Streams Write Throughput (200 inserts, no active streams) / resqlite": 5.847,
+    "Streaming / No-Streams Write Throughput (200 inserts, no active streams) / resqlite [main]": 5.847,
+    "Streaming / Growing-Stream Invalidation (batch-insert 100 into watched stream) / resqlite": 0.807,
+    "Streaming / Growing-Stream Invalidation (batch-insert 100 into watched stream) / resqlite [main]": 0.807,
+    "Streaming / Stream Subscription Rate (500 subscribe+cancel cycles) / resqlite": 11.233,
+    "Streaming / Stream Subscription Rate (500 subscribe+cancel cycles) / resqlite [main]": 11.233,
+    "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()": 219.03,
+    "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream() [main]": 0.0,
+    "Chat Sim (v1) / Insert message / resqlite": 0.035,
+    "Chat Sim (v1) / Insert message / resqlite [main]": 0.0,
+    "Chat Sim (v1) / Update conversation / resqlite": 0.027,
+    "Chat Sim (v1) / Update conversation / resqlite [main]": 0.0,
+    "Chat Sim (v1) / Fetch last-20 messages (JOIN users) / resqlite": 0.033,
+    "Chat Sim (v1) / Fetch last-20 messages (JOIN users) / resqlite [main]": 0.0,
+    "Chat Sim (v1) / Fetch user by PK / resqlite": 0.013,
+    "Chat Sim (v1) / Fetch user by PK / resqlite [main]": 0.0,
+    "Feed Paging (v1) / Keyset pagination (20 pages × 50 rows) / resqlite": 0.045,
+    "Feed Paging (v1) / Keyset pagination (20 pages × 50 rows) / resqlite [main]": 0.004,
+    "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite": 106.518,
+    "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite [main]": 0.0,
+    "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite": 230.92,
+    "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite [main]": 0.0
+  },
+  "memoryMetrics": {
+    "Memory / Select 10k rows → Maps / resqlite select()": {
+      "rssDeltaMedMB": 2.94,
+      "rssDeltaP90MB": 12.41,
+      "ciLowMB": 0.0,
+      "ciHighMB": 8.38,
+      "mdeMB": 4.19
+    },
+    "Memory / Select 10k rows → Maps / sqlite3 select()": {
+      "rssDeltaMedMB": 1.2,
+      "rssDeltaP90MB": 8.77,
+      "ciLowMB": 0.0,
+      "ciHighMB": 6.14,
+      "mdeMB": 3.07
+    },
+    "Memory / Select 10k rows → Maps / sqlite_async select()": {
+      "rssDeltaMedMB": 0.77,
+      "rssDeltaP90MB": 4.5,
+      "ciLowMB": 0.34,
+      "ciHighMB": 1.0,
+      "mdeMB": 0.33
+    },
+    "Memory / Select 10k rows → Maps / drift select()": {
+      "rssDeltaMedMB": 10.25,
+      "rssDeltaP90MB": 75.91,
+      "ciLowMB": 0.0,
+      "ciHighMB": 15.48,
+      "mdeMB": 7.74
+    },
+    "Memory / Select 10k rows → JSON Bytes / resqlite selectBytes()": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 9.0,
+      "ciLowMB": 0.0,
+      "ciHighMB": 7.39,
+      "mdeMB": 3.7
+    },
+    "Memory / Select 10k rows → JSON Bytes / resqlite + jsonEncode": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 39.08,
+      "ciLowMB": 0.0,
+      "ciHighMB": 23.38,
+      "mdeMB": 11.69
+    },
+    "Memory / Select 10k rows → JSON Bytes / sqlite3 + jsonEncode": {
+      "rssDeltaMedMB": 1.05,
+      "rssDeltaP90MB": 78.98,
+      "ciLowMB": 0.0,
+      "ciHighMB": 46.44,
+      "mdeMB": 23.22
+    },
+    "Memory / Select 10k rows → JSON Bytes / sqlite_async + jsonEncode": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 26.83,
+      "ciLowMB": 0.0,
+      "ciHighMB": 18.97,
+      "mdeMB": 9.48
+    },
+    "Memory / Select 10k rows → JSON Bytes / drift + jsonEncode": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 73.83,
+      "ciLowMB": 0.0,
+      "ciHighMB": 2.3,
+      "mdeMB": 1.15
+    },
+    "Memory / Batch insert 10k rows / resqlite executeBatch()": {
+      "rssDeltaMedMB": 1.3,
+      "rssDeltaP90MB": 12.48,
+      "ciLowMB": 0.0,
+      "ciHighMB": 3.28,
+      "mdeMB": 1.64
+    },
+    "Memory / Batch insert 10k rows / sqlite3 executeBatch()": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 0.27,
+      "ciLowMB": 0.0,
+      "ciHighMB": 0.0,
+      "mdeMB": 0.0
+    },
+    "Memory / Batch insert 10k rows / sqlite_async executeBatch()": {
+      "rssDeltaMedMB": 0.03,
+      "rssDeltaP90MB": 8.81,
+      "ciLowMB": 0.0,
+      "ciHighMB": 0.56,
+      "mdeMB": 0.28
+    },
+    "Memory / Batch insert 10k rows / drift batch()": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 2.06,
+      "ciLowMB": 0.0,
+      "ciHighMB": 0.08,
+      "mdeMB": 0.04
+    },
+    "Memory / Streaming fan-out (10 streams × 100 writes) / resqlite stream()": {
+      "rssDeltaMedMB": 0.06,
+      "rssDeltaP90MB": 0.11,
+      "ciLowMB": 0.0,
+      "ciHighMB": 0.06,
+      "mdeMB": 0.03
+    },
+    "Memory / Streaming fan-out (10 streams × 100 writes) / sqlite_async watch()": {
+      "rssDeltaMedMB": 0.0,
+      "rssDeltaP90MB": 0.38,
+      "ciLowMB": 0.0,
+      "ciHighMB": 0.11,
+      "mdeMB": 0.05
+    }
+  },
+  "sqliteDiagnosticsMetrics": {
+    "SQLite Diagnostics / Warm read working set (20000 rows + 2000 point lookups) / resqlite": {
+      "sqliteTotalKiB": 3209.7,
+      "pageCacheKiB": 3188.3,
+      "schemaKiB": 5.3,
+      "stmtKiB": 16.2,
+      "walKiB": 2048.0,
+      "readersBusy": 0
+    },
+    "SQLite Diagnostics / Statement cache footprint (48 distinct SELECT texts) / resqlite": {
+      "sqliteTotalKiB": 3302.7,
+      "pageCacheKiB": 3188.3,
+      "schemaKiB": 5.3,
+      "stmtKiB": 109.2,
+      "walKiB": 2048.0,
+      "readersBusy": 0
+    },
+    "SQLite Diagnostics / WAL after write burst (1000 inserted rows) / resqlite": {
+      "sqliteTotalKiB": 260.2,
+      "pageCacheKiB": 238.8,
+      "schemaKiB": 5.3,
+      "stmtKiB": 16.2,
+      "walKiB": 161.0,
+      "readersBusy": 0
+    }
+  },
+  "streamingColumnMetrics": {
+    "Streaming (Column Granularity) / Disjoint column writes (SET c = ?) / resqlite": {
+      "reemits": 0,
+      "drainMs": 118.4,
+      "ratio": 0.0
+    },
+    "Streaming (Column Granularity) / Disjoint column writes (SET c = ?) / sqlite_async": {
+      "reemits": 3779,
+      "drainMs": 1365.7,
+      "ratio": 0.917
+    },
+    "Streaming (Column Granularity) / Disjoint column writes (SET c = ?) / drift": {
+      "reemits": 5000,
+      "drainMs": 1151.6,
+      "ratio": 1.0
+    },
+    "Streaming (Column Granularity) / Overlapping column writes (SET a = ?) / resqlite": {
+      "reemits": 10,
+      "drainMs": 80.4,
+      "ratio": 0.0
+    },
+    "Streaming (Column Granularity) / Overlapping column writes (SET a = ?) / sqlite_async": {
+      "reemits": 4123,
+      "drainMs": 1212.4,
+      "ratio": 0.917
+    },
+    "Streaming (Column Granularity) / Overlapping column writes (SET a = ?) / drift": {
+      "reemits": 5000,
+      "drainMs": 1204.9,
+      "ratio": 1.0
+    }
+  },
+  "repeatAggregates": {
+    "Select → Maps / 10 rows / resqlite select()": {
+      "median": 0.134,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 10 rows / resqlite select() [main]": {
+      "median": 0.026,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 100 rows / resqlite select()": {
+      "median": 0.082,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 100 rows / resqlite select() [main]": {
+      "median": 0.01,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 1000 rows / resqlite select()": {
+      "median": 0.516,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 1000 rows / resqlite select() [main]": {
+      "median": 0.082,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 10000 rows / resqlite select()": {
+      "median": 5.512,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → Maps / 10000 rows / resqlite select() [main]": {
+      "median": 0.746,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10 rows / resqlite + jsonEncode": {
+      "median": 0.099,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10 rows / resqlite + jsonEncode [main]": {
+      "median": 0.074,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10 rows / resqlite selectBytes()": {
+      "median": 0.024,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10 rows / resqlite selectBytes() [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 100 rows / resqlite + jsonEncode": {
+      "median": 0.237,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 100 rows / resqlite + jsonEncode [main]": {
+      "median": 0.183,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 100 rows / resqlite selectBytes()": {
+      "median": 0.056,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 100 rows / resqlite selectBytes() [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 1000 rows / resqlite + jsonEncode": {
+      "median": 2.116,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 1000 rows / resqlite + jsonEncode [main]": {
+      "median": 1.641,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+      "median": 0.382,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 1000 rows / resqlite selectBytes() [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10000 rows / resqlite + jsonEncode": {
+      "median": 24.742,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10000 rows / resqlite + jsonEncode [main]": {
+      "median": 16.885,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10000 rows / resqlite selectBytes()": {
+      "median": 4.199,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Select → JSON Bytes / 10000 rows / resqlite selectBytes() [main]": {
+      "median": 0.006,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite": {
+      "median": 0.138,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Narrow (2 cols: id + int) / resqlite [main]": {
+      "median": 0.042,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite": {
+      "median": 1.109,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Wide (20 cols: mixed types) / resqlite [main]": {
+      "median": 0.41,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite": {
+      "median": 0.685,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Text-heavy (4 long TEXT cols) / resqlite [main]": {
+      "median": 0.154,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite": {
+      "median": 0.361,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Numeric-heavy (5 numeric cols) / resqlite [main]": {
+      "median": 0.15,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite": {
+      "median": 0.387,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Schema Shapes (1000 rows) / Nullable (50% NULLs) / resqlite [main]": {
+      "median": 0.151,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite": {
+      "median": 0.016,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite [main]": {
+      "median": 0.002,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite": {
+      "median": 0.035,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite [main]": {
+      "median": 0.007,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite": {
+      "median": 0.059,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite [main]": {
+      "median": 0.014,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite": {
+      "median": 0.231,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite [main]": {
+      "median": 0.071,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite": {
+      "median": 0.459,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite [main]": {
+      "median": 0.144,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite": {
+      "median": 1.003,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite [main]": {
+      "median": 0.286,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite": {
+      "median": 3.251,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite [main]": {
+      "median": 0.727,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite": {
+      "median": 5.915,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite [main]": {
+      "median": 1.449,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite": {
+      "median": 12.93,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite [main]": {
+      "median": 2.876,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite + jsonEncode": {
+      "median": 0.034,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite + jsonEncode [main]": {
+      "median": 0.034,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite selectBytes()": {
+      "median": 0.018,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10 rows / resqlite selectBytes() [main]": {
+      "median": 0.018,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite + jsonEncode": {
+      "median": 0.127,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite + jsonEncode [main]": {
+      "median": 0.127,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite selectBytes()": {
+      "median": 0.033,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 50 rows / resqlite selectBytes() [main]": {
+      "median": 0.033,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite + jsonEncode": {
+      "median": 0.224,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite + jsonEncode [main]": {
+      "median": 0.224,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite selectBytes()": {
+      "median": 0.056,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 100 rows / resqlite selectBytes() [main]": {
+      "median": 0.056,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite + jsonEncode": {
+      "median": 1.118,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite + jsonEncode [main]": {
+      "median": 1.118,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite selectBytes()": {
+      "median": 0.202,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 500 rows / resqlite selectBytes() [main]": {
+      "median": 0.202,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite + jsonEncode": {
+      "median": 2.04,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite + jsonEncode [main]": {
+      "median": 2.04,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite selectBytes()": {
+      "median": 0.406,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 1000 rows / resqlite selectBytes() [main]": {
+      "median": 0.406,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite + jsonEncode": {
+      "median": 4.604,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite + jsonEncode [main]": {
+      "median": 4.604,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite selectBytes()": {
+      "median": 0.963,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 2000 rows / resqlite selectBytes() [main]": {
+      "median": 0.963,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite + jsonEncode": {
+      "median": 13.452,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite + jsonEncode [main]": {
+      "median": 13.452,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite selectBytes()": {
+      "median": 2.202,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 5000 rows / resqlite selectBytes() [main]": {
+      "median": 2.202,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite + jsonEncode": {
+      "median": 27.2,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite + jsonEncode [main]": {
+      "median": 27.2,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite selectBytes()": {
+      "median": 4.097,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 10000 rows / resqlite selectBytes() [main]": {
+      "median": 4.097,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite + jsonEncode": {
+      "median": 44.095,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite + jsonEncode [main]": {
+      "median": 44.095,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite selectBytes()": {
+      "median": 8.296,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Scaling (10 → 20,000 rows) / 20000 rows / resqlite selectBytes() [main]": {
+      "median": 8.296,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 1× concurrency / resqlite": {
+      "median": 0.31,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 1× concurrency / resqlite [main]": {
+      "median": 0.31,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 2× concurrency / resqlite": {
+      "median": 0.36,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 2× concurrency / resqlite [main]": {
+      "median": 0.18,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 4× concurrency / resqlite": {
+      "median": 0.44,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 4× concurrency / resqlite [main]": {
+      "median": 0.11,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 8× concurrency / resqlite": {
+      "median": 0.81,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Concurrent Reads (1000 rows per query) / 8× concurrency / resqlite [main]": {
+      "median": 0.1,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Point Query Throughput / resqlite qps": {
+      "median": 87321.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Parameterized Queries / 100 queries × ~500 rows each / resqlite": {
+      "median": 16.854,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Parameterized Queries / 100 queries × ~500 rows each / resqlite [main]": {
+      "median": 16.854,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+      "median": 2.158,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Single Inserts (100 sequential) / resqlite execute() [main]": {
+      "median": 2.158,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (100 rows) / resqlite executeBatch()": {
+      "median": 0.058,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (100 rows) / resqlite executeBatch() [main]": {
+      "median": 0.058,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+      "median": 0.47,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch() [main]": {
+      "median": 0.47,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch()": {
+      "median": 4.349,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batch Insert (10000 rows) / resqlite executeBatch() [main]": {
+      "median": 4.349,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Wide Batch Insert (10000 rows x 20 params) / resqlite executeBatch()": {
+      "median": 15.149,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Wide Batch Insert (10000 rows x 20 params) / resqlite executeBatch() [main]": {
+      "median": 15.149,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction()": {
+      "median": 0.078,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Interactive Transaction (insert + select + conditional delete) / resqlite transaction() [main]": {
+      "median": 0.078,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch()": {
+      "median": 0.098,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.executeBatch() [main]": {
+      "median": 0.098,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop": {
+      "median": 0.803,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (100 rows) / resqlite tx.execute() loop [main]": {
+      "median": 0.803,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch()": {
+      "median": 0.447,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.executeBatch() [main]": {
+      "median": 0.447,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop": {
+      "median": 8.491,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Batched Write Inside Transaction (1000 rows) / resqlite tx.execute() loop [main]": {
+      "median": 8.491,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Transaction Read (500 rows) / resqlite tx.select()": {
+      "median": 0.138,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Transaction Read (500 rows) / resqlite tx.select() [main]": {
+      "median": 0.138,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Transaction Read (1000 rows) / resqlite tx.select()": {
+      "median": 0.194,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Transaction Read (1000 rows) / resqlite tx.select() [main]": {
+      "median": 0.194,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50": {
+      "median": 1.467,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() x50 [main]": {
+      "median": 1.467,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5": {
+      "median": 0.091,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Write Performance / Nested Transactions (savepoints) / resqlite nested transaction() depth=5 [main]": {
+      "median": 0.091,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Initial Emission / resqlite stream()": {
+      "median": 0.088,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Initial Emission / resqlite stream() [main]": {
+      "median": 0.088,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Invalidation Latency / resqlite": {
+      "median": 0.076,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Invalidation Latency / resqlite [main]": {
+      "median": 0.076,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite": {
+      "median": 0.275,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Unchanged Fanout Throughput (1 canary + 10 unchanged streams) / resqlite [main]": {
+      "median": 0.275,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Long-Text Unchanged Fanout (8 unchanged streams, 256 rows x 4KB TEXT) / resqlite": {
+      "median": 3.473,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Long-Text Unchanged Fanout (8 unchanged streams, 256 rows x 4KB TEXT) / resqlite [main]": {
+      "median": 3.473,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Fan-out (10 streams) / resqlite": {
+      "median": 0.362,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Fan-out (10 streams) / resqlite [main]": {
+      "median": 0.362,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Stream Churn (100 cycles) / resqlite": {
+      "median": 3.216,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Stream Churn (100 cycles) / resqlite [main]": {
+      "median": 3.216,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / No-Streams Write Throughput (200 inserts, no active streams) / resqlite": {
+      "median": 5.847,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / No-Streams Write Throughput (200 inserts, no active streams) / resqlite [main]": {
+      "median": 5.847,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Growing-Stream Invalidation (batch-insert 100 into watched stream) / resqlite": {
+      "median": 0.807,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Growing-Stream Invalidation (batch-insert 100 into watched stream) / resqlite [main]": {
+      "median": 0.807,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Stream Subscription Rate (500 subscribe+cancel cycles) / resqlite": {
+      "median": 11.233,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Streaming / Stream Subscription Rate (500 subscribe+cancel cycles) / resqlite [main]": {
+      "median": 11.233,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream()": {
+      "median": 219.03,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Keyed PK Subscriptions (v1) / 50 streams × 200 random-PK writes / resqlite stream() [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Insert message / resqlite": {
+      "median": 0.035,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Insert message / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Update conversation / resqlite": {
+      "median": 0.027,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Update conversation / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Fetch last-20 messages (JOIN users) / resqlite": {
+      "median": 0.033,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Fetch last-20 messages (JOIN users) / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Fetch user by PK / resqlite": {
+      "median": 0.013,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Chat Sim (v1) / Fetch user by PK / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Feed Paging (v1) / Keyset pagination (20 pages × 50 rows) / resqlite": {
+      "median": 0.045,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Feed Paging (v1) / Keyset pagination (20 pages × 50 rows) / resqlite [main]": {
+      "median": 0.004,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite": {
+      "median": 106.518,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "Feed Paging (v1) / Reactive feed with 100 concurrent writes / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite": {
+      "median": 230.92,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    },
+    "High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite [main]": {
+      "median": 0.0,
+      "madPct": 0.0,
+      "stability": "single run",
+      "comparisonThresholdPct": 10.0
+    }
+  },
+  "benchmarkSummary": {
+    "sections": [
+      {
+        "title": "Select → Maps",
+        "subtitle": "10 rows",
+        "entries": [
+          [
+            "resqlite select()",
+            [
+              0.134,
+              0.564,
+              0.026,
+              0.128
+            ]
+          ],
+          [
+            "sqlite3 select()",
+            [
+              0.181,
+              0.49,
+              0.181,
+              0.49
+            ]
+          ],
+          [
+            "sqlite_async select()",
+            [
+              0.309,
+              0.772,
+              0.025,
+              0.108
+            ]
+          ],
+          [
+            "drift select()",
+            [
+              0.192,
+              0.775,
+              0.009,
+              0.021
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → Maps",
+        "subtitle": "100 rows",
+        "entries": [
+          [
+            "resqlite select()",
+            [
+              0.082,
+              0.529,
+              0.01,
+              0.033
+            ]
+          ],
+          [
+            "sqlite3 select()",
+            [
+              0.259,
+              0.835,
+              0.259,
+              0.835
+            ]
+          ],
+          [
+            "sqlite_async select()",
+            [
+              0.405,
+              0.646,
+              0.022,
+              0.052
+            ]
+          ],
+          [
+            "drift select()",
+            [
+              0.445,
+              0.697,
+              0.022,
+              0.034
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → Maps",
+        "subtitle": "1000 rows",
+        "entries": [
+          [
+            "resqlite select()",
+            [
+              0.516,
+              0.84,
+              0.082,
+              0.226
+            ]
+          ],
+          [
+            "sqlite3 select()",
+            [
+              1.317,
+              1.657,
+              1.317,
+              1.657
+            ]
+          ],
+          [
+            "sqlite_async select()",
+            [
+              1.484,
+              1.858,
+              0.102,
+              0.136
+            ]
+          ],
+          [
+            "drift select()",
+            [
+              2.004,
+              2.462,
+              0.099,
+              0.139
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → Maps",
+        "subtitle": "10000 rows",
+        "entries": [
+          [
+            "resqlite select()",
+            [
+              5.512,
+              14.151,
+              0.746,
+              1.246
+            ]
+          ],
+          [
+            "sqlite3 select()",
+            [
+              16.594,
+              22.822,
+              16.594,
+              22.822
+            ]
+          ],
+          [
+            "sqlite_async select()",
+            [
+              15.393,
+              16.889,
+              0.828,
+              2.409
+            ]
+          ],
+          [
+            "drift select()",
+            [
+              25.975,
+              34.977,
+              0.811,
+              2.057
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → JSON Bytes",
+        "subtitle": "10 rows",
+        "entries": [
+          [
+            "resqlite + jsonEncode",
+            [
+              0.099,
+              0.195,
+              0.074,
+              0.106
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              0.1,
+              0.211,
+              0.1,
+              0.211
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.129,
+              0.202,
+              0.03,
+              0.061
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.119,
+              0.25,
+              0.029,
+              0.052
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.024,
+              0.034,
+              0.0,
+              0.002
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → JSON Bytes",
+        "subtitle": "100 rows",
+        "entries": [
+          [
+            "resqlite + jsonEncode",
+            [
+              0.237,
+              0.356,
+              0.183,
+              0.235
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              0.298,
+              0.374,
+              0.298,
+              0.374
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.341,
+              0.562,
+              0.165,
+              0.222
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.44,
+              0.542,
+              0.183,
+              0.2
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.056,
+              0.058,
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → JSON Bytes",
+        "subtitle": "1000 rows",
+        "entries": [
+          [
+            "resqlite + jsonEncode",
+            [
+              2.116,
+              4.634,
+              1.641,
+              3.712
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              2.904,
+              5.264,
+              2.904,
+              5.264
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              3.071,
+              5.296,
+              1.646,
+              2.419
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              3.559,
+              5.797,
+              1.643,
+              2.77
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.382,
+              0.51,
+              0.0,
+              0.005
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Select → JSON Bytes",
+        "subtitle": "10000 rows",
+        "entries": [
+          [
+            "resqlite + jsonEncode",
+            [
+              24.742,
+              27.674,
+              16.885,
+              22.452
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              37.544,
+              40.728,
+              37.544,
+              40.728
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              47.452,
+              77.339,
+              21.865,
+              32.091
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              61.946,
+              111.463,
+              18.671,
+              32.203
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              4.199,
+              6.993,
+              0.006,
+              0.032
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Schema Shapes (1000 rows)",
+        "subtitle": "Narrow (2 cols: id + int)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.138,
+              0.496,
+              0.042,
+              0.385
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.377,
+              0.668,
+              0.377,
+              0.668
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.43,
+              0.611,
+              0.044,
+              0.057
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.759,
+              1.197,
+              0.052,
+              0.069
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Schema Shapes (1000 rows)",
+        "subtitle": "Wide (20 cols: mixed types)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              1.109,
+              2.112,
+              0.41,
+              0.46
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              3.652,
+              4.268,
+              3.652,
+              4.268
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              3.376,
+              3.843,
+              0.343,
+              0.368
+            ]
+          ],
+          [
+            "drift",
+            [
+              5.316,
+              9.201,
+              0.36,
+              0.404
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Schema Shapes (1000 rows)",
+        "subtitle": "Text-heavy (4 long TEXT cols)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.685,
+              0.771,
+              0.154,
+              0.173
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              1.622,
+              1.811,
+              1.622,
+              1.811
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.732,
+              2.548,
+              0.134,
+              0.176
+            ]
+          ],
+          [
+            "drift",
+            [
+              2.328,
+              2.833,
+              0.136,
+              0.164
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Schema Shapes (1000 rows)",
+        "subtitle": "Numeric-heavy (5 numeric cols)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.361,
+              0.427,
+              0.15,
+              0.164
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              1.114,
+              1.434,
+              1.114,
+              1.434
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.123,
+              1.241,
+              0.124,
+              0.13
+            ]
+          ],
+          [
+            "drift",
+            [
+              1.791,
+              2.108,
+              0.135,
+              0.143
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Schema Shapes (1000 rows)",
+        "subtitle": "Nullable (50% NULLs)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.387,
+              0.707,
+              0.151,
+              0.285
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              1.078,
+              1.195,
+              1.078,
+              1.195
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.194,
+              1.469,
+              0.128,
+              0.151
+            ]
+          ],
+          [
+            "drift",
+            [
+              1.902,
+              4.434,
+              0.14,
+              0.382
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "10 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.016,
+              0.029,
+              0.002,
+              0.002
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.023,
+              0.024,
+              0.023,
+              0.024
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.07,
+              0.21,
+              0.004,
+              0.01
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.073,
+              0.179,
+              0.005,
+              0.011
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              0.034,
+              0.091,
+              0.034,
+              0.091
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              0.041,
+              0.155,
+              0.041,
+              0.155
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.087,
+              0.244,
+              0.087,
+              0.244
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.15,
+              0.293,
+              0.15,
+              0.293
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.018,
+              0.022,
+              0.018,
+              0.022
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "50 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.035,
+              0.039,
+              0.007,
+              0.008
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.074,
+              0.213,
+              0.074,
+              0.213
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.115,
+              0.288,
+              0.006,
+              0.014
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.174,
+              0.308,
+              0.009,
+              0.02
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              0.127,
+              0.232,
+              0.127,
+              0.232
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              0.15,
+              0.305,
+              0.15,
+              0.305
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.19,
+              0.241,
+              0.19,
+              0.241
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.233,
+              0.688,
+              0.233,
+              0.688
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.033,
+              0.039,
+              0.033,
+              0.039
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "100 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.059,
+              0.061,
+              0.014,
+              0.015
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.129,
+              0.132,
+              0.129,
+              0.132
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.173,
+              0.316,
+              0.011,
+              0.014
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.28,
+              0.457,
+              0.013,
+              0.024
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              0.224,
+              0.401,
+              0.224,
+              0.401
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              0.282,
+              0.302,
+              0.282,
+              0.302
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.35,
+              0.964,
+              0.35,
+              0.964
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.512,
+              0.956,
+              0.512,
+              0.956
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.056,
+              0.07,
+              0.056,
+              0.07
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "500 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.231,
+              0.234,
+              0.071,
+              0.072
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.604,
+              0.725,
+              0.604,
+              0.725
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.633,
+              0.819,
+              0.044,
+              0.052
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.963,
+              1.675,
+              0.049,
+              0.058
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              1.118,
+              1.698,
+              1.118,
+              1.698
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              1.489,
+              1.939,
+              1.489,
+              1.939
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              1.596,
+              1.953,
+              1.596,
+              1.953
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              1.958,
+              2.991,
+              1.958,
+              2.991
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.202,
+              0.271,
+              0.202,
+              0.271
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "1000 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.459,
+              0.731,
+              0.144,
+              0.151
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              1.309,
+              1.744,
+              1.309,
+              1.744
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.272,
+              2.011,
+              0.088,
+              0.269
+            ]
+          ],
+          [
+            "drift",
+            [
+              2.0,
+              3.756,
+              0.098,
+              0.125
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              2.04,
+              2.565,
+              2.04,
+              2.565
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              3.582,
+              4.665,
+              3.582,
+              4.665
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              3.675,
+              8.41,
+              3.675,
+              8.41
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              3.663,
+              6.558,
+              3.663,
+              6.558
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.406,
+              0.605,
+              0.406,
+              0.605
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "2000 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              1.003,
+              2.294,
+              0.286,
+              0.332
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              2.451,
+              3.486,
+              2.451,
+              3.486
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              2.575,
+              3.092,
+              0.177,
+              0.209
+            ]
+          ],
+          [
+            "drift",
+            [
+              4.985,
+              8.525,
+              0.186,
+              0.268
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              4.604,
+              9.667,
+              4.604,
+              9.667
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              6.53,
+              10.699,
+              6.53,
+              10.699
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              7.13,
+              11.084,
+              7.13,
+              11.084
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              7.393,
+              13.3,
+              7.393,
+              13.3
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              0.963,
+              1.416,
+              0.963,
+              1.416
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "5000 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              3.251,
+              10.034,
+              0.727,
+              1.717
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              6.243,
+              9.235,
+              6.243,
+              9.235
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              6.535,
+              7.84,
+              0.416,
+              0.459
+            ]
+          ],
+          [
+            "drift",
+            [
+              9.722,
+              10.253,
+              0.409,
+              0.426
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              13.452,
+              17.326,
+              13.452,
+              17.326
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              18.786,
+              25.71,
+              18.786,
+              25.71
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              18.168,
+              26.0,
+              18.168,
+              26.0
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              22.189,
+              29.955,
+              22.189,
+              29.955
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              2.202,
+              4.02,
+              2.202,
+              4.02
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "10000 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              5.915,
+              12.485,
+              1.449,
+              2.369
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              16.22,
+              20.163,
+              16.22,
+              20.163
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              15.254,
+              22.389,
+              0.811,
+              2.477
+            ]
+          ],
+          [
+            "drift",
+            [
+              24.072,
+              35.47,
+              0.819,
+              2.084
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              27.2,
+              33.308,
+              27.2,
+              33.308
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              36.082,
+              45.326,
+              36.082,
+              45.326
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              36.882,
+              42.868,
+              36.882,
+              42.868
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              44.937,
+              54.492,
+              44.937,
+              54.492
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              4.097,
+              6.979,
+              4.097,
+              6.979
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Scaling (10 → 20,000 rows)",
+        "subtitle": "20000 rows",
+        "entries": [
+          [
+            "resqlite",
+            [
+              12.93,
+              26.945,
+              2.876,
+              3.041
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              39.54,
+              43.519,
+              39.54,
+              43.519
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              41.074,
+              51.9,
+              1.605,
+              4.905
+            ]
+          ],
+          [
+            "drift",
+            [
+              59.997,
+              79.232,
+              1.621,
+              7.541
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              44.095,
+              51.012,
+              44.095,
+              51.012
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              80.03,
+              117.386,
+              80.03,
+              117.386
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              86.902,
+              117.736,
+              86.902,
+              117.736
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              99.796,
+              125.38,
+              99.796,
+              125.38
+            ]
+          ],
+          [
+            "resqlite selectBytes()",
+            [
+              8.296,
+              11.269,
+              8.296,
+              11.269
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Concurrent Reads (1000 rows per query)",
+        "subtitle": "1× concurrency",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.31,
+              0.31,
+              0.31
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.21,
+              1.37,
+              1.21
+            ]
+          ],
+          [
+            "drift",
+            [
+              1.8,
+              2.33,
+              1.8
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Concurrent Reads (1000 rows per query)",
+        "subtitle": "2× concurrency",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.36,
+              0.54,
+              0.18
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              1.69,
+              2.03,
+              0.84
+            ]
+          ],
+          [
+            "drift",
+            [
+              3.2,
+              3.96,
+              1.6
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Concurrent Reads (1000 rows per query)",
+        "subtitle": "4× concurrency",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.44,
+              0.81,
+              0.11
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              2.78,
+              3.3,
+              0.69
+            ]
+          ],
+          [
+            "drift",
+            [
+              6.02,
+              6.77,
+              1.51
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Concurrent Reads (1000 rows per query)",
+        "subtitle": "8× concurrency",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.81,
+              1.27,
+              0.1
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              5.84,
+              6.93,
+              0.73
+            ]
+          ],
+          [
+            "drift",
+            [
+              12.62,
+              13.59,
+              1.58
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Point Query Throughput",
+        "entries": [
+          [
+            "Metric",
+            [
+              null
+            ]
+          ],
+          [
+            "resqlite qps",
+            [
+              87321.0
+            ]
+          ],
+          [
+            "resqlite per query",
+            [
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Point Query Throughput",
+        "subtitle": "QPS + MDE",
+        "entries": [
+          [
+            "resqlite",
+            [
+              87321.0,
+              null,
+              3.4,
+              12.5
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              152389.0,
+              null,
+              5.1,
+              13.8
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              34882.0,
+              null,
+              7.7,
+              15.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              32646.0,
+              null,
+              6.6,
+              17.9
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Parameterized Queries",
+        "subtitle": "100 queries × ~500 rows each",
+        "entries": [
+          [
+            "resqlite",
+            [
+              16.854,
+              18.305,
+              16.854,
+              18.305
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              42.307,
+              43.39,
+              42.307,
+              43.39
+            ]
+          ],
+          [
+            "drift",
+            [
+              63.428,
+              71.345,
+              63.428,
+              71.345
+            ]
+          ],
+          [
+            "sqlite3 (no cache)",
+            [
+              27.701,
+              29.487,
+              27.701,
+              29.487
+            ]
+          ],
+          [
+            "sqlite3 (cached stmt)",
+            [
+              26.199,
+              27.082,
+              26.199,
+              27.082
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Single Inserts (100 sequential)",
+        "entries": [
+          [
+            "resqlite execute()",
+            [
+              2.158,
+              2.573,
+              2.158,
+              2.573
+            ]
+          ],
+          [
+            "sqlite3 execute()",
+            [
+              1.145,
+              1.702,
+              1.145,
+              1.702
+            ]
+          ],
+          [
+            "sqlite_async execute()",
+            [
+              3.849,
+              5.374,
+              3.849,
+              5.374
+            ]
+          ],
+          [
+            "drift execute()",
+            [
+              4.97,
+              6.517,
+              4.97,
+              6.517
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Batch Insert (100 rows)",
+        "entries": [
+          [
+            "resqlite executeBatch()",
+            [
+              0.058,
+              0.1,
+              0.058,
+              0.1
+            ]
+          ],
+          [
+            "sqlite3 executeBatch()",
+            [
+              0.054,
+              0.134,
+              0.054,
+              0.134
+            ]
+          ],
+          [
+            "sqlite_async executeBatch()",
+            [
+              0.112,
+              0.174,
+              0.112,
+              0.174
+            ]
+          ],
+          [
+            "drift executeBatch()",
+            [
+              0.15,
+              0.231,
+              0.15,
+              0.231
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Batch Insert (1000 rows)",
+        "entries": [
+          [
+            "resqlite executeBatch()",
+            [
+              0.47,
+              0.8,
+              0.47,
+              0.8
+            ]
+          ],
+          [
+            "sqlite3 executeBatch()",
+            [
+              0.458,
+              0.54,
+              0.458,
+              0.54
+            ]
+          ],
+          [
+            "sqlite_async executeBatch()",
+            [
+              0.588,
+              0.76,
+              0.588,
+              0.76
+            ]
+          ],
+          [
+            "drift executeBatch()",
+            [
+              0.816,
+              1.057,
+              0.816,
+              1.057
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Batch Insert (10000 rows)",
+        "entries": [
+          [
+            "resqlite executeBatch()",
+            [
+              4.349,
+              5.41,
+              4.349,
+              5.41
+            ]
+          ],
+          [
+            "sqlite3 executeBatch()",
+            [
+              4.586,
+              5.563,
+              4.586,
+              5.563
+            ]
+          ],
+          [
+            "sqlite_async executeBatch()",
+            [
+              5.551,
+              6.926,
+              5.551,
+              6.926
+            ]
+          ],
+          [
+            "drift executeBatch()",
+            [
+              7.525,
+              14.035,
+              7.525,
+              14.035
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Wide Batch Insert (10000 rows x 20 params)",
+        "entries": [
+          [
+            "resqlite executeBatch()",
+            [
+              15.149,
+              30.243,
+              15.149,
+              30.243
+            ]
+          ],
+          [
+            "sqlite3 executeBatch()",
+            [
+              21.726,
+              25.245,
+              21.726,
+              25.245
+            ]
+          ],
+          [
+            "sqlite_async executeBatch()",
+            [
+              27.848,
+              34.265,
+              27.848,
+              34.265
+            ]
+          ],
+          [
+            "drift executeBatch()",
+            [
+              31.445,
+              38.587,
+              31.445,
+              38.587
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Interactive Transaction (insert + select + conditional delete)",
+        "entries": [
+          [
+            "resqlite transaction()",
+            [
+              0.078,
+              0.171,
+              0.078,
+              0.171
+            ]
+          ],
+          [
+            "sqlite_async writeTransaction()",
+            [
+              0.093,
+              0.219,
+              0.093,
+              0.219
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Batched Write Inside Transaction (100 rows)",
+        "entries": [
+          [
+            "resqlite tx.executeBatch()",
+            [
+              0.098,
+              0.179,
+              0.098,
+              0.179
+            ]
+          ],
+          [
+            "resqlite tx.execute() loop",
+            [
+              0.803,
+              1.343,
+              0.803,
+              1.343
+            ]
+          ],
+          [
+            "sqlite_async tx.execute() loop",
+            [
+              1.705,
+              2.384,
+              1.705,
+              2.384
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Batched Write Inside Transaction (1000 rows)",
+        "entries": [
+          [
+            "resqlite tx.executeBatch()",
+            [
+              0.447,
+              0.615,
+              0.447,
+              0.615
+            ]
+          ],
+          [
+            "resqlite tx.execute() loop",
+            [
+              8.491,
+              9.93,
+              8.491,
+              9.93
+            ]
+          ],
+          [
+            "sqlite_async tx.execute() loop",
+            [
+              15.485,
+              18.692,
+              15.485,
+              18.692
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Transaction Read (500 rows)",
+        "entries": [
+          [
+            "resqlite tx.select()",
+            [
+              0.138,
+              0.207,
+              0.138,
+              0.207
+            ]
+          ],
+          [
+            "sqlite_async tx.getAll()",
+            [
+              0.294,
+              0.409,
+              0.294,
+              0.409
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Transaction Read (1000 rows)",
+        "entries": [
+          [
+            "resqlite tx.select()",
+            [
+              0.194,
+              0.242,
+              0.194,
+              0.242
+            ]
+          ],
+          [
+            "sqlite_async tx.getAll()",
+            [
+              0.399,
+              0.562,
+              0.399,
+              0.562
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Write Performance",
+        "subtitle": "Nested Transactions (savepoints)",
+        "entries": [
+          [
+            "resqlite nested transaction() x50",
+            [
+              1.467,
+              2.077,
+              1.467,
+              2.077
+            ]
+          ],
+          [
+            "resqlite nested transaction() depth=5",
+            [
+              0.091,
+              0.122,
+              0.091,
+              0.122
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Initial Emission",
+        "entries": [
+          [
+            "resqlite stream()",
+            [
+              0.088,
+              0.412,
+              0.088,
+              0.412
+            ]
+          ],
+          [
+            "sqlite_async watch()",
+            [
+              0.205,
+              0.904,
+              0.205,
+              0.904
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Invalidation Latency",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.076,
+              0.147,
+              0.076,
+              0.147
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.096,
+              0.197,
+              0.096,
+              0.197
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Unchanged Fanout Throughput (1 canary + 10 unchanged streams)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.275,
+              0.411,
+              0.275,
+              0.411
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.908,
+              2.02,
+              0.908,
+              2.02
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Long-Text Unchanged Fanout (8 unchanged streams, 256 rows x 4KB TEXT)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              3.473,
+              4.259,
+              3.473,
+              4.259
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Fan-out (10 streams)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.362,
+              0.705,
+              0.362,
+              0.705
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.451,
+              0.799,
+              0.451,
+              0.799
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Stream Churn (100 cycles)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              3.216,
+              3.216,
+              3.216,
+              3.216
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              14.17,
+              14.17,
+              14.17,
+              14.17
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "No-Streams Write Throughput (200 inserts, no active streams)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              5.847,
+              9.214,
+              5.847,
+              9.214
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              8.941,
+              16.928,
+              8.941,
+              16.928
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Growing-Stream Invalidation (batch-insert 100 into watched stream)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.807,
+              1.161,
+              0.807,
+              1.161
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming",
+        "subtitle": "Stream Subscription Rate (500 subscribe+cancel cycles)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              11.233,
+              17.315,
+              11.233,
+              17.315
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming (Column Granularity)",
+        "subtitle": "Disjoint column writes (SET c = ?)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.0,
+              118.4,
+              0.0
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              3779.0,
+              1365.7,
+              0.917
+            ]
+          ],
+          [
+            "drift",
+            [
+              5000.0,
+              1151.6,
+              1.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Streaming (Column Granularity)",
+        "subtitle": "Overlapping column writes (SET a = ?)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              10.0,
+              80.4,
+              0.0
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              4123.0,
+              1212.4,
+              0.917
+            ]
+          ],
+          [
+            "drift",
+            [
+              5000.0,
+              1204.9,
+              1.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Keyed PK Subscriptions (v1)",
+        "subtitle": "50 streams × 200 random-PK writes",
+        "entries": [
+          [
+            "resqlite stream()",
+            [
+              219.03,
+              221.49,
+              0.0,
+              0.0,
+              0.0,
+              3.0
+            ]
+          ],
+          [
+            "sqlite_async stream()",
+            [
+              437.3,
+              439.12,
+              0.0,
+              0.01,
+              1136.0,
+              3.0
+            ]
+          ],
+          [
+            "drift stream()",
+            [
+              594.48,
+              635.0,
+              0.12,
+              0.21,
+              10000.0,
+              3.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Chat Sim (v1)",
+        "subtitle": "Insert message",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.035,
+              0.067,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.023,
+              0.046,
+              0.023,
+              0.046
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.051,
+              0.083,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.052,
+              0.107,
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Chat Sim (v1)",
+        "subtitle": "Update conversation",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.027,
+              0.057,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.015,
+              0.024,
+              0.015,
+              0.024
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.041,
+              0.063,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.045,
+              0.092,
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Chat Sim (v1)",
+        "subtitle": "Fetch last-20 messages (JOIN users)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.033,
+              0.054,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.034,
+              0.039,
+              0.034,
+              0.039
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.067,
+              0.09,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.06,
+              0.09,
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Chat Sim (v1)",
+        "subtitle": "Fetch user by PK",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.013,
+              0.028,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.005,
+              0.007,
+              0.005,
+              0.007
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.027,
+              0.036,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.023,
+              0.048,
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Feed Paging (v1)",
+        "subtitle": "Keyset pagination (20 pages × 50 rows)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              0.045,
+              0.061,
+              0.004,
+              0.004
+            ]
+          ],
+          [
+            "sqlite3",
+            [
+              0.073,
+              0.077,
+              0.073,
+              0.077
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              0.091,
+              0.11,
+              0.001,
+              0.002
+            ]
+          ],
+          [
+            "drift",
+            [
+              0.113,
+              0.141,
+              0.001,
+              0.002
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Feed Paging (v1)",
+        "subtitle": "Reactive feed with 100 concurrent writes",
+        "entries": [
+          [
+            "resqlite",
+            [
+              106.518,
+              106.536,
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              212.714,
+              214.892,
+              0.0,
+              0.0,
+              40.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              219.7,
+              222.57,
+              0.0,
+              0.001,
+              100.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "High-Cardinality Stream Fan-out (v1)",
+        "subtitle": "100 streams × 200 writes",
+        "entries": [
+          [
+            "resqlite",
+            [
+              230.92,
+              230.92,
+              0.0,
+              0.0,
+              12.81,
+              218.59,
+              0.0
+            ]
+          ],
+          [
+            "sqlite_async",
+            [
+              468.12,
+              468.12,
+              0.0,
+              0.0,
+              13.35,
+              454.8,
+              1184.0
+            ]
+          ],
+          [
+            "drift",
+            [
+              1991.32,
+              1991.32,
+              0.81,
+              0.81,
+              13.36,
+              1977.95,
+              20000.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Memory",
+        "subtitle": "Select 10k rows → Maps",
+        "entries": [
+          [
+            "resqlite select()",
+            [
+              2.94,
+              12.41,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite3 select()",
+            [
+              1.2,
+              8.77,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite_async select()",
+            [
+              0.77,
+              4.5,
+              null,
+              null
+            ]
+          ],
+          [
+            "drift select()",
+            [
+              10.25,
+              75.91,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Memory",
+        "subtitle": "Select 10k rows → JSON Bytes",
+        "entries": [
+          [
+            "resqlite selectBytes()",
+            [
+              0.0,
+              9.0,
+              null,
+              null
+            ]
+          ],
+          [
+            "resqlite + jsonEncode",
+            [
+              0.0,
+              39.08,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite3 + jsonEncode",
+            [
+              1.05,
+              78.98,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite_async + jsonEncode",
+            [
+              0.0,
+              26.83,
+              null,
+              null
+            ]
+          ],
+          [
+            "drift + jsonEncode",
+            [
+              0.0,
+              73.83,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Memory",
+        "subtitle": "Batch insert 10k rows",
+        "entries": [
+          [
+            "resqlite executeBatch()",
+            [
+              1.3,
+              12.48,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite3 executeBatch()",
+            [
+              0.0,
+              0.27,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite_async executeBatch()",
+            [
+              0.03,
+              8.81,
+              null,
+              null
+            ]
+          ],
+          [
+            "drift batch()",
+            [
+              0.0,
+              2.06,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "Memory",
+        "subtitle": "Streaming fan-out (10 streams × 100 writes)",
+        "entries": [
+          [
+            "resqlite stream()",
+            [
+              0.06,
+              0.11,
+              null,
+              null
+            ]
+          ],
+          [
+            "sqlite_async watch()",
+            [
+              0.0,
+              0.38,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "SQLite Diagnostics",
+        "subtitle": "Warm read working set (20000 rows + 2000 point lookups)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              3209.7,
+              3188.3,
+              5.3,
+              16.2,
+              2048.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "SQLite Diagnostics",
+        "subtitle": "Statement cache footprint (48 distinct SELECT texts)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              3302.7,
+              3188.3,
+              5.3,
+              109.2,
+              2048.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      {
+        "title": "SQLite Diagnostics",
+        "subtitle": "WAL after write burst (1000 inserted rows)",
+        "entries": [
+          [
+            "resqlite",
+            [
+              260.2,
+              238.8,
+              5.3,
+              16.2,
+              161.0,
+              0.0
+            ]
+          ]
+        ]
+      }
+    ]
+  }
+}
