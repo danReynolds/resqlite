@@ -129,8 +129,8 @@
       "id": "sqlite-version-and-build-config",
       "status": "watch",
       "subsystems": ["sqlite", "sqlite3mc", "build", "planner"],
-      "currentRead": "SQLite compile/config changes have produced real wins, but version bumps need audit discipline because planner and text-format behavior can shift under the library.",
-      "keyPriors": ["016", "044", "090"],
+      "currentRead": "SQLite compile/config changes have produced real wins, but version bumps need audit discipline because planner and text-format behavior can shift under the library. Exp 144 bumped sqlite3mc 2.3.2 → 2.3.5 (SQLite 3.51.3 → 3.53.2) once SQLite shipped its `.2` point release and sqlite3mc cut a tracking release, satisfying exp 090's revisit trigger exactly. Tests stayed green including the embedded-NUL and Unicode bind regression suite. The single-pass release-suite A/B swung between 19 wins / 18 regressions / 124 neutral on the canonical run and 30 wins / 2 regressions / 129 neutral on the rerun — a wide spread characteristic of single-pass noise at sub-ms granularity. The only metric flagged consistently across reruns is Concurrent Reads 8× wall median (+~20% on a sub-ms metric); the 4× concurrency case wins on the same baseline, so it is not a generic read-pool slowdown. Soak window is the right place to confirm whether this is a real 3.53.x reader-pool interaction or single-run tail noise. The 3.53.0 FP-rounding default change (15→17 digits) was confirmed irrelevant because resqlite reads REAL via `sqlite3_column_double` and serialises with its own `snprintf(\"%.17g\", ...)` rather than `sqlite3_column_text`, so the proposed `SQLITE_DBCONFIG_FP_DIGITS=15` shim was skipped.",
+      "keyPriors": ["016", "044", "090", "144"],
       "archive": ["020", "021"],
       "interestingIf": [
         "sqlite3mc tracks a stable SQLite point release with relevant planner or C API changes",
@@ -139,18 +139,19 @@
       ],
       "openQuestions": [
         "Which SQLite release changes affect resqlite's custom JSON/worker architecture rather than only generic SQL workloads?",
-        "Can any build option improve one target platform without harming others?"
+        "Can any build option improve one target platform without harming others?",
+        "Does the exp 144 concurrent-reads-8× single-run slowdown survive a multi-pass release-suite rerun under the 3.53.x line, or does it collapse like the streaming overlap re-emit flag did?"
       ],
       "openCandidates": [
         {
-          "idea": "sqlite3mc bump audit when 3.53.2+ ships",
-          "addedDate": "2026-04-25",
-          "addedAfter": "090",
-          "blockedOn": "no stable SQLite point release with relevant planner/API changes for resqlite hot paths"
+          "idea": "sqlite3mc bump audit when 3.54.x .2+ ships",
+          "addedDate": "2026-06-08",
+          "addedAfter": "144",
+          "blockedOn": "no stable SQLite 3.54.x point release tracked by sqlite3mc"
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Treat this as audit-first. A version bump is interesting when the changelog and current workload both suggest a plausible resqlite-specific win."
+      "notesForExperimenters": "Treat this as audit-first. A version bump is interesting when the changelog and current workload both suggest a plausible resqlite-specific win. Exp 144 is the canonical pattern: confirm the changelog touches a path resqlite actually exercises (not `sqlite3_column_text` for REAL, which we bypass), confirm the policy trigger (`.2`+ SQLite + sqlite3mc tracking it) is satisfied, then take a single-pass release-suite A/B with explicit follow-up confirmation runs on any flagged metric."
     },
     {
       "id": "transaction-control-paths",
@@ -536,6 +537,21 @@
         "add Tracelite workload-summary explain rules before adding another resqlite-local interpretation harness",
         "keep raw trace regions local while committing aggregate markdown and graph data only when it feeds Pages",
         "use repeated Tracelite profile runs before making p99 or max-tail claims"
+      ]
+    },
+    "144": {
+      "directions": ["sqlite-version-and-build-config"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Once SQLite ships a `.2` point release and sqlite3mc cuts a tracking release, exp 090's vendoring-bump audit moves from `defer` to `do` without any further policy debate — the 3.53.x line is the canonical case",
+        "The 3.53.0 default-FP-rounding hazard does not reach resqlite output because we never use `sqlite3_column_text` for REAL values; the proposed `SQLITE_DBCONFIG_FP_DIGITS=15` shim is unnecessary",
+        "Single-pass release-suite A/B on a vendoring bump is direction signal only; the first pass on this worktree showed 19/18/124 and the rerun 30/2/129, so a regression flag should be reconfirmed across two independent passes before being treated as real",
+        "The Concurrent Reads 8× wall-median metric is the only regression that persisted across both candidate passes (+~20%); 4× concurrency wins on the same baseline, so the slowdown is not a generic read-pool effect and is the canonical soak-window question for this bump"
+      ],
+      "nextSignals": [
+        "promote exp 144 from In Review to Accepted once the soak window closes with no release-suite regression",
+        "if a multi-pass rerun of Concurrent Reads 8× under 3.53.x stays slower than 2.3.2-baseline, open a follow-up against the read-pool path or revert the bump",
+        "future bump audits should run two independent single-pass A/Bs before claiming a behavioral change in SQLite or release-suite signal"
       ]
     },
     "145": {

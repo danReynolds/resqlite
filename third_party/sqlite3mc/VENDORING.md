@@ -1,14 +1,14 @@
 # sqlite3mc Vendoring Metadata
 
 - Component: SQLite3MultipleCiphers amalgamation
-- sqlite3mc version: `2.3.2`
-- Embedded SQLite version: `3.51.3` (`SQLITE_VERSION` in amalgamation)
-- Embedded SQLite source id: `2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618`
-- Upstream release tag: <https://github.com/utelle/SQLite3MultipleCiphers/releases/tag/v2.3.2>
+- sqlite3mc version: `2.3.5`
+- Embedded SQLite version: `3.53.2` (`SQLITE_VERSION` in amalgamation)
+- Embedded SQLite source id: `2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24`
+- Upstream release tag: <https://github.com/utelle/SQLite3MultipleCiphers/releases/tag/v2.3.5>
 
 Vendored files and SHA-256:
 
-- `sqlite3mc_amalgamation.c`: `2585ca25542ccc50804760af170b4d412cb74abc9370bdeb00397bd1869b3bbe`
-- `sqlite3mc_amalgamation.h`: `a4f3a5cc798ea590ce4ba89a20cdead5077e009a326488b35f1a603d235c4cf2`
-- `sqlite3.h`: `19585c8b5230e9d4f223bf31b709ece7b6a0bb3faf00d8310625d8e58cda1b1d`
-- `sqlite3ext.h`: `ea81fb7bd05882e0e0b92c4d60f677b205f7f1fbf085f218b12f0b5b3f0b9e48`
+- `sqlite3mc_amalgamation.c`: `ff621c6b75cb1d5d0c58365e42d47d050378456c0c925528abbf9928c86b45e5`
+- `sqlite3mc_amalgamation.h`: `bb0087cfd8a375d1d7383aeae8682dea5dc365ad7ae11322f025ab27d86d8493`
+- `sqlite3.h`: `9e69a1353a4288450b0d5239ede11fc7f1f4c8e5eb07491fc8317eacb5b7de7e`
+- `sqlite3ext.h`: `ac9645e5c9ff0cf176efdd6e75cb5e98f46295d38e02db5c4d208826a39ab4be`
