@@ -18,6 +18,18 @@ Future<Map<String, Object?>> collectBenchmarkEnvironment({
     'resolvedExecutable': Platform.resolvedExecutable,
     'script': Platform.script.toString(),
     'processors': Platform.numberOfProcessors,
+    'ci': Platform.environment['CI'] == 'true',
+    'githubActions': Platform.environment['GITHUB_ACTIONS'] == 'true',
+    if (Platform.environment['RUNNER_OS'] != null)
+      'githubRunnerOs': Platform.environment['RUNNER_OS'],
+    if (Platform.environment['GITHUB_RUN_ID'] != null)
+      'githubRunId': Platform.environment['GITHUB_RUN_ID'],
+    if (Platform.environment['GITHUB_RUN_ATTEMPT'] != null)
+      'githubRunAttempt': Platform.environment['GITHUB_RUN_ATTEMPT'],
+    if (Platform.environment['GITHUB_SHA'] != null)
+      'githubSha': Platform.environment['GITHUB_SHA'],
+    if (Platform.environment['GITHUB_REF'] != null)
+      'githubRef': Platform.environment['GITHUB_REF'],
     if (gitSha != null) 'gitSha': gitSha,
     if (gitBranch != null) 'gitBranch': gitBranch,
     if (gitDirty != null) 'gitDirty': gitDirty,

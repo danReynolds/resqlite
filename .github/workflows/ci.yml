@@ -125,7 +125,7 @@ jobs:
 
       - name: Run benchmark suite
         continue-on-error: true
-        run: dart run benchmark/run_release.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary
+        run: dart run benchmark/run_release.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary --no-auto-compare
 
       - name: Run head-to-head
         continue-on-error: true

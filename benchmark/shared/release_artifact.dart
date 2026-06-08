@@ -11,13 +11,17 @@ Map<String, Object?> buildReleaseRunArtifact({
   required Map<String, AggregateStats> aggregates,
   Map<String, Object?>? environment,
   String? comparisonBaselineFile,
+  String? comparisonBaselineMode,
+  Map<String, Object?>? comparisonBaselineCompatibility,
   String? generatedAt,
 }) {
   final metrics = extractResqliteMedians(markdown);
   final memory = extractMemoryMedians(markdown);
   final sqliteDiagnostics = extractSqliteDiagnosticsMedians(markdown);
   final streamingColumn = extractStreamingColumnMedians(markdown);
-  final benchmarkSummary = _benchmarkSummaryJson(parseBenchmarkSections(markdown));
+  final benchmarkSummary = _benchmarkSummaryJson(
+    parseBenchmarkSections(markdown),
+  );
 
   return {
     'schemaVersion': 3,
@@ -29,6 +33,10 @@ Map<String, Object?> buildReleaseRunArtifact({
       'environment': environment,
     if (comparisonBaselineFile != null)
       'comparisonBaselineFile': comparisonBaselineFile,
+    if (comparisonBaselineMode != null)
+      'comparisonBaselineMode': comparisonBaselineMode,
+    if (comparisonBaselineCompatibility != null)
+      'comparisonBaselineCompatibility': comparisonBaselineCompatibility,
     'metrics': metrics,
     if (memory.isNotEmpty) 'memoryMetrics': _memoryMetricsJson(memory),
     if (sqliteDiagnostics.isNotEmpty)
@@ -135,10 +143,7 @@ List<Map<String, Object?>>? artifactBenchmarks(Map<String, Object?> artifact) {
                 'library': library,
                 'values': [
                   for (final value in values)
-                    if (value == null)
-                      null
-                    else
-                      (value as num).toDouble(),
+                    if (value == null) null else (value as num).toDouble(),
                 ],
               });
             }
@@ -252,7 +257,9 @@ Map<String, Object?> _aggregatesJson(Map<String, AggregateStats> aggregates) {
   };
 }
 
-Map<String, Object?> _benchmarkSummaryJson(List<Map<String, Object?>> sections) {
+Map<String, Object?> _benchmarkSummaryJson(
+  List<Map<String, Object?>> sections,
+) {
   return {
     'sections': [
       for (final section in sections)
@@ -261,7 +268,8 @@ Map<String, Object?> _benchmarkSummaryJson(List<Map<String, Object?>> sections) 
           if (section['subtitle'] case final subtitle?)
             if (subtitle.toString().isNotEmpty) 'subtitle': subtitle,
           'entries': [
-            for (final entry in (section['entries'] as List<Map<String, Object?>>))
+            for (final entry
+                in (section['entries'] as List<Map<String, Object?>>))
               [entry['library'], entry['values']],
           ],
         },

@@ -14,10 +14,10 @@
 // diagnostics.
 //
 // See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
+import 'dart:convert';
 import 'dart:io' show Directory, File, Process, exit, stderr;
 
-import 'dart:convert';
-
+import 'shared/baseline_compatibility.dart';
 import 'shared/benchmark_environment.dart';
 import 'shared/parse_results.dart';
 import 'shared/release_artifact.dart';
@@ -47,10 +47,11 @@ Future<void> main(List<String> args) async {
   final options = _parseOptions(args);
   await _ensureDriftCodegenFresh();
   final resultsDir = Directory('benchmark/results');
-  final compareFile = _resolveComparisonFile(resultsDir, options.compareToPath);
   final environment = await collectBenchmarkEnvironment(
     extra: {'benchmarkMode': 'release', 'includeSlow': options.includeSlow},
   );
+  final baseline = _resolveComparisonBaseline(resultsDir, options, environment);
+  final compareFile = baseline.file;
 
   final runMarkdowns = <String>[];
   final runMetrics = <Map<String, double>>[];
@@ -61,9 +62,19 @@ Future<void> main(List<String> args) async {
   print('Label: ${options.label}');
   print('Repeats: ${options.repeatCount}');
   if (compareFile != null) {
-    print('Compare to: ${compareFile.path}');
+    print('Compare to: ${compareFile.path} (${baseline.mode})');
+    if (!baseline.isCompatible) {
+      print('Baseline compatibility: incompatible');
+      for (final reason in baseline.reasons) {
+        print('  - $reason');
+      }
+    }
   } else {
-    print('Compare to: none');
+    print(
+      options.autoCompare
+          ? 'Compare to: none'
+          : 'Compare to: none (automatic comparison disabled)',
+    );
   }
   print('');
 
@@ -109,8 +120,10 @@ Future<void> main(List<String> args) async {
       '- OS: `${environment['os'] ?? '?'} ${environment['osVersion'] ?? ''}`',
     )
     ..writeln('- Git: `$gitLabel`')
+    ..writeln('- Comparison baseline: `${baseline.fileName}`')
+    ..writeln('- Comparison mode: `${baseline.mode}`')
     ..writeln(
-      '- Comparison baseline: `${compareFile?.path.split('/').last ?? 'none'}`',
+      '- Comparison baseline compatibility: `${baseline.compatibilityLabel}`',
     )
     ..writeln()
     ..write(representativeMarkdown);
@@ -119,9 +132,15 @@ Future<void> main(List<String> args) async {
     markdown.writeln(renderRepeatStability(currentAggregates));
   }
 
-  if (compareFile != null) {
-    final prevContent = compareFile.readAsStringSync();
-    final prevName = compareFile.path.split('/').last;
+  if (baseline.shouldCompare) {
+    if (!baseline.isCompatible) {
+      final warning = _renderBaselineCompatibilityWarning(baseline);
+      markdown.writeln(warning);
+      print(warning);
+    }
+
+    final prevContent = baseline.file!.readAsStringSync();
+    final prevName = baseline.fileName;
     final comparison = generateReleaseComparison(
       currentAggregates,
       prevContent,
@@ -147,12 +166,22 @@ Future<void> main(List<String> args) async {
       markdown.writeln(streamColComparison);
       print(streamColComparison);
     }
+  } else if (compareFile != null) {
+    final skipped = _renderSkippedAutomaticComparison(baseline);
+    markdown.writeln(skipped);
+    print(skipped);
   } else {
     markdown.writeln('## Comparison');
     markdown.writeln();
-    markdown.writeln(
-      'No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.',
-    );
+    if (options.autoCompare) {
+      markdown.writeln(
+        'No comparison baseline found. Use `--compare-to=...` or keep a prior run in `benchmark/results`.',
+      );
+    } else {
+      markdown.writeln(
+        'Automatic comparison is disabled. Use `--compare-to=...` for an explicit baseline comparison.',
+      );
+    }
     markdown.writeln();
   }
 
@@ -171,7 +200,9 @@ Future<void> main(List<String> args) async {
     markdown: representativeMarkdown,
     aggregates: currentAggregates,
     environment: environment,
-    comparisonBaselineFile: compareFile?.path.split('/').last,
+    comparisonBaselineFile: baseline.shouldCompare ? baseline.fileName : null,
+    comparisonBaselineMode: baseline.shouldCompare ? baseline.mode : null,
+    comparisonBaselineCompatibility: baseline.toArtifactJson(),
     generatedAt: generatedAt,
   );
   await jsonFile.writeAsString(
@@ -372,11 +403,145 @@ Future<String> _runSuiteOnce({required bool includeSlow}) async {
   return markdown.toString();
 }
 
+final class _ComparisonBaseline {
+  const _ComparisonBaseline._({
+    required this.file,
+    required this.mode,
+    required this.explicit,
+    required this.compatibility,
+  });
+
+  const _ComparisonBaseline.none()
+    : file = null,
+      mode = 'none',
+      explicit = false,
+      compatibility = const BaselineCompatibility(
+        compatible: true,
+        reasons: [],
+      );
+
+  factory _ComparisonBaseline.explicit(
+    File file,
+    Map<String, Object?> environment,
+  ) {
+    return _ComparisonBaseline._(
+      file: file,
+      mode: 'explicit',
+      explicit: true,
+      compatibility: _evaluateBaselineFile(file, environment),
+    );
+  }
+
+  factory _ComparisonBaseline.automatic(
+    File file,
+    Map<String, Object?> environment,
+  ) {
+    return _ComparisonBaseline._(
+      file: file,
+      mode: 'automatic',
+      explicit: false,
+      compatibility: _evaluateBaselineFile(file, environment),
+    );
+  }
+
+  final File? file;
+  final String mode;
+  final bool explicit;
+  final BaselineCompatibility compatibility;
+
+  bool get isCompatible => compatibility.compatible;
+
+  bool get shouldCompare => file != null && (explicit || isCompatible);
+
+  List<String> get reasons => compatibility.reasons;
+
+  String get fileName {
+    final selected = file;
+    if (selected == null) return 'none';
+    final segments = selected.uri.pathSegments;
+    return segments.isEmpty ? selected.path : segments.last;
+  }
+
+  String get compatibilityLabel {
+    if (file == null) return 'not applicable';
+    if (isCompatible) return 'compatible';
+    if (explicit) return 'incompatible (explicit comparison)';
+    return 'incompatible (automatic comparison skipped)';
+  }
+
+  Map<String, Object?>? toArtifactJson() {
+    if (file == null) return null;
+    return {
+      'selectedBaselineFile': fileName,
+      'mode': mode,
+      'compatible': isCompatible,
+      if (reasons.isNotEmpty) 'reasons': reasons,
+      'comparisonExecuted': shouldCompare,
+    };
+  }
+}
+
+BaselineCompatibility _evaluateBaselineFile(
+  File file,
+  Map<String, Object?> environment,
+) {
+  final artifact = _tryLoadReleaseArtifactSidecar(file);
+  return evaluateBaselineCompatibility(
+    current: environment,
+    baseline: artifact == null ? null : artifactEnvironment(artifact),
+  );
+}
+
+Map<String, Object?>? _tryLoadReleaseArtifactSidecar(File markdownFile) {
+  try {
+    return loadReleaseArtifactSidecarForMarkdown(markdownFile);
+  } catch (_) {
+    return null;
+  }
+}
+
+String _renderBaselineCompatibilityWarning(_ComparisonBaseline baseline) {
+  final buffer = StringBuffer()
+    ..writeln('## Baseline Compatibility')
+    ..writeln()
+    ..writeln(
+      'This is an explicit comparison against `${baseline.fileName}`, but the baseline environment differs from the current run:',
+    );
+  for (final reason in baseline.reasons) {
+    buffer.writeln('- $reason');
+  }
+  buffer
+    ..writeln()
+    ..writeln('Treat the comparison as a reference check, not a gate.')
+    ..writeln();
+  return buffer.toString();
+}
+
+String _renderSkippedAutomaticComparison(_ComparisonBaseline baseline) {
+  final buffer = StringBuffer()
+    ..writeln('## Comparison')
+    ..writeln()
+    ..writeln(
+      'Automatic comparison skipped because `${baseline.fileName}` was not captured in a compatible environment:',
+    );
+  for (final reason in baseline.reasons) {
+    buffer.writeln('- $reason');
+  }
+  buffer
+    ..writeln()
+    ..writeln(
+      'Use `--compare-to=${baseline.file!.path}` to run an explicit reference comparison anyway.',
+    )
+    ..writeln();
+  return buffer.toString();
+}
+
 final class _RunAllOptions {
   const _RunAllOptions({
     required this.label,
     required this.repeatCount,
     required this.compareToPath,
+    required this.autoCompare,
     required this.hardwareSummary,
     required this.includeSlow,
   });
@@ -384,6 +549,7 @@ final class _RunAllOptions {
   final String label;
   final int repeatCount;
   final String? compareToPath;
+  final bool autoCompare;
   final bool hardwareSummary;
 
   /// When true, opt-in "slow" workloads (A7 sync burst, A9 1GB working
@@ -398,6 +564,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   var label = 'unlabeled';
   var repeatCount = 5;
   String? compareToPath;
+  var autoCompare = true;
   var hardwareSummary = false;
   var includeSlow = false;
 
@@ -406,6 +573,8 @@ _RunAllOptions _parseOptions(List<String> args) {
       repeatCount = int.parse(arg.substring('--repeat='.length));
     } else if (arg.startsWith('--compare-to=')) {
       compareToPath = arg.substring('--compare-to='.length);
+    } else if (arg == '--no-auto-compare') {
+      autoCompare = false;
     } else if (arg == '--hardware-summary') {
       hardwareSummary = true;
     } else if (arg == '--include-slow') {
@@ -427,6 +596,7 @@ _RunAllOptions _parseOptions(List<String> args) {
     label: label,
     repeatCount: repeatCount,
     compareToPath: compareToPath,
+    autoCompare: autoCompare,
     hardwareSummary: hardwareSummary,
     includeSlow: includeSlow,
   );
@@ -435,12 +605,16 @@ _RunAllOptions _parseOptions(List<String> args) {
 void _printUsageAndExit() {
   print(
     'Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
-    '[--compare-to=PATH] [--hardware-summary] [--include-slow]',
+    '[--compare-to=PATH] [--no-auto-compare] [--hardware-summary] '
+    '[--include-slow]',
   );
   print('');
   print('  --repeat=N           Run the suite N times (default: 5)');
   print(
     '  --compare-to=PATH    Compare against a specific baseline results file',
+  );
+  print(
+    '  --no-auto-compare    Do not infer a baseline from benchmark/results',
   );
   print(
     '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md',
@@ -451,15 +625,26 @@ void _printUsageAndExit() {
   exit(0);
 }
 
-File? _resolveComparisonFile(Directory resultsDir, String? explicitPath) {
+_ComparisonBaseline _resolveComparisonBaseline(
+  Directory resultsDir,
+  _RunAllOptions options,
+  Map<String, Object?> environment,
+) {
+  final explicitPath = options.compareToPath;
   if (explicitPath != null && explicitPath.isNotEmpty) {
     final file = File(explicitPath);
     if (!file.existsSync()) {
       throw ArgumentError('Comparison file not found: $explicitPath');
     }
-    return file;
+    return _ComparisonBaseline.explicit(file, environment);
   }
-  return _findPreviousResults(resultsDir);
+
+  if (!options.autoCompare) return const _ComparisonBaseline.none();
+
+  final file = _findPreviousResults(resultsDir);
+  if (file == null) return const _ComparisonBaseline.none();
+
+  return _ComparisonBaseline.automatic(file, environment);
 }
 
 /// Find the most recent .md file in the results directory.

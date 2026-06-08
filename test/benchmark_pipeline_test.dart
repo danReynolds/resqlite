@@ -27,10 +27,25 @@ void main() {
           ]),
         },
         environment: const {'runtime': 'dart-vm'},
+        comparisonBaselineFile: 'baseline.md',
+        comparisonBaselineMode: 'explicit',
+        comparisonBaselineCompatibility: const {
+          'selectedBaselineFile': 'baseline.md',
+          'mode': 'explicit',
+          'compatible': false,
+          'reasons': ['ci differs'],
+          'comparisonExecuted': true,
+        },
         generatedAt: '2026-04-23T00:00:00.000Z',
       );
 
       expect(artifact['schemaVersion'], equals(3));
+      expect(artifact['comparisonBaselineFile'], equals('baseline.md'));
+      expect(artifact['comparisonBaselineMode'], equals('explicit'));
+      expect(
+        artifact['comparisonBaselineCompatibility'],
+        containsPair('comparisonExecuted', true),
+      );
       expect(artifact.containsKey('benchmarks'), isFalse);
       expect(artifact.containsKey('benchmarkSummary'), isTrue);
 
@@ -299,37 +314,47 @@ Run settings:
         ..createSync();
 
       // 1. Clean run — 5 repeats, sqlite3 envelope normal.
-      File('${resultsDir.path}/2026-04-23T10-00-00-clean.md')
-          .writeAsStringSync(runMarkdown(
-        label: 'clean',
-        repeats: 5,
-        sqlite3Median: 5.0,
-        sqlite3P90: 7.0,
-      ));
+      File('${resultsDir.path}/2026-04-23T10-00-00-clean.md').writeAsStringSync(
+        runMarkdown(
+          label: 'clean',
+          repeats: 5,
+          sqlite3Median: 5.0,
+          sqlite3P90: 7.0,
+        ),
+      );
       // 2. Single-sample run — should be flagged regardless of sqlite3 numbers.
-      File('${resultsDir.path}/2026-04-23T11-00-00-single.md')
-          .writeAsStringSync(runMarkdown(
-        label: 'single',
-        repeats: 1,
-        sqlite3Median: 4.5,
-        sqlite3P90: 6.0,
-      ));
+      File(
+        '${resultsDir.path}/2026-04-23T11-00-00-single.md',
+      ).writeAsStringSync(
+        runMarkdown(
+          label: 'single',
+          repeats: 1,
+          sqlite3Median: 4.5,
+          sqlite3P90: 6.0,
+        ),
+      );
       // 3. Multi-sample but sqlite3 median elevated — flagged via control gate.
-      File('${resultsDir.path}/2026-04-23T12-00-00-loaded-median.md')
-          .writeAsStringSync(runMarkdown(
-        label: 'loaded-median',
-        repeats: 5,
-        sqlite3Median: 13.0,
-        sqlite3P90: 20.0,
-      ));
+      File(
+        '${resultsDir.path}/2026-04-23T12-00-00-loaded-median.md',
+      ).writeAsStringSync(
+        runMarkdown(
+          label: 'loaded-median',
+          repeats: 5,
+          sqlite3Median: 13.0,
+          sqlite3P90: 20.0,
+        ),
+      );
       // 4. Multi-sample but sqlite3 p90 catastrophic — flagged via p90 gate.
-      File('${resultsDir.path}/2026-04-23T13-00-00-loaded-p90.md')
-          .writeAsStringSync(runMarkdown(
-        label: 'loaded-p90',
-        repeats: 5,
-        sqlite3Median: 6.0,
-        sqlite3P90: 100.0,
-      ));
+      File(
+        '${resultsDir.path}/2026-04-23T13-00-00-loaded-p90.md',
+      ).writeAsStringSync(
+        runMarkdown(
+          label: 'loaded-p90',
+          repeats: 5,
+          sqlite3Median: 6.0,
+          sqlite3P90: 100.0,
+        ),
+      );
 
       final output = generate_history.buildHistoryData(
         resultsDir: resultsDir,
