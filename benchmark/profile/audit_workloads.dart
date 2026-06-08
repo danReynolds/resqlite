@@ -60,6 +60,14 @@ const int directReadBursts = 5;
 /// stream emissions. `counters` is the full `ProfileCounters.snapshot`
 /// taken right after the burst wall completes; consumers pick the
 /// fields they care about.
+///
+/// `countersAfterDrain` (optional) is a second snapshot taken AFTER
+/// the post-burst drain finishes. Counters that primarily fire during
+/// the drain — most notably the reader-completion handler (exp 136)
+/// when reader replies arrive after the last write — are captured
+/// here. Writer-side counters (`invalidateUs`, `intersectionUs`) stop
+/// incrementing once writes stop, so `counters` and
+/// `countersAfterDrain` agree on those fields.
 class AuditScenarioResult {
   AuditScenarioResult({
     required this.workload,
@@ -68,14 +76,18 @@ class AuditScenarioResult {
     required this.emissions,
     required this.observedHits,
     required this.counters,
+    this.drainUs = 0,
+    this.countersAfterDrain,
   });
 
   final String workload;
   final String shape;
   final int wallUs;
+  final int drainUs;
   final int emissions;
   final int observedHits;
   final Map<String, int> counters;
+  final Map<String, int>? countersAfterDrain;
 }
 
 /// Open a temp database, create the wide A11c table, populate it, and
@@ -96,8 +108,7 @@ Future<({Database db, Directory tempDir})> setupA11cDb({
       'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
   await db.execute(createSql);
   await db.executeBatch(insertSql, [
-    for (var i = 0; i < a11cRowCount; i++)
-      [i, for (final _ in colNames) 'v$i'],
+    for (var i = 0; i < a11cRowCount; i++) [i, for (final _ in colNames) 'v$i'],
   ]);
   return (db: db, tempDir: tempDir);
 }
@@ -161,17 +172,39 @@ Future<AuditScenarioResult> runA11cScenario(
     sw.stop();
     final counters = ProfileCounters.snapshot();
 
-    // Drain emissions without inflating wall_us.
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    // Drain emissions without inflating wall_us. The drain uses a
+    // quiet-window pattern so completion-side work that fires after the
+    // last write (most reader-pool replies on a fan-out workload) is
+    // captured in `countersAfterDrain` regardless of how many reruns
+    // were still in flight when the stopwatch stopped.
+    final drainSw = streamCount > 0 ? (Stopwatch()..start()) : null;
+    if (streamCount > 0) {
+      var lastEmissions = emitCounts.fold<int>(0, (a, b) => a + b);
+      const quietWindow = Duration(milliseconds: 50);
+      final quietDeadline = DateTime.now().add(const Duration(seconds: 60));
+      while (DateTime.now().isBefore(quietDeadline)) {
+        await Future<void>.delayed(quietWindow);
+        final nowEmissions = emitCounts.fold<int>(0, (a, b) => a + b);
+        if (nowEmissions == lastEmissions) break;
+        lastEmissions = nowEmissions;
+      }
+    } else {
+      // No streams: nothing to drain, but keep the timing convention.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    drainSw?.stop();
+    final countersAfterDrain = ProfileCounters.snapshot();
     final emissions = emitCounts.fold<int>(0, (a, b) => a + b);
 
     return AuditScenarioResult(
       workload: name,
       shape: '$streamCount streams x $a11cWriteCount writes',
       wallUs: sw.elapsedMicroseconds,
+      drainUs: drainSw?.elapsedMicroseconds ?? 0,
       emissions: emissions,
       observedHits: 0,
       counters: counters,
+      countersAfterDrain: countersAfterDrain,
     );
   } finally {
     for (final sub in subscriptions) {
@@ -186,9 +219,7 @@ Future<AuditScenarioResult> runA11cScenario(
 /// drain runs after the stopwatch stops, so emission count is stable
 /// without padding the wall denominator with idle wait.
 Future<AuditScenarioResult> runKeyedPkScenario() async {
-  final tempDir = await Directory.systemTemp.createTemp(
-    'audit_workloads_pk_',
-  );
+  final tempDir = await Directory.systemTemp.createTemp('audit_workloads_pk_');
   final db = await Database.open('${tempDir.path}/test.db');
   try {
     await db.execute(
@@ -198,10 +229,9 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
       'updated_at INTEGER NOT NULL'
       ')',
     );
-    await db.executeBatch(
-      'INSERT INTO items(body, updated_at) VALUES (?, ?)',
-      [for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0]],
-    );
+    await db.executeBatch('INSERT INTO items(body, updated_at) VALUES (?, ?)', [
+      for (var i = 1; i <= keyedPkRowCount; i++) ['seed_body_$i', 0],
+    ]);
 
     final watchedIds = _pickKeyedPkWatchedIds();
     final watchedSet = watchedIds.toSet();
@@ -250,6 +280,7 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
 
       // Drain trailing emissions on a quiet-window pattern AFTER the
       // stopwatch stops so wall_us is purely write-loop wall.
+      final drainSw = Stopwatch()..start();
       var lastEmissions = emitCounts.fold<int>(0, (a, b) => a + b);
       const quietWindow = Duration(milliseconds: 200);
       final quietDeadline = DateTime.now().add(const Duration(seconds: 60));
@@ -259,14 +290,18 @@ Future<AuditScenarioResult> runKeyedPkScenario() async {
         if (nowEmissions == lastEmissions) break;
         lastEmissions = nowEmissions;
       }
+      drainSw.stop();
+      final countersAfterDrain = ProfileCounters.snapshot();
 
       return AuditScenarioResult(
         workload: 'keyed PK subscriptions',
         shape: '$keyedPkStreamCount streams x $keyedPkWriteCount random writes',
         wallUs: sw.elapsedMicroseconds,
+        drainUs: drainSw.elapsedMicroseconds,
         emissions: lastEmissions,
         observedHits: observedHits,
         counters: counters,
+        countersAfterDrain: countersAfterDrain,
       );
     } finally {
       for (final sub in subscriptions) {
@@ -329,6 +364,8 @@ Future<AuditScenarioResult> runDirectReadControl() async {
         'invalidate_count': 0,
         'intersection_us': 0,
         'intersection_entries': 0,
+        'writer_sqlite_us': 0,
+        'writer_sqlite_count': 0,
         'rows_decoded': 0,
         'cells_decoded': 0,
       },

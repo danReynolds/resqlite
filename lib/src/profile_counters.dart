@@ -1,9 +1,6 @@
-/// Profile-mode allocation counters.
-///
-/// All increments MUST be wrapped in `if (kProfileMode) { ... }` so
-/// Dart's AOT compiler tree-shakes them out of release builds. The
-/// counters themselves are plain `int` fields; they cost nothing when
-/// never incremented.
+/// Direct increments MUST be wrapped in `if (kProfileMode) { ... }` so Dart's
+/// AOT compiler tree-shakes them out of release builds. The counters themselves
+/// are plain `int` fields; they cost nothing when never incremented.
 ///
 /// **Purpose.** Support memory-axis experiments
 /// ([EXP-055](../../experiments/055-columnar-typed-arrays.md) columnar typed
@@ -35,6 +32,8 @@
 /// Keep additions minimal — prefer extending an existing counter's
 /// semantics over introducing a parallel one.
 library;
+
+import 'profile_mode.dart';
 
 class ProfileCounters {
   ProfileCounters._();
@@ -70,6 +69,25 @@ class ProfileCounters {
   /// intersectionEntries`.
   static int intersectionUs = 0;
   static int intersectionEntries = 0;
+
+  /// Cumulative microseconds spent inside SQLite-facing writer calls,
+  /// measured on the writer isolate and aggregated back into the main
+  /// isolate through write responses. This lets profile audits split
+  /// `db.execute(...)` wall into SQLite work, stream invalidation, and
+  /// remaining writer/request overhead without adding a worker snapshot
+  /// protocol.
+  static int writerSqliteUs = 0;
+  static int writerSqliteCount = 0;
+
+  /// Adds writer-isolate SQLite-facing wall time to the profile snapshot.
+  ///
+  /// Use this helper instead of duplicating the profile-mode gate at every
+  /// writer-response call site.
+  static void recordWriterSqlite(int sqliteUs) {
+    if (!kProfileMode) return;
+    writerSqliteUs += sqliteUs;
+    writerSqliteCount++;
+  }
 
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
   /// currently available for dispatch - for example, when every worker
@@ -110,6 +128,47 @@ class ProfileCounters {
   /// isolate (where `ReaderPool._dispatch` runs).
   static int dispatcherCurrentParked = 0;
 
+  /// Cumulative wall-clock microseconds spent inside the main-isolate
+  /// reader worker port handler synchronous body — from the moment a
+  /// reader reply arrives at `_WorkerSlot._workerPort` to the point the
+  /// handler returns control to the event loop. Because
+  /// `_WorkerSlot.request` uses `Completer<Object?>.sync()`, the
+  /// downstream `await _pool.selectIfChanged(...)` continuation in
+  /// `StreamEngine._requery` (hash compare, `entry.emit`,
+  /// `_flushQueue`) runs synchronously inside this handler — so the
+  /// counter captures the full main-isolate completion-side wall per
+  /// reader reply.
+  ///
+  /// Only the normal-reply branch is counted. Startup-handshake (first
+  /// SendPort message) and onExit (`msg == null`) branches are
+  /// excluded. Sacrifice replies are counted because they still drive
+  /// the same `pending.complete(result)` chain.
+  ///
+  /// Added by [EXP-136](../../experiments/136-completion-microtask-counter.md)
+  /// to land the completion-side scheduling cost counter named in
+  /// `signals.json#stream-rerun-dispatch.blockedOnMeasurement` — the
+  /// remaining piece after exp 120 / exp 121 narrowed the main-isolate
+  /// wall to "everything not in the writer-handler".
+  static int completionHandlerUs = 0;
+
+  /// Number of reader-reply completions handled. One increment per
+  /// normal-reply pass through the worker port handler.
+  static int completionHandlerCount = 0;
+
+  /// Cumulative wall-clock microseconds spent inside
+  /// `StreamEntry.emit` — the loop that hands each result list to every
+  /// subscriber controller via `controller.add`. A subset of
+  /// [completionHandlerUs] when the emit is driven by a reader reply
+  /// (the common case for stream re-queries). Lets the audit split
+  /// reader-completion wall into subscriber-fanout cost
+  /// (`streamEmitUs`) and rest-of-completion cost
+  /// (`completionHandlerUs - streamEmitUs`).
+  static int streamEmitUs = 0;
+
+  /// Number of `StreamEntry.emit` calls. One per re-query emission and
+  /// one per initial result emission.
+  static int streamEmitCount = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -118,9 +177,15 @@ class ProfileCounters {
     'invalidate_count': invalidateCount,
     'intersection_us': intersectionUs,
     'intersection_entries': intersectionEntries,
+    'writer_sqlite_us': writerSqliteUs,
+    'writer_sqlite_count': writerSqliteCount,
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
+    'completion_handler_us': completionHandlerUs,
+    'completion_handler_count': completionHandlerCount,
+    'stream_emit_us': streamEmitUs,
+    'stream_emit_count': streamEmitCount,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -145,9 +210,15 @@ class ProfileCounters {
     invalidateCount = 0;
     intersectionUs = 0;
     intersectionEntries = 0;
+    writerSqliteUs = 0;
+    writerSqliteCount = 0;
     dispatcherParkedTotal = 0;
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
     dispatcherCurrentParked = 0;
+    completionHandlerUs = 0;
+    completionHandlerCount = 0;
+    streamEmitUs = 0;
+    streamEmitCount = 0;
   }
 }

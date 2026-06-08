@@ -24,9 +24,9 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Exp 134 proved a rowid precision layer can halve keyed-PK writer-burst wall for verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams (25.54 → 12.45 ms, intersection probes 10,000 → 3), but it is rejected as a production implementation because the merge path depends on fragile internal SQL text recognition. The implementation is preserved at `archive/exp-134`; revisit the signal only through an explicit row observer API, trace metadata, or another stronger dependency model. Exp 145 then tested the remaining `_flushQueue` helper-allocation cleanup (`take(...).toList()` and `where(...).length`) and rejected it: counters were already zero and wall time was mixed. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch; the admission path, invalidation traversal, SQL-recognizer-based keyed-PK miss path, and allocation-only `_flushQueue` cleanup are not active implementation targets on currently-measured workloads.",
-      "keyPriors": ["106", "119", "120", "121", "122", "134"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, writer/request residual, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0), and exp 122 removed the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool. Exp 121 ruled out invalidation traversal as the active implementation target: overlap invalidation is 10–15% of wall, column intersection is 2.5–5.7%, and the structural ceiling is at the per-benchmark decision-threshold edge. Exp 134 proved row-level dirty precision can halve keyed-PK writer-burst wall for a narrow `WHERE id = ?` proof, but its internal SQL recognizer is rejected; revive that area only through explicit API/design or real workload evidence. Exp 136 ships the completion-side reader-handler counter: on A11c overlap the reader worker port handler is 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls/burst, and subscriber-fanout emit is only 0.35% of the chain. Exp 147 split writer-side burst wall from SQLite-facing writer calls: on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%; keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). With both named measurement blockers sized, future stream implementation work should start with reader-reply/completion batching or residual writer/request scheduling, and must prove A11c overlap improves without harming disjoint/keyed-PK. SQLite-step tuning, stream admission, invalidation traversal, SQL-recognizer-based keyed-PK precision, and allocation-only `_flushQueue` cleanup are not active targets on currently-measured workloads.",
+      "keyPriors": ["120", "121", "122", "134", "136", "147"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "106", "114", "115", "118", "119", "145"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a workload shows row-level precision is worth explicit API or metadata design outside a SQL text recognizer",
@@ -36,48 +36,35 @@
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
         "Should explicit row-observer APIs cover aliases, joins, composite keys, or WITHOUT ROWID tables that exp 134 could not cover cleanly as an internal recognizer?",
-        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, the exp 121 invalidation-traversal audit, and exp 134's rejected rowid proof, where does remaining stream-fanout wall sit — completion-side scheduling, writer-side dispatch, or reader work itself?"
+        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, the exp 121 invalidation-traversal audit, exp 134's rejected rowid proof, and exp 147's SQLite wall split, where does remaining stream-fanout residual wall sit — completion-side scheduling, writer reply/request coordination, dirty-set harvest, or reader work itself?"
       ],
       "openCandidates": [
-        {
-          "idea": "completion-side microtask churn audit on A11c overlap",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no current counter for completion-side scheduling cost"
-        },
-        {
-          "idea": "writer-isolate wall vs SQLite wall split on overlap workloads",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no profile-mode split between writer dispatch and SQLite step time"
-        },
         {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
           "addedDate": "2026-04-30",
           "addedAfter": "115"
         },
         {
-          "idea": "reader completion batching",
-          "addedDate": "2026-05-02"
+          "idea": "reader-reply batching to collapse N short-circuited replies into one handler invocation",
+          "addedDate": "2026-05-14",
+          "addedAfter": "136",
+          "blockedOn": "needs a focused experiment that lands the protocol/admission change and proves overlap wall drops while disjoint and keyed-PK stay neutral"
         },
         {
           "idea": "rerun tracing (per-entry dispatch lineage)",
           "addedDate": "2026-05-02"
         }
       ],
-      "blockedOnMeasurement": [
-        "completion-side microtask scheduling cost counter",
-        "writer-isolate wall vs SQLite wall split for overlap workloads"
-      ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8–14 ms off a 100 ms overlap burst — at the per-benchmark decision threshold edge — and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. Exp 134 is proof that row-level precision can win, but its SQL-recognizer implementation is rejected; revive it only with explicit API/design or real workload evidence. Exp 145 says not to chase `_flushQueue` collection-helper cleanup without allocator evidence naming that exact temporary list/count path. A new dispatch experiment now needs a counter for completion-side scheduling cost or writer-side dispatch wall showing nonzero headroom on the workload before the change is worth trying."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119/136/147 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe). Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. Exp 134 is proof that row-level precision can win, but its SQL-recognizer implementation is rejected; revive it only with explicit API/design or real workload evidence. Exp 136 shows completion-side reader handling is 28.57% of A11c overlap total wall and makes reader-reply batching the bounded implementation candidate. Exp 147 shows SQLite-facing writer calls are a minority of A11c overlap and keyed-PK wall, while residual writer/request wall dominates. A new stream experiment should reduce the exp 136 completion counter or split/reduce the exp 147 residual writer/request bucket, and must keep disjoint/keyed-PK guardrails neutral."
     },
     {
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral. Exp 146 tested lowering the ASCII batch-packing threshold to 2 params / 64 total params with a Tracelite A/B run over narrow-batch-insert; it produced no primary improvement (resqlite +1.45%, neutral) and a noisy sqlite_async guardrail, so small/narrow writes should stay on the generic path unless a new workload shows parameter encoding is material.",
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral. Exp 142 retested direct single-row text parameter encoding under Tracelite on chat-sim and narrow-batch-insert; it did not clear the primary gate and trended slower (+6.86% and +16.4%). Exp 146 tested lowering the ASCII batch-packing threshold to 2 params / 64 total params with a Tracelite A/B run over narrow-batch-insert; it produced no primary improvement (resqlite +1.45%, neutral) and a noisy sqlite_async guardrail, so small/narrow writes should stay on the generic path unless a new workload shows parameter encoding is material.",
       "keyPriors": ["109", "112", "113", "116", "125", "126"],
-      "archive": ["028", "076", "077", "095", "096", "146"],
+      "archive": ["028", "076", "077", "095", "096", "142", "146"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
         "a benchmark shows parameter encoding as a material part of write wall time",
@@ -94,7 +81,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path. Exp 146 specifically rejected lowering the ASCII fast-path guard to small/narrow batches; keep those writes generic unless a future workload proves parameter encoding dominates wall time."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path. Exp 142 rejected carrying the same direct text encoding pattern into the single-row `allocateParams` path because current Tracelite lanes did not improve. Exp 146 specifically rejected lowering the ASCII fast-path guard to small/narrow batches; keep small/narrow writes generic unless a future workload proves parameter encoding dominates wall time and clears a Tracelite A/B primary gate."
     },
     {
       "id": "long-text-stream-hashing",
@@ -223,9 +210,9 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 ruled out invalidation traversal as an active wall-time target. Exp 143 confirms the pinned Tracelite profile path is useful as the default experiment workflow because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run. The remaining gap is interpretation: `tracelite explain` currently reports workload coverage but does not yet call out dispatch-bound, work-bound, memory-heavy, or tail-noisy workloads.",
-      "keyPriors": ["110", "111", "115", "119", "121", "143"],
-      "archive": ["055", "088", "099", "102", "108", "113", "116"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121/136/147 are the recent stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target (10–15% of overlap wall, intersection ~3–6%), exp 136 added the completion-side reader-handler counter plus drain-aware audit snapshots and found 28.57% of A11c overlap total wall in the reader worker port handler chain at ~18 us per call, and exp 147 added the writer SQLite wall split and found SQLite-facing writer calls are not the active stream-fanout bottleneck on A11c overlap or keyed-PK. Exp 143 confirms the pinned Tracelite profile path is useful as the default experiment workflow because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run. The remaining gap is interpretation: `tracelite explain` currently reports workload coverage but does not yet call out dispatch-bound, work-bound, memory-heavy, tail-noisy, completion-heavy, or residual-writer-heavy workloads.",
+      "keyPriors": ["115", "121", "136", "143", "147"],
+      "archive": ["055", "088", "099", "102", "108", "113", "116", "119"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -241,23 +228,13 @@
           "addedDate": "2026-05-02"
         },
         {
-          "idea": "completion-side scheduling cost counter (microtasks / event loop)",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
-        },
-        {
-          "idea": "writer dispatch wall counter (dart wall - SQLite step wall)",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120"
-        },
-        {
           "idea": "Tracelite workload-summary explain rules for dispatch-bound, work-bound, memory-heavy, and tail-noisy workloads",
           "addedDate": "2026-06-08",
           "addedAfter": "143"
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck. Use the Tracelite profile wrapper before adding a legacy profile harness: exp 143 shows the structured artifacts already expose dispatch-vs-work and memory/allocation shape. If the profile data answers the question only after manual JSON inspection, prefer improving Tracelite explanation rules over duplicating the measurement path in resqlite."
+      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck. Use the Tracelite profile wrapper before adding a legacy profile harness: exp 143 shows the structured artifacts already expose dispatch-vs-work and memory/allocation shape. If profile data answers the question only after manual JSON inspection, prefer improving Tracelite explanation rules over duplicating the measurement path in resqlite. For scoped resqlite counters, exp 136 is the main-isolate pattern: add the counter, snapshot inside the shared `audit_workloads.dart` scenario runners with both at-burst-end and post-drain snapshots, and have the harness pick the right one for its question. Exp 147 is the writer-isolate pattern: time the writer-side slice in the worker and aggregate it back through responses."
     }
   ],
   "experiments": {
@@ -481,7 +458,7 @@
       ],
       "nextSignals": [
         "profile completion-side microtask scheduling cost on A11c overlap",
-        "split writer-isolate wall vs SQLite wall on overlap workloads to see whether write-side dispatch dominates remaining stream-fanout latency",
+        "exp 147 split writer-isolate wall vs SQLite wall; follow up on residual writer/request scheduling rather than SQLite-step tuning",
         "audit invalidation traversal cost (`invalidateUs`/`intersectionUs`) as a fraction of overlap wall"
       ]
     },
@@ -496,7 +473,7 @@
       ],
       "nextSignals": [
         "build a completion-side microtask scheduling cost counter and re-audit A11c overlap",
-        "build a writer-isolate wall vs SQLite step wall split inside `WriteWorker` and re-audit overlap",
+        "exp 147 built the writer-isolate wall vs SQLite split; use it to steer follow-up toward residual writer/request or completion-side scheduling",
         "until a non-zero counter signal appears for one of those, dispatch-area implementation experiments stay on hold"
       ]
     },
@@ -523,6 +500,20 @@
       "nextSignals": [
         "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
         "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+      ]
+    },
+    "142": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "rejected_no_signal",
+      "changedBeliefs": [
+        "Direct single-row text parameter encoding did not produce current Tracelite production evidence despite the old focused-harness win from PR #130",
+        "The retest over chat-sim and narrow-batch-insert did not clear the primary gate: resqlite changed +6.86% and +16.4% with neutral/inconclusive verdicts and high CV",
+        "Small single-row string binding should stay on the generic `allocateParams` path unless a future workload makes that encoding cost material"
+      ],
+      "nextSignals": [
+        "do not carry the PR #130 `allocateParams` direct UTF-8 path without a Tracelite A/B decision that clears a scenario where single-row string binding is material",
+        "if high-frequency string-parameter reads/writes become important, add a focused Tracelite scenario or profile lane before retrying the implementation",
+        "continue comparing parameter-encoding changes against both narrow batch and wider app-shaped lanes rather than accepting focused microbenchmark wins alone"
       ]
     },
     "143": {
@@ -560,11 +551,11 @@
       "changedBeliefs": [
         "`StreamEngine._flushQueue` helper allocation is not the active stream-dispatch target after exp 120 and exp 122; replacing `take(...).toList()` and `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time movement",
         "A11c overlap can move in a favorable direction from tiny queue-shape changes, but keyed-PK noise/regression risk means collection-helper cleanup needs allocator evidence before it is worth carrying",
-        "The current stream-admission path is behaviorally settled; future stream work should keep looking for completion-side scheduling cost or writer-side dispatch wall instead of polishing the dequeue loop"
+        "The current stream-admission path is behaviorally settled; future stream work should keep looking for completion-side scheduling cost or residual writer/request wall instead of polishing the dequeue loop"
       ],
       "nextSignals": [
         "do not retry `_flushQueue` inline dequeue unless an allocation profile identifies the temporary list or availability count as material",
-        "build completion-side scheduling or writer-dispatch-wall measurement before attempting another stream-dispatch implementation",
+        "use exp 147 writer SQLite split plus a completion-side scheduling counter before attempting another stream-dispatch implementation",
         "use the existing A11c/keyed-PK profile counter gates to reject stream-admission cleanups whose counters are already zero"
       ]
     },
@@ -579,6 +570,19 @@
       "nextSignals": [
         "do not broaden the exp 125 ASCII fast path to small/narrow batches without a new workload and a Tracelite A/B decision that clears the primary gate",
         "when experimenting in this direction, prefer the integrated Tracelite A/B wrapper so baseline/candidate histories, policy, decision, insights, and graph data stay together"
+      ]
+    },
+    "147": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads: A11c overlap is 9.4% SQLite and keyed-PK is 18.1% SQLite",
+        "After subtracting SQLite-facing calls and stream invalidation, residual writer/request wall remains the largest bucket on A11c overlap and keyed-PK",
+        "Future stream-dispatch work should target completion-side scheduling, reply/request coordination, or dirty-set harvest rather than SQLite-step tuning"
+      ],
+      "nextSignals": [
+        "reader-reply batching candidate should reduce exp 136 completion_us / total_us on A11c overlap",
+        "narrower split of residual writer/request wall into dirty-set harvest vs reply/request scheduling if reader-reply batching does not explain it"
       ]
     },
     "125": {
@@ -603,6 +607,21 @@
       "nextSignals": [
         "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
         "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
+      ]
+    },
+    "136": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "On A11c overlap the reader-worker port handler accounts for 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls per burst — the largest remaining reachable main-isolate slice",
+        "Subscriber-fanout emit is < 1% of the completion chain on every measured workload; batching `controller.add` is not the optimization target",
+        "Most reader replies on A11c overlap short-circuit via `selectIfChanged` hash comparison (4,228 completions → 29 emits in the fresh pass); the per-call cost is handler bootstrap + Future resolution + hash check + `_flushQueue` admit, not real query result work",
+        "Most reader-completion wall fires AFTER the writer-burst stopwatch stops; the shared `audit_workloads.dart` now snapshots counters BOTH at burst-end and after the drain so future main-isolate audits can pick the right denominator. A11c drain switched from a fixed 50 ms wait to the same quiet-window pattern keyed-PK already uses"
+      ],
+      "nextSignals": [
+        "evaluate reader-reply batching as the bounded implementation candidate that follows: must drop `completion_us / total_us` on A11c overlap AND stay neutral on A11c disjoint and keyed-PK (otherwise overall release-suite delta is workload-specific)",
+        "treat `stream_emit_us` as evidence-of-absence for subscriber-fanout optimization candidates until a workload with very many listeners per stream surfaces",
+        "future main-isolate counters should follow the exp 136 pattern (counter + post-drain snapshot in `audit_workloads.dart`) rather than redoing the harness wiring"
       ]
     }
   }

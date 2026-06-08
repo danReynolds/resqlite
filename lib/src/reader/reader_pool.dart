@@ -89,7 +89,7 @@ final class ReaderPool {
   /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
   /// column detail under each table dependency.
   Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
-      selectWithDeps(
+  selectWithDeps(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
@@ -166,7 +166,8 @@ final class ReaderPool {
             return TraceliteProfile.traceAsync(
               TraceliteResqliteSpans.readerPoolDispatch,
               () => slot.request(request),
-              correlationId: request.traceCorrelationId ??
+              correlationId:
+                  request.traceCorrelationId ??
                   TraceliteProfile.nextCorrelationId(),
               beginArgs: [typeId],
             );
@@ -345,6 +346,14 @@ class _WorkerSlot {
         return;
       }
 
+      // [EXP-136](../../../experiments/136-completion-microtask-counter.md):
+      // measure the main-isolate completion-side wall per reader reply.
+      // `_WorkerSlot.request` uses `Completer<Object?>.sync()`, so
+      // `pending.complete(result)` runs the entire `_dispatch` /
+      // `_requery` / `entry.emit` / `_flushQueue` chain synchronously
+      // inside this handler. Profile-mode only.
+      final completionSw = kProfileMode ? (Stopwatch()..start()) : null;
+
       final (result, sacrificed, error) =
           msg as (Object?, bool, ResqliteException?);
 
@@ -377,16 +386,19 @@ class _WorkerSlot {
           pending.completeError(error);
         }
       }
+
+      if (kProfileMode) {
+        completionSw!.stop();
+        ProfileCounters.completionHandlerUs += completionSw.elapsedMicroseconds;
+        ProfileCounters.completionHandlerCount++;
+      }
     };
 
-    await Isolate.spawn(
-        readerEntrypoint,
-        [
-          dbHandleAddr,
-          _readerId,
-          workerPort.sendPort,
-        ],
-        onExit: workerPort.sendPort);
+    await Isolate.spawn(readerEntrypoint, [
+      dbHandleAddr,
+      _readerId,
+      workerPort.sendPort,
+    ], onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

@@ -6,6 +6,8 @@ import 'shared/parse_results.dart';
 import 'shared/release_artifact.dart';
 import 'shared/workload_registry.dart';
 
+const _jsonEncoder = JsonEncoder.withIndent('  ');
+
 /// Generates `docs/experiments/history.json` from benchmark results and
 /// experiment markdown files.
 ///
@@ -23,13 +25,46 @@ Future<void> main() async {
   // 4. Write JSON.
   await outFile.parent.create(recursive: true);
 
-  await outFile.writeAsString(
-    const JsonEncoder.withIndent('  ').convert(output),
-  );
+  final wrote = await writeHistoryData(outFile, output);
 
   final tracked = (output['tracked'] as List?)?.cast<String>() ?? const [];
-  print('Wrote ${outFile.path} (${tracked.length} tracked metrics).');
+  if (wrote) {
+    print('Wrote ${outFile.path} (${tracked.length} tracked metrics).');
+  } else {
+    print('${outFile.path} is current (${tracked.length} tracked metrics).');
+  }
   print('Tracked: ${tracked.join(', ')}');
+}
+
+Future<bool> writeHistoryData(File outFile, Map<String, Object?> output) async {
+  final currentText = outFile.existsSync()
+      ? await outFile.readAsString()
+      : null;
+  final currentGenerated = _currentGeneratedTimestamp(currentText);
+  if (currentGenerated != null) {
+    final stableOutput = Map<String, Object?>.from(output)
+      ..['generated'] = currentGenerated;
+    if (_jsonEncoder.convert(stableOutput) == currentText!.trimRight()) {
+      return false;
+    }
+  }
+
+  await outFile.writeAsString(_jsonEncoder.convert(output));
+  return true;
+}
+
+String? _currentGeneratedTimestamp(String? currentText) {
+  if (currentText == null) return null;
+  try {
+    final currentJson = jsonDecode(currentText);
+    if (currentJson is Map) {
+      final generated = currentJson['generated'];
+      if (generated is String) return generated;
+    }
+  } on FormatException {
+    return null;
+  }
+  return null;
 }
 
 Map<String, Object?> buildHistoryData({

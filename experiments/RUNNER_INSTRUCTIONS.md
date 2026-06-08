@@ -182,6 +182,11 @@ Every scheduled experiment run must:
   in a worktree on a stale or unrelated branch, create a fresh branch
   from `origin/main` before committing — do not pile a new experiment
   on top of an unrelated in-flight branch.
+- **Resolve dependencies in every fresh worktree before local validation.**
+  Run `dart pub get` in the experiment worktree before `dart analyze`,
+  focused tests, or any direct benchmark script. For Tracelite A/B runs,
+  also make sure both baseline and candidate worktrees have dependencies
+  resolved before interpreting setup failures as code failures.
 - **Push the branch to `origin` and open a real (non-draft) PR.** Do
   not leave the work unpublished, and do not open the PR as a draft.
   Draft PRs are not ready to merge and are easier for reviewers to

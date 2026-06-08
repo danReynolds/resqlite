@@ -96,23 +96,30 @@ final class CloseRequest extends WriterRequest {
 /// Response to [ExecuteRequest]. Includes the table modifications produced by
 /// the write.
 final class ExecuteResponse {
-  const ExecuteResponse(this.result, this.modifications);
+  const ExecuteResponse(
+    this.result,
+    this.modifications, {
+    this.writerSqliteUs = 0,
+  });
 
   final WriteResult result;
   final TableDependencies modifications;
+  final int writerSqliteUs;
 }
 
 /// Response to [QueryRequest] (transaction reads).
 final class QueryResponse {
-  const QueryResponse(this.rows);
+  const QueryResponse(this.rows, {this.writerSqliteUs = 0});
   final List<Map<String, Object?>> rows;
+  final int writerSqliteUs;
 }
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.modifications);
+  const BatchResponse(this.modifications, {this.writerSqliteUs = 0});
 
   final TableDependencies modifications;
+  final int writerSqliteUs;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,12 +127,13 @@ final class BatchResponse {
 // ---------------------------------------------------------------------------
 
 @ffi.Native<
-    ffi.Pointer<ffi.Void> Function(
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Uint8>,
-      ffi.Int,
-    )>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_stmt_acquire_writer', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
   ffi.Pointer<ffi.Void> db,
   ffi.Pointer<ffi.Void> sql,
@@ -244,26 +252,41 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(ExecuteResponse(result, modifications));
+  msg.replyPort.send(
+    ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
+  );
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
+    final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
-  } else {
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      BatchResponse(
+        TableDependencies.none,
+        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+      ),
+    );
+  } else {
+    final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
+    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    msg.replyPort.send(
+      BatchResponse(
+        getDirtyTableDependencies(state.dbHandle),
+        writerSqliteUs: writerSqliteUs,
+      ),
     );
   }
 }
@@ -271,6 +294,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
 /// Transaction-scoped read. Runs on the writer connection so uncommitted
 /// writes from earlier statements in the same transaction are visible.
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
+  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqlNative = cachedSqlUtf8(msg.sql);
   final paramsNative = allocateParams(msg.params);
   try {
@@ -289,7 +313,10 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     }
     final raw = decodeQuery(stmt, msg.sql);
     msg.replyPort.send(
-      QueryResponse(ResultSet(raw.values, raw.schema, raw.rowCount)),
+      QueryResponse(
+        ResultSet(raw.values, raw.schema, raw.rowCount),
+        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+      ),
     );
   } finally {
     // Both resources are freed in one finally regardless of which line
@@ -338,6 +365,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // is reduced by exactly one and the corresponding SQLite scope is no
   // longer active. The next request sees a predictable state.
   final newDepth = state.txDepth - 1;
+  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   if (newDepth == 0) {
     final rc = resqliteTxCommit(state.dbHandle);
     if (rc != 0) {
@@ -358,9 +386,13 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         sqliteCode: rc,
       );
     }
+    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     state.txDepth = newDepth;
     msg.replyPort.send(
-      BatchResponse(getDirtyTableDependencies(state.dbHandle)),
+      BatchResponse(
+        getDirtyTableDependencies(state.dbHandle),
+        writerSqliteUs: writerSqliteUs,
+      ),
     );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();
@@ -397,10 +429,13 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         sqliteCode: rc,
       );
     }
+    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(const BatchResponse(TableDependencies.none));
+    msg.replyPort.send(
+      BatchResponse(TableDependencies.none, writerSqliteUs: writerSqliteUs),
+    );
   }
 }
 
@@ -449,4 +484,10 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     }
   }
   msg.replyPort.send(true);
+}
+
+int _stopSqliteTimer(Stopwatch? sw) {
+  if (sw == null) return 0;
+  sw.stop();
+  return sw.elapsedMicroseconds;
 }
