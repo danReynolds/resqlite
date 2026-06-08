@@ -1,6 +1,7 @@
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
 library;
 
+import 'dart:collection' show HashMap, HashSet;
 import 'dart:convert' show utf8;
 import 'dart:ffi' as ffi;
 import 'dart:typed_data';
@@ -667,9 +668,57 @@ const int _paramStructSize = 24;
 // batches measured neutral and should avoid the ASCII probe.
 const int _asciiBatchMinParamCount = 8;
 const int _asciiBatchMinTotalParamCount = 8192;
+const int _blobReuseMinParamCount = 8;
+const int _blobReuseMinTotalParamCount = 8192;
+const int _blobReuseMinBytes = 64;
+const int _blobReuseMinSavedBytes = 4096;
 
 typedef _BatchStringWriter =
     int Function(String value, Uint8List out, int offset, int flatIndex);
+
+final class _BatchPayloadPlan {
+  const _BatchPayloadPlan(this.extraBytes, this.reusedBlobOffsets);
+
+  final int extraBytes;
+  final HashMap<Uint8List, int>? reusedBlobOffsets;
+}
+
+final class _BatchPayloadSizer {
+  _BatchPayloadSizer({required this.enableBlobReuse});
+
+  final bool enableBlobReuse;
+  int bytes = 0;
+  int _savedBlobBytes = 0;
+  HashMap<Uint8List, int>? _blobOffsets;
+
+  void addStringBytes(int length) {
+    bytes += length;
+  }
+
+  void addBlob(Uint8List value) {
+    final length = value.length;
+    if (!enableBlobReuse || length < _blobReuseMinBytes) {
+      bytes += length;
+      return;
+    }
+
+    final offsets = _blobOffsets ??= HashMap<Uint8List, int>.identity();
+    if (offsets.containsKey(value)) {
+      _savedBlobBytes += length;
+      return;
+    }
+
+    offsets[value] = bytes;
+    bytes += length;
+  }
+
+  _BatchPayloadPlan finish() {
+    if (_savedBlobBytes >= _blobReuseMinSavedBytes) {
+      return _BatchPayloadPlan(bytes, _blobOffsets);
+    }
+    return _BatchPayloadPlan(bytes + _savedBlobBytes, null);
+  }
+}
 
 /// Pack params into a single buffer: `[struct0..N][text/blob bytes]`.
 ///
@@ -758,30 +807,48 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   final paramCount = paramSets.first.length;
   final totalCount = paramSets.length * paramCount;
   if (totalCount == 0) return ffi.nullptr.cast();
+  final enableBlobReuse = _shouldTryBatchBlobReuse(
+    paramSets,
+    paramCount,
+    totalCount,
+  );
 
   if (paramCount >= _asciiBatchMinParamCount &&
       totalCount >= _asciiBatchMinTotalParamCount &&
       _firstBatchRowHasString(paramSets.first, paramCount)) {
-    final asciiBytes = _tryMeasureAsciiBatchBytes(paramSets, paramCount);
-    if (asciiBytes != null) {
+    final asciiPlan = _tryMeasureAsciiBatchPayload(
+      paramSets,
+      paramCount,
+      enableBlobReuse: enableBlobReuse,
+    );
+    if (asciiPlan != null) {
       return _allocateAsciiBatchParams(
         paramSets,
         paramCount,
         totalCount,
-        asciiBytes,
+        asciiPlan,
       );
     }
 
-    final utf8Bytes = _measureUtf8BatchBytes(paramSets, paramCount);
+    final utf8Plan = _measureUtf8BatchPayload(
+      paramSets,
+      paramCount,
+      enableBlobReuse: enableBlobReuse,
+    );
     return _allocateUtf8BatchParams(
       paramSets,
       paramCount,
       totalCount,
-      utf8Bytes,
+      utf8Plan,
     );
   }
 
-  return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
+  return _allocateBatchParamsGeneric(
+    paramSets,
+    paramCount,
+    totalCount,
+    enableBlobReuse: enableBlobReuse,
+  );
 }
 
 bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
@@ -791,20 +858,60 @@ bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(
+bool _shouldTryBatchBlobReuse(
   List<List<Object?>> paramSets,
   int paramCount,
-) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
+  int totalCount,
+) {
+  if (paramCount < _blobReuseMinParamCount ||
+      totalCount < _blobReuseMinTotalParamCount) {
+    return false;
+  }
 
-int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
-    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;
+  HashSet<Uint8List>? seen;
+  final sampleRows = paramSets.length < 32 ? paramSets.length : 32;
+  for (var row = 0; row < sampleRows; row++) {
+    final set = paramSets[row];
+    for (var i = 0; i < paramCount; i++) {
+      final value = set[i];
+      if (value is Uint8List && value.length >= _blobReuseMinBytes) {
+        final seenBlobs = seen ??= HashSet<Uint8List>.identity();
+        if (!seenBlobs.add(value)) return true;
+      }
+    }
+  }
+  return false;
+}
 
-int? _measureBatchPayloadBytes(
+_BatchPayloadPlan? _tryMeasureAsciiBatchPayload(
+  List<List<Object?>> paramSets,
+  int paramCount, {
+  required bool enableBlobReuse,
+}) => _measureBatchPayload(
+  paramSets,
+  paramCount,
+  asciiOnly: true,
+  enableBlobReuse: enableBlobReuse,
+);
+
+_BatchPayloadPlan _measureUtf8BatchPayload(
+  List<List<Object?>> paramSets,
+  int paramCount, {
+  required bool enableBlobReuse,
+}) => _measureBatchPayload(
+  paramSets,
+  paramCount,
+  asciiOnly: false,
+  enableBlobReuse: enableBlobReuse,
+)!;
+
+_BatchPayloadPlan? _measureBatchPayload(
   List<List<Object?>> paramSets,
   int paramCount, {
   required bool asciiOnly,
+  required bool enableBlobReuse,
 }) {
-  var extraBytes = 0;
+  final sizer = _BatchPayloadSizer(enableBlobReuse: enableBlobReuse);
   var hasString = false;
 
   for (final set in paramSets) {
@@ -819,50 +926,49 @@ int? _measureBatchPayloadBytes(
               return null;
             }
           }
-          extraBytes += length;
+          sizer.addStringBytes(length);
         } else {
-          extraBytes += _utf8Length(value);
+          sizer.addStringBytes(_utf8Length(value));
         }
       } else if (value is Uint8List) {
-        extraBytes += value.length;
+        sizer.addBlob(value);
       }
     }
   }
 
-  return hasString || !asciiOnly ? extraBytes : null;
+  return hasString || !asciiOnly ? sizer.finish() : null;
 }
 
 ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
   List<List<Object?>> paramSets,
   int paramCount,
   int totalCount,
-  int extraBytes,
+  _BatchPayloadPlan plan,
 ) {
-  return _allocatePackedBatchParams(
-    paramSets,
-    paramCount,
-    totalCount,
-    extraBytes,
-    (value, out, offset, _) {
-      for (var j = 0; j < value.length; j++) {
-        out[offset + j] = value.codeUnitAt(j);
-      }
-      return offset + value.length;
-    },
-  );
+  return _allocatePackedBatchParams(paramSets, paramCount, totalCount, plan, (
+    value,
+    out,
+    offset,
+    _,
+  ) {
+    for (var j = 0; j < value.length; j++) {
+      out[offset + j] = value.codeUnitAt(j);
+    }
+    return offset + value.length;
+  });
 }
 
 ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
   List<List<Object?>> paramSets,
   int paramCount,
   int totalCount,
-  int extraBytes,
+  _BatchPayloadPlan plan,
 ) {
   return _allocatePackedBatchParams(
     paramSets,
     paramCount,
     totalCount,
-    extraBytes,
+    plan,
     (value, out, offset, _) => _writeUtf8(value, out, offset),
   );
 }
@@ -871,15 +977,16 @@ ffi.Pointer<ffi.Uint8> _allocatePackedBatchParams(
   List<List<Object?>> paramSets,
   int paramCount,
   int totalCount,
-  int extraBytes,
+  _BatchPayloadPlan plan,
   _BatchStringWriter writeString,
 ) {
   final structsBytes = _paramStructSize * totalCount;
-  final totalBytes = structsBytes + extraBytes;
+  final totalBytes = structsBytes + plan.extraBytes;
   final buf = allocateReusableParamStructBuf(totalBytes);
   final view = buf.asTypedList(totalBytes);
   final byteData = ByteData.sublistView(view);
   final bufAddr = buf.address;
+  final reusedBlobOffsets = plan.reusedBlobOffsets;
 
   var dataOffset = structsBytes;
   var flatIndex = 0;
@@ -903,11 +1010,17 @@ ffi.Pointer<ffi.Uint8> _allocatePackedBatchParams(
         byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
         byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
       } else if (value is Uint8List) {
-        view.setRange(dataOffset, dataOffset + value.length, value);
+        final relativeOffset = reusedBlobOffsets?[value];
+        final blobOffset = relativeOffset == null
+            ? dataOffset
+            : structsBytes + relativeOffset;
+        if (relativeOffset == null || blobOffset == dataOffset) {
+          view.setRange(dataOffset, dataOffset + value.length, value);
+          dataOffset += value.length;
+        }
         byteData.setInt32(offset, 4, Endian.little);
-        byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+        byteData.setInt64(offset + 8, bufAddr + blobOffset, Endian.little);
         byteData.setInt32(offset + 16, value.length, Endian.little);
-        dataOffset += value.length;
       } else {
         byteData.setInt32(offset, 0, Endian.little);
       }
@@ -990,10 +1103,11 @@ bool _isTrailSurrogate(int codeUnit) =>
 ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
   List<List<Object?>> paramSets,
   int paramCount,
-  int totalCount,
-) {
+  int totalCount, {
+  required bool enableBlobReuse,
+}) {
   List<Uint8List?>? encodedStrings;
-  var extraBytes = 0;
+  final sizer = _BatchPayloadSizer(enableBlobReuse: enableBlobReuse);
   var flatIndex = 0;
   for (final set in paramSets) {
     for (var i = 0; i < paramCount; i++) {
@@ -1002,9 +1116,9 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
         encodedStrings ??= List<Uint8List?>.filled(totalCount, null);
         final bytes = utf8.encode(value);
         encodedStrings[flatIndex] = bytes;
-        extraBytes += bytes.length;
+        sizer.addStringBytes(bytes.length);
       } else if (value is Uint8List) {
-        extraBytes += value.length;
+        sizer.addBlob(value);
       }
       flatIndex++;
     }
@@ -1014,7 +1128,7 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
     paramSets,
     paramCount,
     totalCount,
-    extraBytes,
+    sizer.finish(),
     (value, out, offset, flatIndex) {
       final bytes = encodedStrings![flatIndex]!;
       out.setRange(offset, offset + bytes.length, bytes);

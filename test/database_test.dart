@@ -541,8 +541,12 @@ void main() {
     test('wide executeBatch fast path preserves ascii text and blobs', () async {
       await createWideBatchTable();
 
-      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
-      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final payloadA = Uint8List.fromList(
+        List.generate(128, (i) => (i + 1) & 0xff),
+      );
+      final payloadB = Uint8List.fromList(
+        List.generate(128, (i) => (i + 129) & 0xff),
+      );
       final List<List<Object?>> paramSets = [
         for (var i = 0; i < 1024; i++)
           <Object?>[

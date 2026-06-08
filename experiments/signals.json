@@ -75,8 +75,8 @@
       "id": "parameter-encoding-and-binding",
       "status": "active",
       "subsystems": ["ffi", "params", "writer", "allocation"],
-      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral.",
-      "keyPriors": ["109", "112", "113", "116", "125", "126"],
+      "currentRead": "Parameter work can still matter when it removes meaningful native allocation, copying, or repeated SQLite work. Smaller Dart-side allocation cleanups and two-parameter batch-list flattening changes usually measured flat, but exp 113 found a clear wide-row batch signal by avoiding the temporary flat Dart parameter list entirely. Exp 116 promotes the 10,000-row x 20-parameter mixed batch shape into release-suite coverage so width regressions are visible outside the focused script. Exp 125 then showed that large wide ASCII-heavy batches still had removable per-string UTF-8 list allocation inside the matrix encoder: direct ASCII payload packing improved focused 10k x20 from 17.199 ms to 12.760 ms and release Wide Batch Insert from 18.201 ms to 13.031 ms. Exp 126 extended that same allocation-removal shape to non-ASCII wide batches with direct UTF-8 payload writing: focused Unicode 10k x20 improves 21.945 ms to 18.988 ms and emoji 10k x20 improves 24.187 ms to 17.458 ms while release write-suite guardrails stay neutral. Exp 135 covers the blob-heavy follow-up for repeated `Uint8List` objects: large/wide batches can copy each repeated >=64-byte BLOB object once into the native arena and point duplicate params at that payload, cutting isolated 10k x8/x20 marshalling about 51%/44% on 256-byte reused BLOBs while keeping fresh/tiny BLOB rows on the existing path.",
+      "keyPriors": ["113", "116", "125", "126", "135"],
       "archive": ["028", "076", "077", "095", "096"],
       "interestingIf": [
         "the idea changes ownership/layout enough to remove native allocation or copying",
@@ -84,7 +84,7 @@
         "the approach preserves the lean API and targets parameter width as well as row count"
       ],
       "openQuestions": [
-        "Are there remaining blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
+        "Do real generated-statement workloads reuse identical large BLOB objects often enough for the exp 135 fast path to matter end-to-end?",
         "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?"
       ],
       "openCandidates": [
@@ -94,7 +94,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise."
+      "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths or row counts. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path, and small/narrow writes stay generic unless a future workload proves otherwise. Exp 135 adds a narrow repeated-large-BLOB object-identity fast path; do not broaden it into byte-equality deduplication or small-BLOB handling without a workload that proves the hash/compare overhead is worth paying."
     },
     {
       "id": "long-text-stream-hashing",
@@ -541,6 +541,19 @@
       "nextSignals": [
         "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
         "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
+      ]
+    },
+    "135": {
+      "directions": ["parameter-encoding-and-binding", "measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Repeated large `Uint8List` objects in wide batch params can share one native payload copy safely because the batch runner binds and steps synchronously while the arena stays alive",
+        "The focused benchmark now has `--blob-bytes`, `--blob-mode`, and `--measure=marshal` controls so blob-heavy parameter-packing work can be separated from SQLite storage-copy noise",
+        "A sampled object-identity guard avoids paying full identity-map cost for fresh or tiny BLOB rows; do not pursue byte-equality deduplication without a stronger workload"
+      ],
+      "nextSignals": [
+        "watch release-suite Wide Batch Insert and narrow Batch Insert together; the public suite uses fresh tiny BLOBs, so exp 135 should be neutral there",
+        "reopen broader BLOB work only if a production workload repeatedly binds the same large payload object or a benchmark proves byte-equality deduplication clears its compare/hash overhead"
       ]
     }
   }
