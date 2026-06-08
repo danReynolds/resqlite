@@ -48,6 +48,13 @@ profiling, or a benchmark, improve that first only when you can name the
 optimization it enables or the candidate it will let future runners reject
 confidently.
 
+For branch-vs-baseline implementation experiments, prefer the integrated
+Tracelite A/B wrapper in `benchmark/run_tracelite_experiment.dart`; it keeps
+baseline history, candidate history, decision JSON, insights, graph data, and
+the draft writeup together. Use focused profile or audit harnesses instead when
+the signal map names a measurement blocker and the experiment's deliverable is
+the new counter or aggregate evidence, not a production code-path change.
+
 ## Research
 
 - Check recent Dart, SQLite, sqlite3mc, compiler, OS, and peer-library changes
@@ -134,12 +141,15 @@ When finished:
   This regenerates `docs/experiments/history.json`, verifies generated docs,
   and checks that the experiment is indexed in both the README and signal map.
 - run focused validation plus the relevant repo checks
-- open a PR, watch CI/review, and address actionable feedback
+- open a PR when the local experiment package is coherent enough for review
 
 The final summary should clearly state what was tried, what happened, whether
 each idea was accepted/rejected/deferred, and what future experimenters should
 learn from the run. For measurement-only runs, also state the implementation
-candidate or direction decision that should come next.
+candidate or direction decision that should come next. If the run stops at local
+completion, say that explicitly and list the local validation that passed. If it
+claims PR or merge readiness, also watch CI/review and address actionable
+failures before declaring the run finished.
 
 ### Post-merge soak and promotion
 
@@ -177,9 +187,14 @@ Every scheduled experiment run must:
   Draft PRs are not ready to merge and are easier for reviewers to
   defer or ignore; a runner that finishes cleanly should produce a PR
   that is immediately reviewable.
-- **Wait for CI on the PR and address actionable failures** before
-  declaring the run finished. A red PR is not a completed run.
-- **Wait for automated review, not just CI.** After opening the PR, poll
+- **Distinguish local completion from merge readiness.** A local experiment is
+  complete when the branch has coherent code/docs/artifacts, focused validation
+  has passed, and the finalizer is green. A PR is not ready to merge until CI
+  and review feedback have also been checked.
+- **Wait for CI on the PR and address actionable failures** before declaring a
+  PR ready to merge. A red PR is not merge-ready.
+- **Wait for automated review, not just CI, before merge readiness.** After
+  opening the PR, poll
   for review submissions for a few minutes, then read inline review
   threads with thread-aware review data. `gh pr view --json` does not
   expose `reviewThreads`; use the GraphQL API directly:
