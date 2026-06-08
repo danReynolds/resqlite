@@ -24,8 +24,8 @@
       "id": "stream-rerun-dispatch",
       "status": "active",
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
-      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Exp 134 proved a rowid precision layer can halve keyed-PK writer-burst wall for verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams (25.54 → 12.45 ms, intersection probes 10,000 → 3), but it is rejected as a production implementation because the merge path depends on fragile internal SQL text recognition. The implementation is preserved at `archive/exp-134`; revisit the signal only through an explicit row observer API, trace metadata, or another stronger dependency model. Exp 145 then tested the remaining `_flushQueue` helper-allocation cleanup (`take(...).toList()` and `where(...).length`) and rejected it: counters were already zero and wall time was mixed. Future reader-pool dispatch work should look at completion-side churn or write-side dispatch; the admission path, invalidation traversal, SQL-recognizer-based keyed-PK miss path, and allocation-only `_flushQueue` cleanup are not active implementation targets on currently-measured workloads.",
-      "keyPriors": ["106", "119", "120", "121", "122", "134"],
+      "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 106 polish (column-level dependency tracking) absorbed most of the parked-dispatcher contention by eliding stream re-queries on the writer side, before they reach the reader pool. Exp 115 then made the parked-dispatcher path directly observable; exp 118 used that counter gate to remove wake retries; exp 119 measured the surviving parking signal; exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 → 0 on A11c overlap and 1,198 → 0 on keyed-PK; max_parked 46 → 0). Exp 121 then audited the third candidate from exp 120's future notes — invalidation traversal — under a writer-side burst wall convention (stopwatch stops on the last write) and found it accounts for 10–15% of A11c overlap wall (column intersection 2.5–5.7%), 13–14% of keyed-PK wall, and 22–23% of disjoint wall (the latter only because column elision shrinks the reader-pool denominator). At ~16–27 µs per write absolute cost, removing the entire path saves ~8–14 ms on a 100 ms overlap burst — at the per-benchmark decision threshold edge. Exp 122 removes the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool, so _flushQueue stays synchronous and bounded without a separate single-flight guard. Exp 134 proved a rowid precision layer can halve keyed-PK writer-burst wall for verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams (25.54 → 12.45 ms, intersection probes 10,000 → 3), but it is rejected as a production implementation because the merge path depends on fragile internal SQL text recognition. The implementation is preserved at `archive/exp-134`; revisit the signal only through an explicit row observer API, trace metadata, or another stronger dependency model. Exp 145 then tested the remaining `_flushQueue` helper-allocation cleanup (`take(...).toList()` and `where(...).length`) and rejected it: counters were already zero and wall time was mixed. Exp 147 then split writer-side burst wall from SQLite-facing writer calls: on A11c overlap, SQLite is 26.5 ms / 223.2 ms (11.9%), invalidation is 18.7%, and residual writer/request wall is 69.5%; keyed-PK shows the same shape (16.9% SQLite, 18.6% invalidation, 64.5% residual). Future reader-pool dispatch work should look at completion-side churn or reply/request scheduling rather than SQLite-step tuning; the admission path, invalidation traversal, SQL-recognizer-based keyed-PK miss path, allocation-only `_flushQueue` cleanup, and SQLite write-step path are not active implementation targets on currently-measured workloads.",
+      "keyPriors": ["106", "120", "121", "122", "134", "147"],
       "archive": ["045", "075", "083", "084", "085", "100", "105", "114", "115", "118"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
@@ -36,7 +36,7 @@
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
         "Should explicit row-observer APIs cover aliases, joins, composite keys, or WITHOUT ROWID tables that exp 134 could not cover cleanly as an internal recognizer?",
-        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, the exp 121 invalidation-traversal audit, and exp 134's rejected rowid proof, where does remaining stream-fanout wall sit — completion-side scheduling, writer-side dispatch, or reader work itself?"
+        "After FIFO dispatch waiters, bounded concrete-pool `_flushQueue` admission, the exp 121 invalidation-traversal audit, exp 134's rejected rowid proof, and exp 147's SQLite wall split, where does remaining stream-fanout residual wall sit — completion-side scheduling, writer reply/request coordination, dirty-set harvest, or reader work itself?"
       ],
       "openCandidates": [
         {
@@ -44,12 +44,6 @@
           "addedDate": "2026-05-02",
           "addedAfter": "120",
           "blockedOn": "no current counter for completion-side scheduling cost"
-        },
-        {
-          "idea": "writer-isolate wall vs SQLite wall split on overlap workloads",
-          "addedDate": "2026-05-02",
-          "addedAfter": "120",
-          "blockedOn": "no profile-mode split between writer dispatch and SQLite step time"
         },
         {
           "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
@@ -66,10 +60,9 @@
         }
       ],
       "blockedOnMeasurement": [
-        "completion-side microtask scheduling cost counter",
-        "writer-isolate wall vs SQLite wall split for overlap workloads"
+        "completion-side microtask scheduling cost counter"
       ],
-      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8–14 ms off a 100 ms overlap burst — at the per-benchmark decision threshold edge — and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. Exp 134 is proof that row-level precision can win, but its SQL-recognizer implementation is rejected; revive it only with explicit API/design or real workload evidence. Exp 145 says not to chase `_flushQueue` collection-helper cleanup without allocator evidence naming that exact temporary list/count path. A new dispatch experiment now needs a counter for completion-side scheduling cost or writer-side dispatch wall showing nonzero headroom on the workload before the change is worth trying."
+      "notesForExperimenters": "This is a good area for measurement-first work. Avoid assuming a larger reader pool helps; exp 105 found the opposite under A11c fan-out. Use exp 115/119 counters before changing dispatch. After exp 118 + exp 120, `dispatcherParkedTotal` and `dispatcherWakeRetryTotal` stay at zero on every measured stream workload — the parked-dispatcher signal is not the active target. Exp 121 took invalidation traversal off the candidate list (10–15% of overlap wall, 2.5–5.7% intersection, 80–200 ns per probe); the structural ceiling means an experiment that fully eliminated `onDependencyChanges` would shave 8–14 ms off a 100 ms overlap burst — at the per-benchmark decision threshold edge — and column intersection is already O(1) bitset. Exp 122 keeps admission simple by giving StreamEngine a concrete ReaderPool and moving stream registry checks to diagnostics. Exp 134 is proof that row-level precision can win, but its SQL-recognizer implementation is rejected; revive it only with explicit API/design or real workload evidence. Exp 145 says not to chase `_flushQueue` collection-helper cleanup without allocator evidence naming that exact temporary list/count path. Exp 147 cleared the writer-wall-vs-SQLite-wall blocker: SQLite-facing calls are a minority of A11c overlap and keyed-PK wall, while residual writer/request wall dominates. A new dispatch experiment now needs a completion-side scheduling or reply/request counter showing nonzero headroom before the change is worth trying."
     },
     {
       "id": "parameter-encoding-and-binding",
@@ -223,7 +216,7 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 ruled out invalidation traversal as an active wall-time target. Exp 143 confirms the pinned Tracelite profile path is useful as the default experiment workflow because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run. The remaining gap is interpretation: `tracelite explain` currently reports workload coverage but does not yet call out dispatch-bound, work-bound, memory-heavy, or tail-noisy workloads.",
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 ruled out invalidation traversal as an active wall-time target. Exp 143 confirms the pinned Tracelite profile path is useful as the default experiment workflow because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run. Exp 147 adds a profile-mode writer SQLite wall split and shows SQLite-facing writer calls are not the active stream-fanout bottleneck on A11c overlap or keyed-PK; the largest bucket is residual writer/request wall. The remaining gap is interpretation: `tracelite explain` currently reports workload coverage but does not yet call out dispatch-bound, work-bound, memory-heavy, tail-noisy, or residual-writer-heavy workloads.",
       "keyPriors": ["110", "111", "115", "119", "121", "143"],
       "archive": ["055", "088", "099", "102", "108", "113", "116"],
       "interestingIf": [
@@ -257,7 +250,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck. Use the Tracelite profile wrapper before adding a legacy profile harness: exp 143 shows the structured artifacts already expose dispatch-vs-work and memory/allocation shape. If the profile data answers the question only after manual JSON inspection, prefer improving Tracelite explanation rules over duplicating the measurement path in resqlite."
+      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck. Use the Tracelite profile wrapper before adding a legacy profile harness: exp 143 shows the structured artifacts already expose dispatch-vs-work and memory/allocation shape. If the profile data answers the question only after manual JSON inspection, prefer improving Tracelite explanation rules over duplicating the measurement path in resqlite. Exp 147 is the current pattern for clearing a named measurement blocker with a small profile-mode counter plus focused aggregate markdown."
     }
   ],
   "experiments": {
@@ -481,7 +474,7 @@
       ],
       "nextSignals": [
         "profile completion-side microtask scheduling cost on A11c overlap",
-        "split writer-isolate wall vs SQLite wall on overlap workloads to see whether write-side dispatch dominates remaining stream-fanout latency",
+        "exp 147 split writer-isolate wall vs SQLite wall; follow up on residual writer/request scheduling rather than SQLite-step tuning",
         "audit invalidation traversal cost (`invalidateUs`/`intersectionUs`) as a fraction of overlap wall"
       ]
     },
@@ -496,7 +489,7 @@
       ],
       "nextSignals": [
         "build a completion-side microtask scheduling cost counter and re-audit A11c overlap",
-        "build a writer-isolate wall vs SQLite step wall split inside `WriteWorker` and re-audit overlap",
+        "exp 147 built the writer-isolate wall vs SQLite split; use it to steer follow-up toward residual writer/request or completion-side scheduling",
         "until a non-zero counter signal appears for one of those, dispatch-area implementation experiments stay on hold"
       ]
     },
@@ -560,11 +553,11 @@
       "changedBeliefs": [
         "`StreamEngine._flushQueue` helper allocation is not the active stream-dispatch target after exp 120 and exp 122; replacing `take(...).toList()` and `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time movement",
         "A11c overlap can move in a favorable direction from tiny queue-shape changes, but keyed-PK noise/regression risk means collection-helper cleanup needs allocator evidence before it is worth carrying",
-        "The current stream-admission path is behaviorally settled; future stream work should keep looking for completion-side scheduling cost or writer-side dispatch wall instead of polishing the dequeue loop"
+        "The current stream-admission path is behaviorally settled; future stream work should keep looking for completion-side scheduling cost or residual writer/request wall instead of polishing the dequeue loop"
       ],
       "nextSignals": [
         "do not retry `_flushQueue` inline dequeue unless an allocation profile identifies the temporary list or availability count as material",
-        "build completion-side scheduling or writer-dispatch-wall measurement before attempting another stream-dispatch implementation",
+        "use exp 147 writer SQLite split plus a completion-side scheduling counter before attempting another stream-dispatch implementation",
         "use the existing A11c/keyed-PK profile counter gates to reject stream-admission cleanups whose counters are already zero"
       ]
     },
@@ -579,6 +572,19 @@
       "nextSignals": [
         "do not broaden the exp 125 ASCII fast path to small/narrow batches without a new workload and a Tracelite A/B decision that clears the primary gate",
         "when experimenting in this direction, prefer the integrated Tracelite A/B wrapper so baseline/candidate histories, policy, decision, insights, and graph data stay together"
+      ]
+    },
+    "147": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads: A11c overlap is 11.9% SQLite and keyed-PK is 16.9% SQLite",
+        "After subtracting SQLite-facing calls and stream invalidation, residual writer/request wall remains the largest bucket on A11c overlap and keyed-PK",
+        "Future stream-dispatch work should measure completion-side scheduling, reply/request coordination, or dirty-set harvest before trying another implementation pass"
+      ],
+      "nextSignals": [
+        "completion-side microtask scheduling cost counter on A11c overlap",
+        "narrower split of residual writer/request wall into dirty-set harvest vs reply/request scheduling if completion-side counters do not explain it"
       ]
     },
     "125": {

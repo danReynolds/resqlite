@@ -71,6 +71,15 @@ class ProfileCounters {
   static int intersectionUs = 0;
   static int intersectionEntries = 0;
 
+  /// Cumulative microseconds spent inside SQLite-facing writer calls,
+  /// measured on the writer isolate and aggregated back into the main
+  /// isolate through write responses. This lets profile audits split
+  /// `db.execute(...)` wall into SQLite work, stream invalidation, and
+  /// remaining writer/request overhead without adding a worker snapshot
+  /// protocol.
+  static int writerSqliteUs = 0;
+  static int writerSqliteCount = 0;
+
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
   /// currently available for dispatch - for example, when every worker
   /// was busy or when workers were temporarily unavailable during
@@ -118,6 +127,8 @@ class ProfileCounters {
     'invalidate_count': invalidateCount,
     'intersection_us': intersectionUs,
     'intersection_entries': intersectionEntries,
+    'writer_sqlite_us': writerSqliteUs,
+    'writer_sqlite_count': writerSqliteCount,
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
@@ -145,6 +156,8 @@ class ProfileCounters {
     invalidateCount = 0;
     intersectionUs = 0;
     intersectionEntries = 0;
+    writerSqliteUs = 0;
+    writerSqliteCount = 0;
     dispatcherParkedTotal = 0;
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;

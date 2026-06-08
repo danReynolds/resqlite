@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/tracelite_profile.dart';
 import 'package:resqlite/src/writer/writer.dart';
@@ -35,7 +36,7 @@ final class Transaction {
   bool _active = true;
 
   Transaction(this._writer, {int? traceCorrelationId})
-      : _traceCorrelationId = traceCorrelationId;
+    : _traceCorrelationId = traceCorrelationId;
 
   /// Zone key storing the active [Transaction] when inside a transaction body.
   /// Database methods check this to transparently route through the transaction
@@ -72,11 +73,8 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = await _writer.execute(
-        sql,
-        parameters,
-        correlationId,
-      );
+      final response = await _writer.execute(sql, parameters, correlationId);
+      _recordWriterSqlite(response.writerSqliteUs);
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -87,6 +85,7 @@ final class Transaction {
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.result.affectedRows],
     );
+    _recordWriterSqlite(response.writerSqliteUs);
     return response.result;
   }
 
@@ -104,16 +103,24 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      return _writer.select(sql, parameters, correlationId);
+      final response = await _writer.selectResponse(
+        sql,
+        parameters,
+        correlationId,
+      );
+      _recordWriterSqlite(response.writerSqliteUs);
+      return response.rows;
     }
     final sqlId = TraceliteProfile.internString(sql);
-    return TraceliteProfile.traceAsync(
+    final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseSelect,
-      () => _writer.select(sql, parameters, correlationId),
+      () => _writer.selectResponse(sql, parameters, correlationId),
       correlationId: correlationId,
       beginArgs: [sqlId, parameters.length],
-      endArgs: (rows) => [rows.length],
+      endArgs: (response) => [response.rows.length],
     );
+    _recordWriterSqlite(response.writerSqliteUs);
+    return response.rows;
   }
 
   /// Executes one SQL statement across many parameter sets within this
@@ -136,23 +143,21 @@ final class Transaction {
   ///
   /// Throws [StateError] if called after the enclosing transaction body
   /// has returned.
-  Future<void> executeBatch(
-    String sql,
-    List<List<Object?>> paramSets,
-  ) async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      await _writer.executeBatch(
+      final response = await _writer.executeBatch(
         sql,
         paramSets,
         traceCorrelationId: correlationId,
       );
+      if (response != null) _recordWriterSqlite(response.writerSqliteUs);
       return;
     }
     final sqlId = TraceliteProfile.internString(sql);
     final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
-    await TraceliteProfile.traceAsync(
+    final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseExecuteBatch,
       () => _writer.executeBatch(
         sql,
@@ -162,6 +167,7 @@ final class Transaction {
       correlationId: correlationId,
       beginArgs: [sqlId, paramCount, paramSets.length],
     );
+    if (response != null) _recordWriterSqlite(response.writerSqliteUs);
   }
 
   /// Initiates a nested transaction as a new savepoint. If [body] completes normally,
@@ -189,5 +195,11 @@ final class Transaction {
 
   void close() {
     _active = false;
+  }
+
+  void _recordWriterSqlite(int writerSqliteUs) {
+    if (!kProfileMode) return;
+    ProfileCounters.writerSqliteUs += writerSqliteUs;
+    ProfileCounters.writerSqliteCount++;
   }
 }

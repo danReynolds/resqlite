@@ -5,6 +5,8 @@ import 'dart:isolate';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
+import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -122,7 +124,16 @@ final class Writer {
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) async {
-    final response = await _request<QueryResponse>(
+    final response = await selectResponse(sql, parameters, traceCorrelationId);
+    return response.rows;
+  }
+
+  Future<QueryResponse> selectResponse(
+    String sql, [
+    List<Object?> parameters = const [],
+    int? traceCorrelationId,
+  ]) {
+    return _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,
         parameters,
@@ -130,7 +141,6 @@ final class Writer {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    return response.rows;
   }
 
   /// Runs a transaction. Used by both [Database.transaction] and [Transaction.transaction].
@@ -150,10 +160,8 @@ final class Writer {
     int? traceCorrelationId,
   }) async {
     await _request<bool>(
-      (replyPort) => BeginRequest(
-        replyPort,
-        traceCorrelationId: traceCorrelationId,
-      ),
+      (replyPort) =>
+          BeginRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
 
     final tx = Transaction(this, traceCorrelationId: traceCorrelationId);
@@ -189,11 +197,10 @@ final class Writer {
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
     final response = await _request<BatchResponse>(
-      (replyPort) => CommitRequest(
-        replyPort,
-        traceCorrelationId: traceCorrelationId,
-      ),
+      (replyPort) =>
+          CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
+    _recordWriterSqlite(response.writerSqliteUs);
 
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(
@@ -203,6 +210,12 @@ final class Writer {
     }
 
     return result;
+  }
+
+  void _recordWriterSqlite(int writerSqliteUs) {
+    if (!kProfileMode) return;
+    ProfileCounters.writerSqliteUs += writerSqliteUs;
+    ProfileCounters.writerSqliteCount++;
   }
 
   Future<void> close() async {

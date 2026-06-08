@@ -73,6 +73,8 @@ abstract final class TraceliteResqliteCounters {
   static const int profileDispatcherParkedTotal = 0x4146;
   static const int profileDispatcherWakeRetryTotal = 0x4147;
   static const int profileDispatcherMaxParkedConcurrent = 0x4148;
+  static const int profileWriterSqliteUs = 0x4149;
+  static const int profileWriterSqliteCount = 0x414A;
   static const int fanoutWriterUs = 0x4150;
   static const int fanoutYieldUs = 0x4151;
   static const int fanoutTotalUs = 0x4152;
@@ -136,6 +138,10 @@ const Map<int, String> _spanNames = {
       'resqlite.profile.dispatcher_wake_retry_total',
   TraceliteResqliteCounters.profileDispatcherMaxParkedConcurrent:
       'resqlite.profile.dispatcher_max_parked_concurrent',
+  TraceliteResqliteCounters.profileWriterSqliteUs:
+      'resqlite.profile.writer_sqlite_us',
+  TraceliteResqliteCounters.profileWriterSqliteCount:
+      'resqlite.profile.writer_sqlite_count',
   TraceliteResqliteCounters.fanoutWriterUs: 'resqlite.fanout.writer_us',
   TraceliteResqliteCounters.fanoutYieldUs: 'resqlite.fanout.yield_us',
   TraceliteResqliteCounters.fanoutTotalUs: 'resqlite.fanout.total_us',
@@ -159,26 +165,28 @@ const Map<String, int> _profileCounterIds = {
       TraceliteResqliteCounters.profileDispatcherWakeRetryTotal,
   'dispatcher_max_parked_concurrent':
       TraceliteResqliteCounters.profileDispatcherMaxParkedConcurrent,
+  'writer_sqlite_us': TraceliteResqliteCounters.profileWriterSqliteUs,
+  'writer_sqlite_count': TraceliteResqliteCounters.profileWriterSqliteCount,
 };
 
 typedef _AttachNative = Int32 Function(Pointer<Utf8>);
 typedef _AttachDart = int Function(Pointer<Utf8>);
-typedef _RegisterProducerNative = Int32 Function(
-    Uint8, Pointer<Utf8>, Pointer<Utf8>);
+typedef _RegisterProducerNative =
+    Int32 Function(Uint8, Pointer<Utf8>, Pointer<Utf8>);
 typedef _RegisterProducerDart = int Function(int, Pointer<Utf8>, Pointer<Utf8>);
 typedef _InternStringNative = Uint32 Function(Pointer<Utf8>, Uint32);
 typedef _InternStringDart = int Function(Pointer<Utf8>, int);
-typedef _RecordOnTrackNative = Void Function(
-    Uint8, Uint16, Pointer<Uint64>, Uint8);
+typedef _RecordOnTrackNative =
+    Void Function(Uint8, Uint16, Pointer<Uint64>, Uint8);
 typedef _RecordOnTrackDart = void Function(int, int, Pointer<Uint64>, int);
-typedef _RecordCorrelatedOnTrackNative = Void Function(
-    Uint8, Uint16, Uint64, Pointer<Uint64>, Uint8);
-typedef _RecordCorrelatedOnTrackDart = void Function(
-    int, int, int, Pointer<Uint64>, int);
+typedef _RecordCorrelatedOnTrackNative =
+    Void Function(Uint8, Uint16, Uint64, Pointer<Uint64>, Uint8);
+typedef _RecordCorrelatedOnTrackDart =
+    void Function(int, int, int, Pointer<Uint64>, int);
 typedef _CounterOnTrackNative = Void Function(Uint8, Uint16, Int64);
 typedef _CounterOnTrackDart = void Function(int, int, int);
-typedef _CounterCorrelatedOnTrackNative = Void Function(
-    Uint8, Uint16, Uint64, Int64);
+typedef _CounterCorrelatedOnTrackNative =
+    Void Function(Uint8, Uint16, Uint64, Int64);
 typedef _CounterCorrelatedOnTrackDart = void Function(int, int, int, int);
 typedef _DetachTrackNative = Void Function(Uint8);
 typedef _DetachTrackDart = void Function(int);
@@ -508,50 +516,60 @@ final class _AttachedRuntime {
 
 final class _Runtime {
   _Runtime._(DynamicLibrary library)
-      : attach =
-            library.lookupFunction<_AttachNative, _AttachDart>('tlt_attach'),
-        registerProducer = library
-            .lookupFunction<_RegisterProducerNative, _RegisterProducerDart>(
-          'tlt_register_producer',
-        ),
-        internString =
-            library.lookupFunction<_InternStringNative, _InternStringDart>(
-          'tlt_intern_string',
-        ),
-        beginOnTrack =
-            library.lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
-          'tlt_begin_on_track',
-        ),
-        endOnTrack =
-            library.lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
-          'tlt_end_on_track',
-        ),
-        beginCorrelatedOnTrack = library.lookupFunction<
+    : attach = library.lookupFunction<_AttachNative, _AttachDart>('tlt_attach'),
+      registerProducer = library
+          .lookupFunction<_RegisterProducerNative, _RegisterProducerDart>(
+            'tlt_register_producer',
+          ),
+      internString = library
+          .lookupFunction<_InternStringNative, _InternStringDart>(
+            'tlt_intern_string',
+          ),
+      beginOnTrack = library
+          .lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
+            'tlt_begin_on_track',
+          ),
+      endOnTrack = library
+          .lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
+            'tlt_end_on_track',
+          ),
+      beginCorrelatedOnTrack = library
+          .lookupFunction<
             _RecordCorrelatedOnTrackNative,
-            _RecordCorrelatedOnTrackDart>('tlt_begin_correlated_on_track'),
-        endCorrelatedOnTrack = library.lookupFunction<
+            _RecordCorrelatedOnTrackDart
+          >('tlt_begin_correlated_on_track'),
+      endCorrelatedOnTrack = library
+          .lookupFunction<
             _RecordCorrelatedOnTrackNative,
-            _RecordCorrelatedOnTrackDart>('tlt_end_correlated_on_track'),
-        asyncBeginOnTrack = library.lookupFunction<
+            _RecordCorrelatedOnTrackDart
+          >('tlt_end_correlated_on_track'),
+      asyncBeginOnTrack = library
+          .lookupFunction<
             _RecordCorrelatedOnTrackNative,
-            _RecordCorrelatedOnTrackDart>('tlt_async_begin_on_track'),
-        asyncEndOnTrack = library.lookupFunction<_RecordCorrelatedOnTrackNative,
-            _RecordCorrelatedOnTrackDart>('tlt_async_end_on_track'),
-        counterOnTrack =
-            library.lookupFunction<_CounterOnTrackNative, _CounterOnTrackDart>(
-          'tlt_counter_on_track',
-        ),
-        counterCorrelatedOnTrack = library.lookupFunction<
+            _RecordCorrelatedOnTrackDart
+          >('tlt_async_begin_on_track'),
+      asyncEndOnTrack = library
+          .lookupFunction<
+            _RecordCorrelatedOnTrackNative,
+            _RecordCorrelatedOnTrackDart
+          >('tlt_async_end_on_track'),
+      counterOnTrack = library
+          .lookupFunction<_CounterOnTrackNative, _CounterOnTrackDart>(
+            'tlt_counter_on_track',
+          ),
+      counterCorrelatedOnTrack = library
+          .lookupFunction<
             _CounterCorrelatedOnTrackNative,
-            _CounterCorrelatedOnTrackDart>('tlt_counter_correlated_on_track'),
-        metadataOnTrack =
-            library.lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
-          'tlt_metadata_on_track',
-        ),
-        detachTrack =
-            library.lookupFunction<_DetachTrackNative, _DetachTrackDart>(
-          'tlt_detach_track',
-        );
+            _CounterCorrelatedOnTrackDart
+          >('tlt_counter_correlated_on_track'),
+      metadataOnTrack = library
+          .lookupFunction<_RecordOnTrackNative, _RecordOnTrackDart>(
+            'tlt_metadata_on_track',
+          ),
+      detachTrack = library
+          .lookupFunction<_DetachTrackNative, _DetachTrackDart>(
+            'tlt_detach_track',
+          );
 
   final _AttachDart attach;
   final _RegisterProducerDart registerProducer;

@@ -13,6 +13,7 @@ import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
 import 'native/resqlite_bindings.dart';
+import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
@@ -401,6 +402,7 @@ final class Database {
       );
     }
 
+    _recordWriterSqlite(response.writerSqliteUs);
     streamEngine.onDependencyChanges(
       response.modifications,
       traceCorrelationId: correlationId,
@@ -443,12 +445,12 @@ final class Database {
         : null;
 
     Future<BatchResponse?> write() => writer.locked(
-          () => writer.executeBatch(
-            sql,
-            paramSets,
-            traceCorrelationId: correlationId,
-          ),
-        );
+      () => writer.executeBatch(
+        sql,
+        paramSets,
+        traceCorrelationId: correlationId,
+      ),
+    );
 
     final BatchResponse? response;
     if (correlationId == null) {
@@ -465,6 +467,7 @@ final class Database {
     }
 
     if (response != null) {
+      _recordWriterSqlite(response.writerSqliteUs);
       streamEngine.onDependencyChanges(
         response.modifications,
         traceCorrelationId: correlationId,
@@ -508,8 +511,8 @@ final class Database {
         ? TraceliteProfile.nextCorrelationId()
         : null;
     Future<T> run() => writer.locked(
-          () => writer.transaction(body, traceCorrelationId: correlationId),
-        );
+      () => writer.transaction(body, traceCorrelationId: correlationId),
+    );
     if (correlationId == null) {
       return run();
     }
@@ -518,6 +521,12 @@ final class Database {
       run,
       correlationId: correlationId,
     );
+  }
+
+  void _recordWriterSqlite(int writerSqliteUs) {
+    if (!kProfileMode) return;
+    ProfileCounters.writerSqliteUs += writerSqliteUs;
+    ProfileCounters.writerSqliteCount++;
   }
 
   // -------------------------------------------------------------------------
