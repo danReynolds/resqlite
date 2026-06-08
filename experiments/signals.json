@@ -222,9 +222,9 @@
       "id": "measurement-system",
       "status": "active",
       "subsystems": ["benchmarking", "profiling", "methodology"],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the latest examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 then ruled out invalidation traversal as a wall-time target by reading existing counters as a fraction of overlap wall (~7%, intersection ~1.6–1.9%).",
-      "keyPriors": ["099", "110", "111", "115", "119", "121"],
-      "archive": ["055", "088", "102", "108", "113", "116"],
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment. Exp 119/121 are the stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, and exp 121 ruled out invalidation traversal as an active wall-time target. Exp 143 confirms the pinned Tracelite profile path is useful as the default experiment workflow because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run. The remaining gap is interpretation: `tracelite explain` currently reports workload coverage but does not yet call out dispatch-bound, work-bound, memory-heavy, or tail-noisy workloads.",
+      "keyPriors": ["110", "111", "115", "119", "121", "143"],
+      "archive": ["055", "088", "099", "102", "108", "113", "116"],
       "interestingIf": [
         "a profiler or focused benchmark exposes a cost hidden by the release suite",
         "a control metric can identify noisy runs before results are trusted",
@@ -248,10 +248,15 @@
           "idea": "writer dispatch wall counter (dart wall - SQLite step wall)",
           "addedDate": "2026-05-02",
           "addedAfter": "120"
+        },
+        {
+          "idea": "Tracelite workload-summary explain rules for dispatch-bound, work-bound, memory-heavy, and tail-noisy workloads",
+          "addedDate": "2026-06-08",
+          "addedAfter": "143"
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck."
+      "notesForExperimenters": "It is valid for a scheduled run to improve measurement rather than implementation when the missing signal is the bottleneck. Use the Tracelite profile wrapper before adding a legacy profile harness: exp 143 shows the structured artifacts already expose dispatch-vs-work and memory/allocation shape. If the profile data answers the question only after manual JSON inspection, prefer improving Tracelite explanation rules over duplicating the measurement path in resqlite."
     }
   ],
   "experiments": {
@@ -517,6 +522,20 @@
       "nextSignals": [
         "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
         "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+      ]
+    },
+    "143": {
+      "directions": ["measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "Pinned Tracelite profile runs already produce decision-useful structured evidence: dispatch floors, floor-subtracted work, operation tails, memory deltas, allocation counters, source provenance, and validated graph data",
+        "The current canonical profile workload shows point queries are median dispatch-bound (0-1 us of floor-subtracted work), merge rounds are work-bound (77 us of floor-subtracted work), and point queries still carry allocation/RSS cost that wall time alone hides",
+        "`tracelite explain` is not yet doing enough interpretation for resqlite experimenters; it loaded the workload summary but did not identify dispatch-bound, work-bound, memory-heavy, or tail-noisy workloads"
+      ],
+      "nextSignals": [
+        "add Tracelite workload-summary explain rules before adding another resqlite-local interpretation harness",
+        "keep raw trace regions local while committing aggregate markdown and graph data only when it feeds Pages",
+        "use repeated Tracelite profile runs before making p99 or max-tail claims"
       ]
     },
     "125": {
