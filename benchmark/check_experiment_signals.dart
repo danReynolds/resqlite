@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-const _readmePath = 'experiments/README.md';
-const _signalsPath = 'experiments/signals.json';
+const _experimentsDir = 'experiments';
+const _readmePath = '$_experimentsDir/README.md';
+const _signalsPath = '$_experimentsDir/signals.json';
 final _outcomeClassPattern = RegExp(
   r'^(accepted(_.+)?|rejected(_.+)?|in_review(_.+)?|watch|benchmark_gap|deferred)$',
 );
@@ -67,6 +68,53 @@ Map<String, _ExperimentEntry> _readExperimentIndex(
   return entries;
 }
 
+Map<String, List<String>> _discoverExperimentFiles() {
+  final dir = Directory(_experimentsDir);
+  if (!dir.existsSync()) return const {};
+
+  final files = <String, List<String>>{};
+  final filePattern = RegExp(r'^(\d+\w?)-.+\.md$');
+  for (final file in dir.listSync().whereType<File>()) {
+    final filename = file.uri.pathSegments.last;
+    final match = filePattern.firstMatch(filename);
+    if (match == null) continue;
+    (files[match.group(1)!] ??= []).add(filename);
+  }
+  return files;
+}
+
+void _checkExperimentFilesIndexed(
+  Map<String, _ExperimentEntry> experimentIndex,
+  Map<String, List<String>> discoveredExperimentFiles,
+  int? experimentEntriesRequiredFrom,
+  List<_ValidationError> errors,
+) {
+  if (experimentEntriesRequiredFrom == null) return;
+
+  final indexedFilenames = experimentIndex.values
+      .map((entry) => entry.filename)
+      .toSet();
+  for (final entry in discoveredExperimentFiles.entries) {
+    final number = _numericExperimentId(entry.key);
+    if (number == null || number < experimentEntriesRequiredFrom) continue;
+    for (final filename in entry.value) {
+      if (indexedFilenames.contains(filename)) continue;
+      _fileError(
+        errors,
+        '$_experimentsDir/$filename',
+        'Experiment file for id ${entry.key} must be listed in $_readmePath '
+            'because coverage.experimentEntriesRequiredFrom is '
+            '$experimentEntriesRequiredFrom.',
+      );
+    }
+  }
+}
+
+int? _numericExperimentId(String id) {
+  final match = RegExp(r'^\d+').firstMatch(id);
+  return match == null ? null : int.tryParse(match.group(0)!);
+}
+
 Map<Object?, Object?>? _readSignals(List<_ValidationError> errors) {
   final file = File(_signalsPath);
   if (!file.existsSync()) {
@@ -111,6 +159,13 @@ void _checkSignals(
   final directionFieldRequiredFrom = coverage == null
       ? null
       : _intField(coverage, 'directionFieldRequiredFrom', 'coverage', errors);
+  final discoveredExperimentFiles = _discoverExperimentFiles();
+  _checkExperimentFilesIndexed(
+    experimentIndex,
+    discoveredExperimentFiles,
+    experimentEntriesRequiredFrom,
+    errors,
+  );
   final statusDefinitions = _stringMap(
     root,
     'statusDefinitions',

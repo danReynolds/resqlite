@@ -30,7 +30,9 @@ If you're running a branch-vs-baseline performance experiment, use
 `run_tracelite_experiment.dart`. It runs the baseline and candidate
 `suite-history` collections, decides the result over those histories, preserves
 decision insights, and writes a markdown experiment draft with the headline
-comparison table. Rejected or inconclusive results are still valid completed
+comparison table. The JSON artifacts are the authoritative structured data for
+experiment runners and dashboards; the markdown draft is a human-readable
+summary. Rejected or inconclusive results are still valid completed
 experiment artifacts; use `--fail-on-nonaccepted` only when a script should act
 as a strict gate.
 
@@ -400,7 +402,8 @@ It writes `build/tracelite-decisions/<label>/decision.json`,
 `decision.md`, `insights.json`, `insights.md`,
 `resqlite-tracelite-decision.json`, and `graph-data/`. Exit code `0` means
 accepted. Rejected and inconclusive decisions preserve artifacts and exit
-non-zero.
+non-zero. Treat the JSON files and graph-data bundle as the source of truth;
+the markdown files are summaries for review.
 
 ## Profile Mode (experiment vs baseline)
 

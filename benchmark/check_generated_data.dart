@@ -38,6 +38,10 @@ Future<void> main() async {
     );
     stderr.writeln('  dart run benchmark/generate_devices.dart');
     stderr.writeln('  dart run benchmark/generate_history.dart');
+    stderr.writeln('For experiment writeups, prefer:');
+    stderr.writeln(
+      '  dart run benchmark/finalize_experiment.dart --experiment=experiments/NNN-short-slug.md',
+    );
     exitCode = 1;
     return;
   }

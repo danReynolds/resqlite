@@ -127,6 +127,9 @@ Primary tracelite artifacts:
   health, workload coverage, and bottleneck signals.
 - `graph-data/`: normalized JSON datasets for downstream dashboards.
 
+The JSON artifacts are the structured data that runners and dashboards should
+consume. The markdown siblings are review summaries over that data.
+
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
@@ -273,6 +276,20 @@ artifact directory. If `run_tracelite_experiment.dart` produced
 `<label>-experiment.md`, use that as the starting draft instead of rebuilding
 the result table by hand. Do not commit raw trace regions from `build/`; keep
 the small graph-data bundle only when it is meant to power Pages.
+
+Before committing, add the README row and `experiments/signals.json` entry,
+then run the experiment finalizer:
+
+```bash
+dart run benchmark/finalize_experiment.dart \
+  --experiment=experiments/NNN-my-experiment.md
+```
+
+The finalizer regenerates `docs/experiments/history.json`, runs
+`check_generated_data`, and runs `check_experiment_signals`. It also fails on
+obvious draft placeholders or experiment files that are not indexed from the
+README, which keeps the published experiment timeline in sync with the
+writeup.
 
 Template:
 

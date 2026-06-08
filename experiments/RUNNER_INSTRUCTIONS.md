@@ -123,7 +123,16 @@ When finished:
   the journal.
 - do not edit [`../doc/stories/`](../doc/stories/) as part of an experiment
   run. Story posts are updated on maintainer request, not per experiment.
-- regenerate docs/check generated data as needed
+- run the experiment finalizer after the writeup, README row, and
+  `signals.json` entry are in place:
+
+  ```bash
+  dart run benchmark/finalize_experiment.dart \
+    --experiment=experiments/NNN-short-slug.md
+  ```
+
+  This regenerates `docs/experiments/history.json`, verifies generated docs,
+  and checks that the experiment is indexed in both the README and signal map.
 - run focused validation plus the relevant repo checks
 - open a PR, watch CI/review, and address actionable feedback
 
