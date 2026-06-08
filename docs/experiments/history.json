@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-08T16:50:16.576231",
+  "generated": "2026-06-08T12:53:09.680080",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -19136,6 +19136,19 @@
         "timestamp": "2026-06-08T07:34:23",
         "source": "exact"
       }
+    },
+    {
+      "id": "145",
+      "title": "Inline stream flush dequeue",
+      "date": "2026-06-08",
+      "status": "rejected",
+      "summary": "Replacing `_flushQueue`'s `take(...).toList()` dequeue and `availableWorkerCount`'s `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time signal: A11c overlap trended better, keyed-PK trended worse, and the active stream bottleneck remained elsewhere. No runtime code kept.",
+      "commit": null,
+      "problem": "`StreamEngine._flushQueue` bounds stream re-query admission with\n`ReaderPool.availableWorkerCount`, then builds a temporary list before it\ndequeues entries:\n\n```dart\nfinal dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();\n```\n\n`ReaderPool.availableWorkerCount` also used `_workers.where(...).length`.\nBoth are small Dart collection helpers on a stream fan-out path. Exp 120 and\nexp 122 already fixed the correctness and dispatch-pressure shape of stream\nadmission, but the current implementation still had a tiny allocation-shaped\ncleanup available.",
+      "hypothesis": "Replacing the helper chain with straight loops should remove avoidable\ncollection objects without changing stream ordering or public behavior:\n\n- count available workers with a manual loop;\n- dequeue directly from the `LinkedHashSet` while capacity remains;\n- leave `_requery` completion-driven follow-up flushes unchanged.\n\nAccept only if the focused stream profile shows a clear improvement or at\nleast a neutral result across the measured stream shapes. Reject if the result\nis mixed, because exp 120/122 already drove `dispatcherParkedTotal`,\n`dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` to zero.",
+      "approach": "The candidate patch changed only two private methods:\n\n```dart\nint get availableWorkerCount {\n  var count = 0;\n  for (final worker in _workers) {\n    if (worker.isAvailable) count++;\n  }\n  return count;\n}\n```\n\n```dart\nvar available = _pool.availableWorkerCount;\nwhile (available > 0 && _requeryQueue.isNotEmpty) {\n  final entry = _requeryQueue.first;\n  _requeryQueue.remove(entry);\n  _requery(entry);\n  available--;\n}\n```\n\nThe implementation was tested with the existing profile-mode stream admission\nharness, then reverted after the result did not clear the acceptance bar. No\nruntime code from this experiment is kept.",
+      "results": "Focused command:\n\n```text\ndart run -DRESQLITE_PROFILE=true benchmark/profile/stream_concrete_pool_profile.dart --label=<label>\n```\n\nFull aggregate record:\n\n- [`benchmark/profile/results/exp-145-stream-flush-inline-dequeue.md`](../benchmark/profile/results/exp-145-stream-flush-inline-dequeue.md)\n\nTwo-pass profile A/B:\n\n| workload | baseline runs ms | baseline median ms | candidate runs ms | candidate median ms | delta |\n|---|---:|---:|---:|---:|---:|\n| A11c baseline | 51.41, 80.57 | 65.99 | 55.22, 48.40 | 51.81 | -21.5% |\n| A11c disjoint | 56.21, 64.47 | 60.34 | 61.05, 58.62 | 59.84 | -0.8% |\n| A11c overlap | 116.18, 147.79 | 131.99 | 111.64, 125.62 | 118.63 | -10.1% |\n| keyed PK subscriptions | 25.06, 24.79 | 24.93 | 23.85, 32.06 | 27.96 | +12.2% |\n\nCounter result:\n\n| workload | baselin...",
+      "reasoning": "Rejected.\n\nThe code is mechanically correct, but it does not produce decision-quality\nevidence under the current profile workload. Keeping it would add churn to a\nstream-admission path that is already behaviorally settled by exp 120 and exp\n122.\n\nThe important result is negative: do not spend another implementation pass on\n`_flushQueue` collection-helper cleanup unless a future allocation profile\nshows this exact temporary list or availability count as material."
     }
   ],
   "tracked": [
