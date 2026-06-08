@@ -16,19 +16,19 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/completion_scheduling_audit.d
 
 | workload | shape | wall_ms | drain_ms | total_ms | completion_us | completion_count | emit_us | emit_count | invalidate_us | parked_total | max_parked | emissions |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 0 streams x 500 writes | 53.13 | 0.00 | 53.13 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| A11c disjoint | 50 streams x 500 writes | 42.14 | 54.02 | 96.16 | 0 | 0 | 0 | 0 | 8395 | 0 | 0 | 0 |
-| A11c overlap | 50 streams x 500 writes | 107.11 | 102.63 | 209.74 | 57424 | 3870 | 412 | 31 | 13408 | 0 | 0 | 31 |
-| keyed PK subscriptions | 50 streams x 200 random writes | 24.55 | 203.50 | 228.05 | 11161 | 1205 | 15 | 3 | 3271 | 0 | 0 | 3 |
+| A11c baseline | 0 streams x 500 writes | 71.16 | 0.00 | 71.16 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| A11c disjoint | 50 streams x 500 writes | 71.82 | 56.56 | 128.38 | 0 | 0 | 0 | 0 | 17816 | 0 | 0 | 0 |
+| A11c overlap | 50 streams x 500 writes | 159.19 | 107.37 | 266.56 | 76154 | 4228 | 266 | 29 | 25724 | 0 | 0 | 29 |
+| keyed PK subscriptions | 50 streams x 200 random writes | 37.44 | 407.17 | 444.60 | 18807 | 1108 | 59 | 3 | 5752 | 0 | 0 | 3 |
 
 ## Derived fractions
 
 | workload | completion_us / burst | completion_us / total | emit_us / total | emit_us / completion_us | us per completion | us per emit | invalidate_us / burst |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | A11c baseline | 0.00% | 0.00% | 0.00% | 0.00% | 0.00 | 0.00 | 0.00% |
-| A11c disjoint | 0.00% | 0.00% | 0.00% | 0.00% | 0.00 | 0.00 | 19.92% |
-| A11c overlap | 53.61% | 27.38% | 0.20% | 0.72% | 14.84 | 13.29 | 12.52% |
-| keyed PK subscriptions | 45.46% | 4.89% | 0.01% | 0.13% | 9.26 | 5.00 | 13.32% |
+| A11c disjoint | 0.00% | 0.00% | 0.00% | 0.00% | 0.00 | 0.00 | 24.81% |
+| A11c overlap | 47.84% | 28.57% | 0.10% | 0.35% | 18.01 | 9.17 | 16.16% |
+| keyed PK subscriptions | 50.24% | 4.23% | 0.01% | 0.31% | 16.97 | 19.67 | 15.37% |
 
 ## Reading the table
 

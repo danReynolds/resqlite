@@ -75,6 +75,10 @@ abstract final class TraceliteResqliteCounters {
   static const int profileDispatcherMaxParkedConcurrent = 0x4148;
   static const int profileWriterSqliteUs = 0x4149;
   static const int profileWriterSqliteCount = 0x414A;
+  static const int profileCompletionHandlerUs = 0x414B;
+  static const int profileCompletionHandlerCount = 0x414C;
+  static const int profileStreamEmitUs = 0x414D;
+  static const int profileStreamEmitCount = 0x414E;
   static const int fanoutWriterUs = 0x4150;
   static const int fanoutYieldUs = 0x4151;
   static const int fanoutTotalUs = 0x4152;
@@ -142,6 +146,14 @@ const Map<int, String> _spanNames = {
       'resqlite.profile.writer_sqlite_us',
   TraceliteResqliteCounters.profileWriterSqliteCount:
       'resqlite.profile.writer_sqlite_count',
+  TraceliteResqliteCounters.profileCompletionHandlerUs:
+      'resqlite.profile.completion_handler_us',
+  TraceliteResqliteCounters.profileCompletionHandlerCount:
+      'resqlite.profile.completion_handler_count',
+  TraceliteResqliteCounters.profileStreamEmitUs:
+      'resqlite.profile.stream_emit_us',
+  TraceliteResqliteCounters.profileStreamEmitCount:
+      'resqlite.profile.stream_emit_count',
   TraceliteResqliteCounters.fanoutWriterUs: 'resqlite.fanout.writer_us',
   TraceliteResqliteCounters.fanoutYieldUs: 'resqlite.fanout.yield_us',
   TraceliteResqliteCounters.fanoutTotalUs: 'resqlite.fanout.total_us',
@@ -167,6 +179,11 @@ const Map<String, int> _profileCounterIds = {
       TraceliteResqliteCounters.profileDispatcherMaxParkedConcurrent,
   'writer_sqlite_us': TraceliteResqliteCounters.profileWriterSqliteUs,
   'writer_sqlite_count': TraceliteResqliteCounters.profileWriterSqliteCount,
+  'completion_handler_us': TraceliteResqliteCounters.profileCompletionHandlerUs,
+  'completion_handler_count':
+      TraceliteResqliteCounters.profileCompletionHandlerCount,
+  'stream_emit_us': TraceliteResqliteCounters.profileStreamEmitUs,
+  'stream_emit_count': TraceliteResqliteCounters.profileStreamEmitCount,
 };
 
 typedef _AttachNative = Int32 Function(Pointer<Utf8>);

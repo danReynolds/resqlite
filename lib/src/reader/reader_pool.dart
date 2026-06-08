@@ -89,7 +89,7 @@ final class ReaderPool {
   /// [EXP-106](../../../experiments/106-column-level-deps.md) nests optional
   /// column detail under each table dependency.
   Future<(List<Map<String, Object?>>, TableDependencies, int, int)>
-      selectWithDeps(
+  selectWithDeps(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
@@ -166,7 +166,8 @@ final class ReaderPool {
             return TraceliteProfile.traceAsync(
               TraceliteResqliteSpans.readerPoolDispatch,
               () => slot.request(request),
-              correlationId: request.traceCorrelationId ??
+              correlationId:
+                  request.traceCorrelationId ??
                   TraceliteProfile.nextCorrelationId(),
               beginArgs: [typeId],
             );
@@ -388,20 +389,16 @@ class _WorkerSlot {
 
       if (kProfileMode) {
         completionSw!.stop();
-        ProfileCounters.completionHandlerUs +=
-            completionSw.elapsedMicroseconds;
+        ProfileCounters.completionHandlerUs += completionSw.elapsedMicroseconds;
         ProfileCounters.completionHandlerCount++;
       }
     };
 
-    await Isolate.spawn(
-        readerEntrypoint,
-        [
-          dbHandleAddr,
-          _readerId,
-          workerPort.sendPort,
-        ],
-        onExit: workerPort.sendPort);
+    await Isolate.spawn(readerEntrypoint, [
+      dbHandleAddr,
+      _readerId,
+      workerPort.sendPort,
+    ], onExit: workerPort.sendPort);
 
     _sendPort = await completer.future;
     _notifyPool();

@@ -20,10 +20,10 @@ Exp 120 and exp 121 left two named gating measurements in
 - writer-isolate wall vs SQLite step wall split
 - **completion-side microtask scheduling cost counter**
 
-The first is addressed in a parallel PR (exp 135 writer-handler /
-SQLite-step counters). This experiment ships the second.
+The writer-isolate split is addressed by exp 147 in this culmination branch.
+This experiment ships the second counter.
 
-Both measurements are needed because exp 121 / exp 135 left the
+Both measurements are needed because exp 121 / exp 147 left the
 remaining stream-fanout wall sitting on the main isolate — emission
 delivery, microtask scheduling, and reader-pool completion handling —
 with no counter on any of those paths. Until one of them shows nonzero
@@ -79,7 +79,7 @@ Two-part change.
 - `streamEmitCount` — count of `emit` calls.
 
 All four live on the main isolate, so no snapshot RPC is needed
-(unlike the writer-side counters in exp 135).
+(unlike the writer-side counters in exp 147).
 
 **Handler instrumentation.** The reader worker port handler at
 `lib/src/reader/reader_pool.dart` wraps the normal-reply branch in a
@@ -94,7 +94,7 @@ subscriber-fanout loop in a second profile-mode-only stopwatch.
 `benchmark/profile/completion_scheduling_audit.dart` formats the
 A11c-baseline / A11c-disjoint / A11c-overlap / keyed-PK report,
 reusing the shared `audit_workloads.dart` scenarios that exp 119 /
-exp 121 / exp 135 also consume.
+exp 121 / exp 147 also consume.
 
 Two changes were needed in `audit_workloads.dart` because most
 reader-completion work fires AFTER the writer-burst wall ends (most
@@ -125,32 +125,37 @@ dart run -DRESQLITE_PROFILE=true \
   benchmark/profile/completion_scheduling_audit.dart --markdown
 ```
 
-Four repeated passes (a/b/c/d). The committed aggregate
-([`exp-136-completion-scheduling-aggregate.md`](../benchmark/profile/results/exp-136-completion-scheduling-aggregate.md))
-shows pass d; the other three passes match the same band.
+Fresh current-branch pass after rebasing with exp 147:
 
-| workload | wall_ms (a/b/c/d) | drain_ms (d) | total_ms (d) | completion_us (d) | completion / total (a/b/c/d) | us / completion (a/b/c/d) |
+| workload | wall_ms | drain_ms | total_ms | completion_us | completion_count | emit_us | emit_count | invalidate_us | parked_total | max_parked | emissions |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| A11c baseline (0 streams x 500) | 71.16 | 0.00 | 71.16 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| A11c disjoint (50 streams x 500) | 71.82 | 56.56 | 128.38 | 0 | 0 | 0 | 0 | 17,816 | 0 | 0 | 0 |
+| A11c overlap (50 streams x 500) | 159.19 | 107.37 | 266.56 | 76,154 | 4,228 | 266 | 29 | 25,724 | 0 | 0 | 29 |
+| keyed PK (50 streams x 200 random) | 37.44 | 407.17 | 444.60 | 18,807 | 1,108 | 59 | 3 | 5,752 | 0 | 0 | 3 |
+
+Derived fractions:
+
+| workload | completion / burst | completion / total | emit / total | emit / completion | us / completion | invalidate / burst |
 |---|---:|---:|---:|---:|---:|---:|
-| A11c baseline (0 streams x 500) | 50.7 / 47 / 44.9 / 53.1 | 0 | 53.1 | 0 | — | — |
-| A11c disjoint (50 streams x 500) | 37.9 / 41 / 40.0 / 42.1 | 54.0 | 96.2 | 0 | 0% / 0% / 0% / 0% | — |
-| A11c overlap (50 streams x 500) | 90.3 / 95.0 / 93.5 / 107.1 | 102.6 | 209.7 | 57,424 | 21.9% / 23.0% / 20.9% / 27.4% | 11.9 / 11.6 / 10.9 / 14.8 µs |
-| keyed PK (50 streams x 200 random) | 23.3 / 31.7 / 23.4 / 24.6 | 203.5 | 228.1 | 11,161 | 4.7% / 4.2% / 4.7% / 4.9% | 8.9 / 7.6 / 8.5 / 9.3 µs |
+| A11c baseline | 0.00% | 0.00% | 0.00% | 0.00% | 0.00 | 0.00% |
+| A11c disjoint | 0.00% | 0.00% | 0.00% | 0.00% | 0.00 | 24.81% |
+| A11c overlap | 47.84% | 28.57% | 0.10% | 0.35% | 18.01 | 16.16% |
+| keyed PK | 50.24% | 4.23% | 0.01% | 0.31% | 16.97 | 15.37% |
 
-`emit_us` is negligible on every workload: 12–412 µs across the four
-passes on A11c overlap (≤ 0.7% of `completion_us`), 12–17 µs on
-keyed-PK (≤ 0.2% of `completion_us`).
+`emit_us` remains negligible: 0.35% of `completion_us` on A11c overlap and
+0.31% on keyed-PK.
 
 Sanity: `dispatcher_parked_total = 0`, `dispatcher_wake_retry_total =
 0`, and `dispatcher_max_parked_concurrent = 0` on every workload —
 exp 120 / exp 122 still hold post-instrumentation.
 
 **A11c overlap completion-side reading.**
-The reader worker port handler accounts for 22–27% of total A11c
-overlap wall (burst + drain). With 3,700–3,870 completions per burst
-and ~12 µs/call, the handler is doing meaningful per-reply work but
-99.2% of those replies are short-circuited by `selectIfChanged`'s
-hash comparison (3,870 completions → 28–31 actual subscriber emits per
-burst). The per-call cost is therefore "handler bootstrap + Future
+The reader worker port handler accounts for 28.57% of total A11c
+overlap wall (burst + drain). With 4,228 completions per burst and
+~18 µs/call, the handler is doing meaningful per-reply work while
+actual subscriber emits stay rare (29 emits in this pass). The
+per-call cost is therefore "handler bootstrap + Future
 resolution + selectIfChanged short-circuit + flushQueue admit/dispatch
 of the next rerun", not subscriber delivery.
 
@@ -161,7 +166,7 @@ completion-side counters stay at zero — confirming the counters are
 correctly attributed to reader-reply chains, not background traffic.
 
 **Keyed-PK reading.**
-Completion is 4.2–4.9% of total wall. With 50 streams watching
+Completion is 4.23% of total wall. With 50 streams watching
 random PKs and only ~3 watched-row hits per 200-write burst, almost
 all re-queries short-circuit on hash; absolute completion wall is an
 order of magnitude smaller than A11c overlap.
@@ -179,20 +184,19 @@ bootstrap, not the controller add.
 The audit ships the
 `completion-side microtask scheduling cost counter` named in
 [`signals.json#stream-rerun-dispatch.blockedOnMeasurement`](signals.json).
-That entry can drop; the parallel in-flight exp 135 closes the writer-
-isolate wall split, after which `stream-rerun-dispatch.blockedOnMeasurement`
-is fully empty.
+That entry can drop; exp 147 closes the writer-isolate wall split, so
+`stream-rerun-dispatch.blockedOnMeasurement` is fully empty.
 
 The audit's headline reading is that **reader-completion handling IS
-a meaningful slice of A11c overlap wall** (22–27% of total wall, ~12 µs
-per call across ~3,800 calls per burst). Two specific shape findings:
+a meaningful slice of A11c overlap wall** (28.57% of total wall, ~18 µs
+per call across 4,228 calls per burst). Two specific shape findings:
 
 - **Subscriber emit is not the cost.** Per `stream_emit_us` <
   1% of `completion_us`, batching `controller.add` calls or compressing
   the subscriber loop will not move overlap wall.
-- **Per-call cost is bootstrap-shaped, not work-shaped.** 99.2% of
-  reader replies on A11c overlap short-circuit via `selectIfChanged`'s
-  hash comparison; the ~12 µs/call is mostly handler entry, Future
+- **Per-call cost is bootstrap-shaped, not work-shaped.** Most reader
+  replies on A11c overlap short-circuit via `selectIfChanged`'s hash
+  comparison; the ~18 µs/call is mostly handler entry, Future
   resolution, hash check, and the recursive `_flushQueue` admit step,
   not real query result work.
 
@@ -201,13 +205,13 @@ focused implementation experiment: collapse N short-circuited replies
 into a single handler invocation by either (a) merging consecutive
 `_flushQueue` admits before re-entering `_dispatch`, or (b) extending
 the reader-worker protocol to return multiple per-stream `unchanged`
-acknowledgements in one message. Either change targets the 22–27% of
-overlap wall captured here. A 50% reduction in per-call cost (from
-~12 µs down to ~6 µs) would save ~10% of total overlap wall — at the
+acknowledgements in one message. Either change targets the 28.57% of
+overlap total wall captured here. A 50% reduction in per-call cost (from
+~18 µs down to ~9 µs) would save ~14% of total overlap wall — at the
 per-benchmark release-suite decision threshold edge, but materially
 larger than exp 121's invalidation-traversal ceiling.
 
-On keyed-PK (~5% of total wall) and disjoint (0%) the same change
+On keyed-PK (4.23% of total wall) and disjoint (0%) the same change
 would not move the needle. So a future reader-completion-batching
 experiment must accept on A11c overlap *and* stay neutral on disjoint
 and keyed-PK; otherwise the win is at best workload-specific and
@@ -215,7 +219,7 @@ overall release-suite-neutral.
 
 ## Future Notes
 
-- After this experiment lands together with exp 135, the
+- After this experiment lands together with exp 147, the
   `stream-rerun-dispatch.blockedOnMeasurement` array is empty. The
   remaining open candidates that named blockers will need to be
   re-evaluated against the new counter evidence rather than against

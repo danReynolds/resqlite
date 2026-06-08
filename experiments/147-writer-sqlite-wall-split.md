@@ -65,23 +65,23 @@ dart run -DRESQLITE_PROFILE=true \
   benchmark/profile/writer_sqlite_wall_audit.dart --markdown
 ```
 
-Single local pass on current main:
+Fresh current-branch pass after merging exp136:
 
 | workload | wall_ms | writer_sqlite_us | invalidate_us | residual_us | SQLite / wall | invalidation / wall | residual / wall |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 84.04 | 23,605 | 0 | 60,432 | 28.09% | 0.00% | 71.91% |
-| A11c disjoint | 93.99 | 18,339 | 25,527 | 50,128 | 19.51% | 27.16% | 53.33% |
-| A11c overlap | 223.20 | 26,469 | 41,638 | 155,095 | 11.86% | 18.65% | 69.49% |
-| keyed PK subscriptions | 43.69 | 7,364 | 8,141 | 28,186 | 16.85% | 18.63% | 64.51% |
+| A11c baseline | 86.88 | 23,071 | 0 | 63,810 | 26.55% | 0.00% | 73.45% |
+| A11c disjoint | 92.78 | 17,738 | 23,833 | 51,205 | 19.12% | 25.69% | 55.19% |
+| A11c overlap | 166.75 | 15,678 | 31,389 | 119,679 | 9.40% | 18.82% | 71.77% |
+| keyed PK subscriptions | 36.95 | 6,679 | 6,897 | 23,370 | 18.08% | 18.67% | 63.25% |
 
 Per-write averages from this pass:
 
 | workload | SQLite us/write | invalidation us/write | parked_total | max_parked |
 |---|---:|---:|---:|---:|
-| A11c baseline | 47.21 | 0.00 | 0 | 0 |
-| A11c disjoint | 36.68 | 51.05 | 0 | 0 |
-| A11c overlap | 52.94 | 83.28 | 0 | 0 |
-| keyed PK subscriptions | 36.82 | 40.70 | 0 | 0 |
+| A11c baseline | 46.14 | 0.00 | 0 | 0 |
+| A11c disjoint | 35.48 | 47.67 | 0 | 0 |
+| A11c overlap | 31.36 | 62.78 | 0 | 0 |
+| keyed PK subscriptions | 33.40 | 34.48 | 0 | 0 |
 
 `parked_total` and `max_parked` stayed zero on every row, preserving the exp
 120/122 admission result while this audit looked at a different slice.
@@ -92,8 +92,8 @@ Per-write averages from this pass:
 
 The result consumes the writer-wall-vs-SQLite-wall blocker in `signals.json`.
 On the active stream workloads, SQLite-facing write work is a minority of
-writer-side burst wall: about 12% on A11c overlap and 17% on keyed-PK. Even
-when invalidation is included, the residual local wall budget remains 65-69% on
+writer-side burst wall: about 9% on A11c overlap and 18% on keyed-PK. Even
+when invalidation is included, the residual local wall budget remains 63-72% on
 the two overlap-shaped rows.
 
 Future stream-dispatch implementation work should not start with SQLite-step
