@@ -63,10 +63,13 @@ Useful options:
 ```bash
 dart run benchmark/run_release.dart my-label --repeat=5
 dart run benchmark/run_release.dart my-label --repeat=5 --compare-to=benchmark/results/2026-04-08T14-44-58-final.md
+dart run benchmark/run_release.dart my-label --repeat=5 --no-auto-compare
 ```
 
 `run_release.dart`:
 - accepts an explicit `--compare-to=...` baseline instead of always diffing against the latest file
+- skips automatic comparisons when the newest checked-in baseline was captured in an incompatible environment; use `--compare-to=...` for a deliberate reference comparison anyway
+- supports `--no-auto-compare` for CI or artifact-producing runs that should not infer a baseline from `benchmark/results`
 - supports `--repeat=N` to rerun the full package-local suite multiple times
 - emits a `Repeat Stability` section for resqlite medians
 - uses a noise-aware comparison threshold of `max(10%, 3 × current MAD%)` with a `±0.02 ms` absolute floor for ultra-fast cases

@@ -59,6 +59,11 @@ isolate offloading is in play.
   uncertainty because historical markdown baselines only guarantee a published
   median; if both sides have structured repeat artifacts in the future, this can
   tighten to a two-sided uncertainty check.
+- **Baseline provenance**: automatic comparison only uses checked-in result
+  files whose sidecar environment is compatible with the current run. CI should
+  use `--no-auto-compare` unless it is given a deliberate `--compare-to=...`
+  baseline; explicit comparisons still run across incompatible environments but
+  are reported as reference evidence, not a gate.
   - Stable benchmarks: MAD < 5% → 10% threshold
   - Moderate: 5% ≤ MAD < 15% → 3×MAD threshold
   - Noisy: MAD ≥ 15% → marked noisy; deltas treated conservatively

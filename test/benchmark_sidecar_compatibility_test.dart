@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 import '../benchmark/generate_devices.dart' as generate_devices;
+import '../benchmark/shared/baseline_compatibility.dart';
 import '../benchmark/shared/release_artifact.dart';
 import 'benchmark_pipeline_fixtures.dart';
 
@@ -44,9 +45,7 @@ void main() {
           'schemaVersion': 3,
           'kind': 'release-benchmark-run',
           'metrics': const <String, Object?>{},
-          'benchmarkSummary': const {
-            'sections': [],
-          },
+          'benchmarkSummary': const {'sections': []},
           'benchmarks': [
             {
               'key': 'Select → Maps / 1000 rows',
@@ -88,10 +87,7 @@ void main() {
           'generatedAt': '2026-04-23T00:00:00.000Z',
           'label': 'fixture',
           'repeatCount': 3,
-          'environment': const {
-            'runtime': 'dart-vm',
-            'gitSha': 'deadbeef',
-          },
+          'environment': const {'runtime': 'dart-vm', 'gitSha': 'deadbeef'},
           'metrics': const {
             'Select → Maps / 1000 rows / resqlite select()': 1.23,
             'Select → Maps / 1000 rows / resqlite select() [main]': 0.12,
@@ -139,5 +135,77 @@ void main() {
         expect(benchmarks.single['title'], equals('Select → Maps'));
       },
     );
+  });
+
+  group('baseline compatibility', () {
+    test('accepts same local environment', () {
+      final environment = {
+        'benchmarkMode': 'release',
+        'os': 'macos',
+        'runtime': 'dart-vm',
+        'ci': false,
+        'githubActions': false,
+        'hostname': 'macbookpro.lan',
+        'processors': 10,
+        'osVersion': 'Version 26.2',
+        'dartVersion': '3.11.0',
+      };
+
+      final compatibility = evaluateBaselineCompatibility(
+        current: environment,
+        baseline: Map<String, Object?>.from(environment),
+      );
+
+      expect(compatibility.compatible, isTrue);
+      expect(compatibility.reasons, isEmpty);
+    });
+
+    test('rejects automatic CI versus local baseline context', () {
+      final compatibility = evaluateBaselineCompatibility(
+        current: const {
+          'benchmarkMode': 'release',
+          'os': 'macos',
+          'runtime': 'dart-vm',
+          'ci': true,
+          'githubActions': true,
+          'githubRunnerOs': 'macOS',
+          'dartVersion': '3.11.1',
+        },
+        baseline: const {
+          'benchmarkMode': 'release',
+          'os': 'macos',
+          'runtime': 'dart-vm',
+          'ci': false,
+          'githubActions': false,
+          'hostname': 'macbookpro.lan',
+          'processors': 10,
+          'dartVersion': '3.11.0',
+        },
+      );
+
+      expect(compatibility.compatible, isFalse);
+      expect(compatibility.reasons, anyElement(contains('ci differs')));
+      expect(
+        compatibility.reasons,
+        anyElement(contains('githubActions differs')),
+      );
+      expect(
+        compatibility.reasons,
+        anyElement(contains('githubRunnerOs differs')),
+      );
+    });
+
+    test('rejects baselines without environment metadata', () {
+      final compatibility = evaluateBaselineCompatibility(
+        current: const {'benchmarkMode': 'release'},
+        baseline: null,
+      );
+
+      expect(compatibility.compatible, isFalse);
+      expect(
+        compatibility.reasons.single,
+        contains('missing environment metadata'),
+      );
+    });
   });
 }
