@@ -22,6 +22,12 @@ void main() {
       'intersection_entries': 0,
       'writer_sqlite_us': 0,
       'writer_sqlite_count': 0,
+      'writer_handle_us': 0,
+      'writer_handle_count': 0,
+      'writer_dirty_us': 0,
+      'writer_dirty_count': 0,
+      'main_writer_reply_us': 0,
+      'main_writer_reply_count': 0,
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
@@ -42,6 +48,12 @@ void main() {
       'intersection_entries': 0,
       'writer_sqlite_us': 0,
       'writer_sqlite_count': 0,
+      'writer_handle_us': 0,
+      'writer_handle_count': 0,
+      'writer_dirty_us': 0,
+      'writer_dirty_count': 0,
+      'main_writer_reply_us': 0,
+      'main_writer_reply_count': 0,
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
@@ -82,6 +94,31 @@ void main() {
     ProfileCounters.reset();
     expect(ProfileCounters.writerSqliteUs, 0);
     expect(ProfileCounters.writerSqliteCount, 0);
+  });
+
+  test('residual writer counters round-trip through snapshot/diff/reset', () {
+    ProfileCounters.writerHandleUs = 880;
+    ProfileCounters.writerHandleCount = 50;
+    ProfileCounters.writerDirtyUs = 210;
+    ProfileCounters.writerDirtyCount = 50;
+    ProfileCounters.mainWriterReplyUs = 95;
+    ProfileCounters.mainWriterReplyCount = 50;
+
+    final snap = ProfileCounters.snapshot();
+    expect(snap['writer_handle_us'], 880);
+    expect(snap['writer_handle_count'], 50);
+    expect(snap['writer_dirty_us'], 210);
+    expect(snap['writer_dirty_count'], 50);
+    expect(snap['main_writer_reply_us'], 95);
+    expect(snap['main_writer_reply_count'], 50);
+
+    ProfileCounters.reset();
+    expect(ProfileCounters.writerHandleUs, 0);
+    expect(ProfileCounters.writerHandleCount, 0);
+    expect(ProfileCounters.writerDirtyUs, 0);
+    expect(ProfileCounters.writerDirtyCount, 0);
+    expect(ProfileCounters.mainWriterReplyUs, 0);
+    expect(ProfileCounters.mainWriterReplyCount, 0);
   });
 
   test('dispatcher park counters round-trip through snapshot/diff/reset', () {
