@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-08T18:52:24.326700",
+  "generated": "2026-06-09T11:37:36.103056",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -17100,6 +17100,29 @@
       "sqlite3SingleInsertP90Ms": 1.702,
       "noisy": true,
       "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
+    },
+    {
+      "id": "exp150-nullable-batch-packing",
+      "date": "2026-06-09",
+      "timestamp": "2026-06-09T11:20:00",
+      "label": "exp150-nullable-batch-packing",
+      "metrics": {
+        "Batch Param Flatten / Nullable ASCII 10000 x8 / resqlite baseline": 13.552,
+        "Batch Param Flatten / Nullable ASCII 10000 x8 / resqlite candidate": 11.152,
+        "Batch Param Flatten / Nullable ASCII 10000 x20 / resqlite baseline": 25.738,
+        "Batch Param Flatten / Nullable ASCII 10000 x20 / resqlite candidate": 21.723,
+        "Batch Param Flatten / ASCII Guardrail 10000 x8 / resqlite baseline": 10.309,
+        "Batch Param Flatten / ASCII Guardrail 10000 x8 / resqlite candidate": 10.338,
+        "Batch Param Flatten / ASCII Guardrail 10000 x20 / resqlite baseline": 21.625,
+        "Batch Param Flatten / ASCII Guardrail 10000 x20 / resqlite candidate": 20.179,
+        "Batch Param Flatten / Unicode Guardrail 10000 x8 / resqlite baseline": 13.317,
+        "Batch Param Flatten / Unicode Guardrail 10000 x8 / resqlite candidate": 13.469,
+        "Batch Param Flatten / Unicode Guardrail 10000 x20 / resqlite baseline": 29.085,
+        "Batch Param Flatten / Unicode Guardrail 10000 x20 / resqlite candidate": 30.499
+      },
+      "repeatCount": 1,
+      "noisy": true,
+      "noisyReason": "single-sample run (Repeats: 1) — not statistically authoritative"
     }
   ],
   "experiments": [
@@ -19227,6 +19250,25 @@
       "approach": "Created two resqlite worktrees from `origin/main` at\n`841e3623f0c05cb978624ebdcd84b9dfe2c36eaf`:\n\n- Baseline: `/Users/dan/.codex/worktrees/resqlite-exp149-baseline`\n- Candidate: `/Users/dan/.codex/worktrees/resqlite-exp149-six-param-batch-packing`\n\nCandidate patch:\n\n```diff\n-const int _asciiBatchMinParamCount = 8;\n-const int _asciiBatchMinTotalParamCount = 8192;\n+const int _asciiBatchMinParamCount = 6;\n+const int _asciiBatchMinTotalParamCount = 600;\n```\n\nA focused database test adds a six-column `executeBatch` case with 100 rows per\nbatch. The first batch exercises the ASCII fast path, and the second includes a\nnon-ASCII string plus blobs so the UTF-8 fallback stays covered at the new\nthreshold.\n\nThe integrated Tracelite A/B strict batch scenario was deliberately not used as\nthe proof f...",
       "results": "Paired profile command:\n\n```text\n/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart run \\\n  benchmark/profile/run_tracelite_profile.dart \\\n  --tracelite-root=/Users/dan/Coding/tracelite \\\n  --dart=/Users/dan/Coding/flutter_arm64/bin/cache/dart-sdk/bin/dart \\\n  --label=exp149-six-param-batch-packing-candidate \\\n  --out-dir=build/tracelite-profile/exp149-six-param-batch-packing-candidate \\\n  --allow-unpinned-tracelite \\\n  --no-graph-data\n```\n\nTracelite revision:\n\n```text\n8fbfac7675348fa2a765e3b0c36f3a5a22c67fc0\n```\n\nProfile artifacts:\n\n- Baseline:\n  `build/tracelite-profile/exp149-six-param-batch-packing-baseline/workload-summary.json`\n- Candidate:\n  `build/tracelite-profile/exp149-six-param-batch-packing-candidate/workload-summary.json`\n- Candidate insights:\n  `build/tracelite-p...",
       "reasoning": "**Accept for review.**\n\nThis is the narrow version of the batch-threshold change that exp 146 was\nmissing. It does not reopen the rejected small/narrow path; it admits the\nspecific six-parameter repeated merge shape that Tracelite showed was spending\nreal writer-side time in SQLite-facing batch execution.\n\nThe implementation cost is low: two threshold constants and one focused\ncorrectness test. The existing generic encoder remains the fallback for\nnon-ASCII text and for narrow batch shapes."
+    },
+    {
+      "id": "150",
+      "title": "Nullable batch parameter packing",
+      "date": "2026-06-09",
+      "status": "in_review",
+      "summary": "Makes the guarded packed batch encoder nullable-aware for first-row `NULL` text columns; focused nullable ASCII 10k x8 improves 13.552 → 11.152 ms and 10k x20 improves 25.738 → 21.723 ms while existing ASCII/Unicode wide guardrails stay neutral",
+      "commit": null,
+      "problem": "Experiments 125, 126, and 149 made guarded direct payload packing worthwhile for\nlarge or repeated batch writes, but the live guard still had one first-row\nblind spot:\n\n```dart\n_firstBatchRowHasString(paramSets.first, paramCount)\n```\n\nThat cheaply avoided scanning numeric-only batches, but it also skipped the\npacked encoder for nullable generated-statement shapes where row 0 has `NULL`\nin text columns and later rows contain text. Those batches fell back to the\ngeneric encoder even when they had the same width and total parameter count that\nalready justified direct ASCII packing.\n\nThe non-ASCII path also classified a guarded batch in two phases: try ASCII\nmeasurement first, then rescan for UTF-8 byte lengths if any non-ASCII string\nappeared. That was small for early non-ASCII rows, but a...",
+      "hypothesis": "Treat first-row `NULL` values as \"may contain text\", then classify guarded batch\npayloads in one pass:\n\n- if the batch contains only ASCII strings, use the existing ASCII packer;\n- if it contains any non-ASCII string, use the existing direct UTF-8 packer;\n- if it contains no strings, fall back to the generic encoder.\n\nThis should admit nullable first-row ASCII batches without reopening exp 146's\nrejected 2-3 parameter broadening. Accept for review if nullable large rows\nimprove while existing ASCII and Unicode large-row guardrails stay neutral.\n\nExternal contract checks stayed consistent with exp 126:\n\n- Dart's `Utf8Encoder.convert` encodes unpaired surrogates as replacement\n  characters: <https://api.dart.dev/dart-convert/Utf8Encoder/convert.html>\n- SQLite `sqlite3_bind_text` accepts e...",
+      "approach": "`allocateBatchParams` now keeps the same 6-parameter / 600-total guard from\nexperiment 149, but replaces the first-row string probe and split ASCII/UTF-8\nmeasurement helpers with a single `_measureBatchPayload` pass.\n\nThe first row still acts as a cheap gate for stable non-text rows: if it has no\n`String` and no `NULL`, the batch stays generic. When the first row has a\n`String` or `NULL`, the classifier scans the guarded batch once and returns\n`extraBytes`, `hasString`, and `isAscii`.\n\nThe focused benchmark gained `--text-mode=nullable-ascii`, where text columns in\nrow 0 are `NULL` and later rows are ASCII. This mode directly separates the old\nfirst-row heuristic from the nullable-aware candidate while preserving the same\nrow-width matrix used by experiments 113, 125, and 126.\n\nCorrectn...",
+      "results": "Commands:\n\n```text\ndart run benchmark/experiments/batch_param_flatten.dart \\\n  --warmup=8 --iterations=40 --text-mode=nullable-ascii\n\ndart run benchmark/experiments/batch_param_flatten.dart \\\n  --warmup=8 --iterations=40 --text-mode=ascii\n\ndart run benchmark/experiments/batch_param_flatten.dart \\\n  --warmup=8 --iterations=40 --text-mode=unicode\n```\n\nThe baseline worktree was `origin/main` at `72a2b92` with only the temporary\n`nullable-ascii` benchmark mode applied. The candidate was\n`exp-150-param-encoding-hotpath`.\n\nNullable first-row ASCII p50 wall time:\n\n| Shape | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| 10,000 rows x 8 params | 13.552 ms | 11.152 ms | -17.7% |\n| 10,000 rows x 20 params | 25.738 ms | 21.723 ms | -15.6% |\n| 1,000 rows x 8 params | 1.177 ms | 1.132 ms | -3...",
+      "reasoning": "**Accept for review.**\n\nThis is an implementation experiment, not a measurement-only run. The change is\nsmall, private to `allocateBatchParams`, and keeps exp 149's guard intact while\nadmitting a realistic nullable text shape that the previous first-row string\nprobe skipped. Existing ASCII and Unicode wide-batch guardrails stay within the\nlocal benchmark noise band, and the target nullable large rows improve by\n15-18%.",
+      "benchmarkRun": {
+        "id": "exp150-nullable-batch-packing",
+        "date": "2026-06-09",
+        "timestamp": "2026-06-09T11:20:00",
+        "source": "exact"
+      }
     }
   ],
   "tracked": [

@@ -651,6 +651,54 @@ void main() {
       expect(rows[2]['c7'], payloadA);
     });
 
+    test('wide executeBatch preserves nullable first-row text', () async {
+      await db.execute(
+        'CREATE TABLE t('
+        'id INTEGER PRIMARY KEY, '
+        'c0 TEXT, c1 INTEGER NOT NULL, '
+        'c2 REAL NOT NULL, c3 BLOB NOT NULL, '
+        'c4 TEXT, c5 INTEGER NOT NULL, '
+        'c6 REAL NOT NULL, c7 BLOB NOT NULL'
+        ')',
+      );
+
+      final payloadA = Uint8List.fromList([1, 2, 3, 4]);
+      final payloadB = Uint8List.fromList([5, 6, 7, 8]);
+      final List<List<Object?>> paramSets = [
+        for (var i = 0; i < 1024; i++)
+          <Object?>[
+            i == 0 ? null : 'ascii_$i',
+            i,
+            i + 0.5,
+            i.isEven ? payloadA : payloadB,
+            i == 0 ? null : 'slug_$i',
+            i * 2,
+            i + 1.5,
+            i.isEven ? payloadB : payloadA,
+          ],
+      ];
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5, c6, c7) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        paramSets,
+      );
+
+      final rows = await db.select(
+        'SELECT * FROM t WHERE id IN (1, 2, 1024) ORDER BY id',
+      );
+      expect(rows, hasLength(3));
+      expect(rows[0]['c0'], isNull);
+      expect(rows[0]['c4'], isNull);
+      expect(rows[0]['c3'], payloadA);
+      expect(rows[1]['c0'], 'ascii_1');
+      expect(rows[1]['c4'], 'slug_1');
+      expect(rows[1]['c7'], payloadA);
+      expect(rows[2]['c0'], 'ascii_1023');
+      expect(rows[2]['c4'], 'slug_1023');
+      expect(rows[2]['c7'], payloadA);
+    });
+
     test('wide executeBatch preserves mixed non-ascii text', () async {
       await createWideBatchTable();
 

@@ -762,75 +762,74 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
 
   if (paramCount >= _asciiBatchMinParamCount &&
       totalCount >= _asciiBatchMinTotalParamCount &&
-      _firstBatchRowHasString(paramSets.first, paramCount)) {
-    final asciiBytes = _tryMeasureAsciiBatchBytes(paramSets, paramCount);
-    if (asciiBytes != null) {
-      return _allocateAsciiBatchParams(
+      _firstBatchRowMayContainText(paramSets.first, paramCount)) {
+    final payload = _measureBatchPayload(paramSets, paramCount);
+    if (payload.hasString) {
+      if (payload.isAscii) {
+        return _allocateAsciiBatchParams(
+          paramSets,
+          paramCount,
+          totalCount,
+          payload.extraBytes,
+        );
+      }
+
+      return _allocateUtf8BatchParams(
         paramSets,
         paramCount,
         totalCount,
-        asciiBytes,
+        payload.extraBytes,
       );
     }
-
-    final utf8Bytes = _measureUtf8BatchBytes(paramSets, paramCount);
-    return _allocateUtf8BatchParams(
-      paramSets,
-      paramCount,
-      totalCount,
-      utf8Bytes,
-    );
   }
 
   return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
 }
 
-bool _firstBatchRowHasString(List<Object?> params, int paramCount) {
+bool _firstBatchRowMayContainText(List<Object?> params, int paramCount) {
   for (var i = 0; i < paramCount; i++) {
-    if (params[i] is String) return true;
+    final value = params[i];
+    if (value is String || value == null) return true;
   }
   return false;
 }
 
-int? _tryMeasureAsciiBatchBytes(
+({int extraBytes, bool hasString, bool isAscii}) _measureBatchPayload(
   List<List<Object?>> paramSets,
   int paramCount,
-) => _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: true);
-
-int _measureUtf8BatchBytes(List<List<Object?>> paramSets, int paramCount) =>
-    _measureBatchPayloadBytes(paramSets, paramCount, asciiOnly: false)!;
-
-int? _measureBatchPayloadBytes(
-  List<List<Object?>> paramSets,
-  int paramCount, {
-  required bool asciiOnly,
-}) {
+) {
   var extraBytes = 0;
   var hasString = false;
+  var isAscii = true;
 
   for (final set in paramSets) {
     for (var i = 0; i < paramCount; i++) {
       final value = set[i];
       if (value is String) {
         hasString = true;
-        if (asciiOnly) {
+        if (isAscii) {
           final length = value.length;
+          var stringIsAscii = true;
           for (var j = 0; j < length; j++) {
             if (value.codeUnitAt(j) > 0x7f) {
-              return null;
+              stringIsAscii = false;
+              isAscii = false;
+              break;
             }
           }
-          extraBytes += length;
-        } else {
-          extraBytes += _utf8Length(value);
+          if (stringIsAscii) {
+            extraBytes += length;
+            continue;
+          }
         }
+        extraBytes += _utf8Length(value);
       } else if (value is Uint8List) {
         extraBytes += value.length;
       }
     }
   }
 
-  return hasString || !asciiOnly ? extraBytes : null;
+  return (extraBytes: extraBytes, hasString: hasString, isAscii: isAscii);
 }
 
 ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
