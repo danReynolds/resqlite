@@ -81,8 +81,8 @@
       "id": "long-text-stream-hashing",
       "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark. Chunked byte-stream folding produced a large targeted win; further variants need a new profile signal or a broader long-payload workload.",
-      "keyPriors": ["075", "099", "110"],
+      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have representative unchanged-fanout benchmarks. Exp 110 made 4KB TEXT visible and accepted chunked byte-stream folding. Exp 154 added a mixed 32KB TEXT + 32KB BLOB workload, then rejected a guarded 32-byte loop-unroll candidate: the target row moved only -2.5% while short/4KB guardrails moved worse. Further variants need a stronger large-payload hash strategy or a profile showing hashing, not scheduling noise, is still the dominant cost.",
+      "keyPriors": ["075", "099", "110", "154"],
       "archive": ["033"],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
@@ -94,17 +94,9 @@
         "Does the remaining long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
       ],
       "openCandidates": [
-        {
-          "idea": "broader long-payload workload (≥ 32KB TEXT cells, mixed BLOB/TEXT)",
-          "addedDate": "2026-04-29",
-          "addedAfter": "110",
-          "blockedOn": "no benchmark covers payloads larger than the exp 110 4KB shape"
-        }
       ],
-      "blockedOnMeasurement": [
-        "long-payload streaming workload at sizes beyond exp 110's 4KB cells"
-      ],
-      "notesForExperimenters": "Use the long-text unchanged-fanout benchmark before trying another hash-loop change. The direction is no longer blocked on measurement, but the obvious 8-byte fold has already been tried."
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Use both the 4KB long-text unchanged-fanout benchmark and exp 154's mixed 32KB TEXT/BLOB large-payload benchmark before trying another hash-loop change. The obvious 8-byte fold has already been accepted, and simple loop unrolling has now been rejected. Do not keep a new large-payload hash strategy unless it improves the large-payload row without harming short-cell streams."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -607,6 +599,20 @@
         "do not retry synchronous writer response completion unless a Dart runtime change or new workload changes the request-resolution cost model",
         "continue to avoid standalone residual-split profiling; carry only the narrow measurement needed by a concrete implementation candidate",
         "use integrated Tracelite A/B primary gates before keeping stream scheduling changes, even when a profile smoke looks mixed or partially favorable"
+      ]
+    },
+    "154": {
+      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "A mixed 32KB TEXT + 32KB BLOB unchanged-fanout workload now covers the long-payload shape that exp 110's 4KB TEXT row did not",
+        "Simple 32-byte loop unrolling inside `fnv_combine_bytes` is not a useful follow-up to exp 110's 8-byte fold: the target large-payload median changed only -2.5% while short unchanged fanout and the 4KB long-text guardrail moved worse in the same pass",
+        "Future long-payload hashing work needs a stronger hash/copy-path change with an explicit collision-quality argument, not another semantics-preserving loop-control tweak"
+      ],
+      "nextSignals": [
+        "keep the large-payload unchanged-fanout workload as the target row for future long TEXT/BLOB hash variants",
+        "do not retry `fnv_combine_bytes` loop unrolling unless compiler/runtime codegen changes materially",
+        "any future long-payload hash strategy must also check short unchanged fanout and the existing 4KB long-text row before landing runtime code"
       ]
     },
     "146": {

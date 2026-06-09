@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
@@ -435,6 +436,135 @@ Future<String> runStreamingBenchmark() async {
     }
 
     // -----------------------------------------------------------------
+    // 2d. Large-payload unchanged fanout — experiment 154 target
+    //
+    // Exp 110 promoted a 4KB TEXT stream hash workload. This one keeps the
+    // same unchanged-fanout shape but pushes the byte-stream path harder:
+    // each unchanged row carries both 32KB TEXT and 32KB BLOB payloads.
+    // A tiny COUNT(*) stream is registered after the unchanged streams as
+    // the barrier, so the timed path stays focused on hash-only unchanged
+    // re-queries rather than changed-result payload decode.
+    // -----------------------------------------------------------------
+    {
+      const unchangedStreamCount = 4;
+      const rowCount = 64;
+      const payloadBytes = 32768;
+      var counter = 100000;
+
+      final tmp = await Directory.systemTemp.createTemp(
+        'bench_large_payload_stream_',
+      );
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        const createPayloadSql =
+            'CREATE TABLE payload_items('
+            'id INTEGER PRIMARY KEY, '
+            'body TEXT NOT NULL, '
+            'payload BLOB NOT NULL, '
+            'marker INTEGER NOT NULL)';
+        const insertPayloadSql =
+            'INSERT INTO payload_items(id, body, payload, marker) '
+            'VALUES (?, ?, ?, ?)';
+
+        await db.execute(createPayloadSql);
+        await db.executeBatch(insertPayloadSql, [
+          for (var i = 0; i < rowCount; i++)
+            [
+              i,
+              _longTextPayload(payloadBytes, i),
+              _longBlobPayload(payloadBytes, i),
+              i,
+            ],
+        ]);
+
+        final timing = BenchmarkTiming('resqlite');
+        final unchangedSubs = <StreamSubscription>[];
+        StreamSubscription? barrierSub;
+        try {
+          final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+          final unchangedReady = <Completer<void>>[
+            for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+          ];
+
+          for (var s = 0; s < unchangedStreamCount; s++) {
+            final sub = db
+                .stream(
+                  'SELECT id, body, payload, $s as sid FROM payload_items '
+                  'WHERE id < $rowCount ORDER BY id',
+                )
+                .listen((_) {
+                  unchangedEmissions[s]++;
+                  if (!unchangedReady[s].isCompleted) {
+                    unchangedReady[s].complete();
+                  }
+                });
+            unchangedSubs.add(sub);
+          }
+
+          final barrierStream = db.stream(
+            'SELECT COUNT(*) as cnt FROM payload_items',
+          );
+          final barrierReady = Completer<void>();
+          Completer<void>? waitBarrier;
+          barrierSub = barrierStream.listen((_) {
+            if (!barrierReady.isCompleted) {
+              barrierReady.complete();
+            } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+              waitBarrier.complete();
+            }
+          });
+
+          await Future.wait(
+            unchangedReady.map((c) => c.future),
+          ).timeout(const Duration(seconds: 10));
+          await barrierReady.future.timeout(const Duration(seconds: 10));
+
+          for (var i = 0; i < defaultIterations; i++) {
+            waitBarrier = Completer<void>();
+            final before = List<int>.from(unchangedEmissions);
+
+            final sw = Stopwatch()..start();
+            await db.execute(insertPayloadSql, [
+              counter,
+              _longTextPayload(payloadBytes, counter),
+              _longBlobPayload(payloadBytes, counter),
+              i,
+            ]);
+            counter++;
+            await waitBarrier.future.timeout(const Duration(seconds: 10));
+            sw.stop();
+            timing.wallUs.add(sw.elapsedMicroseconds);
+            timing.mainUs.add(sw.elapsedMicroseconds);
+
+            for (var s = 0; s < unchangedStreamCount; s++) {
+              if (unchangedEmissions[s] != before[s]) {
+                throw StateError(
+                  'Large-payload unchanged stream $s emitted for an unchanged result.',
+                );
+              }
+            }
+          }
+        } finally {
+          await barrierSub?.cancel();
+          for (final sub in unchangedSubs) {
+            await sub.cancel();
+          }
+          await db.close();
+        }
+
+        markdown.write(
+          markdownTable(
+            'Large-Payload Unchanged Fanout '
+            '(4 unchanged streams, 64 rows x 32KB TEXT + 32KB BLOB)',
+            [timing],
+          ),
+        );
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
+    // -----------------------------------------------------------------
     // 3. Fan-out (10 streams, one write invalidates all)
     // -----------------------------------------------------------------
     {
@@ -807,4 +937,12 @@ String _longTextPayload(int targetBytes, int seed) {
     buffer.write(chunk);
   }
   return buffer.toString().substring(0, targetBytes);
+}
+
+Uint8List _longBlobPayload(int targetBytes, int seed) {
+  final bytes = Uint8List(targetBytes);
+  for (var i = 0; i < bytes.length; i++) {
+    bytes[i] = (seed * 31 + i) & 0xFF;
+  }
+  return bytes;
 }
