@@ -79,6 +79,7 @@ moved them.
 | [147](147-writer-sqlite-wall-split.md) | Writer SQLite wall split | Measurement-only: profile-mode writer responses now report SQLite-facing write time back into `ProfileCounters`; on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%. Keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). Clears the writer-wall-vs-SQLite-wall blocker; next stream work should reduce completion/reply scheduling or residual writer/request wall rather than SQLite-step tuning |  |
 | [149](149-six-param-batch-packing.md) | Six-parameter batch packing | Lowers the guarded ASCII batch-packing threshold to the Tracelite merge-round shape; profile `merge_rounds` improves executeBatch p50 88 → 75 us and writer SQLite time 87,895 → 75,947 us while keeping 2-3 parameter batches generic |  |
 | [150](150-nullable-batch-packing.md) | Nullable batch parameter packing | Makes the guarded packed batch encoder nullable-aware for first-row `NULL` text columns; focused nullable ASCII 10k x8 improves 13.552 → 11.152 ms and 10k x20 improves 25.738 → 21.723 ms while existing ASCII/Unicode wide guardrails stay neutral |  |
+| [153](153-row-observer-keyed-pk.md) | Explicit row observer for keyed PK streams | Adds an explicit `RowIdentity` prototype for keyed streams and writes; focused keyed-PK write-loop median drops 78.72 → 10.55 ms and 40.16 → 10.57 ms across two local passes, while Tracelite stream guardrails stay neutral/inconclusive |  |
 
 ## Rejected
 

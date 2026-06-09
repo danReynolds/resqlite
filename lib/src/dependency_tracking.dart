@@ -35,6 +35,30 @@ final class UnknownTableDependencies extends TableDependencies {
   const UnknownTableDependencies._() : super._();
 }
 
+/// Explicit row identity supplied by an opt-in stream observer prototype.
+///
+/// This is not inferred from SQL text. The caller declares that a stream is
+/// scoped to [primaryKey] in [table], and write code can declare the primary
+/// keys it actually changed. The stream engine still falls back to table and
+/// column dependencies whenever row identity is missing.
+final class RowIdentity {
+  const RowIdentity({required this.table, required this.primaryKey});
+
+  final String table;
+  final Object primaryKey;
+
+  @override
+  int get hashCode => Object.hash(table, primaryKey);
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is RowIdentity &&
+        other.table == table &&
+        other.primaryKey == primaryKey;
+  }
+}
+
 /// Table-level dependency.
 ///
 /// A plain [TableDependency] means column precision is unavailable or

@@ -12,6 +12,7 @@ import 'package:resqlite/src/writer/writer.dart';
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
+import 'dependency_tracking.dart';
 import 'native/resqlite_bindings.dart';
 import 'profile_counters.dart';
 import 'profile_mode.dart';
@@ -342,6 +343,27 @@ final class Database {
     ).asyncExpand((runtime) => runtime.streamEngine.stream(sql, parameters));
   }
 
+  /// Experimental explicit row-observer prototype.
+  ///
+  /// This is intentionally separate from [stream] while the API is being
+  /// measured. The caller declares that [sql] observes exactly [row], and
+  /// writes using [executeWithRowChanges] can skip re-querying this stream
+  /// when their explicit changed primary keys do not include [row].
+  ///
+  /// No SQL text is parsed to infer row identity. If the stream's actual
+  /// dependency tables do not include [row.table], the engine ignores the row
+  /// hint and falls back to the normal table/column dependency path.
+  Stream<List<Map<String, Object?>>> streamWithRowObservation(
+    String sql, {
+    List<Object?> parameters = const [],
+    required RowIdentity row,
+  }) {
+    _ensureOpen();
+    return Stream.fromFuture(_runtime).asyncExpand(
+      (runtime) => runtime.streamEngine.stream(sql, parameters, row),
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Write operations
   // -------------------------------------------------------------------------
@@ -372,9 +394,37 @@ final class Database {
   Future<WriteResult> execute(
     String sql, [
     List<Object?> parameters = const [],
-  ]) async {
+  ]) {
+    return _execute(sql, parameters);
+  }
+
+  /// Experimental explicit row-observer write prototype.
+  ///
+  /// [rowChanges] must be a complete declaration of the primary-key rows
+  /// changed by this statement for each listed table. Tables dirtied by the
+  /// native dependency tracker but not listed here still use table/column
+  /// invalidation. This prototype deliberately does not support transactions
+  /// because transaction-scoped row change accumulation needs a larger API.
+  Future<WriteResult> executeWithRowChanges(
+    String sql, {
+    List<Object?> parameters = const [],
+    Iterable<RowIdentity> rowChanges = const [],
+  }) {
+    return _execute(sql, parameters, rowChanges: rowChanges);
+  }
+
+  Future<WriteResult> _execute(
+    String sql,
+    List<Object?> parameters, {
+    Iterable<RowIdentity> rowChanges = const [],
+  }) async {
     final transaction = Transaction.current;
     if (transaction != null) {
+      if (rowChanges.isNotEmpty) {
+        throw StateError(
+          'executeWithRowChanges() cannot be used inside a transaction.',
+        );
+      }
       return transaction.execute(sql, parameters);
     }
 
@@ -405,6 +455,7 @@ final class Database {
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     streamEngine.onDependencyChanges(
       response.modifications,
+      rowChanges: rowChanges,
       traceCorrelationId: correlationId,
     );
 

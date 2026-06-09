@@ -32,12 +32,14 @@ import '../drift/keyed_pk_db.dart';
 import '../shared/peer.dart';
 import '../shared/stats.dart';
 import '../shared/workload.dart';
+import 'package:resqlite/resqlite.dart' as resqlite;
 
 const WorkloadMeta keyedPkMeta = WorkloadMeta(
   slug: 'keyed_pk_subscriptions',
   version: 1,
   title: 'Keyed PK Subscriptions',
-  description: '50 reactive streams each watch one PK. 200 random-PK '
+  description:
+      '50 reactive streams each watch one PK. 200 random-PK '
       'writes across a 10K-row table. The committed PRNG seed produces '
       '3 hits on watched PKs, so both miss-path and hit-path are '
       'exercised each run. With keyed invalidation, a library fires '
@@ -80,8 +82,7 @@ Future<String> runKeyedPkSubscriptionsBenchmark() async {
 
   final readings = <_Reading>[];
 
-  final tempDir =
-      await Directory.systemTemp.createTemp('bench_keyed_pk_');
+  final tempDir = await Directory.systemTemp.createTemp('bench_keyed_pk_');
   try {
     final peers = await PeerSet.open(
       tempDir.path,
@@ -90,9 +91,14 @@ Future<String> runKeyedPkSubscriptionsBenchmark() async {
     );
     try {
       for (final peer in peers.all) {
-        print('  running on ${peer.name}...');
-        final r = await _measure(peer);
-        readings.add(r);
+        final modes = peer.name == 'resqlite'
+            ? const [_ObservationMode.legacy, _ObservationMode.rowObserved]
+            : const [_ObservationMode.legacy];
+        for (final mode in modes) {
+          print('  running on ${peer.name} (${mode.label})...');
+          final r = await _measureMode(peer, mode);
+          readings.add(r);
+        }
       }
     } finally {
       await peers.closeAll();
@@ -113,12 +119,16 @@ final class _Reading {
   _Reading({
     required this.label,
     required this.timing,
+    required this.medianWriteLoopMicroseconds,
+    required this.medianSettleMicroseconds,
     required this.medianTotalEmissions,
     required this.medianObservedHits,
   });
 
   final String label;
   final BenchmarkTiming timing;
+  final int medianWriteLoopMicroseconds;
+  final int medianSettleMicroseconds;
 
   /// Median of per-iteration `sum(post-baseline emissions across all 50
   /// streams)`. Optimal = number of writes that hit a watched PK (3
@@ -135,16 +145,18 @@ final class _Reading {
   final int medianObservedHits;
 }
 
-Future<_Reading> _measure(BenchmarkPeer peer) async {
+Future<_Reading> _measureMode(BenchmarkPeer peer, _ObservationMode mode) async {
   await _seed(peer);
 
   final watchedIds = _pickWatchedIds();
-  final timing = BenchmarkTiming('${peer.label} stream()');
+  final timing = BenchmarkTiming(mode.readingLabel(peer));
+  final writeLoopByIter = <int>[];
+  final settleByIter = <int>[];
   final totalEmissionsByIter = <int>[];
   final observedHitsByIter = <int>[];
 
   for (var i = 0; i < _warmup + _iterations; i++) {
-    final r = await _singleIteration(peer, watchedIds);
+    final r = await _singleIteration(peer, watchedIds, mode);
     if (i >= _warmup) {
       // Main-isolate time for this workload is the time spent inside
       // the stream listener callback — that's where emission delivery
@@ -155,27 +167,52 @@ Future<_Reading> _measure(BenchmarkPeer peer) async {
         wallMicroseconds: r.wallMicroseconds,
         mainMicroseconds: r.listenerMicroseconds,
       );
+      writeLoopByIter.add(r.writeLoopMicroseconds);
+      settleByIter.add(r.settleMicroseconds);
       totalEmissionsByIter.add(r.totalEmissions);
       observedHitsByIter.add(r.observedHits);
     }
   }
 
   return _Reading(
-    label: '${peer.label} stream()',
+    label: mode.readingLabel(peer),
     timing: timing,
+    medianWriteLoopMicroseconds: _median(writeLoopByIter),
+    medianSettleMicroseconds: _median(settleByIter),
     medianTotalEmissions: _median(totalEmissionsByIter),
     medianObservedHits: _median(observedHitsByIter),
   );
 }
 
+enum _ObservationMode {
+  legacy('legacy table invalidation'),
+  rowObserved('explicit row observer');
+
+  const _ObservationMode(this.label);
+
+  final String label;
+
+  String readingLabel(BenchmarkPeer peer) {
+    return switch (this) {
+      _ObservationMode.legacy => '${peer.label} stream()',
+      _ObservationMode.rowObserved => '${peer.label} row-observed stream()',
+    };
+  }
+}
+
 final class _IterationResult {
   _IterationResult({
     required this.wallMicroseconds,
+    required this.writeLoopMicroseconds,
+    required this.settleMicroseconds,
     required this.listenerMicroseconds,
     required this.totalEmissions,
     required this.observedHits,
   });
   final int wallMicroseconds;
+  final int writeLoopMicroseconds;
+  final int settleMicroseconds;
+
   /// Aggregate time spent inside the emission listener callback across
   /// all streams in this iteration. Represents main-isolate CPU work;
   /// differs from wall which includes dispatch + await + drain.
@@ -187,6 +224,7 @@ final class _IterationResult {
 Future<_IterationResult> _singleIteration(
   BenchmarkPeer peer,
   List<int> watchedIds,
+  _ObservationMode mode,
 ) async {
   // Reset the random sequence deterministically per iteration so every
   // peer sees the same write pattern in the same order.
@@ -200,16 +238,21 @@ Future<_IterationResult> _singleIteration(
   final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
   for (var i = 0; i < _streamCount; i++) {
     final idx = i; // Capture for closure.
-    final sub = peer.watch(
-      'SELECT id, body, updated_at FROM items WHERE id = ?',
-      params: [watchedIds[i]],
-      readsFrom: const {'items'},
-    ).listen((_) {
-      final sw = Stopwatch()..start();
-      emitCounts[idx]++;
-      sw.stop();
-      listenerMicroseconds += sw.elapsedMicroseconds;
-    });
+    final sub = peer
+        .watch(
+          'SELECT id, body, updated_at FROM items WHERE id = ?',
+          params: [watchedIds[i]],
+          readsFrom: const {'items'},
+          rowObservation: mode == _ObservationMode.rowObserved
+              ? resqlite.RowIdentity(table: 'items', primaryKey: watchedIds[i])
+              : null,
+        )
+        .listen((_) {
+          final sw = Stopwatch()..start();
+          emitCounts[idx]++;
+          sw.stop();
+          listenerMicroseconds += sw.elapsedMicroseconds;
+        });
     subs.add(sub);
   }
 
@@ -230,6 +273,7 @@ Future<_IterationResult> _singleIteration(
     final watchedSet = watchedIds.toSet();
     var observedHits = 0;
     final sw = Stopwatch()..start();
+    final writeSw = Stopwatch()..start();
 
     // Randomized writes over all 10K PKs. Target id and payload are
     // deterministic given the seed so peers see identical traffic.
@@ -239,20 +283,25 @@ Future<_IterationResult> _singleIteration(
       await peer.execute(
         'UPDATE items SET body = ?, updated_at = ? WHERE id = ?',
         ['body_$w', w, pk],
+        mode == _ObservationMode.rowObserved
+            ? [resqlite.RowIdentity(table: 'items', primaryKey: pk)]
+            : const [],
       );
     }
+    writeSw.stop();
 
     // Settle: wait until no more emissions arrive for a quiet window.
+    final settleSw = Stopwatch()..start();
     var lastSum = emitCounts.reduce((a, b) => a + b);
     const quietWindow = Duration(milliseconds: 200);
-    final quietDeadline =
-        DateTime.now().add(const Duration(seconds: 60));
+    final quietDeadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(quietDeadline)) {
       await Future<void>.delayed(quietWindow);
       final nowSum = emitCounts.reduce((a, b) => a + b);
       if (nowSum == lastSum) break;
       lastSum = nowSum;
     }
+    settleSw.stop();
 
     sw.stop();
 
@@ -263,6 +312,8 @@ Future<_IterationResult> _singleIteration(
 
     return _IterationResult(
       wallMicroseconds: sw.elapsedMicroseconds,
+      writeLoopMicroseconds: writeSw.elapsedMicroseconds,
+      settleMicroseconds: settleSw.elapsedMicroseconds,
       listenerMicroseconds: listenerMicroseconds - baselineListenerUs,
       totalEmissions: totalPostBaseline,
       observedHits: observedHits,
@@ -298,12 +349,12 @@ Future<void> _seed(BenchmarkPeer peer) async {
     'updated_at INTEGER NOT NULL'
     ')',
   );
+  await peer.execute('DELETE FROM items');
   final rows = <List<Object?>>[
-    for (var i = 1; i <= _tableRowCount; i++)
-      ['seed_body_$i', 0],
+    for (var i = 1; i <= _tableRowCount; i++) [i, 'seed_body_$i', 0],
   ];
   await peer.executeBatch(
-    'INSERT INTO items(body, updated_at) VALUES (?, ?)',
+    'INSERT INTO items(id, body, updated_at) VALUES (?, ?, ?)',
     rows,
   );
 }
@@ -314,15 +365,20 @@ Future<void> _seed(BenchmarkPeer peer) async {
 
 void _writeResultTable(StringBuffer md, List<_Reading> readings) {
   md
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) | '
-        'Total emits | Observed hits |')
-    ..writeln('|---|---|---|---|---|---|---|');
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Write-loop med (ms) | Settle med (ms) | '
+      'Main med (ms) | Main p90 (ms) | '
+      'Total emits | Observed hits |',
+    )
+    ..writeln('|---|---|---|---|---|---|---|---|---|');
   for (final r in readings) {
     md.writeln(
       '| ${r.label} '
       '| ${r.timing.wall.medianMs.toStringAsFixed(2)} '
       '| ${r.timing.wall.p90Ms.toStringAsFixed(2)} '
+      '| ${(r.medianWriteLoopMicroseconds / 1000).toStringAsFixed(2)} '
+      '| ${(r.medianSettleMicroseconds / 1000).toStringAsFixed(2)} '
       '| ${r.timing.main.medianMs.toStringAsFixed(2)} '
       '| ${r.timing.main.p90Ms.toStringAsFixed(2)} '
       '| ${r.medianTotalEmissions} '
@@ -331,18 +387,29 @@ void _writeResultTable(StringBuffer md, List<_Reading> readings) {
   }
   md.writeln();
   md
-    ..writeln('**Total emits**: post-baseline emissions summed across all '
-        '$_streamCount streams. **Observed hits**: how many of the '
-        '$_writeCount random writes actually targeted a watched PK. '
-        'Perfect behavior: emissions == hits. Emissions < hits means '
-        'hash suppression elided some writes whose row value did not '
-        'change. Emissions > hits means over-fire.')
+    ..writeln(
+      '**Total emits**: post-baseline emissions summed across all '
+      '$_streamCount streams. **Observed hits**: how many of the '
+      '$_writeCount random writes actually targeted a watched PK. '
+      'Perfect behavior: emissions == hits. Emissions < hits means '
+      'hash suppression elided some writes whose row value did not '
+      'change. Emissions > hits means over-fire.',
+    )
     ..writeln()
-    ..writeln('Wall time is dominated by re-query work. A library with '
-        'keyed-PK invalidation (Track D\'s planned `watchRow()`) can '
-        'avoid re-querying for writes whose PK is unwatched, reducing '
-        'wall time substantially even when emission counts already '
-        'look clean due to hash suppression.')
+    ..writeln(
+      'Wall time is dominated by re-query work. A library with '
+      'keyed-PK invalidation can '
+      'avoid re-querying for writes whose PK is unwatched, reducing '
+      'wall time substantially even when emission counts already '
+      'look clean due to hash suppression.',
+    )
+    ..writeln()
+    ..writeln(
+      '`resqlite row-observed stream()` uses the explicit '
+      '`streamWithRowObservation` / `executeWithRowChanges` prototype; '
+      '`resqlite stream()` keeps the public legacy table-level stream path. '
+      'Other peers keep their normal table-level stream invalidation behavior.',
+    )
     ..writeln();
 }
 

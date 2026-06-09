@@ -82,7 +82,11 @@ abstract class BenchmarkPeer {
   // --------------------------------------------------------------------- //
 
   /// Execute a statement that returns no rows (DDL, INSERT, UPDATE, DELETE).
-  Future<void> execute(String sql, [List<Object?> params = const []]);
+  Future<void> execute(
+    String sql, [
+    List<Object?> params = const [],
+    Iterable<resqlite.RowIdentity> rowChanges = const [],
+  ]);
 
   /// Execute a single statement across many parameter sets inside one
   /// transaction. Required for realistic seed + bulk-write workloads.
@@ -94,8 +98,10 @@ abstract class BenchmarkPeer {
   /// Run a SELECT and return all rows materialized as `List<Map<String,
   /// Object?>>`. Workloads doing per-row iteration should do it inside
   /// their main-isolate timing block to measure materialization cost.
-  Future<List<Map<String, Object?>>> select(String sql,
-      [List<Object?> params = const []]);
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]);
 
   /// Create a reactive query stream. Must throw [UnsupportedError] when
   /// [hasStreams] is false. Implementations should disable any library-side
@@ -113,6 +119,7 @@ abstract class BenchmarkPeer {
     String sql, {
     List<Object?> params = const [],
     Set<String> readsFrom = const {},
+    resqlite.RowIdentity? rowObservation,
   });
 }
 
@@ -153,19 +160,32 @@ final class ResqlitePeer implements BenchmarkPeer {
       _db ?? (throw StateError('ResqlitePeer not open'));
 
   @override
-  Future<void> execute(String sql, [List<Object?> params = const []]) async {
-    await _requireDb.execute(sql, params);
+  Future<void> execute(
+    String sql, [
+    List<Object?> params = const [],
+    Iterable<resqlite.RowIdentity> rowChanges = const [],
+  ]) async {
+    if (rowChanges.isEmpty) {
+      await _requireDb.execute(sql, params);
+    } else {
+      await _requireDb.executeWithRowChanges(
+        sql,
+        parameters: params,
+        rowChanges: rowChanges,
+      );
+    }
   }
 
   @override
-  Future<void> executeBatch(
-      String sql, List<List<Object?>> paramSets) async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     await _requireDb.executeBatch(sql, paramSets);
   }
 
   @override
-  Future<List<Map<String, Object?>>> select(String sql,
-      [List<Object?> params = const []]) async {
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]) async {
     return _requireDb.select(sql, params);
   }
 
@@ -174,8 +194,16 @@ final class ResqlitePeer implements BenchmarkPeer {
     String sql, {
     List<Object?> params = const [],
     Set<String> readsFrom = const {}, // ignored — resqlite extracts from SQL.
+    resqlite.RowIdentity? rowObservation,
   }) {
-    return _requireDb.stream(sql, params);
+    if (rowObservation == null) {
+      return _requireDb.stream(sql, params);
+    }
+    return _requireDb.streamWithRowObservation(
+      sql,
+      parameters: params,
+      row: rowObservation,
+    );
   }
 }
 
@@ -232,13 +260,16 @@ final class Sqlite3Peer implements BenchmarkPeer {
       _db ?? (throw StateError('Sqlite3Peer not open'));
 
   @override
-  Future<void> execute(String sql, [List<Object?> params = const []]) async {
+  Future<void> execute(
+    String sql, [
+    List<Object?> params = const [],
+    Iterable<resqlite.RowIdentity> rowChanges = const [],
+  ]) async {
     _requireDb.execute(sql, params);
   }
 
   @override
-  Future<void> executeBatch(
-      String sql, List<List<Object?>> paramSets) async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     final db = _requireDb;
     db.execute('BEGIN');
     // Prepare is INSIDE the rollback-catch block — if the SQL is
@@ -261,8 +292,10 @@ final class Sqlite3Peer implements BenchmarkPeer {
   }
 
   @override
-  Future<List<Map<String, Object?>>> select(String sql,
-      [List<Object?> params = const []]) async {
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]) async {
     final result = _requireDb.select(sql, params);
     // sqlite3.dart returns ResultSet (Iterable<Map<String, dynamic>>).
     // Cast to Object? shape for interface compatibility; values are
@@ -276,6 +309,7 @@ final class Sqlite3Peer implements BenchmarkPeer {
     String sql, {
     List<Object?> params = const [],
     Set<String> readsFrom = const {},
+    resqlite.RowIdentity? rowObservation,
   }) {
     throw UnsupportedError('sqlite3.dart does not support reactive streams');
   }
@@ -320,19 +354,24 @@ final class SqliteAsyncPeer implements BenchmarkPeer {
       _db ?? (throw StateError('SqliteAsyncPeer not open'));
 
   @override
-  Future<void> execute(String sql, [List<Object?> params = const []]) async {
+  Future<void> execute(
+    String sql, [
+    List<Object?> params = const [],
+    Iterable<resqlite.RowIdentity> rowChanges = const [],
+  ]) async {
     await _requireDb.execute(sql, params);
   }
 
   @override
-  Future<void> executeBatch(
-      String sql, List<List<Object?>> paramSets) async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     await _requireDb.executeBatch(sql, paramSets);
   }
 
   @override
-  Future<List<Map<String, Object?>>> select(String sql,
-      [List<Object?> params = const []]) async {
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]) async {
     final result = await _requireDb.getAll(sql, params);
     return [for (final row in result) Map<String, Object?>.from(row)];
   }
@@ -341,13 +380,14 @@ final class SqliteAsyncPeer implements BenchmarkPeer {
   Stream<List<Map<String, Object?>>> watch(
     String sql, {
     List<Object?> params = const [],
-    Set<String> readsFrom = const {}, // ignored — sqlite_async extracts from SQL.
+    Set<String> readsFrom =
+        const {}, // ignored — sqlite_async extracts from SQL.
+    resqlite.RowIdentity? rowObservation,
   }) {
     // Throttle disabled for fair comparison — see METHODOLOGY.md.
     return _requireDb
         .watch(sql, parameters: params, throttle: Duration.zero)
-        .map((rs) =>
-            [for (final row in rs) Map<String, Object?>.from(row)]);
+        .map((rs) => [for (final row in rs) Map<String, Object?>.from(row)]);
   }
 }
 
@@ -438,7 +478,11 @@ final class DriftPeer implements BenchmarkPeer {
       _db ?? (throw StateError('DriftPeer not open'));
 
   @override
-  Future<void> execute(String sql, [List<Object?> params = const []]) async {
+  Future<void> execute(
+    String sql, [
+    List<Object?> params = const [],
+    Iterable<resqlite.RowIdentity> rowChanges = const [],
+  ]) async {
     final db = _requireDb;
     final writeTable = _extractWriteTable(sql);
 
@@ -477,8 +521,7 @@ final class DriftPeer implements BenchmarkPeer {
   }
 
   @override
-  Future<void> executeBatch(
-      String sql, List<List<Object?>> paramSets) async {
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     final db = _requireDb;
     final writeTable = _extractWriteTable(sql);
     final resolved = writeTable == null ? null : _tableByName[writeTable];
@@ -504,8 +547,10 @@ final class DriftPeer implements BenchmarkPeer {
   }
 
   @override
-  Future<List<Map<String, Object?>>> select(String sql,
-      [List<Object?> params = const []]) async {
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]) async {
     final rows = await _requireDb
         .customSelect(sql, variables: _toVariables(params))
         .get();
@@ -517,6 +562,7 @@ final class DriftPeer implements BenchmarkPeer {
     String sql, {
     List<Object?> params = const [],
     Set<String> readsFrom = const {},
+    resqlite.RowIdentity? rowObservation,
   }) {
     final resolved = <drift.ResultSetImplementation>{
       for (final name in readsFrom)
@@ -540,11 +586,7 @@ final class DriftPeer implements BenchmarkPeer {
       );
     }
     return _requireDb
-        .customSelect(
-          sql,
-          variables: _toVariables(params),
-          readsFrom: resolved,
-        )
+        .customSelect(sql, variables: _toVariables(params), readsFrom: resolved)
         .watch()
         .map((rs) => [for (final r in rs) Map<String, Object?>.from(r.data)]);
   }
@@ -572,8 +614,10 @@ final class DriftPeer implements BenchmarkPeer {
     return m?.group(1)?.toLowerCase();
   }
 
-  static final RegExp _insertRegex =
-      RegExp(r'^\s*INSERT\b', caseSensitive: false);
+  static final RegExp _insertRegex = RegExp(
+    r'^\s*INSERT\b',
+    caseSensitive: false,
+  );
 
   static bool _isInsertSql(String sql) => _insertRegex.hasMatch(sql);
 
@@ -601,8 +645,9 @@ final class DriftPeer implements BenchmarkPeer {
           drift.Variable<Uint8List>(Uint8List.fromList(p))
         else
           throw ArgumentError(
-              'DriftPeer: unsupported parameter type ${p.runtimeType} '
-              'for value $p'),
+            'DriftPeer: unsupported parameter type ${p.runtimeType} '
+            'for value $p',
+          ),
     ];
   }
 }
@@ -614,22 +659,22 @@ DriftDbFactory driftFactoryFor(
   drift.GeneratedDatabase Function(drift.QueryExecutor executor) dbCtor,
 ) {
   return (String path) => dbCtor(
-        drift_native.NativeDatabase.createInBackground(
-          File(path),
-          // Drift's `setup:` runs once when the background isolate opens
-          // the db, before any migrator or app query — the idiomatic
-          // place to configure PRAGMAs.
-          //
-          // Normalize to match other peers: WAL mode + synchronous=NORMAL.
-          // See benchmark/SCOPE.md § "PRAGMA normalization across peers"
-          // and the comment on `Sqlite3Peer.open` for why this matters
-          // for cross-library fairness.
-          setup: (rawDb) {
-            rawDb.execute('PRAGMA journal_mode = WAL');
-            rawDb.execute('PRAGMA synchronous = NORMAL');
-          },
-        ),
-      );
+    drift_native.NativeDatabase.createInBackground(
+      File(path),
+      // Drift's `setup:` runs once when the background isolate opens
+      // the db, before any migrator or app query — the idiomatic
+      // place to configure PRAGMAs.
+      //
+      // Normalize to match other peers: WAL mode + synchronous=NORMAL.
+      // See benchmark/SCOPE.md § "PRAGMA normalization across peers"
+      // and the comment on `Sqlite3Peer.open` for why this matters
+      // for cross-library fairness.
+      setup: (rawDb) {
+        rawDb.execute('PRAGMA journal_mode = WAL');
+        rawDb.execute('PRAGMA synchronous = NORMAL');
+      },
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -698,8 +743,9 @@ final class PeerSet {
       SqliteAsyncPeer(),
       if (driftFactory != null) DriftPeer(driftFactory),
     ];
-    final chosen =
-        require == null ? candidates : candidates.where(require).toList();
+    final chosen = require == null
+        ? candidates
+        : candidates.where(require).toList();
     final opened = <BenchmarkPeer>[];
     try {
       for (final peer in chosen) {

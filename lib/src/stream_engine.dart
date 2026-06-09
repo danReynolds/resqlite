@@ -5,6 +5,7 @@ import 'dependency_tracking.dart'
     show
         TableColumnDependency,
         FixedTableDependencies,
+        RowIdentity,
         TableDependencies,
         TableDependency,
         UnknownTableDependencies;
@@ -62,6 +63,9 @@ final class StreamEngine {
   /// Index of tables to the set of stream entries that depend on that table.
   final Map<String, Set<StreamEntry>> _tableIndex = {};
 
+  /// Index of explicit row-observed entries by table and primary key.
+  final Map<String, Map<Object, Set<StreamEntry>>> _rowIndex = {};
+
   /// Stream entries scheduled to be requeried when an available reader opens up.
   final _requeryQueue = LinkedHashSet<StreamEntry>();
 
@@ -83,8 +87,9 @@ final class StreamEngine {
   Stream<List<Map<String, Object?>>> stream(
     String sql, [
     List<Object?> parameters = const [],
+    RowIdentity? rowObservation,
   ]) {
-    final key = _streamKey(sql, parameters);
+    final key = _streamKey(sql, parameters, rowObservation);
 
     // If there is already a stream entry for this query, then subscribe to it.
     if (_entries[key] case StreamEntry entry) {
@@ -92,7 +97,7 @@ final class StreamEngine {
     }
 
     // Otherwise, create the stream and execute its initial query.
-    return _createStream(key, sql, parameters);
+    return _createStream(key, sql, parameters, rowObservation);
   }
 
   /// Apply table dependency updates from a write.
@@ -102,6 +107,7 @@ final class StreamEngine {
   /// tracking was unreliable, so every active stream must re-query.
   Future<void> onDependencyChanges(
     TableDependencies changes, {
+    Iterable<RowIdentity> rowChanges = const [],
     int? traceCorrelationId,
   }) async {
     if (_entries.isEmpty) {
@@ -119,6 +125,7 @@ final class StreamEngine {
     final intersectionSw = kProfileMode ? Stopwatch() : null;
     var intersectionEntries = 0;
     final dirtyEntries = <StreamEntry>{};
+    final rowChangesByTable = _rowChangesByTable(rowChanges);
     if (kProfileMode) {
       TraceliteProfile.begin(
         TraceliteResqliteSpans.streamInvalidate,
@@ -138,9 +145,14 @@ final class StreamEngine {
 
           for (final dep in deps) {
             if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
+              final candidates = _candidateEntriesFor(
+                dep.table,
+                entries,
+                rowChangesByTable[dep.table],
+              );
               switch (dep) {
                 case TableColumnDependency(columns: final changedCols):
-                  for (final entry in entries) {
+                  for (final entry in candidates) {
                     switch (entry.dependencies[dep.table]) {
                       case TableColumnDependency(columns: final entryCols):
                         bool intersects;
@@ -160,7 +172,7 @@ final class StreamEngine {
                     }
                   }
                 case TableDependency():
-                  dirtyEntries.addAll(entries);
+                  dirtyEntries.addAll(candidates);
               }
             }
           }
@@ -241,6 +253,7 @@ final class StreamEngine {
     _entries.clear();
     _tableIndex.clear();
     _unknownDepsEntries.clear();
+    _rowIndex.clear();
     _requeryQueue.clear();
   }
 
@@ -254,11 +267,13 @@ final class StreamEngine {
     int key,
     String sql,
     List<Object?> params,
+    RowIdentity? rowObservation,
   ) {
     final entry = _entries[key] = StreamEntry(
       key: key,
       sql: sql,
       params: params,
+      rowObservation: rowObservation,
     );
     entry.inFlight = true;
 
@@ -294,6 +309,7 @@ final class StreamEngine {
           entry.dependencies = {
             for (final dependency in tables) dependency.table: dependency,
           };
+          _indexRowObservation(entry);
         }
 
         // If an invalidation occurred while performing the entry's initial query then the entry
@@ -400,6 +416,9 @@ final class StreamEngine {
     for (final table in entry.dependencies.keys) {
       _tableIndex[table]?.remove(entry);
     }
+    if (entry.rowObservation case RowIdentity row) {
+      _rowIndex[row.table]?[row.primaryKey]?.remove(entry);
+    }
     // No-op if the entry was never registered there; the membership check is
     // O(1).
     _unknownDepsEntries.remove(entry);
@@ -409,6 +428,53 @@ final class StreamEngine {
       if (!sub.isClosed) sub.close();
     }
     entry.subscribers.clear();
+  }
+
+  Map<String, Set<Object>> _rowChangesByTable(Iterable<RowIdentity> rows) {
+    final byTable = <String, Set<Object>>{};
+    for (final row in rows) {
+      (byTable[row.table] ??= {}).add(row.primaryKey);
+    }
+    return byTable;
+  }
+
+  Iterable<StreamEntry> _candidateEntriesFor(
+    String table,
+    Set<StreamEntry> tableEntries,
+    Set<Object>? changedPrimaryKeys,
+  ) {
+    if (changedPrimaryKeys == null) {
+      return tableEntries;
+    }
+
+    final candidates = <StreamEntry>{};
+
+    for (final entry in tableEntries) {
+      final row = entry.rowObservation;
+      if (row == null || row.table != table) {
+        candidates.add(entry);
+      }
+    }
+
+    final tableRows = _rowIndex[table];
+    if (tableRows != null) {
+      for (final primaryKey in changedPrimaryKeys) {
+        if (tableRows[primaryKey] case Set<StreamEntry> entries) {
+          candidates.addAll(entries);
+        }
+      }
+    }
+
+    return candidates;
+  }
+
+  void _indexRowObservation(StreamEntry entry) {
+    final row = entry.rowObservation;
+    if (row == null || !entry.dependencies.containsKey(row.table)) {
+      return;
+    }
+    final byPrimaryKey = _rowIndex[row.table] ??= {};
+    (byPrimaryKey[row.primaryKey] ??= {}).add(entry);
   }
 }
 
@@ -422,6 +488,7 @@ final class StreamEntry {
     required this.key,
     required this.sql,
     required this.params,
+    this.rowObservation,
     this.dependencies = const {},
   });
 
@@ -433,6 +500,9 @@ final class StreamEntry {
 
   /// Bind parameters for the query.
   final List<Object?> params;
+
+  /// Optional explicit row identity for keyed row-observer experiments.
+  final RowIdentity? rowObservation;
 
   /// Table dependencies of the query, keyed by table name for invalidation.
   ///
@@ -509,6 +579,6 @@ final class StreamEntry {
 }
 
 /// Compute a stable hash key for a stream query.
-int _streamKey(String sql, List<Object?> params) {
-  return Object.hash(sql, Object.hashAll(params));
+int _streamKey(String sql, List<Object?> params, RowIdentity? rowObservation) {
+  return Object.hash(sql, Object.hashAll(params), rowObservation);
 }
