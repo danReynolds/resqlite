@@ -538,6 +538,79 @@ void main() {
       expect(rows[1]['payload'], payloadB);
     });
 
+    test('six-column executeBatch threshold preserves text and blobs', () async {
+      await db.execute(
+        'CREATE TABLE t('
+        'id INTEGER PRIMARY KEY, '
+        'name TEXT NOT NULL, '
+        'value INTEGER NOT NULL, '
+        'payload BLOB NOT NULL, '
+        'category TEXT NOT NULL, '
+        'score REAL NOT NULL, '
+        'created_at TEXT NOT NULL'
+        ')',
+      );
+
+      final payloadA = Uint8List.fromList([1, 2, 3]);
+      final payloadB = Uint8List.fromList([4, 5, 6]);
+      await db.executeBatch(
+        'INSERT INTO t(name, value, payload, category, score, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          for (var i = 0; i < 100; i++)
+            <Object?>[
+              'ascii_$i',
+              i,
+              i.isEven ? payloadA : payloadB,
+              'cat_${i % 4}',
+              i + 0.5,
+              '2026-06-08T00:00:${(i % 60).toString().padLeft(2, '0')}Z',
+            ],
+        ],
+      );
+
+      await db.executeBatch(
+        'INSERT INTO t(name, value, payload, category, score, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          for (var i = 100; i < 200; i++)
+            <Object?>[
+              i == 199 ? 'emoji 🎉🚀' : 'ascii_$i',
+              i,
+              i.isEven ? payloadA : payloadB,
+              'cat_${i % 4}',
+              i + 0.5,
+              '2026-06-08T00:00:${(i % 60).toString().padLeft(2, '0')}Z',
+            ],
+        ],
+      );
+
+      final count = await db.select('SELECT COUNT(*) AS cnt FROM t');
+      expect(count.single['cnt'], 200);
+
+      final rows = await db.select(
+        'SELECT name, value, payload, category, score, created_at '
+        'FROM t WHERE id IN (1, 100, 200) ORDER BY id',
+      );
+      expect(rows, hasLength(3));
+      expect(rows[0]['name'], 'ascii_0');
+      expect(rows[0]['value'], 0);
+      expect(rows[0]['payload'], payloadA);
+      expect(rows[0]['category'], 'cat_0');
+      expect(rows[0]['score'], closeTo(0.5, 0.001));
+      expect(rows[0]['created_at'], '2026-06-08T00:00:00Z');
+      expect(rows[1]['name'], 'ascii_99');
+      expect(rows[1]['payload'], payloadB);
+      expect(rows[1]['category'], 'cat_3');
+      expect(rows[1]['score'], closeTo(99.5, 0.001));
+      expect(rows[1]['created_at'], '2026-06-08T00:00:39Z');
+      expect(rows[2]['name'], 'emoji 🎉🚀');
+      expect(rows[2]['payload'], payloadB);
+      expect(rows[2]['category'], 'cat_3');
+      expect(rows[2]['score'], closeTo(199.5, 0.001));
+      expect(rows[2]['created_at'], '2026-06-08T00:00:19Z');
+    });
+
     test('wide executeBatch fast path preserves ascii text and blobs', () async {
       await createWideBatchTable();
 
