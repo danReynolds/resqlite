@@ -5,15 +5,22 @@ Resqlite performance experiment runner.
 
 ## Goal
 
-Improve Resqlite performance while preserving the lean public API. It is valid
-for a run to produce an accepted optimization, a rejected experiment with useful
-evidence, or a measurement/profiling improvement that makes a specific future
-optimization decision possible.
+Improve Resqlite performance while preserving the lean public API. The normal
+successful outcomes are an accepted optimization or a rejected implementation
+experiment with useful evidence. A measurement/profiling improvement is valid
+support work only when it unlocks a named future optimization decision or lets
+future runners reject a candidate confidently.
 
 Default toward implementation experiments when there is a plausible, bounded
 performance change to try. Measurement-only runs are lower-frequency support
 work: use them when implementation would otherwise be speculative, not as an
 equal-priority substitute for changing the hot path.
+
+When extra measurement is needed, prefer adding the few counters, profile lanes,
+or focused probes directly inside the performance experiment that will consume
+them. Run the candidate while that instrumentation is present, then remove the
+temporary measurement scaffolding before merge unless it is broadly reusable
+across future experiments.
 
 ## Preflight
 
@@ -48,6 +55,11 @@ profiling, or a benchmark, improve that first only when you can name the
 optimization it enables or the candidate it will let future runners reject
 confidently.
 
+Before splitting out a measurement-only PR, ask whether the same branch can add
+the small amount of instrumentation needed, run the implementation candidate,
+and then remove or narrow the instrumentation after the decision is made. A
+separate measurement run is the exception, not the default.
+
 For branch-vs-baseline implementation experiments, prefer the integrated
 Tracelite A/B wrapper in `benchmark/run_tracelite_experiment.dart`; it keeps
 baseline history, candidate history, decision JSON, insights, graph data, and
@@ -69,14 +81,15 @@ Before coding, write a short working note for yourself:
 
 - what prior experiments are adjacent
 - why this is not just a duplicate attempt
-- whether this run is an implementation experiment or measurement-only; if it
-  is measurement-only, why an implementation pass is not yet the right next
-  step
+- what implementation candidate you are trying; if the run is measurement-only,
+  why that candidate cannot be attempted in the same pass
 - what new evidence, benchmark, workload, implementation shape, or external
   change makes it worth trying now
 - what result would make you accept, reject, or defer the idea
 - for measurement-only runs, the specific follow-up optimization, rejection, or
   de-prioritization decision the measurement is expected to unlock
+- for temporary instrumentation, what will be removed before merge and what
+  would justify keeping any counter, benchmark, or profile lane permanently
 
 This note does not need to be committed directly, but the final experiment
 writeup should make the reasoning clear.
@@ -86,6 +99,11 @@ writeup should make the reasoning clear.
 Measurement is in service of performance work. Use it to choose, constrain, or
 reject implementation ideas; do not stack diagnostic runs just because another
 counter would be interesting.
+
+Prefer "instrument and implement" over "instrument now, optimize later": add
+only the measurements needed to make the current candidate legible, run the
+candidate, and then delete temporary counters or harness branches unless the
+result proves they should become shared infrastructure.
 
 Before selecting a measurement-only run, make sure at least one of these is
 true:
@@ -99,10 +117,16 @@ true:
   from `signals.json`.
 
 Avoid back-to-back measurement-only runs unless the current signal map makes an
-implementation pass genuinely speculative. After a measurement experiment
-lands, the next runner should usually consume that signal with an
-implementation, rejection, or direction cleanup rather than adding another
-diagnostic layer.
+implementation pass genuinely speculative or a maintainer explicitly asks for
+the diagnostic pass. After a measurement experiment lands, the next runner
+should usually consume that signal with an implementation, rejection, or
+direction cleanup rather than adding another diagnostic layer.
+
+Permanent profiling code has a high bar. Keep a counter, benchmark, or Tracelite
+profile lane only when it will be reused by multiple future experiments, guards
+a release-facing regression risk, or replaces a weaker legacy measurement path.
+Otherwise, preserve the insight in the experiment writeup and `signals.json`,
+then remove the local scaffolding before opening the PR.
 
 - Use focused benchmarks when they better isolate the target path.
 - Use multi-run comparisons when measuring small effects.
