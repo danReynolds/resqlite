@@ -403,6 +403,8 @@ final class Database {
     }
 
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterHandle(response.writerHandleUs);
+    ProfileCounters.recordWriterDirty(response.writerDirtyUs);
     streamEngine.onDependencyChanges(
       response.modifications,
       traceCorrelationId: correlationId,
@@ -468,6 +470,8 @@ final class Database {
 
     if (response != null) {
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterHandle(response.writerHandleUs);
+      ProfileCounters.recordWriterDirty(response.writerDirtyUs);
       streamEngine.onDependencyChanges(
         response.modifications,
         traceCorrelationId: correlationId,

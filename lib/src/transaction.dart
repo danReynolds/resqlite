@@ -75,6 +75,8 @@ final class Transaction {
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.execute(sql, parameters, correlationId);
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterHandle(response.writerHandleUs);
+      ProfileCounters.recordWriterDirty(response.writerDirtyUs);
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -86,6 +88,8 @@ final class Transaction {
       endArgs: (response) => [response.result.affectedRows],
     );
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterHandle(response.writerHandleUs);
+    ProfileCounters.recordWriterDirty(response.writerDirtyUs);
     return response.result;
   }
 
@@ -105,6 +109,7 @@ final class Transaction {
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.select(sql, parameters, correlationId);
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterHandle(response.writerHandleUs);
       return response.rows;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -116,6 +121,7 @@ final class Transaction {
       endArgs: (response) => [response.rows.length],
     );
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterHandle(response.writerHandleUs);
     return response.rows;
   }
 
@@ -150,6 +156,8 @@ final class Transaction {
       );
       if (response != null) {
         ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+        ProfileCounters.recordWriterHandle(response.writerHandleUs);
+        ProfileCounters.recordWriterDirty(response.writerDirtyUs);
       }
       return;
     }
@@ -167,6 +175,8 @@ final class Transaction {
     );
     if (response != null) {
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterHandle(response.writerHandleUs);
+      ProfileCounters.recordWriterDirty(response.writerDirtyUs);
     }
   }
 

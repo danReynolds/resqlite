@@ -6,6 +6,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -55,11 +56,26 @@ final class Writer {
     final port = RawReceivePort();
     final completer = Completer<T>();
     port.handler = (Object? response) {
+      // Times the main-isolate writer reply handler chain — port close,
+      // exception unwrap, completer.complete — and aggregates into
+      // ProfileCounters.mainWriterReplyUs.
+      //
+      // EXP-149: splits exp 147's residual writer/request bucket so the
+      // next dispatch-area experiment can target the largest sub-bucket.
+      // The downstream `await` continuation that consumes the completed
+      // future runs as a microtask AFTER this handler returns, so this
+      // counter scopes only the synchronous reply-completion work.
+      final replySw = kProfileMode ? (Stopwatch()..start()) : null;
       port.close();
       if (response is ResqliteException) {
         completer.completeError(response);
       } else {
         completer.complete(response as T);
+      }
+      if (replySw != null) {
+        replySw.stop();
+        ProfileCounters.mainWriterReplyUs += replySw.elapsedMicroseconds;
+        ProfileCounters.mainWriterReplyCount++;
       }
     };
     sendPort.send(build(port.sendPort));
@@ -191,6 +207,8 @@ final class Writer {
           CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterHandle(response.writerHandleUs);
+    ProfileCounters.recordWriterDirty(response.writerDirtyUs);
 
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(

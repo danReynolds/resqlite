@@ -89,6 +89,54 @@ class ProfileCounters {
     writerSqliteCount++;
   }
 
+  /// Cumulative microseconds spent inside the writer-isolate per-request
+  /// handler body — the full wall from message receipt to response send.
+  /// Includes [writerSqliteUs] plus [writerDirtyUs] plus the writer-side
+  /// reply send. Subtracting the sub-buckets gives the "writer reply send"
+  /// share of residual wall.
+  ///
+  /// Added by [EXP-149](../../experiments/149-residual-writer-wall-split.md)
+  /// to split exp 147's residual writer/request bucket into named pieces.
+  static int writerHandleUs = 0;
+  static int writerHandleCount = 0;
+
+  /// Adds writer-isolate per-request handler wall time to the profile
+  /// snapshot. See [recordWriterSqlite] for the call-site pattern.
+  static void recordWriterHandle(int handleUs) {
+    if (!kProfileMode) return;
+    writerHandleUs += handleUs;
+    writerHandleCount++;
+  }
+
+  /// Cumulative microseconds spent inside the writer-isolate
+  /// `getDirtyTableDependencies(...)` call — the per-write dirty-set
+  /// harvest path that runs after the SQLite call returns.
+  /// Aggregated through write responses analogous to [writerSqliteUs].
+  ///
+  /// Added by [EXP-149](../../experiments/149-residual-writer-wall-split.md).
+  static int writerDirtyUs = 0;
+  static int writerDirtyCount = 0;
+
+  /// Adds writer-isolate dirty-set harvest wall time to the profile snapshot.
+  static void recordWriterDirty(int dirtyUs) {
+    if (!kProfileMode) return;
+    writerDirtyUs += dirtyUs;
+    writerDirtyCount++;
+  }
+
+  /// Cumulative microseconds spent inside the main-isolate writer reply
+  /// handler — the `port.handler` body in `Writer._request<T>` that
+  /// closes the reply port and completes the request's `Completer<T>`.
+  /// Analogous to [completionHandlerUs] but for the writer side: every
+  /// `db.execute(...)` / `db.executeBatch(...)` / `tx.*` round-trip
+  /// increments it once.
+  ///
+  /// Added by [EXP-149](../../experiments/149-residual-writer-wall-split.md)
+  /// to size "main-isolate request resolution" inside exp 147's residual
+  /// writer/request bucket.
+  static int mainWriterReplyUs = 0;
+  static int mainWriterReplyCount = 0;
+
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
   /// currently available for dispatch - for example, when every worker
   /// was busy or when workers were temporarily unavailable during
@@ -179,6 +227,12 @@ class ProfileCounters {
     'intersection_entries': intersectionEntries,
     'writer_sqlite_us': writerSqliteUs,
     'writer_sqlite_count': writerSqliteCount,
+    'writer_handle_us': writerHandleUs,
+    'writer_handle_count': writerHandleCount,
+    'writer_dirty_us': writerDirtyUs,
+    'writer_dirty_count': writerDirtyCount,
+    'main_writer_reply_us': mainWriterReplyUs,
+    'main_writer_reply_count': mainWriterReplyCount,
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
@@ -212,6 +266,12 @@ class ProfileCounters {
     intersectionEntries = 0;
     writerSqliteUs = 0;
     writerSqliteCount = 0;
+    writerHandleUs = 0;
+    writerHandleCount = 0;
+    writerDirtyUs = 0;
+    writerDirtyCount = 0;
+    mainWriterReplyUs = 0;
+    mainWriterReplyCount = 0;
     dispatcherParkedTotal = 0;
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;
