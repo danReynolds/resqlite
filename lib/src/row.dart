@@ -1,5 +1,7 @@
 import 'dart:collection';
 
+const _identityLookupMaxColumns = 32;
+
 /// Column metadata shared across all rows in a [ResultSet].
 ///
 /// Created once per query and reused by every [Row]. Contains the column
@@ -20,8 +22,10 @@ final class RowSchema {
 
   /// Returns the column index for [name], or -1 if not found.
   int indexOf(String name) {
-    for (var i = 0; i < names.length; i++) {
-      if (identical(names[i], name)) return i;
+    if (names.length <= _identityLookupMaxColumns) {
+      for (var i = 0; i < names.length; i++) {
+        if (identical(names[i], name)) return i;
+      }
     }
     return _indexByName[name] ?? -1;
   }

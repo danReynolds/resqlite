@@ -28,7 +28,8 @@ lookup for `Row.operator[]` and `containsKey`.
 ## Hypothesis
 
 Use a schema-name identity fast path plus a `HashMap<String, int>` fallback for
-`RowSchema.indexOf`.
+`RowSchema.indexOf`, but only on schemas where a short identity scan stays
+cheap.
 
 This should reduce main-isolate full-consumption cost without changing the
 public `List<Row>` / `Map<String, Object?>` surface. Accept for review if
@@ -39,8 +40,8 @@ per select and would expose any construction-cost regression.
 ## Approach
 
 `RowSchema.indexOf` now first checks whether the lookup key is one of the
-schema's own column-name objects by identity. That catches the common
-full-consumption pattern:
+schema's own column-name objects by identity when the schema has at most 32
+columns. That catches the common full-consumption pattern:
 
 ```dart
 for (final key in row.keys) {
@@ -48,10 +49,17 @@ for (final key in row.keys) {
 }
 ```
 
-When the caller supplies an equal but non-identical string, the method falls
-back to a private `HashMap<String, int>` index. Query column order remains
-stored in `RowSchema.names`; the private lookup map does not need insertion
-order. No public API changes and no result transport changes are introduced.
+When the caller supplies an equal but non-identical string, or when the schema
+is wider than 32 columns, the method falls back to a private `HashMap<String,
+int>` index. Query column order remains stored in `RowSchema.names`; the
+private lookup map does not need insertion order. No public API changes and no
+result transport changes are introduced.
+
+A local width sweep showed the identity scan winning through 32 columns and
+losing by 48 columns on this machine. The repo's standard schema is 6 columns,
+the row facade benchmark is 8 columns, and the release-facing wide schema is 20
+columns, so the guard preserves the measured win while avoiding the obvious
+downside for unusually wide selects.
 
 An earlier sub-candidate tried a custom `ResultSet` iterator. It did not hold up
 under paired `select_maps` runs, so that code was removed before this PR.
@@ -62,7 +70,7 @@ Focused paired runs compared `origin/main` at `c14bbbd` against the candidate
 branch in fresh worktrees with generated Drift files.
 
 `row_map_facade` isolates `Row` map operations. The winning candidate was the
-combined identity fast path plus `HashMap` fallback:
+combined `<= 32` column identity fast path plus `HashMap` fallback:
 
 | Case | Baseline row median | Candidate row median | Delta |
 |---|---:|---:|---:|
@@ -109,7 +117,9 @@ the intended lookup path moved.
 ## Future Notes
 
 Do not reopen larger result-shape changes from this result alone. The win is
-specific to the private schema index used by the current `Row` facade. New
+specific to the private schema index used by the current `Row` facade. The
+identity scan is intentionally capped at 32 columns; revisit that threshold only
+with a width sweep and a full-consumption benchmark for wider schemas. New
 result-transfer experiments should still prove full consumer cost, not just
 worker transfer or decode setup.
 
