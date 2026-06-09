@@ -1,7 +1,7 @@
 // ignore_for_file: avoid_print
 import 'dart:collection';
 
-import '../../lib/resqlite.dart';
+import 'package:resqlite/resqlite.dart';
 
 import '../shared/config.dart';
 import '../shared/stats.dart';
@@ -37,7 +37,10 @@ void main() {
     'Canada',
   ];
   final row = ResultSet(values, schema, 1)[0];
-  final map = LinkedHashMap<String, Object?>.fromIterables(schema.names, values);
+  final map = LinkedHashMap<String, Object?>.fromIterables(
+    schema.names,
+    values,
+  );
 
   final cases = <_Case>[
     _Case('hot lookup', 200000),
@@ -67,18 +70,12 @@ void main() {
 
     for (var i = 0; i < defaultIterations; i++) {
       final swRow = Stopwatch()..start();
-      _runInner(
-        testCase.innerLoops,
-        () => _runRowCase(testCase.label, row),
-      );
+      _runInner(testCase.innerLoops, () => _runRowCase(testCase.label, row));
       swRow.stop();
       rowTiming.recordWallOnly(swRow.elapsedMicroseconds);
 
       final swMap = Stopwatch()..start();
-      _runInner(
-        testCase.innerLoops,
-        () => _runMapCase(testCase.label, map),
-      );
+      _runInner(testCase.innerLoops, () => _runMapCase(testCase.label, map));
       swMap.stop();
       mapTiming.recordWallOnly(swMap.elapsedMicroseconds);
     }
