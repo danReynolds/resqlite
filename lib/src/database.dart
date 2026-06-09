@@ -402,7 +402,12 @@ final class Database {
       );
     }
 
-    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterTimings(
+      sqliteUs: response.writerSqliteUs,
+      dirtyHarvestUs: response.writerDirtyHarvestUs,
+      dirtyHarvestCount: response.writerDirtyHarvestCount,
+      handlerUs: response.writerHandlerUs,
+    );
     streamEngine.onDependencyChanges(
       response.modifications,
       traceCorrelationId: correlationId,
@@ -467,7 +472,12 @@ final class Database {
     }
 
     if (response != null) {
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterTimings(
+        sqliteUs: response.writerSqliteUs,
+        dirtyHarvestUs: response.writerDirtyHarvestUs,
+        dirtyHarvestCount: response.writerDirtyHarvestCount,
+        handlerUs: response.writerHandlerUs,
+      );
       streamEngine.onDependencyChanges(
         response.modifications,
         traceCorrelationId: correlationId,

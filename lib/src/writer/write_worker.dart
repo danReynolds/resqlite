@@ -100,26 +100,50 @@ final class ExecuteResponse {
     this.result,
     this.modifications, {
     this.writerSqliteUs = 0,
+    this.writerDirtyHarvestUs = 0,
+    this.writerDirtyHarvestCount = 0,
+    this.writerHandlerUs = 0,
   });
 
   final WriteResult result;
   final TableDependencies modifications;
   final int writerSqliteUs;
+  final int writerDirtyHarvestUs;
+  final int writerDirtyHarvestCount;
+  final int writerHandlerUs;
 }
 
 /// Response to [QueryRequest] (transaction reads).
 final class QueryResponse {
-  const QueryResponse(this.rows, {this.writerSqliteUs = 0});
+  const QueryResponse(
+    this.rows, {
+    this.writerSqliteUs = 0,
+    this.writerDirtyHarvestUs = 0,
+    this.writerDirtyHarvestCount = 0,
+    this.writerHandlerUs = 0,
+  });
   final List<Map<String, Object?>> rows;
   final int writerSqliteUs;
+  final int writerDirtyHarvestUs;
+  final int writerDirtyHarvestCount;
+  final int writerHandlerUs;
 }
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.modifications, {this.writerSqliteUs = 0});
+  const BatchResponse(
+    this.modifications, {
+    this.writerSqliteUs = 0,
+    this.writerDirtyHarvestUs = 0,
+    this.writerDirtyHarvestCount = 0,
+    this.writerHandlerUs = 0,
+  });
 
   final TableDependencies modifications;
   final int writerSqliteUs;
+  final int writerDirtyHarvestUs;
+  final int writerDirtyHarvestCount;
+  final int writerHandlerUs;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,21 +276,34 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
-  final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+  final writerSqliteUs = _stopProfileTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
+  final dirtySw = kProfileMode && state.txDepth == 0
+      ? (Stopwatch()..start())
+      : null;
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
+  final writerDirtyHarvestUs = _stopProfileTimer(dirtySw);
   msg.replyPort.send(
-    ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
+    ExecuteResponse(
+      result,
+      modifications,
+      writerSqliteUs: writerSqliteUs,
+      writerDirtyHarvestUs: writerDirtyHarvestUs,
+      writerDirtyHarvestCount: dirtySw == null ? 0 : 1,
+      writerHandlerUs: _stopProfileTimer(handlerSw),
+    ),
   );
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
@@ -275,17 +312,24 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     msg.replyPort.send(
       BatchResponse(
         TableDependencies.none,
-        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+        writerSqliteUs: _stopProfileTimer(sqliteSw),
+        writerHandlerUs: _stopProfileTimer(handlerSw),
       ),
     );
   } else {
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    final writerSqliteUs = _stopProfileTimer(sqliteSw);
+    final dirtySw = kProfileMode ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    final writerDirtyHarvestUs = _stopProfileTimer(dirtySw);
     msg.replyPort.send(
       BatchResponse(
-        getDirtyTableDependencies(state.dbHandle),
+        modifications,
         writerSqliteUs: writerSqliteUs,
+        writerDirtyHarvestUs: writerDirtyHarvestUs,
+        writerDirtyHarvestCount: 1,
+        writerHandlerUs: _stopProfileTimer(handlerSw),
       ),
     );
   }
@@ -294,6 +338,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
 /// Transaction-scoped read. Runs on the writer connection so uncommitted
 /// writes from earlier statements in the same transaction are visible.
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqlNative = cachedSqlUtf8(msg.sql);
   final paramsNative = allocateParams(msg.params);
@@ -315,7 +360,8 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     msg.replyPort.send(
       QueryResponse(
         ResultSet(raw.values, raw.schema, raw.rowCount),
-        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+        writerSqliteUs: _stopProfileTimer(sqliteSw),
+        writerHandlerUs: _stopProfileTimer(handlerSw),
       ),
     );
   } finally {
@@ -364,6 +410,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
   // Contract: after handling this request (success or failure), txDepth
   // is reduced by exactly one and the corresponding SQLite scope is no
   // longer active. The next request sees a predictable state.
+  final handlerSw = kProfileMode ? (Stopwatch()..start()) : null;
   final newDepth = state.txDepth - 1;
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   if (newDepth == 0) {
@@ -386,12 +433,18 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         sqliteCode: rc,
       );
     }
-    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    final writerSqliteUs = _stopProfileTimer(sqliteSw);
     state.txDepth = newDepth;
+    final dirtySw = kProfileMode ? (Stopwatch()..start()) : null;
+    final modifications = getDirtyTableDependencies(state.dbHandle);
+    final writerDirtyHarvestUs = _stopProfileTimer(dirtySw);
     msg.replyPort.send(
       BatchResponse(
-        getDirtyTableDependencies(state.dbHandle),
+        modifications,
         writerSqliteUs: writerSqliteUs,
+        writerDirtyHarvestUs: writerDirtyHarvestUs,
+        writerDirtyHarvestCount: 1,
+        writerHandlerUs: _stopProfileTimer(handlerSw),
       ),
     );
   } else {
@@ -429,12 +482,16 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
         sqliteCode: rc,
       );
     }
-    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    final writerSqliteUs = _stopProfileTimer(sqliteSw);
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
     msg.replyPort.send(
-      BatchResponse(TableDependencies.none, writerSqliteUs: writerSqliteUs),
+      BatchResponse(
+        TableDependencies.none,
+        writerSqliteUs: writerSqliteUs,
+        writerHandlerUs: _stopProfileTimer(handlerSw),
+      ),
     );
   }
 }
@@ -486,7 +543,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
   msg.replyPort.send(true);
 }
 
-int _stopSqliteTimer(Stopwatch? sw) {
+int _stopProfileTimer(Stopwatch? sw) {
   if (sw == null) return 0;
   sw.stop();
   return sw.elapsedMicroseconds;

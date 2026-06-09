@@ -79,14 +79,45 @@ class ProfileCounters {
   static int writerSqliteUs = 0;
   static int writerSqliteCount = 0;
 
-  /// Adds writer-isolate SQLite-facing wall time to the profile snapshot.
+  /// Cumulative microseconds spent inside dirty table/column harvesting
+  /// on the writer isolate after a successful write/outer commit.
+  static int writerDirtyHarvestUs = 0;
+  static int writerDirtyHarvestCount = 0;
+
+  /// Cumulative writer-isolate handler wall from request dispatch through
+  /// response construction, stopping just before the response is sent.
+  static int writerHandlerUs = 0;
+  static int writerHandlerCount = 0;
+
+  /// Cumulative main-isolate writer request round-trip wall, from sending
+  /// a writer request until the response handler receives the reply.
+  static int writerRequestUs = 0;
+  static int writerRequestCount = 0;
+
+  /// Adds writer-isolate wall timing to the profile snapshot.
   ///
   /// Use this helper instead of duplicating the profile-mode gate at every
   /// writer-response call site.
-  static void recordWriterSqlite(int sqliteUs) {
+  static void recordWriterTimings({
+    required int sqliteUs,
+    required int dirtyHarvestUs,
+    required int dirtyHarvestCount,
+    required int handlerUs,
+  }) {
     if (!kProfileMode) return;
     writerSqliteUs += sqliteUs;
     writerSqliteCount++;
+    writerDirtyHarvestUs += dirtyHarvestUs;
+    writerDirtyHarvestCount += dirtyHarvestCount;
+    writerHandlerUs += handlerUs;
+    writerHandlerCount++;
+  }
+
+  /// Adds main-isolate writer request round-trip wall to the profile snapshot.
+  static void recordWriterRequest(int requestUs) {
+    if (!kProfileMode) return;
+    writerRequestUs += requestUs;
+    writerRequestCount++;
   }
 
   /// Times a `ReaderPool._dispatch` caller parked because no worker was
@@ -179,6 +210,12 @@ class ProfileCounters {
     'intersection_entries': intersectionEntries,
     'writer_sqlite_us': writerSqliteUs,
     'writer_sqlite_count': writerSqliteCount,
+    'writer_dirty_harvest_us': writerDirtyHarvestUs,
+    'writer_dirty_harvest_count': writerDirtyHarvestCount,
+    'writer_handler_us': writerHandlerUs,
+    'writer_handler_count': writerHandlerCount,
+    'writer_request_us': writerRequestUs,
+    'writer_request_count': writerRequestCount,
     'dispatcher_parked_total': dispatcherParkedTotal,
     'dispatcher_wake_retry_total': dispatcherWakeRetryTotal,
     'dispatcher_max_parked_concurrent': dispatcherMaxParkedConcurrent,
@@ -212,6 +249,12 @@ class ProfileCounters {
     intersectionEntries = 0;
     writerSqliteUs = 0;
     writerSqliteCount = 0;
+    writerDirtyHarvestUs = 0;
+    writerDirtyHarvestCount = 0;
+    writerHandlerUs = 0;
+    writerHandlerCount = 0;
+    writerRequestUs = 0;
+    writerRequestCount = 0;
     dispatcherParkedTotal = 0;
     dispatcherWakeRetryTotal = 0;
     dispatcherMaxParkedConcurrent = 0;

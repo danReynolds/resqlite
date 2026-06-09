@@ -22,6 +22,12 @@ void main() {
       'intersection_entries': 0,
       'writer_sqlite_us': 0,
       'writer_sqlite_count': 0,
+      'writer_dirty_harvest_us': 0,
+      'writer_dirty_harvest_count': 0,
+      'writer_handler_us': 0,
+      'writer_handler_count': 0,
+      'writer_request_us': 0,
+      'writer_request_count': 0,
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
@@ -42,6 +48,12 @@ void main() {
       'intersection_entries': 0,
       'writer_sqlite_us': 0,
       'writer_sqlite_count': 0,
+      'writer_dirty_harvest_us': 0,
+      'writer_dirty_harvest_count': 0,
+      'writer_handler_us': 0,
+      'writer_handler_count': 0,
+      'writer_request_us': 0,
+      'writer_request_count': 0,
       'dispatcher_parked_total': 0,
       'dispatcher_wake_retry_total': 0,
       'dispatcher_max_parked_concurrent': 0,
@@ -74,14 +86,32 @@ void main() {
   test('writer sqlite counters round-trip through snapshot/diff/reset', () {
     ProfileCounters.writerSqliteUs = 420;
     ProfileCounters.writerSqliteCount = 12;
+    ProfileCounters.writerDirtyHarvestUs = 80;
+    ProfileCounters.writerDirtyHarvestCount = 10;
+    ProfileCounters.writerHandlerUs = 640;
+    ProfileCounters.writerHandlerCount = 12;
+    ProfileCounters.writerRequestUs = 900;
+    ProfileCounters.writerRequestCount = 12;
 
     final snap = ProfileCounters.snapshot();
     expect(snap['writer_sqlite_us'], 420);
     expect(snap['writer_sqlite_count'], 12);
+    expect(snap['writer_dirty_harvest_us'], 80);
+    expect(snap['writer_dirty_harvest_count'], 10);
+    expect(snap['writer_handler_us'], 640);
+    expect(snap['writer_handler_count'], 12);
+    expect(snap['writer_request_us'], 900);
+    expect(snap['writer_request_count'], 12);
 
     ProfileCounters.reset();
     expect(ProfileCounters.writerSqliteUs, 0);
     expect(ProfileCounters.writerSqliteCount, 0);
+    expect(ProfileCounters.writerDirtyHarvestUs, 0);
+    expect(ProfileCounters.writerDirtyHarvestCount, 0);
+    expect(ProfileCounters.writerHandlerUs, 0);
+    expect(ProfileCounters.writerHandlerCount, 0);
+    expect(ProfileCounters.writerRequestUs, 0);
+    expect(ProfileCounters.writerRequestCount, 0);
   });
 
   test('dispatcher park counters round-trip through snapshot/diff/reset', () {

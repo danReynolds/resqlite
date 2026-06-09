@@ -6,6 +6,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -54,7 +55,12 @@ final class Writer {
     final sendPort = await _workerPort.future;
     final port = RawReceivePort();
     final completer = Completer<T>();
+    Stopwatch? requestSw;
     port.handler = (Object? response) {
+      if (requestSw != null) {
+        requestSw.stop();
+        ProfileCounters.recordWriterRequest(requestSw.elapsedMicroseconds);
+      }
       port.close();
       if (response is ResqliteException) {
         completer.completeError(response);
@@ -62,6 +68,7 @@ final class Writer {
         completer.complete(response as T);
       }
     };
+    requestSw = kProfileMode ? (Stopwatch()..start()) : null;
     sendPort.send(build(port.sendPort));
     return completer.future;
   }
@@ -190,7 +197,12 @@ final class Writer {
       (replyPort) =>
           CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
-    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterTimings(
+      sqliteUs: response.writerSqliteUs,
+      dirtyHarvestUs: response.writerDirtyHarvestUs,
+      dirtyHarvestCount: response.writerDirtyHarvestCount,
+      handlerUs: response.writerHandlerUs,
+    );
 
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(

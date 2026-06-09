@@ -79,6 +79,12 @@ abstract final class TraceliteResqliteCounters {
   static const int profileCompletionHandlerCount = 0x414C;
   static const int profileStreamEmitUs = 0x414D;
   static const int profileStreamEmitCount = 0x414E;
+  static const int profileWriterDirtyHarvestUs = 0x4160;
+  static const int profileWriterDirtyHarvestCount = 0x4161;
+  static const int profileWriterHandlerUs = 0x4162;
+  static const int profileWriterHandlerCount = 0x4163;
+  static const int profileWriterRequestUs = 0x4164;
+  static const int profileWriterRequestCount = 0x4165;
   static const int fanoutWriterUs = 0x4150;
   static const int fanoutYieldUs = 0x4151;
   static const int fanoutTotalUs = 0x4152;
@@ -154,6 +160,18 @@ const Map<int, String> _spanNames = {
       'resqlite.profile.stream_emit_us',
   TraceliteResqliteCounters.profileStreamEmitCount:
       'resqlite.profile.stream_emit_count',
+  TraceliteResqliteCounters.profileWriterDirtyHarvestUs:
+      'resqlite.profile.writer_dirty_harvest_us',
+  TraceliteResqliteCounters.profileWriterDirtyHarvestCount:
+      'resqlite.profile.writer_dirty_harvest_count',
+  TraceliteResqliteCounters.profileWriterHandlerUs:
+      'resqlite.profile.writer_handler_us',
+  TraceliteResqliteCounters.profileWriterHandlerCount:
+      'resqlite.profile.writer_handler_count',
+  TraceliteResqliteCounters.profileWriterRequestUs:
+      'resqlite.profile.writer_request_us',
+  TraceliteResqliteCounters.profileWriterRequestCount:
+      'resqlite.profile.writer_request_count',
   TraceliteResqliteCounters.fanoutWriterUs: 'resqlite.fanout.writer_us',
   TraceliteResqliteCounters.fanoutYieldUs: 'resqlite.fanout.yield_us',
   TraceliteResqliteCounters.fanoutTotalUs: 'resqlite.fanout.total_us',
@@ -184,6 +202,14 @@ const Map<String, int> _profileCounterIds = {
       TraceliteResqliteCounters.profileCompletionHandlerCount,
   'stream_emit_us': TraceliteResqliteCounters.profileStreamEmitUs,
   'stream_emit_count': TraceliteResqliteCounters.profileStreamEmitCount,
+  'writer_dirty_harvest_us':
+      TraceliteResqliteCounters.profileWriterDirtyHarvestUs,
+  'writer_dirty_harvest_count':
+      TraceliteResqliteCounters.profileWriterDirtyHarvestCount,
+  'writer_handler_us': TraceliteResqliteCounters.profileWriterHandlerUs,
+  'writer_handler_count': TraceliteResqliteCounters.profileWriterHandlerCount,
+  'writer_request_us': TraceliteResqliteCounters.profileWriterRequestUs,
+  'writer_request_count': TraceliteResqliteCounters.profileWriterRequestCount,
 };
 
 typedef _AttachNative = Int32 Function(Pointer<Utf8>);

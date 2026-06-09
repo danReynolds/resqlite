@@ -74,7 +74,12 @@ final class Transaction {
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.execute(sql, parameters, correlationId);
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterTimings(
+        sqliteUs: response.writerSqliteUs,
+        dirtyHarvestUs: response.writerDirtyHarvestUs,
+        dirtyHarvestCount: response.writerDirtyHarvestCount,
+        handlerUs: response.writerHandlerUs,
+      );
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -85,7 +90,12 @@ final class Transaction {
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.result.affectedRows],
     );
-    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterTimings(
+      sqliteUs: response.writerSqliteUs,
+      dirtyHarvestUs: response.writerDirtyHarvestUs,
+      dirtyHarvestCount: response.writerDirtyHarvestCount,
+      handlerUs: response.writerHandlerUs,
+    );
     return response.result;
   }
 
@@ -104,7 +114,12 @@ final class Transaction {
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.select(sql, parameters, correlationId);
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterTimings(
+        sqliteUs: response.writerSqliteUs,
+        dirtyHarvestUs: response.writerDirtyHarvestUs,
+        dirtyHarvestCount: response.writerDirtyHarvestCount,
+        handlerUs: response.writerHandlerUs,
+      );
       return response.rows;
     }
     final sqlId = TraceliteProfile.internString(sql);
@@ -115,7 +130,12 @@ final class Transaction {
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.rows.length],
     );
-    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    ProfileCounters.recordWriterTimings(
+      sqliteUs: response.writerSqliteUs,
+      dirtyHarvestUs: response.writerDirtyHarvestUs,
+      dirtyHarvestCount: response.writerDirtyHarvestCount,
+      handlerUs: response.writerHandlerUs,
+    );
     return response.rows;
   }
 
@@ -149,7 +169,12 @@ final class Transaction {
         traceCorrelationId: correlationId,
       );
       if (response != null) {
-        ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+        ProfileCounters.recordWriterTimings(
+          sqliteUs: response.writerSqliteUs,
+          dirtyHarvestUs: response.writerDirtyHarvestUs,
+          dirtyHarvestCount: response.writerDirtyHarvestCount,
+          handlerUs: response.writerHandlerUs,
+        );
       }
       return;
     }
@@ -166,7 +191,12 @@ final class Transaction {
       beginArgs: [sqlId, paramCount, paramSets.length],
     );
     if (response != null) {
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      ProfileCounters.recordWriterTimings(
+        sqliteUs: response.writerSqliteUs,
+        dirtyHarvestUs: response.writerDirtyHarvestUs,
+        dirtyHarvestCount: response.writerDirtyHarvestCount,
+        handlerUs: response.writerHandlerUs,
+      );
     }
   }
 
