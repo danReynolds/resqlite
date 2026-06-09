@@ -15,11 +15,12 @@ import 'package:resqlite/resqlite.dart' as resqlite;
 ///   dart run benchmark/experiments/batch_param_flatten.dart
 ///   dart run benchmark/experiments/batch_param_flatten.dart --iterations=80
 ///   dart run benchmark/experiments/batch_param_flatten.dart --text-mode=unicode
+///   dart run benchmark/experiments/batch_param_flatten.dart --text-mode=nullable-ascii
 const _defaultWarmup = 8;
 const _defaultIterations = 30;
 const _batchSizes = [100, 1000, 10000];
 const _paramWidths = [2, 8, 20];
-const _textModes = {'ascii', 'unicode', 'emoji', 'nul'};
+const _textModes = {'ascii', 'unicode', 'emoji', 'nul', 'nullable-ascii'};
 
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
@@ -137,11 +138,12 @@ Object? _valueFor(int row, int col, String textMode) => switch (col % 4) {
   _ => Uint8List.fromList([row & 0xff, (row >> 8) & 0xff, col & 0xff, 0xA5]),
 };
 
-String _textValueFor(int row, int col, String textMode) => switch (textMode) {
+Object? _textValueFor(int row, int col, String textMode) => switch (textMode) {
   'ascii' => 'item_${row}_$col',
   'unicode' => '項目_${row}_列_${col}_東京',
   'emoji' => 'item_${row}_${col}_🎉🚀',
   'nul' => 'item_${row}\u0000$col',
+  'nullable-ascii' => row == 0 ? null : 'item_${row}_$col',
   _ => throw StateError('unsupported text mode $textMode'),
 };
 
