@@ -64,10 +64,17 @@ final _specs = <_StreamSpec>[
     _convParam,
   ),
   _StreamSpec(
-    'conversation list (DESC + LIMIT)',
+    'conversation list (DESC + LIMIT, no tiebreak)',
     'conversations',
     'SELECT id, last_msg_at FROM conversations '
         'ORDER BY last_msg_at DESC LIMIT 30',
+    _noParams,
+  ),
+  _StreamSpec(
+    'conversation list (DESC + LIMIT, pk tiebreak)',
+    'conversations',
+    'SELECT id, last_msg_at FROM conversations '
+        'ORDER BY last_msg_at DESC, id DESC LIMIT 30',
     _noParams,
   ),
   _StreamSpec(
@@ -114,12 +121,27 @@ Future<void> main() async {
 
   await _setupSchema(db);
 
-  // Direct classifier verdict per spec, against the real table_info.
-  final verdicts = <String, bool>{};
+  // Direct classifier verdict per spec, against the real table metadata.
+  final verdicts = <String, String>{};
   for (final spec in _specs) {
     final info = await db.select('PRAGMA table_info("${spec.table}")');
-    final shape = classifyIvmQuery(spec.sql, spec.paramsFor(0), spec.table, info);
-    verdicts[spec.label] = shape != null;
+    final master = await db.select(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+      [spec.table],
+    );
+    final shape = classifyIvmQuery(
+      spec.sql,
+      spec.paramsFor(0),
+      spec.table,
+      info,
+      createSql: master.isEmpty ? null : master.first['sql'] as String?,
+    );
+    verdicts[spec.label] = switch (shape) {
+      null => 'no',
+      IvmFullShape(limit: final l) => l == null ? 'full' : 'windowed',
+      IvmSkipShape() => 'skip-only',
+      IvmAggregateShape() => 'aggregate',
+    };
   }
 
   // Install the stream mix and wait for initial emissions.
@@ -216,17 +238,22 @@ Future<void> main() async {
   for (final spec in _specs) {
     print(
       '| ${spec.label} | $_instancesPerSpec '
-      '| ${verdicts[spec.label]! ? 'yes' : 'no'} '
+      '| ${verdicts[spec.label]} '
       '| ${emissions[spec.label]} |',
     );
   }
-  final admittedSpecs = verdicts.values.where((v) => v).length;
+  final admittedSpecs = verdicts.values.where((v) => v != 'no').length;
   print('\nSpecs admitted: $admittedSpecs/${_specs.length} '
       '(${admittedSpecs * _instancesPerSpec}/${_specs.length * _instancesPerSpec} stream instances)');
   print('Burst wall: ${(sw.elapsedMicroseconds / 1000).toStringAsFixed(2)} ms '
       'for $_writeCount write ops (writes issue 1-2 statements each)');
   print('\nEngine admission counters (at registration):\n');
-  for (final key in ['ivm_admitted_total', 'ivm_rejected_total']) {
+  for (final key in [
+    'ivm_admitted_total',
+    'ivm_admitted_skip_total',
+    'ivm_admitted_agg_total',
+    'ivm_rejected_total',
+  ]) {
     print('- `$key`: ${admissionSnap[key]}');
   }
   print('\nEngine counters across the burst:\n');
@@ -234,6 +261,7 @@ Future<void> main() async {
     'ivm_skipped_total',
     'ivm_applied_total',
     'ivm_bail_total',
+    'ivm_hit_fallback_total',
     'invalidate_count',
     'completion_handler_count',
   ]) {

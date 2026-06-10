@@ -38,53 +38,116 @@ import 'row_deltas.dart';
 // Predicates
 // ---------------------------------------------------------------------------
 
+/// Predicate comparison op codes, pre-resolved at classification so the
+/// per-delta hot path never switches on strings.
+abstract final class IvmOp {
+  static const int eq = 0;
+  static const int lt = 1;
+  static const int le = 2;
+  static const int gt = 3;
+  static const int ge = 4;
+}
+
 final class IvmPredicate {
-  const IvmPredicate(this.columnIndex, this.op, this.value);
+  IvmPredicate(this.columnIndex, String op, this.value)
+    : opCode = switch (op) {
+        '=' => IvmOp.eq,
+        '<' => IvmOp.lt,
+        '<=' => IvmOp.le,
+        '>' => IvmOp.gt,
+        '>=' => IvmOp.ge,
+        _ => throw ArgumentError.value(op, 'op'),
+      };
 
   /// Table column index (cid from `PRAGMA table_info`).
   final int columnIndex;
 
-  /// One of `=`, `<`, `<=`, `>`, `>=` (`==` normalizes to `=`; only `=`
-  /// is admitted for TEXT values).
-  final String op;
+  /// [IvmOp] code; only [IvmOp.eq] is admitted for TEXT values.
+  final int opCode;
 
   /// Comparison constant: an [int], or a [String] (TEXT equality under
   /// verified BINARY collation). Resolved from a literal or the stream's
   /// fixed bind parameters at classification time.
   final Object value;
 
-  /// Evaluates the predicate against a delta cell. Returns null when the
-  /// comparison is unprovable (type mismatch with the admitted constant).
-  /// A NULL cell never matches, mirroring SQL comparison semantics.
-  bool? evaluate(Object? cell) {
-    if (cell == null) return false;
-    final value = this.value;
-    if (value is int) {
+  String get op => switch (opCode) {
+    IvmOp.eq => '=',
+    IvmOp.lt => '<',
+    IvmOp.le => '<=',
+    IvmOp.gt => '>',
+    _ => '>=',
+  };
+}
+
+/// Flattened predicate conjunction: the per-delta hot path reads parallel
+/// primitive arrays instead of walking object fields and switching on
+/// strings (per-miss evaluation is the single hottest IVM operation —
+/// every write x every admitted stream on the table runs it twice).
+final class IvmPredicateProgram {
+  IvmPredicateProgram(List<IvmPredicate> predicates)
+    : _columns = List<int>.generate(
+        predicates.length,
+        (i) => predicates[i].columnIndex,
+        growable: false,
+      ),
+      _ops = List<int>.generate(
+        predicates.length,
+        (i) => predicates[i].opCode,
+        growable: false,
+      ),
+      _intValues = List<int>.generate(
+        predicates.length,
+        (i) => predicates[i].value is int ? predicates[i].value as int : 0,
+        growable: false,
+      ),
+      _textValues = List<String?>.generate(
+        predicates.length,
+        (i) =>
+            predicates[i].value is String
+                ? predicates[i].value as String
+                : null,
+        growable: false,
+      );
+
+  final List<int> _columns;
+  final List<int> _ops;
+  final List<int> _intValues;
+  final List<String?> _textValues;
+
+  /// Evaluates the conjunction against table-indexed [values]. Returns
+  /// null when any term is unprovable (type mismatch). NULL cells never
+  /// match, mirroring SQL comparison semantics.
+  bool? evaluate(List<Object?> values) {
+    for (var i = 0; i < _columns.length; i++) {
+      final cell = values[_columns[i]];
+      final text = _textValues[i];
+      if (text != null) {
+        if (cell == null) return false;
+        if (cell is! String) return null;
+        if (cell != text) return false;
+        continue;
+      }
+      if (cell == null) return false;
       if (cell is! int) return null;
-      return switch (op) {
-        '=' => cell == value,
-        '<' => cell < value,
-        '<=' => cell <= value,
-        '>' => cell > value,
-        '>=' => cell >= value,
-        _ => null,
+      final v = _intValues[i];
+      final ok = switch (_ops[i]) {
+        IvmOp.eq => cell == v,
+        IvmOp.lt => cell < v,
+        IvmOp.le => cell <= v,
+        IvmOp.gt => cell > v,
+        _ => cell >= v,
       };
+      if (!ok) return false;
     }
-    // TEXT equality (admission guarantees op == '=').
-    if (cell is! String) return null;
-    return cell == value as String;
+    return true;
   }
 }
 
 /// Evaluates a predicate conjunction against table-indexed [values].
-/// Returns null when any term is unprovable.
+/// Returns null when any term is unprovable. (Test/diagnostic entry
+/// point; states use a pre-built [IvmPredicateProgram].)
 bool? evaluatePredicates(List<IvmPredicate> predicates, List<Object?> values) {
-  for (final pred in predicates) {
-    final match = pred.evaluate(values[pred.columnIndex]);
-    if (match == null) return null;
-    if (!match) return false;
-  }
-  return true;
+  return IvmPredicateProgram(predicates).evaluate(values);
 }
 
 // ---------------------------------------------------------------------------
@@ -786,10 +849,12 @@ sealed class IvmState {
 
 /// Tier 1.5 state: nothing cached; only proves misses.
 final class IvmSkipState extends IvmState {
-  IvmSkipState(this.shape);
+  IvmSkipState(this.shape) : _program = IvmPredicateProgram(shape.predicates);
 
   @override
   final IvmSkipShape shape;
+
+  final IvmPredicateProgram _program;
 
   /// [IvmOutcome.unchanged] when every delta row fails the predicate both
   /// before and after the write; [IvmOutcome.bail] otherwise (a hit or an
@@ -802,10 +867,10 @@ final class IvmSkipState extends IvmState {
       }
       final oldMatch = delta.oldValues == null
           ? false
-          : evaluatePredicates(shape.predicates, delta.oldValues!);
+          : _program.evaluate(delta.oldValues!);
       final newMatch = delta.newValues == null
           ? false
-          : evaluatePredicates(shape.predicates, delta.newValues!);
+          : _program.evaluate(delta.newValues!);
       if (oldMatch != false || newMatch != false) return IvmOutcome.bail;
     }
     return IvmOutcome.unchanged;
@@ -814,10 +879,18 @@ final class IvmSkipState extends IvmState {
 
 /// Fully-maintained rows (optionally a top-K window).
 final class IvmFullState extends IvmState {
-  IvmFullState(this.shape);
+  IvmFullState(this.shape) : _program = IvmPredicateProgram(shape.predicates);
 
   @override
   final IvmFullShape shape;
+
+  final IvmPredicateProgram _program;
+
+  /// Cached pks for O(1) presence checks on the (hot) proven-miss path.
+  Set<int>? _pks;
+
+  /// Guards concurrent writer-ordered cache builds after a bail.
+  bool buildInFlight = false;
 
   /// Maintained rows in admitted order. For windowed shapes this is the
   /// top-K (or the complete filtered set when it is smaller). `null`
@@ -857,6 +930,7 @@ final class IvmFullState extends IvmState {
     if (limit != null && newRows.length > limit) return false;
     rows = newRows;
     keys = newKeys;
+    _pks = {for (final (_, pk) in newKeys) pk};
     complete = limit == null || newRows.length < limit;
     return true;
   }
@@ -870,12 +944,14 @@ final class IvmFullState extends IvmState {
     var mutated = false;
     List<Map<String, Object?>> workRows = currentRows;
     List<(int, int)> workKeys = currentKeys;
+    Set<int> workPks = _pks!;
     final limit = shape.limit;
 
     void ensureMutable() {
       if (!mutated) {
         workRows = List<Map<String, Object?>>.of(workRows);
         workKeys = List<(int, int)>.of(workKeys);
+        workPks = Set<int>.of(workPks);
         mutated = true;
       }
     }
@@ -888,12 +964,8 @@ final class IvmFullState extends IvmState {
       List<Object?>? oldValues,
       List<Object?>? newValues,
     ) {
-      final pOldOrNull = hasOld
-          ? evaluatePredicates(shape.predicates, oldValues!)
-          : false;
-      final pNewOrNull = hasNew
-          ? evaluatePredicates(shape.predicates, newValues!)
-          : false;
+      final pOldOrNull = hasOld ? _program.evaluate(oldValues!) : false;
+      final pNewOrNull = hasNew ? _program.evaluate(newValues!) : false;
       if (pOldOrNull == null || pNewOrNull == null) return false;
       final pOld = pOldOrNull;
       final pNew = pNewOrNull;
@@ -917,7 +989,7 @@ final class IvmFullState extends IvmState {
       if (!pOld && !pNew) {
         // Proven miss — but a cached row with this pk means the cache is
         // out of sync with reality.
-        if (hasOld && _pkPresent(workRows, oldPk)) return false;
+        if (hasOld && workPks.contains(oldPk)) return false;
         return true;
       }
 
@@ -925,7 +997,7 @@ final class IvmFullState extends IvmState {
         // The row stays in the filtered set; it may move or patch.
         final foundIdx = oldIdx != null && oldIdx >= 0
             ? oldIdx
-            : _pkIndex(workRows, oldPk);
+            : (workPks.contains(oldPk) ? _pkIndex(workRows, oldPk) : -1);
         if (foundIdx < 0) {
           // Below an incomplete window before the write.
           if (limit == null || complete) return false;
@@ -940,6 +1012,7 @@ final class IvmFullState extends IvmState {
             ensureMutable,
             () => workRows,
             () => workKeys,
+            () => workPks,
             newKey!,
             newValues,
             limit,
@@ -954,6 +1027,7 @@ final class IvmFullState extends IvmState {
         ensureMutable();
         workRows.removeAt(foundIdx);
         workKeys.removeAt(foundIdx);
+        workPks.remove(oldPk);
         if (limit != null &&
             !complete &&
             workKeys.isNotEmpty &&
@@ -966,6 +1040,7 @@ final class IvmFullState extends IvmState {
         final insertAt = _insertionPoint(workKeys, newKey!);
         workRows.insert(insertAt, patched);
         workKeys.insert(insertAt, newKey);
+        workPks.add(newPk);
         return true;
       }
 
@@ -973,7 +1048,7 @@ final class IvmFullState extends IvmState {
         // Row leaves the filtered set.
         final foundIdx = oldIdx != null && oldIdx >= 0
             ? oldIdx
-            : _pkIndex(workRows, oldPk);
+            : (workPks.contains(oldPk) ? _pkIndex(workRows, oldPk) : -1);
         if (foundIdx < 0) {
           // Below the window of an incomplete windowed cache: invisible.
           if (limit != null && !complete) return true;
@@ -982,6 +1057,7 @@ final class IvmFullState extends IvmState {
         ensureMutable();
         workRows.removeAt(foundIdx);
         workKeys.removeAt(foundIdx);
+        workPks.remove(oldPk);
         if (limit != null && !complete && workRows.length < limit) {
           // The window lost a member and the replacement is unknown.
           return false;
@@ -990,7 +1066,7 @@ final class IvmFullState extends IvmState {
       }
 
       // Row enters the filtered set.
-      if (_pkPresent(workRows, newPk)) return false;
+      if (workPks.contains(newPk)) return false;
       if (limit != null && !complete) {
         final lastKey = workKeys.isEmpty ? null : workKeys.last;
         if (workKeys.length >= limit &&
@@ -1003,6 +1079,7 @@ final class IvmFullState extends IvmState {
         ensureMutable,
         () => workRows,
         () => workKeys,
+        () => workPks,
         newKey!,
         newValues!,
         limit,
@@ -1058,11 +1135,13 @@ final class IvmFullState extends IvmState {
     if (limit != null && complete && workRows.length > limit + 64) {
       workRows = workRows.sublist(0, limit);
       workKeys = workKeys.sublist(0, limit);
+      workPks = {for (final (_, pk) in workKeys) pk};
       complete = false;
     }
 
     rows = workRows;
     keys = workKeys;
+    _pks = workPks;
     return IvmOutcome.applied;
   }
 
@@ -1078,6 +1157,7 @@ final class IvmFullState extends IvmState {
     void Function() ensureMutable,
     List<Map<String, Object?>> Function() getRows,
     List<(int, int)> Function() getKeys,
+    Set<int> Function() workPksOf,
     (int, int) key,
     List<Object?> values,
     int? limit,
@@ -1090,10 +1170,12 @@ final class IvmFullState extends IvmState {
     final insertAt = _insertionPoint(keys, key);
     rows.insert(insertAt, inserted);
     keys.insert(insertAt, key);
+    workPksOf().add(key.$2);
     if (limit != null && !complete && rows.length > limit) {
       // The displaced row is no longer the window's business.
+      final removedKey = keys.removeLast();
       rows.removeLast();
-      keys.removeLast();
+      workPksOf().remove(removedKey.$2);
     }
     return true;
   }
@@ -1101,6 +1183,7 @@ final class IvmFullState extends IvmState {
   IvmOutcome _bail() {
     rows = null;
     keys = null;
+    _pks = null;
     return IvmOutcome.bail;
   }
 
@@ -1143,9 +1226,6 @@ final class IvmFullState extends IvmState {
     return idx >= 0 ? idx : -(idx + 1);
   }
 
-  bool _pkPresent(List<Map<String, Object?>> rows, int pk) =>
-      _pkIndex(rows, pk) >= 0;
-
   int _pkIndex(List<Map<String, Object?>> rows, int pk) {
     for (var i = 0; i < rows.length; i++) {
       if (rows[i][shape.pkOutputName] == pk) return i;
@@ -1156,10 +1236,13 @@ final class IvmFullState extends IvmState {
 
 /// Tier 3 state: exact aggregate values maintained from deltas.
 final class IvmAggregateState extends IvmState {
-  IvmAggregateState(this.shape);
+  IvmAggregateState(this.shape)
+    : _program = IvmPredicateProgram(shape.predicates);
 
   @override
   final IvmAggregateShape shape;
+
+  final IvmPredicateProgram _program;
 
   /// Whether the state has been seeded (from the entry's first result for
   /// COUNT(*)-only shapes, otherwise from the admission snapshot query).
@@ -1259,10 +1342,10 @@ final class IvmAggregateState extends IvmState {
       }
       final oldMatch = delta.oldValues == null
           ? false
-          : evaluatePredicates(shape.predicates, delta.oldValues!);
+          : _program.evaluate(delta.oldValues!);
       final newMatch = delta.newValues == null
           ? false
-          : evaluatePredicates(shape.predicates, delta.newValues!);
+          : _program.evaluate(delta.newValues!);
       if (oldMatch == null || newMatch == null) return _bail();
       if (oldMatch && !contribute(delta.oldValues!, -1)) return _bail();
       if (newMatch && !contribute(delta.newValues!, 1)) return _bail();
