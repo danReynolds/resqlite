@@ -386,7 +386,7 @@ final class Database {
         : null;
 
     Future<ExecuteResponse> write() =>
-        writer.locked(() => writer.execute(sql, parameters, correlationId));
+        writer.executePipelined(sql, parameters, correlationId);
 
     final ExecuteResponse response;
     if (correlationId == null) {
@@ -444,12 +444,10 @@ final class Database {
         ? TraceliteProfile.nextCorrelationId()
         : null;
 
-    Future<BatchResponse?> write() => writer.locked(
-      () => writer.executeBatch(
-        sql,
-        paramSets,
-        traceCorrelationId: correlationId,
-      ),
+    Future<BatchResponse?> write() => writer.executeBatchPipelined(
+      sql,
+      paramSets,
+      traceCorrelationId: correlationId,
     );
 
     final BatchResponse? response;

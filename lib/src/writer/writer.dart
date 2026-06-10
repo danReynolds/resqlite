@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:ffi';
 import 'dart:isolate';
 
@@ -11,8 +12,25 @@ import 'package:resqlite/src/writer/write_worker.dart';
 final class Writer {
   final StreamEngine _streamEngine;
 
-  final _workerPort = Completer<SendPort>();
+  /// Worker SendPort, cached once [spawn]'s handshake completes so the
+  /// request path never awaits an already-resolved future. `null` only
+  /// before spawn finishes and after [close].
+  SendPort? _sendPort;
   bool _closed = false;
+
+  /// Persistent reply port shared by every request.
+  ///
+  /// The writer isolate processes its port in FIFO order and sends exactly
+  /// one reply per request (handlers either reply or throw, and the
+  /// entrypoint converts throws into a reply), so replies arrive in request
+  /// order and a FIFO queue of completers is sufficient to match them to
+  /// callers. This replaces the previous per-request `RawReceivePort`,
+  /// removing a port allocate/register/close cycle from every write.
+  late final RawReceivePort _replyPort = RawReceivePort(_onReply);
+
+  /// Completers for in-flight requests, in send order.
+  final ListQueue<Completer<Object?>> _pending =
+      ListQueue<Completer<Object?>>();
 
   // Writer mutex — ensures concurrent db.execute() / db.transaction() calls
   // don't interleave on the writer isolate. Callers wait for the lock;
@@ -23,6 +41,12 @@ final class Writer {
   // re-registers on the new completer before any later-arriving caller can
   // enter `_withWriteLock`. So waiters are served in arrival order and no
   // starvation is possible.
+  //
+  // Transactions hold the lock from BEGIN through COMMIT/ROLLBACK — an
+  // execute sent mid-transaction would silently join the open transaction
+  // on the worker (txDepth > 0 defers its dirty-set harvest). Standalone
+  // writes only need the lock around the *send* (see [executePipelined]):
+  // the worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
   Writer(this._streamEngine);
@@ -33,36 +57,50 @@ final class Writer {
   ) async {
     final writer = Writer(streamEngine);
 
+    final handshake = Completer<SendPort>();
     final receivePort = ReceivePort();
     receivePort.listen((message) {
       if (message is SendPort) {
-        writer._workerPort.complete(message);
+        handshake.complete(message);
         receivePort.close();
       }
     });
 
     Isolate.spawn(writerEntrypoint, [receivePort.sendPort, handle.address]);
 
-    await writer._workerPort.future;
+    writer._sendPort = await handshake.future;
 
     return writer;
   }
 
-  Future<T> _request<T>(
-    WriterRequest Function(SendPort replyPort) build,
-  ) async {
-    final sendPort = await _workerPort.future;
-    final port = RawReceivePort();
-    final completer = Completer<T>();
-    port.handler = (Object? response) {
-      port.close();
-      if (response is ResqliteException) {
-        completer.completeError(response);
-      } else {
-        completer.complete(response as T);
-      }
-    };
-    sendPort.send(build(port.sendPort));
+  void _onReply(Object? response) {
+    // Defensive: a reply with no pending completer (e.g. a stray message
+    // after close) is dropped rather than crashing the port handler.
+    if (_pending.isEmpty) return;
+    final completer = _pending.removeFirst();
+    if (response is ResqliteException) {
+      completer.completeError(response);
+    } else {
+      completer.complete(response);
+    }
+  }
+
+  /// Sends [build]'s request and returns a future for its reply.
+  ///
+  /// The send happens synchronously — no awaits before `sendPort.send` —
+  /// which [executePipelined] relies on to keep its lock window covering
+  /// the send. Completers are `sync` so the reply handler resumes the
+  /// awaiting caller (response bookkeeping + stream invalidation) directly
+  /// inside the port event, the same pattern the reader pool uses for its
+  /// per-worker completers.
+  Future<T> _request<T>(WriterRequest Function(SendPort replyPort) build) {
+    final sendPort = _sendPort;
+    if (sendPort == null) {
+      throw ResqliteConnectionException('Database is closed.');
+    }
+    final completer = Completer<T>.sync();
+    _pending.addLast(completer);
+    sendPort.send(build(_replyPort.sendPort));
     return completer.future;
   }
 
@@ -78,11 +116,62 @@ final class Writer {
     }
   }
 
-  Future<ExecuteResponse> execute(
+  /// Runs a standalone write, holding the writer lock only for the send.
+  ///
+  /// The lock is released as soon as the request is on the worker's port:
+  /// the port FIFO guarantees the write is fully processed (at txDepth 0,
+  /// including its dirty-set harvest) before any later-sent BEGIN opens a
+  /// transaction, so exclusivity across the reply round-trip adds nothing.
+  /// Releasing early lets a subsequent write or transaction overlap its
+  /// send with this write's worker-side execution and reply scheduling.
+  Future<ExecuteResponse> executePipelined(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) async {
+    await _mutex.lock();
+    final Future<ExecuteResponse> reply;
+    try {
+      if (_closed) {
+        throw ResqliteConnectionException('Database is closed.');
+      }
+      reply = execute(sql, parameters, traceCorrelationId);
+    } finally {
+      _mutex.unlock();
+    }
+    return reply;
+  }
+
+  /// Batch variant of [executePipelined]. Parameter validation throws to
+  /// the caller before anything is sent; the empty-batch short-circuit
+  /// never touches the worker.
+  Future<BatchResponse?> executeBatchPipelined(
+    String sql,
+    List<List<Object?>> paramSets, {
+    int? traceCorrelationId,
+  }) async {
+    await _mutex.lock();
+    final Future<BatchResponse?> reply;
+    try {
+      if (_closed) {
+        throw ResqliteConnectionException('Database is closed.');
+      }
+      reply = executeBatch(
+        sql,
+        paramSets,
+        traceCorrelationId: traceCorrelationId,
+      );
+    } finally {
+      _mutex.unlock();
+    }
+    return reply;
+  }
+
+  Future<ExecuteResponse> execute(
+    String sql, [
+    List<Object?> parameters = const [],
+    int? traceCorrelationId,
+  ]) {
     return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(
         sql,
@@ -97,7 +186,7 @@ final class Writer {
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
-  }) async {
+  }) {
     // Empty batch is a no-op — short-circuit before acquiring the write
     // lock so we don't pay for an isolate round-trip on empty input.
     if (paramSets.isEmpty) {
@@ -206,16 +295,14 @@ final class Writer {
     _closed = true;
 
     await _mutex.run(() async {
-      if (await _workerPort.future case SendPort workerPort) {
-        final port = RawReceivePort();
-        final done = Completer<void>();
-        port.handler = (_) {
-          port.close();
-          if (!done.isCompleted) done.complete();
-        };
-        workerPort.send(CloseRequest(port.sendPort));
-        await done.future;
-      }
+      final sendPort = _sendPort;
+      if (sendPort == null) return;
+      final done = Completer<Object?>.sync();
+      _pending.addLast(done);
+      sendPort.send(CloseRequest(_replyPort.sendPort));
+      _sendPort = null;
+      await done.future;
     });
+    _replyPort.close();
   }
 }
