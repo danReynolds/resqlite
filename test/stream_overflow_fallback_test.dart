@@ -249,5 +249,38 @@ void main() {
         await probe.cancel();
       },
     );
+
+    test(
+      'diagnostics counts unknown-dependency fallbacks and stays 0 for tracked writes',
+      () async {
+        const dirtyTableCount = _capDirtyTables + 5; // 69
+        for (var i = 0; i < dirtyTableCount; i++) {
+          await db.execute('CREATE TABLE d$i(id INTEGER PRIMARY KEY)');
+        }
+
+        final probe = _StreamProbe(db.stream('SELECT id FROM d0 ORDER BY id'));
+        await probe.event(1);
+
+        expect((await db.diagnostics()).unknownDependencyFallbackCount, 0);
+
+        // Normal table-tracked write — dirty set is reliable, no fallback.
+        await db.execute('INSERT INTO d0(id) VALUES (?)', [1]);
+        await probe.event(2);
+        expect((await db.diagnostics()).unknownDependencyFallbackCount, 0);
+
+        // Transaction dirtying > RESQLITE_MAX_DIRTY_TABLES tables trips the
+        // reliability flag → one UnknownTableDependencies report on commit →
+        // one conservative all-streams fallback.
+        await db.transaction((tx) async {
+          for (var i = 0; i < dirtyTableCount; i++) {
+            await tx.execute('INSERT INTO d$i(id) VALUES (?)', [2]);
+          }
+        });
+        await probe.event(3);
+        expect((await db.diagnostics()).unknownDependencyFallbackCount, 1);
+
+        await probe.cancel();
+      },
+    );
   });
 }
