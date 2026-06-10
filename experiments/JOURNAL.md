@@ -189,6 +189,26 @@ slots, writer locks, or native buffers. Prefer giving the admission owner a
 concrete handle to the resource over layering a second queue around a future;
 otherwise the check is only advisory.*
 
+### Phase-ordered A/B gates confound code deltas with time-correlated drift
+
+The Tracelite experiment wrapper collects all baseline runs, then all
+candidate runs. [Exp 150](150-writer-pipelining.md)'s first gate pass flagged
++12–19% regressions on stream scenarios whose write loops never execute the
+changed code path — and the flagged phase's within-run CVs were 0.20–0.46
+against the other phase's 0.01–0.06. A second pass with collection order
+flipped (candidate first) measured all three scenarios neutral with CVs of
+0.01–0.03. The flag was machine drift that landed entirely on one side
+because the sides were collected in disjoint time blocks. This extends
+[exp 144](144-sqlite3mc-bump-2-3-5.md)'s two-independent-passes rule: the
+second pass discriminates most when it *flips the collection order*, because
+drift then has to indict the opposite side to reproduce.
+
+*Reapplies whenever a phase-ordered A/B flags a regression. Check the
+flagged phase's within-run CVs against the other phase first; if they are
+elevated, re-run order-flipped before treating the flag as real — and
+before burning an ablation pass on a mechanism the workload may not even
+exercise.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

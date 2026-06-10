@@ -126,6 +126,53 @@ void main() {
       expect(rows[2]['name'], 'outside_tx');
     });
 
+    test('pipelined executes are isolated from a racing rollback', () async {
+      // Standalone writes release the write lock after their request is
+      // sent (exp 149), so several can be in flight when a transaction
+      // begins. None of them may join the transaction: rolling it back
+      // must not undo any standalone write that raced it.
+      final writes = List.generate(
+        10,
+        (i) => db.execute('INSERT INTO items(name) VALUES (?)', ['pre_$i']),
+      );
+
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.execute('INSERT INTO items(name) VALUES (?)', ['doomed']);
+          throw StateError('force rollback');
+        }),
+        throwsStateError,
+      );
+      await Future.wait(writes);
+
+      final rows = await db.select(
+        'SELECT name FROM items ORDER BY name',
+      );
+      expect(rows, hasLength(10));
+      expect(rows.map((r) => r['name']), everyElement(startsWith('pre_')));
+    });
+
+    test('a failing in-flight write does not desync later replies', () async {
+      // With a shared reply port, replies are matched to callers in FIFO
+      // order. An error reply must consume exactly its own slot: the
+      // writes sent after the failing one still complete with their own
+      // results.
+      final bad = db.execute('INSERT INTO missing_table(name) VALUES (?)', [
+        'x',
+      ]);
+      final good = List.generate(
+        5,
+        (i) => db.execute('INSERT INTO items(name) VALUES (?)', ['ok_$i']),
+      );
+
+      await expectLater(bad, throwsA(isA<ResqliteException>()));
+      final results = await Future.wait(good);
+      expect(results, hasLength(5));
+
+      final rows = await db.select('SELECT count(*) as c FROM items');
+      expect(rows[0]['c'], 5);
+    });
+
     test('concurrent transactions run one at a time', () async {
       // Two transactions launched concurrently. The write lock ensures
       // tx2 does not start until tx1 has committed.
