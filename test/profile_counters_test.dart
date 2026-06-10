@@ -33,7 +33,10 @@ void main() {
       'ivm_applied_total': 0,
       'ivm_bail_total': 0,
       'ivm_admitted_total': 0,
+      'ivm_admitted_skip_total': 0,
+      'ivm_admitted_agg_total': 0,
       'ivm_rejected_total': 0,
+      'ivm_hit_fallback_total': 0,
     });
 
     ProfileCounters.reset();
@@ -58,7 +61,10 @@ void main() {
       'ivm_applied_total': 0,
       'ivm_bail_total': 0,
       'ivm_admitted_total': 0,
+      'ivm_admitted_skip_total': 0,
+      'ivm_admitted_agg_total': 0,
       'ivm_rejected_total': 0,
+      'ivm_hit_fallback_total': 0,
     });
   });
 

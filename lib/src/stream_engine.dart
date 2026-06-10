@@ -243,8 +243,26 @@ final class StreamEngine {
     }
   }
 
-  /// `PRAGMA table_info` results per table, shared across admissions.
-  final Map<String, Future<List<Map<String, Object?>>>> _tableInfoCache = {};
+  /// Per-table admission metadata (`PRAGMA table_info` + the CREATE
+  /// statement from sqlite_master, which gates TEXT-equality admission on
+  /// the absence of COLLATE clauses), shared across admissions.
+  final Map<
+    String,
+    Future<(List<Map<String, Object?>>, String?)>
+  > _tableMetaCache = {};
+
+  Future<(List<Map<String, Object?>>, String?)> _tableMeta(String table) {
+    return _tableMetaCache[table] ??= () async {
+      final escaped = table.replaceAll('"', '""');
+      final info = await _pool.select('PRAGMA table_info("$escaped")');
+      final master = await _pool.select(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [table],
+      );
+      final createSql = master.isEmpty ? null : master.first['sql'] as String?;
+      return (info, createSql);
+    }();
+  }
 
   /// Attempt to maintain [entry]'s cached result from the write cycle's
   /// [batch] instead of re-querying. Returns true when the entry is fully
@@ -261,32 +279,90 @@ final class StreamEngine {
       return false;
     }
 
-    if (ivm.rows == null) {
-      final last = entry.lastResult;
-      if (last == null || !ivm.rebuild(last)) {
-        // The cached result cannot be keyed (non-int pk, unexpected
-        // ordering). This is structural, not transient — demote.
-        entry.ivm = null;
+    switch (ivm) {
+      case IvmSkipState():
+        // Tier 1.5: prove all deltas miss, or fall back. There is no
+        // cache to drop on a hit.
+        if (ivm.apply(tableDeltas) == IvmOutcome.unchanged) {
+          if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+          return true;
+        }
+        if (kProfileMode) ProfileCounters.ivmHitFallbackTotal++;
         return false;
-      }
-    }
 
-    switch (ivm.apply(tableDeltas)) {
-      case IvmOutcome.unchanged:
-        if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
-        return true;
-      case IvmOutcome.applied:
-        final rows = ivm.rows!;
-        entry.lastResult = rows;
-        entry.lastResultHash = _ivmStaleHash;
-        entry.lastRowCount = rows.length;
-        entry.emit(rows);
-        if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
-        return true;
-      case IvmOutcome.bail:
-        if (kProfileMode) ProfileCounters.ivmBailTotal++;
-        return false;
+      case IvmFullState():
+        if (ivm.rows == null) {
+          final last = entry.lastResult;
+          if (last == null || !ivm.rebuild(last)) {
+            // The cached result cannot be keyed (non-int pk/order key,
+            // unexpected ordering). Structural — demote.
+            entry.ivm = null;
+            return false;
+          }
+        }
+        switch (ivm.apply(tableDeltas)) {
+          case IvmOutcome.unchanged:
+            if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+            return true;
+          case IvmOutcome.applied:
+            final visible = ivm.visibleRows();
+            // Patches confined to a complete window's invisible tail
+            // change the cache but not the emission.
+            final previous = entry.lastResult;
+            if (previous != null && _sameRowList(previous, visible)) {
+              entry.lastResult = visible;
+              entry.lastResultHash = _ivmStaleHash;
+              entry.lastRowCount = visible.length;
+              if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+              return true;
+            }
+            entry.lastResult = visible;
+            entry.lastResultHash = _ivmStaleHash;
+            entry.lastRowCount = visible.length;
+            entry.emit(visible);
+            if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
+            return true;
+          case IvmOutcome.bail:
+            if (kProfileMode) ProfileCounters.ivmBailTotal++;
+            return false;
+        }
+
+      case IvmAggregateState():
+        if (!ivm.seeded) {
+          _scheduleAggregateReseed(entry, ivm);
+          return false;
+        }
+        switch (ivm.apply(tableDeltas)) {
+          case IvmOutcome.unchanged:
+            if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+            return true;
+          case IvmOutcome.applied:
+            final visible = [ivm.visibleRow()];
+            entry.lastResult = visible;
+            entry.lastResultHash = _ivmStaleHash;
+            entry.lastRowCount = 1;
+            entry.emit(visible);
+            if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
+            return true;
+          case IvmOutcome.bail:
+            _scheduleAggregateReseed(entry, ivm);
+            if (kProfileMode) ProfileCounters.ivmBailTotal++;
+            return false;
+        }
     }
+  }
+
+  /// Rows-identical check by element identity (apply() clones any row it
+  /// changes, so identity captures "visibly unchanged" exactly).
+  bool _sameRowList(
+    List<Map<String, Object?>> a,
+    List<Map<String, Object?>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
   }
 
   /// Try to admit [entry] for incremental maintenance. Best-effort and
@@ -294,22 +370,76 @@ final class StreamEngine {
   /// plain re-query path.
   Future<void> _admitIvm(StreamEntry entry, String table) async {
     try {
-      final escaped = table.replaceAll('"', '""');
-      final info = await (_tableInfoCache[table] ??= _pool.select(
-        'PRAGMA table_info("$escaped")',
-      ));
+      final (info, createSql) = await _tableMeta(table);
       if (entry.subscribers.isEmpty || entry.ivm != null) return;
-      final shape = classifyIvmQuery(entry.sql, entry.params, table, info);
-      if (shape == null) {
-        if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
-        return;
+      final shape = classifyIvmQuery(
+        entry.sql,
+        entry.params,
+        table,
+        info,
+        createSql: createSql,
+      );
+      switch (shape) {
+        case null:
+          if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+        case IvmFullShape():
+          entry.ivm = IvmFullState(shape);
+          if (kProfileMode) ProfileCounters.ivmAdmittedTotal++;
+        case IvmSkipShape():
+          entry.ivm = IvmSkipState(shape);
+          if (kProfileMode) {
+            ProfileCounters.ivmAdmittedTotal++;
+            ProfileCounters.ivmAdmittedSkipTotal++;
+          }
+        case IvmAggregateShape():
+          final state = IvmAggregateState(shape);
+          await _seedAggregate(state, info);
+          if (entry.subscribers.isEmpty || entry.ivm != null) return;
+          if (state.seeded) {
+            entry.ivm = state;
+            if (kProfileMode) {
+              ProfileCounters.ivmAdmittedTotal++;
+              ProfileCounters.ivmAdmittedAggTotal++;
+            }
+          } else if (kProfileMode) {
+            ProfileCounters.ivmRejectedTotal++;
+          }
       }
-      entry.ivm = IvmState(shape);
-      if (kProfileMode) ProfileCounters.ivmAdmittedTotal++;
     } catch (_) {
       // Classification is best-effort; the entry stays on re-query.
       if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
     }
+  }
+
+  /// Seed (or re-seed) an aggregate state with an exact snapshot.
+  Future<void> _seedAggregate(
+    IvmAggregateState state,
+    List<Map<String, Object?>> tableInfo,
+  ) async {
+    final snapshot = await _pool.select(
+      buildAggregateSnapshotSql(state.shape, tableInfo),
+    );
+    if (snapshot.length == 1) {
+      state.seedFromSnapshot(snapshot.first);
+    }
+  }
+
+  /// After an aggregate bail, re-seed asynchronously so a later write can
+  /// resume maintenance; re-queries cover the interim.
+  void _scheduleAggregateReseed(StreamEntry entry, IvmAggregateState state) {
+    if (state.reseedInFlight) return;
+    state.reseedInFlight = true;
+    unawaited(() async {
+      try {
+        final (info, _) = await _tableMeta(state.shape.table);
+        if (entry.subscribers.isEmpty) return;
+        await _seedAggregate(state, info);
+      } catch (_) {
+        // Stay unseeded; the entry keeps re-querying.
+      } finally {
+        state.reseedInFlight = false;
+      }
+    }());
   }
 
   void _flushQueue() {
@@ -341,7 +471,7 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
-    _tableInfoCache.clear();
+    _tableMetaCache.clear();
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -461,8 +591,17 @@ final class StreamEngine {
       entry.lastResult = rows;
       // A fresh query result invalidates the maintained cache; it is
       // rebuilt lazily from lastResult on the next applicable delta.
-      entry.ivm?.rows = null;
-      entry.ivm?.keys = null;
+      // A fresh query result invalidates maintained state; full caches
+      // rebuild lazily from lastResult, aggregates re-seed by snapshot.
+      switch (entry.ivm) {
+        case IvmFullState ivm:
+          ivm.rows = null;
+          ivm.keys = null;
+        case IvmAggregateState ivm:
+          ivm.seeded = false;
+        case IvmSkipState() || null:
+          break;
+      }
 
       entry.emit(rows);
     } catch (e, st) {

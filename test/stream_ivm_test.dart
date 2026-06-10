@@ -14,117 +14,203 @@ final _itemsTableInfo = <Map<String, Object?>>[
   {'cid': 3, 'name': 'name', 'type': 'TEXT', 'pk': 0},
 ];
 
-void main() {
-  group('classifyIvmQuery', () {
-    IvmShape? classify(String sql, [List<Object?> params = const []]) =>
-        classifyIvmQuery(sql, params, 'items', _itemsTableInfo);
+const _itemsCreateSql =
+    'CREATE TABLE items(id INTEGER PRIMARY KEY, flag INTEGER NOT NULL, '
+    'score INTEGER NOT NULL, name TEXT NOT NULL)';
 
-    test('admits range + ORDER BY pk', () {
+void main() {
+  group('classifyIvmQuery (modes)', () {
+    IvmAdmission? classify(
+      String sql, [
+      List<Object?> params = const [],
+      String? createSql = _itemsCreateSql,
+    ]) =>
+        classifyIvmQuery(
+          sql,
+          params,
+          'items',
+          _itemsTableInfo,
+          createSql: createSql,
+        );
+
+    test('full: range + ORDER BY pk', () {
       final shape = classify(
         'SELECT id, score, name FROM items WHERE id >= ? AND id < ? ORDER BY id',
         [10, 20],
       );
-      expect(shape, isNotNull);
-      expect(shape!.predicates, hasLength(2));
-      expect(shape.pkOutputName, 'id');
-      expect(shape.projection.map((p) => p.$1), ['id', 'score', 'name']);
+      expect(shape, isA<IvmFullShape>());
+      final full = shape! as IvmFullShape;
+      expect(full.predicates, hasLength(2));
+      expect(full.pkOutputName, 'id');
+      expect(full.limit, isNull);
+      expect(full.projection.map((c) => c.$1), ['id', 'score', 'name']);
     });
 
-    test('admits pk equality without ORDER BY', () {
-      expect(classify('SELECT * FROM items WHERE id = ?', [5]), isNotNull);
-    });
-
-    test('admits SELECT * with table-order projection', () {
-      final shape = classify('SELECT * FROM items WHERE id = 3');
-      expect(shape, isNotNull);
-      expect(shape!.projection.map((p) => p.$1), [
-        'id',
-        'flag',
-        'score',
-        'name',
-      ]);
-    });
-
-    test('admits integer equality on non-pk column with ORDER BY pk', () {
+    test('full: pk equality without ORDER BY, * projection', () {
       expect(
-        classify('SELECT id, name FROM items WHERE flag = 1 ORDER BY id'),
-        isNotNull,
+        classify('SELECT * FROM items WHERE id = ?', [5]),
+        isA<IvmFullShape>(),
       );
     });
 
-    test('rejects everything outside the grammar', () {
-      final rejected = <String>[
-        // No deterministic order and no pk pin.
+    test('full: DESC on pk alone is deterministic', () {
+      final shape = classify('SELECT id, score FROM items ORDER BY id DESC');
+      expect(shape, isA<IvmFullShape>());
+      expect((shape! as IvmFullShape).orderDesc, isTrue);
+    });
+
+    test('full windowed: composite ORDER BY with pk tiebreak + LIMIT', () {
+      final shape = classify(
+        'SELECT id, score FROM items WHERE flag = 1 '
+        'ORDER BY score DESC, id DESC LIMIT 20',
+      );
+      expect(shape, isA<IvmFullShape>());
+      final full = shape! as IvmFullShape;
+      expect(full.limit, 20);
+      expect(full.orderDesc, isTrue);
+      expect(full.pkDesc, isTrue);
+      expect(full.orderOutputName, 'score');
+    });
+
+    test('full windowed: LIMIT as a bind parameter', () {
+      final shape = classify(
+        'SELECT id, score FROM items ORDER BY score, id LIMIT ?',
+        [30],
+      );
+      expect(shape, isA<IvmFullShape>());
+      expect((shape! as IvmFullShape).limit, 30);
+    });
+
+    test('full: aliased pk keeps keying through the alias', () {
+      final shape = classify('SELECT id AS x FROM items WHERE id = 1');
+      expect(shape, isA<IvmFullShape>());
+      expect((shape! as IvmFullShape).pkOutputName, 'x');
+    });
+
+    test('skip: evaluable predicate with unmaintainable result', () {
+      final cases = <String>[
+        // No deterministic order, no pk pin.
         'SELECT id FROM items WHERE flag = 1',
-        // Order by non-pk.
+        // Order by non-pk without tiebreak.
         'SELECT id, score FROM items WHERE id > 0 ORDER BY score',
-        'SELECT id FROM items ORDER BY id DESC',
-        'SELECT id FROM items ORDER BY id LIMIT 10',
-        'SELECT id FROM items WHERE id > 0 OR flag = 1 ORDER BY id',
-        'SELECT id FROM items WHERE name = ? ORDER BY id', // text param
-        'SELECT count(*) FROM items WHERE id = 1',
-        'SELECT i.id FROM items i WHERE id = 1',
-        'SELECT id FROM items JOIN other ON 1 WHERE id = 1',
+        // DESC window without pk tiebreak.
+        'SELECT id, score FROM items WHERE flag = 1 ORDER BY score DESC LIMIT 20',
+        // OFFSET demotes.
+        'SELECT id FROM items WHERE flag = 1 ORDER BY id LIMIT 10 OFFSET 5',
+        // DISTINCT demotes.
         'SELECT DISTINCT id FROM items WHERE id = 1',
-        'SELECT id AS x FROM items WHERE id = 1',
-        'SELECT id FROM other WHERE id = 1', // table mismatch
-        'SELECT flag FROM items WHERE id = 1', // pk not projected
-        'SELECT id FROM items WHERE missing = 1 ORDER BY id',
-        "SELECT id FROM items WHERE name = 'x' ORDER BY id",
-        'SELECT id FROM items WHERE id IN (1, 2) ORDER BY id',
+        // pk not projected.
+        'SELECT flag FROM items WHERE id = 1',
+        // Order column not projected.
+        'SELECT id FROM items WHERE flag = 1 ORDER BY score, id LIMIT 5',
       ];
-      for (final sql in rejected) {
-        expect(classify(sql), isNull, reason: sql);
+      for (final sql in cases) {
+        expect(classify(sql), isA<IvmSkipShape>(), reason: sql);
       }
     });
 
-    test('rejects text bind parameter values', () {
+    test('skip: TEXT equality admitted only without COLLATE', () {
+      const sql = "SELECT id FROM items WHERE name = 'x'";
+      expect(classify(sql), isA<IvmSkipShape>());
       expect(
-        classify('SELECT id FROM items WHERE id = ? ORDER BY id', ['5']),
+        classify(sql, const [], null),
+        isNull,
+        reason: 'unknown CREATE sql must reject text predicates',
+      );
+      expect(
+        classify(
+          sql,
+          const [],
+          'CREATE TABLE items(id INTEGER PRIMARY KEY, '
+          'name TEXT COLLATE NOCASE)',
+        ),
+        isNull,
+        reason: 'COLLATE anywhere in the table rejects text predicates',
+      );
+    });
+
+    test('full: TEXT equality predicate with ORDER BY pk', () {
+      final shape = classify(
+        'SELECT id, name FROM items WHERE name = ? ORDER BY id',
+        ['row_7'],
+      );
+      expect(shape, isA<IvmFullShape>());
+    });
+
+    test('skip: TEXT inequality never admitted', () {
+      expect(
+        classify("SELECT id FROM items WHERE name > 'x' ORDER BY id"),
         isNull,
       );
     });
 
-    test('rejects tables without an INTEGER pk rowid alias', () {
-      final noPk = [
-        {'cid': 0, 'name': 'a', 'type': 'INTEGER', 'pk': 0},
-      ];
+    test('aggregate: aliased aggregates over evaluable predicate', () {
+      final shape = classify(
+        'SELECT COUNT(*) AS n, SUM(score) AS total, MIN(score) AS lo, '
+        'MAX(score) AS hi, AVG(score) AS mean '
+        'FROM items WHERE flag = ?',
+        [1],
+      );
+      expect(shape, isA<IvmAggregateShape>());
+      final agg = shape! as IvmAggregateShape;
+      expect(agg.aggregates, hasLength(5));
+      expect(agg.aggregateColumns, [2]);
+    });
+
+    test('aggregate: COUNT(*) without WHERE', () {
       expect(
-        classifyIvmQuery('SELECT a FROM t WHERE a = 1', const [], 't', noPk),
+        classify('SELECT COUNT(*) AS n FROM items'),
+        isA<IvmAggregateShape>(),
+      );
+    });
+
+    test('aggregate: missing AS alias rejects', () {
+      expect(classify('SELECT COUNT(*) FROM items WHERE flag = 1'), isNull);
+    });
+
+    test('aggregate: non-INTEGER column for SUM rejects to skip', () {
+      expect(
+        classify('SELECT SUM(name) AS s FROM items WHERE flag = 1'),
         isNull,
       );
-      final textPk = [
-        {'cid': 0, 'name': 'k', 'type': 'TEXT', 'pk': 1},
+    });
+
+    test('rejected outright', () {
+      final cases = <String>[
+        'SELECT id FROM items WHERE id > 0 OR flag = 1 ORDER BY id',
+        'SELECT i.id FROM items i WHERE id = 1',
+        'SELECT id FROM items JOIN other ON 1 WHERE id = 1',
+        'SELECT id FROM other WHERE id = 1',
+        'SELECT id FROM items WHERE missing = 1 ORDER BY id',
+        'SELECT id FROM items WHERE id IN (1, 2) ORDER BY id',
+        'SELECT id FROM items ORDER BY id LIMIT 10', // window without preds is full though
       ];
+      for (final sql in cases.sublist(0, cases.length - 1)) {
+        expect(classify(sql), isNull, reason: sql);
+      }
+      // Windowed full without predicates is admissible.
+      expect(classify(cases.last), isA<IvmFullShape>());
+    });
+
+    test('rejects text bind parameter for int column ops', () {
       expect(
-        classifyIvmQuery('SELECT k FROM t WHERE k = 1', const [], 't', textPk),
-        isNull,
-      );
-      final compositePk = [
-        {'cid': 0, 'name': 'a', 'type': 'INTEGER', 'pk': 1},
-        {'cid': 1, 'name': 'b', 'type': 'INTEGER', 'pk': 2},
-      ];
-      expect(
-        classifyIvmQuery(
-          'SELECT a, b FROM t WHERE a = 1',
-          const [],
-          't',
-          compositePk,
-        ),
+        classify('SELECT id FROM items WHERE id < ? ORDER BY id', ['5']),
         isNull,
       );
     });
   });
 
-  group('IvmState.apply', () {
-    IvmState freshState() {
+  group('IvmFullState (unwindowed)', () {
+    IvmFullState freshState() {
       final shape = classifyIvmQuery(
-        'SELECT id, score, name FROM items WHERE id >= 10 AND id < 20 ORDER BY id',
+        'SELECT id, score, name FROM items '
+        'WHERE id >= 10 AND id < 20 ORDER BY id',
         const [],
         'items',
         _itemsTableInfo,
-      )!;
-      final state = IvmState(shape);
+        createSql: _itemsCreateSql,
+      )! as IvmFullShape;
+      final state = IvmFullState(shape);
       expect(
         state.rebuild([
           {'id': 11, 'score': 5, 'name': 'a'},
@@ -148,145 +234,413 @@ void main() {
     test('proven miss leaves the cache untouched', () {
       final state = freshState();
       final before = state.rows;
-      final outcome = state.apply([
-        update(50, [50, 0, 1, 'x'], [50, 0, 2, 'x']),
-      ]);
-      expect(outcome, IvmOutcome.unchanged);
+      expect(
+        state.apply([
+          update(50, [50, 0, 1, 'x'], [50, 0, 2, 'x']),
+        ]),
+        IvmOutcome.unchanged,
+      );
       expect(identical(state.rows, before), isTrue);
     });
 
-    test('in-window patch emits a fresh list and preserves order', () {
+    test('patch clones and preserves order', () {
       final state = freshState();
       final before = state.rows;
-      final outcome = state.apply([
-        update(15, [15, 0, 7, 'b'], [15, 0, 9, 'b2']),
-      ]);
-      expect(outcome, IvmOutcome.applied);
+      expect(
+        state.apply([
+          update(15, [15, 0, 7, 'b'], [15, 0, 9, 'b2']),
+        ]),
+        IvmOutcome.applied,
+      );
       expect(identical(state.rows, before), isFalse);
       expect(state.rows, [
         {'id': 11, 'score': 5, 'name': 'a'},
         {'id': 15, 'score': 9, 'name': 'b2'},
       ]);
-      // The pre-patch list (held by earlier subscribers) is unchanged.
       expect(before!.last['score'], 7);
     });
 
-    test('update touching only unprojected columns is unchanged', () {
+    test('insert, delete, rowid change', () {
       final state = freshState();
-      final outcome = state.apply([
-        update(15, [15, 0, 7, 'b'], [15, 1, 7, 'b']), // flag not projected
-      ]);
-      expect(outcome, IvmOutcome.unchanged);
-    });
-
-    test('insert enters at the sorted position', () {
-      final state = freshState();
-      final outcome = state.apply([
-        RowDelta(
-          op: deltaOpInsert,
-          table: 'items',
-          oldRowid: 13,
-          newRowid: 13,
-          oldValues: null,
-          newValues: [13, 0, 1, 'c'],
-        ),
-      ]);
-      expect(outcome, IvmOutcome.applied);
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpInsert,
+            table: 'items',
+            oldRowid: 13,
+            newRowid: 13,
+            oldValues: null,
+            newValues: [13, 0, 1, 'c'],
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
       expect(state.rows!.map((r) => r['id']), [11, 13, 15]);
+
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpDelete,
+            table: 'items',
+            oldRowid: 11,
+            newRowid: 11,
+            oldValues: [11, 0, 5, 'a'],
+            newValues: null,
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
+      expect(state.rows!.map((r) => r['id']), [13, 15]);
+
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpUpdate,
+            table: 'items',
+            oldRowid: 15,
+            newRowid: 12,
+            oldValues: [15, 0, 7, 'b'],
+            newValues: [12, 0, 7, 'b'],
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
+      expect(state.rows!.map((r) => r['id']), [12, 13]);
     });
 
-    test('delete departs exactly', () {
+    test('unprovable cell and cache inconsistency bail', () {
       final state = freshState();
-      final outcome = state.apply([
-        RowDelta(
-          op: deltaOpDelete,
-          table: 'items',
-          oldRowid: 11,
-          newRowid: 11,
-          oldValues: [11, 0, 5, 'a'],
-          newValues: null,
-        ),
-      ]);
-      expect(outcome, IvmOutcome.applied);
-      expect(state.rows!.map((r) => r['id']), [15]);
-    });
+      expect(
+        state.apply([
+          update(50, ['oops', 0, 1, 'x'], ['oops', 0, 2, 'x']),
+        ]),
+        IvmOutcome.bail,
+      );
+      expect(state.rows, isNull);
 
-    test('rowid change splits into departure + entry', () {
-      final state = freshState();
-      final outcome = state.apply([
-        RowDelta(
-          op: deltaOpUpdate,
-          table: 'items',
-          oldRowid: 15,
-          newRowid: 12,
-          oldValues: [15, 0, 7, 'b'],
-          newValues: [12, 0, 7, 'b'],
-        ),
-      ]);
-      expect(outcome, IvmOutcome.applied);
-      expect(state.rows!.map((r) => r['id']), [11, 12]);
+      final state2 = freshState();
+      expect(
+        state2.apply([
+          RowDelta(
+            op: deltaOpInsert,
+            table: 'items',
+            oldRowid: 15,
+            newRowid: 15,
+            oldValues: null,
+            newValues: [15, 0, 1, 'dup'],
+          ),
+        ]),
+        IvmOutcome.bail,
+      );
     });
+  });
 
-    test('NULL predicate cell means the row does not match', () {
-      final state = freshState();
-      final outcome = state.apply([
-        update(50, [null, 0, 1, 'x'], [null, 0, 2, 'x']),
-      ]);
-      expect(outcome, IvmOutcome.unchanged);
-    });
+  group('IvmFullState (windowed)', () {
+    // Window: top 3 by (score DESC, id DESC) of flag = 1 rows.
+    IvmFullShape windowShape() =>
+        classifyIvmQuery(
+              'SELECT id, score FROM items WHERE flag = 1 '
+              'ORDER BY score DESC, id DESC LIMIT 3',
+              const [],
+              'items',
+              _itemsTableInfo,
+              createSql: _itemsCreateSql,
+            )!
+            as IvmFullShape;
 
-    test('non-int predicate cell bails', () {
-      final state = freshState();
-      final outcome = state.apply([
-        update(50, ['oops', 0, 1, 'x'], ['oops', 0, 2, 'x']),
-      ]);
-      expect(outcome, IvmOutcome.bail);
+    List<Object?> row(int id, int flag, int score) => [id, flag, score, 'r$id'];
+
+    RowDelta insert(int id, int flag, int score) => RowDelta(
+      op: deltaOpInsert,
+      table: 'items',
+      oldRowid: id,
+      newRowid: id,
+      oldValues: null,
+      newValues: row(id, flag, score),
+    );
+
+    RowDelta delete(int id, int flag, int score) => RowDelta(
+      op: deltaOpDelete,
+      table: 'items',
+      oldRowid: id,
+      newRowid: id,
+      oldValues: row(id, flag, score),
+      newValues: null,
+    );
+
+    test('full window: entries inside/below, departures fall back', () {
+      final state = IvmFullState(windowShape());
+      expect(
+        state.rebuild([
+          {'id': 9, 'score': 90},
+          {'id': 7, 'score': 70},
+          {'id': 5, 'score': 50},
+        ]),
+        isTrue,
+      );
+      expect(state.complete, isFalse); // len == K, more may exist
+
+      // Below-window entry is invisible and ignored.
+      expect(state.apply([insert(2, 1, 10)]), IvmOutcome.unchanged);
+
+      // In-window entry displaces the tail.
+      expect(state.apply([insert(8, 1, 80)]), IvmOutcome.applied);
+      expect(state.visibleRows().map((r) => r['id']), [9, 8, 7]);
+
+      // Miss: flag = 0 rows never matter.
+      expect(state.apply([insert(99, 0, 999)]), IvmOutcome.unchanged);
+
+      // Departure from a full, incomplete window cannot be patched.
+      expect(state.apply([delete(9, 1, 90)]), IvmOutcome.bail);
       expect(state.rows, isNull);
     });
 
-    test('cache inconsistency bails (entry already present)', () {
-      final state = freshState();
-      final outcome = state.apply([
+    test('complete window absorbs departures', () {
+      final state = IvmFullState(windowShape());
+      expect(
+        state.rebuild([
+          {'id': 9, 'score': 90},
+          {'id': 7, 'score': 70},
+        ]),
+        isTrue,
+      );
+      expect(state.complete, isTrue); // fewer rows than K exist
+
+      expect(state.apply([delete(9, 1, 90)]), IvmOutcome.applied);
+      expect(state.visibleRows().map((r) => r['id']), [7]);
+
+      expect(state.apply([insert(8, 1, 80)]), IvmOutcome.applied);
+      expect(state.apply([insert(6, 1, 60)]), IvmOutcome.applied);
+      expect(state.apply([insert(4, 1, 40)]), IvmOutcome.applied);
+      // Window shows top 3; the 4th row is retained (complete set).
+      expect(state.visibleRows().map((r) => r['id']), [8, 7, 6]);
+      expect(state.rows!.length, 4);
+
+      // Now a departure from the window promotes the retained row.
+      expect(state.apply([delete(7, 1, 70)]), IvmOutcome.applied);
+      expect(state.visibleRows().map((r) => r['id']), [8, 6, 4]);
+    });
+
+    test('tie order follows the explicit pk tiebreak', () {
+      final state = IvmFullState(windowShape());
+      expect(
+        state.rebuild([
+          {'id': 9, 'score': 50},
+          {'id': 4, 'score': 50},
+        ]),
+        isTrue,
+      );
+      expect(state.apply([insert(6, 1, 50)]), IvmOutcome.applied);
+      expect(state.visibleRows().map((r) => r['id']), [9, 6, 4]);
+    });
+  });
+
+  group('IvmSkipState', () {
+    IvmSkipState skipState() =>
+        IvmSkipState(
+          classifyIvmQuery(
+                'SELECT id, score FROM items WHERE flag = 1 '
+                'ORDER BY score DESC LIMIT 20',
+                const [],
+                'items',
+                _itemsTableInfo,
+                createSql: _itemsCreateSql,
+              )!
+              as IvmSkipShape,
+        );
+
+    RowDelta update(int rowid, List<Object?> oldV, List<Object?> newV) =>
         RowDelta(
-          op: deltaOpInsert,
+          op: deltaOpUpdate,
           table: 'items',
-          oldRowid: 15,
-          newRowid: 15,
-          oldValues: null,
-          newValues: [15, 0, 1, 'dup'],
-        ),
-      ]);
-      expect(outcome, IvmOutcome.bail);
+          oldRowid: rowid,
+          newRowid: rowid,
+          oldValues: oldV,
+          newValues: newV,
+        );
+
+    test('all-miss batches are proven unchanged', () {
+      final state = skipState();
+      expect(
+        state.apply([
+          update(1, [1, 0, 5, 'a'], [1, 0, 9, 'a']),
+          update(2, [2, 0, 5, 'b'], [2, 0, 9, 'b']),
+        ]),
+        IvmOutcome.unchanged,
+      );
     });
 
-    test('schema drift (column count mismatch) bails', () {
-      final state = freshState();
-      final outcome = state.apply([
-        update(15, [15, 0, 7], [15, 0, 9]),
-      ]);
-      expect(outcome, IvmOutcome.bail);
+    test('any hit falls back', () {
+      final state = skipState();
+      expect(
+        state.apply([
+          update(1, [1, 0, 5, 'a'], [1, 1, 5, 'a']), // enters flag = 1
+        ]),
+        IvmOutcome.bail,
+      );
     });
 
-    test('rebuild rejects unkeyable or unordered results', () {
-      final shape = classifyIvmQuery(
-        'SELECT id, score, name FROM items WHERE id >= 0 ORDER BY id',
-        const [],
-        'items',
-        _itemsTableInfo,
-      )!;
+    test('unprovable cells fall back', () {
+      final state = skipState();
       expect(
-        IvmState(shape).rebuild([
-          {'id': 'nope', 'score': 1, 'name': 'a'},
+        state.apply([
+          update(1, [1, 'x', 5, 'a'], [1, 'x', 9, 'a']),
         ]),
-        isFalse,
+        IvmOutcome.bail,
       );
+    });
+  });
+
+  group('IvmAggregateState', () {
+    IvmAggregateShape aggShape() =>
+        classifyIvmQuery(
+              'SELECT COUNT(*) AS n, SUM(score) AS total, MIN(score) AS lo, '
+              'MAX(score) AS hi, AVG(score) AS mean '
+              'FROM items WHERE flag = 1',
+              const [],
+              'items',
+              _itemsTableInfo,
+              createSql: _itemsCreateSql,
+            )!
+            as IvmAggregateShape;
+
+    IvmAggregateState seeded() {
+      final state = IvmAggregateState(aggShape());
       expect(
-        IvmState(shape).rebuild([
-          {'id': 5, 'score': 1, 'name': 'a'},
-          {'id': 3, 'score': 1, 'name': 'b'},
-        ]),
-        isFalse,
+        state.seedFromSnapshot({
+          '__rows': 2,
+          '__n2': 2,
+          '__s2': 30,
+          '__lo2': 10,
+          '__hi2': 20,
+        }),
+        isTrue,
       );
+      return state;
+    }
+
+    List<Object?> row(int id, int flag, int? score) => [id, flag, score, 'r'];
+
+    test('entries, departures, and patches maintain exact values', () {
+      final state = seeded();
+
+      // Entry of (score 5): count 3, sum 35, min 5, max 20.
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpInsert,
+            table: 'items',
+            oldRowid: 7,
+            newRowid: 7,
+            oldValues: null,
+            newValues: row(7, 1, 5),
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
+      expect(state.visibleRow(), {
+        'n': 3,
+        'total': 35,
+        'lo': 5,
+        'hi': 20,
+        'mean': closeTo(35 / 3, 1e-9),
+      });
+
+      // NULL cells count for COUNT(*) but not the column aggregates.
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpInsert,
+            table: 'items',
+            oldRowid: 8,
+            newRowid: 8,
+            oldValues: null,
+            newValues: row(8, 1, null),
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
+      expect(state.visibleRow()['n'], 4);
+      expect(state.visibleRow()['total'], 35);
+
+      // Patch a non-extremum row: score 10 -> 12 (extremum departures
+      // are covered below and legitimately bail).
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpUpdate,
+            table: 'items',
+            oldRowid: 1,
+            newRowid: 1,
+            oldValues: row(1, 1, 10),
+            newValues: row(1, 1, 12),
+          ),
+        ]),
+        IvmOutcome.applied,
+      );
+      expect(state.visibleRow()['total'], 37);
+      expect(state.visibleRow()['lo'], 5);
+
+      // Misses never touch state.
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpUpdate,
+            table: 'items',
+            oldRowid: 50,
+            newRowid: 50,
+            oldValues: row(50, 0, 1),
+            newValues: row(50, 0, 2),
+          ),
+        ]),
+        IvmOutcome.unchanged,
+      );
+    });
+
+    test('departing extremum bails and unseeds', () {
+      final state = seeded();
+      expect(
+        state.apply([
+          RowDelta(
+            op: deltaOpDelete,
+            table: 'items',
+            oldRowid: 3,
+            newRowid: 3,
+            oldValues: row(3, 1, 20), // current max departs
+            newValues: null,
+          ),
+        ]),
+        IvmOutcome.bail,
+      );
+      expect(state.seeded, isFalse);
+    });
+
+    test('empty set reports SQL aggregate semantics', () {
+      final state = IvmAggregateState(aggShape());
+      expect(
+        state.seedFromSnapshot({
+          '__rows': 0,
+          '__n2': 0,
+          '__s2': null,
+          '__lo2': null,
+          '__hi2': null,
+        }),
+        isTrue,
+      );
+      expect(state.visibleRow(), {
+        'n': 0,
+        'total': null,
+        'lo': null,
+        'hi': null,
+        'mean': null,
+      });
+    });
+
+    test('snapshot SQL is well-formed', () {
+      final sql = buildAggregateSnapshotSql(aggShape(), _itemsTableInfo);
+      expect(sql, contains('COUNT(*) AS __rows'));
+      expect(sql, contains('SUM("score") AS __s2'));
+      expect(sql, contains('FROM "items" WHERE "flag" = 1'));
     });
   });
 
