@@ -192,8 +192,9 @@ final class StreamEngine {
           }
       }
 
+      final deltaBatch = deltas == null ? null : RowDeltaBatch(deltas);
       for (final entry in dirtyEntries) {
-        if (deltas != null && _tryIncrementalMaintain(entry, deltas)) {
+        if (deltaBatch != null && _tryIncrementalMaintain(entry, deltaBatch)) {
           continue;
         }
         entry.dirty = true;
@@ -206,9 +207,6 @@ final class StreamEngine {
       }
 
       _flushQueue();
-      _decodedDeltas = null;
-      _decodedDeltasSource = null;
-      _deltasByTable = null;
     } finally {
       if (kProfileMode) {
         invalidateSw!.stop();
@@ -245,43 +243,21 @@ final class StreamEngine {
     }
   }
 
-  /// Per-write-cycle memo for the decoded delta buffer, so N admitted
-  /// streams on the same table decode it once. Keyed by buffer identity;
-  /// cleared at the end of each [onDependencyChanges] pass.
-  List<RowDelta>? _decodedDeltas;
-  Object? _decodedDeltasSource;
-  Map<String, List<RowDelta>>? _deltasByTable;
-
   /// `PRAGMA table_info` results per table, shared across admissions.
   final Map<String, Future<List<Map<String, Object?>>>> _tableInfoCache = {};
 
-  /// Attempt to maintain [entry]'s cached result from [deltas] instead of
-  /// re-querying. Returns true when the entry is fully handled for this
-  /// write cycle (deltas proven irrelevant, or result patched + emitted).
-  bool _tryIncrementalMaintain(StreamEntry entry, Uint8List deltas) {
+  /// Attempt to maintain [entry]'s cached result from the write cycle's
+  /// [batch] instead of re-querying. Returns true when the entry is fully
+  /// handled for this cycle (deltas proven irrelevant, or result patched
+  /// and emitted).
+  bool _tryIncrementalMaintain(StreamEntry entry, RowDeltaBatch batch) {
     final ivm = entry.ivm;
     if (ivm == null || entry.inFlight || entry.dirty) return false;
 
-    if (!identical(_decodedDeltasSource, deltas)) {
-      _decodedDeltasSource = deltas;
-      _decodedDeltas = decodeRowDeltas(deltas);
-      _deltasByTable = null;
-      final decoded = _decodedDeltas;
-      if (decoded != null) {
-        final byTable = <String, List<RowDelta>>{};
-        for (final delta in decoded) {
-          (byTable[delta.table] ??= []).add(delta);
-        }
-        _deltasByTable = byTable;
-      }
-    }
-    final byTable = _deltasByTable;
-    if (byTable == null) return false; // malformed buffer — fall back
-
-    final tableDeltas = byTable[ivm.shape.table];
+    final tableDeltas = batch.forTable(ivm.shape.table);
     if (tableDeltas == null || tableDeltas.isEmpty) {
-      // The table was reported dirty but capture saw no rows for it —
-      // contradicts a reliable buffer, so trust the dirty set.
+      // Malformed buffer, or the table was reported dirty with no
+      // captured rows — either way, trust the dirty set and re-query.
       return false;
     }
 
@@ -324,10 +300,15 @@ final class StreamEngine {
       ));
       if (entry.subscribers.isEmpty || entry.ivm != null) return;
       final shape = classifyIvmQuery(entry.sql, entry.params, table, info);
-      if (shape == null) return;
+      if (shape == null) {
+        if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+        return;
+      }
       entry.ivm = IvmState(shape);
+      if (kProfileMode) ProfileCounters.ivmAdmittedTotal++;
     } catch (_) {
       // Classification is best-effort; the entry stays on re-query.
+      if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
     }
   }
 
@@ -361,9 +342,6 @@ final class StreamEngine {
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
     _tableInfoCache.clear();
-    _decodedDeltas = null;
-    _decodedDeltasSource = null;
-    _deltasByTable = null;
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -421,6 +399,8 @@ final class StreamEngine {
           // maintenance (exp 160). Admission is async and best-effort.
           if (tables.length == 1) {
             unawaited(_admitIvm(entry, tables.single.table));
+          } else if (kProfileMode) {
+            ProfileCounters.ivmRejectedTotal++;
           }
         }
 

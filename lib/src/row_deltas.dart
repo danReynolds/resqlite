@@ -39,6 +39,38 @@ final class RowDelta {
   final List<Object?>? newValues;
 }
 
+/// Lazily-decoded view over one write cycle's delta bytes, grouped by
+/// table.
+///
+/// Decodes at most once no matter how many admitted streams consult it;
+/// a malformed buffer reports `null` for every table so all consumers
+/// fall back to re-query. Construct one per write cycle and discard —
+/// it carries no cross-cycle state.
+final class RowDeltaBatch {
+  RowDeltaBatch(this._bytes);
+
+  final Uint8List _bytes;
+  bool _decoded = false;
+  Map<String, List<RowDelta>>? _byTable;
+
+  /// Deltas for [table]; `null` when the buffer is malformed or holds no
+  /// rows for the table.
+  List<RowDelta>? forTable(String table) {
+    if (!_decoded) {
+      _decoded = true;
+      final rows = decodeRowDeltas(_bytes);
+      if (rows != null) {
+        final byTable = <String, List<RowDelta>>{};
+        for (final delta in rows) {
+          (byTable[delta.table] ??= []).add(delta);
+        }
+        _byTable = byTable;
+      }
+    }
+    return _byTable?[table];
+  }
+}
+
 /// Decode a drained delta buffer.
 ///
 /// Returns `null` on any structural inconsistency — callers treat that

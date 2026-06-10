@@ -68,3 +68,17 @@ Pass 2 (order flipped): see experiment writeup.
 
 Raw per-run JSONs and tracelite artifacts are local-only under
 `build/tracelite-experiments/`.
+
+## Admission audit (app-shaped stream mix)
+
+`dart run -DRESQLITE_PROFILE=true benchmark/profile/ivm_admission_audit.dart`
+
+8 reactive-UI stream shapes x 10 instances over chat+feed schemas; 300
+chat-shaped write ops. Tier-1 admits 3/8 shapes (30/62 distinct entries
+after dedup): pk-equality cards, int-equality transcripts, and
+ORDER-BY-pk lists. Burst counters: ivm_skipped=2,948, ivm_applied=52,
+ivm_bail=0 (3,000 decisions resolved without reader re-query);
+completion_handler_count=3,138 reader replies remain, generated almost
+entirely by the unadmitted DESC+LIMIT shapes (message panes,
+conversation list, feed page). Tier-2 composite-key ordering + LIMIT
+K+buffer targets exactly that remainder.

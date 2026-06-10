@@ -178,6 +178,13 @@ class ProfileCounters {
   static int ivmAppliedTotal = 0;
   static int ivmBailTotal = 0;
 
+  /// Classifier admission outcomes, one increment per registered stream
+  /// once its dependencies are known: admitted = the tier-1 classifier
+  /// accepted the query; rejected = outside the grammar (including
+  /// multi-table queries that never reach the classifier).
+  static int ivmAdmittedTotal = 0;
+  static int ivmRejectedTotal = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -198,6 +205,8 @@ class ProfileCounters {
     'ivm_skipped_total': ivmSkippedTotal,
     'ivm_applied_total': ivmAppliedTotal,
     'ivm_bail_total': ivmBailTotal,
+    'ivm_admitted_total': ivmAdmittedTotal,
+    'ivm_rejected_total': ivmRejectedTotal,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -235,5 +244,7 @@ class ProfileCounters {
     ivmSkippedTotal = 0;
     ivmAppliedTotal = 0;
     ivmBailTotal = 0;
+    ivmAdmittedTotal = 0;
+    ivmRejectedTotal = 0;
   }
 }
