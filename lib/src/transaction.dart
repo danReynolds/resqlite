@@ -73,14 +73,18 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = await _writer.execute(sql, parameters, correlationId);
+      final response = await _writer.executeInTransaction(
+        sql,
+        parameters,
+        correlationId,
+      );
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
     final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseExecute,
-      () => _writer.execute(sql, parameters, correlationId),
+      () => _writer.executeInTransaction(sql, parameters, correlationId),
       correlationId: correlationId,
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.result.affectedRows],
@@ -103,14 +107,18 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = await _writer.select(sql, parameters, correlationId);
+      final response = await _writer.selectInTransaction(
+        sql,
+        parameters,
+        correlationId,
+      );
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.rows;
     }
     final sqlId = TraceliteProfile.internString(sql);
     final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseSelect,
-      () => _writer.select(sql, parameters, correlationId),
+      () => _writer.selectInTransaction(sql, parameters, correlationId),
       correlationId: correlationId,
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.rows.length],
@@ -143,7 +151,7 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = await _writer.executeBatch(
+      final response = await _writer.executeBatchInTransaction(
         sql,
         paramSets,
         traceCorrelationId: correlationId,
@@ -157,7 +165,7 @@ final class Transaction {
     final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
     final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseExecuteBatch,
-      () => _writer.executeBatch(
+      () => _writer.executeBatchInTransaction(
         sql,
         paramSets,
         traceCorrelationId: correlationId,
