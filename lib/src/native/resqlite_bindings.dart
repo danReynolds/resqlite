@@ -418,6 +418,19 @@ external int resqliteDbStatusTotal(
   ffi.Pointer<ffi.Int> outHighwater,
 );
 
+/// Brackets a read worker's request so `resqlite_db_status_total` never
+/// reads this NOMUTEX connection from the main isolate while the worker
+/// is using it. See `resqlite_reader_set_busy` in `native/resqlite.h`.
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>, ffi.Int, ffi.Int)>(
+  symbol: 'resqlite_reader_set_busy',
+  isLeaf: true,
+)
+external void resqliteReaderSetBusy(
+  ffi.Pointer<ffi.Void> db,
+  int readerId,
+  int busy,
+);
+
 /// Per-worker persistent buffer for read-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte
 /// calloc/free pair per stream subscription
