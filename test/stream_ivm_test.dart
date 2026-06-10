@@ -319,11 +319,42 @@ void main() {
       }
     });
 
-    /// Allow initial emission + async IVM admission + any in-flight
-    /// invalidations to settle.
-    Future<void> settle() => Future<void>.delayed(
-      const Duration(milliseconds: 60),
-    );
+    /// Wait until [emissions] has stopped changing across consecutive
+    /// quiet windows, so in-flight admissions/re-queries drain before a
+    /// "no emission happened" assertion.
+    Future<void> settleQuiet(List<Object?> emissions) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      var last = emissions.length;
+      var quietWindows = 0;
+      while (quietWindows < 2) {
+        if (DateTime.now().isAfter(deadline)) break;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (emissions.length == last) {
+          quietWindows++;
+        } else {
+          quietWindows = 0;
+          last = emissions.length;
+        }
+      }
+    }
+    /// Wait until [emissions] reaches at least [count], then let any
+    /// trailing work drain. Use before positive emission-count
+    /// assertions — fixed delays flake under full-suite load where a
+    /// re-query (or the initial query) can take longer than any chosen
+    /// constant.
+    Future<void> settleTo(List<Object?> emissions, int count) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while (emissions.length < count) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail(
+            'expected $count emissions within 15s, saw ${emissions.length}',
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      await settleQuiet(emissions);
+    }
+
 
     /// Assert the latest emission matches a fresh query of the same SQL.
     Future<void> expectMatchesSelect(
@@ -344,17 +375,17 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, params).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
       expect(emissions, hasLength(1));
 
       // Miss: out-of-range write must not emit.
       await db.execute('UPDATE items SET score = 999 WHERE id = 40');
-      await settle();
+      await settleQuiet(emissions);
       expect(emissions, hasLength(1));
 
       // Patch: in-range projected column.
       await db.execute('UPDATE items SET score = 111 WHERE id = 15');
-      await settle();
+      await settleTo(emissions, 2);
       expect(emissions, hasLength(2));
       await expectMatchesSelect(emissions, sql, params);
       expect(
@@ -366,27 +397,27 @@ void main() {
       await db.execute(
         "INSERT INTO items(id, flag, score, name) VALUES (1000, 0, 5, 'x')",
       );
-      await settle();
+      await settleQuiet(emissions);
       expect(emissions, hasLength(2)); // out of range — no emission
       await db.execute('DELETE FROM items WHERE id = 1000');
-      await settle();
+      await settleQuiet(emissions);
       expect(emissions, hasLength(2));
 
       await db.execute('DELETE FROM items WHERE id = 12');
-      await settle();
+      await settleTo(emissions, 3);
       expect(emissions, hasLength(3));
       await expectMatchesSelect(emissions, sql, params);
       expect(emissions.last.map((r) => r['id']), isNot(contains(12)));
 
       // Rowid change: moves a row out of the range.
       await db.execute('UPDATE items SET id = 500 WHERE id = 15');
-      await settle();
+      await settleTo(emissions, 4);
       await expectMatchesSelect(emissions, sql, params);
       expect(emissions.last.map((r) => r['id']), isNot(contains(15)));
 
       // Rowid change: moves a row into the range.
       await db.execute('UPDATE items SET id = 12 WHERE id = 500');
-      await settle();
+      await settleTo(emissions, 5);
       await expectMatchesSelect(emissions, sql, params);
       expect(emissions.last.map((r) => r['id']), contains(12));
     });
@@ -396,7 +427,7 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, [15]).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
       expect(emissions, hasLength(1));
 
       for (var i = 0; i < 10; i++) {
@@ -405,11 +436,11 @@ void main() {
           20 + i,
         ]);
       }
-      await settle();
+      await settleQuiet(emissions);
       expect(emissions, hasLength(1)); // all misses
 
       await db.execute('UPDATE items SET name = ? WHERE id = ?', ['hit', 15]);
-      await settle();
+      await settleTo(emissions, 2);
       expect(emissions, hasLength(2));
       await expectMatchesSelect(emissions, sql, [15]);
     });
@@ -421,7 +452,7 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, const []).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
 
       await db.execute(
         'UPDATE items SET weight = 2.5, blob_col = ? WHERE id = 3',
@@ -429,7 +460,7 @@ void main() {
           Uint8List.fromList([1, 2, 3]),
         ],
       );
-      await settle();
+      await settleTo(emissions, 2);
       await expectMatchesSelect(emissions, sql, const []);
       final patched = emissions.last.firstWhere((r) => r['id'] == 3);
       expect(patched['weight'], 2.5);
@@ -443,7 +474,7 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, const []).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
       expect(emissions, hasLength(1));
 
       await db.transaction((tx) async {
@@ -451,7 +482,7 @@ void main() {
         await tx.execute('UPDATE items SET score = 2 WHERE id = 13');
         await tx.execute('DELETE FROM items WHERE id = 17');
       });
-      await settle();
+      await settleTo(emissions, 2);
       expect(emissions, hasLength(2));
       await expectMatchesSelect(emissions, sql, const []);
     });
@@ -463,7 +494,7 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, const []).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
 
       await db.transaction((tx) async {
         await tx.execute('UPDATE items SET score = 1 WHERE id = 11');
@@ -477,7 +508,7 @@ void main() {
         }
         await tx.execute('UPDATE items SET score = 2 WHERE id = 14');
       });
-      await settle();
+      await settleTo(emissions, 2);
       await expectMatchesSelect(emissions, sql, const []);
       final byId = {for (final r in emissions.last) r['id']: r};
       expect(byId[11]!['score'], 1);
@@ -492,7 +523,7 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, const []).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
 
       // 400 rows > RESQLITE_MAX_DELTA_ROWS (256) — capture goes unreliable.
       await db.executeBatch(
@@ -501,7 +532,7 @@ void main() {
           for (var i = 100; i < 500; i++) [i, 0, 1, 'bulk_$i'],
         ],
       );
-      await settle();
+      await settleTo(emissions, 2);
       await expectMatchesSelect(emissions, sql, const []);
       expect(emissions.last, hasLength(450));
     });
@@ -511,11 +542,11 @@ void main() {
       final emissions = <List<Map<String, Object?>>>[];
       final sub = db.stream(sql, const []).listen(emissions.add);
       addTearDown(sub.cancel);
-      await settle();
+      await settleTo(emissions, 1);
       expect(emissions, hasLength(1));
 
       await db.execute("UPDATE items SET name = 'row_7' WHERE id = 8");
-      await settle();
+      await settleTo(emissions, 2);
       await expectMatchesSelect(emissions, sql, const []);
       expect(emissions.last, hasLength(2));
     });
@@ -531,12 +562,14 @@ void main() {
       final subB = db.stream(sqlB, const []).listen(emissionsB.add);
       addTearDown(subA.cancel);
       addTearDown(subB.cancel);
-      await settle();
+      await settleTo(emissionsA, 1);
+      await settleTo(emissionsB, 1);
       expect(emissionsA, hasLength(1));
       expect(emissionsB, hasLength(1));
 
       await db.execute('UPDATE items SET score = 1 WHERE id = 5');
-      await settle();
+      await settleTo(emissionsA, 2);
+      await settleQuiet(emissionsB);
       expect(emissionsA, hasLength(2));
       expect(emissionsB, hasLength(1));
       await expectMatchesSelect(emissionsA, sqlA, const []);
