@@ -209,6 +209,26 @@ elevated, re-run order-flipped before treating the flag as real — and
 before burning an ablation pass on a mechanism the workload may not even
 exercise.*
 
+### A dead guard flag is a data race waiting for a traffic pattern
+
+[Exp 160](160-stream-delta-ivm.md)'s detached admission reads surfaced a
+reader-isolate SEGV that root-caused to `Database.diagnostics()` reading
+live NOMUTEX reader connections from the main isolate. The guard existed
+— `resqlite_db_status_total` skips readers marked `in_use` — but
+[exp 030](030-dedicated-reader-assignment.md) had made that flag dead
+code long before, and [exp 051](051-lock-free-reader-pool.md) even
+*documented* the acquire path as dead without anyone asking what the
+flag was still guarding. The race stayed latent because nothing made
+readers reliably busy at diagnostics-poll time until a new feature
+changed the traffic pattern.
+
+*Reapplies whenever an experiment declares a code path dead. Before
+archiving that fact, list what the dead path's side effects (flags,
+locks, counters) were protecting — either remove the consumers or make
+the signal real. A guard that silently stopped being maintained is
+strictly worse than no guard, because readers of the consuming code
+assume protection.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

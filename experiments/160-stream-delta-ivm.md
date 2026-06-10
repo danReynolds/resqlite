@@ -188,6 +188,26 @@ those, flipping most of the remaining ~3,100 re-queries per burst into
 skips/patches. That is the quantified case for tier-2 — and the bound on
 what tier-1 alone can claim in real apps.
 
+### Surfaced pre-existing bug: diagnostics × reader data race
+
+CI caught a flaky reader-isolate SEGV (~1-in-30 stream_test runs) that
+bisected to the admission PRAGMA — but the root cause predates this
+experiment. `resqlite_db_status_total` skips readers whose `in_use` flag
+is set, and that flag has been dead code since exp 030 moved workers to
+dedicated reader assignment (exp 051 even documented the acquire path as
+dead). `Database.diagnostics()` was therefore calling `sqlite3_db_status`
+on live NOMUTEX reader connections from the main isolate; the
+`SCHEMA_USED` op measures memory via the connection's `pnBytesFreed`
+dry-run mechanism, and toggling that under a reader mid-query corrupts
+the reader's own allocation accounting (crash: `sqlite3VdbeDelete` →
+allocation-size read, null). Exp 160's detached admission reads made
+"reader busy while a test polls `Diagnostics.streamLength`" the common
+case, blowing the window open. Fixed here: read workers bracket each
+request with `resqlite_reader_set_busy` (two ~ns leaf FFI calls), making
+the existing busy guard real; the sacrifice path clears the bracket
+before `Isolate.exit`. Validation: crash reproduced locally pre-fix;
+100/100 clean stress iterations post-fix.
+
 ## Future Notes
 
 - **Emission cadence**: IVM emits per write where the re-query path

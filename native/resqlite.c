@@ -1421,6 +1421,12 @@ void resqlite_deltas_mark_unreliable(resqlite_db* db) {
     delta_mark_unreliable(db);
 }
 
+void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy) {
+    if (!db || reader_id < 0 || reader_id >= db->reader_count) return;
+    atomic_store_explicit(&db->readers[reader_id].worker_busy, busy,
+                          memory_order_release);
+}
+
 // Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
 // the cached entry's read-table dependencies are unreliable (overflow / OOM
 // during prepare). Zero would mean "stream has no table deps" → silent stuck
