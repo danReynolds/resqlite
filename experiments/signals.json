@@ -171,9 +171,9 @@
       "id": "result-transfer-shape",
       "status": "watch",
       "subsystems": ["results", "isolate-transfer", "api-shape"],
-      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy.",
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy. Exp 159 then tried routing Row.containsKey through that same indexOf fast path and rejected the swap: the candidate moved row_map_facade containsKey nominally -3.4% (15.231 -> 14.707 ms) but the candidate range fully overlapped the baseline range, because HashMap<String, int>.containsKey is already at the noise floor on canonical-string keys (Dart caches String.hashCode). The rejection bounds future containsKey-side work in this direction unless a workload makes containsKey on canonical-and-present keys a material wall-time fraction.",
       "keyPriors": ["008", "063", "082", "089", "158"],
-      "archive": ["066", "081"],
+      "archive": ["066", "081", "159"],
       "interestingIf": [
         "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
         "a change preserves the lean API while removing end-to-end work",
@@ -192,7 +192,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps` or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes."
+      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps` or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes. Exp 159 took the natural follow-up (extend the identity fast path to Row.containsKey) off the candidate list — the row_map_facade containsKey case collapses to noise because HashMap.containsKey is already fast on canonical-string keys. Do not retry that swap without a workload where containsKey time dominates."
     },
     {
       "id": "measurement-system",
@@ -683,6 +683,19 @@
         "evaluate reader-reply batching as the bounded implementation candidate that follows: must drop `completion_us / total_us` on A11c overlap AND stay neutral on A11c disjoint and keyed-PK (otherwise overall release-suite delta is workload-specific)",
         "treat `stream_emit_us` as evidence-of-absence for subscriber-fanout optimization candidates until a workload with very many listeners per stream surfaces",
         "future main-isolate counters should follow the exp 136 pattern (counter + post-drain snapshot in `audit_workloads.dart`) rather than redoing the harness wiring"
+      ]
+    },
+    "159": {
+      "directions": ["result-transfer-shape"],
+      "outcomeClass": "rejected_below_current_signal",
+      "changedBeliefs": [
+        "HashMap<String, int>.containsKey is already at the row_map_facade noise floor on canonical-string keys, so extending exp 158's identity fast path to Row.containsKey produces no measurable win",
+        "Future result-transfer-shape work should not retry the containsKey side of the identity fast path unless a workload shows containsKey on canonical-and-present keys is a material wall-time fraction"
+      ],
+      "nextSignals": [
+        "do not route Row.containsKey through RowSchema.indexOf without a new workload that exposes containsKey wall time",
+        "if a containsKey-heavy stream consumer or map-presence-filter benchmark appears, re-run the swap and confirm the identity scan actually fires (canonical-string identity holds on the row_map_facade schema, so the fast path is reachable when measured)",
+        "exp 158's indexOf fast path stands; this rejection only bounds the containsKey-side extension"
       ]
     }
   }

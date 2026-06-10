@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-09T15:34:59.695047",
+  "generated": "2026-06-10T07:21:22.379316",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -19301,6 +19301,19 @@
         "timestamp": "2026-06-08T07:16:55",
         "source": "nearby"
       }
+    },
+    {
+      "id": "159",
+      "title": "`Row.containsKey` identity fast path",
+      "date": "2026-06-10",
+      "status": "rejected",
+      "summary": "Routing `Row.containsKey` through `RowSchema.indexOf` to extend exp 158's identity scan landed nominally at -3.4% on the `row_map_facade` `containsKey` row median (15.231 → 14.707 ms), but the candidate range (12.377 – 15.101 ms) fully overlapped the baseline range (13.930 – 15.329 ms). `HashMap<String, int>.containsKey` is already at the noise floor on canonical-string keys because Dart caches `String.hashCode`. The change is behaviour-preserving and exp 158's `indexOf` fast path stands; reopen only if a workload makes `containsKey` on canonical-and-present keys a material wall-time fraction.",
+      "commit": null,
+      "problem": "Experiment 158 added the schema-name identity fast path to `RowSchema.indexOf`\nand observed a clean win on full row consumption — `row_map_facade` hot lookup\ndropped 10.750 → 5.136 ms (-52%) and `select_maps` 10K main-isolate consumption\ndropped 1.998 → 0.967 ms (-52%).\n\nThat experiment intentionally left `Row.containsKey` on the original direct\n`_indexByName.containsKey(key)` path. The `containsKey` row median in exp 158\nmoved from 17.720 → 17.701 ms, recorded as neutral.\n\nThe bounded question for this run was therefore: does extending exp 158's\nidentity fast path to `Row.containsKey` produce a measurable win on the\nsame workload, or is the existing direct `HashMap.containsKey` already at\nthe noise floor of the available benchmark?",
+      "hypothesis": "`Row.containsKey` currently bypasses `RowSchema.indexOf` and goes straight to\n`_indexByName.containsKey(key)`. Routing it through `indexOf` would let\ncanonical-string lookups (the common case in user code that mirrors row.keys)\nshort-circuit inside the up-to-32-column identity scan that exp 158 already\nestablished, without changing any public API and without affecting\n`Row.operator[]`, which already uses `indexOf`.\n\nPredicted ceiling: roughly the same shape as exp 158's hot-lookup delta, since\nboth paths now share the same `indexOf` call.\n\nAccept only if `row_map_facade` containsKey medians drop materially relative to\nbaseline noise. Reject if the candidate collapses to the noise floor — a wide\nidentity scan plus HashMap fallback for non-identical keys is a real fallthrough\ncost, and ma...",
+      "approach": "`Row.containsKey` now calls `_schema.indexOf(key) >= 0` instead of\n`_schema._indexByName.containsKey(key)`:\n\n```dart\n@override\nbool containsKey(Object? key) =>\n    key is String && _schema.indexOf(key) >= 0;\n```\n\n`indexOf` was unchanged. For schemas with `≤ 32` columns it still runs the\nidentity scan first, falling back to the private `HashMap<String, int>` for\nnon-identical or unknown keys. Schemas wider than 32 columns skip the identity\nloop entirely and go straight to the HashMap, identical to exp 158's behavior.\n\nNo other code, public API, or transfer surface was touched.\n\nA pre-run sanity check confirmed canonical-string identity holds in the\nbenchmark setup: `identical(\"updated_at\", schema.names[5])` returned `true` and\n`indexOf(\"updated_at\")` returned `5`. So the identity fast pa...",
+      "results": "Three paired runs of `dart run benchmark/experiments/row_map_facade.dart`,\nstashing the change for baseline and unstashing for candidate. `containsKey`\nrow medians (8-column schema, 500,000 inner iterations per measurement):\n\n| Run | Baseline row (ms) | Candidate row (ms) |\n|---|---:|---:|\n| 1 | 15.329 | 12.377 |\n| 2 | 15.231 | 14.707 |\n| 3 | 13.930 | 15.101 |\n\nRun-median summary:\n\n| Metric | Value |\n|---|---:|\n| Baseline median | 15.231 ms |\n| Candidate median | 14.707 ms |\n| Delta | -3.4% |\n| Baseline run-to-run range | 13.930 – 15.329 ms (1.4 ms span) |\n| Candidate run-to-run range | 12.377 – 15.101 ms (2.7 ms span) |\n\nThe candidate range fully overlaps the baseline range, and the run-3 candidate\nmedian (15.101 ms) is *above* the run-3 baseline median (13.930 ms). The\nnominal -3.4% d...",
+      "reasoning": "Reject.\n\nThe identity fast path is consistent with exp 158 and the change is\nbehavior-preserving, but the measured win on the available benchmark is below\nthe per-run noise floor. The most likely explanation is that\n`HashMap<String, int>.containsKey` is already very fast on canonical-string\nkeys — Dart caches `String.hashCode` on canonical strings, so the bucket lookup\ncollapses to a single hash + identity-compare. The candidate path replaces that\nwith a short identity-scan loop that performs almost the same comparison count.\n\nThere is also a small downside outside the canonical case: any\n`row.containsKey(nonCanonicalKey)` call now pays an up-to-32 element identity\nscan before falling through to the HashMap. For typical user code that passes\nliteral column names this is invisible, but a..."
     }
   ],
   "tracked": [
