@@ -3,6 +3,11 @@ import 'dart:async';
 class Mutex {
   Completer? _completer;
 
+  /// Whether the mutex is currently held (by anyone — ownership is not
+  /// tracked). Used by debug assertions on methods whose precondition is
+  /// "caller holds the lock".
+  bool get isLocked => _completer != null;
+
   Future<void> lock() async {
     while (_completer != null) {
       await _completer!.future;

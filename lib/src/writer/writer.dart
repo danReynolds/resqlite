@@ -45,8 +45,8 @@ final class Writer {
   // Transactions hold the lock from BEGIN through COMMIT/ROLLBACK — an
   // execute sent mid-transaction would silently join the open transaction
   // on the worker (txDepth > 0 defers its dirty-set harvest). Standalone
-  // writes only need the lock around the *send* (see [executePipelined]):
-  // the worker's port FIFO already orders them against any later BEGIN.
+  // writes only need the lock around the *send* (see [execute]): the
+  // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
   Writer(this._streamEngine);
@@ -88,8 +88,8 @@ final class Writer {
   /// Sends [build]'s request and returns a future for its reply.
   ///
   /// The send happens synchronously — no awaits before `sendPort.send` —
-  /// which [executePipelined] relies on to keep its lock window covering
-  /// the send. Completers are `sync` so the reply handler resumes the
+  /// which [execute] relies on to keep its lock window covering the
+  /// send. Completers are `sync` so the reply handler resumes the
   /// awaiting caller (response bookkeeping + stream invalidation) directly
   /// inside the port event, the same pattern the reader pool uses for its
   /// per-worker completers.
@@ -124,7 +124,7 @@ final class Writer {
   /// transaction, so exclusivity across the reply round-trip adds nothing.
   /// Releasing early lets a subsequent write or transaction overlap its
   /// send with this write's worker-side execution and reply scheduling.
-  Future<ExecuteResponse> executePipelined(
+  Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
@@ -135,17 +135,17 @@ final class Writer {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = execute(sql, parameters, traceCorrelationId);
+      reply = executeInTransaction(sql, parameters, traceCorrelationId);
     } finally {
       _mutex.unlock();
     }
     return reply;
   }
 
-  /// Batch variant of [executePipelined]. Parameter validation throws to
-  /// the caller before anything is sent; the empty-batch short-circuit
+  /// Batch variant of [execute]. Parameter validation throws to the
+  /// caller before anything is sent; the empty-batch short-circuit
   /// never touches the worker.
-  Future<BatchResponse?> executeBatchPipelined(
+  Future<BatchResponse?> executeBatch(
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
@@ -156,7 +156,7 @@ final class Writer {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = executeBatch(
+      reply = executeBatchInTransaction(
         sql,
         paramSets,
         traceCorrelationId: traceCorrelationId,
@@ -167,11 +167,20 @@ final class Writer {
     return reply;
   }
 
-  Future<ExecuteResponse> execute(
+  /// Sends a write while the writer lock is already held.
+  ///
+  /// Used by [Transaction.execute] (the enclosing transaction holds the
+  /// lock from BEGIN through COMMIT) and by [execute], which takes the
+  /// lock around this send.
+  Future<ExecuteResponse> executeInTransaction(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
+    assert(
+      _mutex.isLocked,
+      'executeInTransaction requires the writer lock to be held',
+    );
     return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(
         sql,
@@ -182,13 +191,19 @@ final class Writer {
     );
   }
 
-  Future<BatchResponse?> executeBatch(
+  /// Sends a batch write while the writer lock is already held.
+  /// See [executeInTransaction].
+  Future<BatchResponse?> executeBatchInTransaction(
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) {
-    // Empty batch is a no-op — short-circuit before acquiring the write
-    // lock so we don't pay for an isolate round-trip on empty input.
+    assert(
+      _mutex.isLocked,
+      'executeBatchInTransaction requires the writer lock to be held',
+    );
+    // Empty batch is a no-op — short-circuit so we don't pay for an
+    // isolate round-trip on empty input.
     if (paramSets.isEmpty) {
       return Future.value();
     }
@@ -207,11 +222,18 @@ final class Writer {
     );
   }
 
-  Future<QueryResponse> select(
+  /// Transaction-scoped read on the writer connection, so it sees
+  /// uncommitted writes from earlier statements in the same transaction.
+  /// The enclosing transaction holds the writer lock.
+  Future<QueryResponse> selectInTransaction(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
+    assert(
+      _mutex.isLocked,
+      'selectInTransaction requires the writer lock to be held',
+    );
     return _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,

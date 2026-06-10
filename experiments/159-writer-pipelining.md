@@ -62,11 +62,15 @@ can be sent into an open transaction.
   (no awaits before `SendPort.send`).
 - One persistent `RawReceivePort _replyPort` + `ListQueue<Completer>`
   pending queue; completers are `Completer.sync` (reader-pool pattern).
-- New `executePipelined` / `executeBatchPipelined`: acquire the mutex,
-  send, release in `finally`, await the reply outside the lock.
-  `Database.execute` / `Database.executeBatch` use these;
-  `Database.transaction` keeps `locked()` across the full transaction.
-  `Transaction.execute` is unchanged (runs under the transaction's lock).
+- `Writer.execute` / `Writer.executeBatch` (the standalone entry points
+  `Database.execute` / `Database.executeBatch` call) acquire the mutex,
+  send, release in `finally`, and await the reply outside the lock. The
+  raw lock-held sends are named `executeInTransaction` /
+  `executeBatchInTransaction` / `selectInTransaction` — used by
+  `Transaction.*`, which runs under the enclosing transaction's lock —
+  and carry `assert(_mutex.isLocked)` so calling one without the lock
+  fails loudly in debug builds. `Database.transaction` keeps `locked()`
+  across the full transaction.
 - New tests: pipelined writes racing a rolled-back transaction stay
   isolated; an error reply consumes exactly its own FIFO slot.
 - New focused benchmark `benchmark/experiments/writer_pipelining.dart`
