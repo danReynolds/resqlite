@@ -314,6 +314,11 @@ typedef struct {
     resqlite_authz_ctx authz_ctx;
     resqlite_buf json_buf;  // persistent buffer for resqlite_query_bytes
     int in_use;
+    // Set by the reader's worker isolate around each request
+    // (resqlite_reader_set_busy) so resqlite_db_status_total never reads
+    // this NOMUTEX connection while the worker is using it. The legacy
+    // acquire-path `in_use` is dead under dedicated assignment (exp 030).
+    atomic_int worker_busy;
 } resqlite_reader;
 
 // ---------------------------------------------------------------------------
@@ -677,6 +682,7 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
             continue;
         }
         db->readers[idx].in_use = 0;
+        atomic_init(&db->readers[idx].worker_busy, 0);
 
         // Install authorizer to capture read dependencies (table + column).
         // The context lives inline on the reader so its address is stable
@@ -1239,6 +1245,12 @@ int resqlite_get_dirty_tables(
     return count;
 }
 
+void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy) {
+    if (!db || reader_id < 0 || reader_id >= db->reader_count) return;
+    atomic_store_explicit(&db->readers[reader_id].worker_busy, busy,
+                          memory_order_release);
+}
+
 // Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
 // the cached entry's read-table dependencies are unreliable (overflow / OOM
 // during prepare). Zero would mean "stream has no table deps" → silent stuck
@@ -1367,7 +1379,9 @@ int resqlite_db_status_total(
 
     sqlite3_mutex_enter(db->pool_mutex);
     for (int i = 0; i < db->reader_count; i++) {
-        if (db->readers[i].in_use) {
+        if (db->readers[i].in_use ||
+            atomic_load_explicit(&db->readers[i].worker_busy,
+                                 memory_order_acquire)) {
             if (rc == SQLITE_OK) rc = SQLITE_BUSY;
             continue;
         }

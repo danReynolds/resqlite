@@ -104,6 +104,18 @@ void readerEntrypoint(List<Object> args) {
 
     final request = message as ReadRequest;
 
+    // Mark this worker's dedicated reader connection busy so
+    // Database.diagnostics() (sqlite3_db_status from the main isolate)
+    // skips it while we're stepping over it — the connections are
+    // NOMUTEX, so a concurrent status read is a data race. Cleared in
+    // `finally` below, and explicitly before Isolate.exit on the
+    // sacrifice path (exit skips finally).
+    resqliteReaderSetBusy(
+      ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+      readerId,
+      1,
+    );
+
     // Timeline marker scopes the reader-isolate's per-message work so
     // external profilers can see the cross-isolate breakdown. Gated
     // behind `kProfileMode` (compile-time const) so release builds pay
@@ -180,7 +192,14 @@ void readerEntrypoint(List<Object> args) {
 
       if (sacrifice) {
         receivePort.close();
-        // Isolate.exit skips `finally`; close the timeline span manually.
+        // Isolate.exit skips `finally`; release the busy bracket and
+        // close the timeline span manually. The result is fully
+        // materialized at this point — no further native reads occur.
+        resqliteReaderSetBusy(
+          ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+          readerId,
+          0,
+        );
         if (kProfileMode) {
           Timeline.finishSync();
           TraceliteProfile.end(
@@ -205,6 +224,11 @@ void readerEntrypoint(List<Object> args) {
             );
       eventPort.send((null, false, error));
     } finally {
+      resqliteReaderSetBusy(
+        ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+        readerId,
+        0,
+      );
       if (kProfileMode) {
         Timeline.finishSync();
         TraceliteProfile.end(

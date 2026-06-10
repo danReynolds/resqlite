@@ -264,6 +264,18 @@ int resqlite_db_status_total(
     int* out_highwater
 );
 
+// Mark a dedicated reader connection busy/idle from its worker isolate.
+//
+// Connections are opened NOMUTEX, so `resqlite_db_status_total` must never
+// call sqlite3_db_status() on a connection another thread is actively
+// using (SQLITE_DBSTATUS_SCHEMA_USED measures via the connection's
+// pnBytesFreed dry-run mechanism — toggling it under a live reader
+// corrupts that reader's allocation accounting). The legacy acquire-path
+// `in_use` flag is dead under dedicated reader assignment
+// ([EXP-030](../experiments/030-dedicated-reader-assignment.md)), so read
+// workers bracket each request with this call to make the busy guard real.
+void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy);
+
 // ---------------------------------------------------------------------------
 // Read operations (use reader pool)
 // ---------------------------------------------------------------------------
