@@ -29,6 +29,14 @@ void main() {
       'completion_handler_count': 0,
       'stream_emit_us': 0,
       'stream_emit_count': 0,
+      'ivm_skipped_total': 0,
+      'ivm_applied_total': 0,
+      'ivm_bail_total': 0,
+      'ivm_admitted_total': 0,
+      'ivm_admitted_skip_total': 0,
+      'ivm_admitted_agg_total': 0,
+      'ivm_rejected_total': 0,
+      'ivm_hit_fallback_total': 0,
     });
 
     ProfileCounters.reset();
@@ -49,6 +57,14 @@ void main() {
       'completion_handler_count': 0,
       'stream_emit_us': 0,
       'stream_emit_count': 0,
+      'ivm_skipped_total': 0,
+      'ivm_applied_total': 0,
+      'ivm_bail_total': 0,
+      'ivm_admitted_total': 0,
+      'ivm_admitted_skip_total': 0,
+      'ivm_admitted_agg_total': 0,
+      'ivm_rejected_total': 0,
+      'ivm_hit_fallback_total': 0,
     });
   });
 

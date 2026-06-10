@@ -647,6 +647,26 @@
         "when a tracelite gate flags a regression with elevated within-run CVs relative to the other phase, re-run with collection order flipped before treating the flag as real"
       ]
     },
+    "160": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Row-level dirty precision is mergeable when admission is a registration-time, fail-closed classifier instead of exp 134's write-path SQL recognizer: tier-1 (single table, integer predicates, INTEGER-PK ordering) covers the canonical stream workloads and turns 98% of A11c-overlap invalidation decisions into proven misses with zero reader dispatches and zero bails",
+        "The preupdate hook's old/new row values are capturable within bounded cost (256 rows / 32 cols / 256 KB per cycle, poisoned by savepoint rollback) and ship as raw bytes decoded lazily on the main isolate",
+        "Maintained streams change emission cadence: each write's patch is delivered synchronously instead of coalescing behind re-query latency (A11c overlap 44 -> 500 emissions during the same burst) — the semantics an infinitely-fast re-query would produce",
+        "Tracelite stream gate, both collection orders: many-streams -18.5% / +22.2% main-slower (CIs -122..-96 ms and +100..+113 ms), keyed-PK -14.1% / +9.4% (CIs -60..-27 ms and +13..+37 ms) with keyed-PK within-run CV dropping 0.13-0.15 -> 0.02-0.05 under IVM in both passes; the standard-order pass's high-cardinality +2.11% flag did not reproduce order-flipped (CI -3.6..+9.6 ms) — drift, the exp 159 journal pattern",
+        "Tier expansion (v2): one fail-closed grammar classifies into full maintenance (composite ORDER BY with explicit pk tiebreak + LIMIT-K windows), skip-only proven-miss elision, and exactly-maintained aggregates seeded by writer-ordered snapshots; TEXT equality admits when the table CREATE sql has no COLLATE clause",
+        "Reader-built IVM baselines race late writer replies (no cross-port happens-before); all IVM state builds through writer-ordered reads, and maintained state drops whenever a delta-bearing cycle bypasses it — both defects found only by the randomized equivalence harness (~1-in-5 dart test runs, never in deterministic replays)",
+        "v2 gate: many-streams -18.2% with a formal `improved` primary-gate verdict (first in this direction's history); keyed-PK -5.5% (CI excludes zero); high-cardinality +3.55% real cost from O(admitted-streams) main-isolate predicate eval at 100-streams-one-table density",
+        "v2 admission on the app-shaped mix: 7/9 shapes, 7,643 invalidation decisions resolved without reader re-query, 0 bails, burst wall 132.9 ms vs main's ~200 ms while delivering per-write patches"
+      ],
+      "nextSignals": [
+        "per-table equality-predicate index: group admitted streams by (column, value) so a delta dispatches to interested streams in O(1) — removes the v2 high-cardinality +3.55% linear-eval cost and is the natural v3 dispatch structure",
+        "tier 4 one-hop joins: maintain the base stream and patch joined columns via keyed point lookups; demand property-based equivalence testing first",
+        "rebuild storms after churn cycles (overflow/unknown-deps drop all maintained states, then N writer-ordered rebuilds): batch or coalesce rebuilds if a workload shows it",
+        "if subscribers prefer coalesced emissions over per-write patches, apply the exp 045 microtask-batch pattern to IVM emissions and measure"
+      ]
+    },
     "147": {
       "directions": ["stream-rerun-dispatch", "measurement-system"],
       "outcomeClass": "in_review_measurement",

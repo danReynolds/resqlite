@@ -586,6 +586,67 @@ TableDependencies getDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
 void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
   resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   resqliteGetDirtyColumns(dbHandle, _columnTablesBuf, _columnNamesBuf, 64);
+  resqliteDiscardDeltas(dbHandle);
+}
+
+// ---------------------------------------------------------------------------
+// Row delta capture (exp 160)
+// ---------------------------------------------------------------------------
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+    ffi.Pointer<ffi.Int>,
+    ffi.Pointer<ffi.Int>,
+  )
+>(symbol: 'resqlite_get_deltas', isLeaf: true)
+external int resqliteGetDeltas(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>> outBuf,
+  ffi.Pointer<ffi.Int> outLen,
+  ffi.Pointer<ffi.Int> outRows,
+);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_discard_deltas',
+  isLeaf: true,
+)
+external void resqliteDiscardDeltas(ffi.Pointer<ffi.Void> db);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_deltas_mark_unreliable',
+  isLeaf: true,
+)
+external void resqliteDeltasMarkUnreliable(ffi.Pointer<ffi.Void> db);
+
+/// Persistent out-parameter slots for the delta drain, mirroring the
+/// `_dirtyTablesBuf` pattern.
+final ffi.Pointer<ffi.Pointer<ffi.Uint8>> _deltaBufSlot =
+    calloc<ffi.Pointer<ffi.Uint8>>();
+final ffi.Pointer<ffi.Int> _deltaLenSlot = calloc<ffi.Int>();
+final ffi.Pointer<ffi.Int> _deltaRowsSlot = calloc<ffi.Int>();
+
+final Uint8List _emptyDeltaBytes = Uint8List(0);
+
+/// Drain accumulated row deltas for the completed write cycle.
+///
+/// Returns `null` when capture was unreliable for this cycle (caps
+/// exceeded, allocation failure, or a savepoint rollback poisoned the
+/// buffer) — callers fall back to plain re-query invalidation. Returns an
+/// empty list when the cycle modified no rows. The bytes are copied out of
+/// the native buffer, so they remain valid across subsequent writes.
+Uint8List? drainRowDeltas(ffi.Pointer<ffi.Void> dbHandle) {
+  final reliable = resqliteGetDeltas(
+    dbHandle,
+    _deltaBufSlot,
+    _deltaLenSlot,
+    _deltaRowsSlot,
+  );
+  if (reliable == 0) return null;
+  final len = _deltaLenSlot.value;
+  if (len == 0) return _emptyDeltaBytes;
+  return Uint8List.fromList(_deltaBufSlot.value.asTypedList(len));
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle

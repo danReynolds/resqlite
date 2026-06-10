@@ -169,6 +169,28 @@ class ProfileCounters {
   /// one per initial result emission.
   static int streamEmitCount = 0;
 
+  /// Incremental stream maintenance outcomes (exp 160). One increment per
+  /// stream entry per write cycle: `ivmSkippedTotal` — every delta was
+  /// proven irrelevant, no re-query dispatched; `ivmAppliedTotal` — the
+  /// cached result was patched and emitted locally; `ivmBailTotal` — the
+  /// entry fell back to the normal re-query path.
+  static int ivmSkippedTotal = 0;
+  static int ivmAppliedTotal = 0;
+  static int ivmBailTotal = 0;
+
+  /// Classifier admission outcomes, one increment per registered stream
+  /// once its dependencies are known: admitted = the tier-1 classifier
+  /// accepted the query; rejected = outside the grammar (including
+  /// multi-table queries that never reach the classifier).
+  static int ivmAdmittedTotal = 0;
+  static int ivmAdmittedSkipTotal = 0;
+  static int ivmAdmittedAggTotal = 0;
+  static int ivmRejectedTotal = 0;
+
+  /// Skip-only entries whose write cycle contained a predicate hit (or an
+  /// unprovable cell) and fell back to a re-query.
+  static int ivmHitFallbackTotal = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -186,6 +208,14 @@ class ProfileCounters {
     'completion_handler_count': completionHandlerCount,
     'stream_emit_us': streamEmitUs,
     'stream_emit_count': streamEmitCount,
+    'ivm_skipped_total': ivmSkippedTotal,
+    'ivm_applied_total': ivmAppliedTotal,
+    'ivm_bail_total': ivmBailTotal,
+    'ivm_admitted_total': ivmAdmittedTotal,
+    'ivm_admitted_skip_total': ivmAdmittedSkipTotal,
+    'ivm_admitted_agg_total': ivmAdmittedAggTotal,
+    'ivm_rejected_total': ivmRejectedTotal,
+    'ivm_hit_fallback_total': ivmHitFallbackTotal,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -220,5 +250,13 @@ class ProfileCounters {
     completionHandlerCount = 0;
     streamEmitUs = 0;
     streamEmitCount = 0;
+    ivmSkippedTotal = 0;
+    ivmAppliedTotal = 0;
+    ivmBailTotal = 0;
+    ivmAdmittedTotal = 0;
+    ivmAdmittedSkipTotal = 0;
+    ivmAdmittedAggTotal = 0;
+    ivmRejectedTotal = 0;
+    ivmHitFallbackTotal = 0;
   }
 }

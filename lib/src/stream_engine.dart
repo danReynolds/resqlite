@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'dependency_tracking.dart'
     show
@@ -11,8 +12,16 @@ import 'dependency_tracking.dart'
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+import 'row_deltas.dart';
+import 'stream_ivm.dart';
 import 'tracelite_profile.dart';
 import 'extensions/set.dart';
+
+/// Hash sentinel stored after an incrementally-patched emission. The
+/// native result hash is 63-bit non-negative, so `-1` can never match —
+/// the next fallback re-query always decodes and re-emits rather than
+/// risking a stale suppression against a pre-patch baseline.
+const int _ivmStaleHash = -1;
 
 // ---------------------------------------------------------------------------
 // Stream dependency tracking contract
@@ -110,8 +119,14 @@ final class StreamEngine {
   /// [TableDependencies.none] means there are no stream-visible changes for
   /// this writer response. [TableDependencies.unknown] means native dirty-table
   /// tracking was unreliable, so every active stream must re-query.
+  ///
+  /// [deltas] carries the write cycle's raw row-delta bytes when capture
+  /// was reliable (exp 160). Streams admitted for incremental maintenance
+  /// consume them to skip or locally patch instead of re-querying; all
+  /// other streams ignore them.
   Future<void> onDependencyChanges(
     TableDependencies changes, {
+    Uint8List? deltas,
     int? traceCorrelationId,
   }) async {
     if (_entries.isEmpty) {
@@ -177,7 +192,19 @@ final class StreamEngine {
           }
       }
 
+      final deltaBatch = deltas == null ? null : RowDeltaBatch(deltas);
       for (final entry in dirtyEntries) {
+        if (deltaBatch != null && _tryIncrementalMaintain(entry, deltaBatch)) {
+          continue;
+        }
+        // This write cycle is bypassing the maintained state (re-query
+        // fallback). The state's baseline is now stale relative to the
+        // deltas it never saw — and a hash-suppressed re-query would
+        // validate emissions without re-syncing it — so drop it; the
+        // writer-ordered rebuild/reseed path restores an exact baseline.
+        // A maintained state only survives an unbroken chain of cycles
+        // it fully processed.
+        _dropMaintainedState(entry.ivm);
         entry.dirty = true;
         if (traceCorrelationId != null) {
           entry.pendingTraceCorrelationId = traceCorrelationId;
@@ -224,6 +251,287 @@ final class StreamEngine {
     }
   }
 
+  /// Writer-ordered read used to build IVM caches and aggregate
+  /// snapshots. Reads through the writer port are FIFO-ordered against
+  /// the write replies that carry row deltas, so a snapshot's position
+  /// totally orders it against every delta: writes whose replies were
+  /// processed before the snapshot reply are included in it, and all
+  /// later deltas apply cleanly on top. (A reader-side snapshot has no
+  /// such ordering — it can observe a commit whose delta then lands
+  /// after the build, double-applying the write.)
+  Future<List<Map<String, Object?>>> Function(
+    String sql,
+    List<Object?> params,
+  )?
+  _writerRead;
+
+  /// Wired by [Database] once the writer isolate has spawned. Until (and
+  /// unless) attached, full/aggregate admissions are not made and streams
+  /// stay on the plain re-query path.
+  void attachWriterRead(
+    Future<List<Map<String, Object?>>> Function(
+      String sql,
+      List<Object?> params,
+    )
+    read,
+  ) {
+    _writerRead = read;
+  }
+
+  /// Per-table admission metadata (`PRAGMA table_info` + the CREATE
+  /// statement from sqlite_master, which gates TEXT-equality admission on
+  /// the absence of COLLATE clauses), shared across admissions.
+  final Map<
+    String,
+    Future<(List<Map<String, Object?>>, String?)>
+  > _tableMetaCache = {};
+
+  Future<(List<Map<String, Object?>>, String?)> _tableMeta(String table) {
+    return _tableMetaCache[table] ??= () async {
+      final escaped = table.replaceAll('"', '""');
+      final info = await _pool.select('PRAGMA table_info("$escaped")');
+      final master = await _pool.select(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [table],
+      );
+      final createSql = master.isEmpty ? null : master.first['sql'] as String?;
+      return (info, createSql);
+    }();
+  }
+
+  /// Attempt to maintain [entry]'s cached result from the write cycle's
+  /// [batch] instead of re-querying. Returns true when the entry is fully
+  /// handled for this cycle (deltas proven irrelevant, or result patched
+  /// and emitted).
+  bool _tryIncrementalMaintain(StreamEntry entry, RowDeltaBatch batch) {
+    final ivm = entry.ivm;
+    if (ivm == null || entry.inFlight || entry.dirty) {
+      return false;
+    }
+
+    final tableDeltas = batch.forTable(ivm.shape.table);
+    if (tableDeltas == null || tableDeltas.isEmpty) {
+      // Malformed buffer, or the table was reported dirty with no
+      // captured rows — either way, trust the dirty set and re-query.
+      return false;
+    }
+
+    switch (ivm) {
+      case IvmSkipState():
+        // Tier 1.5: prove all deltas miss, or fall back. There is no
+        // cache to drop on a hit.
+        if (ivm.apply(tableDeltas) == IvmOutcome.unchanged) {
+          if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+          return true;
+        }
+        if (kProfileMode) ProfileCounters.ivmHitFallbackTotal++;
+        return false;
+
+      case IvmFullState():
+        if (ivm.rows == null) {
+          // Build (or rebuild after a bail/re-query) through the writer
+          // so the cache is FIFO-ordered against deltas; until it lands,
+          // writes keep falling back to re-query.
+          _scheduleFullBuild(entry, ivm);
+          return false;
+        }
+        switch (ivm.apply(tableDeltas)) {
+          case IvmOutcome.unchanged:
+            if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+            return true;
+          case IvmOutcome.applied:
+            final visible = ivm.visibleRows();
+            // Patches confined to a complete window's invisible tail
+            // change the cache but not the emission.
+            final previous = entry.lastResult;
+            if (previous != null && _sameRowList(previous, visible)) {
+              entry.lastResult = visible;
+              entry.lastResultHash = _ivmStaleHash;
+              entry.lastRowCount = visible.length;
+              if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+              return true;
+            }
+            entry.lastResult = visible;
+            entry.lastResultHash = _ivmStaleHash;
+            entry.lastRowCount = visible.length;
+            entry.emit(visible);
+            if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
+            return true;
+          case IvmOutcome.bail:
+            if (kProfileMode) ProfileCounters.ivmBailTotal++;
+            return false;
+        }
+
+      case IvmAggregateState():
+        if (!ivm.seeded) {
+          _scheduleAggregateReseed(entry, ivm);
+          return false;
+        }
+        switch (ivm.apply(tableDeltas)) {
+          case IvmOutcome.unchanged:
+            if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+            return true;
+          case IvmOutcome.applied:
+            final visible = [ivm.visibleRow()];
+            entry.lastResult = visible;
+            entry.lastResultHash = _ivmStaleHash;
+            entry.lastRowCount = 1;
+            entry.emit(visible);
+            if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
+            return true;
+          case IvmOutcome.bail:
+            _scheduleAggregateReseed(entry, ivm);
+            if (kProfileMode) ProfileCounters.ivmBailTotal++;
+            return false;
+        }
+    }
+  }
+
+  /// Drop maintained state whose delta chain has been broken. Skip-only
+  /// states carry nothing to drop.
+  void _dropMaintainedState(IvmState? state) {
+    switch (state) {
+      case IvmFullState ivm:
+        ivm.rows = null;
+        ivm.keys = null;
+      case IvmAggregateState ivm:
+        ivm.seeded = false;
+      case IvmSkipState() || null:
+        break;
+    }
+  }
+
+  /// Rows-identical check by element identity (apply() clones any row it
+  /// changes, so identity captures "visibly unchanged" exactly).
+  bool _sameRowList(
+    List<Map<String, Object?>> a,
+    List<Map<String, Object?>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  /// Try to admit [entry] for incremental maintenance. Best-effort and
+  /// asynchronous; until (and unless) it completes, the entry stays on the
+  /// plain re-query path.
+  Future<void> _admitIvm(StreamEntry entry, String table) async {
+    try {
+      final (info, createSql) = await _tableMeta(table);
+      if (entry.subscribers.isEmpty || entry.ivm != null) return;
+      final shape = classifyIvmQuery(
+        entry.sql,
+        entry.params,
+        table,
+        info,
+        createSql: createSql,
+      );
+      switch (shape) {
+        case null:
+          if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+        case IvmFullShape():
+          if (_writerRead == null) {
+            if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+            return;
+          }
+          final state = IvmFullState(shape);
+          await _buildFullCache(entry, state);
+          if (entry.subscribers.isEmpty || entry.ivm != null) return;
+          entry.ivm = state;
+          if (kProfileMode) ProfileCounters.ivmAdmittedTotal++;
+        case IvmSkipShape():
+          entry.ivm = IvmSkipState(shape);
+          if (kProfileMode) {
+            ProfileCounters.ivmAdmittedTotal++;
+            ProfileCounters.ivmAdmittedSkipTotal++;
+          }
+        case IvmAggregateShape():
+          if (_writerRead == null) {
+            if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+            return;
+          }
+          final state = IvmAggregateState(shape);
+          await _seedAggregate(state, info);
+          if (entry.subscribers.isEmpty || entry.ivm != null) return;
+          if (state.seeded) {
+            entry.ivm = state;
+            if (kProfileMode) {
+              ProfileCounters.ivmAdmittedTotal++;
+              ProfileCounters.ivmAdmittedAggTotal++;
+            }
+          } else if (kProfileMode) {
+            ProfileCounters.ivmRejectedTotal++;
+          }
+      }
+    } catch (_) {
+      // Classification is best-effort; the entry stays on re-query.
+      if (kProfileMode) ProfileCounters.ivmRejectedTotal++;
+    }
+  }
+
+  /// Seed (or re-seed) an aggregate state with an exact, writer-ordered
+  /// snapshot.
+  Future<void> _seedAggregate(
+    IvmAggregateState state,
+    List<Map<String, Object?>> tableInfo,
+  ) async {
+    final read = _writerRead;
+    if (read == null) return;
+    final snapshot = await read(
+      buildAggregateSnapshotSql(state.shape, tableInfo),
+      const [],
+    );
+    if (snapshot.length == 1) {
+      state.seedFromSnapshot(snapshot.first);
+    }
+  }
+
+  /// Build a full-maintenance cache with a writer-ordered read of the
+  /// entry's own SQL. The result feeds only the cache — emissions remain
+  /// reader-driven until deltas start applying.
+  Future<void> _buildFullCache(StreamEntry entry, IvmFullState state) async {
+    final read = _writerRead;
+    if (read == null) return;
+    final rows = await read(entry.sql, entry.params);
+    state.rebuild(rows);
+  }
+
+  /// After a bail or re-query invalidated a full cache, rebuild it
+  /// asynchronously off the writer; deltas keep falling back meanwhile.
+  void _scheduleFullBuild(StreamEntry entry, IvmFullState state) {
+    if (state.buildInFlight) return;
+    state.buildInFlight = true;
+    unawaited(() async {
+      try {
+        await _buildFullCache(entry, state);
+      } catch (_) {
+        // Stay cacheless; the entry keeps re-querying.
+      } finally {
+        state.buildInFlight = false;
+      }
+    }());
+  }
+
+  /// After an aggregate bail, re-seed asynchronously so a later write can
+  /// resume maintenance; re-queries cover the interim.
+  void _scheduleAggregateReseed(StreamEntry entry, IvmAggregateState state) {
+    if (state.reseedInFlight) return;
+    state.reseedInFlight = true;
+    unawaited(() async {
+      try {
+        final (info, _) = await _tableMeta(state.shape.table);
+        if (entry.subscribers.isEmpty) return;
+        await _seedAggregate(state, info);
+      } catch (_) {
+        // Stay unseeded; the entry keeps re-querying.
+      } finally {
+        state.reseedInFlight = false;
+      }
+    }());
+  }
+
   void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
@@ -253,6 +561,7 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
+    _tableMetaCache.clear();
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -305,6 +614,14 @@ final class StreamEngine {
           entry.dependencies = {
             for (final dependency in tables) dependency.table: dependency,
           };
+
+          // Single-table queries are candidates for incremental
+          // maintenance (exp 160). Admission is async and best-effort.
+          if (tables.length == 1) {
+            unawaited(_admitIvm(entry, tables.single.table));
+          } else if (kProfileMode) {
+            ProfileCounters.ivmRejectedTotal++;
+          }
         }
 
         // If an invalidation occurred while performing the entry's initial query then the entry
@@ -362,6 +679,19 @@ final class StreamEngine {
       entry.lastResultHash = newHash;
       entry.lastRowCount = newRowCount;
       entry.lastResult = rows;
+      // A fresh query result invalidates the maintained cache; it is
+      // rebuilt lazily from lastResult on the next applicable delta.
+      // A fresh query result invalidates maintained state; full caches
+      // rebuild lazily from lastResult, aggregates re-seed by snapshot.
+      switch (entry.ivm) {
+        case IvmFullState ivm:
+          ivm.rows = null;
+          ivm.keys = null;
+        case IvmAggregateState ivm:
+          ivm.seeded = false;
+        case IvmSkipState() || null:
+          break;
+      }
 
       entry.emit(rows);
     } catch (e, st) {
@@ -483,6 +813,10 @@ final class StreamEntry {
   /// non-null correlation is retained so the re-query can still be connected
   /// to a triggering write in tracelite.
   int? pendingTraceCorrelationId;
+
+  /// Incremental maintenance state (exp 160). Non-null once the query has
+  /// been admitted by the tier-1 classifier; null streams always re-query.
+  IvmState? ivm;
 
   @override
   int get hashCode => key;

@@ -173,6 +173,49 @@ int resqlite_get_dirty_tables(
 );
 
 // ---------------------------------------------------------------------------
+// Row delta capture (exp 160 — incremental stream maintenance)
+// ---------------------------------------------------------------------------
+
+// Bounded, best-effort capture of per-row old/new values inside the writer
+// preupdate hook. Exceeding any cap (rows per drain cycle, columns per row,
+// total bytes), an allocation failure, or a savepoint rollback flips the
+// accumulator's reliable flag; Dart then falls back to plain re-query
+// invalidation. Tables remain the correctness layer — deltas are purely an
+// optimization input.
+#define RESQLITE_MAX_DELTA_ROWS 256
+#define RESQLITE_MAX_DELTA_ROW_COLUMNS 32
+#define RESQLITE_MAX_DELTA_BYTES (256 * 1024)
+
+// Buffer layout (little-endian), one record per modified row:
+//   u8  op            SQLITE_INSERT (18) | SQLITE_UPDATE (23) | SQLITE_DELETE (9)
+//   i32 table_len; table bytes (UTF-8, no NUL)
+//   i64 old_rowid; i64 new_rowid
+//   i32 col_count
+//   u8  has_old; u8 has_new
+//   col_count old cells when has_old, then col_count new cells when has_new
+// Cell: u8 tag (0=NULL, 1=INTEGER, 2=FLOAT, 3=TEXT, 4=BLOB);
+//   INTEGER: i64; FLOAT: f64; TEXT/BLOB: i32 len + bytes.
+//
+// Drains the accumulator: writes the buffer pointer/length/row count and
+// resets capture state for the next cycle. Returns 1 when the captured
+// deltas are reliable, 0 when they must be discarded (caller falls back).
+// Buffer bytes stay valid until the next writer activity — copy first.
+int resqlite_get_deltas(
+    resqlite_db* db,
+    const unsigned char** out_buf,
+    int* out_len,
+    int* out_rows
+);
+
+// Drop accumulated deltas (transaction rollback / discarded write cycle).
+void resqlite_discard_deltas(resqlite_db* db);
+
+// Poison the current capture cycle (savepoint rollback: the buffer may
+// contain rows whose changes were undone). The next drain reports
+// unreliable, then capture resumes fresh.
+void resqlite_deltas_mark_unreliable(resqlite_db* db);
+
+// ---------------------------------------------------------------------------
 // Read dependency tracking (authorizer hook on readers)
 // ---------------------------------------------------------------------------
 

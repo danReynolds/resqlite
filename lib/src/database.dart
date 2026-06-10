@@ -56,6 +56,16 @@ final class Database {
       // Spawn the single writer isolate.
       final writer = await Writer.spawn(streamEngine, _handle);
 
+      // IVM state builders read through the writer so their snapshots are
+      // FIFO-ordered against the write replies that carry row deltas —
+      // a reader-side snapshot can observe a commit whose delta is then
+      // applied on top of it (double-counting). Exp 160 tiers.
+      streamEngine.attachWriterRead(
+        (sql, params) => writer.locked(
+          () async => (await writer.selectInTransaction(sql, params)).rows,
+        ),
+      );
+
       return (
         readerPool: readerPool,
         streamEngine: streamEngine,
@@ -405,6 +415,7 @@ final class Database {
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     streamEngine.onDependencyChanges(
       response.modifications,
+      deltas: response.deltas,
       traceCorrelationId: correlationId,
     );
 
@@ -468,6 +479,7 @@ final class Database {
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       streamEngine.onDependencyChanges(
         response.modifications,
+        deltas: response.deltas,
         traceCorrelationId: correlationId,
       );
     }

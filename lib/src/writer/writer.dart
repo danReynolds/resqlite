@@ -306,6 +306,7 @@ final class Writer {
     if (Transaction.current == null) {
       _streamEngine.onDependencyChanges(
         response.modifications,
+        deltas: response.deltas,
         traceCorrelationId: traceCorrelationId,
       );
     }

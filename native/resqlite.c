@@ -376,6 +376,14 @@ struct resqlite_db {
     resqlite_cached_stmt* writer_active_entry;
     int writer_checkpoint_running;
 
+    // Row deltas accumulated by the preupdate hook (exp 160). Bounded and
+    // best-effort: any cap overflow, allocation failure, or savepoint
+    // rollback flips `delta_reliable` and empties the buffer, and the Dart
+    // layer falls back to plain re-query invalidation for that write cycle.
+    resqlite_buf delta_buf;
+    int delta_rows;
+    int delta_reliable;
+
     // Reader pool.
     resqlite_reader readers[MAX_READERS];
     int reader_count;
@@ -477,6 +485,113 @@ static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
     }
 }
 
+// Poison the current delta capture cycle. The next drain reports
+// unreliable once, then capture resumes fresh.
+static void delta_mark_unreliable(resqlite_db* sdb) {
+    sdb->delta_reliable = 0;
+    sdb->delta_buf.len = 0;
+    sdb->delta_rows = 0;
+}
+
+// Serialize one sqlite3_value into the delta buffer (tag + payload).
+static int delta_write_value(resqlite_buf* b, sqlite3_value* v) {
+    if (!v) return -1;
+    switch (sqlite3_value_type(v)) {
+        case SQLITE_NULL:
+            return buf_write_byte(b, 0);
+        case SQLITE_INTEGER:
+            if (buf_write_byte(b, 1) != 0) return -1;
+            return buf_write_i64(b, sqlite3_value_int64(v));
+        case SQLITE_FLOAT:
+            if (buf_write_byte(b, 2) != 0) return -1;
+            return buf_write_f64(b, sqlite3_value_double(v));
+        case SQLITE_TEXT: {
+            const unsigned char* t = sqlite3_value_text(v);
+            int n = sqlite3_value_bytes(v);
+            if (!t && n > 0) return -1;
+            if (buf_write_byte(b, 3) != 0) return -1;
+            if (buf_write_i32(b, n) != 0) return -1;
+            return n > 0 ? buf_write(b, t, n) : 0;
+        }
+        case SQLITE_BLOB: {
+            const void* p = sqlite3_value_blob(v);
+            int n = sqlite3_value_bytes(v);
+            if (!p && n > 0) return -1;
+            if (buf_write_byte(b, 4) != 0) return -1;
+            if (buf_write_i32(b, n) != 0) return -1;
+            return n > 0 ? buf_write(b, p, n) : 0;
+        }
+    }
+    return -1;
+}
+
+// Capture one modified row's old/new values from inside the preupdate
+// callback (the only window where sqlite3_preupdate_old/new are valid).
+// Row appends are atomic: any failure truncates back to the row start and
+// poisons the cycle.
+static void delta_capture(
+    resqlite_db* sdb,
+    sqlite3* db,
+    int op,
+    const char* table_name,
+    sqlite3_int64 old_rowid,
+    sqlite3_int64 new_rowid
+) {
+    if (!sdb->delta_reliable) return;
+    if (!table_name) { delta_mark_unreliable(sdb); return; }
+    if (sdb->delta_rows >= RESQLITE_MAX_DELTA_ROWS ||
+        sdb->delta_buf.len > RESQLITE_MAX_DELTA_BYTES) {
+        delta_mark_unreliable(sdb);
+        return;
+    }
+    int col_count = sqlite3_preupdate_count(db);
+    if (col_count <= 0 || col_count > RESQLITE_MAX_DELTA_ROW_COLUMNS) {
+        delta_mark_unreliable(sdb);
+        return;
+    }
+
+    int row_start = sdb->delta_buf.len;
+    int table_len = (int)strlen(table_name);
+    unsigned char has_old = (op == SQLITE_UPDATE || op == SQLITE_DELETE);
+    unsigned char has_new = (op == SQLITE_UPDATE || op == SQLITE_INSERT);
+
+    resqlite_buf* b = &sdb->delta_buf;
+    int ok = buf_write_byte(b, (unsigned char)op) == 0 &&
+             buf_write_i32(b, table_len) == 0 &&
+             buf_write(b, table_name, table_len) == 0 &&
+             buf_write_i64(b, old_rowid) == 0 &&
+             buf_write_i64(b, new_rowid) == 0 &&
+             buf_write_i32(b, col_count) == 0 &&
+             buf_write_byte(b, has_old) == 0 &&
+             buf_write_byte(b, has_new) == 0;
+
+    if (ok && has_old) {
+        for (int i = 0; ok && i < col_count; i++) {
+            sqlite3_value* v = NULL;
+            if (sqlite3_preupdate_old(db, i, &v) != SQLITE_OK ||
+                delta_write_value(b, v) != 0) {
+                ok = 0;
+            }
+        }
+    }
+    if (ok && has_new) {
+        for (int i = 0; ok && i < col_count; i++) {
+            sqlite3_value* v = NULL;
+            if (sqlite3_preupdate_new(db, i, &v) != SQLITE_OK ||
+                delta_write_value(b, v) != 0) {
+                ok = 0;
+            }
+        }
+    }
+
+    if (!ok) {
+        sdb->delta_buf.len = row_start;
+        delta_mark_unreliable(sdb);
+        return;
+    }
+    sdb->delta_rows++;
+}
+
 static void preupdate_hook(
     void* user_data,
     sqlite3* db,
@@ -486,10 +601,11 @@ static void preupdate_hook(
     sqlite3_int64 old_rowid,
     sqlite3_int64 new_rowid
 ) {
-    (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
+    (void)db_name;
     resqlite_db* sdb = (resqlite_db*)user_data;
     resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
     dirty_columns_add_for_active_stmt(sdb, table_name);
+    delta_capture(sdb, db, op, table_name, old_rowid, new_rowid);
 }
 
 static int writer_wal_hook(
@@ -632,6 +748,14 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     resqlite_column_set_init(&db->dirty_columns);
     resqlite_column_set_init(&db->writer_authz_scratch);
     db->writer_active_entry = NULL;
+    if (buf_init(&db->delta_buf, 4096) != 0) {
+        // Allocation failure at open: deltas stay permanently unreliable
+        // (every drain reports fallback); core functionality is unaffected.
+        db->delta_buf.data = NULL;
+        db->delta_buf.cap = 0;
+    }
+    db->delta_rows = 0;
+    db->delta_reliable = db->delta_buf.data != NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
@@ -799,6 +923,8 @@ void resqlite_close(resqlite_db* db) {
     resqlite_dirty_set_free(&db->dirty_tables);
     resqlite_column_set_free(&db->dirty_columns);
     resqlite_column_set_free(&db->writer_authz_scratch);
+    free(db->delta_buf.data);
+    db->delta_buf.data = NULL;
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
 
@@ -908,6 +1034,7 @@ int resqlite_run_connection_setup(
         resqlite_dirty_set_reset(&db->dirty_tables);
         resqlite_column_set_reset(&db->dirty_columns);
         resqlite_column_set_reset(&db->writer_authz_scratch);
+        resqlite_discard_deltas(db);
         db->writer_active_entry = NULL;
     }
 
@@ -1249,6 +1376,49 @@ void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy) {
     if (!db || reader_id < 0 || reader_id >= db->reader_count) return;
     atomic_store_explicit(&db->readers[reader_id].worker_busy, busy,
                           memory_order_release);
+}
+
+int resqlite_get_deltas(
+    resqlite_db* db,
+    const unsigned char** out_buf,
+    int* out_len,
+    int* out_rows
+) {
+    if (out_buf) *out_buf = NULL;
+    if (out_len) *out_len = 0;
+    if (out_rows) *out_rows = 0;
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
+        return 0;
+    }
+
+    int reliable = db->delta_reliable;
+    if (reliable && out_buf && out_len && out_rows) {
+        *out_buf = db->delta_buf.data;
+        *out_len = db->delta_buf.len;
+        *out_rows = db->delta_rows;
+    }
+
+    // Reset for the next capture cycle. Buffer bytes stay valid until the
+    // next writer activity — the caller copies before issuing more writes
+    // (same contract as resqlite_get_dirty_tables strings).
+    db->delta_buf.len = 0;
+    db->delta_rows = 0;
+    // A buffer that failed to allocate at open stays permanently unreliable.
+    db->delta_reliable = db->delta_buf.data != NULL;
+
+    return reliable;
+}
+
+void resqlite_discard_deltas(resqlite_db* db) {
+    if (!db) return;
+    db->delta_buf.len = 0;
+    db->delta_rows = 0;
+    db->delta_reliable = db->delta_buf.data != NULL;
+}
+
+void resqlite_deltas_mark_unreliable(resqlite_db* db) {
+    if (!db) return;
+    delta_mark_unreliable(db);
 }
 
 // Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
