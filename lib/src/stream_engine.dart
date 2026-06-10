@@ -71,6 +71,16 @@ final class StreamEngine {
   /// listeners for that query cancel. Useful for verifying cleanup in tests.
   int get length => _entries.length;
 
+  /// Number of writes that took the conservative all-streams re-query
+  /// fallback because native table tracking was unreliable
+  /// ([UnknownTableDependencies] — dependency-set overflow or OOM).
+  ///
+  /// Does not count the benign initial-registration path where a single
+  /// new stream's dependencies are not known yet; only whole-index
+  /// invalidations. Cumulative for the lifetime of this engine.
+  int get unknownDependencyFallbackCount => _unknownDependencyFallbackCount;
+  int _unknownDependencyFallbackCount = 0;
+
   /// Create a reactive stream that emits query results and re-emits
   /// whenever the underlying tables change.
   ///
@@ -129,6 +139,7 @@ final class StreamEngine {
     try {
       switch (changes) {
         case UnknownTableDependencies():
+          _unknownDependencyFallbackCount++;
           dirtyEntries.addAll(_unknownDepsEntries);
           for (final entries in _tableIndex.values) {
             dirtyEntries.addAll(entries);

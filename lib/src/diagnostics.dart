@@ -18,6 +18,7 @@ final class Diagnostics {
     required this.walBytes,
     required this.readersBusyAtSnapshot,
     required this.streamLength,
+    required this.unknownDependencyFallbackCount,
   });
 
   /// Total bytes used by the SQLite page cache across the writer and
@@ -72,6 +73,17 @@ final class Diagnostics {
   /// Number of stream registrations (stream(sql) + listen).
   final int streamLength;
 
+  /// Number of writes that forced the conservative all-streams re-query
+  /// fallback because native dependency tracking was unreliable
+  /// (tracking-set overflow past the 64-entry caps, or OOM).
+  ///
+  /// Each such write re-queries every registered stream instead of only
+  /// the streams watching the written tables. A persistently growing
+  /// value means a workload is routinely exceeding the native tracking
+  /// caps and paying full re-query fan-out on every write. Cumulative
+  /// since the database was opened.
+  final int unknownDependencyFallbackCount;
+
   @override
   String toString() =>
       'Diagnostics('
@@ -79,7 +91,8 @@ final class Diagnostics {
       'schema: $sqliteSchemaBytes B, '
       'stmt: $sqliteStmtBytes B, '
       'wal: $walBytes B, '
-      'streams: $streamLength'
+      'streams: $streamLength, '
+      'unknownDepsFallbacks: $unknownDependencyFallbackCount'
       '${readersBusyAtSnapshot ? ', readersBusy: true' : ''}'
       ')';
 }

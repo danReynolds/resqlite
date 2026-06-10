@@ -588,6 +588,7 @@ final class Database {
       walBytes: walBytes,
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
+      unknownDependencyFallbackCount: streamEngine.unknownDependencyFallbackCount,
     );
   }
 }
