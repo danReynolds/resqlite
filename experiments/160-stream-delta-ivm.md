@@ -290,6 +290,40 @@ while delivering a fraction of the emissions). The two remaining
 re-query shapes have documented upgrade paths: the JOIN pane (tier 4)
 and the tiebreak-less conversation list (add `, id DESC`).
 
+### Tracelite gate, v2 stack
+
+Standard-order pass (3 runs per side):
+
+| scenario | delta | evidence | verdict |
+|---|---:|---|---|
+| many-streams-writer-throughput | **−18.2%** (546 → 447 ms) | CV 1.5%, p < 0.001 | **`improved` — primary gate cleared** |
+| keyed-pk-subscriptions | −5.5% | CI −22.5..−4.4 ms (excludes zero); baseline CV 0.12 vs candidate 0.01 | too_noisy label, win signal |
+| high-cardinality-fanout | +3.55% | CI +7.3..+16.4 ms | real small cost (see below) |
+
+The many-streams `improved` verdict is the first formally-cleared
+primary gate in this direction's history — every prior stream
+experiment topped out at "neutral".
+
+The high-cardinality cost has a clear mechanism: 100 admitted streams
+on one table mean every write runs O(streams) predicate evaluations on
+the main isolate, replacing the baseline's reader-distributed hash
+suppression. At that density they trade ~3.5% wall for per-write patch
+delivery. The identified fix (next step, not in this branch): a
+per-table **equality-predicate index** grouping admitted streams by
+(column, value) so a delta dispatches to its interested streams in
+O(1) instead of a linear scan — the same idea column elision applies at
+table granularity, pushed down to predicate granularity. Order-flipped
+confirmation of this pass recorded below.
+
+**Order-flipped confirmation** (v2 collected first, main second; deltas
+as main-vs-v2): many-streams **+19.5% main-slower** (CI +83.3..+94.1 ms,
+CV 1.9%) — the headline win reproduces in both collection orders.
+High-cardinality: main −4.79% (CI −28.7..−4.8 ms) — the ~4% v2 cost is
+real in both orders, as the mechanism predicts. Keyed-PK flipped sign
+across passes (−5.5% / +3.9%) — honestly neutral for the v2 stack
+(tier 1 alone showed a clear keyed-PK win; the v2 delta capture and
+admission machinery absorb part of it on this scenario's shape).
+
 ## Future Notes
 
 - **Emission cadence**: IVM emits per write where the re-query path
