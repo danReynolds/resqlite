@@ -29,6 +29,9 @@ void main() {
       'completion_handler_count': 0,
       'stream_emit_us': 0,
       'stream_emit_count': 0,
+      'ivm_skipped_total': 0,
+      'ivm_applied_total': 0,
+      'ivm_bail_total': 0,
     });
 
     ProfileCounters.reset();
@@ -49,6 +52,9 @@ void main() {
       'completion_handler_count': 0,
       'stream_emit_us': 0,
       'stream_emit_count': 0,
+      'ivm_skipped_total': 0,
+      'ivm_applied_total': 0,
+      'ivm_bail_total': 0,
     });
   });
 

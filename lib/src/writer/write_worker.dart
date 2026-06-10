@@ -10,6 +10,7 @@ library;
 import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -100,11 +101,18 @@ final class ExecuteResponse {
     this.result,
     this.modifications, {
     this.writerSqliteUs = 0,
+    this.deltas,
   });
 
   final WriteResult result;
   final TableDependencies modifications;
   final int writerSqliteUs;
+
+  /// Raw row-delta bytes for this write cycle (exp 160). `null` when
+  /// capture was unreliable or not applicable (inside a transaction);
+  /// empty when the cycle modified no rows. Decoded lazily by the stream
+  /// engine only when an incrementally-maintained stream exists.
+  final Uint8List? deltas;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -116,10 +124,18 @@ final class QueryResponse {
 
 /// Response to [BatchRequest] and [CommitRequest].
 final class BatchResponse {
-  const BatchResponse(this.modifications, {this.writerSqliteUs = 0});
+  const BatchResponse(
+    this.modifications, {
+    this.writerSqliteUs = 0,
+    this.deltas,
+  });
 
   final TableDependencies modifications;
   final int writerSqliteUs;
+
+  /// Raw row-delta bytes for this write cycle (exp 160). See
+  /// [ExecuteResponse.deltas].
+  final Uint8List? deltas;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,14 +271,21 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
-  // Dirty tables and columns are only collected outside transactions.
-  // Inside a transaction they accumulate in the C-level dirty sets until
-  // the outermost transaction completes.
-  final modifications = state.txDepth > 0
+  // Dirty tables, columns, and row deltas are only collected outside
+  // transactions. Inside a transaction they accumulate in the C-level
+  // accumulators until the outermost transaction completes.
+  final inTx = state.txDepth > 0;
+  final modifications = inTx
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
+  final deltas = inTx ? null : drainRowDeltas(state.dbHandle);
   msg.replyPort.send(
-    ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
+    ExecuteResponse(
+      result,
+      modifications,
+      writerSqliteUs: writerSqliteUs,
+      deltas: deltas,
+    ),
   );
 }
 
@@ -286,6 +309,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
         writerSqliteUs: writerSqliteUs,
+        deltas: drainRowDeltas(state.dbHandle),
       ),
     );
   }
@@ -392,6 +416,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
         writerSqliteUs: writerSqliteUs,
+        deltas: drainRowDeltas(state.dbHandle),
       ),
     );
   } else {
@@ -422,6 +447,9 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
       resqliteExec(state.dbHandle, releaseSp);
       calloc.free(rollbackSp);
       calloc.free(releaseSp);
+      // The accumulated deltas may include rows the ROLLBACK TO just
+      // undid; the surviving outer transaction must not apply them.
+      resqliteDeltasMarkUnreliable(state.dbHandle);
       state.txDepth = newDepth;
       throw ResqliteTransactionException(
         errMsg,
@@ -467,6 +495,10 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
     final rc2 = resqliteExec(state.dbHandle, releaseSp);
     calloc.free(rollbackSp);
     calloc.free(releaseSp);
+    // The accumulated deltas may include rows the ROLLBACK TO just undid;
+    // the surviving outer transaction must not apply them. Dirty tables
+    // stay accumulated — over-invalidation is safe, stale deltas are not.
+    resqliteDeltasMarkUnreliable(state.dbHandle);
     state.txDepth = newDepth;
     if (rc1 != 0) {
       throw ResqliteTransactionException(

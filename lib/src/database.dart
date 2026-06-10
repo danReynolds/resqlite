@@ -405,6 +405,7 @@ final class Database {
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
     streamEngine.onDependencyChanges(
       response.modifications,
+      deltas: response.deltas,
       traceCorrelationId: correlationId,
     );
 
@@ -468,6 +469,7 @@ final class Database {
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       streamEngine.onDependencyChanges(
         response.modifications,
+        deltas: response.deltas,
         traceCorrelationId: correlationId,
       );
     }

@@ -1,0 +1,179 @@
+# Experiment 160: Tier-1 incremental stream maintenance (row deltas)
+
+**Date:** 2026-06-10
+**Status:** In Review
+**Direction:** `stream-rerun-dispatch`
+
+## Problem
+
+Every stream invalidation re-executes the full query. Hash suppression
+(exp 075/077) saves the decode and the emission, never the execution: a
+write that provably cannot affect a stream's result still costs a
+reader-pool round-trip (12 µs dispatch floor) plus a full SQLite
+re-execution per affected stream. On A11c overlap that is 50 re-queries
+per write — 25,000 per 500-write burst — of which exp 136 measured the
+completion-handler chain alone at 28.6% of total wall. Exp 134 proved the
+win class (keyed-PK writer-burst wall halved when re-queries were elided
+by rowid precision) but was rejected because its *write-path SQL text
+recognizer* was too fragile to trust. signals.json directed: revive
+row-level precision "only through explicit API/design or real workload
+evidence", and exp 149 (residual split) concluded the next stream work
+needed "a workload-shape or scheduling-model change rather than another
+sub-bucket optimization".
+
+## Hypothesis
+
+The preupdate hook already observes every modified row's old and new
+values — today they are discarded. If the writer ships bounded per-row
+deltas alongside the dirty-table set, the stream engine can maintain
+admitted streams' materialized results *incrementally*: prove most writes
+irrelevant with a few integer comparisons (no reader dispatch at all),
+patch in-window changes locally, and fall back to the existing re-query
+path for anything unprovable. Unlike exp 134's recognizer, admission is
+decided once at stream registration against a sound-by-construction
+grammar, and every uncertainty degrades to performance loss, never
+correctness loss. No public API changes — `db.stream()` is unchanged.
+
+## Approach
+
+**Native capture** (`native/resqlite.c`): the preupdate hook serializes
+op + rowids + old/new column values into a bounded buffer (256 rows / 32
+columns / 256 KB per drain cycle; overflow or OOM poisons the cycle).
+Savepoint rollback poisons the cycle too — stale deltas are unsafe where
+stale dirty-tables are merely conservative. Drained alongside the dirty
+sets at statement end / outermost commit; discarded on rollback.
+
+**Plumbing**: `ExecuteResponse`/`BatchResponse` carry the raw bytes
+(`null` = unreliable → fallback); the engine decodes them lazily, once
+per write cycle, and only when at least one admitted stream watches a
+dirty table.
+
+**Tier-1 admission** (`lib/src/stream_ivm.dart`): at registration —
+asynchronously, off the hot path — the engine fetches
+`PRAGMA table_info` (cached per table) and classifies the stream's SQL
+against a deliberately tiny grammar:
+`SELECT <bare cols|*> FROM <table> [WHERE col op (int|?) [AND ...]]
+[ORDER BY <pk> [ASC]]` — comparisons on INTEGER values only, table must
+have a single-column INTEGER PRIMARY KEY (rowid alias) included in the
+projection, and result order must be fully determined (ORDER BY pk, or a
+pk-equality predicate). TEXT comparisons are excluded in tier 1 because
+column collations are not mirrored. Anything outside the grammar stays on
+the re-query path forever.
+
+**Maintenance**: per delta row, evaluate the predicate conjunction
+against old and new values (NULL cells fail predicates, matching SQL
+semantics; non-INTEGER cells in a compared column bail). Proven miss →
+nothing. In-window patch / entry / departure → clone-on-write the cached
+rows (previously emitted lists are never mutated), emit, and store a hash
+sentinel (−1) so the next fallback re-query can never be suppressed
+against a pre-patch baseline. Any inconsistency (cache disagrees with a
+delta, schema column-count drift, malformed buffer) bails: the cache is
+dropped and the entry re-queries exactly as today.
+
+**Honest divergence from exp 134's rejection**: this is still a SQL
+recognizer. The differences that change the calculus: it runs once at
+registration (not per write), admits a closed grammar where SQLite
+semantics are provably mirrored (INTEGER-only comparisons, BINARY-free),
+fails closed (unparsed → fallback; unprovable at apply time → bail), and
+is paired with maintained-vs-requery equivalence tests. The risk profile
+is "misses an optimization", not "skips a required re-query".
+
+## Results
+
+### Engagement check (profile counters, A11c-overlap shape)
+
+50 streams × 500 writes, every write touching a projected column:
+`ivm_skipped=24,500 ivm_applied=500 ivm_bail=0` — zero reader-pool
+re-queries for the entire burst
+(`benchmark/profile/ivm_engage_check.dart`).
+
+### Writer wall split audit (exp 147 harness, single pass, back-to-back)
+
+| workload | baseline wall | IVM wall | residual_us | emissions |
+|---|---:|---:|---|---:|
+| A11c baseline (0 streams) | 96.5 ms | 75.4 ms | 68,417 → 52,998 | — |
+| A11c disjoint | 100.6 ms | 104.2 ms | 55,669 → 62,360 | 0 → 0 |
+| A11c overlap | 186.5 ms | 132.0 ms | 135,071 → 47,966 | 44 → 500 |
+| keyed PK subscriptions | 46.9 ms | 25.5 ms | 28,340 → 10,287 | 3 → 3 |
+
+A11c overlap **−29%** wall with **11× more emissions delivered** (500 vs
+44): under the baseline, re-query latency causes most per-write changes
+to coalesce or hash-suppress; IVM delivers each write's patch
+synchronously — the behavior an infinitely-fast re-query would produce.
+Keyed-PK **−46%**, reproducing exp 134's archived result through the
+explicit classifier. Disjoint is neutral: column elision (exp 106)
+already skips those streams before IVM is consulted. `invalidate_us`
+rises on overlap (29,974 → 67,340) because patch+emit work now runs
+inline in the invalidation pass — more than paid for by the residual
+collapse (135,071 → 47,966).
+
+### Tracelite A/B (stream-rerun-dispatch direction, formal gate)
+
+**Pass 1 (baseline first, candidate second), 3 runs per side:**
+
+| scenario | delta | 95% CI | p | per-run medians (baseline → candidate) |
+|---|---:|---|---|---|
+| many-streams-writer-throughput | **−18.5%** | −122..−96.3 ms | 3.4e-6 | 591.6/583.5/578.6 → 476.9/491.0/480.3 ms |
+| keyed-pk-subscriptions | **−14.1%** | −60.0..−27.4 ms | 1.6e-10 | 280.9/301.7/283.7 → 267.3/261.5/261.4 ms |
+| high-cardinality-fanout | +2.11% | +2.59..+12.8 ms | 0.009 | 361.5/363.9/366.4 → 379.4/367.4/372.4 ms |
+
+Both wins are consistent across every run with tight CVs — and the
+keyed-PK *within-run CV itself drops* from 0.13–0.15 to 0.02–0.05:
+removing reader-pool contention removes its variance. The
+high-cardinality +2.11% flag has a CI excluding zero but was collected
+with the candidate phase second; per the exp 159 journal lesson, an
+order-flipped second pass adjudicates it.
+
+**Pass 2 (order flipped: exp-160 collected first, main second).** With
+the sign inverted to match pass 1's orientation (main slower → win):
+
+| scenario | main vs exp-160 | 95% CI | per-run medians (exp-160 → main) |
+|---|---:|---|---|
+| many-streams-writer-throughput | **+22.2% slower** | +100..+113 ms | 477.7/483.8/477.0 → 584.5/582.7/587.5 ms |
+| keyed-pk-subscriptions | **+9.4% slower** | +13.0..+37.0 ms | 261.6/265.8/268.4 → 279.3/282.8/279.2 ms |
+| high-cardinality-fanout | +0.80% | −3.63..+9.56 ms (straddles zero) | neutral |
+
+Both wins reproduce with the collection order flipped — exp-160's
+absolute medians are essentially identical across passes (many-streams
+477–491 ms, keyed-PK 261–268 ms), as are main's (579–592 / 279–302 ms).
+The keyed-PK variance reduction follows the code, not the phase: exp-160
+runs at CV 0.01–0.05 in both passes while main runs at CV 0.10–0.15. The
+pass-1 high-cardinality +2.11% flag **did not reproduce** (CI straddles
+zero, p=0.868) — drift, exactly the exp 159 journal pattern.
+
+## Decision
+
+**In Review (accept-shaped).** Two large, twice-reproduced measured-
+elapsed wins on the canonical stream gate — many-streams −18.5%/+22.2%
+(pass 1/pass 2 orientation), keyed-PK −14.1%/+9.4% — with the third
+scenario neutral after order-flipped adjudication, zero bails on every
+measured workload, dedicated equivalence tests (26) and the full suite
+green, and no public API change. This is the first stream experiment to
+remove re-query *execution* rather than tuning its constant: 98% of
+A11c-overlap invalidation decisions become proven misses that never
+touch the reader pool.
+
+## Future Notes
+
+- **Emission cadence**: IVM emits per write where the re-query path
+  naturally coalesces bursts behind reader latency. Subscribers see more
+  timely (and more numerous) emissions. If a workload prefers coalescing,
+  a microtask-batched emit (exp 045 pattern applied to IVM emissions) is
+  the tunable — measure before adding it.
+- **Tier-2 candidates, in evidence order**: TEXT equality under known
+  BINARY collation (needs `PRAGMA table_info` + collation introspection);
+  LIMIT windows with a K+buffer cache (unlocks top-K queries; boundary
+  departures currently can't exist because LIMIT is not admitted);
+  SQLite-side predicate evaluation against a bound delta row (exact
+  semantics for arbitrary predicates at O(1) per delta).
+- **Capture overhead**: writes pay two bounded row-value serializations
+  per modified row even with no admitted streams. Batches poison the
+  buffer at 256 rows and stop paying. If release-suite write benchmarks
+  ever flag it, gate capture on a writer-side "admitted streams exist"
+  flag (one control message when the first stream is admitted).
+- **Schema changes**: `ALTER TABLE ADD/DROP COLUMN` changes the capture
+  column count and demotes admitted streams to fallback on their next
+  delta (correct, self-healing). The cached `PRAGMA table_info` is keyed
+  per table and cleared on engine close; a same-count column rename
+  leaves predicates evaluating the same cid positions, which is
+  positionally correct until the stream's own SQL breaks on re-query.

@@ -169,6 +169,15 @@ class ProfileCounters {
   /// one per initial result emission.
   static int streamEmitCount = 0;
 
+  /// Incremental stream maintenance outcomes (exp 160). One increment per
+  /// stream entry per write cycle: `ivmSkippedTotal` — every delta was
+  /// proven irrelevant, no re-query dispatched; `ivmAppliedTotal` — the
+  /// cached result was patched and emitted locally; `ivmBailTotal` — the
+  /// entry fell back to the normal re-query path.
+  static int ivmSkippedTotal = 0;
+  static int ivmAppliedTotal = 0;
+  static int ivmBailTotal = 0;
+
   /// Take a named snapshot of all counter values.
   static Map<String, int> snapshot() => {
     'rows_decoded': rowsDecoded,
@@ -186,6 +195,9 @@ class ProfileCounters {
     'completion_handler_count': completionHandlerCount,
     'stream_emit_us': streamEmitUs,
     'stream_emit_count': streamEmitCount,
+    'ivm_skipped_total': ivmSkippedTotal,
+    'ivm_applied_total': ivmAppliedTotal,
+    'ivm_bail_total': ivmBailTotal,
   };
 
   /// Compute `after - before` for every key present in both snapshots.
@@ -220,5 +232,8 @@ class ProfileCounters {
     completionHandlerCount = 0;
     streamEmitUs = 0;
     streamEmitCount = 0;
+    ivmSkippedTotal = 0;
+    ivmAppliedTotal = 0;
+    ivmBailTotal = 0;
   }
 }

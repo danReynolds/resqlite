@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'dependency_tracking.dart'
     show
@@ -11,8 +12,16 @@ import 'dependency_tracking.dart'
 import 'profile_counters.dart';
 import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
+import 'row_deltas.dart';
+import 'stream_ivm.dart';
 import 'tracelite_profile.dart';
 import 'extensions/set.dart';
+
+/// Hash sentinel stored after an incrementally-patched emission. The
+/// native result hash is 63-bit non-negative, so `-1` can never match —
+/// the next fallback re-query always decodes and re-emits rather than
+/// risking a stale suppression against a pre-patch baseline.
+const int _ivmStaleHash = -1;
 
 // ---------------------------------------------------------------------------
 // Stream dependency tracking contract
@@ -110,8 +119,14 @@ final class StreamEngine {
   /// [TableDependencies.none] means there are no stream-visible changes for
   /// this writer response. [TableDependencies.unknown] means native dirty-table
   /// tracking was unreliable, so every active stream must re-query.
+  ///
+  /// [deltas] carries the write cycle's raw row-delta bytes when capture
+  /// was reliable (exp 160). Streams admitted for incremental maintenance
+  /// consume them to skip or locally patch instead of re-querying; all
+  /// other streams ignore them.
   Future<void> onDependencyChanges(
     TableDependencies changes, {
+    Uint8List? deltas,
     int? traceCorrelationId,
   }) async {
     if (_entries.isEmpty) {
@@ -178,6 +193,9 @@ final class StreamEngine {
       }
 
       for (final entry in dirtyEntries) {
+        if (deltas != null && _tryIncrementalMaintain(entry, deltas)) {
+          continue;
+        }
         entry.dirty = true;
         if (traceCorrelationId != null) {
           entry.pendingTraceCorrelationId = traceCorrelationId;
@@ -188,6 +206,9 @@ final class StreamEngine {
       }
 
       _flushQueue();
+      _decodedDeltas = null;
+      _decodedDeltasSource = null;
+      _deltasByTable = null;
     } finally {
       if (kProfileMode) {
         invalidateSw!.stop();
@@ -224,6 +245,92 @@ final class StreamEngine {
     }
   }
 
+  /// Per-write-cycle memo for the decoded delta buffer, so N admitted
+  /// streams on the same table decode it once. Keyed by buffer identity;
+  /// cleared at the end of each [onDependencyChanges] pass.
+  List<RowDelta>? _decodedDeltas;
+  Object? _decodedDeltasSource;
+  Map<String, List<RowDelta>>? _deltasByTable;
+
+  /// `PRAGMA table_info` results per table, shared across admissions.
+  final Map<String, Future<List<Map<String, Object?>>>> _tableInfoCache = {};
+
+  /// Attempt to maintain [entry]'s cached result from [deltas] instead of
+  /// re-querying. Returns true when the entry is fully handled for this
+  /// write cycle (deltas proven irrelevant, or result patched + emitted).
+  bool _tryIncrementalMaintain(StreamEntry entry, Uint8List deltas) {
+    final ivm = entry.ivm;
+    if (ivm == null || entry.inFlight || entry.dirty) return false;
+
+    if (!identical(_decodedDeltasSource, deltas)) {
+      _decodedDeltasSource = deltas;
+      _decodedDeltas = decodeRowDeltas(deltas);
+      _deltasByTable = null;
+      final decoded = _decodedDeltas;
+      if (decoded != null) {
+        final byTable = <String, List<RowDelta>>{};
+        for (final delta in decoded) {
+          (byTable[delta.table] ??= []).add(delta);
+        }
+        _deltasByTable = byTable;
+      }
+    }
+    final byTable = _deltasByTable;
+    if (byTable == null) return false; // malformed buffer — fall back
+
+    final tableDeltas = byTable[ivm.shape.table];
+    if (tableDeltas == null || tableDeltas.isEmpty) {
+      // The table was reported dirty but capture saw no rows for it —
+      // contradicts a reliable buffer, so trust the dirty set.
+      return false;
+    }
+
+    if (ivm.rows == null) {
+      final last = entry.lastResult;
+      if (last == null || !ivm.rebuild(last)) {
+        // The cached result cannot be keyed (non-int pk, unexpected
+        // ordering). This is structural, not transient — demote.
+        entry.ivm = null;
+        return false;
+      }
+    }
+
+    switch (ivm.apply(tableDeltas)) {
+      case IvmOutcome.unchanged:
+        if (kProfileMode) ProfileCounters.ivmSkippedTotal++;
+        return true;
+      case IvmOutcome.applied:
+        final rows = ivm.rows!;
+        entry.lastResult = rows;
+        entry.lastResultHash = _ivmStaleHash;
+        entry.lastRowCount = rows.length;
+        entry.emit(rows);
+        if (kProfileMode) ProfileCounters.ivmAppliedTotal++;
+        return true;
+      case IvmOutcome.bail:
+        if (kProfileMode) ProfileCounters.ivmBailTotal++;
+        return false;
+    }
+  }
+
+  /// Try to admit [entry] for incremental maintenance. Best-effort and
+  /// asynchronous; until (and unless) it completes, the entry stays on the
+  /// plain re-query path.
+  Future<void> _admitIvm(StreamEntry entry, String table) async {
+    try {
+      final escaped = table.replaceAll('"', '""');
+      final info = await (_tableInfoCache[table] ??= _pool.select(
+        'PRAGMA table_info("$escaped")',
+      ));
+      if (entry.subscribers.isEmpty || entry.ivm != null) return;
+      final shape = classifyIvmQuery(entry.sql, entry.params, table, info);
+      if (shape == null) return;
+      entry.ivm = IvmState(shape);
+    } catch (_) {
+      // Classification is best-effort; the entry stays on re-query.
+    }
+  }
+
   void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
@@ -253,6 +360,10 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
+    _tableInfoCache.clear();
+    _decodedDeltas = null;
+    _decodedDeltasSource = null;
+    _deltasByTable = null;
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -305,6 +416,12 @@ final class StreamEngine {
           entry.dependencies = {
             for (final dependency in tables) dependency.table: dependency,
           };
+
+          // Single-table queries are candidates for incremental
+          // maintenance (exp 160). Admission is async and best-effort.
+          if (tables.length == 1) {
+            unawaited(_admitIvm(entry, tables.single.table));
+          }
         }
 
         // If an invalidation occurred while performing the entry's initial query then the entry
@@ -362,6 +479,10 @@ final class StreamEngine {
       entry.lastResultHash = newHash;
       entry.lastRowCount = newRowCount;
       entry.lastResult = rows;
+      // A fresh query result invalidates the maintained cache; it is
+      // rebuilt lazily from lastResult on the next applicable delta.
+      entry.ivm?.rows = null;
+      entry.ivm?.keys = null;
 
       entry.emit(rows);
     } catch (e, st) {
@@ -483,6 +604,10 @@ final class StreamEntry {
   /// non-null correlation is retained so the re-query can still be connected
   /// to a triggering write in tracelite.
   int? pendingTraceCorrelationId;
+
+  /// Incremental maintenance state (exp 160). Non-null once the query has
+  /// been admitted by the tier-1 classifier; null streams always re-query.
+  IvmState? ivm;
 
   @override
   int get hashCode => key;
