@@ -1,4 +1,4 @@
-# Experiment 160: Tier-1 incremental stream maintenance (row deltas)
+# Experiment 160: Tiered incremental stream maintenance (row deltas)
 
 **Date:** 2026-06-10
 **Status:** In Review
@@ -207,6 +207,88 @@ request with `resqlite_reader_set_busy` (two ~ns leaf FFI calls), making
 the existing busy guard real; the sacrifice path clears the bracket
 before `Isolate.exit`. Validation: crash reproduced locally pre-fix;
 100/100 clean stress iterations post-fix.
+
+## Tier expansion (v2 stream engine)
+
+Building on tier 1's foundation, the classifier generalized into three
+fail-closed admission modes sharing one strict grammar (string literals,
+aggregate calls, AS aliases, DESC, LIMIT/OFFSET, DISTINCT):
+
+- **Full maintenance** gained composite ordering
+  (`ORDER BY intCol [DESC], pk [DESC]` — explicit pk tiebreak required so
+  tie order is exact) and `LIMIT K` windows: a top-K cache with
+  complete-set tracking. Entries and in-window patches are O(delta);
+  departures from a full incomplete window and boundary-crossing moves
+  fall back (the replacement row is unknown). TEXT equality predicates
+  admit when the table's CREATE statement (sqlite_master, cached per
+  table) contains no COLLATE clause, making BINARY semantics provable.
+- **Tier 1.5 skip-only**: shapes whose results cannot be maintained
+  (DESC without tiebreak, OFFSET, DISTINCT, unprojected keys, aggregate
+  mixes) but whose WHERE is an evaluable conjunction get proven-miss
+  elision with no cached state; any hit or unprovable cell re-queries.
+- **Tier 3 aggregates**: `COUNT(*)/COUNT/SUM/MIN/MAX/AVG(col) AS alias`
+  over an evaluable (possibly empty) predicate, seeded exactly by a
+  writer-ordered snapshot and maintained per delta (SQL NULL semantics;
+  exact integer sums; AVG = sum/count; a departing MIN/MAX extremum
+  bails and re-seeds).
+
+Hot path: predicate conjunctions compile to flattened primitive arrays
+(`IvmPredicateProgram`), and full states keep a pk set for O(1) presence
+checks on the proven-miss path.
+
+### Two ordering defects the equivalence harness caught
+
+Both surfaced only under `dart test` scheduling load (~1-in-5 runs) and
+were invisible to deterministic same-seed replays:
+
+1. **Reader-built baselines race late writer replies.** An aggregate
+   snapshot (or cache build) executed on a reader can observe a commit
+   whose delta is then applied on top of it — cross-port event delivery
+   gives no happens-before between a reader result and the writer reply
+   for a write it already saw. Fix: all IVM state is built through
+   **writer-ordered reads** (a `writer.locked` select hook wired by
+   `Database`): the writer port is FIFO with the writes themselves, so a
+   snapshot's port position totally orders it against every delta.
+2. **A maintained state only survives an unbroken chain of processed
+   cycles.** A delta-bearing write routed to the re-query fallback
+   (dirty/in-flight guard, absent or malformed deltas, capture overflow)
+   leaves the state's baseline permanently stale — and a hash-suppressed
+   re-query validates *emissions* without re-syncing *state* (captured
+   in an event ledger: seed lands at 2784, the next insert is swallowed
+   by an unchanged-hash re-query, every later apply walks the −1
+   forward). Fix: the engine drops maintained state whenever a cycle
+   bypasses it; the writer-ordered rebuild restores an exact baseline.
+   Known trade: churn cycles (overflow batches, unknown-deps fallbacks)
+   trigger rebuild storms; steady state is untouched.
+
+The randomized equivalence harness
+(`test/stream_ivm_equivalence_test.dart`: 3 seeds × 12 rounds × 9
+streams across every admission mode, with rowid changes, NULLs,
+savepoint rollbacks, and overflow batches; every emission compared to a
+fresh select) is the load-bearing safety net — 20/20 clean full-loop
+runs post-fix.
+
+### Admission audit, v2 (app-shaped stream mix)
+
+| stream shape | mode | burst emissions |
+|---|---|---:|
+| message pane (JOIN + DESC + LIMIT) | no | 57 |
+| message pane, denormalized (DESC + LIMIT) | **skip-only** | 47 |
+| conversation list (no tiebreak) | no | ~1,900 |
+| conversation list (pk tiebreak) | **windowed** | ~2,160 |
+| unread badge | **aggregate** | 47 |
+| user card | **full** | 1 |
+| full transcript | **full** | 48 |
+| feed page (`created_at DESC, id DESC LIMIT 50`) | **windowed** | 30 |
+| author drafts | **full** | 3 |
+
+7/9 shapes admitted (was 3/8 at tier 1); 52/63 distinct entries.
+Burst: `ivm_skipped=7,325 / applied=318 / bail=0 / hit_fallback=48` —
+**7,643 invalidation decisions resolved without a reader re-query**
+(tier 1: 3,000) at a burst wall of 132.9 ms (main's equivalent ~200 ms
+while delivering a fraction of the emissions). The two remaining
+re-query shapes have documented upgrade paths: the JOIN pane (tier 4)
+and the tiebreak-less conversation list (add `, id DESC`).
 
 ## Future Notes
 

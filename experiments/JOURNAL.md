@@ -229,6 +229,30 @@ the signal real. A guard that silently stopped being maintained is
 strictly worse than no guard, because readers of the consuming code
 assume protection.*
 
+### Cross-port replies have no happens-before — build derived state on the port that defines its baseline
+
+[Exp 160](160-stream-delta-ivm.md)'s tier expansion seeded aggregate
+state from a reader-pool snapshot. Under load, the snapshot could
+observe a commit whose writer reply — the event that carries the row
+delta — was still queued: reader results and writer replies arrive on
+different ports, and the event loop guarantees nothing about their
+relative order. The delta then applied on top of a baseline that already
+included it. The fix was structural, not a sleep: route every IVM state
+build through the writer port, whose FIFO totally orders a snapshot
+against the deltas it must compose with. A second instance of the same
+class: maintained state that misses even one delta-bearing cycle (a
+dirty-routed write whose covering re-query was hash-suppressed) drifts
+permanently — state must be dropped the moment its chain breaks, because
+emission-level checks cannot re-synchronize it. Both defects fired in
+~1-in-5 `dart test` runs and in zero deterministic same-seed replays;
+the randomized equivalence harness (every emission vs a fresh select)
+was the only net that caught them.
+
+*Reapplies whenever derived state composes a snapshot with an event
+stream. Ask which port/queue defines the baseline's position and build
+the snapshot there; treat any bypassed event as poison, not as "covered
+elsewhere".*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
