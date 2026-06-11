@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-10T11:35:50.140198",
+  "generated": "2026-06-11T07:15:15.592230",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -19644,6 +19644,19 @@
         "timestamp": "2026-06-09T22:41:01",
         "source": "exact"
       }
+    },
+    {
+      "id": "161",
+      "title": "Concurrent standalone writes release coverage",
+      "date": "2026-06-11",
+      "status": "in_review",
+      "summary": "Promotes the exp 159 send-gated writer-lock pipelining shape into release write suite coverage with a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair; resqlite concurrent median drops from ~2.9 ms to ~1.1 ms on the new lane (−58% to −61%) while sequential, batch, wide batch, and transaction rows stay untouched. Makes future writer-scheduling experiments evaluable on a public release lane without relying on the focused `writer_pipelining.dart` script",
+      "commit": null,
+      "problem": "Experiment 159 (writer request pipelining + persistent reply port) replaced\nthe per-request `RawReceivePort` with a single persistent reply port,\ncached the worker `SendPort`, used `Completer.sync` for response\nresolution, and — most importantly — released the writer lock at send\ntime on standalone writes so concurrent `db.execute(...)` calls pipeline\nthrough the worker port's FIFO. The focused\n`benchmark/experiments/writer_pipelining.dart` script measured a\n`-36% to -45%` win on its 200 × 10 concurrent burst shape.\n\nThat focused script stays local. The release write suite still only\nexercised **sequential** standalone writes (Single Inserts: 100\n`await peer.execute(...)` calls in a serial loop). With no public\nbenchmark line that issues writes concurrently, exp 159's win — and any\nfutu...",
+      "hypothesis": "Adding a single concurrent standalone writes row to `Write Performance`\nwill:\n\n1. Make exp 159's send-gated writer-lock pipelining win visible on the\n   public benchmark path on every release run.\n2. Expose a sequential-vs-concurrent contrast for the **same 100-row\n   write workload** as Single Inserts, so future writer-scheduling\n   experiments have a paired baseline.\n3. Add no production code change. The peer interface already supports\n   `Future<void> execute(...)`; the new row only wraps it in\n   `Future.wait` over a fixed burst size.\n\nAccept if the workload runs across all four peers through the existing\n`BenchmarkPeer.execute` path, uses identical schema and parameter values\nto the adjacent Single Inserts row, and the resqlite concurrent median\nis materially below the sequential m...",
+      "approach": "`benchmark/suites/writes.dart` adds one new subsection right after\n`Single Inserts`:\n\n```text\nConcurrent Single Inserts (100 concurrent)\n```\n\nShape:\n\n- 100 standalone `db.execute(...)` calls per iteration.\n- Issued as a single `Future.wait` over the burst (no per-call\n  `await`).\n- Same schema, same insert SQL, same parameter shapes as `Single\n  Inserts` (`['item_$i', i * 1.5]`).\n- Same `defaultWarmup` / `defaultIterations` policy.\n- `DELETE FROM t` between iterations to keep table size bounded.\n\nNo production source files are touched. The new constant\n`_concurrentBurstSize = 100` and the section docstring explain why\nthe burst stays at 100 (matches the Single Inserts row count exactly\nso the sequential and concurrent rows are directly comparable, and\nfits the release-suite iteration bu...",
+      "results": "Command (in this worktree, paired smoke runs):\n\n```text\ndart run benchmark/suites/writes.dart\n```\n\nTwo paired runs (build cache warm, same machine, back-to-back):\n\n| Subsection | resqlite wall med (run 1) | resqlite wall med (run 2) |\n|---|---:|---:|\n| Single Inserts (100 sequential) | 2.818 ms | 2.935 ms |\n| Concurrent Single Inserts (100 concurrent) | **1.084 ms** | **1.218 ms** |\n\nConcurrent-vs-sequential delta on the resqlite row: **−61% to −58%**\n(`1.084 / 2.818` and `1.218 / 2.935`). The reduction lands in the same\nband as exp 159's focused script (−36% to −45%) — slightly larger here\nbecause the release row is a single 100-write burst (deeper\npipelining-to-overhead ratio) rather than ten 200-write bursts. The\nabsolute resqlite concurrent median is around 1 ms, which is the\nexpect...",
+      "reasoning": "**In Review — measurement coverage.**\n\nThis experiment intentionally adds no production optimization. Its\nvalue is that the release suite now tracks the exact workload\ndimension experiment 159's send-gated writer-lock pipelining was\ndesigned to improve. The concurrent and sequential rows share schema,\nrow count, and parameter shapes, so the sequential-vs-concurrent\ndelta is directly readable on every release run.\n\nTwo named decisions this row unlocks for future runners:\n\n- **Confirm exp 159's win publicly.** The next release-suite A/B that\n  rebuilds against pre-159 baseline can show the concurrent row\n  moving while the sequential row stays neutral; today only the\n  focused script can demonstrate this.\n- **Gate future writer-scheduling experiments.** Any later attempt at\n  the stream-r..."
     }
   ],
   "tracked": [

@@ -13,17 +13,26 @@ import '../shared/stats.dart';
 const int _wideBatchSize = 10000;
 const int _wideBatchParamWidth = 20;
 
+// Exp 161: concurrent standalone writes per iteration. The focused
+// `benchmark/experiments/writer_pipelining.dart` proved exp 159's
+// send-gated writer lock can pipeline -36% to -45% on a 200 x 10 burst;
+// this section uses a leaner 100-write burst so it fits inside the
+// release iteration budget while still exposing the same `Future.wait`
+// shape on the public benchmark path.
+const int _concurrentBurstSize = 100;
+
 /// Write performance benchmarks: single writes, batch, transactions.
 ///
-/// Organized in six sections:
+/// Organized in seven sections:
 ///   1. Single Inserts — [PeerSet]-based, 4 peers
-///   2. Batch Insert (3 narrow sizes) — [PeerSet]-based, 4 peers
-///   3. Wide Batch Insert (10k rows x 20 params) — [PeerSet]-based, 4 peers
-///   4. Interactive Transaction — hand-rolled, resqlite + sqlite_async
-///   5. Batched Write Inside Transaction — hand-rolled, resqlite
+///   2. Concurrent Single Inserts — [PeerSet]-based, 4 peers
+///   3. Batch Insert (3 narrow sizes) — [PeerSet]-based, 4 peers
+///   4. Wide Batch Insert (10k rows x 20 params) — [PeerSet]-based, 4 peers
+///   5. Interactive Transaction — hand-rolled, resqlite + sqlite_async
+///   6. Batched Write Inside Transaction — hand-rolled, resqlite
 ///      variants + sqlite_async. Guards the [`resqlite_run_batch_nested`]
 ///      C entry point.
-///   6. Transaction Read — hand-rolled, resqlite + sqlite_async
+///   7. Transaction Read — hand-rolled, resqlite + sqlite_async
 ///
 /// Sections 4–6 aren't on [PeerSet] because they exercise interactive
 /// transaction APIs (`tx.execute` / `tx.select` / `tx.executeBatch`
@@ -85,6 +94,75 @@ Future<String> runWritesBenchmark() async {
         );
         markdown.write(
           markdownTable('Single Inserts ($insertCount sequential)', timings),
+        );
+      } finally {
+        await peers.closeAll();
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Concurrent single inserts — 4 peers via PeerSet
+    //
+    // Matches Single Inserts in row count and schema, but issues the
+    // writes through `Future.wait` so the writer port FIFO can pipeline
+    // them. Exp 159 (writer request pipelining + persistent reply port)
+    // showed -36% to -45% on the focused
+    // `benchmark/experiments/writer_pipelining.dart` 200 x 10 burst,
+    // but that benchmark stayed local and the release suite had no
+    // line exercising concurrent standalone writes. This section is
+    // the public guard so future writer-scheduling experiments can
+    // claim a wall-time win on a release lane, and sequential vs
+    // concurrent for the same workload is a side-by-side row.
+    // -----------------------------------------------------------------
+    {
+      final subdir = await Directory('${tempDir.path}/concurrent').create();
+      final peers = await PeerSet.open(
+        subdir.path,
+        driftFactory: driftFactoryFor((exec) => WritesDriftDb(exec)),
+      );
+      final timings = <BenchmarkTiming>[];
+      try {
+        const createSql =
+            'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL)';
+        const insertSql = 'INSERT INTO t(name, value) VALUES (?, ?)';
+        for (final peer in peers.all) {
+          await peer.execute(createSql);
+        }
+
+        for (final peer in peers.all) {
+          // Warmup + clear.
+          for (var i = 0; i < defaultWarmup; i++) {
+            await Future.wait([
+              for (var j = 0; j < _concurrentBurstSize; j++)
+                peer.execute(insertSql, ['warmup_$j', j.toDouble()]),
+            ]);
+            await peer.execute('DELETE FROM t');
+          }
+
+          final t = BenchmarkTiming('${peer.label} concurrent execute()');
+          for (var iter = 0; iter < defaultIterations; iter++) {
+            final sw = Stopwatch()..start();
+            await Future.wait([
+              for (var i = 0; i < _concurrentBurstSize; i++)
+                peer.execute(insertSql, ['item_$i', i * 1.5]),
+            ]);
+            sw.stop();
+            t.recordWallOnly(sw.elapsedMicroseconds);
+            await peer.execute('DELETE FROM t');
+          }
+          timings.add(t);
+        }
+
+        printComparisonTable(
+          '=== Concurrent Single Inserts '
+          '($_concurrentBurstSize concurrent) ===',
+          timings,
+        );
+        markdown.write(
+          markdownTable(
+            'Concurrent Single Inserts ($_concurrentBurstSize concurrent)',
+            timings,
+          ),
         );
       } finally {
         await peers.closeAll();
