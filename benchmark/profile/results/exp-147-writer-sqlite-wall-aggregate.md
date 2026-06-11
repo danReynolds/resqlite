@@ -16,19 +16,19 @@ dart run -DRESQLITE_PROFILE=true benchmark/profile/writer_sqlite_wall_audit.dart
 
 | workload | shape | wall_ms | writer_sqlite_us | writer_sqlite_count | invalidate_us | invalidate_count | residual_us | parked_total | max_parked | emissions |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 0 streams x 500 writes | 86.88 | 23071 | 500 | 0 | 0 | 63810 | 0 | 0 | 0 |
-| A11c disjoint | 50 streams x 500 writes | 92.78 | 17738 | 500 | 23833 | 500 | 51205 | 0 | 0 | 0 |
-| A11c overlap | 50 streams x 500 writes | 166.75 | 15678 | 500 | 31389 | 500 | 119679 | 0 | 0 | 35 |
-| keyed PK subscriptions | 50 streams x 200 random writes | 36.95 | 6679 | 200 | 6897 | 200 | 23370 | 0 | 0 | 3 |
+| A11c baseline | 0 streams x 500 writes | 52.26 | 19502 | 500 | 0 | 0 | 32760 | 0 | 0 | 0 |
+| A11c disjoint | 50 streams x 500 writes | 56.93 | 12224 | 500 | 14755 | 500 | 29950 | 0 | 0 | 0 |
+| A11c overlap | 50 streams x 500 writes | 174.09 | 18645 | 500 | 19793 | 500 | 135652 | 0 | 0 | 78 |
+| keyed PK subscriptions | 50 streams x 200 random writes | 31.76 | 6775 | 200 | 3701 | 200 | 21286 | 0 | 0 | 3 |
 
 ## Derived fractions
 
 | workload | SQLite / wall | invalidation / wall | residual / wall | SQLite us/write | invalidation us/write | ns/intersection entry |
 |---|---:|---:|---:|---:|---:|---:|
-| A11c baseline | 26.55% | 0.00% | 73.45% | 46.14 | 0.00 | 0 |
-| A11c disjoint | 19.12% | 25.69% | 55.19% | 35.48 | 47.67 | 328 |
-| A11c overlap | 9.40% | 18.82% | 71.77% | 31.36 | 62.78 | 231 |
-| keyed PK subscriptions | 18.08% | 18.67% | 63.25% | 33.40 | 34.48 | 246 |
+| A11c baseline | 37.32% | 0.00% | 62.68% | 39.00 | 0.00 | 0 |
+| A11c disjoint | 21.47% | 25.92% | 52.61% | 24.45 | 29.51 | 170 |
+| A11c overlap | 10.71% | 11.37% | 77.92% | 37.29 | 39.59 | 212 |
+| keyed PK subscriptions | 21.33% | 11.65% | 67.02% | 33.88 | 18.50 | 105 |
 
 ## Reading the table
 

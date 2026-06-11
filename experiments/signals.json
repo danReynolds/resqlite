@@ -40,11 +40,6 @@
       ],
       "openCandidates": [
         {
-          "idea": "long-running concurrent-reads workload that sustains parked dispatchers past pool size",
-          "addedDate": "2026-04-30",
-          "addedAfter": "115"
-        },
-        {
           "idea": "rerun coalescing implementation candidate with temporary per-entry dispatch lineage tracing",
           "addedDate": "2026-05-02"
         }
@@ -645,6 +640,19 @@
         "promote a concurrent standalone-write scenario into release or tracelite coverage (exp 116 pattern) so the pipelined path has public regression visibility",
         "remaining sequential-write residual is the round-trip floor itself; the next structural candidates are cross-call request batching (group commit) or a different transport when the Dart SDK allows shared-memory result passing",
         "when a tracelite gate flags a regression with elevated within-run CVs relative to the other phase, re-run with collection order flipped before treating the flag as real"
+      ]
+    },
+    "162": {
+      "directions": ["stream-rerun-dispatch"],
+      "outcomeClass": "in_review_paired_rejection",
+      "changedBeliefs": [
+        "The reads-saturation gap is closed: a no-streams no-writes concurrent-read lane sustains parked dispatchers at any clients > cap (12,795/12,800 parks at 32 clients, cap 4) with zero wake retries, satisfying the exp 115 counter gate the 2026-04-30 open candidate asked for",
+        "Raising the reader cap is re-rejected on the current dispatch structure: reads gain +10-38% but A11c overlap regresses +36% and keyed-PK +29% at cap 8 — exp 105's completion-churn mechanism survives exps 118/120/122, so that rejection is no longer stale",
+        "First run executed under the paired-measurement rule: the measurement and the implementation it unlocked shipped in one writeup/PR, and the implementation outcome is a decisive current rejection rather than an unconsumed counter"
+      ],
+      "nextSignals": [
+        "any future pool-scheduling idea must win on BOTH the reads-saturation lane and the fan-out guardrails; an elastic pool consuming the parked counters is the only shape with a mechanism for that",
+        "the -DRESQLITE_READER_CAP define is experiment tooling for pool A/Bs; the TODO-sanctioned Database.open max-reader option is the API-level answer if read-heavy use cases materialize (maintainer decision)"
       ]
     },
     "147": {

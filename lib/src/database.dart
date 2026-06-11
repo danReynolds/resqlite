@@ -137,7 +137,14 @@ final class Database {
     //   selectIfChanged reply queues another microtask ahead of the
     //   next pending write. Each idle worker costs ~30KB + one C
     //   reader connection.
-    final readerCount = (Platform.numberOfProcessors - 1).clamp(2, 4);
+    // Experiment-only override for reader-pool sizing A/Bs (exp 162):
+    // `-DRESQLITE_READER_CAP=n` forces the worker count. Compile-time
+    // const, so default builds are unchanged and the branch tree-shakes
+    // away. Not public API.
+    const readerCapOverride = int.fromEnvironment('RESQLITE_READER_CAP');
+    final readerCount = readerCapOverride > 0
+        ? readerCapOverride.clamp(1, 16)
+        : (Platform.numberOfProcessors - 1).clamp(2, 4);
 
     final handle = await _openNativeDatabase(
       path: path,
