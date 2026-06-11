@@ -86,8 +86,10 @@ Before coding, write a short working note for yourself:
 - what new evidence, benchmark, workload, implementation shape, or external
   change makes it worth trying now
 - what result would make you accept, reject, or defer the idea
-- for measurement-only runs, the specific follow-up optimization, rejection, or
-  de-prioritization decision the measurement is expected to unlock
+- for runs that add measurement, the specific implementation experiment the
+  measurement unlocks — which this same run must then execute and report
+  (see "A measurement run carries the experiment it unlocks" below), or
+  the explicit escape hatch that applies
 - for temporary instrumentation, what will be removed before merge and what
   would justify keeping any counter, benchmark, or profile lane permanently
 
@@ -116,11 +118,45 @@ true:
 - The measurement will let future runners remove or de-prioritize a candidate
   from `signals.json`.
 
+### A measurement run carries the experiment it unlocks
+
+A measurement justified by "it unblocks implementation X" must, **in the
+same run**, actually run X against the new signal and report both
+results in one writeup and one PR:
+
+1. Build the counter / benchmark / harness and capture the baseline
+   signal.
+2. Run the implementation candidate the measurement was justified by —
+   a fresh bounded change, or an archived one (`archive/exp-NNN`)
+   re-tested under the new workload. This is the
+   [exp 111](111-nested-tx-benchmark-savepoint-cache.md) pattern: the
+   measurement is the lasting contribution either way, and a rejection
+   against a real signal is a stronger result than an unconsumed
+   measurement (see the matching `JOURNAL.md` lesson).
+3. The PR's **Results** section includes the implementation outcome —
+   accepted, or rejected with the measured evidence — alongside the new
+   signal. A PR whose Results contain only a counter reading is
+   incomplete under this rule.
+
+Two escape hatches, each of which must be stated explicitly in the PR
+body:
+
+- **Out of budget**: the unlocked implementation is genuinely beyond a
+  bounded run (multi-layer change, needs a design pass). Say so, and add
+  a scoped `openCandidates` entry naming the measurement that now backs
+  it — that candidate becomes the default pick for the next run in the
+  direction.
+- **Premise refuted**: the measurement shows no headroom. Record the
+  numbers that close the candidate and prune it from the signal map —
+  that is a complete, valuable outcome.
+
 Avoid back-to-back measurement-only runs unless the current signal map makes an
 implementation pass genuinely speculative or a maintainer explicitly asks for
-the diagnostic pass. After a measurement experiment lands, the next runner
-should usually consume that signal with an implementation, rejection, or
-direction cleanup rather than adding another diagnostic layer.
+the diagnostic pass. Under the paired-run rule above, a measurement-only
+run should exist only via the escape hatches. After one lands, the next
+runner in the direction defaults to consuming its signal with an
+implementation, rejection, or direction cleanup rather than adding
+another diagnostic layer.
 
 Permanent profiling code has a high bar. Keep a counter, benchmark, or Tracelite
 profile lane only when it will be reused by multiple future experiments, guards
