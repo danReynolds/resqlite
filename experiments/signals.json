@@ -171,8 +171,8 @@
       "id": "result-transfer-shape",
       "status": "watch",
       "subsystems": ["results", "isolate-transfer", "api-shape"],
-      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy.",
-      "keyPriors": ["008", "063", "082", "089", "158"],
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy. Exp 167 rechecked closed exp 141's direct ResultSet.forEach override on a real SQLite-backed consumer lane after exp 158 and rejected it: a small first-pair win reversed on the longer confirmation pair, so no runtime code was kept.",
+      "keyPriors": ["008", "063", "082", "089", "158", "167"],
       "archive": ["066", "081"],
       "interestingIf": [
         "Dart adds new deeply immutable or transfer primitives that support typed data and lists",
@@ -192,7 +192,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps` or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes."
+      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps`, `resultset_foreach_consumer.dart`, or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes. Do not retry the exp 141 ResultSet.forEach override unless a future Dart runtime or workload produces a stable target win with neutral controls."
     },
     {
       "id": "measurement-system",
@@ -711,6 +711,20 @@
         "any future writer-scheduling experiment in stream-rerun-dispatch can compare concurrent vs sequential rows on the public lane without depending on `benchmark/experiments/writer_pipelining.dart`",
         "do not sweep burst sizes in release; focused sweeps stay in `benchmark/experiments/writer_pipelining.dart`",
         "if a future change moves the sequential row but not the concurrent row (or vice versa), record that asymmetry rather than treating it as calibration drift"
+      ]
+    },
+    "167": {
+      "directions": ["result-transfer-shape"],
+      "outcomeClass": "rejected_no_stable_signal",
+      "changedBeliefs": [
+        "Closed exp 141's direct ResultSet.forEach override does not show a stable current win after exp 158's RowSchema lookup change when measured on real rows returned by Database.select()",
+        "The focused SQLite-backed consumer lane showed Pair A forEach lookup at 30.525 -> 28.383 ms, but the longer confirmation reversed to 28.563 -> 30.942 ms; forEach length also reversed from 9.439 -> 8.010 ms to 8.652 -> 9.490 ms",
+        "The right durable artifact is the resultset_foreach_consumer benchmark lane, not the runtime override"
+      ],
+      "nextSignals": [
+        "keep result-shape rechecks on SQLite-backed full-consumer lanes rather than synthetic ResultSet-only microbenchmarks",
+        "do not revive ResultSet.forEach override without a future Dart runtime or workload change and a stable target win with neutral for-in/indexed controls",
+        "AOT comparison would be useful if native asset resolution for standalone benchmark executables becomes straightforward"
       ]
     }
   }
