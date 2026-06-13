@@ -124,12 +124,42 @@ final class Writer {
   /// transaction, so exclusivity across the reply round-trip adds nothing.
   /// Releasing early lets a subsequent write or transaction overlap its
   /// send with this write's worker-side execution and reply scheduling.
+  ///
+  /// Non-async so the common no-transaction-in-flight case hits
+  /// [Mutex.lockSync]'s synchronous fast path and skips the microtask
+  /// hop the implicit Future of an `async` function would add. The slow
+  /// path defers to [_executeSlow] when a transaction is holding the
+  /// lock.
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
-  ]) async {
-    await _mutex.lock();
+  ]) {
+    final waiter = _mutex.lockSync();
+    if (waiter != null) {
+      return _executeSlow(waiter, sql, parameters, traceCorrelationId);
+    }
+    final Future<ExecuteResponse> reply;
+    try {
+      if (_closed) {
+        throw ResqliteConnectionException('Database is closed.');
+      }
+      reply = executeInTransaction(sql, parameters, traceCorrelationId);
+    } catch (e, st) {
+      _mutex.unlock();
+      return Future.error(e, st);
+    }
+    _mutex.unlock();
+    return reply;
+  }
+
+  Future<ExecuteResponse> _executeSlow(
+    Future<void> waiter,
+    String sql,
+    List<Object?> parameters,
+    int? traceCorrelationId,
+  ) async {
+    await waiter;
     final Future<ExecuteResponse> reply;
     try {
       if (_closed) {
@@ -149,8 +179,41 @@ final class Writer {
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
+  }) {
+    final waiter = _mutex.lockSync();
+    if (waiter != null) {
+      return _executeBatchSlow(
+        waiter,
+        sql,
+        paramSets,
+        traceCorrelationId: traceCorrelationId,
+      );
+    }
+    final Future<BatchResponse?> reply;
+    try {
+      if (_closed) {
+        throw ResqliteConnectionException('Database is closed.');
+      }
+      reply = executeBatchInTransaction(
+        sql,
+        paramSets,
+        traceCorrelationId: traceCorrelationId,
+      );
+    } catch (e, st) {
+      _mutex.unlock();
+      return Future.error(e, st);
+    }
+    _mutex.unlock();
+    return reply;
+  }
+
+  Future<BatchResponse?> _executeBatchSlow(
+    Future<void> waiter,
+    String sql,
+    List<List<Object?>> paramSets, {
+    int? traceCorrelationId,
   }) async {
-    await _mutex.lock();
+    await waiter;
     final Future<BatchResponse?> reply;
     try {
       if (_closed) {

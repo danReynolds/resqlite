@@ -202,37 +202,51 @@ void main() {
     test(
         'close() during contention rejects queued writers without '
         'hanging', () async {
-      // Exercises the _ensureOpen() re-check inside _withWriteLock that
-      // wakes after an awaited lock completes. Without it, writers queued
-      // on the write lock when close() fires would wake, create a fresh
-      // lock, and send an ExecuteRequest to a writer isolate whose
-      // receive port is about to close — hanging forever.
+      // Exercises the close-vs-queued-writer race: a writer parked on
+      // the write lock when close() fires must wake up and throw
+      // [ResqliteConnectionException] rather than send an
+      // ExecuteRequest to a writer isolate whose receive port is
+      // closing — that would hang forever.
       //
-      // Single synchronous turn:
-      //   - W1 enters _withWriteLock, acquires the lock, sends its
-      //     ExecuteRequest to the writer, then awaits.
-      //   - W2, W3 enter _withWriteLock and await W1's lock.future.
-      //   - close() sets _closed=true and enqueues CloseRequest on the
-      //     writer (after W1's ExecuteRequest).
+      // With [Mutex.lockSync] (exp 168) standalone writes only park
+      // when a transaction is actively holding the lock, so the
+      // scenario uses a long-running transaction to force the queue.
       //
-      // Later:
-      //   - Writer processes W1, replies. W1's body returns, lock
-      //     releases, W2 and W3 wake from their await.
-      //   - On wake they re-run _ensureOpen(), see _closed, and throw
-      //     ResqliteConnectionException.
+      // Sequence:
+      //   - tx starts, holds the lock, signals `txStarted`.
+      //   - W2, W3 enter writer.execute, see the lock held, and park
+      //     on the slow path.
+      //   - close() runs: sets _closed=true and queues CloseRequest on
+      //     the writer (after the transaction's COMMIT).
+      //   - tx body releases the lock; W2 and W3 wake, re-check
+      //     _closed in [_executeSlow], and throw.
       //   - Writer processes CloseRequest and shuts down.
       //
-      // Per-future timeouts turn a regression into a deterministic test
+      // Per-future timeouts turn a regression into a deterministic
       // failure instead of a stuck suite.
-      final w1 = db.execute('INSERT INTO items(name) VALUES (?)', ['w1']);
+      final txStarted = Completer<void>();
+      final txAllowFinish = Completer<void>();
+
+      final txFuture = db.transaction((tx) async {
+        await tx.execute('INSERT INTO items(name) VALUES (?)', ['tx_row']);
+        txStarted.complete();
+        await txAllowFinish.future;
+      });
+
+      await txStarted.future;
+
       final w2 = db.execute('INSERT INTO items(name) VALUES (?)', ['w2']);
       final w3 = db.execute('INSERT INTO items(name) VALUES (?)', ['w3']);
       final closeFuture = db.close();
 
-      // W1 was in-flight before close(); it completes normally.
-      await w1.timeout(const Duration(seconds: 2));
+      // Let the transaction finish; close() and the queued writers can
+      // now make progress.
+      txAllowFinish.complete();
+      await txFuture.timeout(const Duration(seconds: 2));
 
-      // W2 and W3 were still queued on the write lock when close() ran.
+      // W2 and W3 were parked on the write lock; on wake they see
+      // _closed=true and throw rather than send into the closing
+      // worker.
       await expectLater(
         w2.timeout(const Duration(seconds: 2)),
         throwsA(isA<ResqliteConnectionException>()),
@@ -242,6 +256,24 @@ void main() {
         throwsA(isA<ResqliteConnectionException>()),
       );
 
+      await closeFuture.timeout(const Duration(seconds: 2));
+    });
+
+    test('standalone writes submitted before close() succeed', () async {
+      // With [Mutex.lockSync] (exp 168) uncontended standalone writes
+      // hit the synchronous fast path: each takes the lock, sends, and
+      // releases inside one event-loop turn. Writes submitted before
+      // close() have already enqueued ExecuteRequests on the worker's
+      // port FIFO; close() queues CloseRequest after them. The worker
+      // processes the writes, replies, and only then shuts down.
+      final w1 = db.execute('INSERT INTO items(name) VALUES (?)', ['w1']);
+      final w2 = db.execute('INSERT INTO items(name) VALUES (?)', ['w2']);
+      final w3 = db.execute('INSERT INTO items(name) VALUES (?)', ['w3']);
+      final closeFuture = db.close();
+
+      await w1.timeout(const Duration(seconds: 2));
+      await w2.timeout(const Duration(seconds: 2));
+      await w3.timeout(const Duration(seconds: 2));
       await closeFuture.timeout(const Duration(seconds: 2));
     });
 
