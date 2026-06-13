@@ -82,11 +82,12 @@ Both lose their `async` keyword. The body splits into:
    converted to `Future.error` via a small `try`/`catch` so the public
    contract — `Writer.execute(...)` always returns a `Future` — is
    preserved.
-2. **Slow path** — `tryLock()` returned `false`. The reply path
-   defers to a new `_executeSlow` / `_executeBatchSlow` `async` helper
-   that `await`s `_mutex.lock()`, then mirrors the original
-   try/finally body. This matches the old async function's semantics
-   for the contended case bit for bit.
+2. **Awaiting-lock path** — `tryLock()` returned `false`. The reply
+   path defers to a new `_executeAwaitingLock` /
+   `_executeBatchAwaitingLock` `async` helper that `await`s
+   `_mutex.lock()`, then mirrors the original try/finally body. This
+   matches the old async function's semantics for the contended case
+   bit for bit.
 
 `Writer.locked` (used by `Database.transaction`) is intentionally
 unchanged — transactions hold the mutex across the whole body and the

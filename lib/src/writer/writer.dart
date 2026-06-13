@@ -127,15 +127,15 @@ final class Writer {
   ///
   /// Non-async so the common no-transaction-in-flight case hits
   /// [Mutex.tryLock] and skips the microtask hop the implicit Future of
-  /// an `async` function would add. The slow path defers to
-  /// [_executeSlow] when a transaction is holding the lock.
+  /// an `async` function would add. When a transaction holds the lock,
+  /// defer to [_executeAwaitingLock] to park on `_mutex.lock()`.
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
     if (!_mutex.tryLock()) {
-      return _executeSlow(sql, parameters, traceCorrelationId);
+      return _executeAwaitingLock(sql, parameters, traceCorrelationId);
     }
     final Future<ExecuteResponse> reply;
     try {
@@ -151,7 +151,7 @@ final class Writer {
     return reply;
   }
 
-  Future<ExecuteResponse> _executeSlow(
+  Future<ExecuteResponse> _executeAwaitingLock(
     String sql,
     List<Object?> parameters,
     int? traceCorrelationId,
@@ -178,7 +178,7 @@ final class Writer {
     int? traceCorrelationId,
   }) {
     if (!_mutex.tryLock()) {
-      return _executeBatchSlow(
+      return _executeBatchAwaitingLock(
         sql,
         paramSets,
         traceCorrelationId: traceCorrelationId,
@@ -202,7 +202,7 @@ final class Writer {
     return reply;
   }
 
-  Future<BatchResponse?> _executeBatchSlow(
+  Future<BatchResponse?> _executeBatchAwaitingLock(
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,

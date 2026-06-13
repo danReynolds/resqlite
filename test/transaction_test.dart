@@ -219,7 +219,7 @@ void main() {
       //   - close() runs: sets _closed=true and queues CloseRequest on
       //     the writer (after the transaction's COMMIT).
       //   - tx body releases the lock; W2 and W3 wake, re-check
-      //     _closed in [_executeSlow], and throw.
+      //     _closed in [_executeAwaitingLock], and throw.
       //   - Writer processes CloseRequest and shuts down.
       //
       // Per-future timeouts turn a regression into a deterministic
