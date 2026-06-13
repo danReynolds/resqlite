@@ -126,18 +126,16 @@ final class Writer {
   /// send with this write's worker-side execution and reply scheduling.
   ///
   /// Non-async so the common no-transaction-in-flight case hits
-  /// [Mutex.lockSync]'s synchronous fast path and skips the microtask
-  /// hop the implicit Future of an `async` function would add. The slow
-  /// path defers to [_executeSlow] when a transaction is holding the
-  /// lock.
+  /// [Mutex.tryLock] and skips the microtask hop the implicit Future of
+  /// an `async` function would add. The slow path defers to
+  /// [_executeSlow] when a transaction is holding the lock.
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    final waiter = _mutex.lockSync();
-    if (waiter != null) {
-      return _executeSlow(waiter, sql, parameters, traceCorrelationId);
+    if (!_mutex.tryLock()) {
+      return _executeSlow(sql, parameters, traceCorrelationId);
     }
     final Future<ExecuteResponse> reply;
     try {
@@ -154,12 +152,11 @@ final class Writer {
   }
 
   Future<ExecuteResponse> _executeSlow(
-    Future<void> waiter,
     String sql,
     List<Object?> parameters,
     int? traceCorrelationId,
   ) async {
-    await waiter;
+    await _mutex.lock();
     final Future<ExecuteResponse> reply;
     try {
       if (_closed) {
@@ -180,10 +177,8 @@ final class Writer {
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) {
-    final waiter = _mutex.lockSync();
-    if (waiter != null) {
+    if (!_mutex.tryLock()) {
       return _executeBatchSlow(
-        waiter,
         sql,
         paramSets,
         traceCorrelationId: traceCorrelationId,
@@ -208,12 +203,11 @@ final class Writer {
   }
 
   Future<BatchResponse?> _executeBatchSlow(
-    Future<void> waiter,
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) async {
-    await waiter;
+    await _mutex.lock();
     final Future<BatchResponse?> reply;
     try {
       if (_closed) {

@@ -30,12 +30,13 @@ even when the lock was free.
 
 ## Hypothesis
 
-Adding a `Mutex.lockSync()` that returns `null` when the lock can be
-acquired without waiting, and rewriting `Writer.execute` /
-`Writer.executeBatch` as non-`async` around that fast path, should
-remove one microtask hop per uncontended standalone write. Dart's
-single-threaded execution model makes checking the completer and
-claiming the slot in one synchronous call safe.
+Adding a `Mutex.tryLock()` that returns `true` when the lock can be
+acquired without waiting (matching the conventional Java / Rust /
+Python / Go spelling for the same primitive), and rewriting
+`Writer.execute` / `Writer.executeBatch` as non-`async` around that
+fast path, should remove one microtask hop per uncontended standalone
+write. Dart's single-threaded execution model makes checking the
+completer and claiming the slot in one synchronous call safe.
 
 If the focused `writer_pipelining` `sequential-awaited` median improves
 monotonically across paired passes and `transaction-guardrail`
@@ -46,29 +47,33 @@ the floor.
 
 ## Approach
 
-### `Mutex.lockSync`
+### `Mutex.tryLock`
 
 ```dart
-Future<void>? lockSync() {
+bool tryLock() {
   if (_completer == null) {
     _completer = Completer<void>();
-    return null;
+    return true;
   }
-  return lock();
+  return false;
 }
 ```
 
-Returns `null` when the lock was acquired synchronously (the caller
-owns it and must `unlock` exactly as if it had `await`ed `lock()`).
-Returns the `Future<void>` from `lock()` otherwise, so the caller can
-fall back to the existing async path. The existing `lock()` is
-unchanged.
+Returns `true` when the lock was acquired synchronously (the caller
+owns it and must `unlock` exactly as if it had `await`ed `lock()`);
+`false` when the lock is already held. The conventional spelling for
+this primitive in `java.util.concurrent.locks.Lock.tryLock`, Rust's
+`Mutex::try_lock`, Python's `Lock.acquire(blocking=False)`, and Go
+1.18+ `sync.Mutex.TryLock`. The existing `lock()` is unchanged; the
+existing `isLocked` getter and `tryLock()` answer the same question
+from different sides (one reads, one claims), so the two compose for
+callers that want a peek before committing to a claim.
 
 ### `Writer.execute` / `Writer.executeBatch`
 
 Both lose their `async` keyword. The body splits into:
 
-1. **Fast path** — `lockSync()` returned `null`. We hold the mutex
+1. **Fast path** — `tryLock()` returned `true`. We hold the mutex
    synchronously, check `_closed`, call the
    `executeInTransaction` / `executeBatchInTransaction` send (which
    already runs synchronously through `_request`), unlock, and return
@@ -77,9 +82,9 @@ Both lose their `async` keyword. The body splits into:
    converted to `Future.error` via a small `try`/`catch` so the public
    contract — `Writer.execute(...)` always returns a `Future` — is
    preserved.
-2. **Slow path** — `lockSync()` returned a `Future<void>`. The reply
-   path defers to a new `_executeSlow` / `_executeBatchSlow` `async`
-   helper that `await`s the waiter, then mirrors the original
+2. **Slow path** — `tryLock()` returned `false`. The reply path
+   defers to a new `_executeSlow` / `_executeBatchSlow` `async` helper
+   that `await`s `_mutex.lock()`, then mirrors the original
    try/finally body. This matches the old async function's semantics
    for the contended case bit for bit.
 
@@ -148,7 +153,7 @@ The change is a focused overhead removal on the per-write floor:
 - `transaction-guardrail` stays neutral, confirming the change does
   not leak into the path that still goes through `Writer.locked`.
 - No public API change. The mutex contract (await `lock()` then call
-  `unlock()`) is unchanged; `lockSync()` is an additive opt-in.
+  `unlock()`) is unchanged; `tryLock()` is an additive opt-in.
 - Existing transaction / pipeline / FIFO / close-race tests pass
   unchanged. The single test that asserted close-vs-back-to-back race
   semantics is updated to force the queue with a transaction; a new
@@ -166,7 +171,7 @@ The change is a focused overhead removal on the per-write floor:
   review should watch those two metrics; the focused benchmark used
   here was chosen so the soak run does not need a new public lane.
 - `Writer.locked` (transactions) could plausibly use the same
-  `lockSync` fast path. It was left untouched here so
+  `tryLock` fast path. It was left untouched here so
   `transaction-guardrail` could serve as a clean control. Revisit if
   a future workload shows the transaction-start microtask hop is
   material.

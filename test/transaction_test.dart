@@ -208,7 +208,7 @@ void main() {
       // ExecuteRequest to a writer isolate whose receive port is
       // closing — that would hang forever.
       //
-      // With [Mutex.lockSync] (exp 168) standalone writes only park
+      // With [Mutex.tryLock] (exp 168) standalone writes only park
       // when a transaction is actively holding the lock, so the
       // scenario uses a long-running transaction to force the queue.
       //
@@ -260,7 +260,7 @@ void main() {
     });
 
     test('standalone writes submitted before close() succeed', () async {
-      // With [Mutex.lockSync] (exp 168) uncontended standalone writes
+      // With [Mutex.tryLock] (exp 168) uncontended standalone writes
       // hit the synchronous fast path: each takes the lock, sends, and
       // releases inside one event-loop turn. Writes submitted before
       // close() have already enqueued ExecuteRequests on the worker's

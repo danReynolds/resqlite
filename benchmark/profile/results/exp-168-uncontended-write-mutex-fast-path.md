@@ -86,9 +86,10 @@ The exp 159 send-gated writer-lock pattern still acquires the mutex via
 `await _mutex.lock()`. Because `Mutex.lock` is an `async` function whose
 implicit Future hops once before resuming the caller, every uncontended
 standalone write paid one microtask hop on its way to `SendPort.send`.
-Adding `Mutex.lockSync()` (returns `null` when the lock was acquired
-without waiting) and rewriting `Writer.execute` / `Writer.executeBatch`
-as non-`async` removes that hop.
+Adding `Mutex.tryLock()` (returns `true` when the lock was acquired
+without waiting — the conventional spelling for this primitive in
+Java / Rust / Python / Go) and rewriting `Writer.execute` /
+`Writer.executeBatch` as non-`async` removes that hop.
 
 `transaction-guardrail` continues to use `Writer.locked`, which holds
 the mutex across the whole transaction body and still goes through the
