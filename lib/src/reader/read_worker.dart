@@ -156,14 +156,21 @@ void readerEntrypoint(List<Object> args) {
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes = executeQueryBytes(
+          // Bytes never sacrifice. Sacrifice (Isolate.exit) is a win for the
+          // rows path — it transfers already-built Dart objects with no
+          // re-copy. But selectBytes produces native bytes that would have to
+          // be `Uint8List.fromList`-copied before Isolate.exit could transfer
+          // them, so sacrifice buys zero copy savings here and only adds an
+          // isolate respawn. Sending the native-buffer view directly is one
+          // copy (the mandatory SendPort copy) at every size — strictly
+          // better. See executeQueryBytesView for the lifetime contract.
+          result = executeQueryBytesView(
             dbHandleAddr,
             readerId,
             sql,
             parameters,
           );
-          sacrifice = bytes.length > sacrificeByteThreshold;
-          result = bytes;
+          sacrifice = false;
 
         case SelectIfChangedRequest(
             :final sql,
@@ -323,8 +330,19 @@ RawQueryResult executeQuery(
       (_, stmt) => decodeQuery(stmt, sql),
     );
 
-/// Execute a query returning JSON-encoded bytes on a dedicated reader.
-Uint8List executeQueryBytes(
+/// Execute a query returning JSON-encoded bytes as a VIEW over the reader
+/// connection's persistent `json_buf` (native, connection-owned).
+///
+/// The returned [Uint8List] aliases native memory that is reset/reused on
+/// this connection's next query, so the caller MUST hand it straight to
+/// `SendPort.send` (which copies the bytes once into the message) before
+/// any further query on this connection — never retain it. Returning the
+/// view lets the SendPort do the single necessary copy instead of paying
+/// for an extra `Uint8List.fromList` first (the message copy is mandatory
+/// regardless; the pre-copy was pure overhead). Verified safe: SendPort
+/// snapshots the bytes at send time, and the reader handler is single
+/// threaded, so the buffer is stable from here through the send.
+Uint8List executeQueryBytesView(
   int handleAddr,
   int readerId,
   String sql,
@@ -332,8 +350,7 @@ Uint8List executeQueryBytes(
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
   final result = queryBytes(dbHandle, readerId, sql, parameters);
-  // Copy from persistent reader buffer. Don't free — reader owns it.
-  return Uint8List.fromList(result.ptr.asTypedList(result.length));
+  return result.ptr.asTypedList(result.length);
 }
 
 /// Execute a stream's initial query.
