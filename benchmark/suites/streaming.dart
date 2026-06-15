@@ -435,7 +435,7 @@ Future<String> runStreamingBenchmark() async {
     }
 
     // -----------------------------------------------------------------
-    // 2d. Long-text 32KB unchanged fanout — experiment 170 target
+    // 2d. Long-text 32KB unchanged fanout — experiment 173 target
     //
     // Same shape as 2c, but each cell is 32 KB instead of 4 KB. Exp 110
     // proved the 8-byte FNV body wins on 4 KB cells; the open candidate

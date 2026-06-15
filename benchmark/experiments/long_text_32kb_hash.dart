@@ -1,9 +1,9 @@
-// Benchmark: long-text 32KB unchanged-fanout (exp 170).
+// Benchmark: long-text 32KB unchanged-fanout (exp 173).
 //
 // Targets `resqlite_query_hash`'s `fnv_combine_bytes` byte-stream loop.
 // 8 unchanged streams each hash 64 rows of 32KB TEXT cells per writer
 // invalidation; the loop body runs 4096 8-byte chunks per cell, so the
-// whole burst hashes ~16 MB. Used as the A/B harness for the exp 170
+// whole burst hashes ~16 MB. Used as the A/B harness for the exp 173
 // 16-byte fold vs the baseline 8-byte fold (exp 110) inherited from the
 // `fnv_combine_bytes` path.
 //
@@ -25,7 +25,7 @@ const _cellBytes = 32 * 1024;
 Future<void> main() async {
   final dir = await Directory.systemTemp.createTemp('resqlite_long_text32_');
 
-  print('=== Long-text 32KB unchanged-fanout (exp 170) ===');
+  print('=== Long-text 32KB unchanged-fanout (exp 173) ===');
   print(
     '$_unchangedStreamCount unchanged streams '
     'x $_rowCount rows x ${_cellBytes ~/ 1024} KB TEXT, '

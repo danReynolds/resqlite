@@ -1,4 +1,4 @@
-# Exp 170 - 32 KB long-text streaming benchmark + 16-byte FNV fold
+# Exp 173 - 32 KB long-text streaming benchmark + 16-byte FNV fold
 
 Date: 2026-06-15
 
