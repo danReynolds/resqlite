@@ -296,18 +296,6 @@ typedef struct resqlite_authz_ctx_s {
 } resqlite_authz_ctx;
 
 typedef struct {
-    char* table;
-    sqlite3_int64 rowid;
-} resqlite_row_dep;
-
-typedef struct {
-    resqlite_row_dep deps[RESQLITE_MAX_DIRTY_ROWS];
-    int count;
-    int allocated;
-    int reliable;
-} resqlite_row_set;
-
-typedef struct {
     sqlite3* db;
     resqlite_stmt_cache cache;
     resqlite_read_set read_tables;
@@ -375,10 +363,6 @@ struct resqlite_db {
     // Drained by `resqlite_get_dirty_columns()` after the writer publishes
     // the dirty set to Dart at end-of-transaction.
     resqlite_column_set dirty_columns;
-    // Dirty rowids accumulated by the preupdate hook. Rowid precision is only
-    // an optimization; if this bounded set is unavailable, Dart falls back to
-    // table/column invalidation.
-    resqlite_row_set dirty_rows;
     // Per-prepare scratch space populated by the writer authorizer. The
     // authorizer fires inside `sqlite3_prepare_v3`, so this set is drained
     // into the cached stmt entry as soon as prepare returns and is reset
@@ -403,71 +387,6 @@ struct resqlite_db {
 };
 
 #define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 500
-
-static void resqlite_row_set_init(resqlite_row_set* s) {
-    s->count = 0;
-    s->allocated = 0;
-    s->reliable = 1;
-    memset(s->deps, 0, sizeof(s->deps));
-}
-
-static void resqlite_row_dep_clear(resqlite_row_dep* dep) {
-    free(dep->table);
-    dep->table = NULL;
-    dep->rowid = 0;
-}
-
-static void resqlite_row_set_add(
-    resqlite_row_set* s,
-    const char* table,
-    sqlite3_int64 rowid
-) {
-    if (!table) {
-        s->reliable = 0;
-        return;
-    }
-    if (!s->reliable) return;
-
-    for (int i = 0; i < s->count; i++) {
-        if (s->deps[i].rowid == rowid &&
-            strcmp(s->deps[i].table, table) == 0) {
-            return;
-        }
-    }
-
-    if (s->count >= RESQLITE_MAX_DIRTY_ROWS) {
-        s->reliable = 0;
-        return;
-    }
-
-    if (s->count < s->allocated) {
-        resqlite_row_dep_clear(&s->deps[s->count]);
-    }
-
-    char* stored = resqlite_strdup(table);
-    if (!stored) {
-        s->reliable = 0;
-        return;
-    }
-
-    s->deps[s->count].table = stored;
-    s->deps[s->count].rowid = rowid;
-    s->count++;
-    if (s->count > s->allocated) s->allocated = s->count;
-}
-
-static void resqlite_row_set_reset(resqlite_row_set* s) {
-    s->count = 0;
-    s->reliable = 1;
-}
-
-static void resqlite_row_set_free(resqlite_row_set* s) {
-    for (int i = 0; i < s->allocated; i++) {
-        resqlite_row_dep_clear(&s->deps[i]);
-    }
-    s->count = 0;
-    s->allocated = 0;
-}
 
 // ---------------------------------------------------------------------------
 // Authorizer callback — records read tables/columns (stream deps) or, on
@@ -567,27 +486,10 @@ static void preupdate_hook(
     sqlite3_int64 old_rowid,
     sqlite3_int64 new_rowid
 ) {
-    (void)db; (void)db_name;
+    (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
     resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
     dirty_columns_add_for_active_stmt(sdb, table_name);
-
-    switch (op) {
-        case SQLITE_INSERT:
-            resqlite_row_set_add(&sdb->dirty_rows, table_name, new_rowid);
-            break;
-        case SQLITE_DELETE:
-            resqlite_row_set_add(&sdb->dirty_rows, table_name, old_rowid);
-            break;
-        case SQLITE_UPDATE:
-            resqlite_row_set_add(&sdb->dirty_rows, table_name, old_rowid);
-            if (old_rowid != new_rowid) {
-                resqlite_row_set_add(&sdb->dirty_rows, table_name, new_rowid);
-            }
-            break;
-        default:
-            break;
-    }
 }
 
 static int writer_wal_hook(
@@ -728,7 +630,6 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     stmt_cache_init(&db->writer_cache);
     resqlite_dirty_set_init(&db->dirty_tables);
     resqlite_column_set_init(&db->dirty_columns);
-    resqlite_row_set_init(&db->dirty_rows);
     resqlite_column_set_init(&db->writer_authz_scratch);
     db->writer_active_entry = NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
@@ -897,7 +798,6 @@ void resqlite_close(resqlite_db* db) {
     if (db->tx_rollback_stmt) sqlite3_finalize(db->tx_rollback_stmt);
     resqlite_dirty_set_free(&db->dirty_tables);
     resqlite_column_set_free(&db->dirty_columns);
-    resqlite_row_set_free(&db->dirty_rows);
     resqlite_column_set_free(&db->writer_authz_scratch);
     sqlite3_close_v2(db->writer);
     sqlite3_mutex_leave(db->writer_mutex);
@@ -1007,7 +907,6 @@ int resqlite_run_connection_setup(
         // setup DDL/DML leak into the first user-visible write invalidation.
         resqlite_dirty_set_reset(&db->dirty_tables);
         resqlite_column_set_reset(&db->dirty_columns);
-        resqlite_row_set_reset(&db->dirty_rows);
         resqlite_column_set_reset(&db->writer_authz_scratch);
         db->writer_active_entry = NULL;
     }
@@ -1446,28 +1345,6 @@ int resqlite_get_dirty_columns(
     }
 
     resqlite_column_set_reset(&db->dirty_columns);
-
-    return count;
-}
-
-int resqlite_get_dirty_rows(
-    resqlite_db* db,
-    const char** out_tables,
-    sqlite3_int64* out_rowids,
-    int max_rows
-) {
-    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
-
-    int reliable = db->dirty_rows.reliable;
-    int count = reliable ? db->dirty_rows.count : 0;
-    if (count > max_rows) count = max_rows;
-
-    for (int i = 0; i < count; i++) {
-        out_tables[i] = db->dirty_rows.deps[i].table;
-        out_rowids[i] = db->dirty_rows.deps[i].rowid;
-    }
-
-    resqlite_row_set_reset(&db->dirty_rows);
 
     return count;
 }

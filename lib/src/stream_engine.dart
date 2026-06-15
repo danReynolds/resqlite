@@ -7,7 +7,6 @@ import 'dependency_tracking.dart'
         FixedTableDependencies,
         TableDependencies,
         TableDependency,
-        TableRowDependency,
         UnknownTableDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
@@ -66,16 +65,6 @@ final class StreamEngine {
   /// Stream entries scheduled to be requeried when an available reader opens up.
   final _requeryQueue = LinkedHashSet<StreamEntry>();
 
-  /// Cached rowid-plan classifications keyed by exact stream SQL and table.
-  ///
-  /// Values are futures so concurrent stream registrations for the same query
-  /// shape share one planner inspection. The cache is cleared on every writer
-  /// dependency publication, which is conservative for DDL/schema changes while
-  /// still removing repeated EQP work during stream-registration bursts.
-  final _rowidPlanCache = LinkedHashMap<_RowidPlanCacheKey, Future<bool>>();
-
-  static const int _maxRowidPlanCacheEntries = 64;
-
   /// Number of active stream entries.
   ///
   /// Increments when [stream] registers a new query, decrements when all
@@ -125,8 +114,6 @@ final class StreamEngine {
     TableDependencies changes, {
     int? traceCorrelationId,
   }) async {
-    _rowidPlanCache.clear();
-
     if (_entries.isEmpty) {
       return;
     }
@@ -163,76 +150,9 @@ final class StreamEngine {
           for (final dep in deps) {
             if (_tableIndex[dep.table] case Set<StreamEntry> entries) {
               switch (dep) {
-                case TableRowDependency(
-                  rowids: final changedRows,
-                  columns: final changedCols,
-                ):
-                  for (final entry in entries) {
-                    switch (entry.dependencies[dep.table]) {
-                      case TableRowDependency(
-                        rowids: final entryRows,
-                        columns: final entryCols,
-                      ):
-                        if (!entryRows.intersects(changedRows)) {
-                          continue;
-                        }
-                        if (changedCols == null || entryCols == null) {
-                          dirtyEntries.add(entry);
-                          continue;
-                        }
-                        bool intersects;
-                        if (kProfileMode) {
-                          intersectionEntries++;
-                          intersectionSw!.start();
-                          intersects = entryCols.intersects(changedCols);
-                          intersectionSw.stop();
-                        } else {
-                          intersects = entryCols.intersects(changedCols);
-                        }
-                        if (intersects) {
-                          dirtyEntries.add(entry);
-                        }
-                      case TableColumnDependency(columns: final entryCols):
-                        if (changedCols == null) {
-                          dirtyEntries.add(entry);
-                          continue;
-                        }
-                        bool intersects;
-                        if (kProfileMode) {
-                          intersectionEntries++;
-                          intersectionSw!.start();
-                          intersects = entryCols.intersects(changedCols);
-                          intersectionSw.stop();
-                        } else {
-                          intersects = entryCols.intersects(changedCols);
-                        }
-                        if (intersects) {
-                          dirtyEntries.add(entry);
-                        }
-                      case TableDependency _:
-                        dirtyEntries.add(entry);
-                    }
-                  }
                 case TableColumnDependency(columns: final changedCols):
                   for (final entry in entries) {
                     switch (entry.dependencies[dep.table]) {
-                      case TableRowDependency(columns: final entryCols):
-                        if (entryCols == null) {
-                          dirtyEntries.add(entry);
-                          continue;
-                        }
-                        bool intersects;
-                        if (kProfileMode) {
-                          intersectionEntries++;
-                          intersectionSw!.start();
-                          intersects = entryCols.intersects(changedCols);
-                          intersectionSw.stop();
-                        } else {
-                          intersects = entryCols.intersects(changedCols);
-                        }
-                        if (intersects) {
-                          dirtyEntries.add(entry);
-                        }
                       case TableColumnDependency(columns: final entryCols):
                         bool intersects;
                         if (kProfileMode) {
@@ -333,7 +253,6 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
-    _rowidPlanCache.clear();
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -380,26 +299,11 @@ final class StreamEngine {
         if (dependencies case FixedTableDependencies(tables: final tables)) {
           _unknownDepsEntries.remove(entry);
 
-          final rowDependency = await _classifyRowidDependency(
-            sql,
-            params,
-            tables,
-          );
-          final effectiveTables = rowDependency == null
-              ? tables
-              : [
-                  for (final dependency in tables)
-                    dependency.table == rowDependency.table
-                        ? rowDependency
-                        : dependency,
-                ];
-
-          for (final dependency in effectiveTables) {
+          for (final dependency in tables) {
             (_tableIndex[dependency.table] ??= {}).add(entry);
           }
           entry.dependencies = {
-            for (final dependency in effectiveTables)
-              dependency.table: dependency,
+            for (final dependency in tables) dependency.table: dependency,
           };
         }
 
@@ -517,93 +421,11 @@ final class StreamEngine {
     }
     entry.subscribers.clear();
   }
-
-  Future<TableRowDependency?> _classifyRowidDependency(
-    String sql,
-    List<Object?> params,
-    List<TableDependency> dependencies,
-  ) async {
-    if (params.length != 1 ||
-        params.single is! int ||
-        dependencies.length != 1) {
-      return null;
-    }
-
-    final tableDependency = dependencies.single;
-    final table = tableDependency.table;
-    final sawRowidSearch = await _cachedRowidPlanSearch(sql, params, table);
-    if (!sawRowidSearch) return null;
-
-    return switch (tableDependency) {
-      TableRowDependency() => tableDependency,
-      TableColumnDependency(:final columns) => TableRowDependency(table, {
-        params.single as int,
-      }, columns: columns),
-      TableDependency() => TableRowDependency(table, {params.single as int}),
-    };
-  }
-
-  Future<bool> _cachedRowidPlanSearch(
-    String sql,
-    List<Object?> params,
-    String table,
-  ) {
-    final key = _RowidPlanCacheKey(sql, table);
-    final cached = _rowidPlanCache.remove(key);
-    if (cached != null) {
-      _rowidPlanCache[key] = cached;
-      return cached;
-    }
-
-    final inspected = _inspectRowidPlan(sql, params);
-    _rowidPlanCache[key] = inspected;
-    while (_rowidPlanCache.length > _maxRowidPlanCacheEntries) {
-      _rowidPlanCache.remove(_rowidPlanCache.keys.first);
-    }
-    return inspected;
-  }
-
-  Future<bool> _inspectRowidPlan(String sql, List<Object?> params) async {
-    final List<Map<String, Object?>> rows;
-    try {
-      rows = await _pool.select('EXPLAIN QUERY PLAN $sql', params);
-    } catch (_) {
-      // Planner inspection is an optimization only. If SQLite cannot explain
-      // a query shape that already ran, keep the table/column dependency.
-      return false;
-    }
-
-    for (final row in rows) {
-      final detail = row['detail'];
-      if (detail is! String) continue;
-      if (detail.contains('USING INTEGER PRIMARY KEY (rowid=?)')) {
-        return true;
-      }
-    }
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Supporting types
 // ---------------------------------------------------------------------------
-
-final class _RowidPlanCacheKey {
-  const _RowidPlanCacheKey(this.sql, this.table);
-
-  final String sql;
-  final String table;
-
-  @override
-  int get hashCode => Object.hash(sql, table);
-
-  @override
-  bool operator ==(Object other) {
-    return other is _RowidPlanCacheKey &&
-        other.sql == sql &&
-        other.table == table;
-  }
-}
 
 /// A single tracked stream query with its metadata and subscriber list.
 final class StreamEntry {

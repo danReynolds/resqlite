@@ -256,24 +256,6 @@ int resqlite_get_dirty_columns(
     int max_columns
 );
 
-// ---------------------------------------------------------------------------
-// Rowid dependency tracking
-// ---------------------------------------------------------------------------
-
-#define RESQLITE_MAX_DIRTY_ROWS 256
-
-// Get the table/rowid pairs modified by writer activity since the last drain.
-//
-// Rowid precision is an optimization layer only. If this returns 0 because no
-// rowids were captured or capture became unreliable, Dart still receives the
-// dirty table/column sets and falls back to broader invalidation.
-int resqlite_get_dirty_rows(
-    resqlite_db* db,
-    const char** out_tables,
-    sqlite3_int64* out_rowids,
-    int max_rows
-);
-
 int resqlite_db_status_total(
     resqlite_db* db,
     int op,

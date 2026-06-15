@@ -404,21 +404,6 @@ external int resqliteGetDirtyColumns(
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
-    ffi.Pointer<ffi.Pointer<Utf8>>,
-    ffi.Pointer<ffi.Int64>,
-    ffi.Int,
-  )
->(symbol: 'resqlite_get_dirty_rows', isLeaf: true)
-external int resqliteGetDirtyRows(
-  ffi.Pointer<ffi.Void> db,
-  ffi.Pointer<ffi.Pointer<Utf8>> outTables,
-  ffi.Pointer<ffi.Int64> outRowids,
-  int maxRows,
-);
-
-@ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
     ffi.Int,
     ffi.Int,
     ffi.Pointer<ffi.Int>,
@@ -464,9 +449,8 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _readTablesBuf = calloc<ffi.Pointer<Utf8>>(
 TableDependencies _decodeTableDependencies(
   int count,
   ffi.Pointer<ffi.Pointer<Utf8>> tableBuf,
-  List<TableDependency> columnDetails, [
-  List<TableRowDependency> rowDetails = const <TableRowDependency>[],
-]) {
+  List<TableDependency> columnDetails,
+) {
   if (count == _dependencyCountUnknown) return TableDependencies.unknown;
   if (count == 0) return TableDependencies.none;
 
@@ -475,11 +459,6 @@ TableDependencies _decodeTableDependencies(
       : <String, TableDependency>{
           for (final detail in columnDetails) detail.table: detail,
         };
-  final rowsByTable = rowDetails.isEmpty
-      ? null
-      : <String, TableRowDependency>{
-          for (final detail in rowDetails) detail.table: detail,
-        };
   final tables = List<TableDependency>.filled(
     count,
     const TableDependency(''),
@@ -487,20 +466,7 @@ TableDependencies _decodeTableDependencies(
   );
   for (var i = 0; i < count; i++) {
     final table = tableBuf[i].toDartString();
-    final columnDependency = byTable?[table];
-    final rowDependency = rowsByTable?[table];
-    if (rowDependency == null) {
-      tables[i] = columnDependency ?? TableDependency(table);
-      continue;
-    }
-    tables[i] = switch (columnDependency) {
-      TableColumnDependency(:final columns) => TableRowDependency(
-        table,
-        rowDependency.rowids,
-        columns: columns,
-      ),
-      _ => rowDependency,
-    };
+    tables[i] = byTable?[table] ?? TableDependency(table);
   }
   return TableDependencies.fixed(tables);
 }
@@ -513,10 +479,6 @@ final ffi.Pointer<ffi.Pointer<Utf8>> _columnTablesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
 final ffi.Pointer<ffi.Pointer<Utf8>> _columnNamesBuf =
     calloc<ffi.Pointer<Utf8>>(64);
-final ffi.Pointer<ffi.Pointer<Utf8>> _rowTablesBuf = calloc<ffi.Pointer<Utf8>>(
-  256,
-);
-final ffi.Pointer<ffi.Int64> _rowIdsBuf = calloc<ffi.Int64>(256);
 
 /// Decode table/column pointers into grouped column details.
 ///
@@ -592,21 +554,6 @@ List<TableDependency> _getDirtyColumnDetails(ffi.Pointer<ffi.Void> dbHandle) {
   return _decodeColumnDetails(count);
 }
 
-List<TableRowDependency> _getDirtyRowDetails(ffi.Pointer<ffi.Void> dbHandle) {
-  final count = resqliteGetDirtyRows(dbHandle, _rowTablesBuf, _rowIdsBuf, 256);
-  if (count <= 0) return const <TableRowDependency>[];
-
-  final byTable = <String, Set<int>>{};
-  for (var i = 0; i < count; i++) {
-    final table = _rowTablesBuf[i].toDartString();
-    (byTable[table] ??= <int>{}).add(_rowIdsBuf[i]);
-  }
-  return [
-    for (final entry in byTable.entries)
-      TableRowDependency(entry.key, entry.value),
-  ];
-}
-
 /// Read dependencies for the most recent acquired statement on [readerId].
 ///
 /// The C layer exposes table and column metadata separately, but callers should
@@ -632,20 +579,13 @@ TableDependencies getReadTableDependencies(
 TableDependencies getDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
   final tableCount = resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   final columnDetails = _getDirtyColumnDetails(dbHandle);
-  final rowDetails = _getDirtyRowDetails(dbHandle);
-  return _decodeTableDependencies(
-    tableCount,
-    _dirtyTablesBuf,
-    columnDetails,
-    rowDetails,
-  );
+  return _decodeTableDependencies(tableCount, _dirtyTablesBuf, columnDetails);
 }
 
 /// Drain dirty dependency state when a write rolls back or is discarded.
 void discardDirtyTableDependencies(ffi.Pointer<ffi.Void> dbHandle) {
   resqliteGetDirtyTables(dbHandle, _dirtyTablesBuf, 64);
   resqliteGetDirtyColumns(dbHandle, _columnTablesBuf, _columnNamesBuf, 64);
-  resqliteGetDirtyRows(dbHandle, _rowTablesBuf, _rowIdsBuf, 256);
 }
 
 /// Read a sqlite3_db_status aggregate across the writer and any idle
