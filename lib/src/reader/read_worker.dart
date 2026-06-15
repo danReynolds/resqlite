@@ -156,14 +156,12 @@ void readerEntrypoint(List<Object> args) {
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
-          final bytes = executeQueryBytes(
-            dbHandleAddr,
-            readerId,
-            sql,
-            parameters,
-          );
-          sacrifice = bytes.length > sacrificeByteThreshold;
-          result = bytes;
+          // Unlike select() (rows), selectBytes never sacrifices: the result
+          // is native bytes, so Isolate.exit would need a fromList copy first
+          // — saving no copy and only adding a reader respawn. Sending the
+          // view is the one mandatory SendPort copy, at any size.
+          result = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
+          sacrifice = false;
 
         case SelectIfChangedRequest(
             :final sql,
@@ -323,7 +321,13 @@ RawQueryResult executeQuery(
       (_, stmt) => decodeQuery(stmt, sql),
     );
 
-/// Execute a query returning JSON-encoded bytes on a dedicated reader.
+/// Execute a query returning JSON bytes as a view over the reader
+/// connection's persistent `json_buf`.
+///
+/// The returned [Uint8List] aliases native memory that is reused on the next
+/// query, so hand it straight to `SendPort.send` (which copies it) — never
+/// retain it. The send copy is mandatory anyway, so sending the view avoids a
+/// redundant `Uint8List.fromList`.
 Uint8List executeQueryBytes(
   int handleAddr,
   int readerId,
@@ -332,8 +336,7 @@ Uint8List executeQueryBytes(
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
   final result = queryBytes(dbHandle, readerId, sql, parameters);
-  // Copy from persistent reader buffer. Don't free — reader owns it.
-  return Uint8List.fromList(result.ptr.asTypedList(result.length));
+  return result.ptr.asTypedList(result.length);
 }
 
 /// Execute a stream's initial query.
