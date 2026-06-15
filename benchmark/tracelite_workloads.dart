@@ -30,3 +30,9 @@ const traceliteExperimentSuiteScenarios = [
   'chat-sim',
   'keyed-pk-subscriptions',
 ];
+
+const traceliteStreamInitialDrainScenarios = [
+  'stream-initial-drain-text',
+  'stream-initial-drain-rowid',
+  'stream-initial-drain-indexed-int',
+];

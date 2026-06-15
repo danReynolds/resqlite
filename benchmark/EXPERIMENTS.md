@@ -60,6 +60,18 @@ experiment artifact when the collection was clean; the generated writeup should
 explain what was learned and whether the direction should be reopened,
 deferred, or pruned.
 
+For stream re-query dispatch experiments, the wrapper also gates
+`warmup_elapsed_ns` as a guardrail. In the keyed and fan-out stream workloads,
+that warmup interval is the initial stream-drain phase, so this catches changes
+that speed up invalidation by making stream registration slower.
+
+For changes that specifically affect stream registration-time classification,
+use `--direction=stream-initial-drain`. That direction runs Tracelite's focused
+initial-drain shapes, treats the rowid lookup as the primary scenario, and uses
+the text and indexed-int lookup shapes as guardrails. It is the preferred lane
+for checking whether rowid-specific stream optimizations pay for their setup
+cost without adding a separate resqlite-local benchmark.
+
 ## The compile-time gate
 
 All profile-mode instrumentation in resqlite's production code paths
@@ -109,7 +121,7 @@ The preferred workflow is the wrapper:
 
 ```bash
 git clone https://github.com/danReynolds/tracelite /path/to/tracelite
-git -C /path/to/tracelite checkout a2bf3648836fcf680d0aceccb18c2b31a2109586
+git -C /path/to/tracelite checkout 11159638962f5176678f02551a78180f5b9d3bba
 
 dart run benchmark/profile/run_tracelite_profile.dart \
   --tracelite-root=/path/to/tracelite \
@@ -133,7 +145,7 @@ consume. The markdown siblings are review summaries over that data.
 The wrapper deliberately shells out to a pinned local tracelite checkout instead
 of adding tracelite as a resqlite dependency. It records `tracelite_source` in
 the manifest and fails if the checkout is not at the default production pin
-`a2bf3648836fcf680d0aceccb18c2b31a2109586` or is dirty. Use
+`11159638962f5176678f02551a78180f5b9d3bba` or is dirty. Use
 `--allow-unpinned-tracelite` or `--allow-dirty-tracelite` only for local
 tracelite development. The package code only keeps the compile-time trace
 emitters.

@@ -26,7 +26,7 @@
       "subsystems": ["streaming", "dispatch", "reader-pool", "invalidation"],
       "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, writer/request residual, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 -> 0 on A11c overlap and 1,198 -> 0 on keyed-PK; max_parked 46 -> 0), and exp 122 removed the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool. Exp 121 ruled out invalidation traversal as the active implementation target: overlap invalidation is 10-15% of wall, column intersection is 2.5-5.7%, and the structural ceiling is at the per-benchmark decision-threshold edge. Exp 134 proved row-level dirty precision can halve keyed-PK writer-burst wall for a narrow `WHERE id = ?` proof, but its internal SQL recognizer is rejected; revive that area only through explicit API/design or real workload evidence. Exp 136 ships the completion-side reader-handler counter: on A11c overlap the reader worker port handler is 28.57% of total wall (burst + drain) at ~18 us per call across 4,228 calls/burst, and subscriber-fanout emit is only 0.35% of the chain. Exp 147 split writer-side burst wall from SQLite-facing writer calls: on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%; keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). Exp 148 tested the natural reader-reply batching follow-up and rejected it: the profile smoke cut A11c overlap completion callbacks 4,527 -> 1,425 and completion wall 109.6 ms -> 55.6 ms, but Tracelite measured elapsed stayed neutral/slower (+5.18% high-cardinality, +3.28% many-streams, +13.5% keyed-PK). Exp 151 tested synchronous writer response resolution against the residual writer/request bucket and rejected it: high-cardinality fanout stayed neutral (+2.92%), keyed-PK trended slower with too-noisy evidence (+18.5%), and many-streams writer throughput trended slower (+14.0%). SQLite-step tuning, stream admission, invalidation traversal, plain worker-side reader-reply batching, synchronous writer response resolution, SQL-recognizer-based keyed-PK precision, allocation-only `_flushQueue` cleanup, and standalone residual-split profiling are not active targets on currently-measured workloads. Exp 159 attacked the residual structurally: persistent writer reply port + cached SendPort + sync FIFO completion remove fixed per-round-trip scheduling cost, and releasing the write lock at send time pipelines concurrent standalone writes through the worker port FIFO; the focused concurrent-burst benchmark improved 36-45%, exp 147 residual_us dropped on all four audit workloads, and stream-dispatch Tracelite guardrails were neutral on the clean order-flipped pass. Exp 161 closes the release-suite gap by promoting the concurrent-burst shape into `benchmark/suites/writes.dart` as a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair, so exp 159's pipelining win and future writer-scheduling experiments are evaluable on a public release lane (resqlite concurrent median ~1.1 ms vs ~2.9 ms sequential).",
       "keyPriors": ["120", "121", "134", "136", "147", "148"],
-      "archive": ["045", "075", "083", "084", "085", "100", "105", "106", "114", "115", "118", "119", "122", "145", "151"],
+      "archive": ["045", "075", "083", "084", "085", "100", "105", "106", "114", "115", "118", "119", "122", "145", "151", "164"],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a workload shows row-level precision is worth explicit API or metadata design outside a SQL text recognizer",
@@ -613,6 +613,20 @@
         "do not retry synchronous writer response completion unless a Dart runtime change or new workload changes the request-resolution cost model",
         "continue to avoid standalone residual-split profiling; carry only the narrow measurement needed by a concrete implementation candidate",
         "use integrated Tracelite A/B primary gates before keeping stream scheduling changes, even when a profile smoke looks mixed or partially favorable"
+      ]
+    },
+    "164": {
+      "directions": ["stream-rerun-dispatch", "measurement-system"],
+      "outcomeClass": "rejected_no_stable_signal",
+      "changedBeliefs": [
+        "SQLite EXPLAIN QUERY PLAN can avoid a custom SQL parser for rowid lookup detection, but it did not make private row-level stream invalidation cheap enough to keep",
+        "The focused Tracelite stream-initial-drain rowid lane measured -2.33% with neutral/inconclusive evidence while text and indexed-int setup guardrails did not provide a clean offsetting signal",
+        "The broader stream-dispatch guard run stayed mostly neutral and did not turn the keyed-PK rowid idea into a stable end-to-end win"
+      ],
+      "nextSignals": [
+        "do not keep native dirty-row harvesting plus plan inspection without a real workload or Tracelite primary lane that clearly pays for the extra dependency layer",
+        "use stream-initial-drain and warmup_elapsed_ns guardrails for future setup-heavy stream experiments",
+        "if row-level precision reopens, prefer a stronger dependency model over broadening resqlite-owned SQL recognition"
       ]
     },
     "146": {

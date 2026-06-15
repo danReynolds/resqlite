@@ -149,6 +149,93 @@ void main() {
     expect(stdoutText, contains('benchmark/decide_tracelite.dart'));
   });
 
+  test('stream experiment direction guards initial stream drain', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_stream_experiment_plan_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite_experiment.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--baseline-root=${p.join(temp.path, 'baseline')}',
+      '--candidate-root=${p.join(temp.path, 'candidate')}',
+      '--label=unit-stream-experiment',
+      '--direction=stream-rerun-dispatch',
+      '--out-dir=${p.join(temp.path, 'experiment')}',
+      '--dry-run',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('direction: stream-rerun-dispatch'));
+    expect(
+      stdoutText,
+      contains(
+        '--suite-scenarios=high-cardinality-fanout,'
+        'many-streams-writer-throughput,'
+        'keyed-pk-subscriptions',
+      ),
+    );
+    expect(
+      stdoutText,
+      contains('--guardrail-metrics=measured_elapsed_ns,warmup_elapsed_ns'),
+    );
+  });
+
+  test('stream initial drain direction isolates classifier shape', () async {
+    final root = Directory.current.path;
+    final temp = await Directory.systemTemp.createTemp(
+      'resqlite_tracelite_stream_initial_plan_test_',
+    );
+    addTearDown(() => temp.delete(recursive: true));
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'benchmark/run_tracelite_experiment.dart',
+      '--tracelite-root=${p.join(root, 'test', 'fixtures', 'tracelite_root')}',
+      '--baseline-root=${p.join(temp.path, 'baseline')}',
+      '--candidate-root=${p.join(temp.path, 'candidate')}',
+      '--label=unit-stream-initial',
+      '--direction=stream-initial-drain',
+      '--out-dir=${p.join(temp.path, 'experiment')}',
+      '--dry-run',
+    ], workingDirectory: root);
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+    );
+
+    final stdoutText = result.stdout.toString();
+    expect(stdoutText, contains('direction: stream-initial-drain'));
+    expect(
+      stdoutText,
+      contains(
+        '--suite-scenarios=stream-initial-drain-text,'
+        'stream-initial-drain-rowid,'
+        'stream-initial-drain-indexed-int',
+      ),
+    );
+    expect(
+      stdoutText,
+      contains('--primary-scenarios=stream-initial-drain-rowid'),
+    );
+    expect(
+      stdoutText,
+      contains(
+        '--guardrail-scenarios=stream-initial-drain-text,'
+        'stream-initial-drain-indexed-int',
+      ),
+    );
+  });
+
   test(
     'tracelite experiment workflow preserves inconclusive evidence',
     () async {
