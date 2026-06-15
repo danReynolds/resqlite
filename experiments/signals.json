@@ -81,8 +81,8 @@
       "id": "long-text-stream-hashing",
       "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have representative unchanged-fanout coverage. Exp 110 turned exp 099's 8-byte FNV byte fold into a large targeted win on 4KB TEXT cells. Exp 170 added a broader mixed row (8 streams, 64 rows x 32KB TEXT + 32KB BLOB) and long-BLOB hash correctness coverage; the mixed row measured 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without exposing enough headroom for another immediate hash-loop variant.",
-      "keyPriors": ["075", "099", "110", "170"],
+      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have representative unchanged-fanout coverage. Exp 110 turned exp 099's 8-byte FNV byte fold into a large targeted win on 4KB TEXT cells. Exp 172 added a broader mixed row (8 streams, 64 rows x 32KB TEXT + 32KB BLOB) and long-BLOB hash correctness coverage; the mixed row measured 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without exposing enough headroom for another immediate hash-loop variant.",
+      "keyPriors": ["075", "099", "110", "172"],
       "archive": ["033"],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
@@ -95,7 +95,7 @@
       ],
       "openCandidates": [],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Use both long-payload streaming rows before trying another hash-loop change: exp 110's 4KB TEXT row and exp 170's mixed 32KB TEXT + 32KB BLOB row. The direction is not blocked on measurement; reopen implementation only with a production profile or a concrete hash variant that should improve the mixed row without hurting short-cell streams."
+      "notesForExperimenters": "Use both long-payload streaming rows before trying another hash-loop change: exp 110's 4KB TEXT row and exp 172's mixed 32KB TEXT + 32KB BLOB row. The direction is not blocked on measurement; reopen implementation only with a production profile or a concrete hash variant that should improve the mixed row without hurting short-cell streams."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -741,7 +741,7 @@
         "if future profile workload shape changes remove a required stable insight ID, update the guard and signal map in the same experiment rather than weakening the contract silently"
       ]
     },
-    "170": {
+    "172": {
       "directions": ["long-text-stream-hashing", "measurement-system"],
       "outcomeClass": "in_review_measurement",
       "changedBeliefs": [

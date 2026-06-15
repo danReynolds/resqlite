@@ -1,4 +1,4 @@
-# Experiment 170: Long-payload stream hash coverage
+# Experiment 172: Long-payload stream hash coverage
 
 **Date:** 2026-06-15
 **Status:** In Review
