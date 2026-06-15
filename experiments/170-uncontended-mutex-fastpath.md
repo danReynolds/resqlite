@@ -1,4 +1,4 @@
-# Experiment 168: Synchronous uncontended writer mutex fast-path
+# Experiment 170: Synchronous uncontended writer mutex fast-path
 
 **Date:** 2026-06-12
 **Status:** Rejected

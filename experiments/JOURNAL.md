@@ -193,7 +193,7 @@ otherwise the check is only advisory.*
 
 [Exp 151](151-sync-writer-response.md) rejected the response-side
 request-resolution tweak: switching writer reply futures to
-`Completer<T>.sync()`. [Exp 168](168-uncontended-mutex-fastpath.md)
+`Completer<T>.sync()`. [Exp 170](170-uncontended-mutex-fastpath.md)
 tried the symmetric request-side variant: `Mutex.tryLock()` plus a
 non-`async` `Writer.execute` to drop the uncontended `await
 _mutex.lock()` microtask hop and the wrapping async function's
