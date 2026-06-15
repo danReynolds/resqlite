@@ -46,9 +46,9 @@ from `queryBytes` return through the send.
 
 `lib/src/reader/read_worker.dart`:
 
-- `executeQueryBytes` → `executeQueryBytesView`: returns
-  `result.ptr.asTypedList(result.length)` (the native view) instead of
-  `Uint8List.fromList(...)`. Documented lifetime contract: send immediately,
+- `executeQueryBytes`: returns `result.ptr.asTypedList(result.length)` (a view
+  over the connection's persistent `json_buf`) instead of
+  `Uint8List.fromList(...)`. Doc'd as a transient view — send immediately,
   never retain.
 - `SelectBytesRequest` case: `sacrifice = false` unconditionally; `result` is the
   view. The sacrifice machinery is untouched and still serves the rows path.
