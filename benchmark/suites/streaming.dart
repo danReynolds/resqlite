@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
@@ -9,6 +10,10 @@ import '../shared/config.dart';
 import '../shared/stats.dart';
 
 /// Streaming benchmarks: initial emission, invalidation latency, fan-out, churn.
+Future<void> main() async {
+  print(await runStreamingBenchmark());
+}
+
 Future<String> runStreamingBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Streaming');
@@ -435,6 +440,138 @@ Future<String> runStreamingBenchmark() async {
     }
 
     // -----------------------------------------------------------------
+    // 2d. Long-payload unchanged fanout — mixed TEXT/BLOB coverage
+    //
+    // Exp 110 added 4KB TEXT coverage for the byte-stream hash loop. This
+    // broader row keeps the same unchanged-stream contract but raises the
+    // payload to 32KB TEXT + 32KB BLOB cells so future hash experiments
+    // cannot infer mixed long-payload behavior from the text-only row.
+    // -----------------------------------------------------------------
+    {
+      const unchangedStreamCount = 8;
+      const rowCount = 64;
+      const textBytes = 32768;
+      const blobBytes = 32768;
+      var counter = 100000;
+
+      final tmp = await Directory.systemTemp.createTemp(
+        'bench_long_payload_stream_',
+      );
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        const createPayloadSql =
+            'CREATE TABLE long_payloads('
+            'id INTEGER PRIMARY KEY, '
+            'body TEXT NOT NULL, '
+            'payload BLOB NOT NULL, '
+            'marker INTEGER NOT NULL)';
+        const insertPayloadSql =
+            'INSERT INTO long_payloads(id, body, payload, marker) '
+            'VALUES (?, ?, ?, ?)';
+
+        await db.execute(createPayloadSql);
+        await db.executeBatch(insertPayloadSql, [
+          for (var i = 0; i < rowCount; i++)
+            [
+              i,
+              _longTextPayload(textBytes, i),
+              _longBlobPayload(blobBytes, i),
+              i,
+            ],
+        ]);
+
+        final timing = BenchmarkTiming('resqlite');
+        final unchangedSubs = <StreamSubscription>[];
+        StreamSubscription? barrierSub;
+        try {
+          final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+          final unchangedReady = <Completer<void>>[
+            for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+          ];
+
+          for (var s = 0; s < unchangedStreamCount; s++) {
+            final sub = db
+                .stream(
+                  'SELECT id, body, payload, $s as sid FROM long_payloads '
+                  'WHERE id < $rowCount ORDER BY id',
+                )
+                .listen((_) {
+                  unchangedEmissions[s]++;
+                  if (!unchangedReady[s].isCompleted) {
+                    unchangedReady[s].complete();
+                  }
+                });
+            unchangedSubs.add(sub);
+          }
+
+          // Registered after the unchanged streams. It changes on each insert
+          // and acts as a practical drain barrier for the queued hash-only
+          // re-query wave without decoding the large unchanged payloads.
+          final barrierStream = db.stream(
+            'SELECT COUNT(*) AS cnt FROM long_payloads',
+          );
+          final barrierReady = Completer<void>();
+          Completer<void>? waitBarrier;
+          barrierSub = barrierStream.listen((_) {
+            if (!barrierReady.isCompleted) {
+              barrierReady.complete();
+            } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+              waitBarrier.complete();
+            }
+          });
+
+          await Future.wait(
+            unchangedReady.map((c) => c.future),
+          ).timeout(const Duration(seconds: 20));
+          await barrierReady.future.timeout(const Duration(seconds: 20));
+
+          for (var i = 0; i < defaultIterations; i++) {
+            waitBarrier = Completer<void>();
+            final before = List<int>.from(unchangedEmissions);
+
+            final sw = Stopwatch()..start();
+            await db.execute(insertPayloadSql, [
+              counter,
+              _longTextPayload(textBytes, counter),
+              _longBlobPayload(blobBytes, counter),
+              i,
+            ]);
+            counter++;
+            await waitBarrier.future.timeout(const Duration(seconds: 20));
+            sw.stop();
+            timing.wallUs.add(sw.elapsedMicroseconds);
+            timing.mainUs.add(sw.elapsedMicroseconds);
+
+            for (var s = 0; s < unchangedStreamCount; s++) {
+              if (unchangedEmissions[s] != before[s]) {
+                throw StateError(
+                  'Long-payload unchanged stream $s emitted for an '
+                  'unchanged result.',
+                );
+              }
+            }
+          }
+        } finally {
+          await barrierSub?.cancel();
+          for (final sub in unchangedSubs) {
+            await sub.cancel();
+          }
+          await db.close();
+        }
+
+        markdown.write(
+          markdownTable(
+            'Long-Payload Unchanged Fanout '
+            '(8 streams, 64 rows x 32KB TEXT + 32KB BLOB)',
+            [timing],
+          ),
+        );
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
+    // -----------------------------------------------------------------
     // 3. Fan-out (10 streams, one write invalidates all)
     // -----------------------------------------------------------------
     {
@@ -807,4 +944,12 @@ String _longTextPayload(int targetBytes, int seed) {
     buffer.write(chunk);
   }
   return buffer.toString().substring(0, targetBytes);
+}
+
+Uint8List _longBlobPayload(int targetBytes, int seed) {
+  final bytes = Uint8List(targetBytes);
+  for (var i = 0; i < targetBytes; i++) {
+    bytes[i] = (seed + i * 31) & 0xff;
+  }
+  return bytes;
 }

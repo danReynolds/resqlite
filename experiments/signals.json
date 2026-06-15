@@ -81,8 +81,8 @@
       "id": "long-text-stream-hashing",
       "status": "watch",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT cells now have a representative unchanged-fanout benchmark. Chunked byte-stream folding produced a large targeted win; further variants need a new profile signal or a broader long-payload workload.",
-      "keyPriors": ["075", "099", "110"],
+      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have representative unchanged-fanout coverage. Exp 110 turned exp 099's 8-byte FNV byte fold into a large targeted win on 4KB TEXT cells. Exp 170 added a broader mixed row (8 streams, 64 rows x 32KB TEXT + 32KB BLOB) and long-BLOB hash correctness coverage; the mixed row measured 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without exposing enough headroom for another immediate hash-loop variant.",
+      "keyPriors": ["075", "099", "110", "170"],
       "archive": ["033"],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
@@ -90,21 +90,12 @@
         "a hash-loop variant improves the long-text benchmark without hurting short-cell streams"
       ],
       "openQuestions": [
-        "What text sizes appear in realistic stream workloads?",
-        "Does the remaining long-text cost sit in hashing, SQLite text access, Dart decode, or result delivery?"
+        "What text and blob sizes appear in realistic stream workloads?",
+        "If long-payload unchanged fanout becomes hot again, does the remaining cost sit in hashing, SQLite value access, Dart decode on changed paths, or result delivery?"
       ],
-      "openCandidates": [
-        {
-          "idea": "broader long-payload workload (≥ 32KB TEXT cells, mixed BLOB/TEXT)",
-          "addedDate": "2026-04-29",
-          "addedAfter": "110",
-          "blockedOn": "no benchmark covers payloads larger than the exp 110 4KB shape"
-        }
-      ],
-      "blockedOnMeasurement": [
-        "long-payload streaming workload at sizes beyond exp 110's 4KB cells"
-      ],
-      "notesForExperimenters": "Use the long-text unchanged-fanout benchmark before trying another hash-loop change. The direction is no longer blocked on measurement, but the obvious 8-byte fold has already been tried."
+      "openCandidates": [],
+      "blockedOnMeasurement": [],
+      "notesForExperimenters": "Use both long-payload streaming rows before trying another hash-loop change: exp 110's 4KB TEXT row and exp 170's mixed 32KB TEXT + 32KB BLOB row. The direction is not blocked on measurement; reopen implementation only with a production profile or a concrete hash variant that should improve the mixed row without hurting short-cell streams."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -748,6 +739,20 @@
         "use the profile wrapper's generated `insights.md` before opening raw workload-summary JSON for dispatch-vs-work and memory/allocation shape",
         "keep raw profile regions and workload JSON local under `build/`; commit compact aggregates unless graph data is feeding Pages",
         "if future profile workload shape changes remove a required stable insight ID, update the guard and signal map in the same experiment rather than weakening the contract silently"
+      ]
+    },
+    "170": {
+      "directions": ["long-text-stream-hashing", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "The streaming suite now covers mixed long payloads beyond exp 110's 4KB TEXT shape: 8 unchanged streams over 64 rows with 32KB TEXT plus 32KB BLOB cells",
+        "The current 8-byte FNV fold scales acceptably on the broader row in a focused run: 3.446 ms median for mixed long payloads beside 2.356 ms for the existing 4KB TEXT row",
+        "Long-BLOB hash correctness is covered directly: same-length no-op BLOB updates suppress emission, while changes after the first 8-byte chunk emit"
+      ],
+      "nextSignals": [
+        "do not reopen byte-stream hash-loop implementation work without checking both long TEXT and mixed TEXT/BLOB unchanged-fanout rows",
+        "future hash variants need a concrete mechanism or production profile showing this path remains dominant; broader measurement alone is no longer the blocker",
+        "the direct streaming-suite entry point can be used for focused stream measurements before compiling the full release runner"
       ]
     }
   }
