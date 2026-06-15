@@ -121,6 +121,7 @@ final class _Options {
     required this.primaryPeer,
     required this.primaryMetric,
     required this.guardrailPeers,
+    required this.guardrailScenarios,
     required this.guardrailMetrics,
     required this.policyPath,
     required this.traceliteSourcePolicy,
@@ -151,6 +152,7 @@ final class _Options {
   final String primaryPeer;
   final String primaryMetric;
   final String guardrailPeers;
+  final String guardrailScenarios;
   final String guardrailMetrics;
   final String? policyPath;
   final TraceliteSourcePolicy traceliteSourcePolicy;
@@ -185,6 +187,7 @@ final class _Options {
         primaryPeer: _defaultPolicyPeer,
         primaryMetric: _defaultMetric,
         guardrailPeers: _defaultPolicyPeer,
+        guardrailScenarios: preset.guardrailScenarios.join(','),
         guardrailMetrics: _defaultMetric,
         policyPath: null,
         traceliteSourcePolicy: const TraceliteSourcePolicy(
@@ -258,7 +261,11 @@ final class _Options {
       primaryMetric: values['primary-metric'] ?? _defaultMetric,
       guardrailPeers:
           values['guardrail-peers'] ?? directionPreset.guardrailPeers,
-      guardrailMetrics: values['guardrail-metrics'] ?? _defaultMetric,
+      guardrailScenarios:
+          values['guardrail-scenarios'] ??
+          directionPreset.guardrailScenarios.join(','),
+      guardrailMetrics:
+          values['guardrail-metrics'] ?? directionPreset.guardrailMetrics,
       policyPath: _absoluteFileOption(values['policy']),
       traceliteSourcePolicy: traceliteSourcePolicyFromOptions(
         revision: values['tracelite-revision'],
@@ -278,12 +285,16 @@ final class _DirectionPreset {
     required this.suiteScenarios,
     required this.policyScenarios,
     required this.guardrailPeers,
-  });
+    List<String>? guardrailScenarios,
+    this.guardrailMetrics = _defaultMetric,
+  }) : guardrailScenarios = guardrailScenarios ?? policyScenarios;
 
   final String interfaces;
   final List<String> suiteScenarios;
   final List<String> policyScenarios;
   final String guardrailPeers;
+  final List<String> guardrailScenarios;
+  final String guardrailMetrics;
 }
 
 _DirectionPreset _directionPreset(String direction) {
@@ -307,6 +318,17 @@ _DirectionPreset _directionPreset(String direction) {
         'keyed-pk-subscriptions',
       ],
       guardrailPeers: _defaultPolicyPeer,
+      guardrailMetrics: 'measured_elapsed_ns,warmup_elapsed_ns',
+    ),
+    'stream-initial-drain' => const _DirectionPreset(
+      interfaces: _defaultPolicyPeer,
+      suiteScenarios: traceliteStreamInitialDrainScenarios,
+      policyScenarios: ['stream-initial-drain-rowid'],
+      guardrailPeers: _defaultPolicyPeer,
+      guardrailScenarios: [
+        'stream-initial-drain-text',
+        'stream-initial-drain-indexed-int',
+      ],
     ),
     'memory' => const _DirectionPreset(
       interfaces: _defaultPolicyPeer,
@@ -531,7 +553,7 @@ _Step _decisionStep(_Options options, _Paths paths) {
       '--primary-metric=${options.primaryMetric}',
       '--primary-scenarios=${options.policyScenarios}',
       '--guardrail-peers=${options.guardrailPeers}',
-      '--guardrail-scenarios=${options.policyScenarios}',
+      '--guardrail-scenarios=${options.guardrailScenarios}',
       '--guardrail-metrics=${options.guardrailMetrics}',
       '--label=${options.label}-decision',
       '--out-dir=${paths.decisionDir}',
@@ -680,6 +702,7 @@ Future<void> _writeManifest(
     'interfaces': options.interfaces.split(','),
     'suite_scenarios': options.suiteScenarios.split(','),
     'policy_scenarios': options.policyScenarios.split(','),
+    'guardrail_scenarios': options.guardrailScenarios.split(','),
     'decision': decision == null
         ? null
         : {
@@ -747,6 +770,7 @@ void _printPlan(_Options options, _Paths paths, _Steps steps) {
   );
   print('suite_scenarios: ${options.suiteScenarios}');
   print('policy_scenarios: ${options.policyScenarios}');
+  print('guardrail_scenarios: ${options.guardrailScenarios}');
   print('');
   print('artifacts:');
   print('  manifest: ${paths.manifest}');
@@ -867,6 +891,9 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('    [--no-graph-data] [--fail-on-nonaccepted] [--dry-run]');
   stderr.writeln('');
   stderr.writeln('Directions: general, parameter-encoding-and-binding,');
-  stderr.writeln('  stream-rerun-dispatch, memory, production-release.');
+  stderr.writeln(
+    '  stream-rerun-dispatch, stream-initial-drain, memory, '
+    'production-release.',
+  );
   exit(exitCode);
 }
