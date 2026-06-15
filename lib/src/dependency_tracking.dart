@@ -52,3 +52,16 @@ final class TableColumnDependency extends TableDependency {
 
   final Set<String> columns;
 }
+
+/// Dependency on specific rowids in [table].
+///
+/// This is an internal optimization layer. If [columns] is null, writes to any
+/// column of an overlapping rowid re-query the stream. If [columns] is present,
+/// the normal column-intersection optimization still applies after rowid
+/// overlap is proven.
+final class TableRowDependency extends TableDependency {
+  const TableRowDependency(super.table, this.rowids, {this.columns});
+
+  final Set<int> rowids;
+  final Set<String>? columns;
+}
