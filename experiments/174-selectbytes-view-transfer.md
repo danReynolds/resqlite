@@ -107,17 +107,32 @@ explicit `free` rather than a finalizer):
 | 2 | 305.8 µs | 367.3 µs | 120 % |
 | 3 | 318.7 µs | 335.4 µs | 105 % |
 
-**Break-even, trending slightly worse for B — in B's best case.** The saved
-`memcpy` is eaten by the per-query `malloc`/`free` and the page faults on the
-fresh buffer (A reuses a warm `json_buf`), and both paths allocate `len` bytes
-anyway (A's received Dart `Uint8List`, B's native block). The copy was never the
-bottleneck — exp 174's win was the eliminated **respawn**, not the copy. Real B
-would add `NativeFinalizer` GC overhead on top, lose the persistent-buffer reuse
-(exp 037), introduce GC-timed native memory pressure, and trade a few lines of
-safe code for a cross-isolate raw-pointer ownership protocol (leak /
-use-after-free surface). Not worth it. Reopen only for very large payloads
-(>~10 MB), where the fixed `mmap`/`munmap` cost amortizes against a large copy —
-and even then the safety/complexity downsides stand.
+**Worse than the current one-copy path, at every size — no crossover.** A size
+sweep (256 KB → 64 MB) had B **14–24 % slower** throughout, widening at the
+extremes:
+
+| payload | A: copy (reused buf) | B: zero-copy (fresh buf) | B/A |
+|---|---:|---:|---:|
+| 256 KB | 140.7 µs | 173.4 µs | 123 % |
+| 1 MB | 578.8 µs | 661.8 µs | 114 % |
+| 4 MB | 2302.7 µs | 2629.0 µs | 114 % |
+| 16 MB | 8728.9 µs | 10484.8 µs | 120 % |
+| 64 MB | 33841.1 µs | 42095.1 µs | 124 % |
+
+The decisive factor is **buffer reuse, not the copy.** A reuses one warm
+`json_buf` (pages already faulted, no allocator calls); B must `malloc` a
+**fresh** buffer per query — per-query `mmap`/`munmap` syscalls + cold-page
+faults that scale with size — and that costs *more* than the `memcpy` it saves.
+And reuse is fundamentally incompatible with zero-copy: handing the buffer to
+main means it can't be reused, and it can't be safely recycled either, because
+the caller can retain the returned `Uint8List` indefinitely (a recycled buffer
+would corrupt a held reference). So **the copy is the price of keeping the
+buffer reusable, and reuse wins at every size** — the single copy is the floor,
+structurally. (Real B is worse still: `NativeFinalizer` GC overhead, GC-timed
+native memory pressure, and a cross-isolate raw-pointer ownership protocol.)
+**Do not reopen** without a fundamentally different mechanism (e.g. a recycled
+*warm* native transfer-buffer pool with cross-isolate finalizer recycling —
+complex, GC-timing-dependent, and unbounded under load).
 
 ## Future Notes
 
