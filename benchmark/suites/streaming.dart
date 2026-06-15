@@ -435,6 +435,128 @@ Future<String> runStreamingBenchmark() async {
     }
 
     // -----------------------------------------------------------------
+    // 2d. Long-text 32KB unchanged fanout — experiment 170 target
+    //
+    // Same shape as 2c, but each cell is 32 KB instead of 4 KB. Exp 110
+    // proved the 8-byte FNV body wins on 4 KB cells; the open candidate
+    // in `signals.json#long-text-stream-hashing` named the missing
+    // workload at >= 32 KB cells as the blocker for any further
+    // hash-loop variant. Row count is scaled down so the per-iteration
+    // hashed payload (8 unchanged streams * 64 rows * 32 KB ~ 16 MB)
+    // stays inside one quiet machine pass.
+    // -----------------------------------------------------------------
+    {
+      const unchangedStreamCount = 8;
+      const rowCount = 64;
+      const textBytes = 32 * 1024;
+      var counter = 200000;
+
+      final tmp = await Directory.systemTemp.createTemp(
+        'bench_long_text32_stream_',
+      );
+      try {
+        final db = await resqlite.Database.open('${tmp.path}/r.db');
+        const createLongSql =
+            'CREATE TABLE long_items32('
+            'id INTEGER PRIMARY KEY, '
+            'body TEXT NOT NULL, '
+            'marker INTEGER NOT NULL)';
+        const insertLongSql =
+            'INSERT INTO long_items32(id, body, marker) VALUES (?, ?, ?)';
+
+        await db.execute(createLongSql);
+        await db.executeBatch(insertLongSql, [
+          for (var i = 0; i < rowCount; i++)
+            [i, _longTextPayload(textBytes, i), i],
+        ]);
+
+        final timing = BenchmarkTiming('resqlite');
+        final unchangedSubs = <StreamSubscription>[];
+        StreamSubscription? barrierSub;
+        try {
+          final unchangedEmissions = List<int>.filled(unchangedStreamCount, 0);
+          final unchangedReady = <Completer<void>>[
+            for (var i = 0; i < unchangedStreamCount; i++) Completer<void>(),
+          ];
+
+          for (var s = 0; s < unchangedStreamCount; s++) {
+            final sub = db
+                .stream(
+                  'SELECT id, body, $s as sid FROM long_items32 '
+                  'WHERE id < $rowCount ORDER BY id',
+                )
+                .listen((_) {
+                  unchangedEmissions[s]++;
+                  if (!unchangedReady[s].isCompleted)
+                    unchangedReady[s].complete();
+                });
+            unchangedSubs.add(sub);
+          }
+
+          final barrierStream = db.stream(
+            'SELECT id, body FROM long_items32 ORDER BY id',
+          );
+          final barrierReady = Completer<void>();
+          Completer<void>? waitBarrier;
+          barrierSub = barrierStream.listen((_) {
+            if (!barrierReady.isCompleted) {
+              barrierReady.complete();
+            } else if (waitBarrier != null && !waitBarrier.isCompleted) {
+              waitBarrier.complete();
+            }
+          });
+
+          await Future.wait(
+            unchangedReady.map((c) => c.future),
+          ).timeout(const Duration(seconds: 30));
+          await barrierReady.future.timeout(const Duration(seconds: 30));
+
+          for (var i = 0; i < defaultIterations; i++) {
+            waitBarrier = Completer<void>();
+            final before = List<int>.from(unchangedEmissions);
+
+            final sw = Stopwatch()..start();
+            await db.execute(insertLongSql, [
+              counter,
+              _longTextPayload(textBytes, counter),
+              i,
+            ]);
+            counter++;
+            await waitBarrier.future.timeout(const Duration(seconds: 30));
+            sw.stop();
+            timing.wallUs.add(sw.elapsedMicroseconds);
+            timing.mainUs.add(sw.elapsedMicroseconds);
+
+            for (var s = 0; s < unchangedStreamCount; s++) {
+              if (unchangedEmissions[s] != before[s]) {
+                throw StateError(
+                  'Long-text 32KB unchanged stream $s emitted '
+                  'for an unchanged result.',
+                );
+              }
+            }
+          }
+        } finally {
+          await barrierSub?.cancel();
+          for (final sub in unchangedSubs) {
+            await sub.cancel();
+          }
+          await db.close();
+        }
+
+        markdown.write(
+          markdownTable(
+            'Long-Text 32KB Unchanged Fanout '
+            '(8 unchanged streams, 64 rows x 32KB TEXT)',
+            [timing],
+          ),
+        );
+      } finally {
+        await tmp.delete(recursive: true);
+      }
+    }
+
+    // -----------------------------------------------------------------
     // 3. Fan-out (10 streams, one write invalidates all)
     // -----------------------------------------------------------------
     {
