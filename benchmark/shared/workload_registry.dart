@@ -149,6 +149,15 @@ const curatedMetricDefinitions = [
     displayName: 'unchanged fanout',
     chartId: 'chartReactiveMicros',
   ),
+  // The 32KB definition must come before the generic "Long-Text Unchanged
+  // Fanout" pattern so the more specific 32KB key is claimed first; the
+  // generic pattern is a substring of the 32KB one, so the order matters
+  // for `resolveCuratedMetrics`'s `usedKeys` book-keeping.
+  CuratedMetricDefinition(
+    pattern: 'Long-Text 32KB Unchanged Fanout',
+    displayName: 'long-text 32KB unchanged',
+    chartId: 'chartReactiveMicros',
+  ),
   CuratedMetricDefinition(
     pattern: 'Long-Text Unchanged Fanout',
     displayName: 'long-text unchanged',

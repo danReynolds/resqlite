@@ -79,23 +79,30 @@
     },
     {
       "id": "long-text-stream-hashing",
-      "status": "watch",
+      "status": "settled",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have representative unchanged-fanout coverage. Exp 110 turned exp 099's 8-byte FNV byte fold into a large targeted win on 4KB TEXT cells. Exp 172 added a broader mixed row (8 streams, 64 rows x 32KB TEXT + 32KB BLOB) and long-BLOB hash correctness coverage; the mixed row measured 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without exposing enough headroom for another immediate hash-loop variant.",
-      "keyPriors": ["075", "099", "110", "172"],
+      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have three representative unchanged-fanout benchmarks: exp 110's 4 KB TEXT shape, exp 172's mixed 32 KB TEXT + 32 KB BLOB row (3.446 ms median beside the 4 KB row's 2.356 ms, with long-BLOB hash correctness coverage), and exp 173's 32 KB long-text shape. Exp 173 closed the open ≥ 32 KB candidate by running an unrolled 16-byte FNV body against the new workload: two order-flipped passes showed +4.5 % and +12.1 % vs the exp 110 8-byte body, slight regressions inside a 2.6 → 6.0 ms per-pass spread. With the pool-of-4 reader fleet parallelising work across streams, the byte-stream fold is at most ~50 % of wall on the 32 KB shape, so further loop-overhead variants are below noise. Future hash work needs a workload that isolates the hash loop further (single-stream long-payload, direct-FFI microbenchmark); the mixed BLOB/TEXT shape now exists (exp 172) but has not exposed new hash-loop headroom.",
+      "keyPriors": ["075", "099", "110", "172", "173"],
       "archive": ["033"],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
-        "the workload includes unchanged fan-out with larger text payloads",
-        "a hash-loop variant improves the long-text benchmark without hurting short-cell streams"
+        "a workload isolates the hash loop from reader-pool parallelism (single-stream long-payload, direct FFI microbenchmark)",
+        "a mixed BLOB/TEXT long-payload shape produces a different ratio of hash vs SQLite text retrieval"
       ],
       "openQuestions": [
         "What text and blob sizes appear in realistic stream workloads?",
-        "If long-payload unchanged fanout becomes hot again, does the remaining cost sit in hashing, SQLite value access, Dart decode on changed paths, or result delivery?"
+        "If long-payload unchanged fanout becomes hot again, does the remaining cost sit in hashing, SQLite value access, Dart decode, or result delivery?",
+        "Does a single-stream long-payload shape expose hash-loop overhead that the parallel reader pool currently hides?"
       ],
-      "openCandidates": [],
+      "openCandidates": [
+        {
+          "idea": "single-stream long-payload microbenchmark that bypasses the reader-pool parallelism",
+          "addedDate": "2026-06-15",
+          "addedAfter": "173"
+        }
+      ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Use both long-payload streaming rows before trying another hash-loop change: exp 110's 4KB TEXT row and exp 172's mixed 32KB TEXT + 32KB BLOB row. The direction is not blocked on measurement; reopen implementation only with a production profile or a concrete hash variant that should improve the mixed row without hurting short-cell streams."
+      "notesForExperimenters": "Use the long-payload streaming rows before trying another hash-loop change: exp 110's 4 KB TEXT row, exp 172's mixed 32 KB TEXT + 32 KB BLOB row, and exp 173's 32 KB long-text row (`Long-Text 32KB Unchanged Fanout` in streaming.dart, or the focused `benchmark/experiments/long_text_32kb_hash.dart` harness). The 8-byte fold (exp 110) and 16-byte fold (exp 173) have both been tried; further unrolling variants are not worth a pass on the current workload shape because the byte-stream fold is not the dominant wall component under the pool-of-4 reader fleet. Reopen implementation only with a workload that isolates the hash loop (single-stream long-payload) or a production profile."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -780,6 +787,20 @@
         "do not reopen byte-stream hash-loop implementation work without checking both long TEXT and mixed TEXT/BLOB unchanged-fanout rows",
         "future hash variants need a concrete mechanism or production profile showing this path remains dominant; broader measurement alone is no longer the blocker",
         "the direct streaming-suite entry point can be used for focused stream measurements before compiling the full release runner"
+      ]
+    },
+    "173": {
+      "directions": ["long-text-stream-hashing"],
+      "outcomeClass": "rejected_no_signal",
+      "changedBeliefs": [
+        "At 32 KB cells on a pool-of-4 reader fleet the byte-stream fold is no longer the dominant wall component: even an unrolled 16-byte FNV body is +4.5 % to +12.1 % vs the exp 110 8-byte body across two order-flipped passes, all inside a 2.6 → 6.0 ms per-pass spread",
+        "The named ≥ 32 KB cell candidate is closed: the workload now exists (release-suite `Long-Text 32KB Unchanged Fanout` and focused `benchmark/experiments/long_text_32kb_hash.dart`) and shows that hash-loop unrolling beyond exp 110's 8-byte fold is below noise on this shape",
+        "The long-text direction is settled, not just `watch`: further FNV-shape variants need either a workload that isolates the hash loop from reader-pool parallelism, or a mixed BLOB/TEXT long-payload shape that may shift the hash-vs-retrieval ratio"
+      ],
+      "nextSignals": [
+        "do not retry FNV unrolling variants on the existing parallel-fanout long-text shapes without a workload that isolates the hash loop",
+        "if a mixed BLOB + long-TEXT unchanged-fanout workload becomes interesting, exp 173's focused harness is a reusable template",
+        "a single-stream long-payload microbenchmark (one stream, no reader-pool parallelism) would expose hash-loop overhead that the current shape hides"
       ]
     }
   }
