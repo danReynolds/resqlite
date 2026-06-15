@@ -814,7 +814,8 @@
       "nextSignals": [
         "promote a large-byte (>256KB) selectBytes lane into the release suite (exp 161 pattern) so the win is visible and guarded; the existing 'Select -> JSON Bytes / 1000 rows' lane is <256KB and shows this as neutral",
         "if a memory-sensitive workload shows problematic json_buf retention, reopen with a high memory-reclaim sacrifice threshold for bytes (e.g. >8MB) or a C-side json_buf shrink, preserving the view-send win for the realistic large range",
-        "do not extend view-send to the rows path: there the payload is Dart objects and sacrifice's zero-copy object transfer is the real win (exp 008b/019)"
+        "do not extend view-send to the rows path: there the payload is Dart objects and sacrifice's zero-copy object transfer is the real win (exp 008b/019)",
+        "do not pursue true zero-copy bytes transfer (fresh malloc per query + send address + NativeFinalizer): measured break-even-at-best on 651KB (benchmark/experiments/transfer_mechanism_ab.dart) because the saved memcpy is offset by per-query malloc/free + page faults, and both paths allocate len anyway; the copy was never the bottleneck (the respawn was). Reopen only for very large (>~10MB) payloads where fixed mmap cost amortizes, and even then weigh the GC-finalizer / cross-isolate raw-pointer safety / lost-buffer-reuse costs"
       ]
     }
   }

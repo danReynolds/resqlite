@@ -90,6 +90,35 @@ Strong win on large byte payloads (the workload `selectBytes` exists for:
 forwarding large JSON without materializing rows), neutral on small, net code
 simplification, no API change.
 
+## Considered and rejected: true zero-copy transfer
+
+The natural "go further" is to copy zero bytes across the port: `malloc` a
+**fresh** native buffer per query, send only `(address, len)`, and wrap it on
+main with a `NativeFinalizer` (GC frees the native memory) — the manual
+native-memory analogue of what `Isolate.exit` does for Dart objects.
+
+Measured it (`benchmark/experiments/transfer_mechanism_ab.dart`, 651 KB,
+round-trip per query, three order-flipped passes, B given its **best** case of
+explicit `free` rather than a finalizer):
+
+| pass | A: current (one copy) | B: zero-copy (address + free) | B/A |
+|---|---:|---:|---:|
+| 1 | 362.7 µs | 337.3 µs | 93 % |
+| 2 | 305.8 µs | 367.3 µs | 120 % |
+| 3 | 318.7 µs | 335.4 µs | 105 % |
+
+**Break-even, trending slightly worse for B — in B's best case.** The saved
+`memcpy` is eaten by the per-query `malloc`/`free` and the page faults on the
+fresh buffer (A reuses a warm `json_buf`), and both paths allocate `len` bytes
+anyway (A's received Dart `Uint8List`, B's native block). The copy was never the
+bottleneck — exp 174's win was the eliminated **respawn**, not the copy. Real B
+would add `NativeFinalizer` GC overhead on top, lose the persistent-buffer reuse
+(exp 037), introduce GC-timed native memory pressure, and trade a few lines of
+safe code for a cross-isolate raw-pointer ownership protocol (leak /
+use-after-free surface). Not worth it. Reopen only for very large payloads
+(>~10 MB), where the fixed `mmap`/`munmap` cost amortizes against a large copy —
+and even then the safety/complexity downsides stand.
+
 ## Future Notes
 
 - The existing release lane "Select → JSON Bytes / 1000 rows" is a small result
