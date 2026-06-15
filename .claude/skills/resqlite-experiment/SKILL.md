@@ -204,6 +204,75 @@ full artifact and preserving the broken code adds nothing. For any
 rejection of the form "measured, below noise floor, not worth the
 complexity," tag it.
 
+## Closing out the PR: merge, auto-merge, or hold
+
+Every experiment ends as a PR. Decide what happens to it **by the diff, not
+by the verdict word** — a "rejected" that still ships code must not
+auto-merge:
+
+```bash
+git diff --name-only origin/main...HEAD
+```
+
+- **Touches none of `lib/`, `native/`, `hook/`** (only `experiments/`,
+  `benchmark/`, `test/`, `docs/`) → no runtime behavior change. This is a
+  recorded rejection, a measurement lane, or a tooling/CI guard. **Enable
+  auto-merge** so it lands the moment CI is green, before it can stale a
+  sibling:
+  ```bash
+  gh pr merge <N> --squash --auto
+  ```
+  Exception: if a recorded rejection adds *no reusable signal* — no
+  `signals.json` prune, no JOURNAL lesson, a pure duplicate of an existing
+  dead end — **close** the PR instead of merging. Don't spend a `main`
+  commit on an empty record.
+- **Touches `lib/`, `native/`, or `hook/`** → it changes runtime behavior
+  (an accepted win, or a rejection that still ships code like a kept
+  measurement hook). **Leave it open for human review.** Do not auto-merge
+  runtime code, even when CI is green and the verdict is "rejected."
+
+## One experiment in flight at a time
+
+Every experiment PR rewrites the same three shared files —
+`experiments/README.md`, `experiments/signals.json`, and the generated
+`docs/experiments/history.json` — and CI's `check_generated_data.dart` fails
+any PR whose `history.json` predates a merge. So **concurrent experiment PRs
+stale each other into CONFLICTING and pile up**, and parallel runners that
+each grab "the next number" collide on it (exp 168 was claimed by three PRs
+at once). Therefore:
+
+- **Reserve the experiment number atomically.** Don't trust "highest README
+  row + 1" while another run may be mid-flight — check open PRs and branches
+  too (`gh pr list --state open`, `git branch -r`). Two experiments must
+  never share a number: the `signals.json` `experiments` map and the
+  README/history mapping are keyed by it, and a collision silently clobbers
+  one side.
+- **Don't open experiment N+1 while a prior experiment PR is unmerged**,
+  unless that prior one is a held-for-review code PR — in which case expect
+  to regenerate `history.json` on the later one. One in flight keeps the
+  derived files conflict-free and the auto-merge path unblocked.
+
+## Resolving a stale derived-file conflict
+
+If a PR did fall behind `main`, the conflict is mechanical — only
+generated/narrative files collide:
+
+```bash
+git merge origin/main
+dart run benchmark/generate_history.dart      # rebuilds docs/experiments/history.json
+dart run benchmark/generate_devices.dart      # rebuilds docs/benchmarks/devices.json
+# hand-reconcile experiments/signals.json: keep BOTH sides' entries
+dart run benchmark/check_generated_data.dart  # must print "up to date"
+dart run benchmark/check_experiment_signals.dart
+git add -A && git commit --no-edit
+```
+
+`experiments/README.md` usually auto-merges (rows append). `signals.json`
+needs care: two experiments editing the same `currentRead` /
+`notesForExperimenters` narrative is a real weave, and two experiments
+claiming the same `experiments.<N>` key is a number collision — fix the
+numbering, never overwrite a prior experiment's entry.
+
 ## Post-merge
 
 After the experiment branch merges to main, the Update Docs Data workflow
