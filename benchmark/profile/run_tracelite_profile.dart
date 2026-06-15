@@ -19,6 +19,15 @@ import 'package:path/path.dart' as p;
 
 import '../tracelite_source.dart';
 
+const _requiredProfileInsightIds = <String>{
+  'workload_dispatch_floors',
+  'workload_work_bound',
+  'workload_tail_spread',
+  'workload_rss_signal',
+  'workload_allocation_signal',
+  'workload_wal_signal',
+};
+
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (options.showHelp) {
@@ -57,6 +66,7 @@ Future<void> main(List<String> args) async {
     await _runStep(step);
   }
 
+  _validateWorkloadInsights(paths.insightsJson);
   await _writeManifest(options, paths, traceliteSource: traceliteSource);
 
   print('');
@@ -343,6 +353,55 @@ Future<void> _runStep(_Step step) async {
     stderr.writeln('step failed: ${step.name} (exit ${result.exitCode})');
     exit(result.exitCode);
   }
+  print('');
+}
+
+void _validateWorkloadInsights(String insightsJsonPath) {
+  print('== validate workload-summary insights');
+  print(insightsJsonPath);
+
+  final file = File(insightsJsonPath);
+  if (!file.existsSync()) {
+    stderr.writeln('missing tracelite insights JSON: $insightsJsonPath');
+    exit(65);
+  }
+
+  late final Map<String, Object?> artifact;
+  try {
+    artifact = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+  } on Object catch (error) {
+    stderr.writeln('invalid tracelite insights JSON: $error');
+    exit(65);
+  }
+
+  final ids = <String>{};
+  final sources = artifact['sources'];
+  if (sources is List) {
+    for (final source in sources) {
+      if (source is! Map) continue;
+      if (source['artifact_schema'] != 'tracelite.workload_summary.v1') {
+        continue;
+      }
+      final insights = source['insights'];
+      if (insights is! List) continue;
+      for (final insight in insights) {
+        if (insight is Map && insight['id'] is String) {
+          ids.add(insight['id'] as String);
+        }
+      }
+    }
+  }
+
+  final missing = _requiredProfileInsightIds.difference(ids).toList()..sort();
+  if (missing.isNotEmpty) {
+    stderr.writeln(
+      'tracelite workload-summary insights are incomplete; missing '
+      '${missing.join(', ')} in $insightsJsonPath',
+    );
+    exit(65);
+  }
+
+  print('validated workload-summary insights: ${ids.length} ids');
   print('');
 }
 
