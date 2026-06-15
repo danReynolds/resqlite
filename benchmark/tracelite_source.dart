@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 const pinnedTraceliteRepository = 'https://github.com/danReynolds/tracelite';
-const pinnedTraceliteRevision = 'a2bf3648836fcf680d0aceccb18c2b31a2109586';
+const pinnedTraceliteRevision = '11159638962f5176678f02551a78180f5b9d3bba';
 const pinnedTraceliteTag = '';
 
 final class TraceliteSourcePolicy {
