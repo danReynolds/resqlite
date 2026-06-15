@@ -125,48 +125,20 @@ final class Writer {
   /// Releasing early lets a subsequent write or transaction overlap its
   /// send with this write's worker-side execution and reply scheduling.
   ///
-  /// Non-async so the common no-transaction-in-flight case hits
-  /// [Mutex.tryLock] and skips the microtask hop the implicit Future of
-  /// an `async` function would add. When a transaction holds the lock,
-  /// defer to [_executeAwaitingLock] to park on `_mutex.lock()`.
+  /// Non-async so the common no-transaction-in-flight case acquires the
+  /// lock synchronously via [Mutex.tryLock] and returns the reply future
+  /// directly — skipping the microtask hop the implicit Future of an
+  /// `async` function would add. Only when a transaction holds the lock do
+  /// we park on `_mutex.lock()`. Both paths funnel through [_sendUnderLock].
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    if (!_mutex.tryLock()) {
-      return _executeAwaitingLock(sql, parameters, traceCorrelationId);
-    }
-    final Future<ExecuteResponse> reply;
-    try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
-      reply = executeInTransaction(sql, parameters, traceCorrelationId);
-    } catch (e, st) {
-      _mutex.unlock();
-      return Future.error(e, st);
-    }
-    _mutex.unlock();
-    return reply;
-  }
-
-  Future<ExecuteResponse> _executeAwaitingLock(
-    String sql,
-    List<Object?> parameters,
-    int? traceCorrelationId,
-  ) async {
-    await _mutex.lock();
-    final Future<ExecuteResponse> reply;
-    try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
-      reply = executeInTransaction(sql, parameters, traceCorrelationId);
-    } finally {
-      _mutex.unlock();
-    }
-    return reply;
+    Future<ExecuteResponse> send() =>
+        executeInTransaction(sql, parameters, traceCorrelationId);
+    if (_mutex.tryLock()) return _sendUnderLock(send);
+    return _mutex.lock().then((_) => _sendUnderLock(send));
   }
 
   /// Batch variant of [execute]. Parameter validation throws to the
@@ -177,51 +149,34 @@ final class Writer {
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) {
-    if (!_mutex.tryLock()) {
-      return _executeBatchAwaitingLock(
-        sql,
-        paramSets,
-        traceCorrelationId: traceCorrelationId,
-      );
-    }
-    final Future<BatchResponse?> reply;
-    try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
-      reply = executeBatchInTransaction(
-        sql,
-        paramSets,
-        traceCorrelationId: traceCorrelationId,
-      );
-    } catch (e, st) {
-      _mutex.unlock();
-      return Future.error(e, st);
-    }
-    _mutex.unlock();
-    return reply;
+    Future<BatchResponse?> send() => executeBatchInTransaction(
+      sql,
+      paramSets,
+      traceCorrelationId: traceCorrelationId,
+    );
+    if (_mutex.tryLock()) return _sendUnderLock(send);
+    return _mutex.lock().then((_) => _sendUnderLock(send));
   }
 
-  Future<BatchResponse?> _executeBatchAwaitingLock(
-    String sql,
-    List<List<Object?>> paramSets, {
-    int? traceCorrelationId,
-  }) async {
-    await _mutex.lock();
-    final Future<BatchResponse?> reply;
+  /// Sends with the writer lock held, releasing it the moment the request
+  /// is on the wire — the worker port FIFO, not the reply round-trip,
+  /// provides ordering (see [executeInTransaction]). `finally` runs after
+  /// `send()` is evaluated, so the unlock still lands at send time, in one
+  /// place for both the fast and parked paths. A synchronous failure
+  /// (closed connection, bind error) is surfaced as a rejected future so
+  /// the public `execute`/`executeBatch` contract never throws
+  /// synchronously. Precondition: the caller holds `_mutex`.
+  Future<T> _sendUnderLock<T>(Future<T> Function() send) {
     try {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = executeBatchInTransaction(
-        sql,
-        paramSets,
-        traceCorrelationId: traceCorrelationId,
-      );
+      return send();
+    } catch (e, st) {
+      return Future.error(e, st);
     } finally {
       _mutex.unlock();
     }
-    return reply;
   }
 
   /// Sends a write while the writer lock is already held.
