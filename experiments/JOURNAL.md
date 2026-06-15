@@ -189,6 +189,32 @@ slots, writer locks, or native buffers. Prefer giving the admission owner a
 concrete handle to the resource over layering a second queue around a future;
 otherwise the check is only advisory.*
 
+### Mirroring a rejected experiment on the symmetric path does not reopen its rejection
+
+[Exp 151](151-sync-writer-response.md) rejected the response-side
+request-resolution tweak: switching writer reply futures to
+`Completer<T>.sync()`. [Exp 170](170-uncontended-mutex-fastpath.md)
+tried the symmetric request-side variant: `Mutex.tryLock()` plus a
+non-`async` `Writer.execute` to drop the uncontended `await
+_mutex.lock()` microtask hop and the wrapping async function's
+implicit reply await. Both attempts pointed at the same exp 147
+residual writer/request bucket, used the same mental model
+("scheduling overhead", not "execution work"), and produced the same
+verdict (primary lane within ±2 %, wrong direction).
+
+A scheduling-shape rejection generalises across the request and
+response sides. The candidate that follows it should change the
+mechanism, not the side. Exp 159 already proved this: it cleared
+the same residual by restructuring (persistent reply port + cached
+SendPort + send-gated locking) rather than micro-tweaking the
+existing structure on the opposite side.
+
+*Reapplies whenever a recently-rejected scheduling change has an
+obvious mirror on the other end of the same round-trip. The mirror
+is not "a different experiment" — it is the same experiment in a
+different file. Look for a structural change instead, or pick a
+different direction.*
+
 ### Phase-ordered A/B gates confound code deltas with time-correlated drift
 
 The Tracelite experiment wrapper collects all baseline runs, then all
