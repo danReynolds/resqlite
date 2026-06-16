@@ -162,8 +162,9 @@ Map<String, Object?> buildHistoryData({
 
   print('Parsed ${experiments.length} experiments.');
 
-  _attachBenchmarkRunMappings(experiments, runs);
+  final benchmarkRunOptOuts = _attachBenchmarkRunMappings(experiments, runs);
   _assertAcceptedExperimentsLinkToCandidates(experiments, runs);
+  _assertNewExperimentsLinkOrDeclareRun(experiments, benchmarkRunOptOuts);
 
   // 3. Resolve the curated metric registry used by the experiments page.
   final catalog = resolveCuratedMetrics(allKeys);
@@ -256,7 +257,12 @@ Map<String, Object?> _sqliteDiagnosticsJson(
   };
 }
 
-void _attachBenchmarkRunMappings(
+/// Maps each experiment to a benchmark run and returns the set of
+/// experiment ids (lowercased) that explicitly opted out of release-run
+/// mapping via a `**Benchmark Run:**` header (`none`/`n/a`/`tracelite`/...).
+/// The opt-out set is reused by [_assertNewExperimentsLinkOrDeclareRun] to
+/// tell a deliberate "no release run" from a forgotten result file.
+Set<String> _attachBenchmarkRunMappings(
   List<Map<String, Object?>> experiments,
   List<Map<String, Object?>> runs,
 ) {
@@ -389,6 +395,8 @@ void _attachBenchmarkRunMappings(
       claimedRunIndices.add(runIdx);
     }
   }
+
+  return skipRunMappingIds;
 }
 
 /// Catch the case where an Accepted experiment's chart slot points at
@@ -434,6 +442,87 @@ void _assertAcceptedExperimentsLinkToCandidates(
     '${issues.join('\n')}\n'
     'This is usually the experiment->run linker picking the wrong file. '
     'Inspect `_attachBenchmarkRunMappings` in benchmark/generate_history.dart.',
+  );
+  exit(1);
+}
+
+/// The first experiment number for which a chartable experiment must either
+/// link a benchmark run or explicitly declare that it has none. Experiments
+/// below the cutoff predate the per-experiment-result-file convention (or the
+/// `**Benchmark Run:**` opt-out header) and are grandfathered so the guard
+/// targets only new work. Bump this only alongside a backfill pass that
+/// annotates the older silently-unmapped experiments.
+const int _benchmarkRunDeclarationCutoff = 178;
+
+/// Catch the silent chart-invisibility failure the resqlite-experiment skill
+/// warns about: a chartable experiment whose linker found *no* benchmark run
+/// AND which never declared that absence. That happens when a runner forgets
+/// to commit the `benchmark/results/<ts>-expNNN.md` file (or gives it a date
+/// that does not match the doc's `**Date:**`). The experiment then quietly
+/// drops off the chart with no error.
+///
+/// The repo already has the intended opt-out signal — a `**Benchmark Run:**`
+/// header reading `none` / `n/a` / `tracelite` / ... (see
+/// [_skipsReleaseBenchmarkRunMapping]) — for experiments measured with a
+/// focused harness or Tracelite A/B rather than a release run. This guard
+/// makes that declaration *mandatory* for a `null` run so a forgotten result
+/// file is no longer indistinguishable from a deliberate "no release run".
+///
+/// Scoped to accepted/in-review experiments (the statuses the chart plots) at
+/// or above [_benchmarkRunDeclarationCutoff]; rejected experiments commonly
+/// and legitimately carry no release run, and pre-cutoff experiments are
+/// grandfathered.
+///
+/// Pure detector used by [_assertNewExperimentsLinkOrDeclareRun]; returns one
+/// human-readable issue line per offending experiment (empty when clean), so
+/// the rule is unit-testable without the `exit(1)` side effect.
+List<String> findUndeclaredMissingRunExperiments(
+  List<Map<String, Object?>> experiments,
+  Set<String> benchmarkRunOptOuts, {
+  int cutoff = _benchmarkRunDeclarationCutoff,
+}) {
+  final issues = <String>[];
+  for (final exp in experiments) {
+    final status = exp['status'];
+    if (status != 'accepted' && status != 'in_review') continue;
+    if (exp['benchmarkRun'] != null) continue;
+
+    final id = exp['id'] as String;
+    final num = int.tryParse(id.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (num == null || num < cutoff) continue;
+
+    // Declared "no release run" via the **Benchmark Run:** header — fine.
+    if (benchmarkRunOptOuts.contains(id.toLowerCase())) continue;
+
+    issues.add(
+      '  exp $id (${exp['title']}, $status) has no linked benchmark run '
+      'and no **Benchmark Run:** declaration',
+    );
+  }
+  return issues;
+}
+
+void _assertNewExperimentsLinkOrDeclareRun(
+  List<Map<String, Object?>> experiments,
+  Set<String> benchmarkRunOptOuts,
+) {
+  final issues = findUndeclaredMissingRunExperiments(
+    experiments,
+    benchmarkRunOptOuts,
+  );
+  if (issues.isEmpty) return;
+  stderr.writeln(
+    'Chartable experiments are missing a benchmark run and a declaration of '
+    'its absence:\n'
+    '${issues.join('\n')}\n'
+    'Either commit a benchmark/results/<timestamp>-expNNN.md whose date '
+    "matches the experiment doc's **Date:**, or — if the experiment was "
+    'measured with a focused harness or Tracelite A/B and has no release '
+    'run — add a `**Benchmark Run:**` header to the experiment doc declaring '
+    'that (e.g. `**Benchmark Run:** none (Tracelite A/B; ...)`). Without one, '
+    'the experiment silently drops off the experiments chart. See '
+    '`_assertNewExperimentsLinkOrDeclareRun` in '
+    'benchmark/generate_history.dart.',
   );
   exit(1);
 }
