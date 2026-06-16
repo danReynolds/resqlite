@@ -52,13 +52,70 @@ Future<String> runSelectBytesBenchmark() async {
     }
   }
 
+  // Large-result lane: forces a >256 KB selectBytes payload so exp 174's
+  // native-view transfer path (which skips the sacrifice + reader respawn
+  // it formerly took above the 256 KB threshold) is exercised on a public
+  // release lane. The standard sizes above don't cover this band cleanly:
+  // the 1000-row lane is < 256 KB (exp 174 calls this out as neutral),
+  // and the 10000-row lane is so wide that SQLite stepping + JSON-gen
+  // dominates per-query wall and hides the transfer-path delta. Mirror
+  // exp 174's focused harness shape (2000 long rows ≈ 650-800 KB result)
+  // so future regressions to the bytes-transfer path land on the public
+  // dashboard rather than only `benchmark/experiments/large_bytes_transfer.dart`.
+  {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'bench_bytes_large_',
+    );
+    try {
+      final timings = await _benchmarkAtSize(
+        tempDir.path,
+        _largeRowCount,
+        rowBuilder: _largeRow,
+      );
+      printComparisonTable(
+        '=== Select Bytes: $_largeRowCount long rows (≈700 KB result) ===',
+        timings,
+      );
+      markdown.write(
+        markdownTable(
+          '$_largeRowCount long rows (≈700 KB result)',
+          timings,
+        ),
+      );
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  }
+
   return markdown.toString();
 }
 
+// Padding body for the large-result lane. Sized so each JSON-encoded row
+// reaches roughly 400 B (~320 B description + the rest of the standard
+// row), so 2000 rows produces a result comfortably above the 256 KB
+// sacrifice threshold.
+const _largeRowDescription =
+    'long-description payload — this row carries a wider description '
+    'body so the selectBytes result for the lane crosses the 256 KB '
+    'sacrifice threshold and exercises experiment 174 native-view '
+    'transfer path on a public benchmark lane rather than only the '
+    'focused harness. padding padding padding padding padding padding';
+
+const _largeRowCount = 2000;
+
+List<Object?> _largeRow(int i) => [
+      'Item $i',
+      '$_largeRowDescription #$i',
+      i * 1.5,
+      'category_${i % 10}',
+      '2026-04-0${(i % 9) + 1}T12:00:00Z',
+    ];
+
 Future<List<BenchmarkTiming>> _benchmarkAtSize(
   String dir,
-  int rowCount,
-) async {
+  int rowCount, {
+  List<Object?> Function(int)? rowBuilder,
+}) async {
   final timings = <BenchmarkTiming>[];
 
   // --- Peer path: select() + utf8.encode(jsonEncode(...)) -------------
@@ -68,7 +125,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   );
   try {
     for (final peer in peers.all) {
-      await seedPeer(peer, rowCount);
+      await seedPeer(peer, rowCount, rowBuilder: rowBuilder);
     }
 
     for (final peer in peers.all) {
@@ -108,7 +165,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   // cleanup above.
   final resqliteDb = await resqlite.Database.open('$dir/resqlite_bytes.db');
   try {
-    await seedResqlite(resqliteDb, rowCount);
+    await seedResqlite(resqliteDb, rowCount, rowBuilder: rowBuilder);
     final t = BenchmarkTiming('resqlite selectBytes()');
     for (var i = 0; i < defaultWarmup; i++) {
       await resqliteDb.selectBytes(standardSelectSql);
