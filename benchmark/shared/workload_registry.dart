@@ -60,6 +60,11 @@ const curatedMetricDefinitions = [
     chartId: 'chartReads',
   ),
   CuratedMetricDefinition(
+    pattern: 'Large payload (~650KB) / resqlite selectBytes()',
+    displayName: 'selectBytes() large bytes',
+    chartId: 'chartReads',
+  ),
+  CuratedMetricDefinition(
     pattern: 'Wide (20 cols',
     displayName: 'schema wide 20 cols',
     chartId: 'chartReads',

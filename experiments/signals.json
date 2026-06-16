@@ -169,7 +169,7 @@
       "id": "result-transfer-shape",
       "status": "watch",
       "subsystems": ["results", "isolate-transfer", "api-shape"],
-      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy. Exp 167 rechecked closed exp 141's direct ResultSet.forEach override on a real SQLite-backed consumer lane after exp 158 and rejected it: a small first-pair win reversed on the longer confirmation pair, so no runtime code was kept. Exp 174 found a transport asymmetry: the reader 'sacrifice' path (Isolate.exit + reader respawn) is a real win for the rows path because it transfers already-built Dart objects with no re-copy, but it was applied by result size to selectBytes too, where the native JSON must be Uint8List.fromList-copied before Isolate.exit can transfer it — so sacrifice saved zero copies on bytes and only added a respawn, while the non-sacrifice bytes path copied twice. selectBytes now sends a Uint8List view over the connection's persistent json_buf and never sacrifices: -44% (~1.8x) on large (>256KB) byte reads by eliminating the respawn, -4% on small, at a bounded ~+15MB RSS high-water (readers no longer respawned). Rows select() keeps sacrifice — there the zero-copy object transfer is real.",
+      "currentRead": "The current ResultSet/Row shape is close to optimal for the shipped select() contract. Alternatives often move work rather than remove it, especially once main-isolate consumption is measured. Exp 158 found a narrow exception inside the existing shape: adding a schema-name identity fast path for schemas up to 32 columns plus private HashMap fallback for RowSchema.indexOf roughly halved focused row facade lookup and select_maps main-isolate full-consumption medians without changing transfer or public API, while point-query schema construction stayed neutral/noisy. Exp 167 rechecked closed exp 141's direct ResultSet.forEach override on a real SQLite-backed consumer lane after exp 158 and rejected it: a small first-pair win reversed on the longer confirmation pair, so no runtime code was kept. Exp 174 found a transport asymmetry: the reader 'sacrifice' path (Isolate.exit + reader respawn) is a real win for the rows path because it transfers already-built Dart objects with no re-copy, but it was applied by result size to selectBytes too, where the native JSON must be Uint8List.fromList-copied before Isolate.exit can transfer it — so sacrifice saved zero copies on bytes and only added a respawn, while the non-sacrifice bytes path copied twice. selectBytes now sends a Uint8List view over the connection's persistent json_buf and never sacrifices: -44% (~1.8x) on large (>256KB) byte reads by eliminating the respawn, -4% on small, at a bounded ~+15MB RSS high-water (readers no longer respawned). Exp 175 adds a named release-suite guard for that large-bytes path: `Large payload (~650KB) / resqlite selectBytes()` measured 0.323 ms wall / 0.000 ms main and is curated as `selectBytes() large bytes`, so the history no longer relies on the sub-256KB 1K-row metric to watch exp 174. Rows select() keeps sacrifice — there the zero-copy object transfer is real.",
       "keyPriors": ["008", "082", "089", "158", "167", "174"],
       "archive": ["063", "066", "081"],
       "interestingIf": [
@@ -190,7 +190,7 @@
         }
       ],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps`, `resultset_foreach_consumer.dart`, or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes. Do not retry the exp 141 ResultSet.forEach override unless a future Dart runtime or workload produces a stable target win with neutral controls."
+      "notesForExperimenters": "Be explicit about API impact. Some measured wins depend on a new public API, which is outside the lean-API goal. Use `select_maps`, `resultset_foreach_consumer.dart`, or a similarly full-consumer benchmark before accepting result-shape changes; setup-only transfer wins are not enough. Exp 158 is a narrow private data-structure win inside RowSchema, not evidence to revive larger ResultSet API changes. Do not retry the exp 141 ResultSet.forEach override unless a future Dart runtime or workload produces a stable target win with neutral controls. For selectBytes transfer-policy work, include the exp 175 `selectBytes() large bytes` metric so large native-byte payloads stay visible."
     },
     {
       "id": "measurement-system",
@@ -812,10 +812,24 @@
         "Large (>256KB) selectBytes is -44% (~1.8x) by eliminating the per-query reader respawn; small (<256KB) is -4% (two copies -> one); the cost is a bounded ~+15MB RSS high-water because readers are no longer respawned (json_buf reused, not reallocated)"
       ],
       "nextSignals": [
-        "promote a large-byte (>256KB) selectBytes lane into the release suite (exp 161 pattern) so the win is visible and guarded; the existing 'Select -> JSON Bytes / 1000 rows' lane is <256KB and shows this as neutral",
+        "exp 175 promoted a large-byte (>256KB) selectBytes lane into the release suite and curated metric list; use `selectBytes() large bytes` as the guard for future bytes-transfer policy changes",
         "if a memory-sensitive workload shows problematic json_buf retention, reopen with a high memory-reclaim sacrifice threshold for bytes (e.g. >8MB) or a C-side json_buf shrink, preserving the view-send win for the realistic large range",
         "do not extend view-send to the rows path: there the payload is Dart objects and sacrifice's zero-copy object transfer is the real win (exp 008b/019)",
         "do not pursue true zero-copy bytes transfer (fresh malloc per query + send address + NativeFinalizer): a size sweep 256KB->64MB (benchmark/experiments/transfer_mechanism_ab.dart) showed it 14-24% SLOWER at every size, no crossover. The decisive factor is buffer reuse, not the copy: the current path reuses a warm json_buf (no per-query allocation), while zero-copy must malloc a fresh buffer per query (mmap/munmap syscalls + cold-page faults that scale with size) and that exceeds the memcpy it saves. Reuse is incompatible with handing the buffer to main, and the buffer can't be safely recycled because callers can retain the returned Uint8List. The single copy is structurally the floor. Do not reopen without a fundamentally different mechanism (e.g. a recycled WARM native transfer-buffer pool with cross-isolate finalizer recycling — complex, GC-timing-dependent, unbounded under load)"
+      ]
+    },
+    "175": {
+      "directions": ["result-transfer-shape", "measurement-system"],
+      "outcomeClass": "in_review_measurement",
+      "changedBeliefs": [
+        "The release JSON-bytes suite now has an explicit large native-byte transfer row: `Large payload (~650KB) / resqlite selectBytes()` stays above the old 256KB sacrifice threshold and measured 0.323 ms wall / 0.000 ms main in the focused suite run",
+        "The curated history now tracks `selectBytes() large bytes`, so exp 174's native-view transfer path is visible without relying on the existing 1K-row JSON-bytes metric that mostly exercises small-result copy behavior",
+        "Keeping the new row resqlite-only avoids multiplying large JSON encode work across every peer while still guarding the runtime policy that only resqlite implements"
+      ],
+      "nextSignals": [
+        "use `selectBytes() large bytes` before changing selectBytes transfer policy again",
+        "if json_buf high-water memory becomes a problem, compare any memory-reclaim threshold against this row so reclaim work does not reintroduce the reader-respawn cost exp 174 removed",
+        "do not apply bytes-transfer conclusions to rows select(); rows keep sacrifice because Isolate.exit is a real object-graph handoff there"
       ]
     }
   }
