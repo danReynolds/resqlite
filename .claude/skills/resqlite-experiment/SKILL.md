@@ -57,6 +57,10 @@ They are local scratch, not a committed artifact:
 - **Do NOT commit:** the raw `*.json` outputs. They are gitignored
   (`benchmark/profile/results/*.json`) and a CI job
   (`guard-raw-profile-json` in `ci.yml`) will fail any PR that adds them.
+  - This is **only** about `benchmark/profile/results/*.json` (the 10–15 MB
+    profile dumps). The release-suite artifact — `benchmark/results/*.json`
+    (and its `.md`), ~100 KB — **is** tracked and committed; the guard does
+    not touch it. Don't confuse the two.
 - **Workflow:**
   ```bash
   # Run N times per side locally (raw JSONs stay untracked)
@@ -286,10 +290,15 @@ and `git push origin :exp-$N-claim`.
 **2. Don't duplicate the work.** A unique number doesn't help if two runs ship
 the same lane (exp 175: both independently picked exp 174's large-`selectBytes`
 follow-up). Before implementing anything from a writeup's Future Notes or
-`signals.json` `openCandidates`, scan open PRs **and** branches for one already
-targeting the same follow-up/direction; if one exists, **stop** — choose
-different work or build on it. Re-check right before you open the PR, to catch a
-run that started inside your window.
+`signals.json` `openCandidates`, check whether it's already in flight — and
+**trust `gh pr list --state open` as the signal, not raw branch-file diffs.**
+Diffing every remote branch against `origin/main` is noise: any branch older
+than the last commit to a file shows as "touching" it (a `row.dart` check
+surfaced ~55 stale/merged branches as false positives). If a branch matters it
+backs an open PR, so let `gh pr list` find it; only consider a bare branch if
+its tip is ahead of `origin/main` *and* it has an open PR. If your follow-up is
+already in flight, **stop** — choose different work or build on it. Re-check
+right before you open the PR, to catch a run that started inside your window.
 
 **3. One experiment in flight.** Don't open experiment N+1 while a prior
 experiment PR is unmerged, unless that prior is a held-for-review code PR — in
