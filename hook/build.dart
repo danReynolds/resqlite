@@ -30,8 +30,7 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 import 'package:path/path.dart' as p;
-
-import 'build_paths.dart';
+import 'package:resqlite/src/native/build_paths.dart';
 
 void main(List<String> args) async {
   await build(args, (input, output) async {

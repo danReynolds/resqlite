@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-import '../hook/build_paths.dart';
+import 'package:resqlite/src/native/build_paths.dart';
 
 void main() {
   test('output paths use native Windows drive syntax', () {
