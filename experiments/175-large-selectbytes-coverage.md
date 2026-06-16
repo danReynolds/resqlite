@@ -82,6 +82,27 @@ The new row's main-isolate median stays effectively zero, which matches the
 contract exp 174 was protecting: bytes are produced off-main and copied across
 the isolate boundary, not encoded on the main isolate.
 
+## Sensitivity — the lane provably responds to the transfer path
+
+A guard is only worth adding if it *moves* when the thing it guards changes
+(exp 148's lesson: callback counts dropped but measured elapsed did not). This
+lane's workload — `resqlite selectBytes()` on a 651 KB result (2,000 × 300 B) —
+is the exact shape exp 174's focused harness measured, where the view-send path
+beat the old `fromList` + sacrifice path by **−44 % to −47 %** (269 µs vs
+483 µs; `benchmark/experiments/large_bytes_transfer.dart`). A parallel attempt
+at this same coverage ran the A/B directly on a release lane of the same band
+and independently confirmed it: restoring the pre-174 path moved the row
+**+13 % median / +55 % p90** (the respawn cost concentrates in the tail) while
+adjacent standard lanes stayed neutral.
+
+So a regression to the bytes-transfer path lands on this row rather than passing
+silently — which is exactly what the existing lanes can't do: the **1K-row** lane
+is < 256 KB (below the old sacrifice threshold, so it never exercised the path —
+exp 174 calls it neutral), and the **10K-row** lane is wide enough that SQLite
+stepping + JSON-gen dominate per-query wall and bury the transfer-path delta.
+This row sits in the sub-millisecond, transfer-bound band where the delta is
+visible.
+
 ## Decision
 
 **Accept for review - measurement support.**
