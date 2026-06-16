@@ -80,7 +80,9 @@ the new counter or aggregate evidence, not a production code-path change.
 Before coding, write a short working note for yourself:
 
 - what prior experiments are adjacent
-- why this is not just a duplicate attempt
+- why this is not just a duplicate attempt — neither of a prior *rejected*
+  experiment nor of any open PR or branch **in flight right now** (two runs
+  shipping the same follow-up is how exp 175 collided)
 - what implementation candidate you are trying; if the run is measurement-only,
   why that candidate cannot be attempted in the same pass
 - what new evidence, benchmark, workload, implementation shape, or external
@@ -95,6 +97,31 @@ Before coding, write a short working note for yourself:
 
 This note does not need to be committed directly, but the final experiment
 writeup should make the reasoning clear.
+
+### Claim your slot before any work
+
+Once you've chosen the experiment — before writing code — claim it atomically so
+a concurrent run can't take the same number or ship the same follow-up. (Full
+rationale: the resqlite-experiment skill's "Preflight" section.)
+
+- **Number.** `N` = 1 + the highest experiment number across `origin/main`, open
+  PRs, and remote branches — read `origin/main`, not the local tree:
+  `git ls-tree -r --name-only origin/main -- experiments/`; `gh pr list
+  --state open`; `git branch -r | grep -oE 'exp-[0-9]+'`. Then claim it with a
+  tag push, which is rejected if the tag already exists, so the push itself is
+  the atomic test-and-set:
+
+  ```bash
+  git tag exp-$N-claim && git push origin exp-$N-claim   # rejected -> bump $N, retry
+  ```
+
+  "Pick highest + 1" alone *races* — both runs pick the same `N`; the claim is
+  what makes it safe (exp 168/175). Delete the tag on merge/close:
+  `git push origin :exp-$N-claim`.
+- **No duplicate work.** Now, and again right before opening the PR, confirm no
+  open PR/branch is already doing your follow-up. If one is, stop — pick
+  different work or build on it. A unique number doesn't help if two runs ship
+  the same lane.
 
 ## Measurement
 
@@ -236,9 +263,10 @@ If any check fails, leave the row in In Review and add a short note in
 Every scheduled experiment run must:
 
 - **Work on a dedicated git worktree**, never on a checkout of `main`
-  directly. Create the worktree off current `origin/main` and use a
-  branch name of the form `exp-NNN-short-slug` (e.g.
-  `exp-115-dispatcher-park-counters`). If the runner already starts you
+  directly. Create the worktree off current `origin/main` **only after the
+  atomic claim above**, with branch `exp-NNN-short-slug` (e.g.
+  `exp-115-dispatcher-park-counters`) where `NNN` is the *claimed* number,
+  not a bare highest-row + 1. If the runner already starts you
   in a worktree on a stale or unrelated branch, create a fresh branch
   from `origin/main` before committing — do not pile a new experiment
   on top of an unrelated in-flight branch.
