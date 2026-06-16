@@ -295,8 +295,11 @@ Every scheduled experiment run must:
   and review feedback have also been checked.
 - **Wait for CI on the PR and address actionable failures** before declaring a
   PR ready to merge. A red PR is not merge-ready.
-- **Wait for automated review, not just CI, before merge readiness.** After
-  opening the PR, poll
+- **Wait for automated review, not just CI, before merge readiness** — for PRs
+  *held for human review* (runtime-code changes). A docs-only/tooling PR you put
+  on auto-merge may land before any review arrives; that race is benign — those
+  are the auto-merge class anyway — so don't block on the poll for them. For held
+  PRs, after opening the PR, poll
   for review submissions for a few minutes, then read inline review
   threads with thread-aware review data. `gh pr view --json` does not
   expose `reviewThreads`; use the GraphQL API directly:

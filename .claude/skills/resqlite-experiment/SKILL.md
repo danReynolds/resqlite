@@ -240,6 +240,9 @@ git diff --name-only origin/main...HEAD
   ```bash
   gh pr merge <N> --squash --auto
   ```
+  Confirm it took with `gh pr view <N> --json state` — the GraphQL
+  `autoMergeRequest` field lags and can read `null` even when auto-merge is
+  armed or the PR has already merged, so `state` is the reliable check.
   Exception: if a recorded rejection adds *no reusable signal* — no
   `signals.json` prune, no JOURNAL lesson, a pure duplicate of an existing
   dead end — **close** the PR instead of merging. Don't spend a `main`
