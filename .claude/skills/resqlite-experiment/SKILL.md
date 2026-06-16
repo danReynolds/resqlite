@@ -10,6 +10,11 @@ performance change is documented as an experiment with a benchmark result file,
 and those files feed the live charts on the GitHub Pages site
 (`docs/experiments/index.html`). Skipping any piece breaks the chart.
 
+> **First, every run:** do the [Preflight](#preflight-claim-your-slot-before-doing-any-work)
+> — sync from `main`, claim your experiment number with an atomic tag push, and
+> confirm no open PR/branch is already doing your follow-up. Skipping it is how
+> exp 168 and exp 175 ended up claimed by multiple runs at once.
+
 ## The contract
 
 **Every experiment commit must include all three of:**
@@ -231,26 +236,68 @@ git diff --name-only origin/main...HEAD
   measurement hook). **Leave it open for human review.** Do not auto-merge
   runtime code, even when CI is green and the verdict is "rejected."
 
-## One experiment in flight at a time
+## Preflight: claim your slot before doing any work
+
+Do this **first, every run** — before picking a follow-up, before writing any
+code. Start from fresh `origin/main`, but get there **non-destructively**: never
+`git reset --hard` / `git checkout -f` your checkout to "catch up" — that
+silently discards any uncommitted work, and this skill is followed by humans,
+not just the runner. Just fetch, then do the whole experiment in an isolated
+worktree off `origin/main` (steps below), leaving the current tree untouched:
+
+```bash
+git fetch origin
+```
 
 Every experiment PR rewrites the same three shared files —
 `experiments/README.md`, `experiments/signals.json`, and the generated
 `docs/experiments/history.json` — and CI's `check_generated_data.dart` fails
-any PR whose `history.json` predates a merge. So **concurrent experiment PRs
-stale each other into CONFLICTING and pile up**, and parallel runners that
-each grab "the next number" collide on it (exp 168 was claimed by three PRs
-at once). Therefore:
+any PR whose `history.json` predates a merge. So concurrent runs that grab the
+same number, or do the same work, collide and stale each other (exp 168 was
+claimed by three PRs; exp 175 by two runs shipping the *same* follow-up).
 
-- **Reserve the experiment number atomically.** Don't trust "highest README
-  row + 1" while another run may be mid-flight — check open PRs and branches
-  too (`gh pr list --state open`, `git branch -r`). Two experiments must
-  never share a number: the `signals.json` `experiments` map and the
-  README/history mapping are keyed by it, and a collision silently clobbers
-  one side.
-- **Don't open experiment N+1 while a prior experiment PR is unmerged**,
-  unless that prior one is a held-for-review code PR — in which case expect
-  to regenerate `history.json` on the later one. One in flight keeps the
-  derived files conflict-free and the auto-merge path unblocked.
+**1. Claim the number atomically.** A plain "check open PRs, then pick the next
+free" *races*: two runs check, both see N free, both take N. That is exactly
+how 168 and 175 collided. Use a remote tag as the lock — pushing a tag that
+already exists is rejected regardless of commit, so the push itself is the
+atomic test-and-set:
+
+```bash
+# N = 1 + highest experiment number across origin/main, open PRs, and branches
+# (read origin/main, not the local tree, so a stale/dirty checkout can't fool you):
+#   git ls-tree -r --name-only origin/main -- experiments/ | grep -oE '/[0-9]+'
+#   gh pr list --state open ; git branch -r | grep -oE 'exp-[0-9]+'
+git tag exp-$N-claim && git push origin exp-$N-claim
+#   rejected ("already exists") -> another run claimed $N first; bump $N, retry.
+#   success                     -> $N is yours; name your branch exp-$N-<slug>.
+```
+
+Then build the experiment in a fresh worktree branched off `origin/main` — never
+in your main checkout, so nothing local is ever at risk:
+
+```bash
+git worktree add -b exp-$N-<slug> ../resqlite-exp-$N origin/main
+cd ../resqlite-exp-$N
+```
+
+When it merges or closes, clean up: `git worktree remove ../resqlite-exp-$N`
+and `git push origin :exp-$N-claim`.
+
+**2. Don't duplicate the work.** A unique number doesn't help if two runs ship
+the same lane (exp 175: both independently picked exp 174's large-`selectBytes`
+follow-up). Before implementing anything from a writeup's Future Notes or
+`signals.json` `openCandidates`, scan open PRs **and** branches for one already
+targeting the same follow-up/direction; if one exists, **stop** — choose
+different work or build on it. Re-check right before you open the PR, to catch a
+run that started inside your window.
+
+**3. One experiment in flight.** Don't open experiment N+1 while a prior
+experiment PR is unmerged, unless that prior is a held-for-review code PR — in
+which case expect to regenerate `history.json` on the later one.
+
+> The bulletproof fix lives at the scheduler: run experiments **serially** (one
+> at a time) so two never overlap. The claim-tag above is the in-agent backstop
+> for when they do.
 
 ## Resolving a stale derived-file conflict
 
