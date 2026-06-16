@@ -119,9 +119,12 @@ rationale: the resqlite-experiment skill's "Preflight" section.)
   what makes it safe (exp 168/175). Delete the tag on merge/close:
   `git push origin :exp-$N-claim`.
 - **No duplicate work.** Now, and again right before opening the PR, confirm no
-  open PR/branch is already doing your follow-up. If one is, stop — pick
-  different work or build on it. A unique number doesn't help if two runs ship
-  the same lane.
+  in-flight work is already doing your follow-up — **use `gh pr list --state
+  open`**, not a raw branch-by-file diff: stale/merged branches all "touch" any
+  recently-edited file (e.g. ~55 branches show as touching `row.dart` because
+  exp 158 last edited it), so that heuristic is fog. A branch that matters backs
+  an open PR. If your follow-up is already in flight, stop — pick different work
+  or build on it. A unique number doesn't help if two runs ship the same lane.
 
 ## Measurement
 
