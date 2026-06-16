@@ -29,6 +29,16 @@ final class RowSchema {
     }
     return _indexByName[name] ?? -1;
   }
+
+  /// Whether [name] is one of this schema's columns.
+  ///
+  /// Shares the [indexOf] identity fast path: when the caller supplies one of
+  /// the schema's own column-name objects (the common case, e.g. a literal
+  /// column name or a key drawn from [names]) on a schema of at most
+  /// [_identityLookupMaxColumns] columns, the membership test is a short
+  /// pointer-identity scan that avoids hashing the key. Equal-but-non-identical
+  /// keys and wider schemas fall back to the [HashMap] index.
+  bool containsName(String name) => indexOf(name) >= 0;
 }
 
 /// A query result set backed by a flat values list.
@@ -104,7 +114,7 @@ final class Row with MapMixin<String, Object?> {
 
   @override
   bool containsKey(Object? key) =>
-      key is String && _schema._indexByName.containsKey(key);
+      key is String && _schema.containsName(key);
 
   @override
   bool containsValue(Object? value) {
