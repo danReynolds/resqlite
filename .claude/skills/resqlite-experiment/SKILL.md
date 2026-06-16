@@ -61,6 +61,10 @@ They are local scratch, not a committed artifact:
     profile dumps). The release-suite artifact — `benchmark/results/*.json`
     (and its `.md`), ~100 KB — **is** tracked and committed; the guard does
     not touch it. Don't confuse the two.
+  - Corollary: a small JSON **fixture / test-data** file you intend to commit
+    must NOT live in `benchmark/profile/results/` either — it's gitignored
+    *and* CI-blocked there. Put committed fixtures elsewhere, e.g.
+    `benchmark/<name>_fixtures/` (exp 177 had to relocate one mid-run).
 - **Workflow:**
   ```bash
   # Run N times per side locally (raw JSONs stay untracked)
@@ -112,6 +116,11 @@ Run this mental (or literal) checklist:
 - [ ] Does the experiment doc have the headings the parser expects?
       (`Problem`, `Hypothesis`, `Approach` or `What We Built`, `Results`,
       `Decision` or `Why Accepted` / `Why Rejected`)
+- [ ] Did `finalize_experiment.dart` (or `generate_history.dart`) run **last**?
+      If you touched any experiment / doc / `signals.json` / result / fixture
+      file *after* finalizing, re-run it — otherwise the committed
+      `history.json` is stale and the freshness check fails (post-merge, if the
+      PR auto-merged before CI re-ran).
 
 The generator's section extraction tolerates a few heading variants; see
 `_extractSection` in `generate_history.dart` for the full list.
