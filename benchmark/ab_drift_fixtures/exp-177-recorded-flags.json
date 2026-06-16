@@ -1,0 +1,38 @@
+{
+  "_comment": "Recorded phase-ordered A/B flags from prior experiment aggregates, reconstructed to the medians and per-side CV ranges those aggregates documented. pass1 = standard order (the pass that flagged); pass2 = order-flipped confirmation. Used by exp 177 to show benchmark/ab_drift_check.dart reaches the same verdict the runner reached by hand. Per-run values are in ms.",
+  "scenarios": [
+    {
+      "label": "exp159 high-cardinality-fanout",
+      "pass1": {
+        "baseline": [100.0, 99.0, 101.0, 100.5, 99.5],
+        "candidate": [119.0, 165.0, 88.0, 140.0, 95.0]
+      },
+      "pass2": {
+        "baseline": [100.0, 99.5, 100.5, 100.0, 100.0],
+        "candidate": [101.0, 102.0, 100.0, 101.5, 100.5]
+      }
+    },
+    {
+      "label": "exp159 many-streams-writer-throughput",
+      "pass1": {
+        "baseline": [100.0, 101.0, 99.0, 100.0, 100.0],
+        "candidate": [112.0, 150.0, 92.0, 130.0, 96.0]
+      },
+      "pass2": {
+        "baseline": [100.0, 100.0, 100.0, 100.0, 100.0],
+        "candidate": [100.0, 99.0, 101.0, 99.5, 100.5]
+      }
+    },
+    {
+      "label": "exp167 forEach lookup",
+      "pass1": {
+        "baseline": [30.525, 30.6, 30.4, 30.55, 30.5],
+        "candidate": [28.383, 28.5, 28.3, 28.4, 28.35]
+      },
+      "pass2": {
+        "baseline": [28.563, 28.6, 28.5, 28.55, 28.58],
+        "candidate": [30.942, 31.0, 30.9, 30.95, 30.93]
+      }
+    }
+  ]
+}

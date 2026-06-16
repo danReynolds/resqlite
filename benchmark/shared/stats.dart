@@ -164,6 +164,232 @@ double madBasedDetectableEffectPct(List<double> samples) {
   return AggregateStats(samples).madPct * 3.0;
 }
 
+/// Coefficient of variation (stddev / mean) as a percentage.
+///
+/// This is the *within-side, within-pass* dispersion the JOURNAL's
+/// "Phase-ordered A/B gates confound code deltas with time-correlated
+/// drift" lesson tells runners to inspect: when a phase-ordered A/B flags
+/// a regression, the flagged phase's per-run CV is the first thing to
+/// check, because a drift-contaminated phase shows a much higher CV than
+/// the clean phase (exp 159 saw 0.20–0.46 on the contaminated phase vs
+/// 0.01–0.06 on the clean one). Uses the population stddev (divide by n)
+/// to match the CV figures recorded in prior `*-aggregate.md` files.
+///
+/// Returns 0 for fewer than two samples or a zero/empty mean (no
+/// meaningful dispersion to report).
+double cvPct(List<double> samples) {
+  if (samples.length < 2) return 0;
+  final mean = samples.reduce((a, b) => a + b) / samples.length;
+  if (mean == 0) return 0;
+  final variance =
+      samples
+          .map((v) => (v - mean) * (v - mean))
+          .reduce((a, b) => a + b) /
+      samples.length;
+  return (math.sqrt(variance) / mean.abs()) * 100;
+}
+
+/// How a phase-ordered A/B regression flag should be read once a second,
+/// order-flipped pass exists.
+enum DriftVerdict {
+  /// Both passes agree on a same-direction, materially-sized effect and
+  /// neither side is unusually noisy — the flag is a real code effect.
+  reproduced,
+
+  /// The flag did not survive the order flip: the effect changed sign
+  /// between passes, or it only appeared in a pass whose flagged side was
+  /// far noisier than its counterpart. This is the exp 159 signature —
+  /// machine drift that landed on one time block.
+  driftSuspected,
+
+  /// Not enough comparable data to classify (a pass is missing runs, or
+  /// every reading is below [DriftFlagThresholds.effectFloorPct]).
+  inconclusive,
+}
+
+/// Tunable thresholds for [classifyDriftFlag]. Defaults match the
+/// heuristics recorded across exp 144 / 159 / 167 / 171 / 173 aggregates.
+final class DriftFlagThresholds {
+  const DriftFlagThresholds({
+    this.cvAsymmetryRatio = 4.0,
+    this.cleanCvPct = 8.0,
+    this.effectFloorPct = 3.0,
+  });
+
+  /// A flagged side whose CV is at least this many times its counterpart's
+  /// CV (and above [cleanCvPct]) is treated as drift-contaminated. Exp 159
+  /// saw ~0.30 vs ~0.03 — a 10× gap; 4× is a conservative trigger.
+  final double cvAsymmetryRatio;
+
+  /// A flagged-side CV at or below this percent is "clean enough" that
+  /// asymmetry alone does not condemn the pass.
+  final double cleanCvPct;
+
+  /// Median deltas with magnitude below this percent are treated as no
+  /// effect, so a sign change between two sub-floor passes is not read as
+  /// a meaningful reversal.
+  final double effectFloorPct;
+}
+
+/// Per-pass A/B reading for one scenario: the baseline and candidate
+/// per-run values collected within a single collection pass.
+final class AbPass {
+  AbPass({required this.baseline, required this.candidate, this.label});
+
+  final List<double> baseline;
+  final List<double> candidate;
+  final String? label;
+
+  /// Candidate-vs-baseline median delta as a percent of the baseline
+  /// median. Positive = candidate slower (regression direction).
+  double get deltaPct {
+    final b = AggregateStats(baseline).median;
+    final c = AggregateStats(candidate).median;
+    if (b == 0) return 0;
+    return ((c - b) / b) * 100;
+  }
+
+  double get baselineCvPct => cvPct(baseline);
+  double get candidateCvPct => cvPct(candidate);
+
+  /// The CV of the side that carries the regression. When the candidate is
+  /// slower (positive delta), drift would inflate the candidate side; when
+  /// faster, the baseline side. This is the phase whose noise the JOURNAL
+  /// lesson says to inspect first.
+  double get flaggedSideCvPct =>
+      deltaPct >= 0 ? candidateCvPct : baselineCvPct;
+
+  double get cleanSideCvPct => deltaPct >= 0 ? baselineCvPct : candidateCvPct;
+}
+
+/// Result of classifying a flagged scenario across two order-flipped passes.
+final class DriftClassification {
+  const DriftClassification({
+    required this.verdict,
+    required this.reason,
+    required this.pass1DeltaPct,
+    required this.pass2DeltaPct,
+    required this.worstFlaggedCvPct,
+  });
+
+  final DriftVerdict verdict;
+  final String reason;
+  final double pass1DeltaPct;
+  final double pass2DeltaPct;
+
+  /// The larger of the two passes' flagged-side CVs — the headline noise
+  /// number to print next to the verdict.
+  final double worstFlaggedCvPct;
+}
+
+/// Mechanizes the JOURNAL's order-flipped drift check for one scenario.
+///
+/// [pass1] is the standard-order pass that produced the flag; [pass2] is
+/// the order-flipped confirmation pass (candidate collected first). The
+/// classifier reproduces, by rule, the manual reasoning runners have been
+/// applying by hand in every recent `*-aggregate.md`:
+///
+/// 1. If either pass's flagged side is far noisier than its clean side
+///    (CV asymmetry above [DriftFlagThresholds.cvAsymmetryRatio] and above
+///    [DriftFlagThresholds.cleanCvPct]), the effect is *drift-suspected* —
+///    the flagged phase caught a drift block (exp 159).
+/// 2. Else if the two passes disagree on sign (one materially positive,
+///    one materially negative), the flag did not survive the flip —
+///    *drift-suspected* (exp 167's reversed `forEach lookup`).
+/// 3. Else if both passes show a same-direction effect above the floor,
+///    the flag is *reproduced*.
+/// 4. Otherwise (both below floor, or missing data) it is *inconclusive* —
+///    typically meaning "neutral, no real effect".
+DriftClassification classifyDriftFlag(
+  AbPass pass1,
+  AbPass pass2, {
+  DriftFlagThresholds thresholds = const DriftFlagThresholds(),
+}) {
+  if (pass1.baseline.length < 2 ||
+      pass1.candidate.length < 2 ||
+      pass2.baseline.length < 2 ||
+      pass2.candidate.length < 2) {
+    return DriftClassification(
+      verdict: DriftVerdict.inconclusive,
+      reason: 'each side of each pass needs >= 2 runs to classify',
+      pass1DeltaPct: pass1.deltaPct,
+      pass2DeltaPct: pass2.deltaPct,
+      worstFlaggedCvPct: math.max(
+        pass1.flaggedSideCvPct,
+        pass2.flaggedSideCvPct,
+      ),
+    );
+  }
+
+  final worstFlaggedCv = math.max(
+    pass1.flaggedSideCvPct,
+    pass2.flaggedSideCvPct,
+  );
+
+  bool isContaminated(AbPass pass) {
+    final flagged = pass.flaggedSideCvPct;
+    final clean = pass.cleanSideCvPct;
+    if (flagged <= thresholds.cleanCvPct) return false;
+    if (clean == 0) return true;
+    return flagged / clean >= thresholds.cvAsymmetryRatio;
+  }
+
+  if (isContaminated(pass1) || isContaminated(pass2)) {
+    return DriftClassification(
+      verdict: DriftVerdict.driftSuspected,
+      reason:
+          'flagged-side CV asymmetry (worst flagged CV '
+          '${worstFlaggedCv.toStringAsFixed(1)}%) indicates a '
+          'drift-contaminated phase, not a code effect',
+      pass1DeltaPct: pass1.deltaPct,
+      pass2DeltaPct: pass2.deltaPct,
+      worstFlaggedCvPct: worstFlaggedCv,
+    );
+  }
+
+  final d1 = pass1.deltaPct;
+  final d2 = pass2.deltaPct;
+  final d1Material = d1.abs() >= thresholds.effectFloorPct;
+  final d2Material = d2.abs() >= thresholds.effectFloorPct;
+
+  if (d1Material && d2Material && (d1 > 0) != (d2 > 0)) {
+    return DriftClassification(
+      verdict: DriftVerdict.driftSuspected,
+      reason:
+          'effect reversed sign across the order flip '
+          '(${d1.toStringAsFixed(1)}% then ${d2.toStringAsFixed(1)}%); '
+          'flag did not survive',
+      pass1DeltaPct: d1,
+      pass2DeltaPct: d2,
+      worstFlaggedCvPct: worstFlaggedCv,
+    );
+  }
+
+  if (d1Material && d2Material) {
+    return DriftClassification(
+      verdict: DriftVerdict.reproduced,
+      reason:
+          'same-direction effect in both passes '
+          '(${d1.toStringAsFixed(1)}% then ${d2.toStringAsFixed(1)}%) '
+          'with comparable per-side CVs',
+      pass1DeltaPct: d1,
+      pass2DeltaPct: d2,
+      worstFlaggedCvPct: worstFlaggedCv,
+    );
+  }
+
+  return DriftClassification(
+    verdict: DriftVerdict.inconclusive,
+    reason:
+        'both passes below the ${thresholds.effectFloorPct.toStringAsFixed(0)}% '
+        'effect floor (${d1.toStringAsFixed(1)}% then '
+        '${d2.toStringAsFixed(1)}%) — read as neutral',
+    pass1DeltaPct: d1,
+    pass2DeltaPct: d2,
+    worstFlaggedCvPct: worstFlaggedCv,
+  );
+}
+
 final class BenchmarkTiming {
   BenchmarkTiming(this.label);
 

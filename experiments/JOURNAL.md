@@ -235,6 +235,16 @@ elevated, re-run order-flipped before treating the flag as real — and
 before burning an ablation pass on a mechanism the workload may not even
 exercise.*
 
+[Exp 177](177-ab-drift-discriminator.md) turned this check into a tool:
+`benchmark/ab_drift_check.dart` (over `cvPct` + `classifyDriftFlag` in
+`benchmark/shared/stats.dart`) takes two order-flipped passes of per-run
+values and classifies the flag as `reproduced` / `drift-suspected` /
+`inconclusive` by exactly this rule (CV asymmetry, then sign reversal).
+Prefer citing its verdict over re-deriving the reasoning by hand; it
+reproduces the manual exp 159 (CV asymmetry) and exp 167 (sign reversal)
+decisions. It interprets the order-flipped pass — it does not replace
+running it.
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
