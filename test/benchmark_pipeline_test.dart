@@ -320,6 +320,107 @@ Tracelite decision artifacts live under build/.
     });
   });
 
+  group('missing-run-without-declaration guard', () {
+    Map<String, Object?> exp({
+      required String id,
+      required String status,
+      Object? benchmarkRun,
+    }) => {
+      'id': id,
+      'title': 'exp $id',
+      'status': status,
+      if (benchmarkRun != null) 'benchmarkRun': benchmarkRun,
+    };
+
+    test('flags a chartable experiment >= cutoff with no run and no opt-out', () {
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '178', status: 'accepted'),
+      ], const <String>{}, cutoff: 178);
+      expect(issues, hasLength(1));
+      expect(issues.single, contains('exp 178'));
+      expect(issues.single, contains('no **Benchmark Run:** declaration'));
+    });
+
+    test('stays silent when the experiment declares the opt-out header', () {
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '178', status: 'accepted'),
+      ], <String>{'178'}, cutoff: 178);
+      expect(issues, isEmpty);
+    });
+
+    test('stays silent when a benchmark run is linked', () {
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '178', status: 'in_review', benchmarkRun: {'id': 'exp178-x'}),
+      ], const <String>{}, cutoff: 178);
+      expect(issues, isEmpty);
+    });
+
+    test('grandfathers experiments below the cutoff', () {
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '177', status: 'in_review'),
+        exp(id: '116', status: 'in_review'),
+      ], const <String>{}, cutoff: 178);
+      expect(issues, isEmpty);
+    });
+
+    test('ignores rejected experiments (they may legitimately lack a run)', () {
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '200', status: 'rejected'),
+      ], const <String>{}, cutoff: 178);
+      expect(issues, isEmpty);
+    });
+
+    test('the live experiment set passes the guard at the shipped cutoff', () {
+      // Regression anchor: the real experiments/ tree must stay clean so the
+      // CI generator does not start failing on already-merged work.
+      final output = generate_history.buildHistoryData(
+        resultsDir: Directory('benchmark/results'),
+        experimentsDir: Directory('experiments'),
+        generatedAt: '2026-06-16T00:00:00.000Z',
+      );
+      final experiments = output['experiments'] as List<Map<String, Object?>>;
+      // buildHistoryData consumes the opt-out flag internally; re-derive the
+      // declared opt-out set from the docs to feed the pure detector.
+      final docFiles = Directory('experiments')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.md'))
+          .toList();
+      final optOuts = <String>{};
+      for (final e in experiments) {
+        final id = e['id'] as String;
+        final match = docFiles.firstWhere(
+          (f) => f.uri.pathSegments.last.startsWith('$id-'),
+          orElse: () => File(''),
+        );
+        if (match.path.isEmpty) continue;
+        final headerMatch = RegExp(
+          r'^\*\*Benchmark Run:\*\*\s*(.+)$',
+          caseSensitive: false,
+          multiLine: true,
+        ).firstMatch(match.readAsStringSync());
+        final header = headerMatch?.group(1)?.trim().toLowerCase();
+        if (header == null) continue;
+        if (header.startsWith('none') ||
+            header.startsWith('n/a') ||
+            header.startsWith('not applicable') ||
+            header.startsWith('tracelite')) {
+          optOuts.add(id.toLowerCase());
+        }
+      }
+      final issues = generate_history.findUndeclaredMissingRunExperiments(
+        experiments,
+        optOuts,
+      );
+      expect(
+        issues,
+        isEmpty,
+        reason:
+            'Live experiments tripped the missing-run guard:\n${issues.join('\n')}',
+      );
+    });
+  });
+
   group('generate_history noise classification', () {
     String runMarkdown({
       required String label,
