@@ -230,6 +230,12 @@ When finished:
 
   This regenerates `docs/experiments/history.json`, verifies generated docs,
   and checks that the experiment is indexed in both the README and signal map.
+  **Run it as the very LAST step.** If you edit *any* tracked file afterward —
+  the writeup, README, `signals.json`, a result artifact, a relocated fixture —
+  re-run it, or you commit a stale `history.json`. The freshness check then
+  fails *post-merge* (it can slip through if the PR auto-merges before CI
+  re-runs), and only the Update-Docs bot saves you — a runner without that bot
+  ships a red `main`. This is exactly how exp 177 briefly reddened the main tip.
 - run focused validation plus the relevant repo checks
 - open a PR when the local experiment package is coherent enough for review
 
