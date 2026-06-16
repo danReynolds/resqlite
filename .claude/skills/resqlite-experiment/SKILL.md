@@ -238,12 +238,15 @@ git diff --name-only origin/main...HEAD
 
 ## Preflight: claim your slot before doing any work
 
-Do this **first, every run, from fresh `main`** — before picking a follow-up,
-before writing any code. If your checkout is stale you won't even have this
-policy, so begin every run with:
+Do this **first, every run** — before picking a follow-up, before writing any
+code. Start from fresh `origin/main`, but get there **non-destructively**: never
+`git reset --hard` / `git checkout -f` your checkout to "catch up" — that
+silently discards any uncommitted work, and this skill is followed by humans,
+not just the runner. Just fetch, then do the whole experiment in an isolated
+worktree off `origin/main` (steps below), leaving the current tree untouched:
 
 ```bash
-git fetch origin && git switch main && git reset --hard origin/main
+git fetch origin
 ```
 
 Every experiment PR rewrites the same three shared files —
@@ -260,14 +263,25 @@ already exists is rejected regardless of commit, so the push itself is the
 atomic test-and-set:
 
 ```bash
-# N = 1 + highest experiment number across main, open PRs, and remote branches:
-#   ls experiments/ ; gh pr list --state open ; git branch -r | grep -oE 'exp-[0-9]+'
+# N = 1 + highest experiment number across origin/main, open PRs, and branches
+# (read origin/main, not the local tree, so a stale/dirty checkout can't fool you):
+#   git ls-tree -r --name-only origin/main -- experiments/ | grep -oE '/[0-9]+'
+#   gh pr list --state open ; git branch -r | grep -oE 'exp-[0-9]+'
 git tag exp-$N-claim && git push origin exp-$N-claim
 #   rejected ("already exists") -> another run claimed $N first; bump $N, retry.
 #   success                     -> $N is yours; name your branch exp-$N-<slug>.
 ```
 
-Delete the claim tag once the experiment merges: `git push origin :exp-$N-claim`.
+Then build the experiment in a fresh worktree branched off `origin/main` — never
+in your main checkout, so nothing local is ever at risk:
+
+```bash
+git worktree add -b exp-$N-<slug> ../resqlite-exp-$N origin/main
+cd ../resqlite-exp-$N
+```
+
+When it merges or closes, clean up: `git worktree remove ../resqlite-exp-$N`
+and `git push origin :exp-$N-claim`.
 
 **2. Don't duplicate the work.** A unique number doesn't help if two runs ship
 the same lane (exp 175: both independently picked exp 174's large-`selectBytes`
