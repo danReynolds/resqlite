@@ -51,9 +51,9 @@ final class Writer {
   final _mutex = Mutex();
 
   // Standalone writes buffered for cross-call batching (exp 180); drained by
-  // [_pumpExecGroup], which owns the coalescing logic.
-  final List<_PendingExecute> _execGroup = <_PendingExecute>[];
-  bool _pumping = false;
+  // [_drainPendingWrites], which owns the coalescing logic.
+  final List<_PendingWrite> _pendingWrites = <_PendingWrite>[];
+  bool _draining = false;
 
   Writer(this._streamEngine);
 
@@ -128,7 +128,7 @@ final class Writer {
   }
 
   /// Runs a standalone write. Buffers into the coalescing pump
-  /// ([_pumpExecGroup]) so a concurrent burst collapses to ~2 isolate
+  /// ([_drainPendingWrites]) so a concurrent burst collapses to ~2 isolate
   /// round-trips instead of N (exp 180); profile mode sends per-call so
   /// Tracelite correlation ids stay intact.
   Future<ExecuteResponse> execute(
@@ -141,8 +141,8 @@ final class Writer {
     }
     if (_closed) return Future.error(_closedError());
     final completer = Completer<ExecuteResponse>.sync();
-    _execGroup.add(_PendingExecute(sql, parameters, completer));
-    if (!_pumping) _pumpExecGroup();
+    _pendingWrites.add(_PendingWrite(sql, parameters, completer));
+    if (!_draining) _drainPendingWrites();
     return completer.future;
   }
 
@@ -157,33 +157,33 @@ final class Writer {
     final Future<ExecuteResponse> reply;
     try {
       _ensureOpen();
-      reply = executeInTransaction(sql, parameters, traceCorrelationId);
+      reply = executeLocked(sql, parameters, traceCorrelationId);
     } finally {
       _mutex.unlock();
     }
     return reply;
   }
 
-  /// Drains [_execGroup] under backpressure, one send per iteration.
+  /// Drains [_pendingWrites] under backpressure, one send per iteration.
   ///
   /// Each iteration sends whatever is currently buffered — a lone write as a
   /// plain [ExecuteRequest] (no added latency vs the pre-exp-180 path), or
   /// several as one [MultiExecuteRequest] — then *awaits the reply before the
   /// next iteration*. That await is the coalescing window: concurrent
   /// `execute()` calls arriving while a send is in flight pile into
-  /// [_execGroup] and go out together on the next pass. A tight sequential
+  /// [_pendingWrites] and go out together on the next pass. A tight sequential
   /// `await db.execute()` loop keeps one write in flight at a time, so it pays
   /// exactly the baseline's single lock hop and never batches.
   ///
   /// The lock is held only across each send (ordering the group against any
   /// concurrent transaction/batch via the worker port FIFO) and released
   /// before the reply round-trip, mirroring [_executeSingle].
-  Future<void> _pumpExecGroup() async {
-    _pumping = true;
+  Future<void> _drainPendingWrites() async {
+    _draining = true;
     try {
-      while (_execGroup.isNotEmpty) {
-        final group = List<_PendingExecute>.of(_execGroup);
-        _execGroup.clear();
+      while (_pendingWrites.isNotEmpty) {
+        final group = List<_PendingWrite>.of(_pendingWrites);
+        _pendingWrites.clear();
 
         try {
           Future<ExecuteResponse>? singleReply;
@@ -240,7 +240,7 @@ final class Writer {
         }
       }
     } finally {
-      _pumping = false;
+      _draining = false;
     }
   }
 
@@ -258,7 +258,7 @@ final class Writer {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = executeBatchInTransaction(
+      reply = executeBatchLocked(
         sql,
         paramSets,
         traceCorrelationId: traceCorrelationId,
@@ -274,14 +274,14 @@ final class Writer {
   /// Used by [Transaction.execute] (the enclosing transaction holds the
   /// lock from BEGIN through COMMIT) and by [execute], which takes the
   /// lock around this send.
-  Future<ExecuteResponse> executeInTransaction(
+  Future<ExecuteResponse> executeLocked(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
     assert(
       _mutex.isLocked,
-      'executeInTransaction requires the writer lock to be held',
+      'executeLocked requires the writer lock to be held',
     );
     return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(
@@ -294,15 +294,15 @@ final class Writer {
   }
 
   /// Sends a batch write while the writer lock is already held.
-  /// See [executeInTransaction].
-  Future<BatchResponse?> executeBatchInTransaction(
+  /// See [executeLocked].
+  Future<BatchResponse?> executeBatchLocked(
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) {
     assert(
       _mutex.isLocked,
-      'executeBatchInTransaction requires the writer lock to be held',
+      'executeBatchLocked requires the writer lock to be held',
     );
     // Empty batch is a no-op — short-circuit so we don't pay for an
     // isolate round-trip on empty input.
@@ -327,15 +327,12 @@ final class Writer {
   /// Transaction-scoped read on the writer connection, so it sees
   /// uncommitted writes from earlier statements in the same transaction.
   /// The enclosing transaction holds the writer lock.
-  Future<QueryResponse> selectInTransaction(
+  Future<QueryResponse> selectLocked(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    assert(
-      _mutex.isLocked,
-      'selectInTransaction requires the writer lock to be held',
-    );
+    assert(_mutex.isLocked, 'selectLocked requires the writer lock to be held');
     return _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,
@@ -432,9 +429,9 @@ final class Writer {
 }
 
 /// A buffered standalone write: its SQL/params plus the caller's completer,
-/// which [Writer._pumpExecGroup] resolves from the coalesced reply.
-final class _PendingExecute {
-  _PendingExecute(this.sql, this.parameters, this.completer);
+/// which [Writer._drainPendingWrites] resolves from the coalesced reply.
+final class _PendingWrite {
+  _PendingWrite(this.sql, this.parameters, this.completer);
   final String sql;
   final List<Object?> parameters;
   final Completer<ExecuteResponse> completer;
