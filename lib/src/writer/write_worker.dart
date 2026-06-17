@@ -44,6 +44,13 @@ final class ExecuteRequest extends WriterRequest {
   final List<Object?> params;
 }
 
+/// A coalesced group of standalone writes (exp 180), each run as its own
+/// autocommit; answered by one [MultiExecuteResponse].
+final class MultiExecuteRequest extends WriterRequest {
+  MultiExecuteRequest(this.writes, super.replyPort);
+  final List<({String sql, List<Object?> params})> writes;
+}
+
 /// Read query within a transaction — runs on the writer connection so it
 /// sees uncommitted writes from earlier statements in the same transaction.
 final class QueryRequest extends WriterRequest {
@@ -105,6 +112,13 @@ final class ExecuteResponse {
   final WriteResult result;
   final TableDependencies modifications;
   final int writerSqliteUs;
+}
+
+/// Response to [MultiExecuteRequest]: one outcome per statement, in order —
+/// an [ExecuteResponse], or a [ResqliteException] isolated to that statement.
+final class MultiExecuteResponse {
+  const MultiExecuteResponse(this.outcomes);
+  final List<Object> outcomes;
 }
 
 /// Response to [QueryRequest] (transaction reads).
@@ -206,6 +220,8 @@ void writerEntrypoint(List<Object> args) {
       switch (message) {
         case ExecuteRequest():
           _handleExecute(state, message);
+        case MultiExecuteRequest():
+          _handleMultiExecute(state, message);
         case QueryRequest():
           _handleTxQuery(state, message);
         case BatchRequest():
@@ -264,6 +280,29 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   msg.replyPort.send(
     ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
   );
+}
+
+void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
+  // The mutex guarantees a coalesced group is only sent at txDepth 0, so each
+  // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
+  // so outcomes[i] holds exactly statement i's modifications.
+  final outcomes = <Object>[];
+  for (final write in msg.writes) {
+    try {
+      final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
+      final result = executeWrite(state.dbHandle, write.sql, write.params);
+      final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+      final modifications = state.txDepth > 0
+          ? TableDependencies.none
+          : getDirtyTableDependencies(state.dbHandle);
+      outcomes.add(
+        ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
+      );
+    } on ResqliteException catch (e) {
+      outcomes.add(e);
+    }
+  }
+  msg.replyPort.send(MultiExecuteResponse(outcomes));
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {

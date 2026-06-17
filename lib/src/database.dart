@@ -87,8 +87,9 @@ final class Database {
   // -------------------------------------------------------------------------
 
   void _ensureOpen() {
-    if (_closedCompleter != null)
-      throw ResqliteConnectionException('Database is closed.');
+    if (_closedCompleter != null) {
+      throw ResqliteConnectionException.databaseClosed();
+    }
   }
 
   /// Opens or creates a SQLite database at [path].
@@ -444,11 +445,8 @@ final class Database {
         ? TraceliteProfile.nextCorrelationId()
         : null;
 
-    Future<BatchResponse?> write() => writer.executeBatch(
-      sql,
-      paramSets,
-      traceCorrelationId: correlationId,
-    );
+    Future<BatchResponse?> write() =>
+        writer.executeBatch(sql, paramSets, traceCorrelationId: correlationId);
 
     final BatchResponse? response;
     if (correlationId == null) {
@@ -590,7 +588,8 @@ final class Database {
       walBytes: walBytes,
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
-      unknownDependencyFallbackCount: streamEngine.unknownDependencyFallbackCount,
+      unknownDependencyFallbackCount:
+          streamEngine.unknownDependencyFallbackCount,
       readerJsonBufHighWaterBytes: jsonBufTotal,
     );
   }
