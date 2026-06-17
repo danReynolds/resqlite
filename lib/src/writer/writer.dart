@@ -110,12 +110,17 @@ final class Writer {
     return completer.future;
   }
 
+  ResqliteConnectionException _closedError() =>
+      ResqliteConnectionException('Database is closed.');
+
+  void _ensureOpen() {
+    if (_closed) throw _closedError();
+  }
+
   Future<T> locked<T>(Future<T> Function() body) async {
     try {
       await _mutex.lock();
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
+      _ensureOpen();
       return await body();
     } finally {
       _mutex.unlock();
@@ -134,15 +139,10 @@ final class Writer {
     if (kProfileMode) {
       return _executeSingle(sql, parameters, traceCorrelationId);
     }
-    if (_closed) {
-      return Future.error(ResqliteConnectionException('Database is closed.'));
-    }
+    if (_closed) return Future.error(_closedError());
     final completer = Completer<ExecuteResponse>.sync();
     _execGroup.add(_PendingExecute(sql, parameters, completer));
-    if (!_pumping) {
-      _pumping = true;
-      _pumpExecGroup();
-    }
+    if (!_pumping) _pumpExecGroup();
     return completer.future;
   }
 
@@ -156,9 +156,7 @@ final class Writer {
     await _mutex.lock();
     final Future<ExecuteResponse> reply;
     try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
+      _ensureOpen();
       reply = executeInTransaction(sql, parameters, traceCorrelationId);
     } finally {
       _mutex.unlock();
@@ -181,6 +179,7 @@ final class Writer {
   /// concurrent transaction/batch via the worker port FIFO) and released
   /// before the reply round-trip, mirroring [_executeSingle].
   Future<void> _pumpExecGroup() async {
+    _pumping = true;
     try {
       while (_execGroup.isNotEmpty) {
         final group = List<_PendingExecute>.of(_execGroup);
@@ -191,21 +190,19 @@ final class Writer {
           Future<MultiExecuteResponse>? groupReply;
           await _mutex.lock();
           try {
-            if (_closed) {
-              throw ResqliteConnectionException('Database is closed.');
-            }
+            _ensureOpen();
+            // A lone write goes as a plain ExecuteRequest — same lean path as
+            // a non-batched send; only a genuine pile-up pays the multi wrapper.
             if (group.length == 1) {
-              singleReply = executeInTransaction(
-                group.first.sql,
-                group.first.parameters,
+              final p = group.first;
+              singleReply = _request<ExecuteResponse>(
+                (replyPort) => ExecuteRequest(p.sql, p.parameters, replyPort),
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
-                (replyPort) => MultiExecuteRequest(
-                  [for (final p in group) p.sql],
-                  [for (final p in group) p.parameters],
-                  replyPort,
-                ),
+                (replyPort) => MultiExecuteRequest([
+                  for (final p in group) (sql: p.sql, params: p.parameters),
+                ], replyPort),
               );
             }
           } finally {
@@ -218,19 +215,20 @@ final class Writer {
           } else {
             final outcomes = (await groupReply!).outcomes;
             for (var i = 0; i < group.length; i++) {
-              final outcome = outcomes[i];
-              if (outcome is ExecuteResponse) {
-                group[i].completer.complete(outcome);
-              } else if (outcome is ResqliteException) {
-                group[i].completer.completeError(outcome);
-              } else {
-                group[i].completer.completeError(
-                  ResqliteException('Internal writer error: missing outcome'),
-                );
+              final completer = group[i].completer;
+              switch (outcomes[i]) {
+                case final ExecuteResponse response:
+                  completer.complete(response);
+                case final ResqliteException error:
+                  completer.completeError(error);
+                default:
+                  completer.completeError(
+                    ResqliteException('Internal writer error: missing outcome'),
+                  );
               }
             }
           }
-        } on Object catch (error) {
+        } catch (error) {
           // A closed db, a synchronous send error, or a group-level reply
           // failure fails the group's still-pending callers rather than
           // hanging them. (Per-statement errors complete individually above.)

@@ -48,9 +48,8 @@ final class ExecuteRequest extends WriterRequest {
 /// its own autocommit and replies with one [MultiExecuteResponse]; the
 /// coalescing/backpressure logic that builds these lives in `Writer`.
 final class MultiExecuteRequest extends WriterRequest {
-  MultiExecuteRequest(this.sqls, this.paramsList, super.replyPort);
-  final List<String> sqls;
-  final List<List<Object?>> paramsList;
+  MultiExecuteRequest(this.writes, super.replyPort);
+  final List<({String sql, List<Object?> params})> writes;
 }
 
 /// Read query within a transaction — runs on the writer connection so it
@@ -293,10 +292,10 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   // modifications, identical to a standalone ExecuteRequest. A per-statement
   // error is captured as that statement's outcome, isolated from the rest.
   final outcomes = <Object>[];
-  for (var i = 0; i < msg.sqls.length; i++) {
+  for (final write in msg.writes) {
     try {
       final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-      final result = executeWrite(state.dbHandle, msg.sqls[i], msg.paramsList[i]);
+      final result = executeWrite(state.dbHandle, write.sql, write.params);
       final writerSqliteUs = _stopSqliteTimer(sqliteSw);
       final modifications = state.txDepth > 0
           ? TableDependencies.none
