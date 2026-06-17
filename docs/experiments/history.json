@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-17T12:05:23.890803",
+  "generated": "2026-06-17T14:38:59.534521",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -21524,6 +21524,19 @@
         "timestamp": "2026-06-17T07:39:10",
         "source": "exact"
       }
+    },
+    {
+      "id": "184",
+      "title": "Writer residual re-split (post-159/180)",
+      "date": "2026-06-17",
+      "status": "accepted",
+      "summary": "Measurement: re-ran exp 147's `writer_sqlite_wall_audit` after pipelining + group commit landed. Breakdown essentially unchanged (A11c overlap SQLite 13.6% / invalidation 16.0% / residual 70.3%) — the audit is sequential and exp 180 coalesces only concurrent bursts. Retires writer-residual micro-opts: the residual is the SDK-gated per-write round-trip, invalidation precision is owned by in-flight exp 160 (#155), the dirty harvest (~4–6%, exp 182) is small, SQLite config is mined. No runtime code.",
+      "commit": null,
+      "problem": "Exp 147's writer-burst breakdown (SQLite 9.4% / invalidation 18.8% / residual\n71.8% on A11c overlap) is what *directed* exp 159 (pipelining) and exp 180\n(group commit). Both have since landed. Before picking the next writer target,\nthe breakdown needed re-measuring — coalescing could have shifted which bucket\nnow dominates.",
+      "hypothesis": null,
+      "approach": "Re-ran exp 147's harness (`benchmark/profile/writer_sqlite_wall_audit.dart`,\n`-DRESQLITE_PROFILE=true`) on current `main`. No new code — this is a\nmeasurement to re-rank candidates.",
+      "results": "| workload | SQLite/wall | invalidation/wall | residual/wall | exp 147 residual |\n|---|---:|---:|---:|---:|\n| A11c baseline (0 streams) | 38.0% | 0.0% | 62.0% | — |\n| A11c disjoint | 23.7% | 21.6% | 54.7% | ~54.7% |\n| A11c overlap | 13.6% | 16.0% | 70.3% | 71.8% |\n| keyed PK | 23.7% | 14.4% | 61.9% | 63.3% |\n\nThe breakdown is essentially unchanged from exp 147. The audit issues writes\n**sequentially** (`audit_workloads.dart:167`), and exp 180 coalesces only\n*concurrent* bursts — so the sequential writer path it measures is, correctly,\nunmoved. (exp 180's win is on the concurrent release lane, validated separately.)\nFull numbers: `benchmark/profile/results/exp-184-writer-residual-resplit-aggregate.md`.",
+      "reasoning": "**Accepted (measurement).** Retire writer-residual micro-optimization from the\nactive candidate list. The residual (55–70%) is the per-write isolate round-trip,\nwhich for sequential writes is the SDK-gated floor — the only lever left there is\na shared-memory transport. The cleanly-attackable buckets are smaller and either\nspoken for or hard:\n\n- **Invalidation / re-query precision (14–22%)** — the real lever (exp 134\n  halved keyed-PK wall), but the traversal is at its floor (exp 121) and the\n  re-query-count reduction is what the in-flight **exp 160** (incremental view\n  maintenance, [#155](https://github.com/danReynolds/resqlite/pull/155))\n  implements. Don't duplicate it.\n- **Dirty-table harvest (~4–6%, exp 182)** — small; exp 182 showed gating it\n  regresses the with-streams path.\n- ..."
     }
   ],
   "tracked": [
