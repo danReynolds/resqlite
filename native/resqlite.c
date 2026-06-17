@@ -1251,6 +1251,67 @@ void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy) {
                           memory_order_release);
 }
 
+// [EXP-183] Total bytes currently retained by every reader's persistent
+// `json_buf`. The buffer grows via `buf_ensure` (realloc-doubling, exp 022)
+// to fit the largest result, and never shrinks under the current policy.
+// Exposing the high-water lets `Database.diagnostics()` quantify the bounded
+// RSS cost exp 174 left as a known trade-off (`selectBytes` view transfer
+// stops sacrificing readers, so `json_buf` plateaus at the largest result's
+// size per reader). A diagnostic-only read; safe to call concurrently with
+// reader activity because `cap` is an `int` and tearing only widens an
+// already-bounded summary number.
+long long resqlite_reader_json_buf_total(resqlite_db* db) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+    long long total = 0;
+    for (int i = 0; i < db->reader_count; i++) {
+        total += (long long)db->readers[i].json_buf.cap;
+    }
+    return total;
+}
+
+// [EXP-183] High-threshold reclaim for the reader's persistent `json_buf`.
+// Called by the reader worker isolate AFTER `eventPort.send` returns on a
+// `SelectBytesRequest` — at that point `SendPort.send` has already
+// snapshotted the bytes into the receiver, so the native buffer is safe to
+// realloc. The caller passes `last_used_len` (this request's result size);
+// the shrink fires only when the buffer is much larger than the last
+// produced result, so back-to-back large queries don't churn realloc.
+//
+// Thresholds:
+//   - SHRINK_TRIGGER_CAP  (>= 1 MB cap): below this, leave warm buffers alone
+//   - LAST_LEN_GUARD      (< 256 KB result): above this the workload is
+//                          actively using the larger capacity; keep it
+//   - SHRINK_TARGET_CAP   (16 KB initial): the size the buffer started at;
+//                          subsequent queries `buf_ensure`-grow from here
+//
+// Realloc failure leaves the existing buffer intact — the old (larger)
+// capacity is still functional, just memory not reclaimed. Returns the
+// post-call capacity for diagnostics.
+#define RESQLITE_JSON_BUF_SHRINK_TRIGGER_CAP (1 << 20)   // 1 MB
+#define RESQLITE_JSON_BUF_LAST_LEN_GUARD     (256 << 10) // 256 KB
+#define RESQLITE_JSON_BUF_SHRINK_TARGET_CAP  (16 << 10)  // 16 KB (matches buf_init)
+int resqlite_reader_maybe_shrink_json_buf(
+    resqlite_db* db, int reader_id, int last_used_len
+) {
+    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
+    if (reader_id < 0 || reader_id >= db->reader_count) return 0;
+    resqlite_reader* reader = &db->readers[reader_id];
+    if (reader->json_buf.cap <= RESQLITE_JSON_BUF_SHRINK_TRIGGER_CAP) {
+        return reader->json_buf.cap;
+    }
+    if (last_used_len >= RESQLITE_JSON_BUF_LAST_LEN_GUARD) {
+        return reader->json_buf.cap;
+    }
+    unsigned char* p = (unsigned char*)realloc(
+        reader->json_buf.data, RESQLITE_JSON_BUF_SHRINK_TARGET_CAP
+    );
+    if (!p) return reader->json_buf.cap;
+    reader->json_buf.data = p;
+    reader->json_buf.cap = RESQLITE_JSON_BUF_SHRINK_TARGET_CAP;
+    reader->json_buf.len = 0;
+    return reader->json_buf.cap;
+}
+
 // Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when
 // the cached entry's read-table dependencies are unreliable (overflow / OOM
 // during prepare). Zero would mean "stream has no table deps" → silent stuck
