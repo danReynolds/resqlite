@@ -44,9 +44,8 @@ final class ExecuteRequest extends WriterRequest {
   final List<Object?> params;
 }
 
-/// A coalesced group of standalone writes (exp 180). The worker runs each as
-/// its own autocommit and replies with one [MultiExecuteResponse]; the
-/// coalescing/backpressure logic that builds these lives in `Writer`.
+/// A coalesced group of standalone writes (exp 180), each run as its own
+/// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
   MultiExecuteRequest(this.writes, super.replyPort);
   final List<({String sql, List<Object?> params})> writes;
@@ -115,10 +114,8 @@ final class ExecuteResponse {
   final int writerSqliteUs;
 }
 
-/// Response to [MultiExecuteRequest]. One outcome per input statement, in
-/// order: either an [ExecuteResponse] (success) or a [ResqliteException]
-/// (that statement's error). Failures are isolated to their own statement —
-/// the rest still ran and committed.
+/// Response to [MultiExecuteRequest]: one outcome per statement, in order —
+/// an [ExecuteResponse], or a [ResqliteException] isolated to that statement.
 final class MultiExecuteResponse {
   const MultiExecuteResponse(this.outcomes);
   final List<Object> outcomes;
@@ -286,11 +283,9 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
 }
 
 void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
-  // Each statement is its own autocommit — the main-isolate mutex guarantees a
-  // coalesced group is only ever sent at txDepth 0. resqlite_get_dirty_tables
-  // resets the set on read, so outcomes[i] carries exactly statement i's
-  // modifications, identical to a standalone ExecuteRequest. A per-statement
-  // error is captured as that statement's outcome, isolated from the rest.
+  // The mutex guarantees a coalesced group is only sent at txDepth 0, so each
+  // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
+  // so outcomes[i] holds exactly statement i's modifications.
   final outcomes = <Object>[];
   for (final write in msg.writes) {
     try {
