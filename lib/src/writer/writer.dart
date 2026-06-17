@@ -7,6 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -48,6 +49,18 @@ final class Writer {
   // writes only need the lock around the *send* (see [execute]): the
   // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
+
+  // exp 180 — cross-call request batching under backpressure. Standalone
+  // execute() calls are buffered here and drained by [_pumpExecGroup]: an idle
+  // pump sends the first write immediately (one statement, no added latency),
+  // and any writes that arrive while that send's reply is in flight are
+  // coalesced into one MultiExecuteRequest on the next pump iteration. So a
+  // concurrent burst collapses to ~2 round-trips instead of N, while
+  // sequential awaited writes pay exactly the baseline's single lock hop. Each
+  // statement still runs as its own autocommit on the worker, so per-call
+  // success/failure is unchanged from sending them individually.
+  final List<_PendingExecute> _execGroup = <_PendingExecute>[];
+  bool _pumping = false;
 
   Writer(this._streamEngine);
 
@@ -128,7 +141,33 @@ final class Writer {
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
-  ]) async {
+  ]) {
+    // Profile mode keeps the per-call send so Tracelite correlation ids and
+    // per-write spans stay intact; coalescing (exp 180) is the release shape.
+    // Profile mode keeps the per-call send so Tracelite correlation ids and
+    // per-write spans stay intact; coalescing (exp 180) is the release shape.
+    if (kProfileMode) {
+      return _executeSingle(sql, parameters, traceCorrelationId);
+    }
+    if (_closed) {
+      return Future.error(ResqliteConnectionException('Database is closed.'));
+    }
+    final completer = Completer<ExecuteResponse>.sync();
+    _execGroup.add(_PendingExecute(sql, parameters, completer));
+    if (!_pumping) {
+      _pumping = true;
+      _pumpExecGroup();
+    }
+    return completer.future;
+  }
+
+  /// Pre-exp-180 single-send path: takes the lock around the send and returns
+  /// the reply future directly. Used only in profile mode.
+  Future<ExecuteResponse> _executeSingle(
+    String sql,
+    List<Object?> parameters,
+    int? traceCorrelationId,
+  ) async {
     await _mutex.lock();
     final Future<ExecuteResponse> reply;
     try {
@@ -140,6 +179,91 @@ final class Writer {
       _mutex.unlock();
     }
     return reply;
+  }
+
+  /// Drains [_execGroup] under backpressure, one send per iteration.
+  ///
+  /// Each iteration sends whatever is currently buffered — a lone write as a
+  /// plain [ExecuteRequest] (no added latency vs the pre-exp-180 path), or
+  /// several as one [MultiExecuteRequest] — then *awaits the reply before the
+  /// next iteration*. That await is the coalescing window: concurrent
+  /// `execute()` calls arriving while a send is in flight pile into
+  /// [_execGroup] and go out together on the next pass. A tight sequential
+  /// `await db.execute()` loop keeps one write in flight at a time, so it pays
+  /// exactly the baseline's single lock hop and never batches.
+  ///
+  /// The lock is held only across each send (ordering the group against any
+  /// concurrent transaction/batch via the worker port FIFO) and released
+  /// before the reply round-trip, mirroring [_executeSingle].
+  Future<void> _pumpExecGroup() async {
+    try {
+      while (_execGroup.isNotEmpty) {
+        final group = List<_PendingExecute>.of(_execGroup);
+        _execGroup.clear();
+
+        Future<ExecuteResponse>? singleReply;
+        Future<MultiExecuteResponse>? groupReply;
+        await _mutex.lock();
+        try {
+          if (_closed) {
+            final err = ResqliteConnectionException('Database is closed.');
+            for (final p in group) {
+              p.completer.completeError(err);
+            }
+            continue;
+          }
+          if (group.length == 1) {
+            singleReply = executeInTransaction(
+              group.first.sql,
+              group.first.parameters,
+            );
+          } else {
+            groupReply = _request<MultiExecuteResponse>(
+              (replyPort) => MultiExecuteRequest(
+                [for (final p in group) p.sql],
+                [for (final p in group) p.parameters],
+                replyPort,
+              ),
+            );
+          }
+        } finally {
+          _mutex.unlock();
+        }
+
+        if (singleReply != null) {
+          try {
+            group.first.completer.complete(await singleReply);
+          } on Object catch (e) {
+            group.first.completer.completeError(e);
+          }
+          continue;
+        }
+
+        try {
+          final outcomes = (await groupReply!).outcomes;
+          for (var i = 0; i < group.length; i++) {
+            final outcome = outcomes[i];
+            if (outcome is ExecuteResponse) {
+              group[i].completer.complete(outcome);
+            } else if (outcome is ResqliteException) {
+              group[i].completer.completeError(outcome);
+            } else {
+              group[i].completer.completeError(
+                ResqliteException('Internal writer error: missing outcome'),
+              );
+            }
+          }
+        } on Object catch (e) {
+          // A group-level failure (a non-ResqliteException Error escaped the
+          // worker handler) fails every caller in the group.
+          for (final p in group) {
+            p.completer.completeError(e);
+          }
+        }
+      }
+    } finally {
+      _pumping = false;
+    }
   }
 
   /// Batch variant of [execute]. Parameter validation throws to the
@@ -327,4 +451,14 @@ final class Writer {
     });
     _replyPort.close();
   }
+}
+
+/// A standalone write buffered for cross-call batching (exp 180). Holds the
+/// caller's completer so [Writer._flushExecGroup] can resolve it from the
+/// coalesced reply with this statement's own [ExecuteResponse] (or error).
+final class _PendingExecute {
+  _PendingExecute(this.sql, this.parameters, this.completer);
+  final String sql;
+  final List<Object?> parameters;
+  final Completer<ExecuteResponse> completer;
 }

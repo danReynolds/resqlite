@@ -8,6 +8,7 @@ Experiments that proved their value and were merged into the codebase.
 
 | # | Experiment | Impact | Commit |
 |---|---|---|---|
+| [180](180-group-commit-request-batching.md) | Cross-call write request batching (group commit) | The "group commit" lever exp 159 named: standalone `execute()` calls that pile up while a send is in flight coalesce into one `MultiExecuteRequest` (each statement its own autocommit — per-call semantics unchanged), collapsing a concurrent burst's N round-trips toward ~2 and capturing exp 147's ~72% per-round-trip residual that pipelining left behind. **−26% to −32%** on the release Concurrent Single Inserts lane, reproduced across order-flipped runs; sequential lane neutral (backpressure trigger adds no latency to isolated writes); the lone flagged nested-tx regression proven to be drift (sign-flip on an untouched code path). |  |
 | [001](001-c-native-json-serialization.md) | C-native JSON serialization | 3.5x faster bytes path | [`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57) |
 | [003](003-c-level-connection-and-statement-cache.md) | C-level connection + statement cache | ~0.7ms saved per query | [`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57) |
 | [004](004-nomutex-per-query-locking.md) | NOMUTEX with per-query locking | Eliminated 60k mutex ops at 20k rows | [`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57) |

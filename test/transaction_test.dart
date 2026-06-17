@@ -224,23 +224,30 @@ void main() {
       //
       // Per-future timeouts turn a regression into a deterministic test
       // failure instead of a stuck suite.
-      final w1 = db.execute('INSERT INTO items(name) VALUES (?)', ['w1']);
-      final w2 = db.execute('INSERT INTO items(name) VALUES (?)', ['w2']);
-      final w3 = db.execute('INSERT INTO items(name) VALUES (?)', ['w3']);
+      // exp 180: standalone execute() calls issued in the same turn are
+      // coalesced into one MultiExecuteRequest, so a buffered group racing
+      // close() is now atomic — it either flushes before close() takes the
+      // writer lock (all succeed) or after (all rejected with
+      // ResqliteConnectionException). The old per-write outcome (W1 succeeds,
+      // W2/W3 rejected) was an artifact of independent per-call lock ordering.
+      // The property this test guards is unchanged: queued writers never hang.
+      final writes = [
+        db.execute('INSERT INTO items(name) VALUES (?)', ['w1']),
+        db.execute('INSERT INTO items(name) VALUES (?)', ['w2']),
+        db.execute('INSERT INTO items(name) VALUES (?)', ['w3']),
+      ];
       final closeFuture = db.close();
 
-      // W1 was in-flight before close(); it completes normally.
-      await w1.timeout(const Duration(seconds: 2));
-
-      // W2 and W3 were still queued on the write lock when close() ran.
-      await expectLater(
-        w2.timeout(const Duration(seconds: 2)),
-        throwsA(isA<ResqliteConnectionException>()),
-      );
-      await expectLater(
-        w3.timeout(const Duration(seconds: 2)),
-        throwsA(isA<ResqliteConnectionException>()),
-      );
+      for (final w in writes) {
+        // Resolves quickly either way — never hangs (a hang surfaces as a
+        // TimeoutException); any failure must be the clean connection-closed
+        // error, not some other thrown type.
+        try {
+          await w.timeout(const Duration(seconds: 2));
+        } on ResqliteConnectionException {
+          // Acceptable: close() won the race and rejected the buffered group.
+        }
+      }
 
       await closeFuture.timeout(const Duration(seconds: 2));
     });
