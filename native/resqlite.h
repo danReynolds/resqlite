@@ -276,6 +276,20 @@ int resqlite_db_status_total(
 // workers bracket each request with this call to make the busy guard real.
 void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy);
 
+// Toggle preupdate-hook dependency accumulation on the writer connection
+// ([EXP-182](../experiments/182-skip-dep-tracking-no-streams.md)).
+//
+// When `enabled == 0`, `preupdate_hook` returns immediately so writes do
+// not pay the per-row strcmp dedup cost of `dirty_set_add` and
+// `dirty_columns_add_for_active_stmt`. The writer isolate flips this
+// per request based on whether any stream is registered at send time —
+// scheduled flag changes serialize naturally on the writer isolate's
+// event loop.
+//
+// Default after `resqlite_open` is enabled = 1 (track), so callers that
+// never call this preserve existing behavior.
+void resqlite_set_track_dirty(resqlite_db* db, int enabled);
+
 // ---------------------------------------------------------------------------
 // Read operations (use reader pool)
 // ---------------------------------------------------------------------------

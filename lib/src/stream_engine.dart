@@ -52,6 +52,19 @@ final class StreamEngine {
 
   final ReaderPool _pool;
 
+  /// Async barrier wired by [Database] after the writer spawns. Awaited
+  /// before a newly registered stream dispatches its initial query, so an
+  /// in-flight non-tracking write
+  /// ([EXP-182](../../experiments/182-skip-dep-tracking-no-streams.md))
+  /// cannot race with the read and leave the stream stuck on stale data.
+  /// `null` while the runtime is still spawning — initial-burst tests
+  /// never hit this path because the writer hasn't accepted any writes
+  /// yet.
+  Future<void> Function()? _drainBeforeNewStream;
+
+  set drainBeforeNewStream(Future<void> Function()? value) =>
+      _drainBeforeNewStream = value;
+
   /// The index of streamed queries by their hash key.
   final Map<int, StreamEntry> _entries = {};
 
@@ -282,6 +295,14 @@ final class StreamEngine {
 
     Future.sync(() async {
       try {
+        // [EXP-182] Drain any in-flight non-tracking writes before the
+        // reader pool starts the initial query so the read sees their
+        // committed state. The writer skips the round-trip when nothing
+        // is at risk.
+        final drain = _drainBeforeNewStream;
+        if (drain != null) {
+          await drain();
+        }
         final result = await _pool.selectWithDeps(sql, params);
 
         // Cancelled before query finished.

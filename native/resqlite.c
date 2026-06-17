@@ -376,6 +376,13 @@ struct resqlite_db {
     resqlite_cached_stmt* writer_active_entry;
     int writer_checkpoint_running;
 
+    // [EXP-182] When 0, `preupdate_hook` fast-returns without touching
+    // dirty_tables / dirty_columns. The writer isolate toggles this via
+    // `resqlite_set_track_dirty` to skip per-row dependency tracking on
+    // writes whose caller knows no streams will consume the result.
+    // Default 1 (track) so the optimization is opt-in from Dart.
+    int track_dirty;
+
     // Reader pool.
     resqlite_reader readers[MAX_READERS];
     int reader_count;
@@ -488,6 +495,12 @@ static void preupdate_hook(
 ) {
     (void)db; (void)op; (void)db_name; (void)old_rowid; (void)new_rowid;
     resqlite_db* sdb = (resqlite_db*)user_data;
+    // [EXP-182] Skip per-row dependency accumulation when the writer has
+    // disabled tracking. Cheap branch in the hottest write path: avoids
+    // the per-row strcmp dedup loops inside `dirty_set_add` and
+    // `dirty_columns_add_for_active_stmt` on wide / batch writes where
+    // no stream consumer exists.
+    if (!sdb->track_dirty) return;
     resqlite_dirty_set_add(&sdb->dirty_tables, table_name);
     dirty_columns_add_for_active_stmt(sdb, table_name);
 }
@@ -632,6 +645,7 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     resqlite_column_set_init(&db->dirty_columns);
     resqlite_column_set_init(&db->writer_authz_scratch);
     db->writer_active_entry = NULL;
+    db->track_dirty = 1;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
@@ -1249,6 +1263,17 @@ void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy) {
     if (!db || reader_id < 0 || reader_id >= db->reader_count) return;
     atomic_store_explicit(&db->readers[reader_id].worker_busy, busy,
                           memory_order_release);
+}
+
+// [EXP-182] Toggle preupdate-hook dependency accumulation. Called from
+// the writer isolate before processing each request: 0 lets the hook
+// fast-return so wide / batch writes skip per-row strcmp dedup when no
+// stream consumer exists. Called from the writer isolate only, so no
+// synchronization is needed (the field is read by `preupdate_hook` on
+// the same isolate's SQLite callback).
+void resqlite_set_track_dirty(resqlite_db* db, int enabled) {
+    if (!db) return;
+    db->track_dirty = enabled ? 1 : 0;
 }
 
 // Polish (post-2026-04): returns RESQLITE_DEPENDENCY_COUNT_UNKNOWN when

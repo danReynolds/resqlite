@@ -56,6 +56,11 @@ final class Database {
       // Spawn the single writer isolate.
       final writer = await Writer.spawn(streamEngine, _handle);
 
+      // [EXP-182] Wire the stream-creation barrier so a newly registered
+      // stream can fence any in-flight non-tracking writes before its
+      // initial query dispatches on the reader pool.
+      streamEngine.drainBeforeNewStream = writer.drainIfUntracked;
+
       return (
         readerPool: readerPool,
         streamEngine: streamEngine,

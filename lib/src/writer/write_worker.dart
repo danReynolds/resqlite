@@ -33,15 +33,27 @@ sealed class WriterRequest {
 }
 
 /// Single parameterized write (INSERT, UPDATE, DELETE, DDL).
+///
+/// [tracksDirty] = `false` lets the writer disable the preupdate hook for
+/// this top-level write so the per-row strcmp dedup loops in
+/// `dirty_set_add` / `dirty_columns_add_for_active_stmt` never run, and
+/// the reply skips the dirty harvest
+/// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+/// Set by [Writer.execute] from `_streamEngine.length > 0` at send time.
+/// Inside an open transaction the writer forces tracking on regardless,
+/// so callers in that context (`Transaction.execute`) may pass either
+/// value; the standard is `true`.
 final class ExecuteRequest extends WriterRequest {
   ExecuteRequest(
     this.sql,
     this.params,
     super.replyPort, {
     super.traceCorrelationId,
+    this.tracksDirty = true,
   });
   final String sql;
   final List<Object?> params;
+  final bool tracksDirty;
 }
 
 /// Read query within a transaction — runs on the writer connection so it
@@ -58,30 +70,55 @@ final class QueryRequest extends WriterRequest {
 }
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
+///
+/// See [ExecuteRequest.tracksDirty] — same semantics, applied across the
+/// batch's implicit BEGIN/COMMIT inside the writer.
 final class BatchRequest extends WriterRequest {
   BatchRequest(
     this.sql,
     this.paramSets,
     super.replyPort, {
     super.traceCorrelationId,
+    this.tracksDirty = true,
   });
   final String sql;
   final List<List<Object?>> paramSets;
+  final bool tracksDirty;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
+///
+/// The writer force-enables dependency tracking for the body of the
+/// transaction regardless of the request flag, because the commit-time
+/// harvest decision depends on stream presence at COMMIT time, not BEGIN.
 final class BeginRequest extends WriterRequest {
   BeginRequest(super.replyPort, {super.traceCorrelationId});
 }
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
+///
+/// [tracksDirty] = `false` skips the dirty harvest at the outermost
+/// commit; the accumulated state (from the forced-on tracking inside the
+/// transaction) is discarded instead. Set by [Writer.transaction] from
+/// `_streamEngine.length > 0` at commit-send time.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(super.replyPort, {super.traceCorrelationId});
+  CommitRequest(super.replyPort, {super.traceCorrelationId, this.tracksDirty = true});
+  final bool tracksDirty;
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
 final class RollbackRequest extends WriterRequest {
   RollbackRequest(super.replyPort, {super.traceCorrelationId});
+}
+
+/// No-op barrier; the FIFO reply order guarantees all prior requests
+/// have been processed before this one's reply arrives
+/// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+/// Used by [Writer.drainIfUntracked] to fence in-flight non-tracking
+/// writes before a newly registered stream dispatches its initial query
+/// on the reader pool.
+final class DrainRequest extends WriterRequest {
+  DrainRequest(super.replyPort);
 }
 
 /// Shut down the writer isolate.
@@ -167,6 +204,18 @@ final class _WriterState {
   /// leaving both Dart's view and SQLite's savepoint stack in a consistent
   /// state so subsequent requests see predictable depth.
   int txDepth = 0;
+
+  /// Mirror of the native `track_dirty` flag, so we only call the FFI
+  /// setter when the desired value differs from the current one
+  /// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+  /// Native default after `resqlite_open` is enabled.
+  bool nativeTrackEnabled = true;
+}
+
+void _ensureTrackDirty(_WriterState state, bool enabled) {
+  if (state.nativeTrackEnabled == enabled) return;
+  resqliteSetTrackDirty(state.dbHandle, enabled ? 1 : 0);
+  state.nativeTrackEnabled = enabled;
 }
 
 void writerEntrypoint(List<Object> args) {
@@ -216,6 +265,11 @@ void writerEntrypoint(List<Object> args) {
           _handleCommit(state, message);
         case RollbackRequest():
           _handleRollback(state, message);
+        case DrainRequest():
+          // FIFO barrier — the reply order alone guarantees that every
+          // earlier request has been processed before this one's reply
+          // arrives, so the body is intentionally empty.
+          message.replyPort.send(true);
         case CloseRequest():
           receivePort.close();
           message.replyPort.send(true);
@@ -252,15 +306,29 @@ void writerEntrypoint(List<Object> args) {
 // ---------------------------------------------------------------------------
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
+  // [EXP-182] At top-level (txDepth == 0) the request flag chooses whether
+  // the preupdate hook accumulates and whether the reply harvests. Inside
+  // an open transaction tracking stays forced on (set by BeginRequest)
+  // because the COMMIT decides the harvest, and we cannot predict stream
+  // arrivals between BEGIN and COMMIT.
+  if (state.txDepth == 0) {
+    _ensureTrackDirty(state, msg.tracksDirty);
+  }
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final result = executeWrite(state.dbHandle, msg.sql, msg.params);
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
   // the outermost transaction completes.
-  final modifications = state.txDepth > 0
-      ? TableDependencies.none
-      : getDirtyTableDependencies(state.dbHandle);
+  final TableDependencies modifications;
+  if (state.txDepth > 0) {
+    modifications = TableDependencies.none;
+  } else if (msg.tracksDirty) {
+    modifications = getDirtyTableDependencies(state.dbHandle);
+  } else {
+    // Tracking was off: the dirty set is already empty, no FFI needed.
+    modifications = TableDependencies.none;
+  }
   msg.replyPort.send(
     ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
   );
@@ -279,14 +347,19 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
       ),
     );
   } else {
+    // [EXP-182] same gate as `_handleExecute`: at top level the request
+    // flag controls both preupdate accumulation and harvest. The C-side
+    // BEGIN/COMMIT inside `executeBatchWrite` still runs; only the
+    // preupdate work and reply harvest are skipped when off.
+    _ensureTrackDirty(state, msg.tracksDirty);
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    final modifications = msg.tracksDirty
+        ? getDirtyTableDependencies(state.dbHandle)
+        : TableDependencies.none;
     msg.replyPort.send(
-      BatchResponse(
-        getDirtyTableDependencies(state.dbHandle),
-        writerSqliteUs: writerSqliteUs,
-      ),
+      BatchResponse(modifications, writerSqliteUs: writerSqliteUs),
     );
   }
 }
@@ -332,6 +405,11 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
   // On failure, txDepth stays at its current value and the error
   // propagates — _runTransaction on the main isolate will never have
   // entered its body, so there is nothing to roll back.
+  // [EXP-182] Inside a transaction we cannot predict whether a stream
+  // will register between BEGIN and COMMIT, so force tracking on for
+  // the whole body. The COMMIT decides whether to harvest based on
+  // stream presence at COMMIT-send time.
+  _ensureTrackDirty(state, true);
   if (state.txDepth == 0) {
     final rc = resqliteTxBeginImmediate(state.dbHandle);
     if (rc != 0) {
@@ -388,11 +466,18 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     }
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     state.txDepth = newDepth;
+    // [EXP-182] When the COMMIT-send-time check found no streams, the
+    // accumulated dirty state (from the forced-on tracking inside the
+    // transaction) is discarded rather than marshalled to Dart.
+    final TableDependencies modifications;
+    if (msg.tracksDirty) {
+      modifications = getDirtyTableDependencies(state.dbHandle);
+    } else {
+      discardDirtyTableDependencies(state.dbHandle);
+      modifications = TableDependencies.none;
+    }
     msg.replyPort.send(
-      BatchResponse(
-        getDirtyTableDependencies(state.dbHandle),
-        writerSqliteUs: writerSqliteUs,
-      ),
+      BatchResponse(modifications, writerSqliteUs: writerSqliteUs),
     );
   } else {
     final sp = 'RELEASE s$newDepth'.toNativeUtf8();

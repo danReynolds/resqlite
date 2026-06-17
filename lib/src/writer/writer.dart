@@ -49,6 +49,14 @@ final class Writer {
   // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
+  /// True once at least one non-tracking write was sent since the writer
+  /// was opened or since the last drain
+  /// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+  /// Read by [drainIfUntracked] so stream registrations only pay a
+  /// barrier round-trip when an in-flight non-tracking write could race
+  /// with the new stream's initial query.
+  bool _sentUntracked = false;
+
   Writer(this._streamEngine);
 
   static Future<Writer> spawn(
@@ -135,7 +143,22 @@ final class Writer {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = executeInTransaction(sql, parameters, traceCorrelationId);
+      // [EXP-182] No active streams means no consumer will fire on the
+      // dirty notification — skip preupdate accumulation and the reply
+      // harvest. New streams registered after this send drain via
+      // `drainIfUntracked` before dispatching their initial query, so
+      // they never miss this write's effects.
+      final tracksDirty = _streamEngine.length > 0;
+      if (!tracksDirty) _sentUntracked = true;
+      reply = _request<ExecuteResponse>(
+        (replyPort) => ExecuteRequest(
+          sql,
+          parameters,
+          replyPort,
+          tracksDirty: tracksDirty,
+          traceCorrelationId: traceCorrelationId,
+        ),
+      );
     } finally {
       _mutex.unlock();
     }
@@ -156,15 +179,49 @@ final class Writer {
       if (_closed) {
         throw ResqliteConnectionException('Database is closed.');
       }
-      reply = executeBatchInTransaction(
-        sql,
-        paramSets,
-        traceCorrelationId: traceCorrelationId,
-      );
+      // Empty batch is a no-op — short-circuit so we don't pay for an
+      // isolate round-trip on empty input.
+      if (paramSets.isEmpty) {
+        reply = Future.value();
+      } else {
+        assertUniformParamSets(sql, paramSets);
+        // Same EXP-182 gate as [execute]; see comment there.
+        final tracksDirty = _streamEngine.length > 0;
+        if (!tracksDirty) _sentUntracked = true;
+        reply = _request<BatchResponse>(
+          (replyPort) => BatchRequest(
+            sql,
+            paramSets,
+            replyPort,
+            tracksDirty: tracksDirty,
+            traceCorrelationId: traceCorrelationId,
+          ),
+        );
+      }
     } finally {
       _mutex.unlock();
     }
     return reply;
+  }
+
+  /// Drain in-flight non-tracking writes
+  /// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+  ///
+  /// A no-op writer round-trip lands behind all currently-queued
+  /// requests in the worker's FIFO; its reply implies every prior
+  /// request finished, including its commit becoming visible to reader
+  /// connections. Called by [StreamEngine._createStream] right before a
+  /// newly registered stream dispatches its initial query on the reader
+  /// pool, so a write sent earlier with `tracksDirty = false` cannot
+  /// race with the read and leave the stream stuck on stale data.
+  ///
+  /// Cheap by construction: skipped entirely when no non-tracking write
+  /// has been sent, returns synchronously when the writer is closed.
+  Future<void> drainIfUntracked() async {
+    if (!_sentUntracked) return;
+    if (_sendPort == null) return;
+    _sentUntracked = false;
+    await _request<bool>((replyPort) => DrainRequest(replyPort));
   }
 
   /// Sends a write while the writer lock is already held.
@@ -186,6 +243,11 @@ final class Writer {
         sql,
         parameters,
         replyPort,
+        // [EXP-182] In-tx writes always carry `tracksDirty = true`. The
+        // writer forces tracking on inside transactions regardless, but
+        // passing true here keeps the request shape consistent and lets
+        // the writer's mirror check stay in sync.
+        tracksDirty: true,
         traceCorrelationId: traceCorrelationId,
       ),
     );
@@ -217,6 +279,8 @@ final class Writer {
         sql,
         paramSets,
         replyPort,
+        // In-tx batch always tracks; see executeInTransaction.
+        tracksDirty: true,
         traceCorrelationId: traceCorrelationId,
       ),
     );
@@ -297,9 +361,19 @@ final class Writer {
     // Commit is deliberately outside the try/catch: on commit failure the
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
+    // [EXP-182] Check stream presence at commit-send time. If absent, the
+    // writer discards the accumulated dirty state instead of marshalling
+    // it back. The forced-on tracking inside the transaction means the C
+    // dirty set may be populated; `discardDirtyTableDependencies` resets
+    // it so the next standalone write starts clean.
+    final commitTracks = _streamEngine.length > 0;
+    if (!commitTracks) _sentUntracked = true;
     final response = await _request<BatchResponse>(
-      (replyPort) =>
-          CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
+      (replyPort) => CommitRequest(
+        replyPort,
+        tracksDirty: commitTracks,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
 

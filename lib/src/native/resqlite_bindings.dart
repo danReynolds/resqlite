@@ -431,6 +431,17 @@ external void resqliteReaderSetBusy(
   int busy,
 );
 
+/// Toggles the writer's `preupdate_hook` dependency accumulation
+/// ([EXP-182](../../../experiments/182-skip-dep-tracking-no-streams.md)).
+/// Called from the writer isolate before processing each request; the
+/// hook returns early when `enabled = 0`, avoiding the per-row strcmp
+/// dedup loops on writes whose caller knows no stream consumer exists.
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
+  symbol: 'resqlite_set_track_dirty',
+  isLeaf: true,
+)
+external void resqliteSetTrackDirty(ffi.Pointer<ffi.Void> db, int enabled);
+
 /// Per-worker persistent buffer for read-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte
 /// calloc/free pair per stream subscription
