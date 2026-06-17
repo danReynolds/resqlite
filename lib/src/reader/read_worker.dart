@@ -208,6 +208,22 @@ void readerEntrypoint(List<Object> args) {
         Isolate.exit(eventPort, (result, true, null));
       }
       eventPort.send((result, false, null));
+      // [EXP-183] After `SendPort.send` returns the bytes have been
+      // snapshotted into the receiver, so the native `json_buf` is safe
+      // to realloc. Shrink it back down when the buffer has grown past
+      // 1 MB but the just-sent result fit comfortably below 256 KB —
+      // a one-off oversized `selectBytes` no longer pins the reader's
+      // capacity for the remainder of the connection's life. The C
+      // function is a no-op for warm small buffers (< 1 MB) and for
+      // back-to-back large reads (last_used_len >= 256 KB), so the
+      // common case has no extra work.
+      if (request is SelectBytesRequest && result is Uint8List) {
+        resqliteReaderMaybeShrinkJsonBuf(
+          ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+          readerId,
+          result.length,
+        );
+      }
     } catch (e) {
       // Same-group isolates (Isolate.spawn) can send arbitrary objects
       // via SendPort — the VM deep-copies them. Wrap non-resqlite errors

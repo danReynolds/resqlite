@@ -276,6 +276,26 @@ int resqlite_db_status_total(
 // workers bracket each request with this call to make the busy guard real.
 void resqlite_reader_set_busy(resqlite_db* db, int reader_id, int busy);
 
+// [EXP-183] Sum of every reader's persistent `json_buf.cap`. The buffer
+// grows on demand (`buf_ensure` realloc-doubling, exp 022) but never
+// shrinks under current policy; exp 174's view-send drop of the bytes
+// `Isolate.exit` sacrifice removed the only mechanism that previously
+// reset capacity. Use this to quantify the bounded RSS high-water
+// `Database.diagnostics()` reports.
+long long resqlite_reader_json_buf_total(resqlite_db* db);
+
+// [EXP-183] High-threshold reclaim. Called by a reader worker isolate
+// after `SendPort.send` returns on a `selectBytes` reply, with the size
+// of the result just sent. If this reader's `json_buf.cap` has grown
+// past 1 MB AND the last produced result fit comfortably below 256 KB,
+// realloc the buffer back down to 16 KB so subsequent small queries do
+// not pin pathological retained capacity from a one-off oversized read.
+// Realloc failure leaves the existing buffer intact. Returns the
+// post-call capacity for diagnostics.
+int resqlite_reader_maybe_shrink_json_buf(
+    resqlite_db* db, int reader_id, int last_used_len
+);
+
 // ---------------------------------------------------------------------------
 // Read operations (use reader pool)
 // ---------------------------------------------------------------------------

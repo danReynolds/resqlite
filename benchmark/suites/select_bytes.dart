@@ -37,7 +37,9 @@ Future<String> runSelectBytesBenchmark() async {
     'transfer to main); other peers and resqlite\'s own `select()` path go through '
     '`jsonEncode + utf8.encode` on the main isolate. Both numbers are reported '
     'per peer for the select+encode path; resqlite also reports its native '
-    'selectBytes path as a separate row.',
+    'selectBytes path as a separate row. The large-payload row isolates '
+    'resqlite selectBytes because it guards the native bytes transfer policy '
+    'without multiplying large JSON encoding work across every peer.',
   );
   markdown.writeln('');
 
@@ -52,13 +54,21 @@ Future<String> runSelectBytesBenchmark() async {
     }
   }
 
+  final largeTempDir = await Directory.systemTemp.createTemp(
+    'bench_large_bytes_',
+  );
+  try {
+    final timings = await _benchmarkLargeNativeSelectBytes(largeTempDir.path);
+    printComparisonTable('=== Select Bytes: large payload ===', timings);
+    markdown.write(markdownTable('Large payload (~650KB)', timings));
+  } finally {
+    await largeTempDir.delete(recursive: true);
+  }
+
   return markdown.toString();
 }
 
-Future<List<BenchmarkTiming>> _benchmarkAtSize(
-  String dir,
-  int rowCount,
-) async {
+Future<List<BenchmarkTiming>> _benchmarkAtSize(String dir, int rowCount) async {
   final timings = <BenchmarkTiming>[];
 
   // --- Peer path: select() + utf8.encode(jsonEncode(...)) -------------
@@ -135,6 +145,66 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(
   }
 
   return timings;
+}
+
+const int _largePayloadRows = 2000;
+const int _largePayloadBodyLength = 300;
+const int _largePayloadMinimumBytes = 256 * 1024;
+const String _largePayloadCreateSql = '''
+  CREATE TABLE large_items(
+    id INTEGER PRIMARY KEY,
+    body TEXT NOT NULL
+  )
+''';
+const String _largePayloadInsertSql =
+    'INSERT INTO large_items(id, body) VALUES (?, ?)';
+const String _largePayloadSelectSql =
+    'SELECT id, body FROM large_items ORDER BY id';
+
+Future<List<BenchmarkTiming>> _benchmarkLargeNativeSelectBytes(
+  String dir,
+) async {
+  final db = await resqlite.Database.open('$dir/resqlite_large_bytes.db');
+  try {
+    await db.execute(_largePayloadCreateSql);
+    final body = 'x' * _largePayloadBodyLength;
+    await db.executeBatch(_largePayloadInsertSql, [
+      for (var i = 0; i < _largePayloadRows; i++) [i, '$body-$i'],
+    ]);
+
+    final probe = await db.selectBytes(_largePayloadSelectSql);
+    if (probe.length <= _largePayloadMinimumBytes) {
+      throw StateError(
+        'large selectBytes payload was ${probe.length} bytes; expected '
+        '> $_largePayloadMinimumBytes bytes.',
+      );
+    }
+
+    final timing = BenchmarkTiming('resqlite selectBytes()');
+    for (var i = 0; i < defaultWarmup; i++) {
+      await db.selectBytes(_largePayloadSelectSql);
+    }
+    for (var i = 0; i < defaultIterations; i++) {
+      final swMain = Stopwatch();
+      final swWall = Stopwatch()..start();
+      swMain.start();
+      final future = db.selectBytes(_largePayloadSelectSql);
+      swMain.stop();
+      final bytes = await future;
+      swMain.start();
+      bytes.length; // post-await resume
+      swMain.stop();
+      swWall.stop();
+      timing.record(
+        wallMicroseconds: swWall.elapsedMicroseconds,
+        mainMicroseconds: swMain.elapsedMicroseconds,
+      );
+    }
+
+    return [timing];
+  } finally {
+    await db.close();
+  }
 }
 
 Future<void> main() async {

@@ -113,6 +113,11 @@ class ResqliteTransactionException extends ResqliteException {
 class ResqliteConnectionException extends ResqliteException {
   ResqliteConnectionException(super.message);
 
+  /// Thrown when an operation is attempted after the database is closed.
+  /// Shared by every module's open-check (`Database`, `Writer`, …) so the
+  /// message has a single definition.
+  ResqliteConnectionException.databaseClosed() : super('Database is closed.');
+
   @override
   String toString() => 'ResqliteConnectionException: $message';
 }

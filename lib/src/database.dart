@@ -87,8 +87,9 @@ final class Database {
   // -------------------------------------------------------------------------
 
   void _ensureOpen() {
-    if (_closedCompleter != null)
-      throw ResqliteConnectionException('Database is closed.');
+    if (_closedCompleter != null) {
+      throw ResqliteConnectionException.databaseClosed();
+    }
   }
 
   /// Opens or creates a SQLite database at [path].
@@ -444,11 +445,8 @@ final class Database {
         ? TraceliteProfile.nextCorrelationId()
         : null;
 
-    Future<BatchResponse?> write() => writer.executeBatch(
-      sql,
-      paramSets,
-      traceCorrelationId: correlationId,
-    );
+    Future<BatchResponse?> write() =>
+        writer.executeBatch(sql, paramSets, traceCorrelationId: correlationId);
 
     final BatchResponse? response;
     if (correlationId == null) {
@@ -579,6 +577,10 @@ final class Database {
     }
 
     final _DatabaseRuntime(:streamEngine) = await _runtime;
+    // [EXP-183] Per-reader json_buf high-water. Safe to call concurrently
+    // with reader activity: each reader's cap is an int and tearing only
+    // widens an already-bounded summary number, fine for a diagnostic.
+    final jsonBufTotal = resqliteReaderJsonBufTotal(_handle);
     return Diagnostics(
       sqlitePageCacheBytes: pageCache,
       sqliteSchemaBytes: schema,
@@ -586,7 +588,9 @@ final class Database {
       walBytes: walBytes,
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
-      unknownDependencyFallbackCount: streamEngine.unknownDependencyFallbackCount,
+      unknownDependencyFallbackCount:
+          streamEngine.unknownDependencyFallbackCount,
+      readerJsonBufHighWaterBytes: jsonBufTotal,
     );
   }
 }
