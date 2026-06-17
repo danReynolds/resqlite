@@ -80,7 +80,9 @@ the new counter or aggregate evidence, not a production code-path change.
 Before coding, write a short working note for yourself:
 
 - what prior experiments are adjacent
-- why this is not just a duplicate attempt
+- why this is not just a duplicate attempt — neither of a prior *rejected*
+  experiment nor of any open PR or branch **in flight right now** (two runs
+  shipping the same follow-up is how exp 175 collided)
 - what implementation candidate you are trying; if the run is measurement-only,
   why that candidate cannot be attempted in the same pass
 - what new evidence, benchmark, workload, implementation shape, or external
@@ -95,6 +97,34 @@ Before coding, write a short working note for yourself:
 
 This note does not need to be committed directly, but the final experiment
 writeup should make the reasoning clear.
+
+### Claim your slot before any work
+
+Once you've chosen the experiment — before writing code — claim it atomically so
+a concurrent run can't take the same number or ship the same follow-up. (Full
+rationale: the resqlite-experiment skill's "Preflight" section.)
+
+- **Number.** `N` = 1 + the highest experiment number across `origin/main`, open
+  PRs, and remote branches — read `origin/main`, not the local tree:
+  `git ls-tree -r --name-only origin/main -- experiments/`; `gh pr list
+  --state open`; `git branch -r | grep -oE 'exp-[0-9]+'`. Then claim it with a
+  tag push, which is rejected if the tag already exists, so the push itself is
+  the atomic test-and-set:
+
+  ```bash
+  git tag exp-$N-claim && git push origin exp-$N-claim   # rejected -> bump $N, retry
+  ```
+
+  "Pick highest + 1" alone *races* — both runs pick the same `N`; the claim is
+  what makes it safe (exp 168/175). Delete the tag on merge/close:
+  `git push origin :exp-$N-claim`.
+- **No duplicate work.** Now, and again right before opening the PR, confirm no
+  in-flight work is already doing your follow-up — **use `gh pr list --state
+  open`**, not a raw branch-by-file diff: stale/merged branches all "touch" any
+  recently-edited file (e.g. ~55 branches show as touching `row.dart` because
+  exp 158 last edited it), so that heuristic is fog. A branch that matters backs
+  an open PR. If your follow-up is already in flight, stop — pick different work
+  or build on it. A unique number doesn't help if two runs ship the same lane.
 
 ## Measurement
 
@@ -200,6 +230,12 @@ When finished:
 
   This regenerates `docs/experiments/history.json`, verifies generated docs,
   and checks that the experiment is indexed in both the README and signal map.
+  **Run it as the very LAST step.** If you edit *any* tracked file afterward —
+  the writeup, README, `signals.json`, a result artifact, a relocated fixture —
+  re-run it, or you commit a stale `history.json`. The freshness check then
+  fails *post-merge* (it can slip through if the PR auto-merges before CI
+  re-runs), and only the Update-Docs bot saves you — a runner without that bot
+  ships a red `main`. This is exactly how exp 177 briefly reddened the main tip.
 - run focused validation plus the relevant repo checks
 - open a PR when the local experiment package is coherent enough for review
 
@@ -236,9 +272,10 @@ If any check fails, leave the row in In Review and add a short note in
 Every scheduled experiment run must:
 
 - **Work on a dedicated git worktree**, never on a checkout of `main`
-  directly. Create the worktree off current `origin/main` and use a
-  branch name of the form `exp-NNN-short-slug` (e.g.
-  `exp-115-dispatcher-park-counters`). If the runner already starts you
+  directly. Create the worktree off current `origin/main` **only after the
+  atomic claim above**, with branch `exp-NNN-short-slug` (e.g.
+  `exp-115-dispatcher-park-counters`) where `NNN` is the *claimed* number,
+  not a bare highest-row + 1. If the runner already starts you
   in a worktree on a stale or unrelated branch, create a fresh branch
   from `origin/main` before committing — do not pile a new experiment
   on top of an unrelated in-flight branch.
@@ -258,8 +295,11 @@ Every scheduled experiment run must:
   and review feedback have also been checked.
 - **Wait for CI on the PR and address actionable failures** before declaring a
   PR ready to merge. A red PR is not merge-ready.
-- **Wait for automated review, not just CI, before merge readiness.** After
-  opening the PR, poll
+- **Wait for automated review, not just CI, before merge readiness** — for PRs
+  *held for human review* (runtime-code changes). A docs-only/tooling PR you put
+  on auto-merge may land before any review arrives; that race is benign — those
+  are the auto-merge class anyway — so don't block on the poll for them. For held
+  PRs, after opening the PR, poll
   for review submissions for a few minutes, then read inline review
   threads with thread-aware review data. `gh pr view --json` does not
   expose `reviewThreads`; use the GraphQL API directly:

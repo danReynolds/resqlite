@@ -49,13 +49,18 @@ final class Writer {
   // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
-  Writer(this._streamEngine);
+  // Standalone writes buffered for coalescing (exp 180); drained by
+  // [_drainPendingWrites].
+  final List<_PendingWrite> _pendingWrites = <_PendingWrite>[];
+  bool _draining = false;
+
+  Writer._(this._streamEngine);
 
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
   ) async {
-    final writer = Writer(streamEngine);
+    final writer = Writer._(streamEngine);
 
     final handshake = Completer<SendPort>();
     final receivePort = ReceivePort();
@@ -96,7 +101,7 @@ final class Writer {
   Future<T> _request<T>(WriterRequest Function(SendPort replyPort) build) {
     final sendPort = _sendPort;
     if (sendPort == null) {
-      throw ResqliteConnectionException('Database is closed.');
+      throw ResqliteConnectionException.databaseClosed();
     }
     final completer = Completer<T>.sync();
     _pending.addLast(completer);
@@ -104,42 +109,112 @@ final class Writer {
     return completer.future;
   }
 
+  void _ensureOpen() {
+    if (_closed) throw ResqliteConnectionException.databaseClosed();
+  }
+
   Future<T> locked<T>(Future<T> Function() body) async {
     try {
       await _mutex.lock();
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
+      _ensureOpen();
       return await body();
     } finally {
       _mutex.unlock();
     }
   }
 
-  /// Runs a standalone write, holding the writer lock only for the send.
-  ///
-  /// The lock is released as soon as the request is on the worker's port:
-  /// the port FIFO guarantees the write is fully processed (at txDepth 0,
-  /// including its dirty-set harvest) before any later-sent BEGIN opens a
-  /// transaction, so exclusivity across the reply round-trip adds nothing.
-  /// Releasing early lets a subsequent write or transaction overlap its
-  /// send with this write's worker-side execution and reply scheduling.
+  /// Runs a standalone write through the coalescing pump
+  /// ([_drainPendingWrites]) so a concurrent burst collapses to ~2 isolate
+  /// round-trips instead of N (exp 180).
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
-  ]) async {
-    await _mutex.lock();
-    final Future<ExecuteResponse> reply;
-    try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
-      reply = executeInTransaction(sql, parameters, traceCorrelationId);
-    } finally {
-      _mutex.unlock();
+  ]) {
+    if (_closed) {
+      return Future.error(ResqliteConnectionException.databaseClosed());
     }
-    return reply;
+    final completer = Completer<ExecuteResponse>.sync();
+    _pendingWrites.add(
+      _PendingWrite(sql, parameters, traceCorrelationId, completer),
+    );
+    if (!_draining) _drainPendingWrites();
+    return completer.future;
+  }
+
+  /// Drains [_pendingWrites] under backpressure: each iteration sends what's
+  /// buffered, then awaits the reply — and the await is the coalescing window,
+  /// during which concurrent writes pile up and go out together next pass.
+  ///
+  /// The lock is held only across each send (ordering the group against a
+  /// concurrent transaction/batch via the worker FIFO), released before the
+  /// reply.
+  Future<void> _drainPendingWrites() async {
+    _draining = true;
+    try {
+      while (_pendingWrites.isNotEmpty) {
+        final group = List<_PendingWrite>.of(_pendingWrites);
+        _pendingWrites.clear();
+
+        try {
+          Future<ExecuteResponse>? singleReply;
+          Future<MultiExecuteResponse>? groupReply;
+          await _mutex.lock();
+          try {
+            _ensureOpen();
+            if (group.length == 1) {
+              final p = group.first;
+              singleReply = _request<ExecuteResponse>(
+                (replyPort) => ExecuteRequest(
+                  p.sql,
+                  p.parameters,
+                  replyPort,
+                  traceCorrelationId: p.traceCorrelationId,
+                ),
+              );
+            } else {
+              groupReply = _request<MultiExecuteResponse>(
+                (replyPort) => MultiExecuteRequest([
+                  for (final p in group) (sql: p.sql, params: p.parameters),
+                ], replyPort),
+              );
+            }
+          } finally {
+            _mutex.unlock();
+          }
+
+          // Distribute outside the lock — the reply round-trip pipelines.
+          if (singleReply != null) {
+            group.first.completer.complete(await singleReply);
+          } else {
+            final outcomes = (await groupReply!).outcomes;
+            for (var i = 0; i < group.length; i++) {
+              final completer = group[i].completer;
+              switch (outcomes[i]) {
+                case final ExecuteResponse response:
+                  completer.complete(response);
+                case final ResqliteException error:
+                  completer.completeError(error);
+                default:
+                  completer.completeError(
+                    ResqliteException('Internal writer error: missing outcome'),
+                  );
+              }
+            }
+          }
+        } catch (error) {
+          // Fail the group's still-pending callers on any send/reply failure
+          // rather than hang them. (Per-statement errors complete above.)
+          for (final p in group) {
+            if (!p.completer.isCompleted) {
+              p.completer.completeError(error);
+            }
+          }
+        }
+      }
+    } finally {
+      _draining = false;
+    }
   }
 
   /// Batch variant of [execute]. Parameter validation throws to the
@@ -153,10 +228,8 @@ final class Writer {
     await _mutex.lock();
     final Future<BatchResponse?> reply;
     try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
-      reply = executeBatchInTransaction(
+      _ensureOpen();
+      reply = executeBatchLocked(
         sql,
         paramSets,
         traceCorrelationId: traceCorrelationId,
@@ -172,14 +245,14 @@ final class Writer {
   /// Used by [Transaction.execute] (the enclosing transaction holds the
   /// lock from BEGIN through COMMIT) and by [execute], which takes the
   /// lock around this send.
-  Future<ExecuteResponse> executeInTransaction(
+  Future<ExecuteResponse> executeLocked(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
     assert(
       _mutex.isLocked,
-      'executeInTransaction requires the writer lock to be held',
+      'executeLocked requires the writer lock to be held',
     );
     return _request<ExecuteResponse>(
       (replyPort) => ExecuteRequest(
@@ -192,15 +265,15 @@ final class Writer {
   }
 
   /// Sends a batch write while the writer lock is already held.
-  /// See [executeInTransaction].
-  Future<BatchResponse?> executeBatchInTransaction(
+  /// See [executeLocked].
+  Future<BatchResponse?> executeBatchLocked(
     String sql,
     List<List<Object?>> paramSets, {
     int? traceCorrelationId,
   }) {
     assert(
       _mutex.isLocked,
-      'executeBatchInTransaction requires the writer lock to be held',
+      'executeBatchLocked requires the writer lock to be held',
     );
     // Empty batch is a no-op — short-circuit so we don't pay for an
     // isolate round-trip on empty input.
@@ -225,15 +298,12 @@ final class Writer {
   /// Transaction-scoped read on the writer connection, so it sees
   /// uncommitted writes from earlier statements in the same transaction.
   /// The enclosing transaction holds the writer lock.
-  Future<QueryResponse> selectInTransaction(
+  Future<QueryResponse> selectLocked(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    assert(
-      _mutex.isLocked,
-      'selectInTransaction requires the writer lock to be held',
-    );
+    assert(_mutex.isLocked, 'selectLocked requires the writer lock to be held');
     return _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,
@@ -327,4 +397,18 @@ final class Writer {
     });
     _replyPort.close();
   }
+}
+
+/// A buffered standalone write plus the caller's completer.
+final class _PendingWrite {
+  _PendingWrite(
+    this.sql,
+    this.parameters,
+    this.traceCorrelationId,
+    this.completer,
+  );
+  final String sql;
+  final List<Object?> parameters;
+  final int? traceCorrelationId;
+  final Completer<ExecuteResponse> completer;
 }

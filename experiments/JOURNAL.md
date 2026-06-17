@@ -235,6 +235,36 @@ elevated, re-run order-flipped before treating the flag as real — and
 before burning an ablation pass on a mechanism the workload may not even
 exercise.*
 
+[Exp 177](177-ab-drift-discriminator.md) turned this check into a tool:
+`benchmark/ab_drift_check.dart` (over `cvPct` + `classifyDriftFlag` in
+`benchmark/shared/stats.dart`) takes two order-flipped passes of per-run
+values and classifies the flag as `reproduced` / `drift-suspected` /
+`inconclusive` by exactly this rule (CV asymmetry, then sign reversal).
+Prefer citing its verdict over re-deriving the reasoning by hand; it
+reproduces the manual exp 159 (CV asymmetry) and exp 167 (sign reversal)
+decisions. It interprets the order-flipped pass — it does not replace
+running it.
+
+### A guard against the wrong value often leaves the missing value silent
+
+The experiment->chart pipeline had a build-time guard for the *wrong-file*
+case — [exp 109](109-inline-param-buffer.md)'s chart mixup, where an Accepted
+experiment linked a baseline-shaped run while a candidate existed, caught by
+`_assertAcceptedExperimentsLinkToCandidates`. But the more common
+*missing-file* case — an experiment with **no** linked run and no declaration
+of that absence — passed silently, even though the skill warns it makes the
+experiment "invisible on the chart." [Exp 178](178-missing-run-declaration-guard.md)
+found that ~17 of 23 chartable null-run experiments were silently unmapped, and
+added the symmetric guard: an absence is only acceptable if it is *declared*
+(here, a `**Benchmark Run:**` opt-out header), otherwise it is a forgotten
+artifact and fails the build.
+
+*Reapplies whenever a guardrail validates that a present value is correct.
+Ask the symmetric question: what happens when the value is absent entirely? If
+"absent" and "deliberately none" look identical to the checker, a forgotten
+artifact is indistinguishable from an intentional opt-out — add a required
+declaration so the two diverge.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
