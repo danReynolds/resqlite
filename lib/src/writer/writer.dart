@@ -50,15 +50,8 @@ final class Writer {
   // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
-  // exp 180 — cross-call request batching under backpressure. Standalone
-  // execute() calls are buffered here and drained by [_pumpExecGroup]: an idle
-  // pump sends the first write immediately (one statement, no added latency),
-  // and any writes that arrive while that send's reply is in flight are
-  // coalesced into one MultiExecuteRequest on the next pump iteration. So a
-  // concurrent burst collapses to ~2 round-trips instead of N, while
-  // sequential awaited writes pay exactly the baseline's single lock hop. Each
-  // statement still runs as its own autocommit on the worker, so per-call
-  // success/failure is unchanged from sending them individually.
+  // Standalone writes buffered for cross-call batching (exp 180); drained by
+  // [_pumpExecGroup], which owns the coalescing logic.
   final List<_PendingExecute> _execGroup = <_PendingExecute>[];
   bool _pumping = false;
 
@@ -129,23 +122,15 @@ final class Writer {
     }
   }
 
-  /// Runs a standalone write, holding the writer lock only for the send.
-  ///
-  /// The lock is released as soon as the request is on the worker's port:
-  /// the port FIFO guarantees the write is fully processed (at txDepth 0,
-  /// including its dirty-set harvest) before any later-sent BEGIN opens a
-  /// transaction, so exclusivity across the reply round-trip adds nothing.
-  /// Releasing early lets a subsequent write or transaction overlap its
-  /// send with this write's worker-side execution and reply scheduling.
+  /// Runs a standalone write. Buffers into the coalescing pump
+  /// ([_pumpExecGroup]) so a concurrent burst collapses to ~2 isolate
+  /// round-trips instead of N (exp 180); profile mode sends per-call so
+  /// Tracelite correlation ids stay intact.
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    // Profile mode keeps the per-call send so Tracelite correlation ids and
-    // per-write spans stay intact; coalescing (exp 180) is the release shape.
-    // Profile mode keeps the per-call send so Tracelite correlation ids and
-    // per-write spans stay intact; coalescing (exp 180) is the release shape.
     if (kProfileMode) {
       return _executeSingle(sql, parameters, traceCorrelationId);
     }
@@ -246,11 +231,9 @@ final class Writer {
             }
           }
         } on Object catch (error) {
-          // Any failure — a closed database, a synchronous send error, or a
-          // group-level reply error — fails the group's still-pending callers
-          // rather than leaving them hung. Per-statement errors inside a
-          // successful group reply are completed individually above and the
-          // group never reaches here.
+          // A closed db, a synchronous send error, or a group-level reply
+          // failure fails the group's still-pending callers rather than
+          // hanging them. (Per-statement errors complete individually above.)
           for (final p in group) {
             if (!p.completer.isCompleted) {
               p.completer.completeError(error);
@@ -450,9 +433,8 @@ final class Writer {
   }
 }
 
-/// A standalone write buffered for cross-call batching (exp 180). Holds the
-/// caller's completer so [Writer._flushExecGroup] can resolve it from the
-/// coalesced reply with this statement's own [ExecuteResponse] (or error).
+/// A buffered standalone write: its SQL/params plus the caller's completer,
+/// which [Writer._pumpExecGroup] resolves from the coalesced reply.
 final class _PendingExecute {
   _PendingExecute(this.sql, this.parameters, this.completer);
   final String sql;

@@ -3,12 +3,11 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
-/// Coverage for exp 180 cross-call request batching: standalone execute()
-/// calls issued in the same event-loop turn are coalesced into one
-/// MultiExecuteRequest and run as independent autocommits on the worker.
-/// These tests pin the behavior that must stay identical to sending each
-/// write individually — correct per-call results, per-statement failure
-/// isolation, and stream invalidation.
+/// Coverage for exp 180 cross-call request batching: concurrently-issued
+/// standalone execute() calls are coalesced into one MultiExecuteRequest and
+/// run as independent autocommits on the worker. These tests pin the behavior
+/// that must stay identical to sending each write individually — correct
+/// per-call results, per-statement failure isolation, and stream invalidation.
 void main() {
   group('write coalescing (exp 180)', () {
     late Directory tempDir;
