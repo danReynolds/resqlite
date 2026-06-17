@@ -7,7 +7,6 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -50,8 +49,8 @@ final class Writer {
   // worker's port FIFO already orders them against any later BEGIN.
   final _mutex = Mutex();
 
-  // Standalone writes buffered for cross-call batching (exp 180); drained by
-  // [_drainPendingWrites], which owns the coalescing logic.
+  // Standalone writes buffered for coalescing (exp 180); drained by
+  // [_drainPendingWrites].
   final List<_PendingWrite> _pendingWrites = <_PendingWrite>[];
   bool _draining = false;
 
@@ -124,59 +123,32 @@ final class Writer {
     }
   }
 
-  /// Runs a standalone write. Buffers into the coalescing pump
+  /// Runs a standalone write through the coalescing pump
   /// ([_drainPendingWrites]) so a concurrent burst collapses to ~2 isolate
-  /// round-trips instead of N (exp 180); profile mode sends per-call so
-  /// Tracelite correlation ids stay intact.
+  /// round-trips instead of N (exp 180).
   Future<ExecuteResponse> execute(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
-    if (kProfileMode) {
-      return _executeSingle(sql, parameters, traceCorrelationId);
-    }
     if (_closed) {
       return Future.error(ResqliteConnectionException.databaseClosed());
     }
     final completer = Completer<ExecuteResponse>.sync();
-    _pendingWrites.add(_PendingWrite(sql, parameters, completer));
+    _pendingWrites.add(
+      _PendingWrite(sql, parameters, traceCorrelationId, completer),
+    );
     if (!_draining) _drainPendingWrites();
     return completer.future;
   }
 
-  /// Pre-exp-180 single-send path: takes the lock around the send and returns
-  /// the reply future directly. Used only in profile mode.
-  Future<ExecuteResponse> _executeSingle(
-    String sql,
-    List<Object?> parameters,
-    int? traceCorrelationId,
-  ) async {
-    await _mutex.lock();
-    final Future<ExecuteResponse> reply;
-    try {
-      _ensureOpen();
-      reply = executeLocked(sql, parameters, traceCorrelationId);
-    } finally {
-      _mutex.unlock();
-    }
-    return reply;
-  }
-
-  /// Drains [_pendingWrites] under backpressure, one send per iteration.
+  /// Drains [_pendingWrites] under backpressure: each iteration sends what's
+  /// buffered, then awaits the reply — and the await is the coalescing window,
+  /// during which concurrent writes pile up and go out together next pass.
   ///
-  /// Each iteration sends whatever is currently buffered — a lone write as a
-  /// plain [ExecuteRequest] (no added latency vs the pre-exp-180 path), or
-  /// several as one [MultiExecuteRequest] — then *awaits the reply before the
-  /// next iteration*. That await is the coalescing window: concurrent
-  /// `execute()` calls arriving while a send is in flight pile into
-  /// [_pendingWrites] and go out together on the next pass. A tight sequential
-  /// `await db.execute()` loop keeps one write in flight at a time, so it pays
-  /// exactly the baseline's single lock hop and never batches.
-  ///
-  /// The lock is held only across each send (ordering the group against any
-  /// concurrent transaction/batch via the worker port FIFO) and released
-  /// before the reply round-trip, mirroring [_executeSingle].
+  /// The lock is held only across each send (ordering the group against a
+  /// concurrent transaction/batch via the worker FIFO), released before the
+  /// reply.
   Future<void> _drainPendingWrites() async {
     _draining = true;
     try {
@@ -190,12 +162,15 @@ final class Writer {
           await _mutex.lock();
           try {
             _ensureOpen();
-            // A lone write goes as a plain ExecuteRequest — same lean path as
-            // a non-batched send; only a genuine pile-up pays the multi wrapper.
             if (group.length == 1) {
               final p = group.first;
               singleReply = _request<ExecuteResponse>(
-                (replyPort) => ExecuteRequest(p.sql, p.parameters, replyPort),
+                (replyPort) => ExecuteRequest(
+                  p.sql,
+                  p.parameters,
+                  replyPort,
+                  traceCorrelationId: p.traceCorrelationId,
+                ),
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
@@ -228,9 +203,8 @@ final class Writer {
             }
           }
         } catch (error) {
-          // A closed db, a synchronous send error, or a group-level reply
-          // failure fails the group's still-pending callers rather than
-          // hanging them. (Per-statement errors complete individually above.)
+          // Fail the group's still-pending callers on any send/reply failure
+          // rather than hang them. (Per-statement errors complete above.)
           for (final p in group) {
             if (!p.completer.isCompleted) {
               p.completer.completeError(error);
@@ -425,11 +399,16 @@ final class Writer {
   }
 }
 
-/// A buffered standalone write: its SQL/params plus the caller's completer,
-/// which [Writer._drainPendingWrites] resolves from the coalesced reply.
+/// A buffered standalone write plus the caller's completer.
 final class _PendingWrite {
-  _PendingWrite(this.sql, this.parameters, this.completer);
+  _PendingWrite(
+    this.sql,
+    this.parameters,
+    this.traceCorrelationId,
+    this.completer,
+  );
   final String sql;
   final List<Object?> parameters;
+  final int? traceCorrelationId;
   final Completer<ExecuteResponse> completer;
 }
