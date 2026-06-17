@@ -431,6 +431,34 @@ external void resqliteReaderSetBusy(
   int busy,
 );
 
+/// Sum of every reader's persistent `json_buf.cap`
+/// ([EXP-183](../../../experiments/183-json-buf-retention-audit.md)).
+/// Quantifies the bounded RSS high-water `selectBytes` retains after
+/// exp 174 stopped sacrificing readers on the bytes path.
+@ffi.Native<ffi.Int64 Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_reader_json_buf_total',
+  isLeaf: true,
+)
+external int resqliteReaderJsonBufTotal(ffi.Pointer<ffi.Void> db);
+
+/// High-threshold reclaim for the reader's persistent `json_buf`
+/// ([EXP-183](../../../experiments/183-json-buf-retention-audit.md)).
+/// Called by the reader worker AFTER `eventPort.send` returns on a
+/// `selectBytes` reply — by then `SendPort` has snapshotted the bytes
+/// into the receiver, so the native buffer can be realloc'd. Shrinks
+/// only when the buffer is much larger than the last produced result
+/// (1 MB cap threshold, 256 KB last-len guard) so back-to-back large
+/// reads don't churn realloc. Returns the post-call capacity.
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int, ffi.Int)>(
+  symbol: 'resqlite_reader_maybe_shrink_json_buf',
+  isLeaf: true,
+)
+external int resqliteReaderMaybeShrinkJsonBuf(
+  ffi.Pointer<ffi.Void> db,
+  int readerId,
+  int lastUsedLen,
+);
+
 /// Per-worker persistent buffer for read-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte
 /// calloc/free pair per stream subscription

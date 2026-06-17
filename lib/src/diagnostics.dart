@@ -19,6 +19,7 @@ final class Diagnostics {
     required this.readersBusyAtSnapshot,
     required this.streamLength,
     required this.unknownDependencyFallbackCount,
+    required this.readerJsonBufHighWaterBytes,
   });
 
   /// Total bytes used by the SQLite page cache across the writer and
@@ -84,6 +85,24 @@ final class Diagnostics {
   /// since the database was opened.
   final int unknownDependencyFallbackCount;
 
+  /// Sum of every reader's persistent `json_buf` capacity in bytes
+  /// ([EXP-183](../../experiments/183-json-buf-retention-audit.md)).
+  ///
+  /// Each reader's `json_buf` backs [Database.selectBytes] and grows via
+  /// `realloc`-doubling to fit the largest result the reader has
+  /// produced. After exp 174 stopped sacrificing readers on the bytes
+  /// path, the buffer never shrinks for the lifetime of the connection,
+  /// so this counter is the high-water mark of `selectBytes`-driven
+  /// native RSS retention.
+  ///
+  /// A bounded, expected number for steady-state workloads (one warm
+  /// buffer per reader, sized to the largest payload). A surprise spike
+  /// after a one-off oversized `selectBytes` call means subsequent
+  /// readers still hold that capacity even though they no longer need
+  /// it — at which point a future memory-reclaim mechanism (e.g., a
+  /// high-threshold C-side shrink) is the right remediation.
+  final int readerJsonBufHighWaterBytes;
+
   @override
   String toString() =>
       'Diagnostics('
@@ -91,6 +110,7 @@ final class Diagnostics {
       'schema: $sqliteSchemaBytes B, '
       'stmt: $sqliteStmtBytes B, '
       'wal: $walBytes B, '
+      'jsonBuf: $readerJsonBufHighWaterBytes B, '
       'streams: $streamLength, '
       'unknownDepsFallbacks: $unknownDependencyFallbackCount'
       '${readersBusyAtSnapshot ? ', readersBusy: true' : ''}'

@@ -579,6 +579,10 @@ final class Database {
     }
 
     final _DatabaseRuntime(:streamEngine) = await _runtime;
+    // [EXP-183] Per-reader json_buf high-water. Safe to call concurrently
+    // with reader activity: each reader's cap is an int and tearing only
+    // widens an already-bounded summary number, fine for a diagnostic.
+    final jsonBufTotal = resqliteReaderJsonBufTotal(_handle);
     return Diagnostics(
       sqlitePageCacheBytes: pageCache,
       sqliteSchemaBytes: schema,
@@ -587,6 +591,7 @@ final class Database {
       readersBusyAtSnapshot: readersBusy,
       streamLength: streamEngine.length,
       unknownDependencyFallbackCount: streamEngine.unknownDependencyFallbackCount,
+      readerJsonBufHighWaterBytes: jsonBufTotal,
     );
   }
 }
