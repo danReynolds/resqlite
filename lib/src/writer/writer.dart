@@ -55,13 +55,13 @@ final class Writer {
   final List<_PendingWrite> _pendingWrites = <_PendingWrite>[];
   bool _draining = false;
 
-  Writer(this._streamEngine);
+  Writer._(this._streamEngine);
 
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
   ) async {
-    final writer = Writer(streamEngine);
+    final writer = Writer._(streamEngine);
 
     final handshake = Completer<SendPort>();
     final receivePort = ReceivePort();
@@ -102,7 +102,7 @@ final class Writer {
   Future<T> _request<T>(WriterRequest Function(SendPort replyPort) build) {
     final sendPort = _sendPort;
     if (sendPort == null) {
-      throw ResqliteConnectionException('Database is closed.');
+      throw ResqliteConnectionException.databaseClosed();
     }
     final completer = Completer<T>.sync();
     _pending.addLast(completer);
@@ -110,11 +110,8 @@ final class Writer {
     return completer.future;
   }
 
-  ResqliteConnectionException _closedError() =>
-      ResqliteConnectionException('Database is closed.');
-
   void _ensureOpen() {
-    if (_closed) throw _closedError();
+    if (_closed) throw ResqliteConnectionException.databaseClosed();
   }
 
   Future<T> locked<T>(Future<T> Function() body) async {
@@ -139,7 +136,9 @@ final class Writer {
     if (kProfileMode) {
       return _executeSingle(sql, parameters, traceCorrelationId);
     }
-    if (_closed) return Future.error(_closedError());
+    if (_closed) {
+      return Future.error(ResqliteConnectionException.databaseClosed());
+    }
     final completer = Completer<ExecuteResponse>.sync();
     _pendingWrites.add(_PendingWrite(sql, parameters, completer));
     if (!_draining) _drainPendingWrites();
@@ -255,9 +254,7 @@ final class Writer {
     await _mutex.lock();
     final Future<BatchResponse?> reply;
     try {
-      if (_closed) {
-        throw ResqliteConnectionException('Database is closed.');
-      }
+      _ensureOpen();
       reply = executeBatchLocked(
         sql,
         paramSets,
