@@ -201,63 +201,60 @@ final class Writer {
         final group = List<_PendingExecute>.of(_execGroup);
         _execGroup.clear();
 
-        Future<ExecuteResponse>? singleReply;
-        Future<MultiExecuteResponse>? groupReply;
-        await _mutex.lock();
         try {
-          if (_closed) {
-            final err = ResqliteConnectionException('Database is closed.');
-            for (final p in group) {
-              p.completer.completeError(err);
-            }
-            continue;
-          }
-          if (group.length == 1) {
-            singleReply = executeInTransaction(
-              group.first.sql,
-              group.first.parameters,
-            );
-          } else {
-            groupReply = _request<MultiExecuteResponse>(
-              (replyPort) => MultiExecuteRequest(
-                [for (final p in group) p.sql],
-                [for (final p in group) p.parameters],
-                replyPort,
-              ),
-            );
-          }
-        } finally {
-          _mutex.unlock();
-        }
-
-        if (singleReply != null) {
+          Future<ExecuteResponse>? singleReply;
+          Future<MultiExecuteResponse>? groupReply;
+          await _mutex.lock();
           try {
-            group.first.completer.complete(await singleReply);
-          } on Object catch (e) {
-            group.first.completer.completeError(e);
-          }
-          continue;
-        }
-
-        try {
-          final outcomes = (await groupReply!).outcomes;
-          for (var i = 0; i < group.length; i++) {
-            final outcome = outcomes[i];
-            if (outcome is ExecuteResponse) {
-              group[i].completer.complete(outcome);
-            } else if (outcome is ResqliteException) {
-              group[i].completer.completeError(outcome);
+            if (_closed) {
+              throw ResqliteConnectionException('Database is closed.');
+            }
+            if (group.length == 1) {
+              singleReply = executeInTransaction(
+                group.first.sql,
+                group.first.parameters,
+              );
             } else {
-              group[i].completer.completeError(
-                ResqliteException('Internal writer error: missing outcome'),
+              groupReply = _request<MultiExecuteResponse>(
+                (replyPort) => MultiExecuteRequest(
+                  [for (final p in group) p.sql],
+                  [for (final p in group) p.parameters],
+                  replyPort,
+                ),
               );
             }
+          } finally {
+            _mutex.unlock();
           }
-        } on Object catch (e) {
-          // A group-level failure (a non-ResqliteException Error escaped the
-          // worker handler) fails every caller in the group.
+
+          // Distribute outside the lock — the reply round-trip pipelines.
+          if (singleReply != null) {
+            group.first.completer.complete(await singleReply);
+          } else {
+            final outcomes = (await groupReply!).outcomes;
+            for (var i = 0; i < group.length; i++) {
+              final outcome = outcomes[i];
+              if (outcome is ExecuteResponse) {
+                group[i].completer.complete(outcome);
+              } else if (outcome is ResqliteException) {
+                group[i].completer.completeError(outcome);
+              } else {
+                group[i].completer.completeError(
+                  ResqliteException('Internal writer error: missing outcome'),
+                );
+              }
+            }
+          }
+        } on Object catch (error) {
+          // Any failure — a closed database, a synchronous send error, or a
+          // group-level reply error — fails the group's still-pending callers
+          // rather than leaving them hung. Per-statement errors inside a
+          // successful group reply are completed individually above and the
+          // group never reaches here.
           for (final p in group) {
-            p.completer.completeError(e);
+            if (!p.completer.isCompleted) {
+              p.completer.completeError(error);
+            }
           }
         }
       }
