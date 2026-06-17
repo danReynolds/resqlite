@@ -24,6 +24,7 @@ Current experiments:
 - [pool_vs_exit.dart](pool_vs_exit.dart)
 - [row_map_facade.dart](row_map_facade.dart)
 - [resultset_foreach_consumer.dart](resultset_foreach_consumer.dart)
+- [single_stream_long_payload_hash.dart](single_stream_long_payload_hash.dart)
 - [stream_scheduler.dart](stream_scheduler.dart)
 
 Use these when tuning internals, not when producing the headline package comparison.

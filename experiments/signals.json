@@ -81,8 +81,8 @@
       "id": "long-text-stream-hashing",
       "status": "settled",
       "subsystems": ["streaming", "hashing", "text"],
-      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have three representative unchanged-fanout benchmarks: exp 110's 4 KB TEXT shape, exp 172's mixed 32 KB TEXT + 32 KB BLOB row (3.446 ms median beside the 4 KB row's 2.356 ms, with long-BLOB hash correctness coverage), and exp 173's 32 KB long-text shape. Exp 173 closed the open ≥ 32 KB candidate by running an unrolled 16-byte FNV body against the new workload: two order-flipped passes showed +4.5 % and +12.1 % vs the exp 110 8-byte body, slight regressions inside a 2.6 → 6.0 ms per-pass spread. With the pool-of-4 reader fleet parallelising work across streams, the byte-stream fold is at most ~50 % of wall on the 32 KB shape, so further loop-overhead variants are below noise. Future hash work needs a workload that isolates the hash loop further (single-stream long-payload, direct-FFI microbenchmark); the mixed BLOB/TEXT shape now exists (exp 172) but has not exposed new hash-loop headroom.",
-      "keyPriors": ["075", "099", "110", "172", "173"],
+      "currentRead": "Native hashing is valuable, and long TEXT/BLOB cells now have four representative unchanged-fanout signals: exp 110's 4 KB TEXT shape, exp 172's mixed 32 KB TEXT + 32 KB BLOB release row, exp 173's 32 KB long-text focused harness, and exp 181's one-reader single-stream 64 KB TEXT + 64 KB BLOB harness. Exp 173 showed the unrolled 16-byte FNV body was +4.5% and +12.1% versus exp 110's 8-byte fold on the pool-of-4 32 KB fanout; exp 181 removed reader-pool parallelism and still measured flat across an order-flipped pair (baseline 2.771/2.777 ms, candidate 2.763/2.792 ms). The 8-byte fold remains the correct implementation. Further FNV loop unrolling is settled off unless a production profile or direct resqlite_query_hash microbenchmark proves the byte fold itself, not SQLite value access, reader dispatch, or reply delivery, is again dominant.",
+      "keyPriors": ["075", "099", "110", "172", "173", "181"],
       "archive": ["033"],
       "interestingIf": [
         "a production profile shows long TEXT/BLOB stream hashing remains hot after chunked folding",
@@ -92,17 +92,11 @@
       "openQuestions": [
         "What text and blob sizes appear in realistic stream workloads?",
         "If long-payload unchanged fanout becomes hot again, does the remaining cost sit in hashing, SQLite value access, Dart decode, or result delivery?",
-        "Does a single-stream long-payload shape expose hash-loop overhead that the parallel reader pool currently hides?"
+        "Would a direct resqlite_query_hash microbenchmark show loop-only headroom, and would that translate back to a public stream workload?"
       ],
-      "openCandidates": [
-        {
-          "idea": "single-stream long-payload microbenchmark that bypasses the reader-pool parallelism",
-          "addedDate": "2026-06-15",
-          "addedAfter": "173"
-        }
-      ],
+      "openCandidates": [],
       "blockedOnMeasurement": [],
-      "notesForExperimenters": "Use the long-payload streaming rows before trying another hash-loop change: exp 110's 4 KB TEXT row, exp 172's mixed 32 KB TEXT + 32 KB BLOB row, and exp 173's 32 KB long-text row (`Long-Text 32KB Unchanged Fanout` in streaming.dart, or the focused `benchmark/experiments/long_text_32kb_hash.dart` harness). The 8-byte fold (exp 110) and 16-byte fold (exp 173) have both been tried; further unrolling variants are not worth a pass on the current workload shape because the byte-stream fold is not the dominant wall component under the pool-of-4 reader fleet. Reopen implementation only with a workload that isolates the hash loop (single-stream long-payload) or a production profile."
+      "notesForExperimenters": "Use the long-payload streaming rows before trying another hash-loop change: exp 110's 4 KB TEXT row, exp 172's mixed 32 KB TEXT + 32 KB BLOB row, exp 173's 32 KB long-text row (`Long-Text 32KB Unchanged Fanout` in streaming.dart, or `benchmark/experiments/long_text_32kb_hash.dart`), and exp 181's one-reader `benchmark/experiments/single_stream_long_payload_hash.dart` harness. The 8-byte fold (exp 110) and 16-byte fold (exp 173/181) have both been tried; further unrolling variants are not worth a pass on current public stream workloads. Reopen only with a production profile or direct hash microbenchmark that proves the byte fold is again the dominant cost."
     },
     {
       "id": "sqlite-version-and-build-config",
@@ -869,6 +863,20 @@
       "nextSignals": [
         "do not re-test single-row allocateParams direct encoding again without a representative large-single-row-ASCII-text-bind workload where the round-trip/result cost no longer hides the encoder; the encoder mechanism is now measured and settled (see single_row_param_packing.dart)",
         "implementation preserved at archive/exp-179 for cherry-pick if such a workload appears"
+      ]
+    },
+    "181": {
+      "directions": ["long-text-stream-hashing"],
+      "outcomeClass": "rejected_no_signal",
+      "changedBeliefs": [
+        "The single-stream open candidate from exp 173 has been consumed: benchmark/experiments/single_stream_long_payload_hash.dart uses an internal one-reader runtime so one unchanged stream hashes 64 rows x 64 KB TEXT + 64 KB BLOB (~8 MB) before a queued COUNT(*) barrier can emit",
+        "Removing reader-pool parallelism did not reveal a 16-byte FNV win. Across an order-flipped pair, baseline medians were 2.771 / 2.777 ms and candidate medians were 2.763 / 2.792 ms (-0.3% / +0.5%), with overlapping ranges",
+        "The exp 110 8-byte FNV body remains the correct implementation. The exp 173 16-byte unroll is now rejected under both pooled fanout and single-stream long-payload public stream shapes"
+      ],
+      "nextSignals": [
+        "do not retry FNV loop unrolling on the existing long-text, long-payload, or single-stream public stream workloads",
+        "if long-payload unchanged hashing becomes hot again, use a direct resqlite_query_hash microbenchmark or production profile to split SQLite value access, hashing, reader dispatch, and reply delivery before implementing another hash-loop variant",
+        "the one-reader harness is a measurement tool only; it is not evidence for a public Database.open reader-count option"
       ]
     }
   }

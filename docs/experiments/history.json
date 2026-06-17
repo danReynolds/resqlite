@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-16T16:22:55.721547",
+  "generated": "2026-06-17T06:13:01.521361",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -18544,19 +18544,6 @@
       "reasoning": "Eliminated the concurrent read weakness completely. resqlite now beats sqlite_async at every concurrency level. The C pool also enabled per-reader statement caches, improving cache hit rates under concurrent workloads."
     },
     {
-      "id": "008b",
-      "title": "Byte-backed lazy maps",
-      "date": "2026-04-06",
-      "status": "rejected",
-      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
-      "commit": null,
-      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
-      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
-      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
-      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
-      "reasoning": null
-    },
-    {
       "id": "008",
       "title": "Flat value list + lazy ResultSet",
       "date": "2026-04-06",
@@ -18568,6 +18555,19 @@
       "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
       "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
       "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
+    },
+    {
+      "id": "008b",
+      "title": "Byte-backed lazy maps",
+      "date": "2026-04-06",
+      "status": "rejected",
+      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
+      "commit": null,
+      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
+      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
+      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
+      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
+      "reasoning": null
     },
     {
       "id": "009",
@@ -20823,6 +20823,19 @@
         "timestamp": "2026-06-16T15:30:06",
         "source": "exact"
       }
+    },
+    {
+      "id": "181",
+      "title": "Single-stream long-payload hash",
+      "date": "2026-06-17",
+      "status": "rejected",
+      "summary": "Added a focused one-reader harness that removes exp 173's eight-stream reader-pool parallelism: one unchanged stream hashes 64 rows x 64 KB TEXT + 64 KB BLOB (~8 MB) before a queued `COUNT(*)` barrier can emit. Re-tested the 16-byte FNV fold against the exp 110 8-byte body across an order-flipped pair. Baseline medians were 2.771 / 2.777 ms; candidate medians were 2.763 / 2.792 ms (-0.3% / +0.5%), with fully overlapping ranges. Rejected: even isolated to one stream, loop unrolling is invisible on the public stream path. Native C reverted; focused harness retained.",
+      "commit": null,
+      "problem": "Exp 110 accepted the 8-byte FNV byte-stream fold after the new 4 KB long-text\nunchanged-fanout row showed a clear win over byte-at-a-time hashing. Exp 173\nthen tested a 16-byte unrolled fold against a 32 KB long-text workload and\nrejected it: the candidate measured +4.5% and +12.1% versus the 8-byte body\nacross order-flipped passes.\n\nThe remaining uncertainty was whether exp 173 hid hash-loop overhead by\nparallelizing eight unchanged streams across the normal reader pool. The signal\nmap left one explicit candidate: build a single-stream long-payload benchmark\nthat bypasses reader-pool parallelism, then use it to decide whether the\n16-byte fold has any isolated public-API workload signal.",
+      "hypothesis": "If the pool-of-4 fanout was masking the loop-control cost, a one-reader,\none-unchanged-stream workload should make the byte-stream fold more dominant.\nUnder that shape, the exp 173 16-byte fold might finally show a stable win over\nthe exp 110 8-byte body.\n\nAcceptance criterion: the 16-byte fold must improve the focused single-stream\nharness across an order-flipped A/B pair. Reject if the medians overlap or the\neffect changes sign, because the public stream path still cannot see the loop\nunroll.",
+      "approach": "Added `benchmark/experiments/single_stream_long_payload_hash.dart`.\n\nThe harness uses internal runtime pieces so it can force a one-reader stream\nengine without changing the public API:\n\n- opens a native database with one reader;\n- registers one unchanged stream selecting 64 rows of 64 KB ASCII TEXT plus\n  64 KB BLOB, about 8 MB hashed serially per invalidation;\n- registers a cheap `COUNT(*)` barrier stream after the long stream;\n- inserts a row outside the long stream predicate and waits for the barrier's\n  second emission, which can only happen after the one reader finishes the long\n  unchanged hash pass.\n\nThen re-tested the exp 173 16-byte candidate in `fnv_combine_bytes`:\n\n```c\nfor (; i + 16 <= len; i += 16) {\n  uint64_t w0, w1;\n  memcpy(&w0, b + i, 8);\n  memcpy(&w1, b + i + 8, 8);\n...",
+      "results": "Focused harness, 2 warmup + 9 measured rounds per side.\n\n| Pass | Order | Baseline 8-byte median | Candidate 16-byte median | Delta |\n|---|---|---:|---:|---:|\n| 1 | baseline first | 2.771 ms | 2.763 ms | -0.3% |\n| 2 | candidate first | 2.777 ms | 2.792 ms | +0.5% |\n\nMeasured ranges:\n\n| Side | Median | p90 | Min | Max |\n|---|---:|---:|---:|---:|\n| Baseline pass 1 | 2.771 ms | 3.150 ms | 2.636 ms | 3.150 ms |\n| Candidate pass 1 | 2.763 ms | 3.066 ms | 2.659 ms | 3.066 ms |\n| Candidate pass 2 | 2.792 ms | 3.015 ms | 2.642 ms | 3.015 ms |\n| Baseline pass 2 | 2.777 ms | 2.974 ms | 2.655 ms | 2.974 ms |\n\nThe candidate is indistinguishable from the baseline. Removing reader-pool\nparallelism did not make the 16-byte loop body visible.",
+      "reasoning": "Rejected. The single-stream workload consumed the remaining open candidate and\nrefuted the premise that reader-pool parallelism was hiding a mergeable 16-byte\nFNV win.\n\nThe 8-byte fold from exp 110 remains the right implementation. The 16-byte body\nwas reverted from `native/resqlite.c`; the harness is retained so a future\nrunner can recheck this path if a production profile makes long-payload\nunchanged hashing hot again."
     }
   ],
   "tracked": [
