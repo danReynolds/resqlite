@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-18T14:57:33.748322",
+  "generated": "2026-06-18T19:03:17.805127",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -1431,7 +1431,7 @@
           "date": "2026-04-08",
           "status": "rejected",
           "summary": "Mixed and workload-specific; only compelling when the payload is already serialized as JSON",
-          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/031-worker-side-hash.md"
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/031-json1-bulk-shapes.md"
         },
         {
           "id": "030",
