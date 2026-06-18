@@ -90,9 +90,8 @@
     }
     .exp:hover { border-color: var(--accent); }
     .exp .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-    .exp.accepted .dot { background: var(--green); }
+    .exp.landed .dot { background: var(--green); }
     .exp.rejected .dot { background: var(--red); }
-    .exp.other .dot { background: var(--muted); }
     .exp .eid { color: var(--muted); font-variant-numeric: tabular-nums; }
     .exp-meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.55rem; }
 
@@ -114,6 +113,7 @@
       padding: 0 0.3rem; margin-left: 0.4rem; vertical-align: middle;
     }
     .delta-note { color: var(--muted); font-size: 0.74rem; margin-top: 0.5rem; font-style: italic; }
+    .delta-other { color: var(--muted); font-size: 0.82rem; margin-top: 0.2rem; }
     .no-delta { color: var(--muted); font-size: 0.82rem; font-style: italic; }
 
     footer { text-align: center; padding: 2rem; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
@@ -209,19 +209,26 @@
       return { cls: improved ? 'up' : 'down', txt, tag: null };
     }
 
+    // On a published release, an experiment either landed (its work is in the
+    // repo as of this version) or was rejected (explored and reverted). The
+    // raw history.json "in_review" status is stale for shipped versions, so we
+    // collapse non-rejected to "landed".
+    const expClass = (status) => status === 'rejected' ? 'rejected' : 'landed';
     function renderExperiments(exps) {
       if (!exps.length) return '';
-      const acc = exps.filter(e => e.status === 'accepted').length;
-      const rej = exps.filter(e => e.status === 'rejected').length;
+      const rejected = exps.filter(e => e.status === 'rejected').length;
+      const landed = exps.length - rejected;
+      const meta = [landed && `${landed} landed`, rejected && `${rejected} rejected`]
+        .filter(Boolean).join(' · ');
       const chips = exps.map(e => {
-        const cls = e.status === 'accepted' ? 'accepted' : e.status === 'rejected' ? 'rejected' : 'other';
+        const cls = expClass(e.status);
         const inner = `<span class="dot"></span><span class="eid">#${e.id}</span> ${esc(e.title)}`;
         return e.url
           ? `<a class="exp ${cls}" href="${e.url}" target="_blank" rel="noopener" title="${esc(e.summary || '')}">${inner}</a>`
           : `<span class="exp ${cls}" title="${esc(e.summary || '')}">${inner}</span>`;
       }).join('');
       return `<div class="section-label">Experiments run · ${exps.length}</div>` +
-        `<div class="exp-meta">${acc} accepted · ${rej} rejected</div>` +
+        `<div class="exp-meta">${meta}</div>` +
         `<div class="exp-grid">${chips}</div>`;
     }
 
@@ -230,23 +237,33 @@
         return `<div class="section-label">Benchmark deltas</div>` +
           `<div class="no-delta">No same-machine comparison available for this version.</div>`;
       }
+      // Show only deltas that clear the significance bar on a non-noisy lane.
+      // Everything else is run-to-run noise and is summarized, not listed.
+      const real = deltas.filter(d => d.confidence === 'high');
+      const other = deltas.length - real.length;
       let html = `<div class="section-label">Benchmark deltas vs ${prevVersion}</div>`;
+      if (!real.length) {
+        html += `<div class="no-delta">No significant change — all ${deltas.length} measured metrics fell within the run-to-run noise floor.</div>`;
+        return html;
+      }
       for (const g of groups) {
-        const rows = deltas.filter(d => d.group === g);
+        const rows = real.filter(d => d.group === g);
         if (!rows.length) continue;
         html += `<div class="delta-group"><h4>${esc(g)}</h4><table class="deltas">`;
         for (const d of rows) {
           const v = deltaView(d);
-          const tag = v.tag ? `<span class="ntag">${v.tag}</span>` : '';
           const fmt = d.higherIsBetter ? (x) => Math.round(x).toLocaleString() : fmtMs;
           const unit = d.higherIsBetter ? ' qps' : ' ms';
           html += `<tr><td class="metric">${esc(d.label)}</td>` +
             `<td class="nums">${fmt(d.prev)} → ${fmt(d.cur)}${unit}</td>` +
-            `<td class="delta ${v.cls}">${v.txt}${tag}</td></tr>`;
+            `<td class="delta ${v.cls}">${v.txt}</td></tr>`;
         }
         html += `</table></div>`;
       }
-      html += `<div class="delta-note">Release-suite medians, same machine, best-effort local run. Colored deltas clear the suite's per-metric significance threshold on a non-noisy lane; “within noise” and “noisy lane” deltas are not reliable signal. Lower is better unless the metric says otherwise.</div>`;
+      if (other) {
+        html += `<div class="delta-other">${other} other metric${other === 1 ? '' : 's'}: no significant change</div>`;
+      }
+      html += `<div class="delta-note">Release-suite medians, same machine, best-effort local run. Only deltas clearing the suite's per-metric significance threshold and the cross-version drift floor on a non-noisy lane are shown; everything else is within run-to-run noise. Lower is better unless the metric says otherwise.</div>`;
       return html;
     }
 
