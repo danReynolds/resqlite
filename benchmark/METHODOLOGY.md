@@ -86,10 +86,11 @@ beyond the noise threshold.
 
 ### What we do NOT measure (yet)
 
-- **Memory over time** — only point-in-time RSS and SQLite internal counters.
-  RSS is reported in the `## Memory` section; SQLite internal counters are
-  reported in the resqlite-only `## SQLite Diagnostics` section, both as
-  snapshots rather than continuous traces.
+- **Memory over time** — only point-in-time RSS, SQLite internal counters, and
+  selectBytes `json_buf` high-water snapshots. RSS is reported in the
+  `## Memory` section; SQLite and `json_buf` counters are reported in the
+  resqlite-only `## SQLite Diagnostics` section, both as snapshots rather than
+  continuous traces.
 - **Battery impact** — requires device-level instrumentation; out of scope.
 - **Thermal throttling effects** — out of scope; users should be aware that
   long-running suites on M1 Pro can throttle after ~5 minutes under load.

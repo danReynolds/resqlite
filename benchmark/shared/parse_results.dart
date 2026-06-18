@@ -123,7 +123,8 @@ class MemoryMetric {
 ///
 /// Emitted by `suites/sqlite_diagnostics.dart` in the
 /// `## SQLite Diagnostics` section. Values are KiB except
-/// [readersBusy], which is 0/1.
+/// [readersBusy], which is 0/1. [jsonBufKiB] is nullable because
+/// benchmark files before exp 185 did not emit that column.
 class SqliteDiagnosticsMetric {
   SqliteDiagnosticsMetric({
     required this.sqliteTotalKiB,
@@ -131,6 +132,7 @@ class SqliteDiagnosticsMetric {
     required this.schemaKiB,
     required this.stmtKiB,
     required this.walKiB,
+    required this.jsonBufKiB,
     required this.readersBusy,
   });
 
@@ -139,6 +141,7 @@ class SqliteDiagnosticsMetric {
   final double schemaKiB;
   final double stmtKiB;
   final double walKiB;
+  final double? jsonBufKiB;
   final int readersBusy;
 }
 
@@ -247,12 +250,20 @@ Map<String, SqliteDiagnosticsMetric> extractSqliteDiagnosticsMedians(
       final schema = double.tryParse(parts[3]);
       final stmt = double.tryParse(parts[4]);
       final wal = double.tryParse(parts[5]);
-      final readersBusy = int.tryParse(parts[6]);
+      double? jsonBuf;
+      int? readersBusy;
+      if (parts.length >= 8) {
+        jsonBuf = double.tryParse(parts[6]);
+        readersBusy = int.tryParse(parts[7]);
+      } else {
+        readersBusy = int.tryParse(parts[6]);
+      }
       if (total == null ||
           pageCache == null ||
           schema == null ||
           stmt == null ||
           wal == null ||
+          (parts.length >= 8 && jsonBuf == null) ||
           readersBusy == null) {
         continue;
       }
@@ -265,6 +276,7 @@ Map<String, SqliteDiagnosticsMetric> extractSqliteDiagnosticsMedians(
         schemaKiB: schema,
         stmtKiB: stmt,
         walKiB: wal,
+        jsonBufKiB: jsonBuf,
         readersBusy: readersBusy,
       );
     }
