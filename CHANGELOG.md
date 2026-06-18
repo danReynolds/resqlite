@@ -11,17 +11,20 @@ reclaim of that memory after large-`selectBytes` bursts — bounding the RSS tra
 - **New API:** `Diagnostics.readerJsonBufHighWaterBytes` — the summed capacity of
   every reader isolate's native `json_buf`, making the read-buffer high-water mark
   directly observable. Surfaces workloads that pin large native buffers after big
-  `selectBytes` reads ([#183](https://github.com/danReynolds/resqlite/pull/183)).
+  `selectBytes` reads ([#183](https://github.com/danReynolds/resqlite/pull/183),
+  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).
 - **Behavior change:** a buffered group of `execute()` calls that races
   `Database.close()` is now atomic — every call in the group either flushes or is
   rejected, never the old lock-order-dependent partial outcome. It still never hangs,
-  and per-call success/failure semantics are unchanged ([#184](https://github.com/danReynolds/resqlite/pull/184)).
+  and per-call success/failure semantics are unchanged ([#184](https://github.com/danReynolds/resqlite/pull/184),
+  [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).
 - **Memory:** native read buffers that grow to serve a large `selectBytes` read now
   reclaim back to their initial capacity on the next small read, once a reader's
   `json_buf` exceeds 1 MB. A one-off concurrent burst of large reads (e.g. 8 × 8 MB)
   previously pinned tens of MB for the connection's lifetime; that high-water now
   settles back to ~64 KB. Warm large-read workloads keep their capacity (a 256 KB
-  last-read guard prevents shrink-then-regrow churn) ([#183](https://github.com/danReynolds/resqlite/pull/183)).
+  last-read guard prevents shrink-then-regrow churn) ([#183](https://github.com/danReynolds/resqlite/pull/183),
+  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).
 - **Performance.** See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/)
   for current cross-library numbers.
   - **Cross-call write batching (group commit)** — standalone `execute()` calls that
@@ -29,7 +32,8 @@ reclaim of that memory after large-`selectBytes` bursts — bounding the RSS tra
     request (each statement still its own autocommit), collapsing a concurrent
     burst's per-write round-trips toward two. −26% to −32% on the concurrent
     single-insert lane, on top of 0.5.0's pipelining; isolated and sequential writes
-    are unaffected ([#184](https://github.com/danReynolds/resqlite/pull/184)).
+    are unaffected ([#184](https://github.com/danReynolds/resqlite/pull/184),
+    [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).
 
 ## 0.5.0
 
