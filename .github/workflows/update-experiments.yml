@@ -14,6 +14,9 @@ on:
       - 'benchmark/generate_history.dart'
       - 'benchmark/generate_devices.dart'
       - 'benchmark/generate_blog.dart'
+      - 'benchmark/generate_releases.dart'
+      - 'benchmark/version_benchmarks.json'
+      - 'CHANGELOG.md'
       - 'doc/**/*.md'
 
 permissions:
@@ -42,6 +45,9 @@ jobs:
       - name: Generate blog pages
         run: dart run benchmark/generate_blog.dart
 
+      - name: Generate releases JSON
+        run: dart run benchmark/generate_releases.dart
+
       - name: Check for changes
         id: diff
         run: |
@@ -53,5 +59,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/
-          git commit -m "Auto-update docs (experiments + devices + blog)"
+          git commit -m "Auto-update docs (experiments + devices + blog + releases)"
           git push
