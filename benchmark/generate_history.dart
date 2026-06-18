@@ -252,6 +252,8 @@ Map<String, Object?> _sqliteDiagnosticsJson(
         'schemaKiB': entry.value.schemaKiB,
         'stmtKiB': entry.value.stmtKiB,
         'walKiB': entry.value.walKiB,
+        if (entry.value.jsonBufKiB != null)
+          'jsonBufKiB': entry.value.jsonBufKiB,
         'readersBusy': entry.value.readersBusy,
       },
   };

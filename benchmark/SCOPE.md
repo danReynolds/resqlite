@@ -198,7 +198,7 @@ per workload live in the workload's source comments and in
 | Streaming | Initial emission latency, invalidation latency, fan-out, churn |
 | Point query | Per-call dispatch overhead (hot loop) |
 | Memory (RSS) | Process-level allocation delta around per-op workloads |
-| SQLite Diagnostics | resqlite-only SQLite page-cache / schema / stmt / WAL snapshots after representative read-cache-write workloads |
+| SQLite Diagnostics | resqlite-only SQLite page-cache / schema / stmt / WAL / `json_buf` snapshots after representative read-cache-write and `selectBytes` reclaim workloads |
 | Streaming (column granularity) | Disjoint vs overlapping column writes; ratio metric exposes per-column suppression precision |
 
 ### Scenario-level benchmarks (Phase 1+ of Track A)

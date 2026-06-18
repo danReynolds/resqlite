@@ -45,6 +45,28 @@ void main() {
       expect(metric.schemaKiB, equals(80.0));
       expect(metric.stmtKiB, equals(44.0));
       expect(metric.walKiB, equals(512.0));
+      expect(metric.jsonBufKiB, isNull);
+      expect(metric.readersBusy, equals(0));
+    });
+
+    test('SQLite Diagnostics parses json_buf column when present', () {
+      const markdown = '''
+# resqlite Benchmark Results
+
+## SQLite Diagnostics
+
+### JSON buffer reclaim
+
+| Library | SQLite total (KiB) | Page cache (KiB) | Schema (KiB) | Stmt (KiB) | WAL (KiB) | JSON buf (KiB) | Readers busy |
+|---|---|---|---|---|---|---|---|
+| resqlite | 2048.0 | 1900.0 | 80.0 | 44.0 | 512.0 | 64.0 | 0 |
+''';
+
+      final diagnostics = extractSqliteDiagnosticsMedians(markdown);
+      final metric =
+          diagnostics['SQLite Diagnostics / JSON buffer reclaim / resqlite'];
+      expect(metric, isNotNull);
+      expect(metric!.jsonBufKiB, equals(64.0));
       expect(metric.readersBusy, equals(0));
     });
   });

@@ -1,0 +1,341 @@
+{
+  "_comment": "Curated release-suite medians per published version, for the docs/releases page. metrics are populated by the same-machine backfill (download each pub version, run benchmark/run_release.dart). Regenerate the page with: dart run benchmark/generate_releases.dart",
+  "metricsCurated": [
+    {
+      "key": "Select → Maps / 1000 rows / resqlite select()",
+      "label": "select() · 1K rows → maps",
+      "group": "Reads",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Select → JSON Bytes / 1000 rows / resqlite selectBytes()",
+      "label": "selectBytes() · 1K rows",
+      "group": "Reads",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Point Query Throughput / resqlite qps",
+      "label": "Point query throughput (qps)",
+      "group": "Reads",
+      "higherIsBetter": true
+    },
+    {
+      "key": "Write Performance / Single Inserts (100 sequential) / resqlite execute()",
+      "label": "Sequential inserts · 100",
+      "group": "Writes",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()",
+      "label": "Concurrent inserts · 100",
+      "group": "Writes",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()",
+      "label": "Batch insert · 1K",
+      "group": "Writes",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Streaming / Invalidation Latency / resqlite",
+      "label": "Stream invalidation latency",
+      "group": "Streaming",
+      "higherIsBetter": false
+    },
+    {
+      "key": "Streaming / Fan-out (10 streams) / resqlite",
+      "label": "Stream fan-out · 10 streams",
+      "group": "Streaming",
+      "higherIsBetter": false
+    }
+  ],
+  "versions": [
+    {
+      "version": "0.6.0",
+      "date": "2026-06-18",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.365,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.375,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 114990.0,
+          "thr": 23.5,
+          "stab": "moderate"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 1.835,
+          "thr": 43.4,
+          "stab": "noisy"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 0.871,
+          "thr": 10.1,
+          "stab": "moderate"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.42,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.06,
+          "thr": 25.0,
+          "stab": "noisy"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.379,
+          "thr": 31.3,
+          "stab": "noisy"
+        }
+      },
+      "crossDriftPct": 32.7
+    },
+    {
+      "version": "0.5.0",
+      "date": "2026-06-16",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.354,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.355,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 109879.0,
+          "thr": 19.2,
+          "stab": "moderate"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 1.851,
+          "thr": 23.8,
+          "stab": "moderate"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 1.37,
+          "thr": 18.2,
+          "stab": "moderate"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.404,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.054,
+          "thr": 64.6,
+          "stab": "noisy"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.234,
+          "thr": 10.0,
+          "stab": "stable"
+        }
+      },
+      "crossDriftPct": 42.4
+    },
+    {
+      "version": "0.4.0",
+      "date": "2026-06-02",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.422,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.354,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 153399.0,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 1.64,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 2.659,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.403,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.045,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.182,
+          "thr": 10.0,
+          "stab": "stable"
+        }
+      },
+      "crossDriftPct": 16.2
+    },
+    {
+      "version": "0.3.1",
+      "date": "2026-05-06",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.435,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.367,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 140815.0,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 2.22,
+          "thr": 25.6,
+          "stab": "noisy"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 2.765,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.418,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.05,
+          "thr": 30.0,
+          "stab": "noisy"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.169,
+          "thr": 10.0,
+          "stab": "moderate"
+        }
+      },
+      "crossDriftPct": 16.7
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-05-04",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.416,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.352,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 141516.0,
+          "thr": 28.6,
+          "stab": "noisy"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 1.633,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 2.267,
+          "thr": 13.5,
+          "stab": "moderate"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.4,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.049,
+          "thr": 24.5,
+          "stab": "noisy"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.235,
+          "thr": 21.9,
+          "stab": "moderate"
+        }
+      },
+      "crossDriftPct": 7.7
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-04-22",
+      "metrics": {
+        "Select → Maps / 1000 rows / resqlite select()": {
+          "m": 0.407,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Select → JSON Bytes / 1000 rows / resqlite selectBytes()": {
+          "m": 0.348,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Point Query Throughput / resqlite qps": {
+          "m": 145264.0,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Single Inserts (100 sequential) / resqlite execute()": {
+          "m": 1.575,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Concurrent Single Inserts (100 concurrent) / resqlite concurrent execute()": {
+          "m": 2.087,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Write Performance / Batch Insert (1000 rows) / resqlite executeBatch()": {
+          "m": 0.425,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Invalidation Latency / resqlite": {
+          "m": 0.043,
+          "thr": 10.0,
+          "stab": "stable"
+        },
+        "Streaming / Fan-out (10 streams) / resqlite": {
+          "m": 0.191,
+          "thr": 10.0,
+          "stab": "stable"
+        }
+      }
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-04-17",
+      "metrics": {}
+    }
+  ]
+}

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>resqlite — Release history</title>
+  <style>
+    :root {
+      --bg: #0b0d1f;
+      --card: #141829;
+      --border: #262b45;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .wrap { max-width: 920px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+
+    header.page { text-align: center; margin-bottom: 2.5rem; }
+    header.page h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; }
+    header.page h1 span { color: var(--accent); }
+    header.page p { color: var(--muted); margin-top: 0.4rem; }
+
+    nav.top { text-align: center; margin-bottom: 2.5rem; font-size: 0.85rem; }
+    nav.top a { color: var(--accent); text-decoration: none; margin: 0 0.5rem; }
+    nav.top a:hover { text-decoration: underline; }
+
+    /* timeline */
+    .timeline { position: relative; }
+    .release {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.75rem 1.75rem 1.5rem;
+      margin-bottom: 1.75rem;
+    }
+    .release-head {
+      display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.1rem;
+    }
+    .release-head .ver { font-size: 1.7rem; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; }
+    .release-head .date { color: var(--muted); font-size: 0.9rem; }
+    .release-head .latest {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+      background: rgba(63,185,80,0.15); color: var(--green);
+      border: 1px solid rgba(63,185,80,0.4); border-radius: 999px; padding: 0.1rem 0.55rem;
+    }
+
+    .section-label {
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin: 1.4rem 0 0.6rem; font-weight: 700;
+    }
+
+    /* changelog markdown */
+    .md p { margin: 0.5rem 0; }
+    .md ul { margin: 0.4rem 0 0.4rem 1.1rem; }
+    .md li { margin: 0.3rem 0; }
+    .md code {
+      background: #0b0d1f; border: 1px solid var(--border); border-radius: 5px;
+      padding: 0.05rem 0.35rem; font-size: 0.85em; font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    }
+    .md a { color: var(--accent); text-decoration: none; }
+    .md a:hover { text-decoration: underline; }
+    .md strong { color: var(--text); }
+    .md .glance {
+      background: rgba(88,166,255,0.07); border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0; padding: 0.6rem 0.9rem; margin: 0.6rem 0;
+    }
+
+    /* experiments */
+    .exp-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .exp {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 0.25rem 0.7rem; font-size: 0.8rem; text-decoration: none; color: var(--text);
+      background: #0e1124;
+    }
+    .exp:hover { border-color: var(--accent); }
+    .exp .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .exp.landed .dot { background: var(--green); }
+    .exp.rejected .dot { background: var(--red); }
+    .exp .eid { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .exp-meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.55rem; }
+
+    /* deltas */
+    .delta-group { margin-bottom: 0.9rem; }
+    .delta-group h4 { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.35rem; font-weight: 600; }
+    table.deltas { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    table.deltas td { padding: 0.32rem 0.5rem; border-bottom: 1px solid rgba(38,43,69,0.6); }
+    table.deltas td.metric { color: var(--text); }
+    table.deltas td.nums { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.deltas td.delta { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; width: 5.5rem; }
+    .delta.up { color: var(--green); }
+    .delta.down { color: var(--red); }
+    .delta.flat { color: var(--muted); }
+    .delta.low { color: #d2a24c; }
+    .ntag {
+      display: inline-block; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0 0.3rem; margin-left: 0.4rem; vertical-align: middle;
+    }
+    .delta-note { color: var(--muted); font-size: 0.74rem; margin-top: 0.5rem; font-style: italic; }
+    .delta-other { color: var(--muted); font-size: 0.82rem; margin-top: 0.2rem; }
+    .no-delta { color: var(--muted); font-size: 0.82rem; font-style: italic; }
+
+    footer { text-align: center; padding: 2rem; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
+    footer a { color: var(--accent); text-decoration: none; margin: 0 0.4rem; }
+    .loading { text-align: center; color: var(--muted); padding: 3rem; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="page">
+      <h1><span>resqlite</span> release history</h1>
+      <p>Every published version — what changed, the experiments behind it, and measured performance deltas.</p>
+    </header>
+    <nav class="top">
+      <a href="../index.html">Home</a> ·
+      <a href="../benchmarks/index.html">Benchmarks</a> ·
+      <a href="../experiments/index.html">Experiments</a> ·
+      <a href="../blog/index.html">Blog</a> ·
+      <a href="https://pub.dev/packages/resqlite">pub.dev</a>
+    </nav>
+    <div id="timeline" class="timeline">
+      <div class="loading">Loading release history…</div>
+    </div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/danReynolds/resqlite">GitHub</a> ·
+    <a href="../benchmarks/index.html">Benchmarks</a> ·
+    <a href="../experiments/index.html">Experiments</a> ·
+    <a href="../blog/index.html">Blog</a>
+  </footer>
+
+  <script>
+    // --- minimal, safe markdown renderer for changelog bodies -------------
+    function esc(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function inline(s) {
+      s = esc(s);
+      s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+        (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+      s = s.replace(/\*\*([^*]+)\*\*/g, (_, b) => `<strong>${b}</strong>`);
+      return s;
+    }
+    // Renders a small subset: paragraphs, bullet lists with one nesting level.
+    function renderMarkdown(md) {
+      const lines = md.split('\n');
+      let html = '', listStack = [], para = [];
+      const closeLists = (toDepth) => {
+        while (listStack.length > toDepth) { html += '</ul>'; listStack.pop(); }
+      };
+      const flushPara = () => {
+        if (!para.length) return;
+        const text = para.join(' ').trim();
+        if (text) {
+          const cls = /^\*\*Wins at a glance/.test(text) ? ' class="glance"' : '';
+          html += `<p${cls}>${inline(text)}</p>`;
+        }
+        para = [];
+      };
+      for (const raw of lines) {
+        const m = raw.match(/^(\s*)-\s+(.*)$/);
+        if (m) {
+          flushPara();
+          const depth = Math.floor(m[1].length / 2) + 1;
+          while (listStack.length < depth) { html += '<ul>'; listStack.push(1); }
+          closeLists(depth);
+          html += `<li>${inline(m[2])}</li>`;
+        } else if (raw.trim() === '') {
+          flushPara(); closeLists(0);
+        } else {
+          if (listStack.length) { // continuation of a list item
+            html = html.replace(/<\/li>$/, ' ' + inline(raw.trim()) + '</li>');
+          } else {
+            para.push(raw);
+          }
+        }
+      }
+      flushPara(); closeLists(0);
+      return html;
+    }
+
+    function fmtMs(v) { return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(3); }
+    // Confidence comes from the suite's per-metric stability machinery.
+    function deltaView(d) {
+      const sign = d.deltaPct > 0 ? '+' : '';
+      const txt = `${sign}${d.deltaPct.toFixed(1)}%`;
+      if (d.confidence === 'noise') return { cls: 'flat', txt, tag: 'within noise' };
+      if (d.confidence === 'low') return { cls: 'low', txt, tag: 'noisy lane' };
+      const improved = d.higherIsBetter ? d.deltaPct > 0 : d.deltaPct < 0;
+      return { cls: improved ? 'up' : 'down', txt, tag: null };
+    }
+
+    // On a published release, an experiment either landed (its work is in the
+    // repo as of this version) or was rejected (explored and reverted). The
+    // raw history.json "in_review" status is stale for shipped versions, so we
+    // collapse non-rejected to "landed".
+    const expClass = (status) => status === 'rejected' ? 'rejected' : 'landed';
+    function renderExperiments(exps) {
+      if (!exps.length) return '';
+      const rejected = exps.filter(e => e.status === 'rejected').length;
+      const landed = exps.length - rejected;
+      const meta = [landed && `${landed} landed`, rejected && `${rejected} rejected`]
+        .filter(Boolean).join(' · ');
+      const chips = exps.map(e => {
+        const cls = expClass(e.status);
+        const inner = `<span class="dot"></span><span class="eid">#${e.id}</span> ${esc(e.title)}`;
+        return e.url
+          ? `<a class="exp ${cls}" href="${e.url}" target="_blank" rel="noopener" title="${esc(e.summary || '')}">${inner}</a>`
+          : `<span class="exp ${cls}" title="${esc(e.summary || '')}">${inner}</span>`;
+      }).join('');
+      return `<div class="section-label">Experiments run · ${exps.length}</div>` +
+        `<div class="exp-meta">${meta}</div>` +
+        `<div class="exp-grid">${chips}</div>`;
+    }
+
+    function renderDeltas(deltas, groups, version, prevVersion) {
+      if (!deltas.length) {
+        return `<div class="section-label">Benchmark deltas</div>` +
+          `<div class="no-delta">No same-machine comparison available for this version.</div>`;
+      }
+      // Show only deltas that clear the significance bar on a non-noisy lane.
+      // Everything else is run-to-run noise and is summarized, not listed.
+      const real = deltas.filter(d => d.confidence === 'high');
+      const other = deltas.length - real.length;
+      let html = `<div class="section-label">Benchmark deltas vs ${prevVersion}</div>`;
+      if (!real.length) {
+        html += `<div class="no-delta">No significant change — all ${deltas.length} measured metrics fell within the run-to-run noise floor.</div>`;
+        return html;
+      }
+      for (const g of groups) {
+        const rows = real.filter(d => d.group === g);
+        if (!rows.length) continue;
+        html += `<div class="delta-group"><h4>${esc(g)}</h4><table class="deltas">`;
+        for (const d of rows) {
+          const v = deltaView(d);
+          const fmt = d.higherIsBetter ? (x) => Math.round(x).toLocaleString() : fmtMs;
+          const unit = d.higherIsBetter ? ' qps' : ' ms';
+          html += `<tr><td class="metric">${esc(d.label)}</td>` +
+            `<td class="nums">${fmt(d.prev)} → ${fmt(d.cur)}${unit}</td>` +
+            `<td class="delta ${v.cls}">${v.txt}</td></tr>`;
+        }
+        html += `</table></div>`;
+      }
+      if (other) {
+        html += `<div class="delta-other">${other} other metric${other === 1 ? '' : 's'}: no significant change</div>`;
+      }
+      html += `<div class="delta-note">Release-suite medians, same machine, best-effort local run. Only deltas clearing the suite's per-metric significance threshold and the cross-version drift floor on a non-noisy lane are shown; everything else is within run-to-run noise. Lower is better unless the metric says otherwise.</div>`;
+      return html;
+    }
+
+    async function load() {
+      const tl = document.getElementById('timeline');
+      try {
+        const res = await fetch('releases.json');
+        const data = await res.json();
+        const groups = data.metricGroups || [];
+        const releases = data.releases || [];
+        tl.innerHTML = releases.map((r, i) => {
+          const latest = i === 0 ? '<span class="latest">latest</span>' : '';
+          const prev = releases[i + 1] ? releases[i + 1].version : null;
+          return `<section class="release">
+            <div class="release-head">
+              <span class="ver">v${r.version}</span>
+              <span class="date">${r.date || ''}</span>
+              ${latest}
+            </div>
+            <div class="md">${renderMarkdown(r.bodyMarkdown || '')}</div>
+            ${renderExperiments(r.experiments || [])}
+            ${renderDeltas(r.deltas || [], groups, r.version, prev)}
+          </section>`;
+        }).join('');
+      } catch (err) {
+        tl.innerHTML = `<div class="loading">Could not load release data.</div>`;
+        console.error(err);
+      }
+    }
+    load();
+  </script>
+</body>
+
+</html>
