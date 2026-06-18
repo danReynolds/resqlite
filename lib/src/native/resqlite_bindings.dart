@@ -736,10 +736,81 @@ typedef _BatchStringWriter =
 ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   if (params.isEmpty) return ffi.nullptr.cast();
 
-  // Pass 1: encode strings up front so we know their byte lengths
-  // before sizing the buffer. We hold onto the encoded bytes (rather
-  // than re-encoding in pass 2) because Dart `utf8.encode` is the same
-  // work that `String.toNativeUtf8` did internally on the old path.
+  // Pass 1: size the payload. Exp 179 extends the batch path's direct-ASCII
+  // write (exp 125/149) to the single-row bind path: when every string param
+  // is ASCII its UTF-8 byte length equals `String.length`, so we can size the
+  // buffer from O(1) lengths and copy code units straight into it in pass 2 —
+  // skipping the `utf8.encode()` allocation per string and the
+  // `encodedStrings` list entirely. The first non-ASCII string bails to the
+  // pre-encoded path. Exp 186 revives exp 179 against large single-row
+  // ASCII text binds where the encoder cost is no longer hidden by the
+  // round-trip floor.
+  var extraBytes = 0;
+  for (var i = 0; i < params.length; i++) {
+    final value = params[i];
+    if (value is String) {
+      final len = value.length;
+      var ascii = true;
+      for (var j = 0; j < len; j++) {
+        if (value.codeUnitAt(j) > 0x7f) {
+          ascii = false;
+          break;
+        }
+      }
+      if (!ascii) return _allocateParamsPreEncoded(params);
+      extraBytes += len;
+    } else if (value is Uint8List) {
+      extraBytes += value.length;
+    }
+  }
+
+  final structsBytes = _paramStructSize * params.length;
+  final totalBytes = structsBytes + extraBytes;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final view = buf.asTypedList(totalBytes);
+  final byteData = ByteData.sublistView(view);
+  final bufAddr = buf.address;
+
+  var dataOffset = structsBytes;
+  for (var i = 0; i < params.length; i++) {
+    final offset = i * _paramStructSize;
+    final value = params[i];
+
+    if (value == null) {
+      byteData.setInt32(offset, 0, Endian.little);
+    } else if (value is int) {
+      byteData.setInt32(offset, 1, Endian.little);
+      byteData.setInt64(offset + 8, value, Endian.little);
+    } else if (value is double) {
+      byteData.setInt32(offset, 2, Endian.little);
+      byteData.setFloat64(offset + 8, value, Endian.little);
+    } else if (value is String) {
+      final start = dataOffset;
+      for (var j = 0; j < value.length; j++) {
+        view[dataOffset++] = value.codeUnitAt(j);
+      }
+      byteData.setInt32(offset, 3, Endian.little);
+      byteData.setInt64(offset + 8, bufAddr + start, Endian.little);
+      byteData.setInt32(offset + 16, dataOffset - start, Endian.little);
+    } else if (value is Uint8List) {
+      view.setRange(dataOffset, dataOffset + value.length, value);
+      byteData.setInt32(offset, 4, Endian.little);
+      byteData.setInt64(offset + 8, bufAddr + dataOffset, Endian.little);
+      byteData.setInt32(offset + 16, value.length, Endian.little);
+      dataOffset += value.length;
+    } else {
+      byteData.setInt32(offset, 0, Endian.little);
+    }
+  }
+
+  return buf;
+}
+
+/// Pre-encoded single-row param packing: encodes each string with
+/// `utf8.encode` up front (one `Uint8List` per string) before sizing the
+/// buffer. Used as the fallback from [allocateParams] when a parameter list
+/// contains a non-ASCII string, where direct code-unit copying is unsafe.
+ffi.Pointer<ffi.Uint8> _allocateParamsPreEncoded(List<Object?> params) {
   List<Uint8List?>? encodedStrings;
   var extraBytes = 0;
   for (var i = 0; i < params.length; i++) {
