@@ -51,6 +51,8 @@
       display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
       border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.1rem;
     }
+    .release.unreleased { border-style: dashed; border-color: #36406b; background: #10142400; }
+    .release.unreleased .ver { color: var(--muted); }
     .release-head .ver { font-size: 1.7rem; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; }
     .release-head .date { color: var(--muted); font-size: 0.9rem; }
     .release-head .latest {
@@ -274,8 +276,19 @@
         const data = await res.json();
         const groups = data.metricGroups || [];
         const releases = data.releases || [];
+        const firstPublished = releases.findIndex(r => r.version !== 'Unreleased');
         tl.innerHTML = releases.map((r, i) => {
-          const latest = i === 0 ? '<span class="latest">latest</span>' : '';
+          if (r.version === 'Unreleased') {
+            const since = r.sinceVersion ? `merged to main since v${r.sinceVersion} · not yet released` : 'not yet released';
+            return `<section class="release unreleased">
+              <div class="release-head">
+                <span class="ver">Unreleased</span>
+                <span class="date">${since}</span>
+              </div>
+              ${renderExperiments(r.experiments || [])}
+            </section>`;
+          }
+          const latest = i === firstPublished ? '<span class="latest">latest</span>' : '';
           const prev = releases[i + 1] ? releases[i + 1].version : null;
           return `<section class="release">
             <div class="release-head">

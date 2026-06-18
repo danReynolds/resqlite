@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-18T18:43:32.380977",
+  "generated": "2026-06-18T14:55:44.384820",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -7,10 +7,19 @@
   ],
   "releases": [
     {
-      "version": "0.6.0",
-      "date": "2026-06-18",
-      "bodyMarkdown": "Performance and observability release. No breaking changes, and no changes to the\npublic export surface — safe to upgrade from 0.5.x.\n\n**Wins at a glance:** up to **~30% faster concurrent writes** on top of 0.5.0's\npipelining, a new diagnostics counter for native read-buffer memory, and automatic\nreclaim of that memory after large-`selectBytes` bursts — bounding the RSS trade-off\n0.5.0 introduced with native-view transfer.\n\n- **New API:** `Diagnostics.readerJsonBufHighWaterBytes` — the summed capacity of\n  every reader isolate's native `json_buf`, making the read-buffer high-water mark\n  directly observable. Surfaces workloads that pin large native buffers after big\n  `selectBytes` reads ([#183](https://github.com/danReynolds/resqlite/pull/183),\n  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).\n- **Behavior change:** a buffered group of `execute()` calls that races\n  `Database.close()` is now atomic — every call in the group either flushes or is\n  rejected, never the old lock-order-dependent partial outcome. It still never hangs,\n  and per-call success/failure semantics are unchanged ([#184](https://github.com/danReynolds/resqlite/pull/184),\n  [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).\n- **Memory:** native read buffers that grow to serve a large `selectBytes` read now\n  reclaim back to their initial capacity on the next small read, once a reader's\n  `json_buf` exceeds 1 MB. A one-off concurrent burst of large reads (e.g. 8 × 8 MB)\n  previously pinned tens of MB for the connection's lifetime; that high-water now\n  settles back to ~64 KB. Warm large-read workloads keep their capacity (a 256 KB\n  last-read guard prevents shrink-then-regrow churn) ([#183](https://github.com/danReynolds/resqlite/pull/183),\n  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).\n- **Performance.** See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/)\n  for current cross-library numbers.\n  - **Cross-call write batching (group commit)** — standalone `execute()` calls that\n    pile up while a write is in flight now coalesce into a single cross-isolate\n    request (each statement still its own autocommit), collapsing a concurrent\n    burst's per-write round-trips toward two. −26% to −32% on the concurrent\n    single-insert lane, on top of 0.5.0's pipelining; isolated and sequential writes\n    are unaffected ([#184](https://github.com/danReynolds/resqlite/pull/184),\n    [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).",
+      "version": "Unreleased",
+      "date": null,
+      "sinceVersion": "0.6.0",
+      "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "186",
+          "title": "Single-row large-text bind encoder",
+          "date": "2026-06-18",
+          "status": "accepted",
+          "summary": "Revives exp 179's direct-ASCII `allocateParams` rewrite against a representative large-payload workload — the explicit revisit condition exp 179 named. Focused `single_row_large_text_bind.dart` measures **−15% to −32%** at 16 KB → 1 MB single-row INSERT text binds, reproduced across order-flipped passes; encoder isolation reproduces exp 179's −45% / −58% / −37% on the synthetic micro. Small-payload release-suite lanes (Parameterized Queries, Single Inserts, Concurrent Single Inserts) stay neutral, confirming exp 179's small-bind finding stands; the lone flagged batch-tx regression is sub-decision-threshold noise on a routing path the encoder does not touch (`allocateBatchParams`). Saves one `Uint8List` allocation + one byte-buffer copy per ASCII string param; non-ASCII strings still take the unchanged `_allocateParamsPreEncoded` fallback.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/186-single-row-large-text-bind-encoder.md"
+        },
         {
           "id": "185",
           "title": "JSON buffer reclaim release coverage",
@@ -18,7 +27,15 @@
           "status": "in_review",
           "summary": "Measurement-support guard for exp 183: `SQLite Diagnostics` now emits `JSON buf (KiB)` and a `JSON buffer reclaim (8 large selectBytes + 64 small settles)` row. The row grows reader `json_buf` capacity with a concurrent large `selectBytes` burst, settles with small reads, and fails if post-settle retention stays above 512 KiB; the focused suite run settled at **64.0 KiB** with idle readers. Parser/sidecar/history data carry optional `jsonBufKiB` while legacy diagnostics tables remain parseable. No runtime code.",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/185-json-buf-release-coverage.md"
-        },
+        }
+      ],
+      "deltas": []
+    },
+    {
+      "version": "0.6.0",
+      "date": "2026-06-18",
+      "bodyMarkdown": "Performance and observability release. No breaking changes, and no changes to the\npublic export surface — safe to upgrade from 0.5.x.\n\n**Wins at a glance:** up to **~30% faster concurrent writes** on top of 0.5.0's\npipelining, a new diagnostics counter for native read-buffer memory, and automatic\nreclaim of that memory after large-`selectBytes` bursts — bounding the RSS trade-off\n0.5.0 introduced with native-view transfer.\n\n- **New API:** `Diagnostics.readerJsonBufHighWaterBytes` — the summed capacity of\n  every reader isolate's native `json_buf`, making the read-buffer high-water mark\n  directly observable. Surfaces workloads that pin large native buffers after big\n  `selectBytes` reads ([#183](https://github.com/danReynolds/resqlite/pull/183),\n  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).\n- **Behavior change:** a buffered group of `execute()` calls that races\n  `Database.close()` is now atomic — every call in the group either flushes or is\n  rejected, never the old lock-order-dependent partial outcome. It still never hangs,\n  and per-call success/failure semantics are unchanged ([#184](https://github.com/danReynolds/resqlite/pull/184),\n  [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).\n- **Memory:** native read buffers that grow to serve a large `selectBytes` read now\n  reclaim back to their initial capacity on the next small read, once a reader's\n  `json_buf` exceeds 1 MB. A one-off concurrent burst of large reads (e.g. 8 × 8 MB)\n  previously pinned tens of MB for the connection's lifetime; that high-water now\n  settles back to ~64 KB. Warm large-read workloads keep their capacity (a 256 KB\n  last-read guard prevents shrink-then-regrow churn) ([#183](https://github.com/danReynolds/resqlite/pull/183),\n  [exp 183](https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md)).\n- **Performance.** See the [interactive benchmark dashboard](https://danreynolds.github.io/resqlite/benchmarks/)\n  for current cross-library numbers.\n  - **Cross-call write batching (group commit)** — standalone `execute()` calls that\n    pile up while a write is in flight now coalesce into a single cross-isolate\n    request (each statement still its own autocommit), collapsing a concurrent\n    burst's per-write round-trips toward two. −26% to −32% on the concurrent\n    single-insert lane, on top of 0.5.0's pipelining; isolated and sequential writes\n    are unaffected ([#184](https://github.com/danReynolds/resqlite/pull/184),\n    [exp 180](https://github.com/danReynolds/resqlite/blob/main/experiments/180-group-commit-request-batching.md)).",
+      "experiments": [
         {
           "id": "184",
           "title": "Writer residual re-split (post-159/180)",
@@ -1414,7 +1431,7 @@
           "date": "2026-04-08",
           "status": "rejected",
           "summary": "Mixed and workload-specific; only compelling when the payload is already serialized as JSON",
-          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/031-json1-bulk-shapes.md"
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/031-worker-side-hash.md"
         },
         {
           "id": "030",

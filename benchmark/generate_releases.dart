@@ -46,6 +46,8 @@ void main() {
 
   // Versions in descending semver order, as they appear in the changelog.
   final versions = changelog.map((e) => e.version).toList();
+  final latestVersion = versions.isEmpty ? null : versions.first;
+  final latestDate = latestVersion == null ? null : dateByVersion[latestVersion];
 
   final releases = <Map<String, dynamic>>[];
   for (var i = 0; i < versions.length; i++) {
@@ -58,7 +60,11 @@ void main() {
       'version': version,
       'date': date,
       'bodyMarkdown': changelog[i].body,
-      'experiments': _experimentsInWindow(experiments, prevDate, date),
+      // The latest release uses a strict upper bound: an experiment dated on
+      // the release date landed *after* the release was cut (you publish, then
+      // keep working that day), so it belongs to "Unreleased", not the release.
+      'experiments': _experimentsInWindow(experiments, prevDate, date,
+          strictUpper: i == 0),
       'deltas': _deltas(
         curated,
         metricsByVersion[version] ?? const {},
@@ -66,6 +72,23 @@ void main() {
         prevVersion,
         crossDriftByVersion[version] ?? 0,
       ),
+    });
+  }
+
+  // Experiments dated on or after the latest release are post-release work,
+  // not yet in a published version. Surface them in an "Unreleased" card.
+  final unreleased = latestDate == null
+      ? const <Map<String, dynamic>>[]
+      : (experiments.where((e) => (e['date'] as String).compareTo(latestDate) >= 0).toList()
+        ..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String)));
+  if (unreleased.isNotEmpty) {
+    releases.insert(0, {
+      'version': 'Unreleased',
+      'date': null,
+      'sinceVersion': latestVersion,
+      'bodyMarkdown': '',
+      'experiments': unreleased,
+      'deltas': const [],
     });
   }
 
@@ -161,14 +184,16 @@ Map<String, String> _experimentUrls() {
 List<Map<String, dynamic>> _experimentsInWindow(
   List<Map<String, dynamic>> experiments,
   String? prevDate,
-  String? date,
-) {
+  String? date, {
+  bool strictUpper = false,
+}) {
   if (date == null) return const [];
   final inWindow = experiments.where((e) {
     final d = e['date'] as String;
     final afterPrev = prevDate == null || d.compareTo(prevDate) > 0;
-    final onOrBefore = d.compareTo(date) <= 0;
-    return afterPrev && onOrBefore;
+    final cmp = d.compareTo(date);
+    final beforeUpper = strictUpper ? cmp < 0 : cmp <= 0;
+    return afterPrev && beforeUpper;
   }).toList()
     ..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String));
   return inWindow;
