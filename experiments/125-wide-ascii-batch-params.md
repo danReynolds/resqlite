@@ -3,6 +3,7 @@
 **Date:** 2026-05-05T18:20:00Z
 **Status:** In Review
 **Direction:** `parameter-encoding-and-binding`
+**Benchmark Run:** none (focused `benchmark/experiments/batch_param_flatten.dart` + release Wide Batch Insert A/B; no exp-125 release artifact was committed at the time and the durable signal lives in the focused harness — see Results)
 
 ## Problem
 

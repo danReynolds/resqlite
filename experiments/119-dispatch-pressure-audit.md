@@ -3,6 +3,7 @@
 **Date:** 2026-05-01
 **Status:** In Review
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
+**Benchmark Run:** none (profile-mode audit only; the deliverable is the post-FIFO counter snapshot, not a release-suite delta)
 
 ## Problem
 

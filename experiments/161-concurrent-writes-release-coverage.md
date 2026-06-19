@@ -3,6 +3,7 @@
 **Date:** 2026-06-11
 **Status:** In Review
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
+**Benchmark Run:** none (release-suite coverage row only; the Single Inserts / Concurrent Single Inserts row pair it adds is exercised by downstream writer-scheduling experiments)
 
 ## Problem
 

@@ -3,6 +3,7 @@
 **Date:** 2026-05-14
 **Status:** In Review
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
+**Benchmark Run:** none (profile-mode counter gated by `kProfileMode`; deliverable is the new `completion_handler_us / stream_emit_us` reading on the A11c overlap audit, not a release-suite delta)
 
 ## Problem
 

@@ -3,6 +3,7 @@
 **Date:** 2026-04-06
 **Status:** Accepted
 **Commit:** [`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57)
+**Benchmark Run:** none (predates the per-experiment-result-file convention; same-day runs on 2026-04-06 are general baselines, not exp-003 candidates)
 
 ## Problem
 
