@@ -3,7 +3,7 @@
 **Date:** 2026-06-15
 **Status:** In Review
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** Focused A/B (`benchmark/experiments/large_bytes_transfer.dart`), candidate vs baseline (`read_worker.dart` swap), quiet machine, order-flipped passes.
+**Benchmark Run:** none — focused A/B (`benchmark/experiments/large_bytes_transfer.dart`), candidate vs baseline (`read_worker.dart` swap), quiet machine, order-flipped passes; the release-suite guard for this path is the exp 175 `selectBytes() large bytes` row.
 
 ## Problem
 

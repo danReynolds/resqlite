@@ -3,6 +3,7 @@
 **Date:** 2026-05-01
 **Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`, `measurement-system`
+**Benchmark Run:** none (release-suite coverage row only; the public Wide Batch Insert lane it adds is exercised by downstream exp 125/126's runs)
 
 ## Problem
 

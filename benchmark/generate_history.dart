@@ -449,12 +449,19 @@ void _assertAcceptedExperimentsLinkToCandidates(
 }
 
 /// The first experiment number for which a chartable experiment must either
-/// link a benchmark run or explicitly declare that it has none. Experiments
-/// below the cutoff predate the per-experiment-result-file convention (or the
-/// `**Benchmark Run:**` opt-out header) and are grandfathered so the guard
-/// targets only new work. Bump this only alongside a backfill pass that
-/// annotates the older silently-unmapped experiments.
-const int _benchmarkRunDeclarationCutoff = 178;
+/// link a benchmark run or explicitly declare that it has none. Lowering this
+/// past a chartable experiment number requires either committing its missing
+/// result file (with a date matching the doc's `**Date:**`) or backfilling a
+/// `**Benchmark Run:**` opt-out header — otherwise the guard fires.
+///
+/// Exp 188 walked the cutoff back from exp 178's pilot (178) to (1) — every
+/// chartable accepted/in-review experiment is now under the guard. The 16
+/// silently-unmapped chartable experiments at the time of the backfill (003,
+/// 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172)
+/// each gained a declared `**Benchmark Run:** none ...` header explaining
+/// why no release artifact exists; pre-convention writeups are tagged as
+/// such, profile/coverage-only changes name their workload directly.
+const int _benchmarkRunDeclarationCutoff = 1;
 
 /// Catch the silent chart-invisibility failure the resqlite-experiment skill
 /// warns about: a chartable experiment whose linker found *no* benchmark run

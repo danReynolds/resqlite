@@ -3,6 +3,7 @@
 **Date:** 2026-04-20
 **Status:** In Review
 **PR:** [#25](https://github.com/danReynolds/resqlite/pull/25)
+**Benchmark Run:** none (predates the per-experiment-result-file convention; the measured wins live in PR #25's commentary, not in a same-day exp-083 release artifact)
 
 ## Problem
 
