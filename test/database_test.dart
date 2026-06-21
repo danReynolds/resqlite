@@ -403,6 +403,44 @@ void main() {
       }
     });
 
+    test('selectBytes encodes int64 extremes', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, v INTEGER)');
+      const llongMin = -9223372036854775807 - 1;
+      const llongMax = 9223372036854775807;
+      final values = <int>[
+        0,
+        1,
+        -1,
+        9,
+        10,
+        99,
+        100,
+        999,
+        -999,
+        1000,
+        9999,
+        10000,
+        12345,
+        -12345,
+        1234567890,
+        -1234567890,
+        llongMax,
+        llongMin,
+      ];
+      for (var i = 0; i < values.length; i++) {
+        await db.execute(
+          'INSERT INTO t(id, v) VALUES (?, ?)',
+          [i + 1, values[i]],
+        );
+      }
+      final bytes = await db.selectBytes('SELECT v FROM t ORDER BY id');
+      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      expect(decoded.length, values.length);
+      for (var i = 0; i < values.length; i++) {
+        expect((decoded[i] as Map)['v'], values[i], reason: 'value ${values[i]}');
+      }
+    });
+
     test('selectBytes encodes blobs as base64', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, data BLOB)',
