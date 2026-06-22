@@ -1750,11 +1750,22 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
 // Fast int64-to-string (avoids snprintf format parsing overhead)
 // ---------------------------------------------------------------------------
 
+// Two-digit lookup table for the int64-to-string fast path: one division and
+// one 2-byte memcpy per pair of output digits. Halves the division count vs
+// the single-digit loop exp 023 introduced.
+static const char kTwoDigits[200] =
+    "0001020304050607080910111213141516171819"
+    "2021222324252627282930313233343536373839"
+    "4041424344454647484950515253545556575859"
+    "6061626364656667686970717273747576777879"
+    "8081828384858687888990919293949596979899";
+
 RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
     if (val == 0) { buf[0] = '0'; return 1; }
 
-    char tmp[21]; // max int64 is 20 digits + sign
-    int pos = 0;
+    // Unsigned int64 magnitude fits in 20 decimal digits.
+    char tmp[20];
+    int pos = 20;
     int negative = 0;
     unsigned long long uval;
 
@@ -1765,17 +1776,25 @@ RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
         uval = (unsigned long long)val;
     }
 
-    while (uval > 0) {
-        tmp[pos++] = '0' + (char)(uval % 10);
-        uval /= 10;
+    while (uval >= 100) {
+        unsigned d = (unsigned)(uval % 100);
+        uval /= 100;
+        pos -= 2;
+        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
+    }
+    if (uval >= 10) {
+        unsigned d = (unsigned)uval;
+        pos -= 2;
+        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
+    } else {
+        tmp[--pos] = (char)('0' + (unsigned)uval);
     }
 
+    int digits = 20 - pos;
     int len = 0;
     if (negative) buf[len++] = '-';
-    for (int i = pos - 1; i >= 0; i--) {
-        buf[len++] = tmp[i];
-    }
-    return len;
+    memcpy(buf + len, tmp + pos, digits);
+    return len + digits;
 }
 
 // ---------------------------------------------------------------------------
