@@ -125,12 +125,12 @@
       "id": "transaction-control-paths",
       "status": "low-current-signal",
       "subsystems": ["writer", "transactions", "sqlite"],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Per-isolate-round-trip cost dominates per-savepoint allocation savings.",
-      "keyPriors": ["101", "102", "111"],
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Per-isolate-round-trip cost dominates per-savepoint allocation/naming savings, so string/naming work is closed.",
+      "keyPriors": ["101", "102", "111", "189"],
       "archive": ["027", "103"],
       "interestingIf": [
         "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching)",
-        "a profile mode shows the savepoint allocator path as a measurable spike under a realistic workload",
+        "a profile mode shows savepoint boundary round-trips, not string allocation, as a measurable spike under a realistic workload",
         "the change reduces prepare/string work without adding much native API surface"
       ],
       "openQuestions": [
@@ -143,16 +143,12 @@
           "idea": "multi-savepoint round-trip batching (analogous to exp 009 read-side batching)",
           "addedDate": "2026-04-28",
           "addedAfter": "111"
-        },
-        {
-          "idea": "savepoint naming compression",
-          "addedDate": "2026-05-02"
         }
       ],
       "blockedOnMeasurement": [
         "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)"
       ],
-      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark before claiming a win on any savepoint-related change. Per-call savepoint allocation removal is below noise on the worst-case shape; the open headroom is round-trip-shaped, not allocation-shaped."
+      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189's `savepoint_name_compression.dart` harness before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. The open headroom is round-trip-shaped, not allocation-shaped; do not retry savepoint string/naming tweaks without new evidence that the string path, rather than the isolate request boundary, has become dominant."
     },
     {
       "id": "result-transfer-shape",
@@ -989,6 +985,20 @@
         "do not add a new chartable experiment without a `**Benchmark Run:**` declaration — the guard now fires for every id, not just 178+",
         "if a pre-178 experiment later gains a real release artifact (e.g. someone re-runs exp 125 against current main to produce `2026-MM-DDTHH-MM-SS-exp125-*.md`), remove the opt-out header in the same change so the linker maps it correctly",
         "the measurement-system openCandidate `memory profiling harness with per-benchmark RSS acceptance criteria` is independent of this run; exp 183/185 added the underlying RSS signal (readerJsonBufHighWaterBytes + the SQLite Diagnostics row), so a future RSS-criteria pass should build on those rather than on the guard scope"
+      ]
+    },
+    "189": {
+      "directions": ["transaction-control-paths"],
+      "outcomeClass": "rejected_below_signal",
+      "changedBeliefs": [
+        "Savepoint naming compression (same-name cached SQL for `SAVEPOINT s`, `RELEASE s`, and `ROLLBACK TO s`) can move best-case focused control rows: empty fanout improved about 6-7%, rollback fanout improved 13-17%, and repeated deep chains improved 7-8% across the order-flipped pair.",
+        "The representative nested-write fanout did not reproduce: baseline-first measured -1.3%, then the candidate-first pass measured +21.6% slower. That is the load-bearing row because it matches the real nested transaction shape better than empty control-only fanout.",
+        "Per-savepoint string formatting, native UTF-8 allocation, caching, and naming are below the merge bar after exp 102, exp 111, and exp 189. Nested transaction headroom remains round-trip-shaped, not string-shaped."
+      ],
+      "nextSignals": [
+        "Do not retry savepoint string caching, savepoint naming compression, or native helpers that still send one request per savepoint boundary without new evidence that string work is dominant.",
+        "Use benchmark/experiments/savepoint_name_compression.dart for quick savepoint-control probes, but treat the write-fanout row as the representative gate.",
+        "The remaining open implementation shape is multi-savepoint round-trip batching with preserved callback semantics and rollback legality."
       ]
     },
     "191": {
