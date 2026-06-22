@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T13:16:55.852314",
+  "generated": "2026-06-22T13:32:33.885222",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -24092,6 +24092,19 @@
         "timestamp": "2026-06-21T07:18:02",
         "source": "exact"
       }
+    },
+    {
+      "id": "193",
+      "title": "Row.values list-view iterator",
+      "date": "2026-06-22",
+      "status": "rejected",
+      "summary": "Tried replacing `Row.values`' custom `_RowValueIterator` with a fixed-length `ListBase` slice view after a JIT `row_map_facade` sample suggested values iteration was slower than `LinkedHashMap.values`. The JIT signal did not reproduce cleanly, and the decisive AOT check reversed it: baseline `_RowValueIterator` values iteration stayed at 2.663 / 2.675 / 2.687 ms, while the list-view candidate regressed to 6.828 / 6.847 / 7.101 ms (~2.6x slower). Controls stayed neutral. No runtime code kept; future `Row.values` changes should compile the focused harness to AOT before trusting JIT microbenchmarks.",
+      "commit": null,
+      "problem": "Exp 158 and exp 176 tightened the existing `ResultSet` / `Row` shape instead\nof replacing it. `row_map_facade.dart` now shows `Row` at parity or better than\n`LinkedHashMap` on hot lookup, key iteration, entries, `forEach`, and\n`Map.from`. One apparent gap remained on a fresh JIT run:\n\n| Case | Row median | LinkedHashMap median | Delta |\n|---|---:|---:|---:|\n| values iteration | 8.607 ms | 4.779 ms | +3.828 ms |\n\n`Row.values` returned a custom `IterableBase` backed by `_RowValueIterator`.\nThat iterator stepped through the whole `Row` object and read\n`_schema.columnCount` on every bound check. A fixed-length list view over the\nrow's slice of the flat value array looked like a bounded way to remove that\nindirection without changing the public `Map` contract.",
+      "hypothesis": "Returning a fixed-length `_RowValues extends ListBase<Object?>` with direct\nindexed access to `_values[_offset + index]` would make `for (final value in\nrow.values)` use a simpler list-style iterator. Accept if the focused\n`values iteration` lane improved reproducibly while the existing hot lookup,\n`forEach`, entries, and clone controls stayed neutral.",
+      "approach": "Tried two local candidates and reverted both before publishing:\n\n1. A direct custom iterator storing `_values`, `_offset`, and `_end` instead of\n   a `Row` reference.\n2. A fixed-length `_RowValues extends ListBase<Object?>` slice view with\n   `operator []`, `length`, and unsupported mutation methods.\n\nThe focused harness was the existing `benchmark/experiments/row_map_facade.dart`.\nBecause JIT runs produced contradictory results after VM warmup, the decision\nused AOT executables compiled from a clean `origin/main` baseline worktree and\nthe candidate branch:\n\n```bash\ndart compile exe benchmark/experiments/row_map_facade.dart -o /tmp/row_facade_exp193_baseline\ndart compile exe benchmark/experiments/row_map_facade.dart -o /tmp/row_facade_exp193_candidate\n```",
+      "results": "### JIT probe\n\nThe first direct-iterator sample looked promising:\n\n| Build | values iteration row median | LinkedHashMap median | Delta |\n|---|---:|---:|---:|\n| baseline, first clean sample | 8.607 ms | 4.779 ms | +3.828 ms |\n| direct-iterator candidate, first sample | 3.410 ms | 4.788 ms | -1.378 ms |\n\nThat did not reproduce. After a fresh `dart pub get`, the same direct-iterator\ncandidate produced 5.693 / 8.616 / 8.563 / 8.728 ms over four JIT samples. A\nfresh baseline pass also alternated between fast and slow values samples\n(3.145 / 10.955 / 3.150 / 8.800 / 3.154 ms). The apparent gap was dominated by\nJIT tiering and benchmark warmup behavior, not a stable implementation delta.\n\nThe fixed-list view looked stable under JIT (3.488 / 3.654 / 3.442 / 3.453 /\n3.435 ms), so it received th...",
+      "reasoning": "**Rejected.** No runtime code kept. The only apparent win came from unstable\nJIT behavior, and the compiled result regressed the target lane by roughly\n2.6x. `Row.values` should stay on the existing `_RowValueIterator`."
     }
   ],
   "tracked": [
