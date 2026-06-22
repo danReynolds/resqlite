@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T17:24:54.862763",
+  "generated": "2026-06-22T17:39:54.222653",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,14 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "193",
+          "title": "Row.values list-view iterator",
+          "date": "2026-06-22",
+          "status": "rejected",
+          "summary": "Tried replacing `Row.values`' custom `_RowValueIterator` with a fixed-length `ListBase` slice view after a JIT `row_map_facade` sample suggested values iteration was slower than `LinkedHashMap.values`. The JIT signal did not reproduce cleanly, and the decisive AOT check reversed it: baseline `_RowValueIterator` values iteration stayed at 2.663 / 2.675 / 2.687 ms, while the list-view candidate regressed to 6.828 / 6.847 / 7.101 ms (~2.6x slower). Controls stayed neutral. No runtime code kept; future `Row.values` changes should compile the focused harness to AOT before trusting JIT microbenchmarks.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/193-row-values-list-view.md"
+        },
         {
           "id": "192",
           "title": "Two-digit table itoa for selectBytes integer columns",
