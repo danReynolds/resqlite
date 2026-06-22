@@ -223,6 +223,16 @@ void main() {
       expect(rows[2]['name'], 'مرحبا');
     });
 
+    test('execute preserves multibyte and embedded-NUL text', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      const body = '項目_東京\u0000emoji_🎉🚀';
+
+      await db.execute('INSERT INTO t(body) VALUES (?)', [body]);
+
+      final rows = await db.select('SELECT body FROM t');
+      expect(rows.single['body'], body);
+    });
+
     test('select with parameterized query', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, active INTEGER)',
@@ -355,6 +365,24 @@ void main() {
         (decoded[0] as Map)['val'],
         'quote"slash\\newline\ntab\t',
       );
+    });
+
+    test('selectBytes preserves embedded-NUL text', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      await db.execute(
+        "INSERT INTO t(body) VALUES ('prefix' || char(0) || 'suffix_日本語')",
+      );
+      const body = 'prefix\u0000suffix_日本語';
+
+      final rows = await db.select(
+        'SELECT body, hex(CAST(body AS BLOB)) AS body_hex FROM t',
+      );
+      expect(rows.single['body'], body);
+      expect(rows.single['body_hex'], _hexUtf8(body));
+
+      final bytes = await db.selectBytes('SELECT body FROM t');
+      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      expect((decoded.single as Map)['body'], body);
     });
 
     test('selectBytes matches jsonEncode of select', () async {
