@@ -357,6 +357,24 @@ void main() {
       );
     });
 
+    test('selectBytes preserves embedded-NUL text', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      await db.execute(
+        "INSERT INTO t(body) VALUES ('prefix' || char(0) || 'suffix_日本語')",
+      );
+      const body = 'prefix\u0000suffix_日本語';
+
+      final rows = await db.select(
+        'SELECT body, hex(CAST(body AS BLOB)) AS body_hex FROM t',
+      );
+      expect(rows.single['body'], body);
+      expect(rows.single['body_hex'], _hexUtf8(body));
+
+      final bytes = await db.selectBytes('SELECT body FROM t');
+      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      expect((decoded.single as Map)['body'], body);
+    });
+
     test('selectBytes matches jsonEncode of select', () async {
       await db.execute('''
         CREATE TABLE items(
