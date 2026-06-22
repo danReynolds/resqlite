@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T09:07:28.310233",
+  "generated": "2026-06-22T09:24:32.119534",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -22618,6 +22618,19 @@
         "timestamp": "2026-06-18T07:48:46",
         "source": "exact"
       }
+    },
+    {
+      "id": "187",
+      "title": "Single-row UTF-8 bind encoder",
+      "date": "2026-06-19",
+      "status": "in_review",
+      "summary": "Extends exp 186's single-row large-text encoder from ASCII-only to direct UTF-8 for non-ASCII parameter lists, reusing the wide-batch `_utf8Length` / `_writeUtf8` helpers and removing the temporary `utf8.encode()` list plus second copy. The broadened `single_row_large_text_bind.dart` CJK rows improve **~31% to ~39%** at 16 KB through 1 MB across an order-flipped pair; ASCII controls stay comparable because the exp 186 all-ASCII fast path is preserved. Adds single-row multibyte + embedded-NUL correctness coverage. Runtime code change; held in review.",
+      "commit": null,
+      "problem": "Exp 186 accepted the single-row direct-ASCII `allocateParams` encoder after\nadding a representative large-text workload. That closed exp 179's ASCII revisit\ncondition, but it deliberately left non-ASCII strings on the old fallback:\n`utf8.encode(value)` allocates a temporary `Uint8List`, then `setRange` copies\nthose bytes into the native parameter buffer.\n\nThe signal map kept the next condition explicit: do not extend the single-row\nencoder to UTF-8 long payloads unless a representative non-ASCII large\nsingle-row workload makes the fallback hot. CJK chat / document inserts are the\nnatural shape: the writer still does one SQLite step, but every string byte pays\nfor a temporary encoded list plus a second copy before binding.",
+      "hypothesis": "Reusing the existing batch direct-UTF-8 helpers (`_utf8Length` and `_writeUtf8`)\ninside single-row `allocateParams` should remove the temporary encoded list and\nthe second byte-buffer copy for non-ASCII text, while preserving exp 186's\nASCII-only fast path exactly.\n\nAcceptance criterion: after broadening `single_row_large_text_bind.dart` with\nbyte-matched CJK payloads, CJK rows at 16 KB or larger improve by more than 5%\nacross an order-flipped pair, while ASCII controls stay in the same range as\nexp 186's accepted direct-ASCII path.",
+      "approach": "- `allocateParams` still detects an all-ASCII parameter list in pass 1 and keeps\n  the O(1) `String.length` sizing plus direct code-unit copy from exp 186.\n- When any string is non-ASCII, pass 1 sizes strings with `_utf8Length`, and\n  pass 2 writes every string directly into the same native parameter buffer with\n  `_writeUtf8`. This is the same UTF-8 encoder already used by the wide-batch\n  path from exp 126.\n- Removed the private `_allocateParamsPreEncoded` fallback because no single-row\n  string path needs a temporary encoded list anymore.\n- Extended `single_row_large_text_bind.dart` so every ASCII shape also has a\n  byte-matched CJK shape (1 KB, 16 KB, 64 KB, 256 KB, 1 MB).\n- Added a single-row regression test for multibyte text plus embedded NUL\n  through `execute`.\n\nNo public API c...",
+      "results": "### Focused workload (`single_row_large_text_bind.dart`)\n\nPass 1 was collected baseline first, then candidate:\n\n| Payload | Baseline ms / 100 | Candidate ms / 100 | Delta |\n|---|---:|---:|---:|\n| ASCII 1 KB | 4.39 | 4.32 | -1.6% |\n| ASCII 16 KB | 9.02 | 8.71 | -3.4% |\n| ASCII 64 KB | 24.50 | 23.91 | -2.4% |\n| ASCII 256 KB | 94.86 | 86.27 | -9.1% |\n| ASCII 1 MB | 367.12 | 336.26 | -8.4% |\n| CJK 1 KB | 3.38 | 2.00 | -40.8% |\n| CJK 16 KB | 10.18 | 6.93 | -31.9% |\n| CJK 64 KB | 35.92 | 25.15 | -30.0% |\n| CJK 256 KB | 145.84 | 90.80 | -37.7% |\n| CJK 1 MB | 556.30 | 347.21 | -37.6% |\n\nPass 2 was order-flipped: candidate had already run, then the same broadened\nharness was applied to a temporary `origin/main` baseline worktree.\n\n| Payload | Baseline ms / 100 | Candidate ms / 100 | Delta |\n|---...",
+      "reasoning": "**In Review.** The implementation meets the bounded gate: non-ASCII large\nsingle-row text binds now use the same direct UTF-8 packing strategy as wide\nbatches, and the CJK workload improves by ~31-39% at 16 KB through 1 MB across\nthe order-flipped pair. Exp 186's ASCII fast path is preserved, and correctness\ncoverage now includes single-row multibyte + embedded-NUL text.\n\nThis consumes exp 186's UTF-8-heavy follow-up. Future single-row bind work\nshould treat `single_row_large_text_bind.dart` as both the ASCII and non-ASCII\nlarge-payload gate. Small text remains at the round-trip floor; do not reopen\nsmall single-row text encoding without a workload that changes that materiality\nthreshold."
     },
     {
       "id": "188",
