@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T13:05:33.457304",
+  "generated": "2026-06-22T13:21:47.798375",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,14 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "191",
+          "title": "Embedded-NUL public API audit",
+          "date": "2026-06-21",
+          "status": "in_review",
+          "summary": "Correctness guard for the remaining public text surfaces in `parameter-encoding-and-binding`: `selectBytes()` now has an assertion that SQLite `char(0)` TEXT decodes through native JSON bytes without truncation, and `stream()` now verifies both initial and changed emissions preserve embedded-NUL UTF-8 bytes. No runtime code or benchmark run; this consumes the signal-map's broader embedded-NUL audit candidate while leaving performance candidates unchanged.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/191-embedded-nul-public-api-audit.md"
+        },
         {
           "id": "189",
           "title": "Savepoint name compression",
