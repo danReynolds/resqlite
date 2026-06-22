@@ -2,6 +2,7 @@
 
 **Date:** 2026-04-09
 **Status:** Accepted
+**Benchmark Run:** none (predates the per-experiment-result-file convention; same-day runs on 2026-04-09 are general baselines, not exp-037 candidates)
 
 ## Change
 

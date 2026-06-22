@@ -3,6 +3,7 @@
 **Date:** 2026-05-06
 **Status:** In Review
 **Direction:** `parameter-encoding-and-binding`
+**Benchmark Run:** none (focused `benchmark/experiments/batch_param_flatten.dart` Unicode/emoji shapes; no exp-126 release artifact was committed at the time — see Results)
 
 ## Problem
 

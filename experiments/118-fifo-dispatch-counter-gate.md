@@ -3,6 +3,7 @@
 **Date:** 2026-05-01
 **Status:** In Review
 **Direction:** `stream-rerun-dispatch`
+**Benchmark Run:** none (acceptance gated on exp 115 profile-mode counters dropping `dispatcherWakeRetryTotal` to zero; no release-suite run because the change is invisible to wall-time outside `kProfileMode`)
 
 ## Problem
 

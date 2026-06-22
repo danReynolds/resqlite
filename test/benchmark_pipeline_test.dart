@@ -174,6 +174,7 @@ void main() {
 
 **Date:** 2026-04-25
 **Status:** In Review
+**Benchmark Run:** none (synthetic test fixture; no real release artifact)
 
 ## Problem
 Synthetic in-review fixture.
@@ -361,6 +362,19 @@ Tracelite decision artifacts live under build/.
         exp(id: '116', status: 'in_review'),
       ], const <String>{}, cutoff: 178);
       expect(issues, isEmpty);
+    });
+
+    test('exp 188 walked the cutoff to 1 — every chartable id is in scope', () {
+      // After the exp 188 backfill, every accepted/in-review experiment must
+      // either link a run or declare opt-out. The pure detector should flag a
+      // chartable id of any number when no declaration is present.
+      final issues = generate_history.findUndeclaredMissingRunExperiments([
+        exp(id: '003', status: 'accepted'),
+        exp(id: '083', status: 'in_review'),
+      ], const <String>{}, cutoff: 1);
+      expect(issues, hasLength(2));
+      expect(issues[0], contains('exp 003'));
+      expect(issues[1], contains('exp 083'));
     });
 
     test('ignores rejected experiments (they may legitimately lack a run)', () {

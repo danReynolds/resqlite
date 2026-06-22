@@ -66,14 +66,9 @@
       ],
       "openQuestions": [
         "Are there remaining blob-heavy parameter shapes where encoding, not SQLite stepping, dominates?",
-        "Does any production workload need broader embedded-NUL guarantees beyond the guarded batch path?"
+        "Does any production workload need text/binary edge-case guarantees outside the public API surfaces covered by exp 191?"
       ],
-      "openCandidates": [
-        {
-          "idea": "broader embedded-NUL text handling audit across public APIs, evaluated separately from performance",
-          "addedDate": "2026-05-02"
-        }
-      ],
+      "openCandidates": [],
       "blockedOnMeasurement": [],
       "notesForExperimenters": "Do not treat tiny allocation removal as the whole category. Exp 109 shows this area can win when the implementation removes a larger allocation/copy pattern; exp 112 shows simple two-parameter batch-list construction tweaks are not enough by themselves; exp 113 shows wide batch rows can justify a direct matrix encoder. After exp 116, release-suite write runs include one 10k x 20-param mixed batch row; use the focused benchmark only when sweeping additional widths, row counts, or nullable text shapes. After exp 125 and exp 126, direct text payload packing is justified only for large wide batches: ASCII takes the first fast path, non-ASCII takes the direct UTF-8 path. Exp 142 rejected carrying the same direct text encoding pattern into the single-row `allocateParams` path on small workloads, and exp 179 reaffirmed that small-bind path is below the round-trip floor; exp 186 then revived the same encoder against a representative large-text bind workload (single_row_large_text_bind.dart 16 KB - 1 MB) where the encoder savings clear the floor (-15% to -32% reproduced across order-flipped passes). Exp 187 extends that single-row encoder to non-ASCII strings by replacing `_allocateParamsPreEncoded` with direct `_utf8Length` / `_writeUtf8` packing; the CJK rows in the same harness now carry the UTF-8-heavy acceptance gate. Exp 146 specifically rejected lowering the ASCII fast-path guard to small/narrow batches; exp 149 only admits repeated 6+ parameter batches after Tracelite showed merge-round writer cost. Exp 150 keeps that guard but treats first-row NULL values as possible text so nullable generated-statement batches can still use the packed encoder. Use single_row_large_text_bind.dart as the durable workload for any future single-row bind change; run both ASCII and CJK rows, with the 1 MB shapes as the load-bearing acceptance gates. Keep 2-3 parameter writes generic unless a future workload proves parameter encoding dominates wall time and clears a Tracelite A/B primary gate."
     },
@@ -130,12 +125,12 @@
       "id": "transaction-control-paths",
       "status": "low-current-signal",
       "subsystems": ["writer", "transactions", "sqlite"],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Per-isolate-round-trip cost dominates per-savepoint allocation savings.",
-      "keyPriors": ["101", "102", "111"],
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Per-isolate-round-trip cost dominates per-savepoint allocation/naming savings, so string/naming work is closed.",
+      "keyPriors": ["101", "102", "111", "189"],
       "archive": ["027", "103"],
       "interestingIf": [
         "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching)",
-        "a profile mode shows the savepoint allocator path as a measurable spike under a realistic workload",
+        "a profile mode shows savepoint boundary round-trips, not string allocation, as a measurable spike under a realistic workload",
         "the change reduces prepare/string work without adding much native API surface"
       ],
       "openQuestions": [
@@ -148,16 +143,12 @@
           "idea": "multi-savepoint round-trip batching (analogous to exp 009 read-side batching)",
           "addedDate": "2026-04-28",
           "addedAfter": "111"
-        },
-        {
-          "idea": "savepoint naming compression",
-          "addedDate": "2026-05-02"
         }
       ],
       "blockedOnMeasurement": [
         "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)"
       ],
-      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark before claiming a win on any savepoint-related change. Per-call savepoint allocation removal is below noise on the worst-case shape; the open headroom is round-trip-shaped, not allocation-shaped."
+      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189's `savepoint_name_compression.dart` harness before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. The open headroom is round-trip-shaped, not allocation-shaped; do not retry savepoint string/naming tweaks without new evidence that the string path, rather than the isolate request boundary, has become dominant."
     },
     {
       "id": "result-transfer-shape",
@@ -863,7 +854,7 @@
         "Adding _assertNewExperimentsLinkOrDeclareRun (over a pure, unit-testable findUndeclaredMissingRunExperiments detector) makes the declaration mandatory for accepted/in-review experiments numbered >= a cutoff (178) with a null run; the repo's existing _skipsReleaseBenchmarkRunMapping header (none/n/a/tracelite) is the escape hatch. Pre-cutoff experiments are grandfathered, history.json is byte-for-byte unchanged, and no runtime code (lib/native/hook) is touched"
       ],
       "nextSignals": [
-        "to pull the ~17 pre-178 silently-unmapped chartable experiments under the guard, backfill their **Benchmark Run:** headers (or commit their missing result files) and lower _benchmarkRunDeclarationCutoff in the same change",
+        "to pull the ~17 pre-178 silently-unmapped chartable experiments under the guard, backfill their **Benchmark Run:** headers (or commit their missing result files) and lower _benchmarkRunDeclarationCutoff in the same change — completed by exp 188 (cutoff walked to 1; 16 chartable experiments backfilled + exp 174 declaration tightened to start with `none — `; history.json byte-for-byte unchanged)",
         "if the experiments page ever charts rejected experiments that ship a result file, widen the guard's status scope (currently accepted/in-review only) rather than touching the cutoff"
       ]
     },
@@ -994,6 +985,48 @@
         "use benchmark/experiments/single_row_large_text_bind.dart for both ASCII and CJK rows before accepting any future single-row bind encoder rewrite",
         "the old single-row Unicode fallback is gone; future correctness changes to _utf8Length/_writeUtf8 must preserve multibyte, surrogate-pair, and embedded-NUL behavior on execute() as well as executeBatch()",
         "if a release-suite large single-row text lane is added later, it should include a non-ASCII shape rather than only repeating exp 186's ASCII gate"
+      ]
+    },
+    "188": {
+      "directions": ["measurement-system"],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "Exp 178's pilot cutoff (`_benchmarkRunDeclarationCutoff = 178`) left ~17 pre-cutoff chartable experiments outside the missing-run-without-declaration guard's scope, still indistinguishable from forgotten result files. The follow-up exp 178 named (`backfill **Benchmark Run:** headers and lower the cutoff`) walks the cutoff back to 1, so every accepted/in-review experiment is now under the same forced-declaration discipline",
+        "All 16 silently-unmapped chartable experiments at the time of the backfill (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing `**Benchmark Run:** Focused A/B (...)` header was descriptive but did not start with one of the opt-out keywords) gain a declared `**Benchmark Run:** none ...` line that explains why no release artifact exists. docs/experiments/history.json is byte-for-byte unchanged because the `_skipBenchmarkRunMapping` flag is consumed inside `_attachBenchmarkRunMappings` before serialization and none of these experiments were linked to a release run anyway",
+        "Test fixture `100-test.md` in benchmark_pipeline_test.dart predated the original cutoff at 178 too, and is updated to declare the opt-out so the test exercises a representative valid post-cutoff state. A new regression anchor (`exp 188 walked the cutoff to 1 — every chartable id is in scope`) lives next to exp 178's tests, asserting that `findUndeclaredMissingRunExperiments(..., cutoff: 1)` flags low-numbered chartable ids without declarations"
+      ],
+      "nextSignals": [
+        "do not add a new chartable experiment without a `**Benchmark Run:**` declaration — the guard now fires for every id, not just 178+",
+        "if a pre-178 experiment later gains a real release artifact (e.g. someone re-runs exp 125 against current main to produce `2026-MM-DDTHH-MM-SS-exp125-*.md`), remove the opt-out header in the same change so the linker maps it correctly",
+        "the measurement-system openCandidate `memory profiling harness with per-benchmark RSS acceptance criteria` is independent of this run; exp 183/185 added the underlying RSS signal (readerJsonBufHighWaterBytes + the SQLite Diagnostics row), so a future RSS-criteria pass should build on those rather than on the guard scope"
+      ]
+    },
+    "189": {
+      "directions": ["transaction-control-paths"],
+      "outcomeClass": "rejected_below_signal",
+      "changedBeliefs": [
+        "Savepoint naming compression (same-name cached SQL for `SAVEPOINT s`, `RELEASE s`, and `ROLLBACK TO s`) can move best-case focused control rows: empty fanout improved about 6-7%, rollback fanout improved 13-17%, and repeated deep chains improved 7-8% across the order-flipped pair.",
+        "The representative nested-write fanout did not reproduce: baseline-first measured -1.3%, then the candidate-first pass measured +21.6% slower. That is the load-bearing row because it matches the real nested transaction shape better than empty control-only fanout.",
+        "Per-savepoint string formatting, native UTF-8 allocation, caching, and naming are below the merge bar after exp 102, exp 111, and exp 189. Nested transaction headroom remains round-trip-shaped, not string-shaped."
+      ],
+      "nextSignals": [
+        "Do not retry savepoint string caching, savepoint naming compression, or native helpers that still send one request per savepoint boundary without new evidence that string work is dominant.",
+        "Use benchmark/experiments/savepoint_name_compression.dart for quick savepoint-control probes, but treat the write-fanout row as the representative gate.",
+        "The remaining open implementation shape is multi-savepoint round-trip batching with preserved callback semantics and rollback legality."
+      ]
+    },
+    "191": {
+      "directions": ["parameter-encoding-and-binding"],
+      "outcomeClass": "in_review_correctness_guard",
+      "changedBeliefs": [
+        "The broader embedded-NUL public API audit candidate is consumed as correctness support, not a performance result. Current main already covers wide executeBatch with multibyte embedded-NUL TEXT, and exp 187 covers single-row execute in flight; exp 191 adds the missing reader surfaces.",
+        "selectBytes preserves embedded-NUL TEXT seeded by SQLite char(0): select() returns the expected Dart string, hex(CAST(body AS BLOB)) matches _hexUtf8(body), and native JSON bytes decode back to the same value.",
+        "stream initial and changed emissions preserve embedded-NUL TEXT bytes, proving the one-pass initial decode, result hashing, and re-query emission path do not treat TEXT as NUL-terminated."
+      ],
+      "nextSignals": [
+        "do not reopen broad embedded-NUL work without a new public API surface or a concrete regression report; coverage now spans wide executeBatch, in-flight single-row execute, selectBytes, and stream emissions",
+        "if _utf8Length, _writeUtf8, sqlite3_bind_text lengths, native JSON string emission, or stream row decoding changes, keep these tests in the focused validation set",
+        "future performance work in this direction still needs a workload where parameter encoding is material; exp 191 does not change the blob-heavy or small/narrow shape guidance"
       ]
     }
   }

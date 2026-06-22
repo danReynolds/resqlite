@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-18T19:03:17.805127",
+  "generated": "2026-06-22T13:21:47.798375",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,30 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "191",
+          "title": "Embedded-NUL public API audit",
+          "date": "2026-06-21",
+          "status": "in_review",
+          "summary": "Correctness guard for the remaining public text surfaces in `parameter-encoding-and-binding`: `selectBytes()` now has an assertion that SQLite `char(0)` TEXT decodes through native JSON bytes without truncation, and `stream()` now verifies both initial and changed emissions preserve embedded-NUL UTF-8 bytes. No runtime code or benchmark run; this consumes the signal-map's broader embedded-NUL audit candidate while leaving performance candidates unchanged.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/191-embedded-nul-public-api-audit.md"
+        },
+        {
+          "id": "189",
+          "title": "Savepoint name compression",
+          "date": "2026-06-20",
+          "status": "rejected",
+          "summary": "Replaced depth-specific nested transaction SQL with cached same-name savepoint strings (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) and measured it with a new focused `savepoint_name_compression.dart` harness. Best-case control rows trended faster (empty fanout ~-6% both passes; rollback fanout -17% / -13%; deep chain -7% / -8%), but the representative nested-write fanout did not reproduce: -1.3% in the baseline-first pass, then +21.6% slower in the candidate-first pass. Same-name savepoint semantics are not worth carrying for a noisy/non-reproducing write-fanout result. Runtime change reverted; focused harness retained. Future transaction-control work needs to collapse savepoint round trips, not rename/cache per-boundary SQL strings.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/189-savepoint-name-compression.md"
+        },
+        {
+          "id": "188",
+          "title": "Pre-178 benchmark-run declarations backfill",
+          "date": "2026-06-19",
+          "status": "in_review",
+          "summary": "Extends [exp 178](178-missing-run-declaration-guard.md) by walking `_benchmarkRunDeclarationCutoff` from `178` back to `1`, so every chartable (accepted/in-review) experiment is now under the missing-run-without-declaration guard. Backfills `**Benchmark Run:**` opt-out headers on the 16 silently-unmapped chartable experiments (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing header was descriptive but did not start with an opt-out keyword). `docs/experiments/history.json` is unchanged for every pre-existing row — only the new exp 188 entry is added. A new unit test (`exp 188 walked the cutoff to 1`) anchors the cutoff change inside the same `findUndeclaredMissingRunExperiments` suite exp 178 shipped. No runtime code.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/188-prerun-declarations-backfill.md"
+        },
         {
           "id": "186",
           "title": "Single-row large-text bind encoder",
