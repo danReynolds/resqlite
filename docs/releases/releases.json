@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T13:42:42.496551",
+  "generated": "2026-06-22T14:00:06.611052",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -19,6 +19,14 @@
           "status": "in_review",
           "summary": "Correctness guard for the remaining public text surfaces in `parameter-encoding-and-binding`: `selectBytes()` now has an assertion that SQLite `char(0)` TEXT decodes through native JSON bytes without truncation, and `stream()` now verifies both initial and changed emissions preserve embedded-NUL UTF-8 bytes. No runtime code or benchmark run; this consumes the signal-map's broader embedded-NUL audit candidate while leaving performance candidates unchanged.",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/191-embedded-nul-public-api-audit.md"
+        },
+        {
+          "id": "190",
+          "title": "selectBytes column-name token pre-encoding",
+          "date": "2026-06-20",
+          "status": "in_review",
+          "summary": "Native-side encoder amortization for `Database.selectBytes()`. `write_json_to_buf` in `native/resqlite.c` now pre-builds each column's `\"col\":` / `,\"col\":` token once at first-row time into a per-query scratch buffer, then emits each column on subsequent rows with a single `buf_write` instead of comma + `json_write_string` (SWAR scan + escape walk) + colon — collapsing four `buf_write*` calls per column per row into one on the common ASCII identifier case. Focused `select_bytes_wide_cols.dart` measures **−4% to −11%** across two order-flipped passes on 10k-row × 8 / 20-col shapes, with the 1-row and 100-row regression guards staying inside the sub-µs noise floor; `large_bytes_transfer.dart` (exp 174's focused guard) also moves **−8.7% / −8.2%** on large/small lanes. No public API change; behavior preserved by reusing `json_write_string` for the token build so escape semantics are identical.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/190-selectbytes-col-name-preencode.md"
         },
         {
           "id": "189",
