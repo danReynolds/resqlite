@@ -289,6 +289,9 @@ Every scheduled experiment run must:
   Draft PRs are not ready to merge and are easier for reviewers to
   defer or ignore; a runner that finishes cleanly should produce a PR
   that is immediately reviewable.
+- **Label the PR when you open it.** Apply exactly one `type:` and one
+  `result:` label (see [PR labels](#pr-labels) below) so the PR list is
+  triageable at a glance.
 - **Distinguish local completion from merge readiness.** A local experiment is
   complete when the branch has coherent code/docs/artifacts, focused validation
   has passed, and the finalizer is green. A PR is not ready to merge until CI
@@ -323,6 +326,42 @@ Every scheduled experiment run must:
   explicitly in the handoff and create a follow-up/heartbeat when the
   environment supports it. After every feedback-response push, watch
   CI again and re-check review threads.
+
+### PR labels
+
+Every experiment PR carries exactly one `type:` label and one `result:` label.
+The labels already exist in the repo with fixed colors — apply them by name with
+`gh pr edit`, never recreate them.
+
+- **`type:`** — the kind of run (independent of whether it ships runtime code):
+  - `type: performance` — an implementation experiment changing a runtime hot
+    path.
+  - `type: measurement` — counters, profiling, benchmarks, or focused probes. A
+    measurement hook that is kept still counts as `type: measurement` even
+    though it ships `lib/`/`native/`.
+  - `type: correctness` — a public-API guard or audit with no performance claim.
+- **`result:`** — mirrors the experiment's `experiments/README.md` Status:
+  - `result: rejected` — measured below the bar or regressed; code not kept.
+  - `result: deferred` — out of budget or premise needs a design pass.
+  - `result: in review` — a merged win still soaking. The separate promotion
+    pass (see "Post-merge soak and promotion") swaps this for `result: accepted`
+    when it moves the README row to Accepted — keep the label and row in sync.
+
+```bash
+gh pr edit <N> --add-label "type: performance" --add-label "result: in review"
+```
+
+If `gh pr edit` errors with a Projects-classic `projectCards` GraphQL message
+(this repo trips it), add the labels via the REST endpoint, which skips the
+projects lookup:
+
+```bash
+gh api --method POST repos/danReynolds/resqlite/issues/<N>/labels \
+  -f "labels[]=type: performance" -f "labels[]=result: in review"
+```
+
+If the verdict changes during review, swap the `result:` label with
+`--remove-label`/`--add-label` rather than leaving two attached.
 
 ### What the PR description must contain
 

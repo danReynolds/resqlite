@@ -252,6 +252,42 @@ git diff --name-only origin/main...HEAD
   measurement hook). **Leave it open for human review.** Do not auto-merge
   runtime code, even when CI is green and the verdict is "rejected."
 
+### Label the PR
+
+Tag every experiment PR with exactly one `type:` and one `result:` label, so the
+PR list reads at a glance (colors live in the repo's label set — apply by name,
+don't redefine them):
+
+- **`type:`** — the kind of run, *not* the diff-based merge class above:
+  - `type: performance` — an implementation experiment that changes a runtime
+    hot path.
+  - `type: measurement` — counters, profiling, or focused probes. A kept
+    measurement *hook* is still `type: measurement` even though it ships `lib/`.
+  - `type: correctness` — a public-API guard or audit with no performance claim
+    (e.g. the embedded-NUL audit).
+- **`result:`** — mirrors the experiment's `experiments/README.md` Status:
+  `result: rejected`, `result: deferred`, or `result: in review` for a merged
+  win still soaking. The promotion pass that moves a row from In Review to
+  Accepted also swaps `result: in review` → `result: accepted`; keep the label
+  and the README row in sync.
+
+```bash
+gh pr edit <N> --add-label "type: performance" --add-label "result: in review"
+```
+
+If `gh pr edit` fails with a Projects-classic `projectCards` GraphQL error
+(this repo trips it), add the labels through the REST endpoint instead — it
+doesn't touch projects:
+
+```bash
+gh api --method POST repos/danReynolds/resqlite/issues/<N>/labels \
+  -f "labels[]=type: performance" -f "labels[]=result: in review"
+```
+
+If the verdict changes during review, swap the result label
+(`--remove-label`/`--add-label`, or `gh api --method DELETE
+.../labels/<name>`) rather than stacking two.
+
 ## Preflight: claim your slot before doing any work
 
 Do this **first, every run** — before picking a follow-up, before writing any
