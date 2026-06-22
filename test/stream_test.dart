@@ -1,9 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
+
+String _hexUtf8(String value) => utf8
+    .encode(value)
+    .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+    .join()
+    .toUpperCase();
 
 final class _EventWaiter<T> {
   _EventWaiter(this.count, this.completer);
@@ -467,6 +474,38 @@ void main() {
 
       await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
       expect(probe.events, hasLength(1));
+
+      await probe.cancel();
+    });
+
+    test('preserves embedded-NUL text through stream emissions', () async {
+      await db.execute(
+        'CREATE TABLE text_values(id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
+      );
+      await db.execute(
+        "INSERT INTO text_values(body) VALUES ('initial' || char(0) || '東京')",
+      );
+      const initial = 'initial\u0000東京';
+      const changed = 'changed\u0000🚀';
+
+      final probe = _StreamProbe(
+        db.stream(
+          'SELECT body, hex(CAST(body AS BLOB)) AS body_hex '
+          'FROM text_values WHERE id = 1',
+        ),
+      );
+      final initialRows = await probe.event(1);
+      expect(initialRows.single['body'], initial);
+      expect(initialRows.single['body_hex'], _hexUtf8(initial));
+
+      await db.execute(
+        "UPDATE text_values SET body = 'changed' || char(0) || '🚀' "
+        'WHERE id = 1',
+      );
+
+      final changedRows = await probe.event(2);
+      expect(changedRows.single['body'], changed);
+      expect(changedRows.single['body_hex'], _hexUtf8(changed));
 
       await probe.cancel();
     });

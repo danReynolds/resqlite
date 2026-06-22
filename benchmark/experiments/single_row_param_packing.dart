@@ -22,8 +22,8 @@ void main() {
     'ascii-5-mixed': [42, 'Ada Lovelace', 'ada@example.com', 'London', 'UK'],
     // Large ASCII text param (1 KB) — where direct-write should help most.
     'ascii-1-large': [_asciiOf(1024)],
-    // Non-ASCII: exercises the pre-encoded fallback (guardrail, must not
-    // regress materially).
+    // Non-ASCII: exercises the direct UTF-8 path added after the ASCII fast
+    // path, as a small-payload guardrail.
     'unicode-1': ['項目_東京_${'あ' * 64}'],
     // BLOB + int only: no string, identical on both paths (control).
     'blob-int': [7, Uint8List(256)],

@@ -252,6 +252,47 @@ git diff --name-only origin/main...HEAD
   measurement hook). **Leave it open for human review.** Do not auto-merge
   runtime code, even when CI is green and the verdict is "rejected."
 
+### Label the PR
+
+Tag every experiment PR with one `type:` label and one outcome label, so the
+PR list reads at a glance (colors live in the repo's label set — apply by name,
+don't redefine them):
+
+- **`type:`** — the kind of run, *not* the diff-based merge class above:
+  - `type: performance` — an implementation experiment that changes a runtime
+    hot path.
+  - `type: measurement` — counters, profiling, or focused probes. A kept
+    measurement *hook* is still `type: measurement` even though it ships `lib/`.
+  - `type: correctness` — a public-API guard or audit with no performance claim
+    (e.g. the embedded-NUL audit).
+- **outcome** — whether the experiment *succeeded or failed*, which is the
+  verdict, **not** the PR or `README.md` status:
+  - `approved` — the experiment succeeded: a kept win, or a passing
+    correctness guard.
+  - `rejected` — the experiment failed: measured below the decision bar,
+    regressed, or the candidate was abandoned.
+  An accepted win is `approved` from the moment its result is known, regardless
+  of whether its README row still reads "In Review" while it soaks. Leave a
+  still-undecided / deferred experiment with no outcome label until its verdict
+  lands.
+
+```bash
+gh pr edit <N> --add-label "type: performance" --add-label "approved"
+```
+
+If `gh pr edit` fails with a Projects-classic `projectCards` GraphQL error
+(this repo trips it), add the labels through the REST endpoint instead — it
+doesn't touch projects:
+
+```bash
+gh api --method POST repos/danReynolds/resqlite/issues/<N>/labels \
+  -f "labels[]=type: performance" -f "labels[]=approved"
+```
+
+If the verdict flips during review, swap the outcome label
+(`--remove-label`/`--add-label`, or `gh api --method DELETE
+.../labels/<name>`) rather than stacking both.
+
 ## Preflight: claim your slot before doing any work
 
 Do this **first, every run** — before picking a follow-up, before writing any

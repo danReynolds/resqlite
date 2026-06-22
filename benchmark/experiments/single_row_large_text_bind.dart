@@ -1,7 +1,8 @@
-// Focused workload for exp 186 — single-row INSERT with a large ASCII
+// Focused workload for exp 186/187 — single-row INSERT with a large
 // TEXT param. Stresses the bind path in [allocateParams] at sizes where
-// the encoder cost (utf8.encode allocating a Uint8List + setRange copy)
-// is no longer dominated by the writer round-trip floor.
+// the encoder cost (utf8.encode allocating a Uint8List + setRange copy,
+// or direct inline UTF-8 writing) is no longer dominated by the writer
+// round-trip floor.
 //
 // exp 179 showed the direct-ASCII rewrite of allocateParams is 37–58 %
 // faster on a synthetic encoder loop, but the release suite (1-short-
@@ -14,11 +15,13 @@
 //   dart run benchmark/experiments/single_row_large_text_bind.dart
 //
 // Reports median ms/100 INSERTs per text-size shape.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
 
 const _shapes = <int>[1024, 16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024];
+const _kinds = <_PayloadKind>[_PayloadKind.ascii, _PayloadKind.cjk];
 
 const _writesPerSample = 100;
 const _samples = 11;
@@ -34,40 +37,48 @@ Future<void> main() async {
     'single-row large-text bind — '
     '$_writesPerSample writes/sample, $_samples samples\n',
   );
-  stdout.writeln('| Text bytes | Median ms/$_writesPerSample | Min | Max |');
-  stdout.writeln('|---|---|---|---|');
+  stdout.writeln(
+    '| Payload | UTF-8 bytes | Median ms/$_writesPerSample | Min | Max |',
+  );
+  stdout.writeln('|---|---:|---:|---:|---:|');
 
-  for (final bytes in _shapes) {
-    final text = _asciiOf(bytes);
-    // Warm up: bind cache, statement cache, page cache.
-    for (var i = 0; i < 5; i++) {
-      await db.execute('INSERT INTO doc(body) VALUES (?)', [text]);
-    }
-    await db.execute('DELETE FROM doc');
-
-    final medians = <double>[];
-    for (var s = 0; s < _samples; s++) {
-      final sw = Stopwatch()..start();
-      for (var i = 0; i < _writesPerSample; i++) {
+  for (final kind in _kinds) {
+    for (final bytes in _shapes) {
+      final text = _textOf(kind, bytes);
+      final utf8Bytes = utf8.encode(text).length;
+      // Warm up: bind cache, statement cache, page cache.
+      for (var i = 0; i < 5; i++) {
         await db.execute('INSERT INTO doc(body) VALUES (?)', [text]);
       }
-      sw.stop();
-      medians.add(sw.elapsedMicroseconds / 1000.0);
       await db.execute('DELETE FROM doc');
+
+      final medians = <double>[];
+      for (var s = 0; s < _samples; s++) {
+        final sw = Stopwatch()..start();
+        for (var i = 0; i < _writesPerSample; i++) {
+          await db.execute('INSERT INTO doc(body) VALUES (?)', [text]);
+        }
+        sw.stop();
+        medians.add(sw.elapsedMicroseconds / 1000.0);
+        await db.execute('DELETE FROM doc');
+      }
+      medians.sort();
+      final med = medians[medians.length ~/ 2];
+      stdout.writeln(
+        '| ${_kindLabel(kind)} ${_bytesLabel(bytes)} '
+        '| $utf8Bytes '
+        '| ${med.toStringAsFixed(2)} '
+        '| ${medians.first.toStringAsFixed(2)} '
+        '| ${medians.last.toStringAsFixed(2)} |',
+      );
     }
-    medians.sort();
-    final med = medians[medians.length ~/ 2];
-    stdout.writeln(
-      '| ${_bytesLabel(bytes)} '
-      '| ${med.toStringAsFixed(2)} '
-      '| ${medians.first.toStringAsFixed(2)} '
-      '| ${medians.last.toStringAsFixed(2)} |',
-    );
   }
 
   await db.close();
   await tmp.delete(recursive: true);
 }
+
+enum _PayloadKind { ascii, cjk }
 
 String _bytesLabel(int n) {
   if (n >= 1024 * 1024) return '${n ~/ (1024 * 1024)} MB';
@@ -75,10 +86,43 @@ String _bytesLabel(int n) {
   return '$n B';
 }
 
+String _kindLabel(_PayloadKind kind) {
+  switch (kind) {
+    case _PayloadKind.ascii:
+      return 'ASCII';
+    case _PayloadKind.cjk:
+      return 'CJK';
+  }
+}
+
+String _textOf(_PayloadKind kind, int bytes) {
+  switch (kind) {
+    case _PayloadKind.ascii:
+      return _asciiOf(bytes);
+    case _PayloadKind.cjk:
+      return _cjkOf(bytes);
+  }
+}
+
 String _asciiOf(int n) {
   final b = StringBuffer();
   for (var i = 0; i < n; i++) {
     b.writeCharCode(0x61 + (i % 26));
+  }
+  return b.toString();
+}
+
+String _cjkOf(int utf8Bytes) {
+  const chars = ['日', '本', '語', '東', '京', '漢', '字'];
+  final b = StringBuffer();
+  var remaining = utf8Bytes;
+  var i = 0;
+  while (remaining >= 3) {
+    b.write(chars[i++ % chars.length]);
+    remaining -= 3;
+  }
+  for (var j = 0; j < remaining; j++) {
+    b.writeCharCode(0x61 + j);
   }
   return b.toString();
 }

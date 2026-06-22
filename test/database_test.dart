@@ -223,6 +223,16 @@ void main() {
       expect(rows[2]['name'], 'مرحبا');
     });
 
+    test('execute preserves multibyte and embedded-NUL text', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      const body = '項目_東京\u0000emoji_🎉🚀';
+
+      await db.execute('INSERT INTO t(body) VALUES (?)', [body]);
+
+      final rows = await db.select('SELECT body FROM t');
+      expect(rows.single['body'], body);
+    });
+
     test('select with parameterized query', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, active INTEGER)',
@@ -357,6 +367,24 @@ void main() {
       );
     });
 
+    test('selectBytes preserves embedded-NUL text', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      await db.execute(
+        "INSERT INTO t(body) VALUES ('prefix' || char(0) || 'suffix_日本語')",
+      );
+      const body = 'prefix\u0000suffix_日本語';
+
+      final rows = await db.select(
+        'SELECT body, hex(CAST(body AS BLOB)) AS body_hex FROM t',
+      );
+      expect(rows.single['body'], body);
+      expect(rows.single['body_hex'], _hexUtf8(body));
+
+      final bytes = await db.selectBytes('SELECT body FROM t');
+      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      expect((decoded.single as Map)['body'], body);
+    });
+
     test('selectBytes matches jsonEncode of select', () async {
       await db.execute('''
         CREATE TABLE items(
@@ -400,6 +428,44 @@ void main() {
         final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
         expect(decoded, hasLength(1), reason: 'iteration $i');
         expect((decoded[0] as Map)['tag'], 'target');
+      }
+    });
+
+    test('selectBytes encodes int64 extremes', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, v INTEGER)');
+      const llongMin = -9223372036854775807 - 1;
+      const llongMax = 9223372036854775807;
+      final values = <int>[
+        0,
+        1,
+        -1,
+        9,
+        10,
+        99,
+        100,
+        999,
+        -999,
+        1000,
+        9999,
+        10000,
+        12345,
+        -12345,
+        1234567890,
+        -1234567890,
+        llongMax,
+        llongMin,
+      ];
+      for (var i = 0; i < values.length; i++) {
+        await db.execute(
+          'INSERT INTO t(id, v) VALUES (?, ?)',
+          [i + 1, values[i]],
+        );
+      }
+      final bytes = await db.selectBytes('SELECT v FROM t ORDER BY id');
+      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      expect(decoded.length, values.length);
+      for (var i = 0; i < values.length; i++) {
+        expect((decoded[i] as Map)['v'], values[i], reason: 'value ${values[i]}');
       }
     });
 

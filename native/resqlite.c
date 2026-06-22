@@ -1750,11 +1750,22 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
 // Fast int64-to-string (avoids snprintf format parsing overhead)
 // ---------------------------------------------------------------------------
 
+// Two-digit lookup table for the int64-to-string fast path: one division and
+// one 2-byte memcpy per pair of output digits. Halves the division count vs
+// the single-digit loop exp 023 introduced.
+static const char kTwoDigits[200] =
+    "0001020304050607080910111213141516171819"
+    "2021222324252627282930313233343536373839"
+    "4041424344454647484950515253545556575859"
+    "6061626364656667686970717273747576777879"
+    "8081828384858687888990919293949596979899";
+
 RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
     if (val == 0) { buf[0] = '0'; return 1; }
 
-    char tmp[21]; // max int64 is 20 digits + sign
-    int pos = 0;
+    // Unsigned int64 magnitude fits in 20 decimal digits.
+    char tmp[20];
+    int pos = 20;
     int negative = 0;
     unsigned long long uval;
 
@@ -1765,17 +1776,25 @@ RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
         uval = (unsigned long long)val;
     }
 
-    while (uval > 0) {
-        tmp[pos++] = '0' + (char)(uval % 10);
-        uval /= 10;
+    while (uval >= 100) {
+        unsigned d = (unsigned)(uval % 100);
+        uval /= 100;
+        pos -= 2;
+        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
+    }
+    if (uval >= 10) {
+        unsigned d = (unsigned)uval;
+        pos -= 2;
+        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
+    } else {
+        tmp[--pos] = (char)('0' + (unsigned)uval);
     }
 
+    int digits = 20 - pos;
     int len = 0;
     if (negative) buf[len++] = '-';
-    for (int i = pos - 1; i >= 0; i--) {
-        buf[len++] = tmp[i];
-    }
-    return len;
+    memcpy(buf + len, tmp + pos, digits);
+    return len + digits;
 }
 
 // ---------------------------------------------------------------------------
@@ -1926,8 +1945,19 @@ RESQLITE_HOT static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
     // Stack-allocate for typical column counts (<=64), heap for larger.
     const char* _col_names_stack[64];
     int _col_name_lens_stack[64];
+    int _token_offsets_stack[64];
+    int _token_lens_stack[64];
     const char** col_names = (col_count <= 64) ? _col_names_stack : NULL;
     int* col_name_lens = (col_count <= 64) ? _col_name_lens_stack : NULL;
+    // [EXP-190] Per-column pre-encoded JSON name token offsets/lengths into
+    // `tokens_buf`. Column 0's token is `"name":`; columns 1+ also include the
+    // leading `,`. Built once at first-row time so subsequent rows pay a
+    // single `buf_write` per column instead of a comma + `json_write_string`
+    // (SWAR scan + escape walk) + colon — collapsing four buf_writes per
+    // column per row into one on the common ASCII identifier case.
+    int* token_offsets = (col_count <= 64) ? _token_offsets_stack : NULL;
+    int* token_lens = (col_count <= 64) ? _token_lens_stack : NULL;
+    resqlite_buf tokens_buf = {NULL, 0, 0};
     int col_names_init = 0;
     int row_index = 0;
     int rc;
@@ -1938,15 +1968,45 @@ RESQLITE_HOT static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
             if (col_count > 64) {
                 col_names = (const char**)malloc(col_count * sizeof(const char*));
                 col_name_lens = (int*)malloc(col_count * sizeof(int));
-                if (!col_names || !col_name_lens) {
+                token_offsets = (int*)malloc(col_count * sizeof(int));
+                token_lens = (int*)malloc(col_count * sizeof(int));
+                if (!col_names || !col_name_lens ||
+                    !token_offsets || !token_lens) {
                     rc = SQLITE_NOMEM;
                     goto cleanup;
                 }
             }
             col_names_init = 1;
+            int tokens_cap = 0;
             for (int i = 0; i < col_count; i++) {
                 col_names[i] = sqlite3_column_name(stmt, i);
                 col_name_lens[i] = (int)strlen(col_names[i]);
+                // Worst case per name: every byte escapes to \uXXXX (6 bytes),
+                // plus leading `,` (col 1+), opening `"`, closing `"`, `:`.
+                tokens_cap += col_name_lens[i] * 6 + 4;
+            }
+            if (buf_init(&tokens_buf, tokens_cap > 64 ? tokens_cap : 64) != 0) {
+                rc = SQLITE_NOMEM;
+                goto cleanup;
+            }
+            for (int i = 0; i < col_count; i++) {
+                token_offsets[i] = tokens_buf.len;
+                if (i > 0) {
+                    if (buf_write_char(&tokens_buf, ',') != 0) {
+                        rc = SQLITE_NOMEM;
+                        goto cleanup;
+                    }
+                }
+                if (json_write_string(
+                        &tokens_buf, col_names[i], col_name_lens[i]) != 0) {
+                    rc = SQLITE_NOMEM;
+                    goto cleanup;
+                }
+                if (buf_write_char(&tokens_buf, ':') != 0) {
+                    rc = SQLITE_NOMEM;
+                    goto cleanup;
+                }
+                token_lens[i] = tokens_buf.len - token_offsets[i];
             }
         }
 
@@ -1954,10 +2014,8 @@ RESQLITE_HOT static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
         JSON_CHECK(buf_write_char(b, '{'));
 
         for (int i = 0; i < col_count; i++) {
-            if (i > 0) JSON_CHECK(buf_write_char(b, ','));
-
-            JSON_CHECK(json_write_string(b, col_names[i], col_name_lens[i]));
-            JSON_CHECK(buf_write_char(b, ':'));
+            JSON_CHECK(buf_write(
+                b, tokens_buf.data + token_offsets[i], token_lens[i]));
 
             int type = sqlite3_column_type(stmt, i);
             switch (type) {
@@ -2008,9 +2066,12 @@ RESQLITE_HOT static int write_json_to_buf(sqlite3_stmt* stmt, resqlite_buf* b) {
 
 cleanup:
     sqlite3_reset(stmt);
+    free(tokens_buf.data);
     if (col_count > 64) {
         free(col_names);
         free(col_name_lens);
+        free(token_offsets);
+        free(token_lens);
     }
 
     if (rc == SQLITE_NOMEM) return rc;
