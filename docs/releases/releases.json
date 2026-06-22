@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T13:21:47.798375",
+  "generated": "2026-06-22T13:29:39.232911",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -35,6 +35,14 @@
           "status": "in_review",
           "summary": "Extends [exp 178](178-missing-run-declaration-guard.md) by walking `_benchmarkRunDeclarationCutoff` from `178` back to `1`, so every chartable (accepted/in-review) experiment is now under the missing-run-without-declaration guard. Backfills `**Benchmark Run:**` opt-out headers on the 16 silently-unmapped chartable experiments (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing header was descriptive but did not start with an opt-out keyword). `docs/experiments/history.json` is unchanged for every pre-existing row — only the new exp 188 entry is added. A new unit test (`exp 188 walked the cutoff to 1`) anchors the cutoff change inside the same `findUndeclaredMissingRunExperiments` suite exp 178 shipped. No runtime code.",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/188-prerun-declarations-backfill.md"
+        },
+        {
+          "id": "187",
+          "title": "Single-row UTF-8 bind encoder",
+          "date": "2026-06-19",
+          "status": "in_review",
+          "summary": "Extends exp 186's single-row large-text encoder from ASCII-only to direct UTF-8 for non-ASCII parameter lists, reusing the wide-batch `_utf8Length` / `_writeUtf8` helpers and removing the temporary `utf8.encode()` list plus second copy. The broadened `single_row_large_text_bind.dart` CJK rows improve **~31% to ~39%** at 16 KB through 1 MB across an order-flipped pair; ASCII controls stay comparable because the exp 186 all-ASCII fast path is preserved. Adds single-row multibyte + embedded-NUL correctness coverage. Runtime code change; held in review.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/187-single-row-utf8-bind-encoder.md"
         },
         {
           "id": "186",
