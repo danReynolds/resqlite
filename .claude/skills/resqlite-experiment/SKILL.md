@@ -254,7 +254,7 @@ git diff --name-only origin/main...HEAD
 
 ### Label the PR
 
-Tag every experiment PR with exactly one `type:` and one `result:` label, so the
+Tag every experiment PR with one `type:` label and one outcome label, so the
 PR list reads at a glance (colors live in the repo's label set — apply by name,
 don't redefine them):
 
@@ -265,14 +265,19 @@ don't redefine them):
     measurement *hook* is still `type: measurement` even though it ships `lib/`.
   - `type: correctness` — a public-API guard or audit with no performance claim
     (e.g. the embedded-NUL audit).
-- **`result:`** — mirrors the experiment's `experiments/README.md` Status:
-  `result: rejected`, `result: deferred`, or `result: in review` for a merged
-  win still soaking. The promotion pass that moves a row from In Review to
-  Accepted also swaps `result: in review` → `result: accepted`; keep the label
-  and the README row in sync.
+- **outcome** — whether the experiment *succeeded or failed*, which is the
+  verdict, **not** the PR or `README.md` status:
+  - `approved` — the experiment succeeded: a kept win, or a passing
+    correctness guard.
+  - `rejected` — the experiment failed: measured below the decision bar,
+    regressed, or the candidate was abandoned.
+  An accepted win is `approved` from the moment its result is known, regardless
+  of whether its README row still reads "In Review" while it soaks. Leave a
+  still-undecided / deferred experiment with no outcome label until its verdict
+  lands.
 
 ```bash
-gh pr edit <N> --add-label "type: performance" --add-label "result: in review"
+gh pr edit <N> --add-label "type: performance" --add-label "approved"
 ```
 
 If `gh pr edit` fails with a Projects-classic `projectCards` GraphQL error
@@ -281,12 +286,12 @@ doesn't touch projects:
 
 ```bash
 gh api --method POST repos/danReynolds/resqlite/issues/<N>/labels \
-  -f "labels[]=type: performance" -f "labels[]=result: in review"
+  -f "labels[]=type: performance" -f "labels[]=approved"
 ```
 
-If the verdict changes during review, swap the result label
+If the verdict flips during review, swap the outcome label
 (`--remove-label`/`--add-label`, or `gh api --method DELETE
-.../labels/<name>`) rather than stacking two.
+.../labels/<name>`) rather than stacking both.
 
 ## Preflight: claim your slot before doing any work
 
