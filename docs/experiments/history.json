@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T07:28:00.759436",
+  "generated": "2026-06-23T12:00:59.688828",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -21588,19 +21588,6 @@
       "reasoning": "Eliminated the concurrent read weakness completely. resqlite now beats sqlite_async at every concurrency level. The C pool also enabled per-reader statement caches, improving cache hit rates under concurrent workloads."
     },
     {
-      "id": "008b",
-      "title": "Byte-backed lazy maps",
-      "date": "2026-04-06",
-      "status": "rejected",
-      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
-      "commit": null,
-      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
-      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
-      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
-      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
-      "reasoning": null
-    },
-    {
       "id": "008",
       "title": "Flat value list + lazy ResultSet",
       "date": "2026-04-06",
@@ -21612,6 +21599,19 @@
       "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
       "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
       "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
+    },
+    {
+      "id": "008b",
+      "title": "Byte-backed lazy maps",
+      "date": "2026-04-06",
+      "status": "rejected",
+      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
+      "commit": null,
+      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
+      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
+      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
+      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
+      "reasoning": null
     },
     {
       "id": "009",
@@ -21698,10 +21698,10 @@
     },
     {
       "id": "014",
-      "title": "BEGIN IMMEDIATE + remove clear_bindings",
+      "title": "locking_mode=EXCLUSIVE *(partial)*",
       "date": "2026-04-07",
-      "status": "accepted",
-      "summary": "Correct but within noise (write I/O dominated)",
+      "status": "rejected",
+      "summary": "Blocks all readers — incompatible with concurrent reader pool",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -21717,10 +21717,10 @@
     },
     {
       "id": "014",
-      "title": "locking_mode=EXCLUSIVE *(partial)*",
+      "title": "BEGIN IMMEDIATE + remove clear_bindings",
       "date": "2026-04-07",
-      "status": "rejected",
-      "summary": "Blocks all readers — incompatible with concurrent reader pool",
+      "status": "accepted",
+      "summary": "Correct but within noise (write I/O dominated)",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -24105,6 +24105,19 @@
       "approach": "Tried two local candidates and reverted both before publishing:\n\n1. A direct custom iterator storing `_values`, `_offset`, and `_end` instead of\n   a `Row` reference.\n2. A fixed-length `_RowValues extends ListBase<Object?>` slice view with\n   `operator []`, `length`, and unsupported mutation methods.\n\nThe focused harness was the existing `benchmark/experiments/row_map_facade.dart`.\nBecause JIT runs produced contradictory results after VM warmup, the decision\nused AOT executables compiled from a clean `origin/main` baseline worktree and\nthe candidate branch:\n\n```bash\ndart compile exe benchmark/experiments/row_map_facade.dart -o /tmp/row_facade_exp193_baseline\ndart compile exe benchmark/experiments/row_map_facade.dart -o /tmp/row_facade_exp193_candidate\n```",
       "results": "### JIT probe\n\nThe first direct-iterator sample looked promising:\n\n| Build | values iteration row median | LinkedHashMap median | Delta |\n|---|---:|---:|---:|\n| baseline, first clean sample | 8.607 ms | 4.779 ms | +3.828 ms |\n| direct-iterator candidate, first sample | 3.410 ms | 4.788 ms | -1.378 ms |\n\nThat did not reproduce. After a fresh `dart pub get`, the same direct-iterator\ncandidate produced 5.693 / 8.616 / 8.563 / 8.728 ms over four JIT samples. A\nfresh baseline pass also alternated between fast and slow values samples\n(3.145 / 10.955 / 3.150 / 8.800 / 3.154 ms). The apparent gap was dominated by\nJIT tiering and benchmark warmup behavior, not a stable implementation delta.\n\nThe fixed-list view looked stable under JIT (3.488 / 3.654 / 3.442 / 3.453 /\n3.435 ms), so it received th...",
       "reasoning": "**Rejected.** No runtime code kept. The only apparent win came from unstable\nJIT behavior, and the compiled result regressed the target lane by roughly\n2.6x. `Row.values` should stay on the existing `_RowValueIterator`."
+    },
+    {
+      "id": "194",
+      "title": "Integer-valued REAL selectBytes fast path",
+      "date": "2026-06-23",
+      "status": "in_review",
+      "summary": "Adds a conservative `SQLITE_FLOAT` JSON helper that routes finite, exactly integral REAL values inside the exact double integer range (`abs(v) <= 2^53`) through the existing `fast_i64_to_str` path while preserving `snprintf(\"%.17g\")` for fractional values, huge values, non-finite values, and negative zero. Focused `select_bytes_real_int_fastpath.dart` A/B (order-flipped pair): **10k x 8 integral REAL -79%, 10k x 20 integral REAL -81%, 1k x 2 integral REAL -72%**, with the fractional-REAL fallback guard flat at +0.5% and the mixed lane moving in proportion to its integral-REAL columns. No public API change; new selectBytes test covers integral REAL, fractional REAL, and huge fallback values.",
+      "commit": null,
+      "problem": "After [exp 190](190-selectbytes-col-name-preencode.md) amortized column-name\ntokens and [exp 192](192-two-digit-itoa.md) tightened the `SQLITE_INTEGER`\narm, `write_json_to_buf` still formatted every `SQLITE_FLOAT` cell with\n`snprintf(\"%.17g\")`.\n\nThat is the right fallback for fractional doubles, huge magnitudes,\nNaN/Inf, and negative zero, but it is also paid for REAL columns whose\nstored value is exactly integral. Those values are common in schemas that use\nREAL affinity for scoring, timestamps, or metrics while still carrying many\nwhole-number cells. For those cells, the JSON spelling from `%.17g` is the\nsame decimal integer spelling the existing `fast_i64_to_str` path already\nemits for `SQLITE_INTEGER`.",
+      "hypothesis": "If a REAL value is finite, exactly integral, and inside the exact integer\nrange of a double (`abs(value) <= 2^53`), `selectBytes()` can route it through\n`fast_i64_to_str` without changing JSON semantics. The win should reproduce\non real-heavy rowsets where integral REAL cells dominate, while fractional\nREAL lanes should stay flat because they still use `snprintf`.\n\nAcceptance criterion: two order-flipped focused passes must improve the\nintegral-REAL primary lanes by more than 10%, with the fractional-REAL guard\nneutral and the small/mixed lanes moving in the predicted direction.",
+      "approach": "In [`native/resqlite.c`](../native/resqlite.c):\n\n- add `fast_double_to_json_num`;\n- keep `snprintf(\"%.17g\")` for negative zero, non-finite values, fractional\n  values, and values outside the exact `double` integer range;\n- route positive zero directly to `\"0\"`;\n- for finite integral values in `[-2^53, 2^53]`, cast to `long long` and reuse\n  `fast_i64_to_str`;\n- replace only the `SQLITE_FLOAT` call site in `write_json_to_buf`.\n\nThe helper is intentionally conservative. It does not try to replace general\nfloating-point formatting or revive exp 041's broad Ryu/Grisu direction; it\nonly removes `snprintf` where the existing integer encoder is exactly the same\nJSON spelling.\n\nAdded focused harness\n[`benchmark/experiments/select_bytes_real_int_fastpath.dart`](../benchmark/experiments/select_by...",
+      "results": "Focused `select_bytes_real_int_fastpath.dart`, two order-flipped passes\n(medians in us/query, six rounds per lane):\n\n| Lane | Pass 1 baseline | Pass 1 candidate | Delta | Pass 2 baseline | Pass 2 candidate | Delta |\n|---|---:|---:|---:|---:|---:|---:|\n| 10k rows x 8 integral reals | 15311 | 3190 | -79.2% | 15367 | 3221 | -79.0% |\n| 10k rows x 20 integral reals | 37328 | 6896 | -81.5% | 37491 | 6960 | -81.4% |\n| 10k rows x 20 fractional reals | 68508 | 68831 | +0.5% | 68777 | 69095 | +0.5% |\n| 10k rows x 8 mixed (4 int-real + 2 frac-real + 2 text) | 15597 | 9566 | -38.7% | 15740 | 10281 | -34.7% |\n| 1k rows x 2 integral reals | 438 | 123 | -71.9% | 436 | 123 | -71.8% |\n\nPass 1 ran baseline first, then candidate. Pass 2 ran candidate first, then\nbaseline. The primary integral-REAL lanes r...",
+      "reasoning": "**Accepted / In Review.** The candidate is a small, behavior-preserving\nspecial case with a large reproduced win on the target path and a flat\nfractional fallback guard. It does not expand public API, does not change\ngeneral floating-point formatting, and keeps negative zero on the old\n`snprintf` path.\n\nThe release suite is not the right denominator for this change: the public\nlanes are not REAL-integer-heavy enough to isolate a per-cell formatter win.\nThe durable gate for this path is the focused\n`select_bytes_real_int_fastpath.dart` harness."
     },
     {
       "id": "195",

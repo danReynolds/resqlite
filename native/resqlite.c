@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include <math.h>
 
 #if defined(_MSC_VER)
 #define RESQLITE_HOT
@@ -1827,6 +1828,31 @@ RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
     return len + digits;
 }
 
+RESQLITE_HOT static int fast_double_to_json_num(double val, char* buf, size_t buf_size) {
+    // Keep snprintf for negative zero: JSON permits `-0`, and snprintf preserves
+    // the sign bit while the integer fast path would collapse it to `0`.
+    if (val == 0.0) {
+        if (signbit(val)) {
+            return snprintf(buf, buf_size, "%.17g", val);
+        }
+        buf[0] = '0';
+        return 1;
+    }
+
+    // Only exact integer-valued doubles can reuse the integer encoder without
+    // changing spelling. 2^53 is the largest range where every integer is exactly
+    // representable as a double and where %.17g still chooses decimal notation.
+    const double max_exact_int = 9007199254740992.0;
+    if (isfinite(val) && val >= -max_exact_int && val <= max_exact_int) {
+        long long as_int = (long long)val;
+        if ((double)as_int == val) {
+            return fast_i64_to_str(as_int, buf);
+        }
+    }
+
+    return snprintf(buf, buf_size, "%.17g", val);
+}
+
 // ---------------------------------------------------------------------------
 // JSON output
 // ---------------------------------------------------------------------------
@@ -2080,8 +2106,8 @@ RESQLITE_HOT static int write_json_to_buf(
                 }
                 case SQLITE_FLOAT: {
                     char num[32];
-                    int num_len = snprintf(num, sizeof(num), "%.17g",
-                                           sqlite3_column_double(stmt, i));
+                    int num_len = fast_double_to_json_num(
+                        sqlite3_column_double(stmt, i), num, sizeof(num));
                     JSON_CHECK(buf_write_str(b, num, num_len));
                     break;
                 }
