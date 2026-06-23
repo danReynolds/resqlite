@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T19:47:00.068168",
+  "generated": "2026-06-23T20:11:19.224287",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,14 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "196",
+          "title": "selectBytes inter-row framing batch",
+          "date": "2026-06-23",
+          "status": "rejected",
+          "summary": "Batching the per-row `}` + `,` + `{` into one `buf_write` is below the noise floor — structural delimiters are a tiny share of encoder wall versus the per-cell value formatters and `json_write_string`. No runtime code kept.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/196-selectbytes-row-framing.md"
+        },
         {
           "id": "195",
           "title": "Stmt-cache pre-encoded JSON column-name tokens",
