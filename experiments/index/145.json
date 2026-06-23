@@ -1,0 +1,7 @@
+{
+  "file": "145-stream-flush-inline-dequeue.md",
+  "title": "Inline stream flush dequeue",
+  "impact": "Replacing `_flushQueue`'s `take(...).toList()` dequeue and `availableWorkerCount`'s `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time signal: A11c overlap trended better, keyed-PK trended worse, and the active stream bottleneck remained elsewhere. No runtime code kept.",
+  "status": "rejected",
+  "link": ""
+}

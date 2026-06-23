@@ -1,0 +1,7 @@
+{
+  "file": "019-hybrid-reader-pool.md",
+  "title": "Hybrid reader pool (SendPort + sacrifice)",
+  "impact": "64-83% faster small reads, 45k qps point queries",
+  "status": "accepted",
+  "link": "[`e07d95b`](https://github.com/danReynolds/dune/commit/e07d95b)"
+}

@@ -1,0 +1,7 @@
+{
+  "file": "113-direct-batch-param-matrix.md",
+  "title": "Direct batch parameter matrix encoding",
+  "impact": "Avoids the temporary flat Dart parameter list; 10k-row wide batches improve 14-26% in the focused benchmark",
+  "status": "in_review",
+  "link": "[#70](https://github.com/danReynolds/resqlite/pull/70)"
+}

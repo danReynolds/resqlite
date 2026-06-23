@@ -1,0 +1,7 @@
+{
+  "file": "150-nullable-batch-packing.md",
+  "title": "Nullable batch parameter packing",
+  "impact": "Makes the guarded packed batch encoder nullable-aware for first-row `NULL` text columns; focused nullable ASCII 10k x8 improves 13.552 → 11.152 ms and 10k x20 improves 25.738 → 21.723 ms while existing ASCII/Unicode wide guardrails stay neutral",
+  "status": "in_review",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "182-skip-dep-tracking-no-streams.md",
+  "title": "Skip preupdate dependency tracking when no streams active",
+  "impact": "Added a `track_dirty` flag on `resqlite_db` plus a `tracksDirty` field on writer requests so `preupdate_hook` and the reply harvest both short-circuit when `_streamEngine.length == 0` at send time, with a `DrainRequest` no-op barrier from `StreamEngine._createStream` to fence in-flight non-tracking writes before the new stream's initial query. Two order-flipped focused passes confirm the no-stream wins (sequential **−3.8% / −5.3%**, wide-batch **−2.4% / −5.9%**) but also reproduce a with-streams regression (`with-streams guardrail` **+2.7% / +3.7%**, classified `reproduced` by `ab_drift_check.dart`), and the Tracelite `stream-rerun-dispatch` decision came back `inconclusive` with all three stream-direction warmup elapsed regressing in the same direction (+12% / +36% / +21%, gated `too_noisy`). Reactive streams are the library's primary use case, so the workload mix where the optimization helps is narrower than the one it slows. Reverted from `lib/` and `native/`; focused harness retained; implementation preserved at `archive/exp-182`.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "034-schema-cache.md",
+  "title": "Per-worker schema cache",
+  "impact": "Eliminates FFI calls + string allocations for repeated queries",
+  "status": "accepted",
+  "link": ""
+}

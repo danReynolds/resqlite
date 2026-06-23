@@ -21,8 +21,9 @@ and those files feed the live charts on the GitHub Pages site
 
 1. **The code change** — `native/`, `lib/`, `hook/`, or `test/` as appropriate
 2. **The experiment doc** — `experiments/NNN-short-name.md` with
-   `**Date:** YYYY-MM-DD` frontmatter and a row in `experiments/README.md`
-   (under Accepted or Rejected)
+   `**Date:** YYYY-MM-DD` frontmatter and an `experiments/index/NNN.json` row
+   fragment (`{file, title, impact, status, link}`). `experiments/README.md` is
+   *generated* from those fragments — never hand-edit the README table.
 3. **At least one benchmark result file** — `benchmark/results/<ISO-timestamp>-<label>.md`
    whose **filename timestamp's date** matches the experiment doc's `**Date:**`
 
@@ -112,7 +113,9 @@ Run this mental (or literal) checklist:
 
 - [ ] `git status --short benchmark/results/` — is there an untracked result file?
 - [ ] Does that file's filename timestamp match `grep "^**Date:**" experiments/NNN-*.md`?
-- [ ] Is the experiment listed in `experiments/README.md` (Accepted or Rejected section)?
+- [ ] Is the experiment's README row in its own file,
+      `experiments/index/NNN.json` (`{file, title, impact, status, link}`)?
+      `README.md` is generated from these — don't hand-edit the table.
 - [ ] Is the signal entry in its own file, `experiments/signals/entries/NNN.json`
       (not hand-edited into the generated `signals.json`)?
 - [ ] Does the experiment doc have the headings the parser expects?
@@ -120,8 +123,9 @@ Run this mental (or literal) checklist:
       `Decision` or `Why Accepted` / `Why Rejected`)
 - [ ] Did `finalize_experiment.dart` pass? It only *validates* sources — it does
       not write the generated aggregates, and you must not commit
-      `docs/experiments/history.json`, `docs/benchmarks/devices.json`, or
-      `experiments/signals.json` (the bot regenerates them on `main`).
+      `docs/experiments/history.json`, `docs/benchmarks/devices.json`,
+      `experiments/signals.json`, or `experiments/README.md` (the bot
+      regenerates them on `main`).
 
 The generator's section extraction tolerates a few heading variants; see
 `_extractSection` in `generate_history.dart` for the full list.
@@ -309,16 +313,17 @@ git fetch origin
 
 Experiment PRs used to collide on shared generated files; that is now designed
 out. The generated aggregates — `docs/experiments/history.json`,
-`docs/benchmarks/devices.json`, and `experiments/signals.json` — are
-**bot-owned on `main` and never committed on a branch** (CI's
-`guard-generated-docs` job blocks them, and `check_generated_data.dart` only
-checks that the *sources* build). Each experiment's signal data lives in its
-own file, `experiments/signals/entries/NNN.json`, so two experiments never
-touch the same one. The only files a normal run still shares are
-`experiments/README.md` (rows append) and `experiments/signals/base.json` (the
-per-direction synthesis). You must still claim your number — concurrent runs
-that grab the same number, or ship the same follow-up, still collide (exp 168
-was claimed by three PRs; exp 175 by two runs shipping the *same* follow-up).
+`docs/benchmarks/devices.json`, `experiments/signals.json`, and
+`experiments/README.md` — are **bot-owned on `main` and never committed on a
+branch** (CI's `guard-generated-docs` job blocks them, and
+`check_generated_data.dart` only checks that the *sources* build). Each
+experiment's signal entry and README row each live in their own file —
+`experiments/signals/entries/NNN.json` and `experiments/index/NNN.json` — so
+two experiments never touch the same one. The only file a normal run still
+shares is `experiments/signals/base.json` (the per-direction synthesis). You
+must still claim your number — concurrent runs that grab the same number, or
+ship the same follow-up, still collide (exp 168 was claimed by three PRs; exp
+175 by two runs shipping the *same* follow-up).
 
 **1. Claim the number atomically.** A plain "check open PRs, then pick the next
 free" *races*: two runs check, both see N free, both take N. That is exactly
@@ -371,16 +376,17 @@ which case expect to regenerate `history.json` on the later one.
 ## Resolving a stale derived-file conflict
 
 Generated aggregates no longer conflict: `docs/experiments/history.json`,
-`docs/benchmarks/devices.json`, and `experiments/signals.json` are bot-owned
-and never committed on a branch, so a stale branch just takes `main`'s copy
-with a one-sided auto-merge. If a PR falls behind `main`, the only files that
-can really conflict are hand-edited *sources*:
+`docs/benchmarks/devices.json`, `experiments/signals.json`, and
+`experiments/README.md` are bot-owned and never committed on a branch, so a
+stale branch just takes `main`'s copy with a one-sided auto-merge. If a PR
+falls behind `main`, the only files that can really conflict are hand-edited
+*sources*, and each is per-experiment:
 
-- `experiments/README.md` — rows append; usually auto-merges. If two
-  experiments inserted at the same spot, fix the row order by hand.
-- `experiments/signals/entries/NNN.json` — one file per experiment, so a true
-  collision only happens when two runs claimed the same number `N`. That's a
-  numbering bug: renumber, never overwrite a prior experiment's entry.
+- `experiments/index/NNN.json` (the README row) and
+  `experiments/signals/entries/NNN.json` (the signal entry) — one file per
+  experiment, so a true collision only happens when two runs claimed the same
+  number `N`. That's a numbering bug: renumber, never overwrite a prior
+  experiment's file.
 - `experiments/signals/base.json` — two experiments editing the same
   direction's `currentRead` / `notesForExperimenters` narrative is a real
   weave; keep both contributions.

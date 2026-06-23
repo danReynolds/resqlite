@@ -1,0 +1,7 @@
+{
+  "file": "181-single-stream-long-payload-hash.md",
+  "title": "Single-stream long-payload hash",
+  "impact": "Added a focused one-reader harness that removes exp 173's eight-stream reader-pool parallelism: one unchanged stream hashes 64 rows x 64 KB TEXT + 64 KB BLOB (~8 MB) before a queued `COUNT(*)` barrier can emit. Re-tested the 16-byte FNV fold against the exp 110 8-byte body across an order-flipped pair. Baseline medians were 2.771 / 2.777 ms; candidate medians were 2.763 / 2.792 ms (-0.3% / +0.5%), with fully overlapping ranges. Rejected: even isolated to one stream, loop unrolling is invisible on the public stream path. Native C reverted; focused harness retained.",
+  "status": "rejected",
+  "link": ""
+}

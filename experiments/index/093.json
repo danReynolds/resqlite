@@ -1,0 +1,7 @@
+{
+  "file": "093-alias-cache-entry-read-tables.md",
+  "title": "Alias cache entry's read tables instead of copying",
+  "impact": "Below the measurement floor — savings ceiling was one `strdup`/`free` pair per cached table name per reader query (~hundreds of ns on a 1–3 table query). Work medians unchanged in 3-run A/B; tail regressions pattern-matched run-to-run variance (`noop` regressed as much as `point_query`, but `noop` never touches the changed path). Same class as exp 076",
+  "status": "rejected",
+  "link": ""
+}

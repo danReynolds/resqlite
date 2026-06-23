@@ -26,7 +26,8 @@ across future experiments.
 
 Before choosing an experiment, read:
 
-- [`README.md`](README.md) — the experiment table and templates
+- [`README.md`](README.md) — the experiment tables and templates (generated
+  from `experiments/index/NNN.json` fragments; read it, don't hand-edit it)
 - [`signals.json`](signals.json) — the canonical per-direction research map
 - [`JOURNAL.md`](JOURNAL.md) — transferable lessons from prior experiments
 - [`../doc/stories/`](../doc/stories/) — the curated narrative arc, for context
@@ -224,8 +225,14 @@ When finished:
   the journal.
 - do not edit [`../doc/stories/`](../doc/stories/) as part of an experiment
   run. Story posts are updated on maintainer request, not per experiment.
-- run the experiment finalizer after the writeup, README row, and
-  `experiments/signals/entries/NNN.json` are in place:
+- register the experiment by adding its **README row fragment**,
+  `experiments/index/NNN.json` — `{file, title, impact, status, link}` (status
+  is `accepted` / `in_review` / `rejected`). `experiments/README.md` is
+  *generated* from these fragments; do not edit the README table by hand. A
+  split experiment that has both an accepted and a rejected finding (like 014)
+  stores a JSON array of rows.
+- run the experiment finalizer after the writeup, the `index/NNN.json` row
+  fragment, and `experiments/signals/entries/NNN.json` are in place:
 
   ```bash
   dart run benchmark/finalize_experiment.dart \
@@ -234,14 +241,15 @@ When finished:
 
   This verifies the generated-docs **sources** build cleanly and the signal map
   is valid. It does **not** write `docs/experiments/history.json`,
-  `docs/benchmarks/devices.json`, or `experiments/signals.json` — those are
-  generated aggregates owned by the post-merge Update-Docs bot. **Never commit
-  them on your branch** (CI's `guard-generated-docs` job blocks it). You commit
-  only sources: the writeup, the README row, your signal fragment, benchmark
-  result files, and any code; the bot regenerates the aggregates on `main`
-  after merge. This is what keeps a stale branch from re-conflicting on
-  generated files the way the old "regenerate + commit `history.json` on every
-  branch" rule did.
+  `docs/benchmarks/devices.json`, `experiments/signals.json`, or
+  `experiments/README.md` — those are generated aggregates owned by the
+  post-merge Update-Docs bot. **Never commit them on your branch** (CI's
+  `guard-generated-docs` job blocks the JSON aggregates). You commit only
+  sources: the writeup, your `index/NNN.json` row fragment, your signal
+  fragment, benchmark result files, and any code; the bot regenerates the
+  aggregates on `main` after merge. This is what keeps a stale branch from
+  re-conflicting on generated files the way the old "regenerate + commit
+  `history.json` on every branch" rule did.
 - run focused validation plus the relevant repo checks
 - open a PR when the local experiment package is coherent enough for review
 

@@ -1,0 +1,7 @@
+{
+  "file": "118-fifo-dispatch-counter-gate.md",
+  "title": "FIFO dispatch waiters with counter gate",
+  "impact": "Replaces the shared reader-pool dispatch completer with FIFO one-shot waiters; exp 115 counters show wake retries drop to zero under overload",
+  "status": "in_review",
+  "link": ""
+}

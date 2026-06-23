@@ -1,0 +1,7 @@
+{
+  "file": "097-one-pass-initial-stream-hash.md",
+  "title": "One-pass initial stream decode and hash",
+  "impact": "14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay",
+  "status": "in_review",
+  "link": ""
+}

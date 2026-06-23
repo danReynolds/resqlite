@@ -1,0 +1,7 @@
+{
+  "file": "036-compiler-hints.md",
+  "title": "Compiler hints (Dart + C)",
+  "impact": "Zero-risk annotations, no behavioral changes",
+  "status": "accepted",
+  "link": ""
+}

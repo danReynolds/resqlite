@@ -1,0 +1,7 @@
+{
+  "file": "059-row-count-hint.md",
+  "title": "Row count hint in schema cache",
+  "impact": "Marginal wins (2/0/61) on repeated queries but below noise on primary paths",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "092-wal-checkpoint-noop.md",
+  "title": "`wal_checkpoint=NOOP` probe in periodic checkpointer",
+  "impact": "Premise invalid — exp-029 is hook-gated on `pages_in_wal`, not timer-gated. NOOP exists to report the frame counter the wal-hook already receives; adding NOOP would be a strictly additive header read with no empty-tick cost to amortize",
+  "status": "rejected",
+  "link": ""
+}

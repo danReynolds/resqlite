@@ -117,14 +117,19 @@ String? _validateExperimentFile(File experimentFile) {
         'experiments/147-short-slug.md: ${p.relative(experimentPath)}';
   }
 
-  final readme = File(p.join(experimentsDir, 'README.md'));
-  if (!readme.existsSync()) {
-    return 'Missing experiments/README.md.';
+  // README.md is generated from the per-experiment index fragments, so a new
+  // experiment is registered by adding its fragment, not by editing README.md
+  // (which the bot regenerates on main). Validate the fragment, not the row.
+  final id = idMatch.group(1)!;
+  final indexFragment = File(p.join(experimentsDir, 'index', '$id.json'));
+  if (!indexFragment.existsSync()) {
+    return 'Experiment $id has no index fragment '
+        'experiments/index/$id.json (its README row: file, title, impact, '
+        'status, link). README.md is generated from these — do not edit it.';
   }
-  final readmeText = readme.readAsStringSync();
-  if (!RegExp(r'\]\(' + RegExp.escape(filename) + r'\)').hasMatch(readmeText)) {
-    return 'Experiment ${idMatch.group(1)} is not linked from '
-        'experiments/README.md.';
+  if (!indexFragment.readAsStringSync().contains('"$filename"')) {
+    return 'experiments/index/$id.json does not reference "$filename" in a '
+        '"file" field.';
   }
 
   final content = experimentFile.readAsStringSync();

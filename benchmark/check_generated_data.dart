@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'generate_devices.dart' as generate_devices;
 import 'generate_history.dart' as generate_history;
+import 'generate_readme.dart' as generate_readme;
 import 'generate_signals.dart' as generate_signals;
 
 /// Verifies that the generated-docs sources are well-formed enough that the
@@ -35,6 +36,8 @@ Future<void> main() async {
       signalsSourceDir: Directory('experiments/signals'),
       generatedAt: null,
     ),
+    'README.md': () =>
+        generate_readme.buildReadme(experimentsDir: Directory('experiments')),
   };
 
   final failures = <String>[];

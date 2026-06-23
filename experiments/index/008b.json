@@ -1,0 +1,7 @@
+{
+  "file": "008b-byte-backed-lazy-maps.md",
+  "title": "Byte-backed lazy maps",
+  "impact": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
+  "status": "rejected",
+  "link": ""
+}

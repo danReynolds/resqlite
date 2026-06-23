@@ -1,0 +1,7 @@
+{
+  "file": "024-json-buffer-16k.md",
+  "title": "JSON buffer initial size 16KB",
+  "impact": "Sensible default, no measurable impact",
+  "status": "accepted",
+  "link": ""
+}

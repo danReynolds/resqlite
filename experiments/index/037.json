@@ -1,0 +1,7 @@
+{
+  "file": "037-persistent-json-buffer.md",
+  "title": "Persistent JSON buffer per reader",
+  "impact": "Eliminates syscall-class operations on the hot path",
+  "status": "accepted",
+  "link": ""
+}

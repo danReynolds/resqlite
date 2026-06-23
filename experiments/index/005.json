@@ -1,0 +1,7 @@
+{
+  "file": "005-dart-binary-codec-transferable-typed-data.md",
+  "title": "Dart binary codec + TransferableTypedData",
+  "impact": "5-7x slower than VM's native SendPort.send serializer",
+  "status": "rejected",
+  "link": ""
+}

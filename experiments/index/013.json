@@ -1,0 +1,7 @@
+{
+  "file": "013-ffi-isleaf.md",
+  "title": "FFI isLeaf annotation",
+  "impact": "12-19% on small results, 5-9% across the board",
+  "status": "accepted",
+  "link": "[`af2cfd0`](https://github.com/danReynolds/dune/commit/af2cfd0)"
+}

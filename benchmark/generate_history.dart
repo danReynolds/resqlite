@@ -151,9 +151,16 @@ Map<String, Object?> buildHistoryData({
   final experiments = <Map<String, Object?>>[];
 
   if (experimentsDir.existsSync()) {
-    final readmeFile = File('${experimentsDir.path}/README.md');
-    if (readmeFile.existsSync()) {
-      final readme = readmeFile.readAsStringSync();
+    // The per-experiment index fragments (experiments/index/NNN.json) are the
+    // source of truth. README.md is a generated, bot-owned aggregate that a
+    // branch never keeps fresh, so we synthesize the equivalent table markdown
+    // from the fragments and reuse the existing README parser unchanged. Fall
+    // back to a committed README.md when there is no index dir (test fixtures,
+    // legacy trees).
+    final readme =
+        _readmeFromIndex(Directory('${experimentsDir.path}/index')) ??
+        _maybeReadFile('${experimentsDir.path}/README.md');
+    if (readme != null) {
       experiments.addAll(
         _parseExperimentsReadme(readme, experimentsDir, allKeys),
       );
@@ -562,6 +569,57 @@ int? _pickClosestUnclaimedRun(
   return null;
 }
 
+String? _maybeReadFile(String path) {
+  final file = File(path);
+  return file.existsSync() ? file.readAsStringSync() : null;
+}
+
+/// Synthesizes README-equivalent table markdown from the per-experiment index
+/// fragments (`experiments/index/NNN.json`), so [_parseExperimentsReadme] can
+/// consume the fragments without any change to its (golden-fixture-tested)
+/// logic. A fragment is one row object, or a list of rows for a "split"
+/// experiment (e.g. 014 has both an accepted and a rejected finding). Returns
+/// null when there is no index dir or it holds no fragments.
+String? _readmeFromIndex(Directory indexDir) {
+  if (!indexDir.existsSync()) return null;
+  final files = indexDir
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.json'))
+      .toList();
+  if (files.isEmpty) return null;
+
+  final rows = <String, List<String>>{
+    'accepted': [],
+    'in_review': [],
+    'rejected': [],
+  };
+  for (final file in files) {
+    final id = file.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
+    final decoded = json.decode(file.readAsStringSync());
+    final entries = decoded is List ? decoded : [decoded];
+    for (final entry in entries) {
+      if (entry is! Map) continue;
+      final bucket = rows[entry['status']?.toString()];
+      if (bucket == null) continue;
+      final fileName = entry['file']?.toString() ?? '$id.md';
+      final title = entry['title']?.toString() ?? '';
+      final impact = entry['impact']?.toString() ?? '';
+      final link = entry['link']?.toString() ?? '';
+      bucket.add('| [$id]($fileName) | $title | $impact | $link |');
+    }
+  }
+
+  final buffer = StringBuffer();
+  buffer.writeln('## Accepted');
+  rows['accepted']!.forEach(buffer.writeln);
+  buffer.writeln('## In Review');
+  rows['in_review']!.forEach(buffer.writeln);
+  buffer.writeln('## Rejected');
+  rows['rejected']!.forEach(buffer.writeln);
+  return buffer.toString();
+}
+
 /// Parse experiment entries from the README.md table rows and individual files.
 List<Map<String, Object?>> _parseExperimentsReadme(
   String readme,
@@ -705,18 +763,29 @@ List<Map<String, Object?>> _parseExperimentsReadme(
     }
   }
 
-  // Sort by experiment number.
-  experiments.sort((a, b) {
-    final aNum =
-        int.tryParse((a['id'] as String).replaceAll(RegExp(r'[^0-9]'), '')) ??
-        0;
-    final bNum =
-        int.tryParse((b['id'] as String).replaceAll(RegExp(r'[^0-9]'), '')) ??
-        0;
-    return aNum.compareTo(bNum);
-  });
+  // Sort by experiment number, kept stable on insertion order so that ids
+  // sharing a number — a suffixed sibling (008 vs 008b) or a split experiment's
+  // two rows (014's accepted + rejected findings) — preserve their source
+  // order. (Dart's List.sort is not stable, so an explicit index tiebreak is
+  // required; without it the tie order depends on sort internals and on whether
+  // the rows came from README.md or the index fragments.)
+  final ordered = experiments.asMap().entries.toList()
+    ..sort((a, b) {
+      final aNum =
+          int.tryParse(
+            (a.value['id'] as String).replaceAll(RegExp(r'[^0-9]'), ''),
+          ) ??
+          0;
+      final bNum =
+          int.tryParse(
+            (b.value['id'] as String).replaceAll(RegExp(r'[^0-9]'), ''),
+          ) ??
+          0;
+      if (aNum != bNum) return aNum.compareTo(bNum);
+      return a.key.compareTo(b.key);
+    });
 
-  return experiments;
+  return ordered.map((entry) => entry.value).toList();
 }
 
 String? _experimentHeaderValue(String content, String label) {

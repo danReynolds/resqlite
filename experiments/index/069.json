@@ -1,0 +1,7 @@
+{
+  "file": "069-sql-fingerprint.md",
+  "title": "SQL fingerprint in stmt cache",
+  "impact": "Deferred: proper normalization needs a ~300+-line SQL rewriter; `sqlite3_normalized_sql` takes a prepared stmt as input, not raw SQL",
+  "status": "rejected",
+  "link": ""
+}

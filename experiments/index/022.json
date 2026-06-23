@@ -1,0 +1,7 @@
+{
+  "file": "022-wal-autocheckpoint.md",
+  "title": "WAL autocheckpoint tuning",
+  "impact": "Correctness and reliability improvement",
+  "status": "accepted",
+  "link": ""
+}

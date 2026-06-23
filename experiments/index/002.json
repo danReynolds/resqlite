@@ -1,0 +1,7 @@
+{
+  "file": "002-c-binary-buffer-for-maps.md",
+  "title": "C binary buffer for maps",
+  "impact": "Double-pass overhead (C encode + Dart decode) negated FFI savings",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "033-fnv1a-hash.md",
+  "title": "FNV-1a hash for result change detection",
+  "impact": "Shared module for consistent stream result hashing",
+  "status": "accepted",
+  "link": ""
+}

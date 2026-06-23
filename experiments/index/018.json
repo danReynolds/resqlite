@@ -1,0 +1,7 @@
+{
+  "file": "018-multi-row-step.md",
+  "title": "Multi-row step (64 rows/FFI call)",
+  "impact": "String copy overhead exceeds FFI crossing savings",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "114-fifo-waiter-queue.md",
+  "title": "FIFO waiter queue for `ReaderPool` dispatch",
+  "impact": "First A/B pass (against pre-exp-106 baseline) showed −10 % to −32 % on streaming fan-out paths; rebasing onto main with exp 106 polish merged collapsed all targeted wins into noise. Exp 106 elides stream re-queries on the writer side before they reach the reader pool, so the parked-dispatcher contention this change targeted no longer fires under any release-suite workload. Implementation reverted; doc + benchmark artifacts retained as the durable record. Cherry-pickable from PR git history if a workload re-introduces sustained pool parking",
+  "status": "rejected",
+  "link": ""
+}

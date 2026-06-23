@@ -1,0 +1,7 @@
+{
+  "file": "009-batch-ffi-step-row.md",
+  "title": "Batch FFI (resqlite_step_row)",
+  "impact": "9-21% improvement across all benchmarks",
+  "status": "accepted",
+  "link": "[`4c18bb4`](https://github.com/danReynolds/dune/commit/4c18bb4)"
+}

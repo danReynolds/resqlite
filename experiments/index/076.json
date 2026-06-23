@@ -1,0 +1,7 @@
+{
+  "file": "076-prebound-stmt-cache-analysis.md",
+  "title": "Pre-bound statement cache",
+  "impact": "Rejected in pre-implementation analysis: bind is ~0.3 % of re-query wall time (~50 ns per call). No measurable headroom even for a perfect implementation",
+  "status": "rejected",
+  "link": ""
+}

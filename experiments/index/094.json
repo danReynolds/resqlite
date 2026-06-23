@@ -1,0 +1,7 @@
+{
+  "file": "094-dirty-read-string-reuse.md",
+  "title": "Dirty/read table string reuse",
+  "impact": "Focused dispatch was effectively flat and the full suite produced no wins; native branch/lifetime complexity is not justified",
+  "status": "rejected",
+  "link": ""
+}

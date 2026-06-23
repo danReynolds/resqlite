@@ -1,0 +1,7 @@
+{
+  "file": "012-sendport-vs-spawn-deep-dive.md",
+  "title": "SendPort vs Isolate.spawn deep dive",
+  "impact": "Confirmed one-off isolates are optimal; persistent pools not faster",
+  "status": "rejected",
+  "link": ""
+}

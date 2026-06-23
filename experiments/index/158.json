@@ -1,0 +1,7 @@
+{
+  "file": "158-row-schema-hash-index.md",
+  "title": "Row schema hash index",
+  "impact": "Adds a schema-name identity fast path for schemas up to 32 columns plus private `HashMap` fallback for `RowSchema` lookup; focused `select_maps` main-isolate consumption improved 0.169 → 0.081 ms at 1K rows and 1.998 → 0.967 ms at 10K rows while point-query throughput stayed neutral/noisy",
+  "status": "in_review",
+  "link": ""
+}

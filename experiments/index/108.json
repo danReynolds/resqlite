@@ -1,0 +1,7 @@
+{
+  "file": "108-selectbytes-out-slots.md",
+  "title": "Persistent selectBytes out-parameter slots",
+  "impact": "Target selectBytes benchmarks stayed within noise, and memory/rss flags removed any case for permanent native scratch state",
+  "status": "rejected",
+  "link": ""
+}

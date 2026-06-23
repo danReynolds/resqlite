@@ -1,0 +1,7 @@
+{
+  "file": "035-cell-buffer-reuse.md",
+  "title": "Reuse cell buffer across queries",
+  "impact": "Eliminates per-query buffer allocations",
+  "status": "accepted",
+  "link": ""
+}

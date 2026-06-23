@@ -1,0 +1,7 @@
+{
+  "file": "066-transparent-fast-path.md",
+  "title": "Transparent single-row fast path in `select()`",
+  "impact": "Insufficient headroom — most of 063's win came from return-type change (`Map` vs `List<Map>`) which can't be captured transparently",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "001-c-native-json-serialization.md",
+  "title": "C-native JSON serialization",
+  "impact": "3.5x faster bytes path",
+  "status": "accepted",
+  "link": "[`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57)"
+}

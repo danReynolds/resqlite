@@ -1,0 +1,7 @@
+{
+  "file": "151-sync-writer-response.md",
+  "title": "Synchronous writer response resolution",
+  "impact": "Switching writer response futures to `Completer<T>.sync()` was a concrete request-resolution attempt against exp 147's residual writer/request bucket, but the formal Tracelite stream-dispatch A/B did not clear the primary gate. High-cardinality fanout changed +2.92%, keyed-PK subscriptions changed +18.5% with too-noisy evidence, and many-streams writer throughput changed +14.0%. No runtime code kept.",
+  "status": "rejected",
+  "link": ""
+}

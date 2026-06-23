@@ -1,0 +1,7 @@
+{
+  "file": "070-zero-row-change-shortcircuit.md",
+  "title": "Zero-row-change short-circuit + persistent dirty buffer",
+  "impact": "Removes per-write calloc/free pair and short-circuits empty dirty set to a const empty list",
+  "status": "accepted",
+  "link": ""
+}

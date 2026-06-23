@@ -1,0 +1,7 @@
+{
+  "file": "146-lower-batch-pack-threshold.md",
+  "title": "Lower batch packing threshold",
+  "impact": "Tracelite A/B run over `narrow-batch-insert` collected clean baseline and candidate histories but produced no primary improvement: resqlite changed +1.45% with neutral verdict, while the sqlite_async guardrail was too noisy. Keep the exp 125 large-wide-batch guard; small/narrow batches stay generic until a new workload proves parameter encoding is material.",
+  "status": "rejected",
+  "link": ""
+}

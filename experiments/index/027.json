@@ -1,0 +1,7 @@
+{
+  "file": "027-transaction-query-writer-cache.md",
+  "title": "Transaction query writer cache",
+  "impact": "Did not move the target interactive transaction metric enough to justify merging",
+  "status": "rejected",
+  "link": ""
+}

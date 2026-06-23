@@ -1,0 +1,7 @@
+{
+  "file": "125-wide-ascii-batch-params.md",
+  "title": "Wide ASCII batch parameter encoding",
+  "impact": "Direct ASCII payload packing skips temporary per-string UTF-8 lists in large wide batches; focused 10k x20 improves 17.199 → 12.760 ms and release Wide Batch Insert improves 18.201 → 13.031 ms",
+  "status": "in_review",
+  "link": ""
+}

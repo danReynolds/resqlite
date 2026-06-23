@@ -1,0 +1,7 @@
+{
+  "file": "057-preupdate-batching.md",
+  "title": "Preupdate hook batching for batch inserts",
+  "impact": "Savings (~2ms in 50ms batch) below noise floor",
+  "status": "rejected",
+  "link": ""
+}

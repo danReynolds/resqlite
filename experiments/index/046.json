@@ -1,0 +1,7 @@
+{
+  "file": "046-sync-stream-controller.md",
+  "title": "Synchronous StreamController",
+  "impact": "Reentrancy crash: sync delivery causes concurrent modification of subscriber list during iteration",
+  "status": "rejected",
+  "link": ""
+}

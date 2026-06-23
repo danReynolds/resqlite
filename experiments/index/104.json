@@ -1,0 +1,7 @@
+{
+  "file": "104-094-reeval-under-a11c.md",
+  "title": "Re-eval of exp 094 (dirty/read string reuse) under A11c",
+  "impact": "Even under A11c fan-out (~50× amplification of read-set/dirty-set add traffic), deltas were within noise on every workload the change targets (disjoint +4%, overlap −2%, concurrent reads ±10% — all inside MDE_ci). Empirically validates 094's original \"below noise floor\" rejection.",
+  "status": "rejected",
+  "link": ""
+}

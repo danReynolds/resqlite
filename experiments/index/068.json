@@ -1,0 +1,7 @@
+{
+  "file": "068-ddl-schema-watchdog.md",
+  "title": "DDL schema_version watchdog",
+  "impact": "Deferred: initial implementation shipped + reverted after CI flakiness. Root cause is a C-level stmt cache race with SQLite's auto-reprepare — needs its own design pass to invalidate cached stmts on schema version bump",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "025-pragma-optimize.md",
+  "title": "`PRAGMA optimize`",
+  "impact": "Right idea in principle, but no compelling or reliable benchmark win in the current suite",
+  "status": "rejected",
+  "link": ""
+}

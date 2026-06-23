@@ -1,0 +1,7 @@
+{
+  "file": "051-lock-free-reader-pool.md",
+  "title": "Lock-free reader pool with atomics",
+  "impact": "Mutex path is dead code since experiment 030 assigned dedicated readers; optimization target doesn't exist in the live path",
+  "status": "rejected",
+  "link": ""
+}

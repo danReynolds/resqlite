@@ -1,0 +1,7 @@
+{
+  "file": "047-authorizer-opt-out.md",
+  "title": "Authorizer opt-out for non-stream queries",
+  "impact": "Shared statement cache stores empty dependency sets when tracking is off, breaking stream invalidation",
+  "status": "rejected",
+  "link": ""
+}

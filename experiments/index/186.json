@@ -1,0 +1,7 @@
+{
+  "file": "186-single-row-large-text-bind-encoder.md",
+  "title": "Single-row large-text bind encoder",
+  "impact": "Revives exp 179's direct-ASCII `allocateParams` rewrite against a representative large-payload workload — the explicit revisit condition exp 179 named. Focused `single_row_large_text_bind.dart` measures **−15% to −32%** at 16 KB → 1 MB single-row INSERT text binds, reproduced across order-flipped passes; encoder isolation reproduces exp 179's −45% / −58% / −37% on the synthetic micro. Small-payload release-suite lanes (Parameterized Queries, Single Inserts, Concurrent Single Inserts) stay neutral, confirming exp 179's small-bind finding stands; the lone flagged batch-tx regression is sub-decision-threshold noise on a routing path the encoder does not touch (`allocateBatchParams`). Saves one `Uint8List` allocation + one byte-buffer copy per ASCII string param; non-ASCII strings still take the unchanged `_allocateParamsPreEncoded` fallback.",
+  "status": "accepted",
+  "link": ""
+}

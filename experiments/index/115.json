@@ -1,0 +1,7 @@
+{
+  "file": "115-dispatcher-park-counters.md",
+  "title": "Dispatcher park counters for `ReaderPool`",
+  "impact": "Measurement-only: profile-mode counters (park-total, wake-retry-total, max-parked-concurrent) that quantify the parked-dispatcher path exp 105 / exp 114 targeted indirectly. Wake-retry/park ratio reaches 93 % at concurrency=32 (pool=4), the direct wake-amplification signal. Tree-shaken from release builds. Unblocks future dispatch-area experiments with a non-wall-time evaluation gate",
+  "status": "accepted",
+  "link": ""
+}

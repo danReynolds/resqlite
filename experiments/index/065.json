@@ -1,0 +1,7 @@
+{
+  "file": "065-json1-reevaluation.md",
+  "title": "JSON1 re-evaluation (post-041/043)",
+  "impact": "Our custom path now ≥ JSON1 everywhere; confirms 031 with larger margin",
+  "status": "rejected",
+  "link": ""
+}

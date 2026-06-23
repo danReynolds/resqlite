@@ -1,0 +1,7 @@
+{
+  "file": "067-shrink-initial-allocation.md",
+  "title": "Shrink initial values allocation (256→4)",
+  "impact": "Caused +40-44% regressions; Dart VM has a fast path for `List.filled` that shrinking bypasses",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "106-column-level-deps.md",
+  "title": "Column-level dependency tracking (re-attempt of 052 under A11c)",
+  "impact": "**+82 %** on A11c disjoint writer throughput (3,956 → 7,201 w/s); overlap unchanged (4,477 → 4,581 w/s); overlap/disjoint ratio drops 1.132 → 0.636, the direct signature of writer-side dispatch elision",
+  "status": "accepted",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "074-bulk-step-many.md",
+  "title": "Bulk `step_many` batched FFI for read path",
+  "impact": "Same wall as exp 018: memcpy-in-C cost exceeds FFI-crossing savings. Text-heavy workloads regressed +38 %. Dart already reads directly from SQLite's text buffer; adding a C-side copy before Dart decode is strictly worse",
+  "status": "rejected",
+  "link": ""
+}

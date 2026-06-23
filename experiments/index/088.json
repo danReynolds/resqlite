@@ -1,0 +1,7 @@
+{
+  "file": "088-setlk-timeout.md",
+  "title": "`SQLITE_ENABLE_SETLK_TIMEOUT` + `sqlite3_setlk_timeout` on every connection",
+  "impact": "Downgraded from Accepted after 5-run confirmation: original single-run p99/max wins were noise (baseline outlier that never reproduced). Multi-run median shows p99 +74 % to +172 % worse and max +29 % to +529 % worse on writes; noop regresses even though it has no lock contention. Needs a concurrent-reader harness + shorter timeout to be evaluable",
+  "status": "rejected",
+  "link": ""
+}

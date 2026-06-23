@@ -1,0 +1,7 @@
+{
+  "file": "075-native-hash-selectifchanged.md",
+  "title": "Native-buffered hash for `selectIfChanged`",
+  "impact": "**−39 % on unchanged-fanout benchmark**. Worker-side C hash (`resqlite_query_hash`) short-circuits stream re-queries before any Dart decode when the result is unchanged",
+  "status": "accepted",
+  "link": ""
+}

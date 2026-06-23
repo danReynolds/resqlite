@@ -1,0 +1,7 @@
+{
+  "file": "100-bounded-stream-requery-scheduler.md",
+  "title": "Bounded stream re-query scheduler",
+  "impact": "Did not improve unrelated reads during fan-out and regressed high-cardinality stream fan-out by 103%",
+  "status": "rejected",
+  "link": ""
+}

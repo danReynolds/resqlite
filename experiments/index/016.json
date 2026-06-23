@@ -1,0 +1,7 @@
+{
+  "file": "016-sqlite-compile-flags.md",
+  "title": "SQLite compile flags + prepare_v3",
+  "impact": "Correctness wins, performance within noise",
+  "status": "accepted",
+  "link": "[`b9c6b6d`](https://github.com/danReynolds/dune/commit/b9c6b6d)"
+}

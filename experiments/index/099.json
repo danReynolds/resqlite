@@ -1,0 +1,7 @@
+{
+  "file": "099-fnv-8byte-bytestream.md",
+  "title": "8-byte-chunked FNV for byte-stream cells",
+  "impact": "Structurally sound (folds 8 bytes per multiply on the long-text hash path) but benchmark-invisible — current streaming workloads carry only short cells (≤ 3–8 bytes) that bypass the new main loop. Same class as exp 071. Revisit when a long-text streaming benchmark exists",
+  "status": "rejected",
+  "link": ""
+}

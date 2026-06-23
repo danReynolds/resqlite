@@ -1,0 +1,7 @@
+{
+  "file": "171-resolved-runtime-cache.md",
+  "title": "Resolved runtime cache for `Database` hot paths",
+  "impact": "Mirrored exp 159's `_sendPort` cache one layer up: a sync-readable `_resolvedRuntime` field on `Database` so post-open `select`/`execute`/`executeBatch`/`transaction` skip the `await _runtime` microtask hop. Two order-flipped passes on `writer_pipelining.dart` produced alternating-sign deltas inside per-round variance (sequential-awaited −2.3% / +2.5%, transaction-guardrail −7.5% / +6.1%, concurrent-burst +4–5% both passes). The theoretical ~1–2 µs/call saving sits at or below the focused-harness floor. No runtime code kept; exp 159's \"the residual is the round-trip floor itself; further reduction needs group commit or a different transport\" framing stands.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "095-writer-result-buffer.md",
+  "title": "Persistent writer result buffer",
+  "impact": "The removable 16-byte calloc/free pair did not produce reliable write-path wins",
+  "status": "rejected",
+  "link": ""
+}

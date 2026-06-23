@@ -1,0 +1,7 @@
+{
+  "file": "023-fast-itoa.md",
+  "title": "Fast int64-to-string for JSON",
+  "impact": "Measurable win on the selectBytes hot path",
+  "status": "accepted",
+  "link": ""
+}

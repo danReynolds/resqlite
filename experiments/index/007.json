@@ -1,0 +1,7 @@
+{
+  "file": "007-c-level-connection-pool.md",
+  "title": "C-level connection pool",
+  "impact": "4.4x faster concurrent reads",
+  "status": "accepted",
+  "link": "[`3a08838`](https://github.com/danReynolds/dune/commit/3a08838)"
+}
