@@ -1,0 +1,7 @@
+{
+  "file": "117-named-parameters.md",
+  "title": "Named parameter support (`Map<String, Object?>`)",
+  "impact": "Functionally complete and correct; 5-run focused harness showed wide-batch within noise (+2.7%). Deferred for v0.x launch: 12K-LOC change touching the entire write path for an ergonomics nice-to-have, with 6/7 write-path benchmarks trending slightly slower (monotonic direction = weaker than independent noise). Reopen if (a) community feedback shows named params are a real adoption barrier and a 5-run release suite confirms neutral, or (b) someone redesigns dispatch as two top-level branches in `run_batch_locked` instead of per-row inline dispatch. Implementation lives on the `exp-117-named-parameters` branch.",
+  "status": "rejected",
+  "link": ""
+}

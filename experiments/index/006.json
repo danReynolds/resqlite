@@ -1,0 +1,7 @@
+{
+  "file": "006-string-interning.md",
+  "title": "String interning",
+  "impact": "Hash lookup cost exceeded dedup savings on mostly-unique data",
+  "status": "rejected",
+  "link": ""
+}

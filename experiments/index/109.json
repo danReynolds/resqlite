@@ -1,0 +1,7 @@
+{
+  "file": "109-inline-param-buffer.md",
+  "title": "Inline-packed parameter buffer",
+  "impact": "**−10 % to −16 %** on text-param INSERT workloads (Single Inserts, Batch Insert, No-Streams Write Throughput) by collapsing per-text/blob `calloc` into the reusable param-struct buffer and passing actual UTF-8 byte length so `sqlite3_bind_text` skips its internal `strlen`",
+  "status": "accepted",
+  "link": ""
+}

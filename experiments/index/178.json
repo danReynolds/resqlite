@@ -1,0 +1,7 @@
+{
+  "file": "178-missing-run-declaration-guard.md",
+  "title": "Missing-benchmark-run declaration guard",
+  "impact": "Measurement-only CI guardrail: `generate_history.dart` now fails the build when a chartable (accepted/in-review) experiment numbered `≥ 178` has no linked benchmark run *and* no `**Benchmark Run:**` opt-out declaration — converting the documented silent chart-invisibility failure (forgotten result file / date mismatch) into a loud error for new work. Reuses the existing `_skipsReleaseBenchmarkRunMapping` opt-out signal as the escape hatch; pre-178 experiments are grandfathered. No runtime code; `history.json` byte-for-byte unchanged",
+  "status": "in_review",
+  "link": ""
+}

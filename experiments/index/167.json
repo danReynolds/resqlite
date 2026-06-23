@@ -1,0 +1,7 @@
+{
+  "file": "167-resultset-foreach-consumer.md",
+  "title": "ResultSet.forEach consumer recheck",
+  "impact": "Re-tested closed exp 141 after exp 158 on a real SQLite-backed consumer lane. The one-method `ResultSet.forEach` override had no stable current win: Pair A `forEach lookup` improved 30.525 -> 28.383 ms, but the longer confirmation reversed to 28.563 -> 30.942 ms, and `forEach length` also reversed. No runtime code kept; the focused benchmark remains for future result-shape rechecks.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "030-dedicated-reader-assignment.md",
+  "title": "Dedicated reader assignment",
+  "impact": "Removes per-query C pool mutex overhead and closes the point-query gap",
+  "status": "accepted",
+  "link": ""
+}

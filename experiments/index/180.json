@@ -1,0 +1,7 @@
+{
+  "file": "180-group-commit-request-batching.md",
+  "title": "Cross-call write request batching (group commit)",
+  "impact": "The \"group commit\" lever exp 159 named: standalone `execute()` calls that pile up while a send is in flight coalesce into one `MultiExecuteRequest` (each statement its own autocommit — per-call semantics unchanged), collapsing a concurrent burst's N round-trips toward ~2 and capturing exp 147's ~72% per-round-trip residual that pipelining left behind. **−26% to −32%** on the release Concurrent Single Inserts lane, reproduced across order-flipped runs; sequential lane neutral (backpressure trigger adds no latency to isolated writes); the lone flagged nested-tx regression proven to be drift (sign-flip on an untouched code path).",
+  "status": "accepted",
+  "link": ""
+}

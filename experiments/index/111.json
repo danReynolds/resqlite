@@ -1,0 +1,7 @@
+{
+  "file": "111-nested-tx-benchmark-savepoint-cache.md",
+  "title": "Nested-tx benchmark + revisit savepoint string cache",
+  "impact": "Built the missing nested-transaction workload (shipped) and re-tested exp 102's archived cached-savepoint-string pattern against it. Even on the worst-case 50×-shallow-fan-out shape the cache landed at -9 % (below the ±17 % decision threshold); deep-5-chain was flat. Confirms exp 102 across a maximally stressing workload — per-isolate-round-trip cost dominates per-call savepoint allocations",
+  "status": "rejected",
+  "link": ""
+}

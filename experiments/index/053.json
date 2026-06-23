@@ -1,0 +1,7 @@
+{
+  "file": "053-page-size-8192.md",
+  "title": "Page size 8192",
+  "impact": "-16% select at 10k rows on new DBs but breaks existing DBs (requires VACUUM); should be exposed as `Database.open` option, not default",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "085-reserved-reader-slot-for-reruns.md",
+  "title": "Reserved reader slot for reruns",
+  "impact": "The queue is the real source of the `A11` / `A11b` win; removing the reserved reader regressed broader workload balance, especially `A7`",
+  "status": "rejected",
+  "link": ""
+}

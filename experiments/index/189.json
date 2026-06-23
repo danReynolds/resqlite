@@ -1,0 +1,7 @@
+{
+  "file": "189-savepoint-name-compression.md",
+  "title": "Savepoint name compression",
+  "impact": "Replaced depth-specific nested transaction SQL with cached same-name savepoint strings (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) and measured it with a new focused `savepoint_name_compression.dart` harness. Best-case control rows trended faster (empty fanout ~-6% both passes; rollback fanout -17% / -13%; deep chain -7% / -8%), but the representative nested-write fanout did not reproduce: -1.3% in the baseline-first pass, then +21.6% slower in the candidate-first pass. Same-name savepoint semantics are not worth carrying for a noisy/non-reproducing write-fanout result. Runtime change reverted; focused harness retained. Future transaction-control work needs to collapse savepoint round trips, not rename/cache per-boundary SQL strings.",
+  "status": "rejected",
+  "link": ""
+}

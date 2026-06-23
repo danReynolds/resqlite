@@ -1,0 +1,7 @@
+{
+  "file": "052-column-level-dependencies.md",
+  "title": "Column-level dependency tracking",
+  "impact": "Sound architecture (skip re-queries on writes to non-watched columns), but current streaming benchmarks have 0% disjoint-column rate — benchmark-invisible",
+  "status": "rejected",
+  "link": ""
+}

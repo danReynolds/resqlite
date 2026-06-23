@@ -1,0 +1,7 @@
+{
+  "file": "015-cell-buffer-union.md",
+  "title": "Cell buffer union (48 → 16 bytes)",
+  "impact": "Simplicity win, performance neutral",
+  "status": "accepted",
+  "link": "[`52f1e4b`](https://github.com/danReynolds/dune/commit/52f1e4b)"
+}

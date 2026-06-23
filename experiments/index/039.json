@@ -1,0 +1,7 @@
+{
+  "file": "039-byte-size-sacrifice-threshold.md",
+  "title": "Byte-size sacrifice threshold",
+  "impact": "Better proxy for SendPort copy cost than cell count",
+  "status": "accepted",
+  "link": ""
+}

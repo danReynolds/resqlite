@@ -1,0 +1,7 @@
+{
+  "file": "026-db-status-probe.md",
+  "title": "`sqlite3_db_status()` probe",
+  "impact": "Near-perfect cache hit rates and zero spill mean a page-cache experiment is not justified",
+  "status": "rejected",
+  "link": ""
+}

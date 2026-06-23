@@ -1,0 +1,16 @@
+[
+  {
+    "file": "014-writer-tuning.md",
+    "title": "BEGIN IMMEDIATE + remove clear_bindings",
+    "impact": "Correct but within noise (write I/O dominated)",
+    "status": "accepted",
+    "link": "[`4c368a6`](https://github.com/danReynolds/dune/commit/4c368a6)"
+  },
+  {
+    "file": "014-writer-tuning.md",
+    "title": "locking_mode=EXCLUSIVE *(partial)*",
+    "impact": "Blocks all readers — incompatible with concurrent reader pool",
+    "status": "rejected",
+    "link": ""
+  }
+]

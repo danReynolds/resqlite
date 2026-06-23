@@ -1,0 +1,7 @@
+{
+  "file": "191-embedded-nul-public-api-audit.md",
+  "title": "Embedded-NUL public API audit",
+  "impact": "Correctness guard for the remaining public text surfaces in `parameter-encoding-and-binding`: `selectBytes()` now has an assertion that SQLite `char(0)` TEXT decodes through native JSON bytes without truncation, and `stream()` now verifies both initial and changed emissions preserve embedded-NUL UTF-8 bytes. No runtime code or benchmark run; this consumes the signal-map's broader embedded-NUL audit candidate while leaving performance candidates unchanged.",
+  "status": "in_review",
+  "link": ""
+}

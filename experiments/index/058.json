@@ -1,0 +1,7 @@
+{
+  "file": "058-short-string-cache.md",
+  "title": "Short-string value cache",
+  "impact": "+134-256% regression. Dart's `String.fromCharCodes` is uncatchable with any Dart-level cache",
+  "status": "rejected",
+  "link": ""
+}

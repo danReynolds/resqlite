@@ -1,0 +1,7 @@
+{
+  "file": "179-single-row-ascii-param-packing.md",
+  "title": "Single-row ASCII parameter packing",
+  "impact": "Extended exp 125/149's direct-code-unit batch write to the single-row `allocateParams` path, removing the per-string `utf8.encode()` `Uint8List` + `encodedStrings` list for all-ASCII parameter lists. The focused `single_row_param_packing.dart` micro confirms the mechanism — encoder **−45% / −58% / −37%** on 1-short / 5-mixed / 1-KB ASCII shapes, flat blob+int control — but the full release suite is neutral (Parameterized +0.04%, Single Inserts −1.7%, 1 win / 0 reg / 166 neutral, the flags on untouched read paths). The bind is too small a fraction of any representative workload to register (exp 146 restated for single-row). Reverted from `lib/`; micro retained; implementation preserved at `archive/exp-179`.",
+  "status": "rejected",
+  "link": ""
+}

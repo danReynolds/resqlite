@@ -1,0 +1,7 @@
+{
+  "file": "021-pcache-initsz.md",
+  "title": "SQLITE_DEFAULT_PCACHE_INITSZ=128",
+  "impact": "Slight positive trend on larger result sets",
+  "status": "accepted",
+  "link": ""
+}

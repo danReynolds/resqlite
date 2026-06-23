@@ -1,0 +1,7 @@
+{
+  "file": "159-writer-pipelining.md",
+  "title": "Writer request pipelining + persistent reply port",
+  "impact": "**−36% to −45%** on concurrent standalone writes (new focused burst benchmark) by holding the write lock only across the send and letting the worker's port FIFO pipeline requests; persistent reply port + cached SendPort + sync completers remove a port allocate/register/close cycle and two scheduling hops from every write round-trip. Stream-dispatch Tracelite guardrails neutral on the clean order-flipped pass; exp 147 `residual_us` drops on all four audit workloads",
+  "status": "in_review",
+  "link": ""
+}

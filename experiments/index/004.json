@@ -1,0 +1,7 @@
+{
+  "file": "004-nomutex-per-query-locking.md",
+  "title": "NOMUTEX with per-query locking",
+  "impact": "Eliminated 60k mutex ops at 20k rows",
+  "status": "accepted",
+  "link": "[`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57)"
+}

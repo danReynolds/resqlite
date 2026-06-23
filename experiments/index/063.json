@@ -1,0 +1,7 @@
+{
+  "file": "063-select-one-fast-path.md",
+  "title": "SelectOne fast path API",
+  "impact": "+28-48% point query win measured but rejected to preserve lean API surface",
+  "status": "rejected",
+  "link": ""
+}

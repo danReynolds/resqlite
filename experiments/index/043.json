@@ -1,0 +1,7 @@
+{
+  "file": "043-swar-escape-lookup-table.md",
+  "title": "SWAR escape scanning + lookup table",
+  "impact": "8-byte-at-a-time escape detection + lookup table eliminates branch chains in JSON strings",
+  "status": "accepted",
+  "link": ""
+}

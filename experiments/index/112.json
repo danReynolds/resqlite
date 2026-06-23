@@ -1,0 +1,7 @@
+{
+  "file": "112-fixed-length-batch-param-flatten.md",
+  "title": "Fixed-length batch parameter flattening",
+  "impact": "Focused benchmark medians overlapped after repeated A/B passes; any large-batch improvement was below the current decision threshold, so the simpler growable-list flattening stays",
+  "status": "rejected",
+  "link": ""
+}

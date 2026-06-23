@@ -1,0 +1,7 @@
+{
+  "file": "064-drop-clear-bindings.md",
+  "title": "Drop redundant `sqlite3_clear_bindings`",
+  "impact": "Provably-redundant call removed; simpler bind path with documented invariants",
+  "status": "accepted",
+  "link": ""
+}

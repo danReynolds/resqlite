@@ -1,0 +1,7 @@
+{
+  "file": "081-binary-row-result-storage.md",
+  "title": "Binary row result storage",
+  "impact": "Transfer-side numeric scan wins collapsed once full main-isolate row consumption was measured; mixed rows regressed and point-query floor worsened",
+  "status": "rejected",
+  "link": ""
+}

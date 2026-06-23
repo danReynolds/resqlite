@@ -1,0 +1,7 @@
+{
+  "file": "040-reader-slot-event-port-cleanup.md",
+  "title": "Reader slot event-port cleanup",
+  "impact": "Simpler reader-worker protocol with a measured point-query and large-read win",
+  "status": "accepted",
+  "link": ""
+}

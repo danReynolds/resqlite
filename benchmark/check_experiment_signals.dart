@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'generate_signals.dart' as generate_signals;
@@ -31,40 +32,42 @@ void main() {
   print('Experiment signal map is valid.');
 }
 
+/// Builds the experiment index from the per-experiment fragments
+/// (`experiments/index/NNN.json`). README.md is generated from these, so the
+/// fragments are the fresh source on a branch that hasn't regenerated it. A
+/// fragment is one row object, or a list of rows for a split experiment.
 Map<String, _ExperimentEntry> _readExperimentIndex(
   List<_ValidationError> errors,
 ) {
-  final file = File(_readmePath);
-  if (!file.existsSync()) {
-    _readmeError(errors, 'Missing $_readmePath.');
+  final indexDir = Directory('$_experimentsDir/index');
+  if (!indexDir.existsSync()) {
+    _signalError(errors, 'Missing ${indexDir.path}/ (experiment index fragments).');
     return const {};
   }
 
   final entries = <String, _ExperimentEntry>{};
-  final rowPattern = RegExp(r'^\|\s*\[(\d+\w?)\]\(([^)]+)\)\s*\|');
-  var currentStatus = 'accepted';
-  for (final line in file.readAsStringSync().split('\n')) {
-    if (line.startsWith('## Accepted')) {
-      currentStatus = 'accepted';
-    } else if (line.startsWith('## In Review')) {
-      currentStatus = 'in_review';
-    } else if (line.startsWith('## Rejected')) {
-      currentStatus = 'rejected';
+  for (final file in indexDir.listSync().whereType<File>()) {
+    if (!file.path.endsWith('.json')) continue;
+    final id = file.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
+    Object? decoded;
+    try {
+      decoded = json.decode(file.readAsStringSync());
+    } on FormatException catch (error) {
+      _signalError(errors, '${file.path} is not valid JSON: ${error.message}');
+      continue;
     }
-
-    final match = rowPattern.firstMatch(line);
-    if (match == null) continue;
-
-    final id = match.group(1)!;
-    final filename = match.group(2)!;
-    entries[id] = _ExperimentEntry(
-      id: id,
-      filename: filename,
-      status: currentStatus,
-    );
+    final rows = decoded is List ? decoded : [decoded];
+    for (final row in rows) {
+      if (row is! Map) continue;
+      entries[id] = _ExperimentEntry(
+        id: id,
+        filename: row['file']?.toString() ?? '$id.md',
+        status: row['status']?.toString() ?? 'accepted',
+      );
+    }
   }
   if (entries.isEmpty) {
-    _readmeError(errors, 'No experiment rows found in $_readmePath.');
+    _signalError(errors, 'No experiment fragments found in ${indexDir.path}/.');
   }
   return entries;
 }
@@ -629,10 +632,6 @@ void _checkOpenCandidates(
       _signalError(errors, '$itemPath.blockedOn must be a non-empty string.');
     }
   }
-}
-
-void _readmeError(List<_ValidationError> errors, String message) {
-  errors.add(_ValidationError(_readmePath, message));
 }
 
 void _signalError(List<_ValidationError> errors, String message) {

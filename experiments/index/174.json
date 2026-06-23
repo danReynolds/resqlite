@@ -1,0 +1,7 @@
+{
+  "file": "174-selectbytes-view-transfer.md",
+  "title": "selectBytes native-view transfer",
+  "impact": "`selectBytes` sends a `Uint8List` view over the reader connection's persistent `json_buf` and never takes the sacrifice (Isolate.exit + reader respawn) path. Sacrifice is a real win for the rows path (zero-copy object transfer) but counterproductive for bytes — native JSON must be `fromList`-copied before `Isolate.exit` can transfer it, so it saved zero copies and only added a respawn, while the non-sacrifice path copied twice. **−44% (~1.8×)** on large (>256KB) byte reads by eliminating the per-query respawn, **−4%** on small, at a bounded ~+15MB RSS high-water. Net code removal, no public API change",
+  "status": "in_review",
+  "link": ""
+}

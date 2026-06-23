@@ -1,0 +1,7 @@
+{
+  "file": "017-dart-postcobject.md",
+  "title": "Dart_PostCObject for reads",
+  "impact": "2-5x slower — serialize/deserialize costs more than validation walk",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "101-tx-stmt-cache.md",
+  "title": "Cached BEGIN/COMMIT/ROLLBACK statements",
+  "impact": "**−13 % to −14 %** on Batched-Write-Inside-Transaction and Growing-Stream Invalidation by replacing `sqlite3_exec`'s per-call prepare+finalize with three persistently prepared transaction-control stmts",
+  "status": "accepted",
+  "link": ""
+}

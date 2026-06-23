@@ -1,0 +1,7 @@
+{
+  "file": "173-long-text-32kb-hash.md",
+  "title": "32 KB long-text streaming benchmark + 16-byte FNV fold",
+  "impact": "Filled the open `long-text-stream-hashing` candidate by building the missing ≥32 KB cell workload, then tested an unrolled 16-byte FNV body inside `fnv_combine_bytes` against it. Two order-flipped passes showed the candidate consistently +4.5 % and +12.1 % vs the exp 110 8-byte body — slight regressions inside a 2.6 → 6.0 ms per-pass spread, no real signal. Premise refuted: at 32 KB on a pool-of-4 reader fleet the byte-stream fold is at most ~50 % of wall, so loop-overhead removal is below noise. C body reverted to exp 110's path; new `streaming.dart` 32 KB section, `workload_registry.dart` curated metric, and focused `benchmark/experiments/long_text_32kb_hash.dart` harness retained as the durable contribution.",
+  "status": "rejected",
+  "link": ""
+}

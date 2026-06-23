@@ -1,0 +1,7 @@
+{
+  "file": "020-lookaside-allocator.md",
+  "title": "SQLITE_DEFAULT_LOOKASIDE tuning",
+  "impact": "Zero-cost compile flag improvement",
+  "status": "accepted",
+  "link": ""
+}

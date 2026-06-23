@@ -1,0 +1,7 @@
+{
+  "file": "142-single-row-text-direct-encoding.md",
+  "title": "Single-row text parameter direct encoding",
+  "impact": "Tracelite retest over `chat-sim` and `narrow-batch-insert` did not clear the primary gate: resqlite changed +6.86% and +16.4% with neutral/inconclusive verdicts. Do not carry the `allocateParams` direct UTF-8 path unless a future workload shows single-row string binding is material.",
+  "status": "rejected",
+  "link": ""
+}

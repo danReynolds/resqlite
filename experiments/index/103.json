@@ -1,0 +1,7 @@
+{
+  "file": "103-native-nested-tx-depth-control.md",
+  "title": "Native nested transaction depth control",
+  "impact": "Focused nested-tx benchmark showed at best a small savepoint-only improvement; realistic nested write cases were flat or worse, so extra native API surface is not justified",
+  "status": "rejected",
+  "link": ""
+}

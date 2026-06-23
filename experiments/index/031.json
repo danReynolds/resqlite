@@ -1,0 +1,7 @@
+{
+  "file": "031-json1-bulk-shapes.md",
+  "title": "JSON1 bulk shapes",
+  "impact": "Mixed and workload-specific; only compelling when the payload is already serialized as JSON",
+  "status": "rejected",
+  "link": ""
+}

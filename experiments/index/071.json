@@ -1,0 +1,7 @@
+{
+  "file": "071-stmt-cache-mru-scan.md",
+  "title": "MRU-first stmt cache scan + SQL hash filter",
+  "impact": "Structurally sound but unmeasurable: benchmark suite uses ≤ 10 distinct SQLs so the cache never stresses the scan path",
+  "status": "rejected",
+  "link": ""
+}

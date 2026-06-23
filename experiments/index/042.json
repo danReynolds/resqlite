@@ -1,0 +1,7 @@
+{
+  "file": "042-lto-build-flag.md",
+  "title": "LTO build flag (`-flto`)",
+  "impact": "Four rounds tested (full, noinline, stacked, thin). Every config net negative — icache pressure from cross-unit inlining into the 250k-line SQLite amalgamation",
+  "status": "rejected",
+  "link": ""
+}

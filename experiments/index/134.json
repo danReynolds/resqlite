@@ -1,0 +1,7 @@
+{
+  "file": "134-keyed-pk-dirty-elision.md",
+  "title": "Keyed PK dirty rowid elision",
+  "impact": "Profile proof was real (keyed-PK writer-burst wall 25.54 → 12.45 ms; probes 10,000 → 3), but the mergeable implementation depended on internal SQL text recognition for `WHERE id = ?`. Keep as future evidence for explicit row-level observer APIs or a stronger dependency model; implementation preserved at `archive/exp-134`.",
+  "status": "rejected",
+  "link": ""
+}

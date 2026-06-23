@@ -1,0 +1,7 @@
+{
+  "file": "011-persistent-reader-pool.md",
+  "title": "Persistent reader pool",
+  "impact": "Equivalent to one-off isolates; pool overhead cancels messaging savings",
+  "status": "rejected",
+  "link": ""
+}

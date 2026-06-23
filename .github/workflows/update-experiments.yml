@@ -6,7 +6,10 @@ on:
     paths:
       - 'experiments/*.md'
       - 'experiments/signals/**'
+      - 'experiments/index/**'
+      - 'experiments/README.template.md'
       - 'benchmark/generate_signals.dart'
+      - 'benchmark/generate_readme.dart'
       - 'benchmark/results/*.md'
       - 'benchmark/results/*.json'
       - 'benchmark/HARDWARE_RESULTS.md'
@@ -44,6 +47,9 @@ jobs:
       - name: Generate signals JSON
         run: dart run benchmark/generate_signals.dart
 
+      - name: Generate experiments README
+        run: dart run benchmark/generate_readme.dart
+
       - name: Generate devices JSON
         run: dart run benchmark/generate_devices.dart
 
@@ -56,13 +62,13 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet docs/ experiments/signals.json && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --quiet docs/ experiments/signals.json experiments/README.md && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
         if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/ experiments/signals.json
-          git commit -m "Auto-update docs (experiments + signals + devices + blog + releases)"
+          git add docs/ experiments/signals.json experiments/README.md
+          git commit -m "Auto-update docs (experiments + signals + README + devices + blog + releases)"
           git push

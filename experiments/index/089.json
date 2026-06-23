@@ -1,0 +1,7 @@
+{
+  "file": "089-deeply-immutable-resultset.md",
+  "title": "Deeply-immutable `ResultSet` for zero-copy isolate transfer",
+  "impact": "Blocked upstream: Dart's `@pragma('vm:deeply-immutable')` requires all fields to be in a closed set that excludes `List<T>`, `Uint8List`, and any typed data. `ResultSet` / `RawQueryResult` are `List<Object?>`-centered and BLOB cells are `Uint8List`. Re-check when SDK #50068 (DI typed-data factory) ships",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "116-wide-batch-release-coverage.md",
+  "title": "Wide batch insert release coverage",
+  "impact": "Adds a 10k-row x 20-parameter mixed-type batch insert to the release write suite so parameter-width regressions are visible on the public benchmark path",
+  "status": "in_review",
+  "link": ""
+}

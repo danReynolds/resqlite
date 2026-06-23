@@ -1,0 +1,7 @@
+{
+  "file": "045-microtask-invalidation-coalescing.md",
+  "title": "Microtask invalidation coalescing",
+  "impact": "Batches rapid sequential writes into a single invalidation pass per microtask",
+  "status": "accepted",
+  "link": ""
+}

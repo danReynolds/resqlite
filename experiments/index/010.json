@@ -1,0 +1,7 @@
+{
+  "file": "010-ascii-fast-path-string-decode.md",
+  "title": "ASCII fast-path string decode",
+  "impact": "Marginal gain for ASCII, strictly worse for non-ASCII",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "060-combined-single-row-ffi.md",
+  "title": "Combined single-row FFI call",
+  "impact": "Text pointers invalidated by `sqlite3_reset` — required the inline-copy approach explored later",
+  "status": "rejected",
+  "link": ""
+}

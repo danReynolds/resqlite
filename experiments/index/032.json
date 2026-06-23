@@ -1,0 +1,7 @@
+{
+  "file": "032-row-map-facade.md",
+  "title": "Row `Map` facade overrides",
+  "impact": "Keeps the fast transport shape intact while materially improving main-isolate `Map` operations",
+  "status": "accepted",
+  "link": ""
+}

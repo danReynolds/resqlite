@@ -1,0 +1,7 @@
+{
+  "file": "055-columnar-typed-arrays.md",
+  "title": "Columnar typed arrays",
+  "impact": "Memory win confirmed (75% for numerics, 10000x fewer GC objects) but below time-based benchmark floor; requires memory profiling harness",
+  "status": "rejected",
+  "link": ""
+}

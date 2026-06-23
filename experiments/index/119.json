@@ -1,0 +1,7 @@
+{
+  "file": "119-dispatch-pressure-audit.md",
+  "title": "Post-FIFO dispatch pressure audit",
+  "impact": "Profile audit shows wake retries stay zero after FIFO, while A11c overlap and keyed-PK streams still produce parked dispatchers; next dispatch work should target stream admission/completion",
+  "status": "in_review",
+  "link": ""
+}

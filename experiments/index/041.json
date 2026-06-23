@@ -1,0 +1,7 @@
+{
+  "file": "041-ryu-double-to-string.md",
+  "title": "Ryu double-to-string for JSON",
+  "impact": "Initially accepted but reverted after re-analysis: only -10% on one benchmark (text-heavy 1k rows) was actually attributable to 041; the claimed selectBytes wins were from 043. Not worth ~1500 lines of vendored third-party code + ~85-line format-compatibility wrapper",
+  "status": "rejected",
+  "link": ""
+}

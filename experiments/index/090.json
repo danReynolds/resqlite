@@ -1,0 +1,7 @@
+{
+  "file": "090-sqlite3mc-bump-audit.md",
+  "title": "sqlite3mc dependency bump audit",
+  "impact": "No bump needed — we are already on the newest stable sqlite3mc (2.3.2 / SQLite 3.51.3, 37 days old). The only newer target (3.53.0) is a 12-day-old .0 release excluded by our known-regressions policy, and its changelog shows no hot-path wins. Revisit when 3.53.2+ ships",
+  "status": "rejected",
+  "link": ""
+}

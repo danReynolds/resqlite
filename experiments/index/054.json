@@ -1,0 +1,7 @@
+{
+  "file": "054-pgo.md",
+  "title": "Profile-Guided Optimization",
+  "impact": "macOS dylib profraw flush doesn't fire from Dart VM host process; needs CI pipeline with standalone C binary",
+  "status": "rejected",
+  "link": ""
+}

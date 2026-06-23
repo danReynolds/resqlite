@@ -1,0 +1,7 @@
+{
+  "file": "038-stack-alloc-col-names.md",
+  "title": "Stack allocation for column name arrays",
+  "impact": "Eliminates unnecessary heap allocations",
+  "status": "accepted",
+  "link": ""
+}

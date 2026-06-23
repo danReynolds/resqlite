@@ -1,0 +1,7 @@
+{
+  "file": "073-schema-cache-fast-path.md",
+  "title": "Single-slot schema-cache fast-path",
+  "impact": "Within noise: Dart's cached `String.hashCode` already makes map lookups fast enough that a one-slot bypass is below the measurement floor for the current suite",
+  "status": "rejected",
+  "link": ""
+}

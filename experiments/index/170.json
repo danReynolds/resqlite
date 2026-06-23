@@ -1,0 +1,7 @@
+{
+  "file": "170-uncontended-mutex-fastpath.md",
+  "title": "Synchronous uncontended writer mutex fast-path",
+  "impact": "`Mutex.tryLock()` plus a non-`async` `Writer.execute` / `executeBatch` were a concrete request-scheduling attempt against exp 147's residual writer/request bucket. Paired focused + release runs showed the primary `sequential-awaited` / Single Inserts lanes within ±2 % (wrong direction), only Concurrent Single Inserts moved by −7.8 % — a lane exp 159 already drives at −58 % to −61 %. Sub-decision-threshold gain doesn't justify adding a slow-path branch plus the behavior change of sync-before-close writes no longer being rejected. No runtime code kept.",
+  "status": "rejected",
+  "link": ""
+}

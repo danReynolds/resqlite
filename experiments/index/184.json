@@ -1,0 +1,7 @@
+{
+  "file": "184-writer-residual-resplit.md",
+  "title": "Writer residual re-split (post-159/180)",
+  "impact": "Measurement: re-ran exp 147's `writer_sqlite_wall_audit` after pipelining + group commit landed. Breakdown essentially unchanged (A11c overlap SQLite 13.6% / invalidation 16.0% / residual 70.3%) — the audit is sequential and exp 180 coalesces only concurrent bursts. Retires writer-residual micro-opts: the residual is the SDK-gated per-write round-trip, invalidation precision is owned by in-flight exp 160 (#155), the dirty harvest (~4–6%, exp 182) is small, SQLite config is mined. No runtime code.",
+  "status": "accepted",
+  "link": ""
+}

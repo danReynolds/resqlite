@@ -1,0 +1,7 @@
+{
+  "file": "149-six-param-batch-packing.md",
+  "title": "Six-parameter batch packing",
+  "impact": "Lowers the guarded ASCII batch-packing threshold to the Tracelite merge-round shape; profile `merge_rounds` improves executeBatch p50 88 → 75 us and writer SQLite time 87,895 → 75,947 us while keeping 2-3 parameter batches generic",
+  "status": "in_review",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "044-batch-atomic-write.md",
+  "title": "`SQLITE_ENABLE_BATCH_ATOMIC_WRITE`",
+  "impact": "Zero-risk compile flag enabling 2-3x write speedup on Android F2FS",
+  "status": "accepted",
+  "link": ""
+}

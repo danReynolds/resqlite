@@ -1,0 +1,7 @@
+{
+  "file": "003-c-level-connection-and-statement-cache.md",
+  "title": "C-level connection + statement cache",
+  "impact": "~0.7ms saved per query",
+  "status": "accepted",
+  "link": "[`4acfb57`](https://github.com/danReynolds/dune/commit/4acfb57)"
+}

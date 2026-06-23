@@ -1,0 +1,7 @@
+{
+  "file": "096-direct-batch-param-encoding.md",
+  "title": "Direct batch parameter encoding",
+  "impact": "Large batch medians only trended down; no accepted-level harness win and too much duplicate parameter-encoding code",
+  "status": "rejected",
+  "link": ""
+}

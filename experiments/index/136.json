@@ -1,0 +1,7 @@
+{
+  "file": "136-completion-microtask-counter.md",
+  "title": "Completion-side reader-handler counter",
+  "impact": "Measurement-only: profile-mode counters (`completion_handler_us`, `stream_emit_us`) expose the main-isolate reader worker port handler chain on A11c overlap as 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls/burst, with subscriber emit only 0.35% of the chain. Reader-reply batching is the natural bounded implementation candidate. Closes the `completion-side microtask scheduling cost counter` entry in `signals.json#stream-rerun-dispatch.blockedOnMeasurement`",
+  "status": "in_review",
+  "link": ""
+}

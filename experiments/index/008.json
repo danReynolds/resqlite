@@ -1,0 +1,7 @@
+{
+  "file": "008-flat-list-lazy-resultset.md",
+  "title": "Flat value list + lazy ResultSet",
+  "impact": "The breakthrough — 10x fewer objects, beat sqlite3",
+  "status": "accepted",
+  "link": "[`a18492c`](https://github.com/danReynolds/dune/commit/a18492c), [`666da73`](https://github.com/danReynolds/dune/commit/666da73)"
+}

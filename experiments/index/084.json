@@ -1,0 +1,7 @@
+{
+  "file": "084-late-dispatch-generation-stamp.md",
+  "title": "Late dispatch generation stamp",
+  "impact": "Real partial improvement, but materially weaker than 083 because reruns still pile up inside `ReaderPool`",
+  "status": "rejected",
+  "link": ""
+}

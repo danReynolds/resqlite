@@ -1,0 +1,7 @@
+{
+  "file": "188-prerun-declarations-backfill.md",
+  "title": "Pre-178 benchmark-run declarations backfill",
+  "impact": "Extends [exp 178](178-missing-run-declaration-guard.md) by walking `_benchmarkRunDeclarationCutoff` from `178` back to `1`, so every chartable (accepted/in-review) experiment is now under the missing-run-without-declaration guard. Backfills `**Benchmark Run:**` opt-out headers on the 16 silently-unmapped chartable experiments (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing header was descriptive but did not start with an opt-out keyword). `docs/experiments/history.json` is unchanged for every pre-existing row — only the new exp 188 entry is added. A new unit test (`exp 188 walked the cutoff to 1`) anchors the cutoff change inside the same `findUndeclaredMissingRunExperiments` suite exp 178 shipped. No runtime code.",
+  "status": "in_review",
+  "link": ""
+}

@@ -1,0 +1,7 @@
+{
+  "file": "029-periodic-passive-checkpointing.md",
+  "title": "Periodic PASSIVE checkpointing",
+  "impact": "Much lower burst write p95/p99/max via writer-side scheduling",
+  "status": "accepted",
+  "link": "[`8822bd2`](https://github.com/danReynolds/dune/commit/8822bd2)"
+}

@@ -1,0 +1,7 @@
+{
+  "file": "072-xxhash-for-fnv.md",
+  "title": "xxhash64 replacing FNV-1a for result change detection",
+  "impact": "+75 % regression on stream invalidation: xxhash mergeRound is ~2× more ops than FNV's xor+mul, and our inputs are pre-hashed 64-bit values rather than byte streams (where xxhash wins)",
+  "status": "rejected",
+  "link": ""
+}

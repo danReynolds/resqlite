@@ -1,0 +1,7 @@
+{
+  "file": "102-savepoint-string-cache.md",
+  "title": "Cached SAVEPOINT/RELEASE/ROLLBACK TO strings on `_WriterState`",
+  "impact": "Theoretically removes per-nested-tx `toNativeUtf8` + `calloc.free` pair, but the benchmark suite has no nested-transaction workload — no directly attributable signal, only run-to-run drift on unrelated read paths. Pattern-matches exp 095. Revisit if a deeply-nested-tx benchmark exists",
+  "status": "rejected",
+  "link": ""
+}

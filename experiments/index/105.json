@@ -1,0 +1,7 @@
+{
+  "file": "105-reader-pool-sizing.md",
+  "title": "Raise reader pool worker cap (4→8)",
+  "impact": "Regressed A11c writer throughput by ~31% under N=50 stream fan-out; the profile's reader-pool serialization bottleneck was actually throttling completion-side microtask churn. Cap=4 is correctly tuned.",
+  "status": "rejected",
+  "link": ""
+}

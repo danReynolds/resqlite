@@ -1,0 +1,7 @@
+{
+  "file": "164-eqp-rowid-dirty-elision.md",
+  "title": "EQP rowid dirty elision",
+  "impact": "Replaced exp 134's custom SQL recognizer with SQLite `EXPLAIN QUERY PLAN` plus native dirty-row harvesting and a private plan cache, but the focused Tracelite initial-drain lane stayed neutral/inconclusive (`stream-initial-drain-rowid` -2.33%) and broader stream guardrails did not produce a stable keyed-PK win. No runtime code kept; implementation preserved at `archive/exp-164`.",
+  "status": "rejected",
+  "link": ""
+}
