@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T12:00:59.688828",
+  "generated": "2026-06-23T19:46:57.238772",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -21698,10 +21698,10 @@
     },
     {
       "id": "014",
-      "title": "locking_mode=EXCLUSIVE *(partial)*",
+      "title": "BEGIN IMMEDIATE + remove clear_bindings",
       "date": "2026-04-07",
-      "status": "rejected",
-      "summary": "Blocks all readers — incompatible with concurrent reader pool",
+      "status": "accepted",
+      "summary": "Correct but within noise (write I/O dominated)",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -21717,10 +21717,10 @@
     },
     {
       "id": "014",
-      "title": "BEGIN IMMEDIATE + remove clear_bindings",
+      "title": "locking_mode=EXCLUSIVE *(partial)*",
       "date": "2026-04-07",
-      "status": "accepted",
-      "summary": "Correct but within noise (write I/O dominated)",
+      "status": "rejected",
+      "summary": "Blocks all readers — incompatible with concurrent reader pool",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",

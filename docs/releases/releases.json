@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T18:51:22.903579",
+  "generated": "2026-06-23T19:47:00.068168",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -1635,18 +1635,18 @@
         },
         {
           "id": "014",
-          "title": "BEGIN IMMEDIATE + remove clear_bindings",
-          "date": "2026-04-07",
-          "status": "accepted",
-          "summary": "Correct but within noise (write I/O dominated)",
-          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/014-writer-tuning.md"
-        },
-        {
-          "id": "014",
           "title": "locking_mode=EXCLUSIVE *(partial)*",
           "date": "2026-04-07",
           "status": "rejected",
           "summary": "Blocks all readers — incompatible with concurrent reader pool",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/014-writer-tuning.md"
+        },
+        {
+          "id": "014",
+          "title": "BEGIN IMMEDIATE + remove clear_bindings",
+          "date": "2026-04-07",
+          "status": "accepted",
+          "summary": "Correct but within noise (write I/O dominated)",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/014-writer-tuning.md"
         },
         {
