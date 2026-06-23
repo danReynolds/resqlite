@@ -283,67 +283,25 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
 }
 
 void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
-  // Moonshot prototype (exp 197): coalesced standalone writes share one SQLite
-  // transaction instead of paying one autocommit per statement. This deliberately
-  // tests the semantic line exp 180 avoided while keeping per-statement errors
-  // isolated where SQLite's default ABORT behavior leaves the transaction usable.
-  final beginRc = resqliteTxBeginImmediate(state.dbHandle);
-  if (beginRc != 0) {
-    throw ResqliteTransactionException(
-      resqliteErrmsg(state.dbHandle).toDartString(),
-      operation: 'begin',
-      sqliteCode: beginRc,
-    );
-  }
-
+  // The mutex guarantees a coalesced group is only sent at txDepth 0, so each
+  // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
+  // so outcomes[i] holds exactly statement i's modifications.
   final outcomes = <Object>[];
-  var lastSuccess = -1;
-  try {
-    for (final write in msg.writes) {
-      try {
-        final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-        final result = executeWrite(state.dbHandle, write.sql, write.params);
-        final writerSqliteUs = _stopSqliteTimer(sqliteSw);
-        outcomes.add(
-          ExecuteResponse(
-            result,
-            TableDependencies.none,
-            writerSqliteUs: writerSqliteUs,
-          ),
-        );
-        lastSuccess = outcomes.length - 1;
-      } on ResqliteException catch (e) {
-        outcomes.add(e);
-      }
-    }
-
-    final commitRc = resqliteTxCommit(state.dbHandle);
-    if (commitRc != 0) {
-      final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
-      resqliteTxRollback(state.dbHandle);
-      discardDirtyTableDependencies(state.dbHandle);
-      throw ResqliteTransactionException(
-        errMsg,
-        operation: 'commit',
-        sqliteCode: commitRc,
+  for (final write in msg.writes) {
+    try {
+      final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
+      final result = executeWrite(state.dbHandle, write.sql, write.params);
+      final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+      final modifications = state.txDepth > 0
+          ? TableDependencies.none
+          : getDirtyTableDependencies(state.dbHandle);
+      outcomes.add(
+        ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
       );
+    } on ResqliteException catch (e) {
+      outcomes.add(e);
     }
-
-    final modifications = getDirtyTableDependencies(state.dbHandle);
-    if (lastSuccess >= 0) {
-      final response = outcomes[lastSuccess] as ExecuteResponse;
-      outcomes[lastSuccess] = ExecuteResponse(
-        response.result,
-        modifications,
-        writerSqliteUs: response.writerSqliteUs,
-      );
-    }
-  } catch (_) {
-    resqliteTxRollback(state.dbHandle);
-    discardDirtyTableDependencies(state.dbHandle);
-    rethrow;
   }
-
   msg.replyPort.send(MultiExecuteResponse(outcomes));
 }
 
