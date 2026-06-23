@@ -469,6 +469,39 @@ void main() {
       }
     });
 
+    test('selectBytes encodes real integer-valued numbers', () async {
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, v REAL)');
+      final values = <double>[
+        0.0,
+        1.0,
+        -1.0,
+        12345.0,
+        -12345.0,
+        9007199254740992.0,
+        -9007199254740992.0,
+        1.25,
+        -2.5,
+        1.0e20,
+      ];
+      for (var i = 0; i < values.length; i++) {
+        await db.execute(
+          'INSERT INTO t(id, v) VALUES (?, CAST(? AS REAL))',
+          [i + 1, values[i]],
+        );
+      }
+
+      final bytes = await db.selectBytes('SELECT v FROM t ORDER BY id');
+      final json = utf8.decode(bytes);
+      final decoded = jsonDecode(json) as List<dynamic>;
+      expect(decoded.length, values.length);
+      for (var i = 0; i < values.length; i++) {
+        final actual = (decoded[i] as Map)['v'] as num;
+        expect(actual.toDouble(), values[i], reason: 'value ${values[i]}');
+      }
+      expect(json, contains('1.25'));
+      expect(json, contains('-2.5'));
+    });
+
     test('selectBytes encodes blobs as base64', () async {
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, data BLOB)',
