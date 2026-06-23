@@ -368,26 +368,95 @@ If the verdict flips during review, swap the outcome label with
 
 ### What the PR description must contain
 
-The PR is the human-readable handoff. Even when the full experiment doc
-lives at `experiments/NNN-*.md`, the PR body must stand on its own and
-clearly state, in this order:
+The PR body is the human-readable handoff — most reviewers read it and
+nothing else. Write it the way you would **explain the experiment to a
+colleague who hasn't seen the code**: full sentences, plain language, and
+enough *why* that they understand the decision without opening the diff or
+the writeup. The experiment doc (`experiments/NNN-*.md`) already tells this
+story — its Problem / Hypothesis / Approach / Results sections are usually
+well-written prose. **Lift that narrative into the PR body; do not compress it
+back into keyword fragments.** A reader who finishes the body should be able to
+say, in their own words, what you tried, why, what happened, and what it means.
 
-1. **Hypothesis** — the proposed change and why it should work.
-2. **Approach** — what was built or instrumented (one paragraph or a
-   short bullet list; link to the experiment doc for full detail).
-3. **Results** — the measured outcome. Include the decision-relevant
-   numbers (medians, deltas, counter values, ratios) inline as a small
-   table; do not force the reviewer to open the aggregate file to see
-   the headline number.
-4. **Outcome** — Accepted / Rejected / Deferred, with the one-sentence
-   reason. For rejections, the reason must be specific enough that a
-   future runner can tell whether their new evidence changes the
-   calculus ("rejected because X, would reopen if Y" — same shape as
-   the experiment doc).
-5. **Test plan** — checkboxes for the validation that was actually run
-   (focused tests, `dart analyze`, generated-data checks, any
-   profile/release benchmark passes).
+Required sections, in this order:
 
-If any of those sections are missing, the PR is not finished. Do not
-rely on the linked experiment doc to carry the headline; reviewers
-triage from the PR body first.
+1. **Hypothesis** — open with the *motivation*: what you noticed in the code or
+   a prior experiment that made this worth trying (this is the writeup's
+   "Problem"), in plain terms. Then state the change you expected to help and
+   why. The reader should understand the bet before any symbol or function name
+   appears.
+2. **Approach** — what you actually changed, in words, not just a list of
+   identifiers. Say what stays on the old path and why the change is safe — the
+   conservative boundaries matter to a reviewer as much as the fast path. Link
+   the writeup for full detail.
+3. **Results** — the numbers *and what they mean*. Put the decision-relevant
+   figures inline as a small table, then **interpret them in 1–3 sentences**:
+   the magnitude in intuitive terms ("~5× faster", not only "−79%"), what the
+   control / guard lanes confirm (e.g. "fractional values stay flat, exactly as
+   intended"), and when the result actually matters in real usage. Never make
+   the reviewer derive the takeaway from a delta column on their own.
+4. **Outcome** — plain Accepted / Rejected / Deferred, and what it means going
+   forward. For a win: roughly how big and where it applies. For a rejection:
+   "rejected because X, would reopen if Y" — specific enough that a future
+   runner can tell whether their new evidence changes the calculus.
+5. **Test plan** — the validation that actually ran (focused tests,
+   `dart analyze`, generated-data checks, any profile/release benchmark passes).
+
+The PR is not finished if a section is missing, if **Results is a bare table
+with no interpretation**, or if **Hypothesis leads with the mechanism instead
+of the motivation**. Don't rely on the linked writeup to carry the headline —
+reviewers triage from the body first.
+
+#### Worked example
+
+Too terse — mechanism only, numbers without meaning (what *not* to ship):
+
+```markdown
+## Summary
+- add a conservative SQLITE_FLOAT helper routing exact integral REALs through fast_i64_to_str
+## Results
+- 10k x 8 integral REAL: -79.2% / -79.0%
+- 10k x 20 fractional REAL guard: +0.5% / +0.5%
+```
+
+Better — motivation, plain approach, interpreted results:
+
+```markdown
+## Hypothesis
+`selectBytes()` formats every REAL cell with `snprintf("%.17g")`. But REAL
+columns often hold whole numbers — scores, timestamps, metrics kept under REAL
+affinity — and for those the JSON output is identical to what our fast integer
+encoder already produces. So: detect exactly-integral REAL values and route
+them through `fast_i64_to_str`, expecting a large win on integer-heavy REAL
+rowsets and no change for genuine fractionals.
+
+## Approach
+Added `fast_double_to_json_num`: finite values in the exact integer range
+(`|v| <= 2^53`) cast to `long long` and reuse the integer path; everything
+risky — fractionals, huge magnitudes, NaN/Inf, negative zero — stays on
+`snprintf`. Deliberately narrow: not a general float-formatting rewrite (see
+exp 041). Full detail in experiments/194-real-integer-fastpath.md.
+
+## Results
+| Lane | Δ (order-flipped pair) |
+|---|---|
+| 10k × 20 integral REAL | −81.5% / −81.4% |
+| 10k × 20 fractional REAL (guard) | +0.5% / +0.5% |
+| 10k × 8 mixed | −38.7% / −34.7% |
+
+Integer-heavy REAL encoding is **~5× faster**; genuine fractionals are
+untouched (the guard confirms they stay on the safe path), and mixed rowsets
+improve in proportion to how many integral-REAL cells they carry. This only
+moves wall time on workloads that read many whole-number REAL cells — a
+per-cell encoder win, invisible to the release suite, so the focused harness is
+the durable gate.
+
+## Outcome
+Accepted (in review): a contained, conservative ~5× win on integral-REAL
+selectBytes, with the fractional path provably unchanged.
+
+## Test plan
+- [x] `dart analyze --fatal-infos` on the harness + tests
+- [x] `dart test test/database_test.dart -n selectBytes` (integral, fractional, huge fallback)
+- [x] focused A/B both orders; `finalize_experiment.dart` green
+```
