@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-22T17:39:54.222653",
+  "generated": "2026-06-23T15:58:45.371924",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,14 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "195",
+          "title": "Stmt-cache pre-encoded JSON column-name tokens",
+          "date": "2026-06-23",
+          "status": "in_review",
+          "summary": "Extends [exp 190](190-selectbytes-col-name-preencode.md)'s per-query token amortization across re-executions of the same prepared SQL by caching the encoded `\"name\":` / `,\"name\":` tokens on the `resqlite_cached_stmt` entry. Eliminates the per-query `buf_init(64)` + `free` pair and the first-row pre-encode walk from `write_json_to_buf`; the per-row loop is bit-identical to exp 190 and JSON output is byte-identical. Focused `select_bytes_repeated_calls.dart` 1-row × 20-col improves **−9.2 % / −7.2 %** and 10-row × 20-col improves **−5.1 % / −2.7 %** across two order-flipped passes, while 100/1000-row guards show sign reversal (drift-suspected — per-query setup is < 0.2 % of wall at those sizes). Exp 190's `wide_cols.dart` shapes trend candidate-faster on every 10k-row lane across both passes. No public API change, ~hundreds of bytes per cached statement",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/195-stmt-cache-name-tokens.md"
+        },
         {
           "id": "193",
           "title": "Row.values list-view iterator",
