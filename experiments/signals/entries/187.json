@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Exp 186's UTF-8-heavy follow-up now has a representative workload: single_row_large_text_bind.dart emits byte-matched CJK rows beside the ASCII rows, so future single-row bind changes can test both direct-ASCII and direct-UTF-8 payloads in one focused harness.",
+    "Replacing the single-row non-ASCII _allocateParamsPreEncoded fallback with direct _utf8Length/_writeUtf8 packing removes one temporary Uint8List allocation plus one copy per non-ASCII string param. The CJK focused rows improve roughly 31-39% at 16 KB through 1 MB across the order-flipped pair.",
+    "The ASCII single-row path remains the exp 186 direct code-unit path; ASCII controls stayed comparable across the widened harness. Small unicode-1 encoder micro differences are tens of nanoseconds and not the acceptance gate."
+  ],
+  "nextSignals": [
+    "use benchmark/experiments/single_row_large_text_bind.dart for both ASCII and CJK rows before accepting any future single-row bind encoder rewrite",
+    "the old single-row Unicode fallback is gone; future correctness changes to _utf8Length/_writeUtf8 must preserve multibyte, surrogate-pair, and embedded-NUL behavior on execute() as well as executeBatch()",
+    "if a release-suite large single-row text lane is added later, it should include a non-ASCII shape rather than only repeating exp 186's ASCII gate"
+  ]
+}

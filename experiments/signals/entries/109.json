@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Parameter encoding still has worthwhile headroom when the change removes per-text/blob native allocations and SQLite strlen work"
+  ],
+  "nextSignals": [
+    "look for larger ownership/layout changes rather than tiny scratch-object reuse"
+  ]
+}

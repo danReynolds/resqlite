@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "`StreamEngine._flushQueue` helper allocation is not the active stream-dispatch target after exp 120 and exp 122; replacing `take(...).toList()` and `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time movement",
+    "A11c overlap can move in a favorable direction from tiny queue-shape changes, but keyed-PK noise/regression risk means collection-helper cleanup needs allocator evidence before it is worth carrying",
+    "The current stream-admission path is behaviorally settled; future stream work should try bounded completion-side scheduling or writer/request changes with in-branch measurement instead of polishing the dequeue loop"
+  ],
+  "nextSignals": [
+    "do not retry `_flushQueue` inline dequeue unless an allocation profile identifies the temporary list or availability count as material",
+    "if a stream implementation needs a completion-side scheduling counter, add it in the same branch and remove it before merge unless it becomes reusable",
+    "use the existing A11c/keyed-PK profile counter gates to reject stream-admission cleanups whose counters are already zero"
+  ]
+}

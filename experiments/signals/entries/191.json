@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "in_review_correctness_guard",
+  "changedBeliefs": [
+    "The broader embedded-NUL public API audit candidate is consumed as correctness support, not a performance result. Current main already covers wide executeBatch with multibyte embedded-NUL TEXT, and exp 187 covers single-row execute in flight; exp 191 adds the missing reader surfaces.",
+    "selectBytes preserves embedded-NUL TEXT seeded by SQLite char(0): select() returns the expected Dart string, hex(CAST(body AS BLOB)) matches _hexUtf8(body), and native JSON bytes decode back to the same value.",
+    "stream initial and changed emissions preserve embedded-NUL TEXT bytes, proving the one-pass initial decode, result hashing, and re-query emission path do not treat TEXT as NUL-terminated."
+  ],
+  "nextSignals": [
+    "do not reopen broad embedded-NUL work without a new public API surface or a concrete regression report; coverage now spans wide executeBatch, in-flight single-row execute, selectBytes, and stream emissions",
+    "if _utf8Length, _writeUtf8, sqlite3_bind_text lengths, native JSON string emission, or stream row decoding changes, keep these tests in the focused validation set",
+    "future performance work in this direction still needs a workload where parameter encoding is material; exp 191 does not change the blob-heavy or small/narrow shape guidance"
+  ]
+}

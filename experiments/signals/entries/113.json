@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "The two-parameter batch insert shape is not a sufficient proxy for batch parameter overhead",
+    "Avoiding the temporary flat Dart parameter list becomes measurable once batch rows are wide enough"
+  ],
+  "nextSignals": [
+    "watch release-suite two-parameter batch metrics for neutrality",
+    "include parameter width when evaluating future executeBatch encoder changes"
+  ]
+}

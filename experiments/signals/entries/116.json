@@ -1,0 +1,13 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
+  ],
+  "nextSignals": [
+    "compare future batch-parameter changes against both narrow Batch Insert and Wide Batch Insert before claiming neutrality"
+  ]
+}

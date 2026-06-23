@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Exp 023 left bounded headroom inside `write_json_to_buf`'s `SQLITE_INTEGER` arm — the single-digit `fast_i64_to_str` body runs one `% 10` / `/ 10` per output digit, and 10k × 20 INTEGER selectBytes performs 200k of these calls. Replacing the body with a two-digit `[00..99]` lookup table (one `% 100` / `/ 100` + one 2-byte memcpy per digit pair) cuts focused integer-heavy `selectBytes` by −8 to −26 % across two order-flipped passes on `select_bytes_int_heavy.dart`, with the biggest win on the deepest-digit shape (10k × 20 ~18-digit big ints, −24 to −26 %) — exactly the shape the algorithm predicts gains most from halving the division count",
+    "The release suite is not the right denominator for this change: no public selectBytes lane is integer-heavy enough for per-cell encoder savings to register. The same `Select 10k rows → JSON Bytes` lane reads 3.545 / 5.213 / 3.598 / 3.739 ms across baseline-first / candidate-second / candidate-first / baseline-second — *which side ran first* explains more variance than *which side is candidate*. Remaining release flags (Long-Text / Long-Payload Unchanged Fanout, Nested Transactions, column-granularity re-emit counters) reverse sign across the order flip and live on hash/savepoint/dependency paths the change cannot mechanically touch, so they read as exp 159 / exp 177 phase-correlated drift, not real regressions",
+    "Correctness for the int64 boundaries (LLONG_MIN, LLONG_MAX, zero, ±9 / ±99 / ±999 / ±10000 / ±1234567890) is preserved bit-for-bit by reusing exp 023's `(unsigned long long)(-(val + 1)) + 1` LLONG_MIN trick and the `val == 0` short circuit, and is covered end-to-end by a new `selectBytes encodes int64 extremes` test against `db.selectBytes()`"
+  ],
+  "nextSignals": [
+    "use `select_bytes_int_heavy.dart` as the durable gate for future selectBytes int-encode work — release suite is not the right denominator at typical int-cell counts",
+    "do not retry deeper itoa variants (4- or 8-digit tables, branchless log10 length prediction) without a workload that goes further than the 10k × 20 big-ints shape, or a production profile showing INTEGER cells dominate `selectBytes` wall on a representative payload — exp 023 → exp 192 has now consumed the bounded itoa headroom for typical magnitudes",
+    "the remaining bounded slice of `write_json_to_buf` is the `SQLITE_FLOAT` arm's `snprintf(\"%.17g\")`; exp 041 already rejected a vendored Grisu/Ryu replacement on size grounds, so any future float-encode candidate needs either a much smaller fast path or production evidence that FLOAT cells dominate selectBytes wall"
+  ]
+}

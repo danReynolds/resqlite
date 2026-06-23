@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Exp 174's bounded RSS high-water (~+15 MB after 200 x 651 KB selectBytes) becomes pathological under a one-off concurrent-burst shape: 8 concurrent x 8 MB selectBytes pin 32 MB of native json_buf across the 4-reader pool for the rest of the connection's life, and the recurring-large pattern (1 large per 50 small over 300 iterations) settles at 16 MB pinned. The exp 174 future-note about high-threshold reclaim is a real candidate, not a hypothetical",
+    "Adding Diagnostics.readerJsonBufHighWaterBytes (sum of per-reader json_buf.cap) makes the high-water directly observable from any benchmark or downstream user — a reusable signal for future memory-sensitive selectBytes work alongside the existing exp 174 'large bytes' release lane",
+    "A high-threshold C-side realloc shrink, fired by the reader worker after SendPort.send returns on a selectBytes reply when json_buf.cap > 1 MB AND the just-sent result was < 256 KB, reclaims pathological retention without per-call cost on warm small buffers or back-to-back large reads. Post-burst settle: 32 MB -> 64 KB (32 MB freed); recurring: 16 MB -> 64 KB. Focused large_bytes_transfer.dart neutral within noise (large +0.7%, small +2%)",
+    "The 256 KB last-len guard is the load-bearing piece of the policy: it prevents the realloc churn anti-case the exp 174 future-note explicitly named (back-to-back large reads would shrink-then-regrow if shrinks were unconditional)"
+  ],
+  "nextSignals": [
+    "promote a release lane that asserts json_buf_total stays bounded after a representative one-off concurrent-burst workload (exp 161 pattern) so this reclaim mechanism has public regression visibility",
+    "if a future workload shows the 1 MB trigger cap is too aggressive (hot 1-MB-class reads followed by a steady 500-KB-class read paying realloc churn), the natural tuning is to raise the trigger cap to 4 MB, not to drop the last_used_len guard",
+    "the new diagnostic field is the reusable signal for any future RSS-sensitive selectBytes work; the existing measurement-system openCandidate ('memory profiling harness with per-benchmark RSS acceptance criteria') can build on top of it rather than from scratch"
+  ]
+}

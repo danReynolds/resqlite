@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "The exp 179 single-row direct-ASCII allocateParams rewrite is materially beneficial once the bound text crosses the mid-tens-of-KB range — exactly the revisit condition exp 179 named. The new focused single_row_large_text_bind.dart workload (1 KB to 1 MB sequential INSERTs) measures -15.4% / -11.1% at 16 KB, -17.3% / -18.7% at 64 KB, -32.3% / -32.1% at 256 KB, and -26.7% / -28.5% at 1 MB across two order-flipped passes",
+    "Encoder isolation reproduces exp 179's deltas exactly (-45% / -58% / -37% on the single_row_param_packing.dart micro), so the mechanism question (encoder faster vs slower) is settled separately from the workload-materiality question",
+    "Small-payload single-row binds remain at the noise floor — Parameterized Queries, Single Inserts, and Concurrent Single Inserts all neutral on the release suite. Exp 179's small-bind finding stands: the encoder is the right default for the single-row path now because we have a representative workload where it matters, not because the small case stopped being flat",
+    "The one flagged release-suite regression (Batched Write Inside Transaction 100 rows, +44% on a 0.37 ms / 18.8% CV lane) is sub-decision-threshold noise on a code path the encoder cannot mechanistically reach (allocateBatchParams, not allocateParams); the 1000-row sibling moves the opposite direction (-10%) on the same change"
+  ],
+  "nextSignals": [
+    "use benchmark/experiments/single_row_large_text_bind.dart as the durable workload for any future single-row bind change; the 1 MB shape is the load-bearing acceptance gate",
+    "do not extend the single-row encoder to UTF-8 long payloads (extending the Unicode fallback in the same shape exp 126 did for batches) without a representative non-ASCII large single-row workload; the encoder mechanism is settled but the materiality threshold is workload-specific",
+    "exp 142 / exp 179 small-bind rejections are sharpened (not overturned) by this run: do not retry direct encoding on small single-row text shapes without new evidence that the round-trip floor has moved"
+  ]
+}

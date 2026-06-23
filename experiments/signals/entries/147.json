@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads: A11c overlap is 9.4% SQLite and keyed-PK is 18.1% SQLite",
+    "After subtracting SQLite-facing calls and stream invalidation, residual writer/request wall remains the largest bucket on A11c overlap and keyed-PK",
+    "Future stream-dispatch work should target completion-side scheduling, reply/request coordination, or dirty-set harvest rather than SQLite-step tuning, and should carry any narrow measurement inside the implementation branch"
+  ],
+  "nextSignals": [
+    "reader-reply batching candidate should reduce exp 136 completion_us / total_us on A11c overlap",
+    "if residual writer/request detail is needed, gather only the split required by a concrete reduction candidate and remove temporary scaffolding before merge unless it is reusable"
+  ]
+}

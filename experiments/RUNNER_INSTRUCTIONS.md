@@ -212,8 +212,12 @@ When finished:
   what was measured, and what would make the area interesting again — a
   "rejected, no signal" record is worth less than a "rejected because X, would
   reopen if Y" record.
-- update [`signals.json`](signals.json) if the run changes how future agents
-  should interpret an area.
+- record the run's signal in its own file,
+  `experiments/signals/entries/NNN.json` (directions, outcomeClass,
+  changedBeliefs, nextSignals) — never the generated `signals.json`, and never
+  a shared file, so two concurrent runs can't collide on it. When the run
+  changes how future agents should read a whole *direction*, also update that
+  direction's synthesis in [`signals/base.json`](signals/base.json).
 - add to [`JOURNAL.md`](JOURNAL.md) only when the run surfaced a *transferable*
   lesson — something a future runner could reapply to a different direction or
   could waste time relearning. Per-direction state goes in `signals.json`, not
@@ -221,21 +225,23 @@ When finished:
 - do not edit [`../doc/stories/`](../doc/stories/) as part of an experiment
   run. Story posts are updated on maintainer request, not per experiment.
 - run the experiment finalizer after the writeup, README row, and
-  `signals.json` entry are in place:
+  `experiments/signals/entries/NNN.json` are in place:
 
   ```bash
   dart run benchmark/finalize_experiment.dart \
     --experiment=experiments/NNN-short-slug.md
   ```
 
-  This regenerates `docs/experiments/history.json`, verifies generated docs,
-  and checks that the experiment is indexed in both the README and signal map.
-  **Run it as the very LAST step.** If you edit *any* tracked file afterward —
-  the writeup, README, `signals.json`, a result artifact, a relocated fixture —
-  re-run it, or you commit a stale `history.json`. The freshness check then
-  fails *post-merge* (it can slip through if the PR auto-merges before CI
-  re-runs), and only the Update-Docs bot saves you — a runner without that bot
-  ships a red `main`. This is exactly how exp 177 briefly reddened the main tip.
+  This verifies the generated-docs **sources** build cleanly and the signal map
+  is valid. It does **not** write `docs/experiments/history.json`,
+  `docs/benchmarks/devices.json`, or `experiments/signals.json` — those are
+  generated aggregates owned by the post-merge Update-Docs bot. **Never commit
+  them on your branch** (CI's `guard-generated-docs` job blocks it). You commit
+  only sources: the writeup, the README row, your signal fragment, benchmark
+  result files, and any code; the bot regenerates the aggregates on `main`
+  after merge. This is what keeps a stale branch from re-conflicting on
+  generated files the way the old "regenerate + commit `history.json` on every
+  branch" rule did.
 - run focused validation plus the relevant repo checks
 - open a PR when the local experiment package is coherent enough for review
 

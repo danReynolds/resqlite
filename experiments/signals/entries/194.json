@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "The SQLITE_FLOAT arm in write_json_to_buf still paid snprintf(\"%.17g\") for every REAL cell after exp 190 and exp 192 tightened neighboring selectBytes encoder work.",
+    "Finite, exactly integral REAL values inside the exact double integer range (abs(v) <= 2^53) can reuse fast_i64_to_str without changing JSON spelling, while fractional values, huge values, non-finite values, and negative zero stay on snprintf.",
+    "Focused select_bytes_real_int_fastpath.dart reproduced roughly -79% to -82% on 10k-row integral-REAL lanes across an order-flipped pair, -72% on the 1k x 2 integral-REAL lane, and a flat +0.5% fractional-REAL fallback guard."
+  ],
+  "nextSignals": [
+    "use benchmark/experiments/select_bytes_real_int_fastpath.dart as the durable gate for future SQLITE_FLOAT JSON-formatting changes",
+    "preserve the conservative fallback boundaries for fractional values, huge magnitudes, non-finite values, and negative zero",
+    "do not treat the integral-REAL fast path as evidence to revive broad Ryu/Grisu-style float formatting without a much smaller implementation and a production profile showing fractional REAL cells dominate"
+  ]
+}

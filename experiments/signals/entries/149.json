@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Tracelite profile merge rounds expose a material six-parameter batch shape between exp 146's rejected small/narrow guard and exp 125/126's large wide guard",
+    "Lowering the ASCII batch-packing guard to 6 params / 600 total params improved merge-round executeBatch p50 from 88 us to 75 us and writer SQLite time from 87,895 us to 75,947 us",
+    "The 2-3 parameter paths remain generic; this is a bounded middle-ground guard, not a retry of exp 146's broad small-batch threshold"
+  ],
+  "nextSignals": [
+    "watch for release-suite or downstream evidence that six-parameter merge batches are common enough to deserve a strict Tracelite policy scenario",
+    "do not lower the guard below six parameters without a new workload and a Tracelite decision artifact that clears the primary gate",
+    "if six-parameter merge rounds become a recurring product workload, add an explicit Tracelite suite scenario instead of treating narrow-batch-insert as a proxy"
+  ]
+}

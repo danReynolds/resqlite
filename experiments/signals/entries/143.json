@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "Pinned Tracelite profile runs already produce decision-useful structured evidence: dispatch floors, floor-subtracted work, operation tails, memory deltas, allocation counters, source provenance, and validated graph data",
+    "The current canonical profile workload shows point queries are median dispatch-bound (0-1 us of floor-subtracted work), merge rounds are work-bound (77 us of floor-subtracted work), and point queries still carry allocation/RSS cost that wall time alone hides",
+    "`tracelite explain` is not yet doing enough interpretation for resqlite experimenters; it loaded the workload summary but did not identify dispatch-bound, work-bound, memory-heavy, or tail-noisy workloads"
+  ],
+  "nextSignals": [
+    "add Tracelite workload-summary explain rules before adding another resqlite-local interpretation harness",
+    "keep raw trace regions local while committing aggregate markdown and graph data only when it feeds Pages",
+    "use repeated Tracelite profile runs before making p99 or max-tail claims"
+  ]
+}

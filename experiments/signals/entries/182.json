@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_no_stable_signal",
+  "changedBeliefs": [
+    "Skipping the writer's preupdate_hook accumulation + reply harvest when _streamEngine.length == 0 at send time is a coherent residual-bucket attack — it removes per-row strcmp dedup + per-write FFI/toDartString/object work that no consumer reads, gated by a track_dirty flag on resqlite_db flipped from the writer isolate, with a DrainRequest no-op barrier from StreamEngine._createStream to fence in-flight non-tracking writes before a new stream's initial query",
+    "The no-stream win is real: two order-flipped focused passes show sequential-awaited (2000 writes) -3.8% / -5.3% and wide-batch (10k rows x 20 params) -2.4% / -5.9%, matched by the release-suite Single Inserts -5.2% / Concurrent Single Inserts -3.8% / Batch Insert 10k -6.8% deltas (sub-MDE flags on the public guard)",
+    "The with-streams cost is also real: the focused with-streams guardrail (1000 writes, 1 stream) regressed +2.7% / +3.7% across the same order-flipped passes — classified `reproduced` (not drift) by ab_drift_check.dart's direction-plus-CV-match rule — and Tracelite stream-rerun-dispatch came back inconclusive with the warmup elapsed guardrail regressing in the same direction across all three scenarios (+12.4% / +35.9% / +21.0%, gated too_noisy but matching the focused signal)",
+    "Reactive streams are the library's primary use case, so the workload mix in which the optimization helps (write-heavy without active streams) is narrower than the one it slows (any write while at least one stream is active). Net unfavorable on the realistic mix; the rejection class is rejected_no_stable_signal because the primary gate stayed inconclusive rather than reproducing a hard fail"
+  ],
+  "nextSignals": [
+    "do not retry the same gate without a workload that shows write throughput without active streams is on a hot path — at that point the focused dep_tracking_skip.dart harness is the reusable lane",
+    "if a future revisit happens, consider amortizing the per-write _streamEngine.length check via a cached bool hasStreams on Writer (toggled on stream registration / cancellation) and/or restricting the gate to single-row standalone writes so the per-write overhead lands where the harvest savings are largest",
+    "the DrainRequest no-op barrier in archive/exp-182 is also useful as a standalone test-side fence (drain the writer FIFO before an assertion); factor it out separately if needed",
+    "implementation preserved at archive/exp-182 for cherry-pick"
+  ]
+}

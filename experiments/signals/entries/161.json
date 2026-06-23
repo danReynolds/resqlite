@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "The exp 159 send-gated writer-lock pipelining shape is now visible on the release write suite as a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair using the same schema and parameter values",
+    "Resqlite concurrent median is ~1.1 ms vs sequential ~2.9 ms in two paired smoke runs (-58% to -61%); the pipelining effect lands in the same band as exp 159's focused script (-36% to -45%)",
+    "The sqlite3 (sync) concurrent row drops from sequential as well, because Future.wait skips the per-call await microtask cost — that row is the no-isolate-boundary floor and should not be read as evidence of pipelining"
+  ],
+  "nextSignals": [
+    "any future writer-scheduling experiment in stream-rerun-dispatch can compare concurrent vs sequential rows on the public lane without depending on `benchmark/experiments/writer_pipelining.dart`",
+    "do not sweep burst sizes in release; focused sweeps stay in `benchmark/experiments/writer_pipelining.dart`",
+    "if a future change moves the sequential row but not the concurrent row (or vice versa), record that asymmetry rather than treating it as calibration drift"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Pre-sizing the temporary executeBatch flat parameter list is below the current benchmark signal",
+    "The shared inline parameter encoder should stay centralized unless a profiler proves batch flattening is material"
+  ],
+  "nextSignals": [
+    "writer-isolate profile showing flat-list construction as a material batch-write cost",
+    "batch workload with much wider parameter rows than the current two-param INSERT shape"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "Under a corrected wall convention (stopwatch stops on the last write, not after a fixed drain), invalidation traversal is at the *edge* of the wall-time noise floor on A11c overlap (10–15% of wall, intersection 2.5–5.7%) and keyed-PK (13.5–13.9%, intersection ~4%). The earlier ~7%/~1.6% figures were biased low by an arbitrary 50 ms drain sleep included in the wall denominator",
+    "Per-write `onDependencyChanges` cost is workload-shape-stable at ~16–27 µs A11c, ~14 µs keyed-PK. Removing the entire path would save ~8–14 ms on a 100 ms A11c overlap burst — measurable in the focused harness, but at the per-benchmark decision threshold edge of the release suite",
+    "Column-set intersection is already O(1) bitset (80–200 ns per probe, ~3 ms total per overlap burst); the rest of the traversal is `_tableIndex` map lookup, dirtyEntries Set.add, and the synchronous portion of `_flushQueue` — none obviously reducible without a dependency-model redesign",
+    "Wall-clock measurement convention for stream-fanout audits should stop the stopwatch on the last write, not after a fixed drain or quiet-window wait, and emission counts should be read after the stopwatch stops. Both `audit_workloads.dart` runners enforce this; future audits inherit it"
+  ],
+  "nextSignals": [
+    "build a completion-side microtask scheduling cost counter and re-audit A11c overlap",
+    "exp 147 built the writer-isolate wall vs SQLite split; use it to steer follow-up toward residual writer/request or completion-side scheduling",
+    "until a non-zero counter signal appears for one of those, dispatch-area implementation experiments stay on hold"
+  ]
+}
