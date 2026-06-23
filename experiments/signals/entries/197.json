@@ -1,0 +1,15 @@
+{
+  "directions": ["stream-rerun-dispatch"],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "True commit merging is a large writer frontier: changing coalesced MultiExecuteRequest handling from N independent SQLite autocommits to one BEGIN IMMEDIATE / COMMIT moved writer_pipelining.dart's concurrent-burst lane from 49.999 ms to 5.931 ms in the candidate-first pass and from 44.919 ms to 5.717 ms in the baseline-first pass (-88.1% / -87.3%).",
+    "The focused sequential-awaited lane stayed effectively neutral (+3.5% / -1.0%), and the transaction-guardrail lane stayed neutral after order flip (-12.5% / +0.1%), so the win is specific to concurrent standalone write bursts that currently pay many SQLite transaction boundaries.",
+    "The prototype passed existing exp 180 write-coalescing tests for per-call results, per-statement query-error isolation, and stream invalidation, but it still changes hidden API semantics: concurrent read visibility, crash-window durability, and atomicity are no longer independent-autocommit behavior."
+  ],
+  "nextSignals": [
+    "Do not hide true group commit behind db.execute() coalescing. Reopen this frontier only with explicit opt-in semantics such as a group-commit batch, write-session API, or named mode that documents read visibility, failure atomicity, and crash-window durability.",
+    "Use benchmark/experiments/writer_pipelining.dart as the focused gate for future group-commit prototypes; the concurrent-burst row is sensitive enough to show the ceiling quickly.",
+    "The prototype is preserved at archive/exp-197. Future work should start from the semantic/API shape, not another per-call writer scheduling cleanup."
+  ]
+}
