@@ -1,0 +1,7 @@
+{
+  "file": "196-selectbytes-row-framing.md",
+  "title": "selectBytes inter-row framing batch",
+  "impact": "Batching the per-row `}` + `,` + `{` into one `buf_write` is below the noise floor — structural delimiters are a tiny share of encoder wall versus the per-cell value formatters and `json_write_string`. No runtime code kept.",
+  "status": "rejected",
+  "link": ""
+}
