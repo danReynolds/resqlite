@@ -7,8 +7,12 @@ const _usage = '''
 Usage:
   dart run benchmark/finalize_experiment.dart --experiment=experiments/NNN-short-slug.md
 
-Regenerates docs/experiments/history.json and runs the experiment postflight
-checks that should pass before committing an experiment record.
+Runs the experiment postflight checks that should pass before committing an
+experiment record. It does NOT write docs/experiments/history.json,
+docs/benchmarks/devices.json, or experiments/signals.json — those are
+generated aggregates owned by the post-merge bot, not committed on branches
+(see experiments/RUNNER_INSTRUCTIONS.md). The checks below verify the sources
+generate cleanly and the signal map is valid.
 ''';
 
 Future<void> main(List<String> args) async {
@@ -35,12 +39,7 @@ Future<void> main(List<String> args) async {
 
   final commands = [
     _Command(
-      label: 'generate experiment history',
-      executable: Platform.resolvedExecutable,
-      args: const ['run', 'benchmark/generate_history.dart'],
-    ),
-    _Command(
-      label: 'check generated docs data',
+      label: 'check generated docs sources build cleanly',
       executable: Platform.resolvedExecutable,
       args: const ['run', 'benchmark/check_generated_data.dart'],
     ),

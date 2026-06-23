@@ -1,0 +1,19 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "A narrow private RowSchema lookup change can still improve full row consumption without changing the ResultSet/Row public API",
+    "The schema-name identity fast path plus HashMap fallback cut row_map_facade hot lookup from 10.750 -> 5.136 ms and keys+lookup from 20.602 -> 10.650 ms",
+    "A local width sweep showed the identity scan still ahead at 32 columns but behind by 48 columns, so the fast path is capped at 32 columns and unusually wide selects fall straight through to the HashMap",
+    "Focused select_maps main-isolate medians improved from 0.169 -> 0.081 ms at 1K rows and 1.998 -> 0.967 ms at 10K rows in the clean paired pass",
+    "Point-query throughput stayed neutral/noisy with overlapping confidence intervals, so the per-query schema construction cost did not show a hot single-row select regression"
+  ],
+  "nextSignals": [
+    "keep result-shape experiments on full consumer benchmarks such as select_maps, not transfer/setup-only measurements",
+    "do not infer from exp 158 that larger ResultSet API changes are attractive; this win is limited to the private schema index",
+    "do not raise the 32-column identity-scan threshold without a fresh width sweep and a full-consumption benchmark covering wider schemas",
+    "watch release select_maps metrics during soak because the local 10K runs showed visible machine noise even though the clean paired pass favored the candidate"
+  ]
+}

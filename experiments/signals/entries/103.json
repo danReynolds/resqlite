@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "transaction-control-paths"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Native nested transaction helpers add complexity without a stable realistic-workload win"
+  ],
+  "nextSignals": [
+    "realistic deeply nested transaction workload"
+  ]
+}

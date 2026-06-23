@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "Row-level dirty precision can remove the keyed-PK miss-path cost: verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams skipped when dirty rowids did not overlap",
+    "The keyed-PK profile workload reached per-stream column intersection only for actual watched-row hits: `intersection_entries` dropped 10000 → 3 and writer-burst wall dropped 25.54 → 12.45 ms",
+    "The implementation is rejected because internal SQL text recognition is too fragile to grow into a production dependency model; preserve the result as evidence for a future explicit row observer API, trace metadata, or stronger dependency model"
+  ],
+  "nextSignals": [
+    "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
+    "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+  ]
+}

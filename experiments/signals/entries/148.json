@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Plain worker-side reader-reply batching reduces completion callback counters but does not produce a mergeable measured-elapsed win on the stream-dispatch Tracelite suite",
+    "The profile smoke cut A11c overlap completion callbacks from 4,527 to 1,425 and completion wall from 109.6 ms to 55.6 ms, but the formal A/B still measured high-cardinality fanout at +5.18%, many-streams writer throughput at +3.28%, and keyed-PK subscriptions at +13.5%",
+    "Completion callback count alone is not a sufficient acceptance signal; future stream work needs direct measured-elapsed evidence plus only the in-branch residual measurement needed to explain the result"
+  ],
+  "nextSignals": [
+    "do not retry the same SelectIfChanged batch-response protocol unless a new workload shows callback count dominates measured elapsed",
+    "do not run another standalone residual split before choosing a target; pick a concrete dirty-set, writer reply, request-resolution, or drain coordination change and measure that candidate directly",
+    "keep using the integrated Tracelite A/B wrapper for implementation attempts because it prevented a counter-only optimization from being merged"
+  ]
+}

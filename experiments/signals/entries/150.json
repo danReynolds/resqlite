@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "The first-row string probe missed nullable generated-statement batches where row 0 carries NULL text columns and later rows carry strings",
+    "Treating first-row NULL values as possible text admits nullable batches only after the existing 6-param / 600-total guard, preserving exp 146's small/narrow rejection",
+    "A single batch payload classifier can choose ASCII versus UTF-8 packing without a separate ASCII-probe pass"
+  ],
+  "nextSignals": [
+    "watch nullable generated-statement workloads for evidence that this shape deserves a strict Tracelite scenario",
+    "keep 2-3 parameter writes on the generic path unless a future workload clears a Tracelite A/B primary gate",
+    "if blob-heavy parameter shapes become interesting, benchmark them separately because this run targeted text-nullability rather than blob-only packing"
+  ]
+}

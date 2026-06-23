@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Reader-pool wake amplification (single shared completer waking every parked dispatcher) was a real but workload-dependent cost: -10 % to -32 % on streaming fan-out paths against pre-exp-106 main, then collapsed into noise once exp 106 polish landed and elided most stream re-queries on the writer side",
+    "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) — without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
+  ],
+  "nextSignals": [
+    "a long-running concurrent-reads workload (or any non-streaming workload) that sustains parked dispatchers past the worker count for measurable durations (now verifiable via exp 115's `dispatcherMaxParkedConcurrent` counter)",
+    "a streaming workload whose stream projections all intersect every write's modified columns, defeating exp 106's column-tracking elision",
+    "exp 115 shipped the profile-mode counters; future re-evaluation can require `dispatcherWakeRetryTotal > 0` on the workload before judging a wall-time delta"
+  ]
+}

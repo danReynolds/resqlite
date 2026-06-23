@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'experiments/*.md'
+      - 'experiments/signals/**'
+      - 'benchmark/generate_signals.dart'
       - 'benchmark/results/*.md'
       - 'benchmark/results/*.json'
       - 'benchmark/HARDWARE_RESULTS.md'
@@ -39,6 +41,9 @@ jobs:
       - name: Generate history JSON
         run: dart run benchmark/generate_history.dart
 
+      - name: Generate signals JSON
+        run: dart run benchmark/generate_signals.dart
+
       - name: Generate devices JSON
         run: dart run benchmark/generate_devices.dart
 
@@ -51,13 +56,13 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet docs/ && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --quiet docs/ experiments/signals.json && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
         if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/
-          git commit -m "Auto-update docs (experiments + devices + blog + releases)"
+          git add docs/ experiments/signals.json
+          git commit -m "Auto-update docs (experiments + signals + devices + blog + releases)"
           git push

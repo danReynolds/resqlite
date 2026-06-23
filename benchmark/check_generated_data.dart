@@ -1,108 +1,65 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'generate_devices.dart' as generate_devices;
 import 'generate_history.dart' as generate_history;
+import 'generate_signals.dart' as generate_signals;
 
+/// Verifies that the generated-docs sources are well-formed enough that the
+/// generators run to completion.
+///
+/// This does **not** compare against the committed `docs/.../*.json` or
+/// `experiments/signals.json`. Those are generated artifacts owned by the
+/// post-merge "Update Docs Data" bot, not by experiment branches — see
+/// experiments/RUNNER_INSTRUCTIONS.md ("Generated files are bot-owned"). A
+/// branch never has to carry a fresh copy, which is what used to force every
+/// open experiment PR to re-resolve the same mechanical conflict on those
+/// files. The job here is to fail fast on a *source* that can't be generated
+/// (a malformed signals fragment, a missing run declaration, a broken
+/// experiment <-> benchmark-run mapping) — every one of those checks lives
+/// inside the build functions below and throws on violation.
 Future<void> main() async {
-  final mismatches = <String>[];
-
-  await _checkJsonFile(
-    label: 'devices.json',
-    currentPath: 'docs/benchmarks/devices.json',
-    buildExpected: (generatedAt) => generate_devices.buildDevicesData(
+  final builders = <String, void Function()>{
+    'devices.json': () => generate_devices.buildDevicesData(
       hardwareResultsMarkdown: File(
         'benchmark/HARDWARE_RESULTS.md',
       ).readAsStringSync(),
       resultsDir: Directory('benchmark/results'),
-      generatedAt: generatedAt,
+      generatedAt: null,
     ),
-    mismatches: mismatches,
-  );
-
-  await _checkJsonFile(
-    label: 'history.json',
-    currentPath: 'docs/experiments/history.json',
-    buildExpected: (generatedAt) => generate_history.buildHistoryData(
+    'history.json': () => generate_history.buildHistoryData(
       resultsDir: Directory('benchmark/results'),
       experimentsDir: Directory('experiments'),
-      generatedAt: generatedAt,
+      generatedAt: null,
     ),
-    mismatches: mismatches,
-  );
+    'signals.json': () => generate_signals.buildSignalsData(
+      signalsSourceDir: Directory('experiments/signals'),
+      generatedAt: null,
+    ),
+  };
 
-  if (mismatches.isNotEmpty) {
+  final failures = <String>[];
+  for (final entry in builders.entries) {
+    try {
+      entry.value();
+      print('${entry.key}: generators build cleanly.');
+    } catch (error, stack) {
+      failures.add(entry.key);
+      stderr.writeln('::error::${entry.key} failed to generate: $error');
+      stderr.writeln(stack);
+    }
+  }
+
+  if (failures.isNotEmpty) {
     stderr.writeln('');
     stderr.writeln(
-      'Benchmark-generated docs are stale. Re-run the generators and commit the updated files:',
-    );
-    stderr.writeln('  dart run benchmark/generate_devices.dart');
-    stderr.writeln('  dart run benchmark/generate_history.dart');
-    stderr.writeln('For experiment writeups, prefer:');
-    stderr.writeln(
-      '  dart run benchmark/finalize_experiment.dart --experiment=experiments/NNN-short-slug.md',
+      'Generated-docs sources do not build: ${failures.join(', ')}. '
+      'Fix the offending source (experiment doc, benchmark result, or '
+      'signals fragment) — you do NOT need to commit the regenerated '
+      'docs/*.json or signals.json; the bot owns those on main.',
     );
     exitCode = 1;
     return;
   }
 
-  print('Benchmark-generated docs are up to date.');
-}
-
-Future<void> _checkJsonFile({
-  required String label,
-  required String currentPath,
-  required Object Function(String? generatedAt) buildExpected,
-  required List<String> mismatches,
-}) async {
-  final currentFile = File(currentPath);
-  if (!currentFile.existsSync()) {
-    throw StateError(
-      'Missing generated docs artifact: $currentPath. '
-      'Re-run the generator and commit the updated file.',
-    );
-  }
-
-  final currentText = currentFile.readAsStringSync();
-  final currentJson = json.decode(currentText);
-  if (currentJson is! Map<String, Object?>) {
-    throw StateError('$currentPath does not contain a top-level JSON object.');
-  }
-
-  final expected = buildExpected(currentJson['generated']?.toString());
-  const encoder = JsonEncoder.withIndent('  ');
-  final currentComparable = '${encoder.convert(currentJson)}\n';
-  final expectedText = '${encoder.convert(expected)}\n';
-
-  if (currentComparable == expectedText) {
-    print('$label is current.');
-    return;
-  }
-
-  mismatches.add(label);
-  stderr.writeln('::error file=$currentPath::$label is stale.');
-
-  final tempDir = await Directory.systemTemp.createTemp(
-    'resqlite-generated-data-diff_',
-  );
-  try {
-    final normalizedCurrentFile = File(
-      '${tempDir.path}/current_${currentFile.uri.pathSegments.last}',
-    )..writeAsStringSync(currentComparable);
-    final expectedFile = File(
-      '${tempDir.path}/${currentFile.uri.pathSegments.last}',
-    )..writeAsStringSync(expectedText);
-    final diff = await Process.run('diff', [
-      '-u',
-      normalizedCurrentFile.path,
-      expectedFile.path,
-    ]);
-    if ((diff.stdout as String).trim().isNotEmpty) {
-      stderr.writeln(diff.stdout);
-    } else if ((diff.stderr as String).trim().isNotEmpty) {
-      stderr.writeln(diff.stderr);
-    }
-  } finally {
-    await tempDir.delete(recursive: true);
-  }
+  print('All generated-docs sources build cleanly.');
 }

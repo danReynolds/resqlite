@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "transaction-control-paths"
+  ],
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "Savepoint naming compression (same-name cached SQL for `SAVEPOINT s`, `RELEASE s`, and `ROLLBACK TO s`) can move best-case focused control rows: empty fanout improved about 6-7%, rollback fanout improved 13-17%, and repeated deep chains improved 7-8% across the order-flipped pair.",
+    "The representative nested-write fanout did not reproduce: baseline-first measured -1.3%, then the candidate-first pass measured +21.6% slower. That is the load-bearing row because it matches the real nested transaction shape better than empty control-only fanout.",
+    "Per-savepoint string formatting, native UTF-8 allocation, caching, and naming are below the merge bar after exp 102, exp 111, and exp 189. Nested transaction headroom remains round-trip-shaped, not string-shaped."
+  ],
+  "nextSignals": [
+    "Do not retry savepoint string caching, savepoint naming compression, or native helpers that still send one request per savepoint boundary without new evidence that string work is dominant.",
+    "Use benchmark/experiments/savepoint_name_compression.dart for quick savepoint-control probes, but treat the write-fanout row as the representative gate.",
+    "The remaining open implementation shape is multi-savepoint round-trip batching with preserved callback semantics and rollback legality."
+  ]
+}

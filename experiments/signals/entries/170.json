@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "A synchronous `Mutex.tryLock()` plus a non-`async` `Writer.execute` / `executeBatch` is a coherent request-side scheduling change — exactly the request-side counterpart to exp 151's response-side `Completer<T>.sync()` attempt — but it does not move the primary sequential-write lane: Single Inserts (100 sequential) shifted +1.7 % (paired medians 3.099 ms -> 3.153 ms, 3.082 -> 2.982, 3.169 -> 3.501) and writer_pipelining `sequential-awaited (2000 writes)` shifted +2.0 % (34.047 -> 34.723), both within the run-to-run noise band and in the wrong direction",
+    "Only Concurrent Single Inserts moved consistently (1.231 -> 1.135 ms, -7.8 %) — but that lane is owned by exp 159's send-gated writer-lock pipelining at -58 % to -61 %, so a second pass at the same workload is sub-decision-threshold gain at the cost of an extra slow-path branch plus the behavioral change of sync-before-close writes no longer being rejected",
+    "Closes the request-side scheduling tweak as a candidate for the exp 147 residual writer/request bucket; the next bounded implementation candidates are still the structural ones exp 159 named (cross-call request batching / group commit, or a shared-memory transport when the Dart SDK allows it)"
+  ],
+  "nextSignals": [
+    "do not retry `Mutex.tryLock` + non-`async` Writer.execute without a Dart runtime change that makes `await` over a resolved Future provably more expensive than today",
+    "if a future profile shows sequential writes spending materially more wall in main-isolate spans than the writer-handle span, the sub-decision-threshold signal here might invert — re-check with a Tracelite A/B over both Single Inserts and Concurrent Single Inserts before reopening",
+    "the rewritten `close()` contention test (long-running transaction holding the lock, parked writer wakes and sees `_closed`) generalizes the previous microtask-hop-specific test and should be retained even after this experiment reverts"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Exp 178's pilot cutoff (`_benchmarkRunDeclarationCutoff = 178`) left ~17 pre-cutoff chartable experiments outside the missing-run-without-declaration guard's scope, still indistinguishable from forgotten result files. The follow-up exp 178 named (`backfill **Benchmark Run:** headers and lower the cutoff`) walks the cutoff back to 1, so every accepted/in-review experiment is now under the same forced-declaration discipline",
+    "All 16 silently-unmapped chartable experiments at the time of the backfill (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing `**Benchmark Run:** Focused A/B (...)` header was descriptive but did not start with one of the opt-out keywords) gain a declared `**Benchmark Run:** none ...` line that explains why no release artifact exists. docs/experiments/history.json is byte-for-byte unchanged because the `_skipBenchmarkRunMapping` flag is consumed inside `_attachBenchmarkRunMappings` before serialization and none of these experiments were linked to a release run anyway",
+    "Test fixture `100-test.md` in benchmark_pipeline_test.dart predated the original cutoff at 178 too, and is updated to declare the opt-out so the test exercises a representative valid post-cutoff state. A new regression anchor (`exp 188 walked the cutoff to 1 — every chartable id is in scope`) lives next to exp 178's tests, asserting that `findUndeclaredMissingRunExperiments(..., cutoff: 1)` flags low-numbered chartable ids without declarations"
+  ],
+  "nextSignals": [
+    "do not add a new chartable experiment without a `**Benchmark Run:**` declaration — the guard now fires for every id, not just 178+",
+    "if a pre-178 experiment later gains a real release artifact (e.g. someone re-runs exp 125 against current main to produce `2026-MM-DDTHH-MM-SS-exp125-*.md`), remove the opt-out header in the same change so the linker maps it correctly",
+    "the measurement-system openCandidate `memory profiling harness with per-benchmark RSS acceptance criteria` is independent of this run; exp 183/185 added the underlying RSS signal (readerJsonBufHighWaterBytes + the SQLite Diagnostics row), so a future RSS-criteria pass should build on those rather than on the guard scope"
+  ]
+}

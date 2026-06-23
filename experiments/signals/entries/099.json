@@ -1,0 +1,13 @@
+{
+  "directions": [
+    "long-text-stream-hashing",
+    "measurement-system"
+  ],
+  "outcomeClass": "benchmark_gap",
+  "changedBeliefs": [
+    "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable"
+  ],
+  "nextSignals": [
+    "representative long-text streaming benchmark"
+  ]
+}

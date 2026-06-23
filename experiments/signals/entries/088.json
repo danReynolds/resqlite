@@ -1,0 +1,13 @@
+{
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_after_noise_check",
+  "changedBeliefs": [
+    "Single-run tail wins need confirmation against control metrics before acceptance"
+  ],
+  "nextSignals": [
+    "concurrent-reader lock-contention harness",
+    "shorter lock timeout sweep only with a workload that shows lock wait"
+  ]
+}

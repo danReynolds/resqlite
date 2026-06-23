@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "long-text-stream-hashing"
+  ],
+  "outcomeClass": "rejected_no_signal",
+  "changedBeliefs": [
+    "The single-stream open candidate from exp 173 has been consumed: benchmark/experiments/single_stream_long_payload_hash.dart uses an internal one-reader runtime so one unchanged stream hashes 64 rows x 64 KB TEXT + 64 KB BLOB (~8 MB) before a queued COUNT(*) barrier can emit",
+    "Removing reader-pool parallelism did not reveal a 16-byte FNV win. Across an order-flipped pair, baseline medians were 2.771 / 2.777 ms and candidate medians were 2.763 / 2.792 ms (-0.3% / +0.5%), with overlapping ranges",
+    "The exp 110 8-byte FNV body remains the correct implementation. The exp 173 16-byte unroll is now rejected under both pooled fanout and single-stream long-payload public stream shapes"
+  ],
+  "nextSignals": [
+    "do not retry FNV loop unrolling on the existing long-text, long-payload, or single-stream public stream workloads",
+    "if long-payload unchanged hashing becomes hot again, use a direct resqlite_query_hash microbenchmark or production profile to split SQLite value access, hashing, reader dispatch, and reply delivery before implementing another hash-loop variant",
+    "the one-reader harness is a measurement tool only; it is not evidence for a public Database.open reader-count option"
+  ]
+}

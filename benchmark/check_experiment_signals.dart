@@ -1,5 +1,6 @@
-import 'dart:convert';
 import 'dart:io';
+
+import 'generate_signals.dart' as generate_signals;
 
 const _experimentsDir = 'experiments';
 const _readmePath = '$_experimentsDir/README.md';
@@ -115,26 +116,21 @@ int? _numericExperimentId(String id) {
   return match == null ? null : int.tryParse(match.group(0)!);
 }
 
+/// Assembles the signal map from its sources (`experiments/signals/base.json` +
+/// `experiments/signals/entries/NNN.json`) and validates that, rather than the
+/// committed `signals.json` — which is a generated, bot-owned aggregate that an
+/// experiment branch never has to keep fresh. A malformed fragment surfaces
+/// here as an assembly failure.
 Map<Object?, Object?>? _readSignals(List<_ValidationError> errors) {
-  final file = File(_signalsPath);
-  if (!file.existsSync()) {
-    _signalError(errors, 'Missing $_signalsPath.');
-    return null;
-  }
-
-  Object? decoded;
   try {
-    decoded = json.decode(file.readAsStringSync());
-  } on FormatException catch (error) {
-    _signalError(errors, 'signals.json is not valid JSON: ${error.message}');
+    final data = generate_signals.buildSignalsData(
+      signalsSourceDir: Directory('$_experimentsDir/signals'),
+    );
+    return data.cast<Object?, Object?>();
+  } catch (error) {
+    _signalError(errors, 'signals sources do not assemble: $error');
     return null;
   }
-
-  if (decoded is! Map) {
-    _signalError(errors, 'signals.json must contain a top-level JSON object.');
-    return null;
-  }
-  return decoded.cast<Object?, Object?>();
 }
 
 void _checkSignals(

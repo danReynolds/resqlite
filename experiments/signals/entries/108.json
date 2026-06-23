@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Persistent selectBytes out-parameter slots are below the current benchmark and RSS signal"
+  ],
+  "nextSignals": [
+    "profile evidence before retrying tiny scratch allocation changes"
+  ]
+}

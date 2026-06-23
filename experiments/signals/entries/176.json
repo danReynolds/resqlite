@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "Exp 158 added the schema-name identity fast path to RowSchema.indexOf (serving Row.operator[]) but not to Row.containsKey, which still went straight to the private HashMap and hashed the key on every call. Exp 158's 'containsKey neutral' row compared Row vs LinkedHashMap with containsKey unchanged on both sides of that diff, so it was never evidence that routing containsKey through the identity path is neutral",
+    "Routing Row.containsKey through the identity scan (via a shared RowSchema.containsName(name) => indexOf(name) >= 0) improved the focused row_map_facade containsKey lane ~13.0 -> ~10.0 ms (-23%) across three order-stable passes, with the hot lookup control lane flat, flipping Row from ~+3.6 ms slower than LinkedHashMap to at-parity. The win is smaller than exp 158's -52% on operator[] because containsKey still pays MapMixin dispatch and the key-is-String check that operator[] does not; the identity scan removes only the hash",
+    "The win is interned-key-specific, like exp 158's operator[] path: in the real decode path schema names are freshly allocated via fastDecodeText, so a user-supplied literal is generally not identical to a decoded name and containsName falls through to the HashMap (same cost as before, never worse). The benchmark hits the identity path because both schema and probe key are string literals canonicalized to the same object"
+  ],
+  "nextSignals": [
+    "containsName is coupled to indexOf by construction; it inherits whatever the identity scan does. Revisit only if exp 158's identity fast path is removed or its 32-column cap changes",
+    "do not infer a broader result-shape change from this; it is a consistency fix inside the same private schema index (exp 158 Future Notes still apply)",
+    "if a workload supplies containsKey with high-frequency equal-but-non-identical keys, the cost reverts to the HashMap probe (unchanged from before); no further work unless that workload is shown hot"
+  ]
+}

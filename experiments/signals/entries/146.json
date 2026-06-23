@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_no_signal",
+  "changedBeliefs": [
+    "Lowering the ASCII batch-packing guard from 8 params / 8192 total params to 2 params / 64 total params did not improve the Tracelite narrow-batch-insert primary lane",
+    "The clean A/B run measured resqlite at +1.45% with neutral verdict and 13.2% max CV, while the sqlite_async guardrail was too noisy to add confidence",
+    "Small and narrow batch writes should stay on the generic path unless a future workload shows parameter encoding is a material part of wall time"
+  ],
+  "nextSignals": [
+    "do not broaden the exp 125 ASCII fast path to small/narrow batches without a new workload and a Tracelite A/B decision that clears the primary gate",
+    "when experimenting in this direction, prefer the integrated Tracelite A/B wrapper so baseline/candidate histories, policy, decision, insights, and graph data stay together"
+  ]
+}

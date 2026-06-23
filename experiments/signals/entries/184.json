@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted_measurement",
+  "changedBeliefs": [
+    "Re-running exp 147's writer_sqlite_wall_audit on main after exp 159 + exp 180 shows the writer-burst breakdown essentially unchanged (A11c overlap SQLite 13.6% / invalidation 16.0% / residual 70.3% vs exp 147's 9.4 / 18.8 / 71.8). Expected: the audit issues writes sequentially (audit_workloads.dart:167) and exp 180 coalesces only concurrent bursts, so the sequential writer path it measures is unmoved",
+    "The sequential writer residual (55-70%) is the per-write isolate round-trip — the SDK-gated floor; the only lever left there is a shared-memory transport. Writer-residual micro-optimization is retired from the active candidate list",
+    "The cleanly-attackable buckets are smaller and spoken-for: invalidation/re-query precision (14-22%) is owned by in-flight exp 160 (incremental view maintenance, #155) and its traversal is already at floor (exp 121); the dirty-table harvest (~4-6%) is small and gating it regresses with-streams (exp 182); SQLite (14-38%) is sqlite3mc config, mined"
+  ],
+  "nextSignals": [
+    "next reactive-engine win is exp 160; next sequential-write reduction needs the shared-memory transport when the Dart SDK allows it",
+    "do not re-open writer-residual micro-opts (harvest, scheduling hops) without a workload showing one of them is newly dominant"
+  ]
+}

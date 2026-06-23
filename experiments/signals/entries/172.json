@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "long-text-stream-hashing",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "The streaming suite now covers mixed long payloads beyond exp 110's 4KB TEXT shape: 8 unchanged streams over 64 rows with 32KB TEXT plus 32KB BLOB cells",
+    "The current 8-byte FNV fold scales acceptably on the broader row in a focused run: 3.446 ms median for mixed long payloads beside 2.356 ms for the existing 4KB TEXT row",
+    "Long-BLOB hash correctness is covered directly: same-length no-op BLOB updates suppress emission, while changes after the first 8-byte chunk emit"
+  ],
+  "nextSignals": [
+    "do not reopen byte-stream hash-loop implementation work without checking both long TEXT and mixed TEXT/BLOB unchanged-fanout rows",
+    "future hash variants need a concrete mechanism or production profile showing this path remains dominant; broader measurement alone is no longer the blocker",
+    "the direct streaming-suite entry point can be used for focused stream measurements before compiling the full release runner"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "result-transfer-shape",
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "The release JSON-bytes suite now has an explicit large native-byte transfer row: `Large payload (~650KB) / resqlite selectBytes()` stays above the old 256KB sacrifice threshold and measured 0.323 ms wall / 0.000 ms main in the focused suite run",
+    "The curated history now tracks `selectBytes() large bytes`, so exp 174's native-view transfer path is visible without relying on the existing 1K-row JSON-bytes metric that mostly exercises small-result copy behavior",
+    "Keeping the new row resqlite-only avoids multiplying large JSON encode work across every peer while still guarding the runtime policy that only resqlite implements",
+    "The lane provably responds to the transfer path (not a dead guard): its 651KB selectBytes workload is the shape exp 174's focused A/B moved -44% to -47% (large_bytes_transfer.dart), and a parallel release-lane A/B independently showed +13% median / +55% p90 when the pre-174 fromList+sacrifice path was restored, while adjacent standard lanes stayed neutral. The 1K-row lane (<256KB) and 10K-row lane (SQLite-step dominated) both miss this band"
+  ],
+  "nextSignals": [
+    "use `selectBytes() large bytes` before changing selectBytes transfer policy again",
+    "if json_buf high-water memory becomes a problem, compare any memory-reclaim threshold against this row so reclaim work does not reintroduce the reader-respawn cost exp 174 removed",
+    "do not apply bytes-transfer conclusions to rows select(); rows keep sacrifice because Isolate.exit is a real object-graph handoff there"
+  ]
+}

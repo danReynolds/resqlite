@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "in_review_measurement",
+  "changedBeliefs": [
+    "The Tracelite workload-summary explanation layer now emits the interpretation exp 143 had to recover manually: dispatch floors, dispatch-bound point queries, work-bound merge rounds, tail spread, RSS movement, allocation counters, and WAL side effects",
+    "`benchmark/profile/run_tracelite_profile.dart` now validates the stable workload insight IDs after `tracelite explain`; a thin `workload_loaded`-only artifact exits 65 instead of silently looking complete",
+    "`workload_dispatch_bound` is useful but intentionally not a hard guard because it is threshold-based and can disappear when point-query floor-subtracted work lands slightly above the near-zero band on a noisy machine"
+  ],
+  "nextSignals": [
+    "use the profile wrapper's generated `insights.md` before opening raw workload-summary JSON for dispatch-vs-work and memory/allocation shape",
+    "keep raw profile regions and workload JSON local under `build/`; commit compact aggregates unless graph data is feeding Pages",
+    "if future profile workload shape changes remove a required stable insight ID, update the guard and signal map in the same experiment rather than weakening the contract silently"
+  ]
+}

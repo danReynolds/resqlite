@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_regression",
+  "changedBeliefs": [
+    "Bounded rerun scheduling can harm high-cardinality stream fan-out even if it looks attractive for unrelated reads"
+  ],
+  "nextSignals": [
+    "better separation of unrelated read latency from fan-out throughput"
+  ]
+}

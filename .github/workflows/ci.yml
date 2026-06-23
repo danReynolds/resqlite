@@ -33,6 +33,32 @@ jobs:
             exit 1
           fi
 
+  guard-generated-docs:
+    # history.json and devices.json are generated aggregates owned by the
+    # "Update Docs Data" bot on main. Experiment branches must NOT commit them,
+    # so a merge (or a post-merge bot commit) never re-conflicts open PRs on
+    # them — the routine churn this whole convention exists to remove. See
+    # experiments/RUNNER_INSTRUCTIONS.md ("Generated files are bot-owned").
+    name: Guard against committing generated docs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Check PR diff for bot-owned generated files
+        run: |
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base...HEAD" \
+            -- 'docs/experiments/history.json' 'docs/benchmarks/devices.json' || true)
+          if [ -n "$changed" ]; then
+            echo "::error::Generated docs are bot-owned; do not commit them on a branch."
+            echo "Revert them so the PR carries no change to these files:"
+            printf '  %s\n' $changed
+            echo "Run: git checkout origin/${{ github.base_ref }} -- docs/experiments/history.json docs/benchmarks/devices.json"
+            exit 1
+          fi
+
   test:
     name: Tests
     runs-on: macos-latest

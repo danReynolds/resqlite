@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_no_signal",
+  "changedBeliefs": [
+    "Direct single-row text parameter encoding did not produce current Tracelite production evidence despite the old focused-harness win from PR #130",
+    "The retest over chat-sim and narrow-batch-insert did not clear the primary gate: resqlite changed +6.86% and +16.4% with neutral/inconclusive verdicts and high CV",
+    "Small single-row string binding should stay on the generic `allocateParams` path unless a future workload makes that encoding cost material"
+  ],
+  "nextSignals": [
+    "do not carry the PR #130 `allocateParams` direct UTF-8 path without a Tracelite A/B decision that clears a scenario where single-row string binding is material",
+    "if high-frequency string-parameter reads/writes become important, add a focused Tracelite scenario or profile lane before retrying the implementation",
+    "continue comparing parameter-encoding changes against both narrow batch and wider app-shaped lanes rather than accepting focused microbenchmark wins alone"
+  ]
+}

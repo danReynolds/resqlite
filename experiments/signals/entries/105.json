@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_regression",
+  "changedBeliefs": [
+    "Increasing reader worker count can worsen writer throughput by increasing completion-side microtask churn"
+  ],
+  "nextSignals": [
+    "queueing trace around completion and writer throughput"
+  ]
+}

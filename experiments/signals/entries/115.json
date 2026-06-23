@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "measurement-system",
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted_measurement",
+  "changedBeliefs": [
+    "The parked-dispatcher path inside `ReaderPool._dispatch` is now directly observable via `ProfileCounters.dispatcherParkedTotal`, `dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` — gated behind `kProfileMode` so release builds stay zero-cost",
+    "Future dispatch-area experiments (exp 114 archive, exp 083, slot-handoff variants) can gate evaluation on direct parking evidence rather than wall-time delta alone, closing the exp 099 / exp 110 evaluation-gap pattern earlier in the loop"
+  ],
+  "nextSignals": [
+    "use the new counters when re-evaluating exp 114's archived FIFO swap or other reader-pool-internal dispatch changes",
+    "profile real workloads (concurrent reads under writer, A11c stream fan-out post-exp-106) through the counters before choosing the next dispatch experiment target"
+  ]
+}

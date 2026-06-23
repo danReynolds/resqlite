@@ -113,14 +113,15 @@ Run this mental (or literal) checklist:
 - [ ] `git status --short benchmark/results/` — is there an untracked result file?
 - [ ] Does that file's filename timestamp match `grep "^**Date:**" experiments/NNN-*.md`?
 - [ ] Is the experiment listed in `experiments/README.md` (Accepted or Rejected section)?
+- [ ] Is the signal entry in its own file, `experiments/signals/entries/NNN.json`
+      (not hand-edited into the generated `signals.json`)?
 - [ ] Does the experiment doc have the headings the parser expects?
       (`Problem`, `Hypothesis`, `Approach` or `What We Built`, `Results`,
       `Decision` or `Why Accepted` / `Why Rejected`)
-- [ ] Did `finalize_experiment.dart` (or `generate_history.dart`) run **last**?
-      If you touched any experiment / doc / `signals.json` / result / fixture
-      file *after* finalizing, re-run it — otherwise the committed
-      `history.json` is stale and the freshness check fails (post-merge, if the
-      PR auto-merged before CI re-ran).
+- [ ] Did `finalize_experiment.dart` pass? It only *validates* sources — it does
+      not write the generated aggregates, and you must not commit
+      `docs/experiments/history.json`, `docs/benchmarks/devices.json`, or
+      `experiments/signals.json` (the bot regenerates them on `main`).
 
 The generator's section extraction tolerates a few heading variants; see
 `_extractSection` in `generate_history.dart` for the full list.
@@ -306,12 +307,18 @@ worktree off `origin/main` (steps below), leaving the current tree untouched:
 git fetch origin
 ```
 
-Every experiment PR rewrites the same three shared files —
-`experiments/README.md`, `experiments/signals.json`, and the generated
-`docs/experiments/history.json` — and CI's `check_generated_data.dart` fails
-any PR whose `history.json` predates a merge. So concurrent runs that grab the
-same number, or do the same work, collide and stale each other (exp 168 was
-claimed by three PRs; exp 175 by two runs shipping the *same* follow-up).
+Experiment PRs used to collide on shared generated files; that is now designed
+out. The generated aggregates — `docs/experiments/history.json`,
+`docs/benchmarks/devices.json`, and `experiments/signals.json` — are
+**bot-owned on `main` and never committed on a branch** (CI's
+`guard-generated-docs` job blocks them, and `check_generated_data.dart` only
+checks that the *sources* build). Each experiment's signal data lives in its
+own file, `experiments/signals/entries/NNN.json`, so two experiments never
+touch the same one. The only files a normal run still shares are
+`experiments/README.md` (rows append) and `experiments/signals/base.json` (the
+per-direction synthesis). You must still claim your number — concurrent runs
+that grab the same number, or ship the same follow-up, still collide (exp 168
+was claimed by three PRs; exp 175 by two runs shipping the *same* follow-up).
 
 **1. Claim the number atomically.** A plain "check open PRs, then pick the next
 free" *races*: two runs check, both see N free, both take N. That is exactly
@@ -363,24 +370,33 @@ which case expect to regenerate `history.json` on the later one.
 
 ## Resolving a stale derived-file conflict
 
-If a PR did fall behind `main`, the conflict is mechanical — only
-generated/narrative files collide:
+Generated aggregates no longer conflict: `docs/experiments/history.json`,
+`docs/benchmarks/devices.json`, and `experiments/signals.json` are bot-owned
+and never committed on a branch, so a stale branch just takes `main`'s copy
+with a one-sided auto-merge. If a PR falls behind `main`, the only files that
+can really conflict are hand-edited *sources*:
+
+- `experiments/README.md` — rows append; usually auto-merges. If two
+  experiments inserted at the same spot, fix the row order by hand.
+- `experiments/signals/entries/NNN.json` — one file per experiment, so a true
+  collision only happens when two runs claimed the same number `N`. That's a
+  numbering bug: renumber, never overwrite a prior experiment's entry.
+- `experiments/signals/base.json` — two experiments editing the same
+  direction's `currentRead` / `notesForExperimenters` narrative is a real
+  weave; keep both contributions.
 
 ```bash
 git merge origin/main
-dart run benchmark/generate_history.dart      # rebuilds docs/experiments/history.json
-dart run benchmark/generate_devices.dart      # rebuilds docs/benchmarks/devices.json
-# hand-reconcile experiments/signals.json: keep BOTH sides' entries
-dart run benchmark/check_generated_data.dart  # must print "up to date"
-dart run benchmark/check_experiment_signals.dart
+# resolve any of the source files above by hand, then:
+dart run benchmark/check_generated_data.dart       # sources build cleanly
+dart run benchmark/check_experiment_signals.dart   # signal map valid
 git add -A && git commit --no-edit
 ```
 
-`experiments/README.md` usually auto-merges (rows append). `signals.json`
-needs care: two experiments editing the same `currentRead` /
-`notesForExperimenters` narrative is a real weave, and two experiments
-claiming the same `experiments.<N>` key is a number collision — fix the
-numbering, never overwrite a prior experiment's entry.
+Do **not** regenerate or `git add` the generated aggregates. If your branch
+somehow carries changes to them, revert: `git checkout origin/main --
+docs/experiments/history.json docs/benchmarks/devices.json
+experiments/signals.json`.
 
 ## Post-merge
 

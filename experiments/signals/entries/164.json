@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_no_stable_signal",
+  "changedBeliefs": [
+    "SQLite EXPLAIN QUERY PLAN can avoid a custom SQL parser for rowid lookup detection, but it did not make private row-level stream invalidation cheap enough to keep",
+    "The focused Tracelite stream-initial-drain rowid lane measured -2.33% with neutral/inconclusive evidence while text and indexed-int setup guardrails did not provide a clean offsetting signal",
+    "The broader stream-dispatch guard run stayed mostly neutral and did not turn the keyed-PK rowid idea into a stable end-to-end win"
+  ],
+  "nextSignals": [
+    "do not keep native dirty-row harvesting plus plan inspection without a real workload or Tracelite primary lane that clearly pays for the extra dependency layer",
+    "use stream-initial-drain and warmup_elapsed_ns guardrails for future setup-heavy stream experiments",
+    "if row-level precision reopens, prefer a stronger dependency model over broadening resqlite-owned SQL recognition"
+  ]
+}

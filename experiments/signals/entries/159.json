@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "in_review_accepted",
+  "changedBeliefs": [
+    "The writer request path carried removable fixed cost on every round-trip: a per-request RawReceivePort, a guaranteed microtask hop awaiting the already-resolved worker-port future, and async reply completers — replacing them with a persistent reply port, cached SendPort, and sync FIFO completers drops exp 147 residual_us on all four audit workloads",
+    "Holding the write lock across the full round-trip for standalone writes added no exclusion a later BEGIN needs (the worker's port FIFO already orders them); releasing at send time pipelines concurrent standalone writes and improves the focused concurrent-burst benchmark 36-45%",
+    "Phase-ordered A/B collection (all baseline runs, then all candidate runs) is vulnerable to time-correlated machine drift: the first gate pass flagged +12-19% on stream scenarios that an order-flipped second pass showed were contamination (clean-pass deltas +1.02%, -0.26%, +4.00%, all CIs straddling zero)"
+  ],
+  "nextSignals": [
+    "promote a concurrent standalone-write scenario into release or tracelite coverage (exp 116 pattern) so the pipelined path has public regression visibility",
+    "remaining sequential-write residual is the round-trip floor itself; the next structural candidates are cross-call request batching (group commit) or a different transport when the Dart SDK allows shared-memory result passing",
+    "when a tracelite gate flags a regression with elevated within-run CVs relative to the other phase, re-run with collection order flipped before treating the flag as real"
+  ]
+}

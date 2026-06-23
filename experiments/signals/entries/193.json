@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected_regression",
+  "changedBeliefs": [
+    "A JIT row_map_facade sample made Row.values look like the remaining Row facade gap (baseline values iteration 8.607 ms vs LinkedHashMap 4.779 ms), but repeated JIT samples were contradictory after VM warmup: the baseline itself alternated between ~3 ms, ~9 ms, and ~11 ms on the values lane.",
+    "Replacing Row.values with a fixed-length ListBase slice view produced stable-looking JIT samples around 3.4-3.7 ms, but the AOT check reversed the decision. Compiled baseline _RowValueIterator values iteration stayed at 2.663 / 2.675 / 2.687 ms, while the ListBase candidate regressed to 6.828 / 6.847 / 7.101 ms.",
+    "The controls stayed neutral under AOT (hot lookup, containsKey, entries iteration, Map.from clone), so the regression is specific to Row.values. The original custom iterator is the better compiled shape."
+  ],
+  "nextSignals": [
+    "do not replace Row.values with ListBase, getRange, or fixed-slice views based on JIT row_map_facade output alone",
+    "future Row.values work must compile the focused harness to AOT before acceptance; the JIT values lane is not a reliable decision gate",
+    "no runtime code kept; keep _RowValueIterator unless a future Dart runtime changes compiled iterator behavior"
+  ]
+}

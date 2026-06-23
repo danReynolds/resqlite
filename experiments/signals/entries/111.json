@@ -1,0 +1,15 @@
+{
+  "directions": [
+    "transaction-control-paths",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Even on a worst-case shallow-fan-out workload (50 SAVEPOINTs per iteration), the savepoint string allocation cost is below the per-benchmark decision threshold — per-isolate-round-trip cost dominates",
+    "The missing nested-transaction benchmark from exp 102 / exp 103 is now in the suite, so future savepoint-related experiments can be evaluated without forcing the same gap"
+  ],
+  "nextSignals": [
+    "look for round-trip-batching opportunities for savepoint open/close pairs (analogous to exp 009 read-side batching)",
+    "compare any future savepoint-path change against the exp 111 nested-tx benchmark before claiming a win"
+  ]
+}

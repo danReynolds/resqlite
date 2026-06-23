@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected_below_current_signal",
+  "changedBeliefs": [
+    "Changing writer response futures from `Completer<T>()` to `Completer<T>.sync()` is a coherent request-resolution implementation attempt, but it does not clear the Tracelite stream-dispatch primary gate",
+    "The formal A/B measured high-cardinality fanout at +2.92%, keyed-PK subscriptions at +18.5% with too-noisy evidence, and many-streams writer throughput at +14.0%",
+    "Exp 147's residual writer/request bucket is not solved by making the existing writer response future synchronous; future work needs a more structural dirty-set, reply coordination, or workload-shape candidate"
+  ],
+  "nextSignals": [
+    "do not retry synchronous writer response completion unless a Dart runtime change or new workload changes the request-resolution cost model",
+    "continue to avoid standalone residual-split profiling; carry only the narrow measurement needed by a concrete implementation candidate",
+    "use integrated Tracelite A/B primary gates before keeping stream scheduling changes, even when a profile smoke looks mixed or partially favorable"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "directions": [
+    "transaction-control-paths"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Top-level transaction control still had removable SQLite prepare/finalize work"
+  ],
+  "nextSignals": [
+    "nested transaction benchmark before revisiting savepoint control"
+  ]
+}
