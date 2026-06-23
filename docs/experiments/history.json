@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T06:13:45.942112",
+  "generated": "2026-06-23T12:00:59.688828",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -21588,19 +21588,6 @@
       "reasoning": "Eliminated the concurrent read weakness completely. resqlite now beats sqlite_async at every concurrency level. The C pool also enabled per-reader statement caches, improving cache hit rates under concurrent workloads."
     },
     {
-      "id": "008b",
-      "title": "Byte-backed lazy maps",
-      "date": "2026-04-06",
-      "status": "rejected",
-      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
-      "commit": null,
-      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
-      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
-      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
-      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
-      "reasoning": null
-    },
-    {
       "id": "008",
       "title": "Flat value list + lazy ResultSet",
       "date": "2026-04-06",
@@ -21612,6 +21599,19 @@
       "approach": "Three changes, each building on the previous:\n\n### 1. Flat value list\nAll rows' values stored in a single `List<Object?>`:\n```\nvalues = [row0_col0, row0_col1, ..., row0_colN, row1_col0, ...]\n```\n\n### 2. Lightweight Row class\n`Row` implements `Map<String, Object?>` via `MapMixin`. Looks up column index in a shared `RowSchema` (one small map for the whole result set), then indexes into the flat list. No per-row hash table.\n\n### 3. Lazy Row creation\n`ResultSet` creates `Row` objects on-demand when `result[i]` is accessed, not on the worker. Row creation is just 3 field assignments (list ref, schema ref, offset int) — nanoseconds. The actual values are already fully decoded in the flat list.\n\n`Isolate.exit` transfers: 1 ResultSet + 1 RowSchema + 1 List<Object?> + actual values = **~3 struct...",
       "results": "### Progression at 20,000 rows\n\n| Implementation | Wall | Main | vs sqlite3 |\n|---|---|---|---|\n| LinkedHashMap + Isolate.exit | 24.95 ms | 1.57 ms | +12% slower |\n| Flat list + eager Row wrappers | 19.39 ms | 1.74 ms | -12% faster |\n| **Flat list + lazy ResultSet** | **18.03 ms** | **2.52 ms** | **-13% faster** |\n| sqlite3 (baseline) | 20.65 ms | 20.65 ms | — |\n\n### Main-isolate time across sizes\n\n| Rows | resqlite main | sqlite3 main | sqlite_async main |\n|---|---|---|---|\n| 1,000 | **0.10 ms** | 0.79 ms | 0.17 ms |\n| 5,000 | **0.47 ms** | 3.90 ms | 0.87 ms |\n| 20,000 | **2.52 ms** | 20.65 ms | — |\n\n### Why the lazy ResultSet doesn't hurt main-isolate time\n\nUnlike the ByteBackedResultSet (experiment 008b), the lazy `Row` creation is trivial — 3 field assignments, no decode work. The v...",
       "reasoning": "This was the single most impactful optimization in the entire project. Reducing the `Isolate.exit` object graph from ~200k to ~3 structural objects was more impactful than C-native query execution, NOMUTEX, or connection pooling. It transformed resqlite from 12% slower than sqlite3 to 13% faster.\n\n**Key lesson:** The number of Dart heap objects matters more than their size for `Isolate.exit` performance. Data structure choice had more impact than any systems-level optimization."
+    },
+    {
+      "id": "008b",
+      "title": "Byte-backed lazy maps",
+      "date": "2026-04-06",
+      "status": "rejected",
+      "summary": "Moved decode work (utf8.decode) to main isolate — wrong trade-off",
+      "commit": null,
+      "problem": "`Isolate.exit` validation walks O(n) Dart objects. Transferring a single `Uint8List` is O(1). Could we transfer results as bytes and wrap them in lazy `Map` objects on main that decode from the buffer on access?",
+      "hypothesis": "Worker sends results as a `Uint8List` (O(1) transfer). Main wraps in `ByteBackedResultSet` where each `ByteBackedRow` implements `Map<String, Object?>` and decodes values from the byte buffer lazily. For partial access (e.g., Flutter ListView rendering 20 visible items from 20,000), this would be dramatically faster than materializing all maps.",
+      "approach": "`ByteBackedResultSet` — backed by a `Uint8List` containing the compact binary row format from `resqlite_query_to_rows`. Pre-computed cell offsets for O(1) field access. `ByteBackedRow` decodes values via `ByteData.getInt64/getFloat64` and `utf8.decode` on demand.",
+      "results": "At 20,000 rows:\n\n| Path | Wall | Main |\n|---|---|---|\n| Direct maps + Isolate.exit | 27.45 ms | **2.12 ms** |\n| ByteBackedResultSet (full access) | **11.92 ms** | 7.29 ms |\n| ByteBackedResultSet (20 rows only) | **4.50 ms** | **0.01 ms** |\n\n### The trade-off\n\n- **Wall time:** ByteBackedResultSet wins (11.92ms vs 27.45ms) by eliminating the Isolate.exit validation cliff\n- **Partial access main-isolate:** ByteBackedResultSet wins spectacularly (0.01ms for 20 visible rows)\n- **Full access main-isolate:** Direct maps win (2.12ms vs 7.29ms) because maps arrive pre-built\n\nThe 7.29ms on main for full access comes from `utf8.decode` and value construction happening on the main isolate — the expensive kind of lazy.",
+      "reasoning": null
     },
     {
       "id": "009",
@@ -21698,10 +21698,10 @@
     },
     {
       "id": "014",
-      "title": "BEGIN IMMEDIATE + remove clear_bindings",
+      "title": "locking_mode=EXCLUSIVE *(partial)*",
       "date": "2026-04-07",
-      "status": "accepted",
-      "summary": "Correct but within noise (write I/O dominated)",
+      "status": "rejected",
+      "summary": "Blocks all readers — incompatible with concurrent reader pool",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -21717,10 +21717,10 @@
     },
     {
       "id": "014",
-      "title": "locking_mode=EXCLUSIVE *(partial)*",
+      "title": "BEGIN IMMEDIATE + remove clear_bindings",
       "date": "2026-04-07",
-      "status": "rejected",
-      "summary": "Blocks all readers — incompatible with concurrent reader pool",
+      "status": "accepted",
+      "summary": "Correct but within noise (write I/O dominated)",
       "commit": "4c368a6",
       "problem": null,
       "hypothesis": "Three write-path optimizations could reduce per-write overhead:\n1. `PRAGMA locking_mode=EXCLUSIVE` on the writer — skip shm file operations\n2. `BEGIN IMMEDIATE` instead of `BEGIN` — avoid lock-upgrade path\n3. Remove `sqlite3_clear_bindings` — redundant when all params are rebound",
@@ -24118,6 +24118,19 @@
       "approach": "In [`native/resqlite.c`](../native/resqlite.c):\n\n- add `fast_double_to_json_num`;\n- keep `snprintf(\"%.17g\")` for negative zero, non-finite values, fractional\n  values, and values outside the exact `double` integer range;\n- route positive zero directly to `\"0\"`;\n- for finite integral values in `[-2^53, 2^53]`, cast to `long long` and reuse\n  `fast_i64_to_str`;\n- replace only the `SQLITE_FLOAT` call site in `write_json_to_buf`.\n\nThe helper is intentionally conservative. It does not try to replace general\nfloating-point formatting or revive exp 041's broad Ryu/Grisu direction; it\nonly removes `snprintf` where the existing integer encoder is exactly the same\nJSON spelling.\n\nAdded focused harness\n[`benchmark/experiments/select_bytes_real_int_fastpath.dart`](../benchmark/experiments/select_by...",
       "results": "Focused `select_bytes_real_int_fastpath.dart`, two order-flipped passes\n(medians in us/query, six rounds per lane):\n\n| Lane | Pass 1 baseline | Pass 1 candidate | Delta | Pass 2 baseline | Pass 2 candidate | Delta |\n|---|---:|---:|---:|---:|---:|---:|\n| 10k rows x 8 integral reals | 15311 | 3190 | -79.2% | 15367 | 3221 | -79.0% |\n| 10k rows x 20 integral reals | 37328 | 6896 | -81.5% | 37491 | 6960 | -81.4% |\n| 10k rows x 20 fractional reals | 68508 | 68831 | +0.5% | 68777 | 69095 | +0.5% |\n| 10k rows x 8 mixed (4 int-real + 2 frac-real + 2 text) | 15597 | 9566 | -38.7% | 15740 | 10281 | -34.7% |\n| 1k rows x 2 integral reals | 438 | 123 | -71.9% | 436 | 123 | -71.8% |\n\nPass 1 ran baseline first, then candidate. Pass 2 ran candidate first, then\nbaseline. The primary integral-REAL lanes r...",
       "reasoning": "**Accepted / In Review.** The candidate is a small, behavior-preserving\nspecial case with a large reproduced win on the target path and a flat\nfractional fallback guard. It does not expand public API, does not change\ngeneral floating-point formatting, and keeps negative zero on the old\n`snprintf` path.\n\nThe release suite is not the right denominator for this change: the public\nlanes are not REAL-integer-heavy enough to isolate a per-cell formatter win.\nThe durable gate for this path is the focused\n`select_bytes_real_int_fastpath.dart` harness."
+    },
+    {
+      "id": "195",
+      "title": "Stmt-cache pre-encoded JSON column-name tokens",
+      "date": "2026-06-23",
+      "status": "in_review",
+      "summary": "Extends [exp 190](190-selectbytes-col-name-preencode.md)'s per-query token amortization across re-executions of the same prepared SQL by caching the encoded `\"name\":` / `,\"name\":` tokens on the `resqlite_cached_stmt` entry. Eliminates the per-query `buf_init(64)` + `free` pair and the first-row pre-encode walk from `write_json_to_buf`; the per-row loop is bit-identical to exp 190 and JSON output is byte-identical. Focused `select_bytes_repeated_calls.dart` 1-row × 20-col improves **−9.2 % / −7.2 %** and 10-row × 20-col improves **−5.1 % / −2.7 %** across two order-flipped passes, while 100/1000-row guards show sign reversal (drift-suspected — per-query setup is < 0.2 % of wall at those sizes). Exp 190's `wide_cols.dart` shapes trend candidate-faster on every 10k-row lane across both passes. No public API change, ~hundreds of bytes per cached statement",
+      "commit": null,
+      "problem": "[Exp 190](190-selectbytes-col-name-preencode.md) pre-built each column's\n`\"name\":` / `,\"name\":` token once at first-row time inside `write_json_to_buf`\nand stored the result in a per-query scratch buffer\n([`tokens_buf`](../native/resqlite.c)). Subsequent rows pay one `buf_write`\nper column instead of comma + `json_write_string` + colon.\n\nThat amortizes per-row work within a single query. The per-query setup is\nstill paid in full on every call:\n\n- one `buf_init(&tokens_buf, ...)` → 64-byte `malloc` per `selectBytes()` call\n  (worst-case `name_len * 6 + 4` per column, but always ≥ 64);\n- one walk over every column at first-row time, calling `sqlite3_column_name`,\n  `strlen`, `json_write_string` (SWAR scan + escape walk for the name), and\n  two `buf_write_char` calls (`,` and `:`);\n- a mat...",
+      "hypothesis": "If the pre-encoded JSON column-name tokens are cached on the `resqlite_cached_stmt`\nentry, every `selectBytes()` call after the first reuses them — eliminating\nthe per-query `buf_init` malloc/free pair and the first-row pre-encode walk.\nThe per-row loop is bit-identical to exp 190 (one `buf_write` per column per\nrow), so per-row work stays exactly where it is.\n\nThe expected signal:\n\n- small rowsets where the per-query setup is a measurable fraction of total\n  wall (~0.5 µs setup vs ~5–10 µs total per call) should move 5–10%;\n- large rowsets where per-row work dominates (~3 ms total per call) should\n  stay neutral — the 0.5 µs savings is ~0.02% of wall;\n- mixed-column shapes should track the same direction as int-only shapes.\n\nAcceptance criterion: two order-flipped focused passes must i...",
+      "approach": "In [`native/resqlite.c`](../native/resqlite.c):\n\n- extend `resqlite_cached_stmt` with `json_name_tokens_buf`,\n  `json_name_token_offsets`, `json_name_token_lens`, `json_name_tokens_len`,\n  and `json_name_tokens_col_count` (the build sentinel);\n- add `ensure_json_name_tokens(entry, stmt, col_count)` which builds the\n  tokens on first call and returns immediately on subsequent calls. The\n  token shape is identical to exp 190 — column 0 emits `\"name\":`,\n  columns 1+ emit `,\"name\":` — so the per-row inner loop is unchanged;\n- change `write_json_to_buf(stmt, b)` to `write_json_to_buf(stmt, entry, b)`;\n  the caller (`resqlite_query_bytes`) already has `entry` in scope from the\n  preceding `get_or_prepare_reader` call;\n- remove the per-query `tokens_buf` + `_token_offsets_stack[64]` +\n  `_toke...",
+      "results": "Focused `select_bytes_repeated_calls.dart`, two order-flipped passes\n(medians in µs/call):\n\n| Lane | Pass 1 baseline | Pass 1 candidate | Δ | Pass 2 baseline | Pass 2 candidate | Δ |\n|---|---:|---:|---:|---:|---:|---:|\n| 1 row × 8 int cols | 10.415 | 10.159 | −2.5% | 10.019 | 9.936 | −0.8% |\n| 1 row × 20 int cols | 5.730 | 5.204 | −9.2% | 5.355 | 4.967 | −7.2% |\n| 1 row × 8 mixed cols | 5.084 | 5.045 | −0.8% | 4.751 | 4.752 | +0.0% |\n| 10 rows × 8 int cols | 7.332 | 7.128 | −2.8% | 6.936 | 7.001 | +0.9% |\n| 10 rows × 20 int cols | 11.027 | 10.460 | −5.1% | 10.304 | 10.027 | −2.7% |\n| 100 rows × 8 int cols | 29.750 | 30.296 | +1.8% | 29.936 | 29.120 | −2.7% |\n| 1000 rows × 8 int cols | 251.270 | 253.841 | +1.0% | 251.156 | 246.973 | −1.7% |\n\nPass 1 ran baseline first then candidate; Pass...",
+      "reasoning": "**Accepted / In Review.** The per-query setup amortization is small but\nreproducible on the predicted shape: 1-row × 20-col and 10-row × 20-col\nlanes move 5–9% same-direction across two order-flipped passes, where the\n~0.5 µs of removed per-query work is a measurable fraction of total wall.\nThe 10k-row lanes also trend candidate-faster across both passes on every\nshape, consistent with eliminating the per-query `malloc(64)` + `free`\npair from the hot path. The 100 / 1000-row guards show drift-suspected\nsign reversal — consistent with \"no real movement\" where per-row work\ndominates per-query setup by 100× or more.\n\nThe implementation is bounded — five new fields on the cache entry, one\nnew helper, a one-arg signature change on `write_json_to_buf`. Memory cost\nper cached statement is `O(c..."
     }
   ],
   "tracked": [
