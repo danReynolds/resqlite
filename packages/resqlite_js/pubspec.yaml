@@ -12,7 +12,7 @@ dependencies:
   code_assets: ^1.0.0
   hooks: ^1.0.0
   path: ^1.9.0
-  resqlite: ^0.6.0
+  resqlite: ^0.7.0
 
 dev_dependencies:
   test: ^1.26.3

@@ -181,7 +181,7 @@ Future<void> _workloadBytesSelect(StringBuffer md) async {
       await seedResqlite(resqliteDb, _largeRowCount);
       byLib['resqlite selectBytes()'] = await _repeatedMeasure(() async {
         final b = await resqliteDb.selectBytes(standardSelectSql);
-        _touchBytes(b);
+        _touchBytes(b.bytes);
       });
     } finally {
       await resqliteDb.close();

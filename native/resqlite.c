@@ -2097,11 +2097,18 @@ fail:
 // Macro to bail out of write_json_to_buf on OOM without leaking.
 #define JSON_CHECK(expr) do { if ((expr) != 0) { rc = SQLITE_NOMEM; goto cleanup; } } while (0)
 
+// `out_row_count` receives the number of rows serialized into `b`. It is
+// written on every exit path (including OOM/error) so the caller never reads
+// an uninitialized value — on error it holds the count of rows fully written
+// before the failure, which the caller discards along with the partial buffer.
 RESQLITE_HOT static int write_json_to_buf(
-    sqlite3_stmt* stmt, resqlite_cached_stmt* entry, resqlite_buf* b
-) {
+    sqlite3_stmt* stmt, resqlite_cached_stmt* entry, resqlite_buf* b,
+    int* out_row_count) {
     int col_count = sqlite3_column_count(stmt);
     int rc;
+    // Declared before the first `goto cleanup` below so cleanup always reads
+    // an initialized count, even when token setup fails before any row.
+    int row_index = 0;
 
     // [EXP-195] Build the JSON column-name tokens once per cached stmt and
     // reuse them across every re-execution. Supersedes exp 190's per-query
@@ -2112,7 +2119,6 @@ RESQLITE_HOT static int write_json_to_buf(
     const unsigned char* tokens_data = entry->json_name_tokens_buf;
     const int* token_offsets = entry->json_name_token_offsets;
     const int* token_lens = entry->json_name_token_lens;
-    int row_index = 0;
 
     JSON_CHECK(buf_write_char(b, '['));
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -2163,6 +2169,7 @@ RESQLITE_HOT static int write_json_to_buf(
 
 cleanup:
     sqlite3_reset(stmt);
+    *out_row_count = row_index;
 
     if (rc == SQLITE_NOMEM) return rc;
     if (rc != SQLITE_DONE) return rc;
@@ -2179,16 +2186,19 @@ int resqlite_query_bytes(
     const resqlite_param* params,
     int param_count,
     unsigned char** out_buf,
-    int* out_len
+    int* out_len,
+    int* out_row_count
 ) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
         *out_buf = NULL;
         *out_len = 0;
+        *out_row_count = 0;
         return SQLITE_MISUSE;
     }
     if (reader_id < 0 || reader_id >= db->reader_count) {
         *out_buf = NULL;
         *out_len = 0;
+        *out_row_count = 0;
         return SQLITE_BUSY;
     }
     resqlite_reader* reader = &db->readers[reader_id];
@@ -2199,6 +2209,7 @@ int resqlite_query_bytes(
     if (!entry) {
         *out_buf = NULL;
         *out_len = 0;
+        *out_row_count = 0;
         return rc;
     }
     sqlite3_stmt* stmt = entry->stmt;
@@ -2208,17 +2219,19 @@ int resqlite_query_bytes(
         sqlite3_reset(stmt);
         *out_buf = NULL;
         *out_len = 0;
+        *out_row_count = 0;
         return rc;
     }
 
     // Use persistent reader buffer — reset, no malloc/free per query.
     reader->json_buf.len = 0;
 
-    rc = write_json_to_buf(stmt, entry, &reader->json_buf);
+    rc = write_json_to_buf(stmt, entry, &reader->json_buf, out_row_count);
 
     if (rc != SQLITE_OK) {
         *out_buf = NULL;
         *out_len = 0;
+        *out_row_count = 0;
         return rc;
     }
 

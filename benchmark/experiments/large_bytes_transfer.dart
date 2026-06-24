@@ -25,7 +25,7 @@ Future<int> _medianUs(
     final sw = Stopwatch()..start();
     for (var i = 0; i < iters; i++) {
       final b = await db.selectBytes(sql);
-      if (b.isEmpty) throw StateError('empty result');
+      if (b.bytes.isEmpty) throw StateError('empty result');
     }
     sw.stop();
     samples.add(sw.elapsedMicroseconds ~/ iters);
@@ -57,7 +57,7 @@ Future<void> _lane({
     }
     final medUs = await _medianUs(db, sql, iters, 6);
     stdout.writeln(
-      '$label: ${probe.length}B x$iters -> median ${medUs}us/query '
+      '$label: ${probe.bytes.length}B x$iters -> median ${medUs}us/query '
       '(${(medUs * iters / 1000).toStringAsFixed(1)}ms total)',
     );
   } finally {

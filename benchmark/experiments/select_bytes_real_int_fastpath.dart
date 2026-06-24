@@ -18,7 +18,7 @@ Future<int> _medianUs(Database db, String sql, int iters, int rounds) async {
   for (var r = 0; r < rounds; r++) {
     final sw = Stopwatch()..start();
     for (var i = 0; i < iters; i++) {
-      final b = await db.selectBytes(sql);
+      final b = (await db.selectBytes(sql)).bytes;
       if (b.isEmpty) throw StateError('empty result');
     }
     sw.stop();
@@ -82,7 +82,7 @@ Future<void> _lane({
     await db.executeBatch(sql, batch);
 
     final selectSql = 'SELECT ${cols.join(', ')} FROM t ORDER BY id';
-    final probe = await db.selectBytes(selectSql);
+    final probe = (await db.selectBytes(selectSql)).bytes;
     for (var i = 0; i < (iters ~/ 4) + 1; i++) {
       await db.selectBytes(selectSql);
     }

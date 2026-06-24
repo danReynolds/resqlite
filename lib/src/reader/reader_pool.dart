@@ -104,8 +104,9 @@ final class ReaderPool {
     return result as (List<Map<String, Object?>>, TableDependencies, int, int);
   }
 
-  /// Execute a query returning JSON-encoded bytes.
-  Future<Uint8List> selectBytes(
+  /// Execute a query returning JSON-encoded bytes plus the serialized row
+  /// count (`(bytes, rowCount)`).
+  Future<({Uint8List bytes, int rowCount})> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
@@ -117,7 +118,7 @@ final class ReaderPool {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    return result as Uint8List;
+    return result as ({Uint8List bytes, int rowCount});
   }
 
   /// Execute a re-query with worker-side hash comparison.

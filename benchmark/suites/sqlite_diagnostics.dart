@@ -171,7 +171,7 @@ Future<void> _seedJsonBufWorkload(Database db) async {
 Future<void> _exerciseJsonBufReclaim(Database db) async {
   const smallSql = 'SELECT id, body FROM small_bytes ORDER BY id';
   const largeSql = 'SELECT id, body FROM large_bytes ORDER BY id';
-  final largeProbe = await db.selectBytes(largeSql);
+  final largeProbe = (await db.selectBytes(largeSql)).bytes;
   if (largeProbe.length <= 1024 * 1024) {
     throw StateError(
       'large selectBytes diagnostic payload was ${largeProbe.length} bytes; '

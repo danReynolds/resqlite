@@ -340,17 +340,19 @@ void main() {
         ['beta', 2.5],
       );
 
-      final bytes = await db.selectBytes('SELECT * FROM t ORDER BY id');
-      final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
+      final result = await db.selectBytes('SELECT * FROM t ORDER BY id');
+      final decoded = jsonDecode(utf8.decode(result.bytes)) as List<dynamic>;
       expect(decoded, hasLength(2));
+      expect(result.rowCount, 2);
       expect((decoded[0] as Map)['name'], 'alpha');
       expect((decoded[1] as Map)['name'], 'beta');
     });
 
     test('selectBytes empty result', () async {
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY)');
-      final bytes = await db.selectBytes('SELECT * FROM t');
-      expect(utf8.decode(bytes), '[]');
+      final result = await db.selectBytes('SELECT * FROM t');
+      expect(utf8.decode(result.bytes), '[]');
+      expect(result.rowCount, 0);
     });
 
     test('selectBytes with JSON special characters', () async {
@@ -359,7 +361,7 @@ void main() {
         'quote"slash\\newline\ntab\t',
       ]);
 
-      final bytes = await db.selectBytes('SELECT val FROM t');
+      final bytes = (await db.selectBytes('SELECT val FROM t')).bytes;
       final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
       expect(
         (decoded[0] as Map)['val'],
@@ -380,7 +382,7 @@ void main() {
       expect(rows.single['body'], body);
       expect(rows.single['body_hex'], _hexUtf8(body));
 
-      final bytes = await db.selectBytes('SELECT body FROM t');
+      final bytes = (await db.selectBytes('SELECT body FROM t')).bytes;
       final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
       expect((decoded.single as Map)['body'], body);
     });
@@ -404,12 +406,12 @@ void main() {
       final rows = await db.select('SELECT * FROM items ORDER BY id');
       final bytesFromSelect = utf8.encode(jsonEncode(rows));
 
-      final bytesFromSelectBytes =
-          await db.selectBytes('SELECT * FROM items ORDER BY id');
+      final result = await db.selectBytes('SELECT * FROM items ORDER BY id');
 
       final fromSelect = jsonDecode(utf8.decode(bytesFromSelect));
-      final fromBytes = jsonDecode(utf8.decode(bytesFromSelectBytes));
+      final fromBytes = jsonDecode(utf8.decode(result.bytes));
       expect(fromBytes, equals(fromSelect));
+      expect(result.rowCount, rows.length);
     });
 
     test('repeated selectBytes preserves text and blob parameters', () async {
@@ -424,7 +426,7 @@ void main() {
 
       const sql = 'SELECT tag FROM t WHERE tag = ? AND payload = ?';
       for (var i = 0; i < 10; i++) {
-        final bytes = await db.selectBytes(sql, ['target', blob]);
+        final bytes = (await db.selectBytes(sql, ['target', blob])).bytes;
         final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
         expect(decoded, hasLength(1), reason: 'iteration $i');
         expect((decoded[0] as Map)['tag'], 'target');
@@ -461,7 +463,7 @@ void main() {
           [i + 1, values[i]],
         );
       }
-      final bytes = await db.selectBytes('SELECT v FROM t ORDER BY id');
+      final bytes = (await db.selectBytes('SELECT v FROM t ORDER BY id')).bytes;
       final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
       expect(decoded.length, values.length);
       for (var i = 0; i < values.length; i++) {
@@ -490,7 +492,7 @@ void main() {
         );
       }
 
-      final bytes = await db.selectBytes('SELECT v FROM t ORDER BY id');
+      final bytes = (await db.selectBytes('SELECT v FROM t ORDER BY id')).bytes;
       final json = utf8.decode(bytes);
       final decoded = jsonDecode(json) as List<dynamic>;
       expect(decoded.length, values.length);
@@ -525,7 +527,7 @@ void main() {
         await db.execute('DELETE FROM t');
         await db.execute('INSERT INTO t(data) VALUES (?)', [blob]);
 
-        final bytes = await db.selectBytes('SELECT data FROM t');
+        final bytes = (await db.selectBytes('SELECT data FROM t')).bytes;
         final decoded = jsonDecode(utf8.decode(bytes)) as List<dynamic>;
         final value = (decoded[0] as Map)['data'] as String;
         expect(value, expectedB64, reason: label);

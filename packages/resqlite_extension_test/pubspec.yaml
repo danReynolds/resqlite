@@ -10,7 +10,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  resqlite: ^0.6.0
+  resqlite: ^0.7.0
   resqlite_js: ^0.1.0
   resqlite_vector: ^0.1.0
 

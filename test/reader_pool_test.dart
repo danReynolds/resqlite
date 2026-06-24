@@ -66,18 +66,20 @@ void main() {
 
     test('selectBytes returns valid JSON for small queries', () async {
       await _seed(db, 50);
-      final bytes = await db.selectBytes('SELECT * FROM items WHERE id <= 5');
-      final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+      final result = await db.selectBytes('SELECT * FROM items WHERE id <= 5');
+      final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
       expect(decoded, hasLength(5));
+      expect(result.rowCount, 5);
       expect((decoded[0] as Map)['name'], 'item_0');
     });
 
     test('selectBytes matches select for small queries', () async {
       await _seed(db, 50);
       final rows = await db.select('SELECT * FROM items WHERE id <= 10');
-      final bytes = await db.selectBytes('SELECT * FROM items WHERE id <= 10');
-      final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+      final result = await db.selectBytes('SELECT * FROM items WHERE id <= 10');
+      final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
       expect(decoded, hasLength(rows.length));
+      expect(result.rowCount, rows.length);
       for (var i = 0; i < rows.length; i++) {
         expect((decoded[i] as Map)['name'], rows[i]['name']);
       }
@@ -98,9 +100,10 @@ void main() {
 
     test('selectBytes handles large results (sacrifice path)', () async {
       await _seed(db, 5000);
-      final bytes = await db.selectBytes('SELECT * FROM items');
-      final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+      final result = await db.selectBytes('SELECT * FROM items');
+      final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
       expect(decoded, hasLength(5000));
+      expect(result.rowCount, 5000);
       expect((decoded.first as Map)['name'], 'item_0');
       expect((decoded.last as Map)['name'], 'item_4999');
     });
@@ -118,9 +121,10 @@ void main() {
     test('repeated large selectBytes work (workers respawn)', () async {
       await _seed(db, 3000);
       for (var i = 0; i < 10; i++) {
-        final bytes = await db.selectBytes('SELECT * FROM items');
-        final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+        final result = await db.selectBytes('SELECT * FROM items');
+        final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
         expect(decoded, hasLength(3000), reason: 'iteration $i');
+        expect(result.rowCount, 3000, reason: 'iteration $i');
       }
     });
 
@@ -155,8 +159,9 @@ void main() {
       );
       final results = await Future.wait(futures);
       for (var i = 0; i < 10; i++) {
-        final decoded = jsonDecode(String.fromCharCodes(results[i])) as List;
+        final decoded = jsonDecode(String.fromCharCodes(results[i].bytes)) as List;
         expect(decoded, hasLength(10), reason: 'cat_$i');
+        expect(results[i].rowCount, 10, reason: 'cat_$i');
       }
     });
 
@@ -217,9 +222,10 @@ void main() {
       for (final rows in selectResults) {
         expect(rows, hasLength(500));
       }
-      for (final bytes in bytesResults) {
-        final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+      for (final r in bytesResults) {
+        final decoded = jsonDecode(String.fromCharCodes(r.bytes)) as List;
         expect(decoded, hasLength(500));
+        expect(r.rowCount, 500);
       }
     });
 
@@ -306,9 +312,10 @@ void main() {
 
     test('empty result selectBytes', () async {
       await _seed(db, 10);
-      final bytes = await db.selectBytes('SELECT * FROM items WHERE id > 9999');
-      final decoded = jsonDecode(String.fromCharCodes(bytes)) as List;
+      final result = await db.selectBytes('SELECT * FROM items WHERE id > 9999');
+      final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
       expect(decoded, isEmpty);
+      expect(result.rowCount, 0);
     });
 
     test('single row result', () async {
@@ -393,10 +400,11 @@ void main() {
           case 2:
             // selectBytes (small, SendPort path)
             futures.add(
-              db.selectBytes('SELECT * FROM items LIMIT 100').then((bytes) {
+              db.selectBytes('SELECT * FROM items LIMIT 100').then((r) {
                 final decoded =
-                    jsonDecode(String.fromCharCodes(bytes)) as List;
+                    jsonDecode(String.fromCharCodes(r.bytes)) as List;
                 expect(decoded, hasLength(100));
+                expect(r.rowCount, 100);
               }),
             );
         }
