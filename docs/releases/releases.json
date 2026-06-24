@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-23T20:11:19.224287",
+  "generated": "2026-06-24T13:28:38.336481",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -12,6 +12,14 @@
       "sinceVersion": "0.6.0",
       "bodyMarkdown": "",
       "experiments": [
+        {
+          "id": "197",
+          "title": "True group commit moonshot",
+          "date": "2026-06-23",
+          "status": "rejected",
+          "summary": "Moonshot: Wrapping a coalesced standalone write burst in one SQLite transaction makes the focused concurrent-burst lane roughly 8x faster (-88.1% / -87.3%) while sequential writes and explicit transaction guardrails stay neutral. Rejected as a hidden default because it changes independent-autocommit visibility, durability, and failure semantics; prototype preserved at `archive/exp-197`.",
+          "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/197-true-group-commit-moonshot.md"
+        },
         {
           "id": "196",
           "title": "selectBytes inter-row framing batch",
