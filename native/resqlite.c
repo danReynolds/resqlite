@@ -1853,6 +1853,36 @@ RESQLITE_HOT static int fast_double_to_json_num(double val, char* buf, size_t bu
     return snprintf(buf, buf_size, "%.17g", val);
 }
 
+// Maximum bytes a JSON-encoded INTEGER cell can occupy: 20 digits + optional
+// '-' sign. fast_i64_to_str never writes a NUL terminator.
+#define RESQLITE_JSON_INT_MAX 24
+// Maximum bytes a JSON-encoded FLOAT cell can occupy through
+// fast_double_to_json_num. %.17g produces at most ~25 chars for finite
+// doubles; round up and reserve one extra for snprintf's NUL terminator,
+// which lands inside the buffer but is not counted toward the return length.
+#define RESQLITE_JSON_FLOAT_MAX 32
+
+// Write a SQLite INTEGER as JSON decimal digits directly into the output
+// buffer. Avoids the per-cell stack-scratch + memcpy pair that
+// `fast_i64_to_str` + `buf_write_str` used to do.
+RESQLITE_HOT static int buf_write_int_json(resqlite_buf* b, long long val) {
+    if (buf_ensure(b, RESQLITE_JSON_INT_MAX) != 0) return -1;
+    int num_len = fast_i64_to_str(val, (char*)(b->data + b->len));
+    b->len += num_len;
+    return 0;
+}
+
+// Write a SQLite FLOAT as JSON number directly into the output buffer.
+// Reserves one extra byte so the snprintf fallback's NUL terminator fits
+// inside the buffer without growing it.
+RESQLITE_HOT static int buf_write_double_json(resqlite_buf* b, double val) {
+    if (buf_ensure(b, RESQLITE_JSON_FLOAT_MAX + 1) != 0) return -1;
+    int num_len = fast_double_to_json_num(
+        val, (char*)(b->data + b->len), (size_t)(RESQLITE_JSON_FLOAT_MAX + 1));
+    b->len += num_len;
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // JSON output
 // ---------------------------------------------------------------------------
@@ -2097,20 +2127,12 @@ RESQLITE_HOT static int write_json_to_buf(
                 case SQLITE_NULL:
                     JSON_CHECK(buf_write_str(b, "null", 4));
                     break;
-                case SQLITE_INTEGER: {
-                    char num[24];
-                    int num_len = fast_i64_to_str(
-                        sqlite3_column_int64(stmt, i), num);
-                    JSON_CHECK(buf_write_str(b, num, num_len));
+                case SQLITE_INTEGER:
+                    JSON_CHECK(buf_write_int_json(b, sqlite3_column_int64(stmt, i)));
                     break;
-                }
-                case SQLITE_FLOAT: {
-                    char num[32];
-                    int num_len = fast_double_to_json_num(
-                        sqlite3_column_double(stmt, i), num, sizeof(num));
-                    JSON_CHECK(buf_write_str(b, num, num_len));
+                case SQLITE_FLOAT:
+                    JSON_CHECK(buf_write_double_json(b, sqlite3_column_double(stmt, i)));
                     break;
-                }
                 case SQLITE_TEXT: {
                     // column_text MUST be called before column_bytes — calling
                     // bytes first can trigger an implicit type conversion that
