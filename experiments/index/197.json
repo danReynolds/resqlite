@@ -1,0 +1,7 @@
+{
+  "file": "197-true-group-commit-moonshot.md",
+  "title": "True group commit moonshot",
+  "impact": "Moonshot: Wrapping a coalesced standalone write burst in one SQLite transaction makes the focused concurrent-burst lane roughly 8x faster (-88.1% / -87.3%) while sequential writes and explicit transaction guardrails stay neutral. Rejected as a hidden default because it changes independent-autocommit visibility, durability, and failure semantics; prototype preserved at `archive/exp-197`.",
+  "status": "rejected",
+  "link": ""
+}

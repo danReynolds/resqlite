@@ -22,6 +22,26 @@ them. Run the candidate while that instrumentation is present, then remove the
 temporary measurement scaffolding before merge unless it is broadly reusable
 across future experiments.
 
+The program has two lanes:
+
+- **Exploit** — incremental, high-confidence work against known hot paths. This
+  is the default for ordinary scheduled runs: focused optimizations, correctness
+  guards, measurement that directly unlocks a candidate, and cleanup of stale
+  directions.
+- **Explore / moonshot** — bolder frontier work that challenges a live
+  architectural assumption. A moonshot may prototype a new transport shape,
+  result representation, stream-maintenance model, or semantic trade-off that no
+  prior experiment proved would work. The bar is not "likely to merge"; the bar
+  is "attacks a meaningful ceiling and will leave useful evidence even if it is
+  rejected."
+
+Moonshots are still bounded experiments. They must name the assumption being
+challenged, the frontier they are trying to move, the risk or complexity they
+are allowed to add if they win, and the evidence that would kill the direction.
+They can succeed by producing a mergeable win, falsifying a tempting direction,
+creating a new benchmark/profile that exposes a hidden floor, or proving that a
+supposed architecture limit is not real.
+
 ## Preflight
 
 Before choosing an experiment, read:
@@ -80,6 +100,10 @@ the new counter or aggregate evidence, not a production code-path change.
 
 Before coding, write a short working note for yourself:
 
+- whether this run is **exploit** or **moonshot**, and why the current cadence
+  requires or allows that lane
+- for a moonshot: the architecture assumption being challenged, the frontier it
+  attacks, and the risk budget you are intentionally allowing for the prototype
 - what prior experiments are adjacent
 - why this is not just a duplicate attempt — neither of a prior *rejected*
   experiment nor of any open PR or branch **in flight right now** (two runs
@@ -98,6 +122,29 @@ Before coding, write a short working note for yourself:
 
 This note does not need to be committed directly, but the final experiment
 writeup should make the reasoning clear.
+
+### Moonshot cadence
+
+Do not let the runner always take the safest local optimization.
+
+- **Wednesday and Friday scheduled runs are moonshot-default.** On those days,
+  choose a moonshot unless a maintainer has named an active release,
+  correctness, or CI blocker that must be handled first, or unless another
+  moonshot PR is already open and needs completion before starting a new one.
+- If the runner is not scheduled on weekdays, enforce the same mix by experiment
+  number: after three consecutive non-moonshot experiment claims, the next
+  scheduled experiment must be a moonshot.
+- A non-moonshot day may still pick a moonshot when `signals.json`, a production
+  profile, or a recent rejection points at a real architectural ceiling.
+- Do not satisfy the moonshot requirement with a larger version of the same
+  micro-optimization. The attempt must challenge a broader assumption, such as
+  one request per isolate round trip, Dart-object-first result transfer,
+  all-or-nothing stream invalidation, or hidden-vs-explicit batching semantics.
+
+If you skip a moonshot on a moonshot-default day, say why in the PR body or
+handoff. The reason should be concrete, not "no good ideas found"; in that case,
+spend the run drafting and testing a frontier candidate instead of taking the
+easy path.
 
 ### Claim your slot before any work
 
@@ -212,13 +259,17 @@ When finished:
   experiments, the writeup should explain why the direction looked plausible,
   what was measured, and what would make the area interesting again — a
   "rejected, no signal" record is worth less than a "rejected because X, would
-  reopen if Y" record.
+  reopen if Y" record. For moonshots, add `**Category:** Moonshot` in the
+  writeup header and include a short "Assumption challenged" sentence in the
+  **Hypothesis** or **Approach** section.
 - record the run's signal in its own file,
   `experiments/signals/entries/NNN.json` (directions, outcomeClass,
   changedBeliefs, nextSignals) — never the generated `signals.json`, and never
   a shared file, so two concurrent runs can't collide on it. When the run
   changes how future agents should read a whole *direction*, also update that
-  direction's synthesis in [`signals/base.json`](signals/base.json).
+  direction's synthesis in [`signals/base.json`](signals/base.json). For
+  moonshots, record the class in the signal source too:
+  `experimentClass: "moonshot"`.
 - add to [`JOURNAL.md`](JOURNAL.md) only when the run surfaced a *transferable*
   lesson — something a future runner could reapply to a different direction or
   could waste time relearning. Per-direction state goes in `signals.json`, not
@@ -230,7 +281,8 @@ When finished:
   is `accepted` / `in_review` / `rejected`). `experiments/README.md` is
   *generated* from these fragments; do not edit the README table by hand. A
   split experiment that has both an accepted and a rejected finding (like 014)
-  stores a JSON array of rows.
+  stores a JSON array of rows. For moonshots, start the `impact` text with
+  `Moonshot:` so the generated README/category surfaces make the class visible.
 - run the experiment finalizer after the writeup, the `index/NNN.json` row
   fragment, and `experiments/signals/entries/NNN.json` are in place:
 
@@ -305,7 +357,8 @@ Every scheduled experiment run must:
   that is immediately reviewable.
 - **Label the PR when you open it.** Apply one `type:` label and the outcome
   label `approved`/`rejected` (see [PR labels](#pr-labels) below) so the PR list
-  is triageable at a glance.
+  is triageable at a glance. GitHub calls these PR "labels", not tags.
+  Moonshot PRs use `type: moonshot`.
 - **Distinguish local completion from merge readiness.** A local experiment is
   complete when the branch has coherent code/docs/artifacts, focused validation
   has passed, and the finalizer is green. A PR is not ready to merge until CI
@@ -350,6 +403,9 @@ edit`, never recreate them.
 - **`type:`** — the kind of run (independent of whether it ships runtime code):
   - `type: performance` — an implementation experiment changing a runtime hot
     path.
+  - `type: moonshot` — a frontier experiment that intentionally challenges a
+    broader architecture assumption. Use this even when the branch mostly
+    produces a prototype, archive tag, benchmark, or rejection evidence.
   - `type: measurement` — counters, profiling, benchmarks, or focused probes. A
     measurement hook that is kept still counts as `type: measurement` even
     though it ships `lib/`/`native/`.
@@ -360,12 +416,19 @@ edit`, never recreate them.
     guard. An accepted win is `approved` as soon as its result is known, even
     while its README row still reads "In Review" during the soak.
   - `rejected` — the experiment failed: measured below the bar, regressed, or
-    the candidate was abandoned.
+    the candidate was abandoned. Rejected moonshots are still valuable when the
+    writeup makes the falsified assumption clear.
   A still-undecided or deferred experiment carries no outcome label until its
   verdict lands.
 
 ```bash
 gh pr edit <N> --add-label "type: performance" --add-label "approved"
+```
+
+For a moonshot:
+
+```bash
+gh pr edit <N> --add-label "type: moonshot" --add-label "rejected"
 ```
 
 If `gh pr edit` errors with a Projects-classic `projectCards` GraphQL message
