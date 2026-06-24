@@ -1420,6 +1420,22 @@
         "Use benchmark/experiments/writer_pipelining.dart as the focused gate for future group-commit prototypes; the concurrent-burst row is sensitive enough to show the ceiling quickly.",
         "The prototype is preserved at archive/exp-197. Future work should start from the semantic/API shape, not another per-call writer scheduling cleanup."
       ]
+    },
+    "198": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "in_review_accepted",
+      "changedBeliefs": [
+        "After exp 192 (two-digit itoa body) and exp 194 (integer-real fast path), the `SQLITE_INTEGER` and `SQLITE_FLOAT` cell sites inside `write_json_to_buf` still paid one short `memcpy` (≤ 20 bytes for integers, ≤ ~25 for floats) per cell to copy a stack scratch buffer into the output buffer via `buf_write_str` -> `buf_write` -> `memcpy`. The formatters already take a raw destination pointer, so the scratch buffer is just a non-load-bearing intermediate. Reserving the max cell length once (`buf_ensure(b, 24)` for int, 33 for float) and pointing the formatter at `(char*)(b->data + b->len)` removes the per-cell `memcpy` and the `buf_write` indirection while keeping JSON output bit-identical (same digit formatters, same snprintf fallback semantics for negative zero / NaN / Inf / fractional doubles).",
+        "Two order-flipped focused passes on `select_bytes_int_heavy.dart` reproduce the win same-direction on every integer-heavy lane: 10k x 8 small ints -7.2 % / -7.4 %, 10k x 20 small ints -2.5 % / -6.8 %, 10k x 20 big ints (~18 digits) -8.7 % / -9.4 %, 1k x 2 ints -9.5 % / -7.8 %. The mixed-row guard (4 int + 2 text + 2 real) is sub-2 % phase noise (its int contribution is ~25 % of per-row work), the same shape exp 192 saw on the same guard.",
+        "The integer-via-REAL fast path that exp 194 added inherits the same per-cell saving: `select_bytes_real_int_fastpath.dart` 10k x 8 integral reals improves -8.6 % / -8.8 % and 10k x 20 integral reals improves -7.5 % / -7.6 % across two order-flipped passes. The fractional-REAL guard (snprintf %.17g dominates per-cell wall) stays inside +/-1.5 %, confirming the saving is structurally the removed `memcpy`, not anything that would help the snprintf body itself."
+      ],
+      "nextSignals": [
+        "the `SQLITE_TEXT` and `SQLITE_BLOB` paths inside `write_json_to_buf` already write directly to the output buffer via `json_write_string` / `json_write_base64` (both do their own `buf_ensure`), so the same direct-write pattern is not available to extend - they were never on the scratch-buffer path",
+        "the remaining per-cell win on float wall sits in `snprintf(\"%.17g\")` for fractional REAL; a Grisu2 / Ryu replacement is the next bounded candidate against that, but requires an output-equivalence audit against the existing snprintf spelling and is a much larger change than this experiment",
+        "the new `buf_write_int_json` / `buf_write_double_json` helpers are mechanically reusable by any future C-side JSON writer that wants to format a numeric directly into the output buffer; keep them generic (no JSON-specific assumptions inside the helper) so a hypothetical binary-frame transport could reuse the integer one"
+      ]
     }
   }
 }
