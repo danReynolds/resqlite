@@ -133,8 +133,9 @@ void main() {
       expect(rows, hasLength(3));
 
       // SelectBytes.
-      final bytes = await db.selectBytes('SELECT * FROM items ORDER BY id');
-      expect(bytes.isNotEmpty, isTrue);
+      final selected = await db.selectBytes('SELECT * FROM items ORDER BY id');
+      expect(selected.bytes.isNotEmpty, isTrue);
+      expect(selected.rowCount, 3);
 
       // Transaction.
       final count = await db.transaction((tx) async {

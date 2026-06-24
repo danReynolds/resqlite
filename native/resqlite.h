@@ -334,7 +334,8 @@ int resqlite_query_bytes(
     const resqlite_param* params,
     int param_count,
     unsigned char** out_buf,
-    int* out_len
+    int* out_len,
+    int* out_row_count
 );
 
 void resqlite_free(void* ptr);

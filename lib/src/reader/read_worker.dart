@@ -159,7 +159,8 @@ void readerEntrypoint(List<Object> args) {
           // Unlike select() (rows), selectBytes never sacrifices: the result
           // is native bytes, so Isolate.exit would need a fromList copy first
           // — saving no copy and only adding a reader respawn. Sending the
-          // view is the one mandatory SendPort copy, at any size.
+          // (bytes view, rowCount) record is the one mandatory SendPort copy,
+          // at any size; the rowCount rides along for free.
           result = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           sacrifice = false;
 
@@ -217,11 +218,12 @@ void readerEntrypoint(List<Object> args) {
       // function is a no-op for warm small buffers (< 1 MB) and for
       // back-to-back large reads (last_used_len >= 256 KB), so the
       // common case has no extra work.
-      if (request is SelectBytesRequest && result is Uint8List) {
+      if (request is SelectBytesRequest &&
+          result is ({Uint8List bytes, int rowCount})) {
         resqliteReaderMaybeShrinkJsonBuf(
           ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
           readerId,
-          result.length,
+          result.bytes.length,
         );
       }
     } catch (e) {
@@ -338,13 +340,14 @@ RawQueryResult executeQuery(
     );
 
 /// Execute a query returning JSON bytes as a view over the reader
-/// connection's persistent `json_buf`.
+/// connection's persistent `json_buf`, plus the number of rows serialized
+/// into them (counted in C during the same pass — no extra walk).
 ///
 /// The returned [Uint8List] aliases native memory that is reused on the next
 /// query, so hand it straight to `SendPort.send` (which copies it) — never
 /// retain it. The send copy is mandatory anyway, so sending the view avoids a
 /// redundant `Uint8List.fromList`.
-Uint8List executeQueryBytes(
+({Uint8List bytes, int rowCount}) executeQueryBytes(
   int handleAddr,
   int readerId,
   String sql,
@@ -352,7 +355,10 @@ Uint8List executeQueryBytes(
 ) {
   final dbHandle = ffi.Pointer<ffi.Void>.fromAddress(handleAddr);
   final result = queryBytes(dbHandle, readerId, sql, parameters);
-  return result.ptr.asTypedList(result.length);
+  return (
+    bytes: result.ptr.asTypedList(result.length),
+    rowCount: result.rowCount,
+  );
 }
 
 /// Execute a stream's initial query.

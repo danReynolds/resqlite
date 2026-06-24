@@ -55,7 +55,7 @@ Future<void> _smallOnlyShape() async {
   try {
     await _seed(db, _smallRows, _smallBodyLen);
     final sql = 'SELECT id, body FROM t ORDER BY id';
-    final probe = await db.selectBytes(sql);
+    final probe = (await db.selectBytes(sql)).bytes;
     print('## small-only (${_smallIters} x ~${probe.length}B selectBytes)');
     await _snap(db, 'open');
     for (var i = 0; i < 10; i++) {
@@ -96,8 +96,8 @@ Future<void> _oneShotLargeShape() async {
 
     final smallSql = 'SELECT id, body FROM small ORDER BY id';
     final bigSql = 'SELECT id, body FROM big ORDER BY id';
-    final smallProbe = await db.selectBytes(smallSql);
-    final bigProbe = await db.selectBytes(bigSql);
+    final smallProbe = (await db.selectBytes(smallSql)).bytes;
+    final bigProbe = (await db.selectBytes(bigSql)).bytes;
 
     print(
       '\n## one-shot-large (small ~${smallProbe.length}B '

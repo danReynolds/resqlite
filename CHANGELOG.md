@@ -1,3 +1,22 @@
+## 0.7.0
+
+**Breaking:** `Database.selectBytes` now returns a `BytesResult`
+(`{Uint8List bytes, int rowCount}`) instead of a bare `Uint8List`. Update call
+sites to read `.bytes` where they previously used the result directly.
+
+- **New:** `selectBytes` reports `rowCount` — the number of rows serialized into
+  the JSON. It is counted in C during the same serialization pass, so reading it
+  is free: callers building a paging envelope (e.g. `has_more`) or logging a sent
+  count no longer need a second `COUNT(*)` or to parse the bytes. The serialization
+  hot loop is unchanged; the row count is a single store outside it, and the value
+  rides along on the existing reader→main SendPort transfer.
+
+```dart
+final result = await db.selectBytes('SELECT * FROM events WHERE ... LIMIT 1000');
+// result.bytes    -> Uint8List of JSON
+// result.rowCount -> rows serialized (e.g. for has_more = rowCount == 1000)
+```
+
 ## 0.6.0
 
 Performance and observability release. No breaking changes, and no changes to the

@@ -39,9 +39,10 @@ void main() {
 
     test('small result (<256KB) round-trips and matches select()', () async {
       await seed(1000, 40);
-      final bytes = await db.selectBytes('SELECT id, body, n FROM t ORDER BY id');
-      expect(bytes.length, lessThan(256 * 1024));
-      final decoded = jsonDecode(utf8.decode(bytes)) as List;
+      final result = await db.selectBytes('SELECT id, body, n FROM t ORDER BY id');
+      expect(result.bytes.length, lessThan(256 * 1024));
+      expect(result.rowCount, 1000);
+      final decoded = jsonDecode(utf8.decode(result.bytes)) as List;
       expect(decoded, hasLength(1000));
       expect((decoded.first as Map)['id'], 0);
       final rows = await db.select('SELECT id, body, n FROM t ORDER BY id');
@@ -50,9 +51,10 @@ void main() {
 
     test('large result (>256KB, formerly sacrificed) is intact', () async {
       await seed(2000, 300);
-      final bytes = await db.selectBytes('SELECT id, body, n FROM t ORDER BY id');
-      expect(bytes.length, greaterThan(256 * 1024));
-      final decoded = jsonDecode(utf8.decode(bytes)) as List;
+      final result = await db.selectBytes('SELECT id, body, n FROM t ORDER BY id');
+      expect(result.bytes.length, greaterThan(256 * 1024));
+      expect(result.rowCount, 2000);
+      final decoded = jsonDecode(utf8.decode(result.bytes)) as List;
       expect(decoded, hasLength(2000));
       expect((decoded.first as Map)['id'], 0);
       expect((decoded[1000] as Map)['body'], 'x' * 300 + '-1000');
@@ -67,20 +69,23 @@ void main() {
       await seed(2000, 300);
       const sql = 'SELECT id, body, n FROM t ORDER BY id';
       for (var i = 0; i < 10; i++) {
-        final bytes = await db.selectBytes(sql);
-        expect(bytes.length, greaterThan(256 * 1024));
-        expect((jsonDecode(utf8.decode(bytes)) as List), hasLength(2000));
+        final result = await db.selectBytes(sql);
+        expect(result.bytes.length, greaterThan(256 * 1024));
+        expect(result.rowCount, 2000);
+        expect((jsonDecode(utf8.decode(result.bytes)) as List), hasLength(2000));
       }
       // interleave concurrent large byte reads — exercises every pooled reader
       final all = await Future.wait([for (var i = 0; i < 8; i++) db.selectBytes(sql)]);
-      for (final b in all) {
-        expect((jsonDecode(utf8.decode(b)) as List), hasLength(2000));
+      for (final r in all) {
+        expect(r.rowCount, 2000);
+        expect((jsonDecode(utf8.decode(r.bytes)) as List), hasLength(2000));
       }
     });
 
     test('empty result is a valid empty JSON array', () async {
-      final bytes = await db.selectBytes('SELECT id, body, n FROM t WHERE id < 0');
-      expect(jsonDecode(utf8.decode(bytes)), isEmpty);
+      final result = await db.selectBytes('SELECT id, body, n FROM t WHERE id < 0');
+      expect(jsonDecode(utf8.decode(result.bytes)), isEmpty);
+      expect(result.rowCount, 0);
     });
   });
 }

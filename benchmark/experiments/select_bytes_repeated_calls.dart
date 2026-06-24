@@ -65,7 +65,7 @@ Future<void> main() async {
     for (var i = 0; i < 16; i++) {
       await db.selectBytes(sql);
     }
-    final probe = await db.selectBytes(sql);
+    final probe = (await db.selectBytes(sql)).bytes;
 
     final medians = <double>[];
     for (var s = 0; s < _samples; s++) {

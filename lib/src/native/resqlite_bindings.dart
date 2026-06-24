@@ -1100,6 +1100,7 @@ void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> _) {
     ffi.Int,
     ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
     ffi.Pointer<ffi.Int>,
+    ffi.Pointer<ffi.Int>,
   )
 >(symbol: 'resqlite_query_bytes', isLeaf: true)
 external int resqliteQueryBytes(
@@ -1110,6 +1111,7 @@ external int resqliteQueryBytes(
   int paramCount,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>> outBuf,
   ffi.Pointer<ffi.Int> outLen,
+  ffi.Pointer<ffi.Int> outRowCount,
 );
 
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
@@ -1122,7 +1124,7 @@ external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 // High-level helpers
 // ---------------------------------------------------------------------------
 
-typedef NativeBuffer = ({ffi.Pointer<ffi.Uint8> ptr, int length});
+typedef NativeBuffer = ({ffi.Pointer<ffi.Uint8> ptr, int length, int rowCount});
 
 NativeBuffer queryBytes(
   ffi.Pointer<ffi.Void> dbHandle,
@@ -1134,6 +1136,7 @@ NativeBuffer queryBytes(
   final paramsNative = allocateParams(params);
   final pBuf = calloc<ffi.Pointer<ffi.Uint8>>();
   final pLen = calloc<ffi.Int>();
+  final pRowCount = calloc<ffi.Int>();
   try {
     final rc = resqliteQueryBytes(
       dbHandle,
@@ -1143,6 +1146,7 @@ NativeBuffer queryBytes(
       params.length,
       pBuf,
       pLen,
+      pRowCount,
     );
     if (rc != 0) {
       // Don't free pBuf — it points to the reader's persistent json_buf,
@@ -1156,10 +1160,11 @@ NativeBuffer queryBytes(
         sqliteCode: rc,
       );
     }
-    return (ptr: pBuf.value, length: pLen.value);
+    return (ptr: pBuf.value, length: pLen.value, rowCount: pRowCount.value);
   } finally {
     freeParams(paramsNative, params);
     calloc.free(pBuf);
     calloc.free(pLen);
+    calloc.free(pRowCount);
   }
 }

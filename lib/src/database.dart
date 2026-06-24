@@ -22,6 +22,22 @@ import 'tracelite_profile.dart';
 part 'extensions/registration.dart';
 part 'native/open_database.dart';
 
+/// The result of [Database.selectBytes]: the JSON-encoded result [bytes] and
+/// the [rowCount] of rows serialized into them.
+///
+/// [rowCount] is counted in C during the same serialization pass that produces
+/// [bytes], so reading it is free — there is no second `COUNT(*)` query and no
+/// need to parse the bytes to learn how many rows came back.
+final class BytesResult {
+  const BytesResult(this.bytes, this.rowCount);
+
+  /// The query result as a single UTF-8 JSON array, serialized natively in C.
+  final Uint8List bytes;
+
+  /// The number of rows serialized into [bytes].
+  final int rowCount;
+}
+
 /// A high-performance SQLite database with reactive queries.
 ///
 /// All reads, writes, and reactive re-queries run off the main isolate
@@ -245,20 +261,24 @@ final class Database {
     );
   }
 
-  /// Executes a query and returns the result as JSON-encoded bytes.
+  /// Executes a query and returns the result as JSON-encoded bytes plus the
+  /// number of rows serialized into them (see [BytesResult]).
   ///
   /// ```dart
-  /// final bytes = await db.selectBytes(
+  /// final result = await db.selectBytes(
   ///   'SELECT id, name FROM users WHERE active = ?',
   ///   [1],
   /// );
-  /// // bytes is a Uint8List containing a JSON array, e.g.:
+  /// // result.bytes is a Uint8List containing a JSON array, e.g.:
   /// // [{"id":1,"name":"Ada"},{"id":2,"name":"Grace"}]
+  /// // result.rowCount is 2.
   /// ```
   ///
   /// JSON serialization happens entirely in C — no Dart [Map] or [String]
-  /// objects are created for the result data. The result crosses to Dart as
-  /// a single [Uint8List].
+  /// objects are created for the result data. The bytes cross to Dart as a
+  /// single [Uint8List]. [BytesResult.rowCount] is counted during that same
+  /// C pass, so it costs nothing to read and saves callers a `COUNT(*)` or a
+  /// parse when they need the row count (e.g. to build a paging envelope).
   ///
   /// This is ideal for HTTP responses, file export, or any path where the
   /// end consumer wants JSON bytes rather than Dart objects.
@@ -268,7 +288,7 @@ final class Database {
   ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed.
   /// Throws [StateError] if called inside a [transaction] body.
-  Future<Uint8List> selectBytes(
+  Future<BytesResult> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
   ]) async {
@@ -285,17 +305,20 @@ final class Database {
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
         : null;
+    final ({Uint8List bytes, int rowCount}) result;
     if (correlationId == null) {
-      return readerPool.selectBytes(sql, parameters);
+      result = await readerPool.selectBytes(sql, parameters);
+    } else {
+      final sqlId = TraceliteProfile.internString(sql);
+      result = await TraceliteProfile.traceAsync(
+        TraceliteResqliteSpans.databaseSelectBytes,
+        () => readerPool.selectBytes(sql, parameters, correlationId),
+        correlationId: correlationId,
+        beginArgs: [sqlId, parameters.length],
+        endArgs: (r) => [r.bytes.length, r.rowCount],
+      );
     }
-    final sqlId = TraceliteProfile.internString(sql);
-    return TraceliteProfile.traceAsync(
-      TraceliteResqliteSpans.databaseSelectBytes,
-      () => readerPool.selectBytes(sql, parameters, correlationId),
-      correlationId: correlationId,
-      beginArgs: [sqlId, parameters.length],
-      endArgs: (bytes) => [bytes.length],
-    );
+    return BytesResult(result.bytes, result.rowCount);
   }
 
   // -------------------------------------------------------------------------

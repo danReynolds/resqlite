@@ -131,7 +131,7 @@ Future<List<BenchmarkTiming>> _benchmarkAtSize(String dir, int rowCount) async {
       swMain.stop();
       final bytes = await future;
       swMain.start();
-      bytes.length; // post-await resume
+      bytes.bytes.length; // post-await resume
       swMain.stop();
       swWall.stop();
       t.record(
@@ -172,7 +172,7 @@ Future<List<BenchmarkTiming>> _benchmarkLargeNativeSelectBytes(
       for (var i = 0; i < _largePayloadRows; i++) [i, '$body-$i'],
     ]);
 
-    final probe = await db.selectBytes(_largePayloadSelectSql);
+    final probe = (await db.selectBytes(_largePayloadSelectSql)).bytes;
     if (probe.length <= _largePayloadMinimumBytes) {
       throw StateError(
         'large selectBytes payload was ${probe.length} bytes; expected '
@@ -192,7 +192,7 @@ Future<List<BenchmarkTiming>> _benchmarkLargeNativeSelectBytes(
       swMain.stop();
       final bytes = await future;
       swMain.start();
-      bytes.length; // post-await resume
+      bytes.bytes.length; // post-await resume
       swMain.stop();
       swWall.stop();
       timing.record(

@@ -1,6 +1,6 @@
 library;
 
-export 'src/database.dart' show Database;
+export 'src/database.dart' show BytesResult, Database;
 export 'src/diagnostics.dart' show Diagnostics;
 export 'src/extensions/extension.dart'
     show

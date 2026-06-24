@@ -102,7 +102,8 @@ final db = await Database.open('app.db');
 
 // Reads
 final rows = await db.select('SELECT * FROM users WHERE id = ?', [42]);
-final json = await db.selectBytes('SELECT * FROM users'); // JSON serialized in C — no Dart object allocation
+final bytes = await db.selectBytes('SELECT * FROM users'); // JSON serialized in C — no Dart object allocation
+// bytes.bytes is the JSON Uint8List; bytes.rowCount is the row count (counted in C).
 
 // Writes
 final result = await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
@@ -188,15 +189,17 @@ When a write hits the `tasks` table:
 
 ```dart
 Future<Response> handleProducts(Request request) async {
-  final bytes = await db.selectBytes(
+  final result = await db.selectBytes(
     'SELECT id, name, price FROM products WHERE active = ?',
     [1],
   );
-  return Response.ok(bytes, headers: {'content-type': 'application/json'});
+  // result.rowCount is counted in C during serialization — no second COUNT(*)
+  // and no parse needed to build a paging envelope.
+  return Response.ok(result.bytes, headers: {'content-type': 'application/json'});
 }
 ```
 
-String escaping, number formatting, and JSON structure are handled in native code. The result crosses to Dart as a single [`Uint8List`](https://api.dart.dev/dart-typed_data/Uint8List-class.html). At 1,000 rows this is **5× faster** than building Dart maps and calling [`jsonEncode`](https://api.dart.dev/dart-convert/jsonEncode.html), and uses **0ms of main-isolate time.**
+String escaping, number formatting, and JSON structure are handled in native code. The result crosses to Dart as a [`BytesResult`](./lib/src/database.dart) — a single [`Uint8List`](https://api.dart.dev/dart-typed_data/Uint8List-class.html) of JSON plus the `rowCount` serialized into it. At 1,000 rows this is **5× faster** than building Dart maps and calling [`jsonEncode`](https://api.dart.dev/dart-convert/jsonEncode.html), and uses **0ms of main-isolate time.**
 
 ### Bulk sync
 
