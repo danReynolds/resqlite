@@ -1,0 +1,7 @@
+{
+  "file": "199-row-level-buf-ensure.md",
+  "title": "Row-level capacity reservation in write_json_to_buf",
+  "impact": "Closes the per-cell `buf_ensure` stack [exp 195](195-stmt-cache-name-tokens.md) and [exp 198](198-direct-buf-int-float-json.md) left in place: a single row-level `buf_ensure` covers the row prelude, every cached column-name token, the per-cell fixed-size upper bound, and the trailing `}`, and the inner loop writes NULL / INTEGER / FLOAT cells directly into `b->data + b->len` without a per-cell ensure. TEXT / BLOB cells stay on their existing helpers and re-ensure remaining headroom afterwards. Bit-identical JSON. Focused `select_bytes_int_heavy.dart` A/B (order-flipped pair): **10k × 8 small ints −1.6 % / −4.0 %, 10k × 20 small ints −6.8 % / −2.8 %, 10k × 20 big ints −1.7 % / −3.0 %, 1k × 2 ints −3.8 % / −1.9 %**, with the mixed-row guard flat at −0.6 % / −0.6 %. `select_bytes_real_int_fastpath.dart` lanes stay inside ±1 % (integer-real lanes inherit no extra saving over exp 198's direct-write, fractional REAL is dominated by snprintf). `select_bytes_wide_cols.dart` int-only lanes reproduce −2.4 % / −3.8 %. No public API change.",
+  "status": "in_review",
+  "link": ""
+}
