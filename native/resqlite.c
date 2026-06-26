@@ -2120,14 +2120,6 @@ RESQLITE_HOT static int write_json_to_buf(
     const int* token_offsets = entry->json_name_token_offsets;
     const int* token_lens = entry->json_name_token_lens;
     int tokens_total = entry->json_name_tokens_len;
-    int* stable_cell_types = NULL;
-    if (col_count > 0) {
-        stable_cell_types = (int*)malloc((size_t)col_count * sizeof(int));
-        if (!stable_cell_types) {
-            rc = SQLITE_NOMEM;
-            goto cleanup;
-        }
-    }
 
     // [EXP-199] Per-row capacity reservation. Pre-reserve at row start for the
     // brace/separator boilerplate, every column-name token, the trailing `}`,
@@ -2159,13 +2151,7 @@ RESQLITE_HOT static int write_json_to_buf(
                    (size_t)token_lens[i]);
             b->len += token_lens[i];
 
-            int type;
-            if (row_index == 0) {
-                type = sqlite3_column_type(stmt, i);
-                stable_cell_types[i] = type;
-            } else {
-                type = stable_cell_types[i];
-            }
+            int type = sqlite3_column_type(stmt, i);
             switch (type) {
                 case SQLITE_NULL:
                     memcpy(b->data + b->len, "null", 4);
@@ -2225,7 +2211,6 @@ RESQLITE_HOT static int write_json_to_buf(
     JSON_CHECK(buf_write_char(b, ']'));
 
 cleanup:
-    free(stable_cell_types);
     sqlite3_reset(stmt);
     *out_row_count = row_index;
 
