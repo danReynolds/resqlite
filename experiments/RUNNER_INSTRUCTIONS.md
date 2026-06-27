@@ -365,11 +365,24 @@ Every scheduled experiment run must:
   and review feedback have also been checked.
 - **Wait for CI on the PR and address actionable failures** before declaring a
   PR ready to merge. A red PR is not merge-ready.
+- **Classify the PR before merge.** Only final PRs that keep source
+  implementation changes are held for human review before merge. "Source
+  implementation" means runtime or public behavior changes in `lib/`, `native/`,
+  package sources, generated source, or public API surfaces. These PRs may be
+  accepted optimizations, correctness changes, or a rejected experiment that
+  still intentionally keeps implementation code. They block on merge until CI is
+  green and review feedback has been checked.
+- **Auto-merge publication-only experiments.** Failed/rejected experiments whose
+  final branch reverts the runtime prototype and keeps only the experiment
+  writeup, index/signal fragments, benchmark result files, focused harnesses,
+  tests, or other documentation/tooling artifacts are the auto-merge class.
+  Once CI is green and there are no unresolved actionable review threads, put
+  them on auto-merge or merge them yourself; do not stop at "ready for review"
+  unless a reviewer or maintainer explicitly asks for a hold.
 - **Wait for automated review, not just CI, before merge readiness** — for PRs
-  *held for human review* (runtime-code changes). A docs-only/tooling PR you put
-  on auto-merge may land before any review arrives; that race is benign — those
-  are the auto-merge class anyway — so don't block on the poll for them. For held
-  PRs, after opening the PR, poll
+  *held for human review* by the classification above. A publication-only PR you
+  put on auto-merge may land before any review arrives; that race is benign, so
+  don't block on the poll for it. For held PRs, after opening the PR, poll
   for review submissions for a few minutes, then read inline review
   threads with thread-aware review data. `gh pr view --json` does not
   expose `reviewThreads`; use the GraphQL API directly:
