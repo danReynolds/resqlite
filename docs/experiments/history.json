@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-25T13:13:43.543850",
+  "generated": "2026-06-27T17:55:44.205013",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -25581,6 +25581,26 @@
         "date": "2026-06-25",
         "timestamp": "2026-06-25T07:33:46",
         "source": "exact"
+      }
+    },
+    {
+      "id": "201",
+      "title": "Base64 quote reservation for selectBytes BLOBs",
+      "date": "2026-06-27",
+      "status": "rejected",
+      "summary": "Tried collapsing `json_write_base64` from quote write + payload ensure + quote write into one `buf_ensure(encoded_len + 2)` with direct quote writes. Rejected: the tiny-BLOB lanes that should expose per-cell framing overhead were flat or sign-flipped (10k x 8 tiny +0.3% / -0.1%, 10k x 20 tiny -2.0% / +0.8%), while the medium/large trend was not enough to explain or keep the runtime change. Prototype preserved at `archive/exp-201`; focused `select_bytes_blob_base64.dart` harness retained for future BLOB encoder work.",
+      "commit": null,
+      "archive": "archive/exp-201",
+      "problem": "After [exp 199](199-row-level-buf-ensure.md), fixed-size\nNULL/INTEGER/FLOAT cells in `write_json_to_buf` write directly under one\nrow-level reservation. Variable-size TEXT and BLOB cells still go through their\nhelpers because their encoded length is data-dependent.\n\nThe BLOB helper, `json_write_base64`, had a small remaining per-cell framing\ncost:\n\n```c\nbuf_write_char(b, '\"');\nbuf_ensure(b, encoded_len);\n... write base64 ...\nbuf_write_char(b, '\"');\n```\n\nFor BLOB-heavy `selectBytes()` payloads with many tiny cells, those two quote\nwrites and three capacity checks could plausibly be a visible part of the\ncell-level overhead left after the numeric encoder work. Unlike a new base64\nalgorithm, this candidate is deliberately small and behavior-preserving.",
+      "hypothesis": "Reserving `encoded_len + 2` once and writing the opening and closing JSON quotes\ndirectly around the base64 payload should remove two helper calls and two\ncapacity checks per BLOB cell.\n\nThe acceptance bar was set on the tiny-BLOB lanes: if the mechanism matters,\nthe many-cell shapes should reproduce a candidate-faster result across an\norder-flipped pair. Medium and large BLOB lanes are guardrails because the\nbase64 loop and transfer volume should dominate there.",
+      "approach": "The archived prototype changed only `native/resqlite.c`:\n\n- compute the same `encoded_len = ((len + 2) / 3) * 4`,\n- call `buf_ensure(b, encoded_len + 2)` once,\n- write `\"` directly before and after the encoded payload,\n- advance `b->len` by `encoded_len + 2`.\n\nThe experiment also adds\n`benchmark/experiments/select_bytes_blob_base64.dart`, a focused harness with\ntiny, small, medium, large, and mixed BLOB `selectBytes()` lanes. The runtime\nprototype is archived at `archive/exp-201` and reverted from this branch; only\nthe harness and experiment record are kept.",
+      "results": "Focused harness: `dart run benchmark/experiments/select_bytes_blob_base64.dart`.\nValues are median microseconds per `selectBytes()` query.\n\n| Lane | Baseline P1 | Candidate P1 | Delta P1 | Candidate P2 | Baseline P2 | Delta P2 |\n|---|---:|---:|---:|---:|---:|---:|\n| 10k rows x 8 tiny blobs (3B) | 2373 | 2379 | +0.3% | 2358 | 2360 | -0.1% |\n| 10k rows x 20 tiny blobs (3B) | 5530 | 5417 | -2.0% | 5385 | 5340 | +0.8% |\n| 10k rows x 8 small blobs (16B) | 2943 | 2945 | +0.1% | 2946 | 2888 | +2.0% |\n| 10k rows x 4 medium blobs (128B) | 3847 | 3796 | -1.3% | 3823 | 3899 | -1.9% |\n| 1k rows x 2 large blobs (4KB) | 4984 | 4602 | -7.7% | 4702 | 4885 | -3.7% |\n| 10k rows x 8 mixed (4 blob + 2 int + 2 text) | 2777 | 2742 | -1.3% | 2803 | 2743 | +2.2% |\n\nFocused correctness:\n\n```bash\ndart test test/...",
+      "reasoning": "Rejected. The candidate did not move the lanes that should have carried the\nmechanism. The 8-column tiny-BLOB lane was flat in both pass orderings, the\n20-column tiny-BLOB lane changed sign, and the small/mixed lanes were flat or\nworse in the confirmation pass. Medium and large BLOBs trended faster, but that\nis not enough to keep the runtime change: those lanes have far fewer BLOB cells,\nso a quote-framing optimization is not the load-bearing explanation.\n\nNo runtime code is kept. The focused harness remains because it closes this\nspecific candidate and gives future BLOB encoder work a direct gate.",
+      "benchmarkRun": {
+        "id": "baseline-for-exp199",
+        "date": "2026-06-25",
+        "timestamp": "2026-06-25T07:44:46",
+        "source": "nearby"
       }
     }
   ],
