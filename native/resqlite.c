@@ -1896,10 +1896,10 @@ RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
                                                    int len) {
     // Output size: 4 chars per 3 bytes, rounded up, plus quotes.
     int encoded_len = ((len + 2) / 3) * 4;
-    if (buf_write_char(b, '"') != 0) return -1;
-    if (buf_ensure(b, encoded_len) != 0) return -1;
+    if (buf_ensure(b, encoded_len + 2) != 0) return -1;
 
     unsigned char* out = b->data + b->len;
+    *out++ = '"';
     int i = 0;
 
     // Process 3-byte groups.
@@ -1923,8 +1923,9 @@ RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
         *out++ = '=';
     }
 
-    b->len += encoded_len;
-    return buf_write_char(b, '"');
+    *out++ = '"';
+    b->len += encoded_len + 2;
+    return 0;
 }
 
 // Lookup table: maps each byte to its JSON escape string length (0 = safe).
