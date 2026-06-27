@@ -1,0 +1,7 @@
+{
+  "file": "201-base64-quote-reservation.md",
+  "title": "Base64 quote reservation for selectBytes BLOBs",
+  "impact": "Tried collapsing `json_write_base64` from quote write + payload ensure + quote write into one `buf_ensure(encoded_len + 2)` with direct quote writes. Rejected: the tiny-BLOB lanes that should expose per-cell framing overhead were flat or sign-flipped (10k x 8 tiny +0.3% / -0.1%, 10k x 20 tiny -2.0% / +0.8%), while the medium/large trend was not enough to explain or keep the runtime change. Prototype preserved at `archive/exp-201`; focused `select_bytes_blob_base64.dart` harness retained for future BLOB encoder work.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected_below_signal_bar",
+  "changedBeliefs": [
+    "Collapsing `json_write_base64` from quote write + payload ensure + quote write into one `buf_ensure(encoded_len + 2)` with direct quote writes is below the current decision bar. The many-cell lanes that should expose per-BLOB framing overhead did not reproduce a win: 10k x 8 tiny blobs moved +0.3% / -0.1%, 10k x 20 tiny blobs moved -2.0% / +0.8%, and 10k x 8 small blobs moved +0.1% / +2.0%.",
+    "Medium and large BLOB lanes trended candidate-faster (-1.3% / -1.9% on 10k x 4 medium blobs, -7.7% / -3.7% on 1k x 2 large blobs), but that is not the load-bearing mechanism for a per-cell quote/framing optimization because those lanes have far fewer BLOB cells and are dominated by base64 loop/transfer volume.",
+    "The new `benchmark/experiments/select_bytes_blob_base64.dart` harness is the durable contribution: it covers tiny, small, medium, large, and mixed BLOB `selectBytes()` shapes and should gate any future BLOB JSON encoder change."
+  ],
+  "nextSignals": [
+    "Do not retry quote/framing reservation in `json_write_base64` without a new compiler/runtime fact; the many-tiny-cell lanes did not reproduce a win.",
+    "Future BLOB `selectBytes()` work should target the base64 loop, transport/copy shape, or another measured allocation boundary rather than only the quotes around the encoded payload.",
+    "The rejected prototype is preserved at `archive/exp-201`; use `select_bytes_blob_base64.dart` before accepting or rejecting the next BLOB JSON encoder candidate."
+  ]
+}
