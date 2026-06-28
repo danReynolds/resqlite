@@ -1485,6 +1485,22 @@
         "Future BLOB `selectBytes()` work should target the base64 loop, transport/copy shape, or another measured allocation boundary rather than only the quotes around the encoded payload.",
         "The rejected prototype is preserved at `archive/exp-201`; use `select_bytes_blob_base64.dart` before accepting or rejecting the next BLOB JSON encoder candidate."
       ]
+    },
+    "202": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_below_signal_bar",
+      "changedBeliefs": [
+        "Pre-reserving `len + 2` in `json_write_string` and directly writing quote + payload + quote for no-escape strings is below the current decision bar. The safe ASCII lanes did not reproduce a material win: 10k x 8 short ASCII moved +0.7% / -0.8%, 10k x 20 short ASCII moved -0.8% / +0.0%, and the 1k x 2 narrow guard moved -0.9% / +1.7%.",
+        "Medium safe ASCII and mixed TEXT/INTEGER/REAL lanes trended slightly candidate-faster (-0.7% to -1.6%), and escaped text trended -1.1% / -1.7%, but those magnitudes are in the same band as the controls and are not enough to keep a runtime helper rewrite.",
+        "The new `benchmark/experiments/select_bytes_text_string_reserve.dart` harness is the durable contribution: it covers short/wide/medium safe TEXT, escaped TEXT, mixed rows, and a narrow small-rowset guard for future `json_write_string` changes."
+      ],
+      "nextSignals": [
+        "Do not retry simple quote/payload reservation in `json_write_string` without a new compiler/runtime fact; the safe ASCII lanes did not clear the signal bar.",
+        "Future TEXT `selectBytes()` work should target the SWAR escape scan, escaped-control formatting, a measurable allocation/copy boundary, or a production profile showing TEXT cells dominate `write_json_to_buf` wall.",
+        "The rejected prototype is preserved at `archive/exp-202`; use `select_bytes_text_string_reserve.dart` before accepting or rejecting the next TEXT JSON encoder candidate."
+      ]
     }
   }
 }
