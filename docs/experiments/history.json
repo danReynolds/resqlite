@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-27T17:55:44.205013",
+  "generated": "2026-06-28T10:04:40.305659",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -25584,6 +25584,26 @@
       }
     },
     {
+      "id": "200",
+      "title": "Stable-Type selectBytes moonshot",
+      "date": "2026-06-26",
+      "status": "rejected",
+      "summary": "Moonshot: Caching each column's first-row SQLite storage class and skipping `sqlite3_column_type()` on later rows exposed a plausible fixed-shape ceiling in `select_bytes_wide_cols.dart` (candidate faster on the wide integer and mixed lanes), but the integer-heavy harness did not reproduce a clean win and the semantic failure is decisive: an untyped column with row 1 INTEGER and row 2 TEXT serialized as `[{\"v\":1},{\"v\":0}]` instead of `[{\"v\":1},{\"v\":\"abc\"}]`. Rejected as a hidden default; prototype preserved at `archive/exp-200`.",
+      "commit": null,
+      "archive": "archive/exp-200",
+      "problem": "Exp 190, 192, 194, 195, 198, and 199 removed most of the visible per-cell JSON\nencoder overhead from `write_json_to_buf`: column-name tokens are cached, integer\nand integer-valued REAL formatters write directly into the output buffer, and\nthe fixed-size row path pre-reserves capacity once per row.\n\nOne boundary remains in the inner loop: every cell still calls\n`sqlite3_column_type(stmt, i)` before choosing the NULL / INTEGER / FLOAT / TEXT\n/ BLOB writer. On fixed-shape result sets this looks redundant. The statement\nand table declarations often imply stable per-column storage classes, and the\nfirst row reveals the actual SQLite storage class the encoder will see.",
+      "hypothesis": "Assumption challenged: `selectBytes()` must inspect each row's SQLite storage\nclass cell by cell, even when a result set appears type-stable.\n\nPrototype: record each column's storage class from row 0, then serialize later\nrows using that cached class instead of calling `sqlite3_column_type()` again.\nThis intentionally allows more risk than an exploit experiment. The point is to\nmeasure the ceiling for removing the type probe and to learn whether any hidden\ndefault can be safe.\n\nThe kill condition is correctness, not just wall time: if ordinary SQLite\ndynamic typing can make later rows carry a different storage class, the hidden\ndefault is invalid no matter how much a fixed-type benchmark improves.",
+      "approach": "The archived prototype changed only `write_json_to_buf`:\n\n- allocate one per-query `int[col_count]` type vector,\n- fill it from `sqlite3_column_type()` while serializing row 0,\n- for row 1 and later, skip `sqlite3_column_type()` and dispatch on the cached\n  first-row type,\n- keep the existing row-level reservation and fixed-cell direct-write path from\n  exp 199.\n\nNo production-safe fallback was added. A fallback that rechecks the type before\nusing the cached class would pay the exact probe this experiment is trying to\nremove. A production version would need a stronger proof surface: strict tables,\ndeclared-type inspection with query-shape constraints, an explicit opt-in, or\nsome other semantic contract that SQLite's dynamic storage classes cannot\nsilently violate.\n\nThe runtime patch was...",
+      "results": "### Fixed-shape integer harness\n\nFocused harness: `dart run benchmark/experiments/select_bytes_int_heavy.dart`.\nMedians are one baseline pass followed by one candidate pass.\n\n| Lane | Baseline | Candidate | Delta |\n|---|---:|---:|---:|\n| 10k rows x 8 small ints | 3056 us | 2820 us | -7.7% |\n| 10k rows x 20 small ints | 7626 us | 8415 us | +10.3% |\n| 10k rows x 20 big ints (~18 digits) | 8431 us | 8756 us | +3.9% |\n| 10k rows x 8 mixed (4 int + 2 text + 2 real) | 9985 us | 10385 us | +4.0% |\n| 1k rows x 2 ints | 136 us | 145 us | +6.6% |\n\nThis harness does not support accepting the idea. The narrow 8-column integer\nlane improves, but every other lane regresses in the same pass. The per-query\ntype-vector allocation and altered branch shape appear to erase or exceed the\nsaved type call on ...",
+      "reasoning": "Rejected as a hidden default.\n\nThe performance ceiling is plausible on fixed-shape wide rows, but the\nassumption is not safe for ordinary SQLite result sets. Caching the first row's\nstorage class can silently corrupt `selectBytes()` output as soon as later rows\ncarry a different storage class. The only safe hidden implementation would need\nto reintroduce per-cell verification or a proof layer whose complexity is not\njustified by the current mixed performance evidence.",
+      "benchmarkRun": {
+        "id": "baseline-for-exp199",
+        "date": "2026-06-25",
+        "timestamp": "2026-06-25T07:44:46",
+        "source": "nearby"
+      }
+    },
+    {
       "id": "201",
       "title": "Base64 quote reservation for selectBytes BLOBs",
       "date": "2026-06-27",
@@ -25595,13 +25615,7 @@
       "hypothesis": "Reserving `encoded_len + 2` once and writing the opening and closing JSON quotes\ndirectly around the base64 payload should remove two helper calls and two\ncapacity checks per BLOB cell.\n\nThe acceptance bar was set on the tiny-BLOB lanes: if the mechanism matters,\nthe many-cell shapes should reproduce a candidate-faster result across an\norder-flipped pair. Medium and large BLOB lanes are guardrails because the\nbase64 loop and transfer volume should dominate there.",
       "approach": "The archived prototype changed only `native/resqlite.c`:\n\n- compute the same `encoded_len = ((len + 2) / 3) * 4`,\n- call `buf_ensure(b, encoded_len + 2)` once,\n- write `\"` directly before and after the encoded payload,\n- advance `b->len` by `encoded_len + 2`.\n\nThe experiment also adds\n`benchmark/experiments/select_bytes_blob_base64.dart`, a focused harness with\ntiny, small, medium, large, and mixed BLOB `selectBytes()` lanes. The runtime\nprototype is archived at `archive/exp-201` and reverted from this branch; only\nthe harness and experiment record are kept.",
       "results": "Focused harness: `dart run benchmark/experiments/select_bytes_blob_base64.dart`.\nValues are median microseconds per `selectBytes()` query.\n\n| Lane | Baseline P1 | Candidate P1 | Delta P1 | Candidate P2 | Baseline P2 | Delta P2 |\n|---|---:|---:|---:|---:|---:|---:|\n| 10k rows x 8 tiny blobs (3B) | 2373 | 2379 | +0.3% | 2358 | 2360 | -0.1% |\n| 10k rows x 20 tiny blobs (3B) | 5530 | 5417 | -2.0% | 5385 | 5340 | +0.8% |\n| 10k rows x 8 small blobs (16B) | 2943 | 2945 | +0.1% | 2946 | 2888 | +2.0% |\n| 10k rows x 4 medium blobs (128B) | 3847 | 3796 | -1.3% | 3823 | 3899 | -1.9% |\n| 1k rows x 2 large blobs (4KB) | 4984 | 4602 | -7.7% | 4702 | 4885 | -3.7% |\n| 10k rows x 8 mixed (4 blob + 2 int + 2 text) | 2777 | 2742 | -1.3% | 2803 | 2743 | +2.2% |\n\nFocused correctness:\n\n```bash\ndart test test/...",
-      "reasoning": "Rejected. The candidate did not move the lanes that should have carried the\nmechanism. The 8-column tiny-BLOB lane was flat in both pass orderings, the\n20-column tiny-BLOB lane changed sign, and the small/mixed lanes were flat or\nworse in the confirmation pass. Medium and large BLOBs trended faster, but that\nis not enough to keep the runtime change: those lanes have far fewer BLOB cells,\nso a quote-framing optimization is not the load-bearing explanation.\n\nNo runtime code is kept. The focused harness remains because it closes this\nspecific candidate and gives future BLOB encoder work a direct gate.",
-      "benchmarkRun": {
-        "id": "baseline-for-exp199",
-        "date": "2026-06-25",
-        "timestamp": "2026-06-25T07:44:46",
-        "source": "nearby"
-      }
+      "reasoning": "Rejected. The candidate did not move the lanes that should have carried the\nmechanism. The 8-column tiny-BLOB lane was flat in both pass orderings, the\n20-column tiny-BLOB lane changed sign, and the small/mixed lanes were flat or\nworse in the confirmation pass. Medium and large BLOBs trended faster, but that\nis not enough to keep the runtime change: those lanes have far fewer BLOB cells,\nso a quote-framing optimization is not the load-bearing explanation.\n\nNo runtime code is kept. The focused harness remains because it closes this\nspecific candidate and gives future BLOB encoder work a direct gate."
     }
   ],
   "tracked": [

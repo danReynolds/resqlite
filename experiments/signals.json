@@ -1453,6 +1453,23 @@
         "Any future encoder change inside `write_json_to_buf` should keep the row-level reservation pattern intact: pre-reserve at row start, write fixed cells directly, re-ensure after TEXT / BLOB. The TEXT / BLOB recovery path is a single ensure call per variable-size cell and is the right baseline cost for mixed-row workloads."
       ]
     },
+    "200": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "experimentClass": "moonshot",
+      "outcomeClass": "rejected_semantic_mismatch",
+      "changedBeliefs": [
+        "Skipping per-cell `sqlite3_column_type()` by caching first-row storage classes is not safe as a hidden `selectBytes()` default. SQLite storage class is per value, not per column: a local probe with an untyped column containing row 1 INTEGER and row 2 TEXT produced `[{\"v\":1},{\"v\":0}]` from the prototype while `select()` saw `[{\"v\":1},{\"v\":\"abc\"}]`.",
+        "There is plausible fixed-shape headroom in wide rows: `select_bytes_wide_cols.dart` measured candidate-faster on 10k-row integer and mixed-column shapes in both pass orderings. The magnitude is not load-bearing because the flipped baseline drifted much slower than the first baseline, but one `sqlite3_column_type()` call per cell is not free.",
+        "The integer-heavy focused harness did not reproduce a clean win: only 10k x 8 small ints improved (-7.7%), while 10k x 20 small ints (+10.3%), 10k x 20 big ints (+3.9%), the mixed guard (+4.0%), and 1k x 2 ints (+6.6%) regressed in the same pass. A per-query type vector plus altered branch shape can erase the saved type probe on the rows that should have been the cleanest path."
+      ],
+      "nextSignals": [
+        "Do not skip `sqlite3_column_type()` in the general `selectBytes()` path based only on first-row type stability.",
+        "Reopen stable-type JSON encoding only with a real proof surface: SQLite STRICT tables, declared-type plus query-shape constraints, generated/static statement metadata, or an explicit user-visible mode that documents dynamic-type behavior.",
+        "If such a proof surface appears, use `select_bytes_wide_cols.dart` as the fast ceiling check and add a dynamic-storage-class correctness guard before accepting any production runtime code. The rejected prototype is preserved at `archive/exp-200`."
+      ]
+    },
     "201": {
       "directions": [
         "result-transfer-shape"
