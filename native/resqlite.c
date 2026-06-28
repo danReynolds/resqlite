@@ -1963,14 +1963,10 @@ static const char json_esc_char[256] = {
 };
 
 RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
-    // Reserve the common no-escape shape once: opening quote + payload +
-    // closing quote. Escaped strings can still grow below via buf_write().
-    if (buf_ensure(b, len + 2) != 0) return -1;
-    b->data[b->len++] = '"';
+    if (buf_write_char(b, '"') != 0) return -1;
 
     int start = 0;
     int i = 0;
-    int saw_escape = 0;
 
     // SWAR: scan 8 bytes at a time for the common case (no escapes needed).
     // Check if any byte < 0x20, == '"' (0x22), or == '\\' (0x5C).
@@ -2004,8 +2000,6 @@ RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char
 
         if (RESQLITE_LIKELY(elen == 0)) continue; // Common case: safe byte.
 
-        saw_escape = 1;
-
         // Flush unescaped span before this character.
         if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
 
@@ -2023,18 +2017,9 @@ RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char
     }
 
     // Flush remaining unescaped span.
-    if (start < len) {
-        if (saw_escape) {
-            if (buf_write(b, s + start, len - start) != 0) return -1;
-        } else {
-            memcpy(b->data + b->len, s + start, (size_t)(len - start));
-            b->len += len - start;
-        }
-    }
+    if (start < len && buf_write(b, s + start, len - start) != 0) return -1;
 
-    if (saw_escape) return buf_write_char(b, '"');
-    b->data[b->len++] = '"';
-    return 0;
+    return buf_write_char(b, '"');
 }
 
 // [EXP-195] Lazily build the cached JSON column-name tokens on `entry`.
