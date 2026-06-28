@@ -2151,7 +2151,20 @@ RESQLITE_HOT static int write_json_to_buf(
                    (size_t)token_lens[i]);
             b->len += token_lens[i];
 
-            int type = sqlite3_column_type(stmt, i);
+            // [EXP-203] Grab the cell's `sqlite3_value*` once per column and
+            // dispatch through `sqlite3_value_*` instead of `sqlite3_column_*`.
+            // Each `sqlite3_column_*` call runs a fresh `columnMem` lookup
+            // (mutex enter/leave + result-row index check) plus
+            // `columnMallocFailure` (mutex leave + ApiExit). The `sqlite3_value_*`
+            // family operates directly on the Mem* with no per-call lookup. For
+            // TEXT/BLOB this saves two redundant columnMem calls per cell
+            // (type + payload + bytes -> one column_value + three cheap value
+            // accesses); for INTEGER/FLOAT it saves one. Safe under
+            // SQLITE_OPEN_NOMUTEX because each connection is owned by a single
+            // isolate worker — the "unprotected sqlite3_value" warning applies
+            // only when threads can race on the underlying Mem cell.
+            sqlite3_value* val = sqlite3_column_value(stmt, i);
+            int type = sqlite3_value_type(val);
             switch (type) {
                 case SQLITE_NULL:
                     memcpy(b->data + b->len, "null", 4);
@@ -2159,20 +2172,20 @@ RESQLITE_HOT static int write_json_to_buf(
                     break;
                 case SQLITE_INTEGER:
                     b->len += fast_i64_to_str(
-                        sqlite3_column_int64(stmt, i),
+                        sqlite3_value_int64(val),
                         (char*)(b->data + b->len));
                     break;
                 case SQLITE_FLOAT:
                     b->len += fast_double_to_json_num(
-                        sqlite3_column_double(stmt, i),
+                        sqlite3_value_double(val),
                         (char*)(b->data + b->len), (size_t)cell_max);
                     break;
                 case SQLITE_TEXT: {
-                    // column_text MUST be called before column_bytes — calling
+                    // value_text MUST be called before value_bytes — calling
                     // bytes first can trigger an implicit type conversion that
                     // invalidates the text pointer.
-                    const char* text = (const char*)sqlite3_column_text(stmt, i);
-                    int text_len = sqlite3_column_bytes(stmt, i);
+                    const char* text = (const char*)sqlite3_value_text(val);
+                    int text_len = sqlite3_value_bytes(val);
                     JSON_CHECK(json_write_string(b, text, text_len));
                     // [EXP-199] json_write_string may have grown the buffer
                     // past the row-start reservation. Re-ensure headroom for
@@ -2186,9 +2199,9 @@ RESQLITE_HOT static int write_json_to_buf(
                     break;
                 }
                 case SQLITE_BLOB: {
-                    int blob_len = sqlite3_column_bytes(stmt, i);
+                    int blob_len = sqlite3_value_bytes(val);
                     const unsigned char* blob =
-                        (const unsigned char*)sqlite3_column_blob(stmt, i);
+                        (const unsigned char*)sqlite3_value_blob(val);
                     JSON_CHECK(json_write_base64(b, blob, blob_len));
                     int remaining_tokens = tokens_total
                         - (token_offsets[i] + token_lens[i]);
