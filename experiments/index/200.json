@@ -1,0 +1,7 @@
+{
+  "file": "200-stable-type-selectbytes-moonshot.md",
+  "title": "Stable-Type selectBytes moonshot",
+  "impact": "Moonshot: Caching each column's first-row SQLite storage class and skipping `sqlite3_column_type()` on later rows exposed a plausible fixed-shape ceiling in `select_bytes_wide_cols.dart` (candidate faster on the wide integer and mixed lanes), but the integer-heavy harness did not reproduce a clean win and the semantic failure is decisive: an untyped column with row 1 INTEGER and row 2 TEXT serialized as `[{\"v\":1},{\"v\":0}]` instead of `[{\"v\":1},{\"v\":\"abc\"}]`. Rejected as a hidden default; prototype preserved at `archive/exp-200`.",
+  "status": "rejected",
+  "link": ""
+}
