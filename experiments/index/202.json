@@ -1,0 +1,7 @@
+{
+  "file": "202-text-json-string-reserve.md",
+  "title": "TEXT string reservation for selectBytes",
+  "impact": "Tried reserving `len + 2` once inside `json_write_string` so no-escape TEXT cells could write quote + payload + quote directly. Rejected: the safe ASCII lanes stayed in the +/-2% band and the narrow guard changed sign (10k x 8 short ASCII +0.7% / -0.8%, 10k x 20 short ASCII -0.8% / +0.0%, 1k x 2 short ASCII -0.9% / +1.7%). Prototype preserved at `archive/exp-202`; focused `select_bytes_text_string_reserve.dart` harness retained for future TEXT encoder work.",
+  "status": "rejected",
+  "link": ""
+}
