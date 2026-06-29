@@ -257,6 +257,27 @@ git diff --name-only origin/main...HEAD
   measurement hook). **Leave it open for human review.** Do not auto-merge
   runtime code, even when CI is green and the verdict is "rejected."
 
+### Disposition must be terminal before merge
+
+An experiment merges only once it has a verdict, so its recorded disposition
+must be **terminal — `accepted` or `rejected`, never `in_review`** — by the time
+the PR goes green. The soak/decision happens in the open PR; do not merge an
+experiment still in review (keep the PR open until the verdict lands). CI
+enforces this: `check_experiment_dispositions.dart` (the *Verify experiments
+reach a terminal disposition* step) fails if any experiment is still
+`in_review`, so the flip cannot be skipped the way it was historically — which
+left dozens of merged-but-unpromoted experiments stranded in the In Review
+bucket.
+
+Set the disposition in all **three** per-experiment sources together (they must
+agree, and `check_experiment_signals.dart` enforces the index↔outcomeClass link):
+
+- `experiments/index/NNN.json` → `"status"` (`accepted` / `rejected`)
+- `experiments/NNN-*.md` → `**Status:**` (`Accepted` / `Rejected`)
+- `experiments/signals/entries/NNN.json` → `outcomeClass` (must start with
+  `accepted` / `rejected`, e.g. `accepted`, `accepted_measurement`,
+  `rejected_below_signal`)
+
 ### Label the PR
 
 Tag every experiment PR with one `type:` label and one outcome label, so the
@@ -276,10 +297,10 @@ don't redefine them):
     correctness guard.
   - `rejected` — the experiment failed: measured below the decision bar,
     regressed, or the candidate was abandoned.
-  An accepted win is `approved` from the moment its result is known, regardless
-  of whether its README row still reads "In Review" while it soaks. Leave a
-  still-undecided / deferred experiment with no outcome label until its verdict
-  lands.
+  An accepted win is `approved` from the moment its result is known; promote its
+  disposition to `accepted` (see *Disposition must be terminal before merge*)
+  rather than merging it while still in review. Leave a still-undecided
+  experiment's PR open with no outcome label until its verdict lands.
 
 ```bash
 gh pr edit <N> --add-label "type: performance" --add-label "approved"
