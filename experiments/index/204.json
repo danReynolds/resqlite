@@ -1,0 +1,7 @@
+{
+  "file": "204-utf8-overreserve-bind.md",
+  "title": "UTF-8 over-reserve bind sizing",
+  "impact": "Tried skipping the exact `_utf8Length` prepass for non-ASCII single-row binds by reserving `ascii_prefix + 3 * remaining_utf16_code_units` and letting `_writeUtf8` record the actual byte count. Rejected: CJK 64 KB through 1 MB binds improved in both orderings (-6% to -12%), and the micro showed the Unicode sizing pass is real work (-20%), but the policy can over-allocate badly for mixed Unicode/ASCII or two-byte text. Prototype preserved at `archive/exp-204`; no runtime change kept.",
+  "status": "rejected",
+  "link": ""
+}
