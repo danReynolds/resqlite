@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-29T14:58:08.451383",
+  "generated": "2026-06-29T22:32:13.954212",
   "metricGroups": [
     "Reads",
     "Writes",
@@ -30,7 +30,7 @@
           "id": "185",
           "title": "JSON buffer reclaim release coverage",
           "date": "2026-06-18",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-support guard for exp 183: `SQLite Diagnostics` now emits `JSON buf (KiB)` and a `JSON buffer reclaim (8 large selectBytes + 64 small settles)` row. The row grows reader `json_buf` capacity with a concurrent large `selectBytes` burst, settles with small reads, and fails if post-settle retention stays above 512 KiB; the focused suite run settled at **64.0 KiB** with idle readers. Parser/sidecar/history data carry optional `jsonBufKiB` while legacy diagnostics tables remain parseable. No runtime code.",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/185-json-buf-release-coverage.md"
         },
@@ -46,7 +46,7 @@
           "id": "183",
           "title": "json_buf retention audit + high-threshold reclaim",
           "date": "2026-06-17",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Diagnostic + reclaim. Adds `Diagnostics.readerJsonBufHighWaterBytes` (sum of per-reader `json_buf.cap`) so the bounded RSS high-water exp 174 left as a known trade-off is now directly observable. Pathological retention is real on a one-off concurrent-burst workload (8 × 8 MB `selectBytes` pins **32 MB** across the 4-reader pool for the rest of the connection's life) and on a recurring-large pattern (16 MB pinned). A high-threshold C-side `realloc` shrink — fired by the reader worker after `SendPort.send` on a `selectBytes` reply when `json_buf.cap > 1 MB` AND the just-sent result was < 256 KB — reclaims back to the 16 KB initial cap on subsequent small reads: **post-burst settle 32 MB → 64 KB** (×4 readers, summed); recurring-large **16 MB → 64 KB**. Neutral on the focused `large_bytes_transfer.dart` lanes (±2 % within run-to-run noise). The 256 KB last-len guard is what makes the policy safe under back-to-back large reads — they keep their warm capacity",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/183-json-buf-retention-audit.md"
         },
@@ -183,7 +183,7 @@
           "id": "178",
           "title": "Missing-benchmark-run declaration guard",
           "date": "2026-06-16",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-only CI guardrail: `generate_history.dart` now fails the build when a chartable (accepted/in-review) experiment numbered `≥ 178` has no linked benchmark run *and* no `**Benchmark Run:**` opt-out declaration — converting the documented silent chart-invisibility failure (forgotten result file / date mismatch) into a loud error for new work. Reuses the existing `_skipsReleaseBenchmarkRunMapping` opt-out signal as the escape hatch; pre-178 experiments are grandfathered. No runtime code; `history.json` byte-for-byte unchanged",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/178-missing-run-declaration-guard.md"
         },
@@ -191,7 +191,7 @@
           "id": "177",
           "title": "Order-flipped A/B drift discriminator",
           "date": "2026-06-16",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Methodology tooling: mechanizes the JOURNAL's most-reapplied lesson (phase-ordered A/B gates confound code deltas with time-correlated drift). Adds `cvPct` + `classifyDriftFlag` to `benchmark/shared/stats.dart` and a `benchmark/ab_drift_check.dart` CLI that reads two order-flipped passes of per-run values and classifies a regression flag as `reproduced` (same-direction effect, comparable CVs), `drift-suspected` (CV asymmetry on the flagged phase, or sign reversal across the flip), or `inconclusive`. Re-run against the recorded flags from exp 159 (CV asymmetry) and exp 167 (sign reversal), it reproduces the verdicts those runners reached by hand. No runtime change; 14/14 unit tests pass",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/177-ab-drift-discriminator.md"
         },
@@ -199,7 +199,7 @@
           "id": "176",
           "title": "Row.containsKey identity fast path",
           "date": "2026-06-16",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Routes `Row.containsKey` through the exp 158 schema-name identity scan (via a shared `RowSchema.containsName`) instead of always hashing the key in the private `HashMap`. For interned-key probes on schemas ≤ 32 columns the membership test becomes a pointer-identity scan; equal-but-non-identical keys and wider schemas still fall back to the map. Focused `row_map_facade` `containsKey` lane improves **~13.0 → ~10.0 ms (−23%)** with a flat `hot lookup` control, flipping Row from ~+3.6 ms slower than `LinkedHashMap` to at-parity. Behavior-identical, no public API change",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/176-row-containskey-identity-fastpath.md"
         },
@@ -207,7 +207,7 @@
           "id": "175",
           "title": "Large selectBytes release coverage",
           "date": "2026-06-16",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a named `Large payload (~650KB)` `resqlite selectBytes()` row to the release JSON-bytes suite and curates it as `selectBytes() large bytes`, giving exp 174's native-view transfer path a release-history guard above the old 256 KB sacrifice threshold. Single-repeat release run measured 0.323 ms wall / 0.000 ms main for the new row.",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/175-large-selectbytes-coverage.md"
         },
@@ -215,7 +215,7 @@
           "id": "174",
           "title": "selectBytes native-view transfer",
           "date": "2026-06-15",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "`selectBytes` sends a `Uint8List` view over the reader connection's persistent `json_buf` and never takes the sacrifice (Isolate.exit + reader respawn) path. Sacrifice is a real win for the rows path (zero-copy object transfer) but counterproductive for bytes — native JSON must be `fromList`-copied before `Isolate.exit` can transfer it, so it saved zero copies and only added a respawn, while the non-sacrifice path copied twice. **−44% (~1.8×)** on large (>256KB) byte reads by eliminating the per-query respawn, **−4%** on small, at a bounded ~+15MB RSS high-water. Net code removal, no public API change",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/174-selectbytes-view-transfer.md"
         },
@@ -231,7 +231,7 @@
           "id": "172",
           "title": "Long-payload stream hash coverage",
           "date": "2026-06-15",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a default streaming-suite row for mixed 32KB TEXT + 32KB BLOB unchanged fanout plus long-BLOB hash correctness coverage. The mixed row lands at 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without justifying an immediate new hash-loop variant",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/172-long-payload-stream-hash.md"
         },
@@ -255,7 +255,7 @@
           "id": "169",
           "title": "Tracelite workload-summary insight guard",
           "date": "2026-06-14",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a Resqlite-side validation step to `benchmark/profile/run_tracelite_profile.dart` so canonical profile runs fail if `tracelite explain` regresses to coverage-only output. The validated profile emitted dispatch floors, dispatch-bound point queries, work-bound merge rounds, tail spread, RSS, allocation, and WAL insight IDs; thin `workload_loaded` fixtures now fail locally",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/169-tracelite-workload-insights.md"
         },
@@ -279,7 +279,7 @@
           "id": "161",
           "title": "Concurrent standalone writes release coverage",
           "date": "2026-06-11",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Promotes the exp 159 send-gated writer-lock pipelining shape into release write suite coverage with a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair; resqlite concurrent median drops from ~2.9 ms to ~1.1 ms on the new lane (−58% to −61%) while sequential, batch, wide batch, and transaction rows stay untouched. Makes future writer-scheduling experiments evaluable on a public release lane without relying on the focused `writer_pipelining.dart` script",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/161-concurrent-writes-release-coverage.md"
         },
@@ -287,7 +287,7 @@
           "id": "159",
           "title": "Writer request pipelining + persistent reply port",
           "date": "2026-06-09",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "**−36% to −45%** on concurrent standalone writes (new focused burst benchmark) by holding the write lock only across the send and letting the worker's port FIFO pipeline requests; persistent reply port + cached SendPort + sync completers remove a port allocate/register/close cycle and two scheduling hops from every write round-trip. Stream-dispatch Tracelite guardrails neutral on the clean order-flipped pass; exp 147 `residual_us` drops on all four audit workloads",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/159-writer-pipelining.md"
         },
@@ -295,7 +295,7 @@
           "id": "158",
           "title": "Row schema hash index",
           "date": "2026-06-09",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a schema-name identity fast path for schemas up to 32 columns plus private `HashMap` fallback for `RowSchema` lookup; focused `select_maps` main-isolate consumption improved 0.169 → 0.081 ms at 1K rows and 1.998 → 0.967 ms at 10K rows while point-query throughput stayed neutral/noisy",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/158-row-schema-hash-index.md"
         },
@@ -311,7 +311,7 @@
           "id": "150",
           "title": "Nullable batch parameter packing",
           "date": "2026-06-09",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Makes the guarded packed batch encoder nullable-aware for first-row `NULL` text columns; focused nullable ASCII 10k x8 improves 13.552 → 11.152 ms and 10k x20 improves 25.738 → 21.723 ms while existing ASCII/Unicode wide guardrails stay neutral",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/150-nullable-batch-packing.md"
         },
@@ -319,7 +319,7 @@
           "id": "149",
           "title": "Six-parameter batch packing",
           "date": "2026-06-08",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Lowers the guarded ASCII batch-packing threshold to the Tracelite merge-round shape; profile `merge_rounds` improves executeBatch p50 88 → 75 us and writer SQLite time 87,895 → 75,947 us while keeping 2-3 parameter batches generic",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/149-six-param-batch-packing.md"
         },
@@ -335,7 +335,7 @@
           "id": "147",
           "title": "Writer SQLite wall split",
           "date": "2026-06-08",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-only: profile-mode writer responses now report SQLite-facing write time back into `ProfileCounters`; on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%. Keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). Clears the writer-wall-vs-SQLite-wall blocker; next stream work should reduce completion/reply scheduling or residual writer/request wall rather than SQLite-step tuning",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/147-writer-sqlite-wall-split.md"
         },
@@ -359,7 +359,7 @@
           "id": "144",
           "title": "sqlite3mc 2.3.2 → 2.3.5 bump (SQLite 3.51.3 → 3.53.2)",
           "date": "2026-06-08",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Satisfies exp 090's revisit trigger (SQLite `.2`+ point release with sqlite3mc tracking it); tests stay green including embedded-NUL + Unicode bind regression suite; release-suite single-pass A/Bs swing between 19/18/124 and 30/2/129 — Concurrent Reads 8× is the only metric that flags consistently across reruns (+~20% on a sub-ms metric) and is the focus of the soak window; FP-rounding hazard skipped because resqlite never serialises REAL via `sqlite3_column_text`",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/144-sqlite3mc-bump-2-3-5.md"
         },
@@ -367,7 +367,7 @@
           "id": "143",
           "title": "Tracelite profile insight audit",
           "date": "2026-06-08",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-only: pinned Tracelite profile runs show stable dispatch floors (reader 12 us, writer 16 us), point queries at the dispatch floor, merge rounds with 77 us of floor-subtracted work, and memory/allocation signal that wall time alone hides; current `tracelite explain` only reports coverage, so richer workload-summary insight rules are the next measurement-system improvement",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/143-tracelite-profile-insights.md"
         },
@@ -480,7 +480,7 @@
           "id": "136",
           "title": "Completion-side reader-handler counter",
           "date": "2026-05-14",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-only: profile-mode counters (`completion_handler_us`, `stream_emit_us`) expose the main-isolate reader worker port handler chain on A11c overlap as 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls/burst, with subscriber emit only 0.35% of the chain. Reader-reply batching is the natural bounded implementation candidate. Closes the `completion-side microtask scheduling cost counter` entry in `signals.json#stream-rerun-dispatch.blockedOnMeasurement`",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/136-completion-microtask-counter.md"
         },
@@ -593,7 +593,7 @@
           "id": "126",
           "title": "Wide UTF-8 batch parameter packing",
           "date": "2026-05-06",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 → 18.988 ms and emoji 10k x20 improves 24.187 → 17.458 ms while release write-suite guardrails remain neutral",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/126-wide-utf8-batch-packing.md"
         },
@@ -601,7 +601,7 @@
           "id": "125",
           "title": "Wide ASCII batch parameter encoding",
           "date": "2026-05-05",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Direct ASCII payload packing skips temporary per-string UTF-8 lists in large wide batches; focused 10k x20 improves 17.199 → 12.760 ms and release Wide Batch Insert improves 18.201 → 13.031 ms",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/125-wide-ascii-batch-params.md"
         }
@@ -706,7 +706,7 @@
           "id": "122",
           "title": "Concrete reader-pool stream admission",
           "date": "2026-05-02",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Initializes `StreamEngine` with a concrete `ReaderPool` so `_flushQueue` stays synchronous and bounded by `availableWorkerCount`; tests now use diagnostics for stream registry size, and post-rebase profile counters stay at zero parks/retries/max-parked on A11c overlap and keyed-PK workloads",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/122-concrete-reader-pool-stream-admission.md"
         },
@@ -714,7 +714,7 @@
           "id": "121",
           "title": "Invalidation traversal cost audit",
           "date": "2026-05-03",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Measurement-only: profile-mode harness reports `invalidate_us` / `intersection_us` as a fraction of writer-side burst wall on A11c (baseline / disjoint / overlap) and keyed-PK. Overlap invalidation is 10–15% of wall (column intersection 2.5–5.7%); keyed-PK 13–14% (intersection ~4%); disjoint 22–23% only because column elision shrinks the denominator. Per-entry intersection probes are 80–200 ns. Extracts shared `audit_workloads.dart` so this audit and exp 119 stay structurally comparable. Removes invalidation traversal from the active candidate list — the structural ceiling on smarter dependency tracking is ~3 ms / 25k probes per overlap burst",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/121-invalidation-traversal-audit.md"
         },
@@ -722,7 +722,7 @@
           "id": "120",
           "title": "Bounded `_flushQueue` admission",
           "date": "2026-05-02",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Cap stream re-query admission at `ReaderPool.availableWorkerCount` per call so synchronous over-dispatch can no longer pile up against `_dispatchWaiters`. `dispatcherParkedTotal` drops from 3,590 → 0 (A11c overlap) and 1,198 → 0 (keyed-PK); `max_parked` 46 → 0. Release suite: 9 wins, 0 regressions, including neutral high-cardinality fan-out (the exp-100 killer)",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/120-flush-admit-bound.md"
         },
@@ -730,7 +730,7 @@
           "id": "119",
           "title": "Post-FIFO dispatch pressure audit",
           "date": "2026-05-01",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Profile audit shows wake retries stay zero after FIFO, while A11c overlap and keyed-PK streams still produce parked dispatchers; next dispatch work should target stream admission/completion",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/119-dispatch-pressure-audit.md"
         },
@@ -738,7 +738,7 @@
           "id": "118",
           "title": "FIFO dispatch waiters with counter gate",
           "date": "2026-05-01",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Replaces the shared reader-pool dispatch completer with FIFO one-shot waiters; exp 115 counters show wake retries drop to zero under overload",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/118-fifo-dispatch-counter-gate.md"
         },
@@ -754,7 +754,7 @@
           "id": "116",
           "title": "Wide batch insert release coverage",
           "date": "2026-05-01",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a 10k-row x 20-parameter mixed-type batch insert to the release write suite so parameter-width regressions are visible on the public benchmark path",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/116-wide-batch-release-coverage.md"
         },
@@ -778,7 +778,7 @@
           "id": "113",
           "title": "Direct batch parameter matrix encoding",
           "date": "2026-05-01",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Avoids the temporary flat Dart parameter list; 10k-row wide batches improve 14-26% in the focused benchmark",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/113-direct-batch-param-matrix.md"
         },
@@ -802,7 +802,7 @@
           "id": "110",
           "title": "Long-text stream hash benchmark + 8-byte FNV",
           "date": "2026-04-27",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/110-long-text-fnv-8byte.md"
         },
@@ -890,7 +890,7 @@
           "id": "097",
           "title": "One-pass initial stream decode and hash",
           "date": "2026-04-23",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "14-16% faster setup-heavy streaming benchmarks by avoiding the initial stream query replay",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/097-one-pass-initial-stream-hash.md"
         },
@@ -1075,7 +1075,7 @@
           "id": "083",
           "title": "Stream rerun pre-dispatch queue",
           "date": "2026-04-20",
-          "status": "in_review",
+          "status": "accepted",
           "summary": "Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission",
           "url": "https://github.com/danReynolds/resqlite/blob/main/experiments/083-stream-rerun-pre-dispatch-queue.md"
         },
