@@ -2,6 +2,6 @@
   "file": "169-tracelite-workload-insights.md",
   "title": "Tracelite workload-summary insight guard",
   "impact": "Adds a Resqlite-side validation step to `benchmark/profile/run_tracelite_profile.dart` so canonical profile runs fail if `tracelite explain` regresses to coverage-only output. The validated profile emitted dispatch floors, dispatch-bound point queries, work-bound merge rounds, tail spread, RSS, allocation, and WAL insight IDs; thin `workload_loaded` fixtures now fail locally",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

@@ -1,7 +1,7 @@
 {
   "file": "121-invalidation-traversal-audit.md",
   "title": "Invalidation traversal cost audit",
-  "impact": "Measurement-only: profile-mode harness reports `invalidate_us` / `intersection_us` as a fraction of writer-side burst wall on A11c (baseline / disjoint / overlap) and keyed-PK. Overlap invalidation is 10–15% of wall (column intersection 2.5–5.7%); keyed-PK 13–14% (intersection ~4%); disjoint 22–23% only because column elision shrinks the denominator. Per-entry intersection probes are 80–200 ns. Extracts shared `audit_workloads.dart` so this audit and exp 119 stay structurally comparable. Removes invalidation traversal from the active candidate list — the structural ceiling on smarter dependency tracking is ~3 ms / 25k probes per overlap burst",
-  "status": "in_review",
+  "impact": "Measurement-only: profile-mode harness reports `invalidate_us` / `intersection_us` as a fraction of writer-side burst wall on A11c (baseline / disjoint / overlap) and keyed-PK. Overlap invalidation is 10\u201315% of wall (column intersection 2.5\u20135.7%); keyed-PK 13\u201314% (intersection ~4%); disjoint 22\u201323% only because column elision shrinks the denominator. Per-entry intersection probes are 80\u2013200 ns. Extracts shared `audit_workloads.dart` so this audit and exp 119 stay structurally comparable. Removes invalidation traversal from the active candidate list \u2014 the structural ceiling on smarter dependency tracking is ~3 ms / 25k probes per overlap burst",
+  "status": "accepted",
   "link": ""
 }

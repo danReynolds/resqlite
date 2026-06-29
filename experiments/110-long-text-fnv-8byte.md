@@ -1,7 +1,7 @@
 # Experiment 110: Long-text stream hash benchmark + 8-byte FNV
 
 **Date:** 2026-04-27T15:46:01
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `long-text-stream-hashing`, `measurement-system`
 **PR:** [#53](https://github.com/danReynolds/resqlite/pull/53)
 

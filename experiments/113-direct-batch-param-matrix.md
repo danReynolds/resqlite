@@ -1,7 +1,7 @@
 # Experiment 113: Direct batch parameter matrix encoding
 
 **Date:** 2026-05-01T06:20:00
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`, `measurement-system`
 **PR:** [#70](https://github.com/danReynolds/resqlite/pull/70)
 

@@ -2,6 +2,6 @@
   "file": "172-long-payload-stream-hash.md",
   "title": "Long-payload stream hash coverage",
   "impact": "Adds a default streaming-suite row for mixed 32KB TEXT + 32KB BLOB unchanged fanout plus long-BLOB hash correctness coverage. The mixed row lands at 3.446 ms median beside the existing 4KB TEXT row at 2.356 ms, closing the long-payload measurement blocker without justifying an immediate new hash-loop variant",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

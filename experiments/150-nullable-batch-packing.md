@@ -1,7 +1,7 @@
 # Experiment 150: Nullable batch parameter packing
 
 **Date:** 2026-06-09
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`
 **Benchmark Run:** Focused `batch_param_flatten`, `nullable-ascii`
 

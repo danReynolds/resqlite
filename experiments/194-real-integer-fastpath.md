@@ -1,7 +1,7 @@
 # Experiment 194: Integer-valued REAL selectBytes fast path
 
 **Date:** 2026-06-23
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused A/B
   (`benchmark/experiments/select_bytes_real_int_fastpath.dart`),

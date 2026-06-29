@@ -1,7 +1,7 @@
 # Experiment 177: Order-flipped A/B drift discriminator
 
 **Date:** 2026-06-16
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `measurement-system`
 **Benchmark Run:** none (methodology tooling; validation aggregate at `benchmark/profile/results/exp-177-ab-drift-check-aggregate.md`)
 

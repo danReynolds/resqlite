@@ -2,6 +2,6 @@
   "file": "187-single-row-utf8-bind-encoder.md",
   "title": "Single-row UTF-8 bind encoder",
   "impact": "Extends exp 186's single-row large-text encoder from ASCII-only to direct UTF-8 for non-ASCII parameter lists, reusing the wide-batch `_utf8Length` / `_writeUtf8` helpers and removing the temporary `utf8.encode()` list plus second copy. The broadened `single_row_large_text_bind.dart` CJK rows improve **~31% to ~39%** at 16 KB through 1 MB across an order-flipped pair; ASCII controls stay comparable because the exp 186 all-ASCII fast path is preserved. Adds single-row multibyte + embedded-NUL correctness coverage. Runtime code change; held in review.",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

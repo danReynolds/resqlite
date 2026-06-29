@@ -1,7 +1,7 @@
 # Experiment 176: Row.containsKey identity fast path
 
 **Date:** 2026-06-16
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused `row_map_facade` A/B (order-stable, 3 passes per side, quiet box) + release-suite `Select → Maps` artifact
 

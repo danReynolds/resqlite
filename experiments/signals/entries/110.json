@@ -3,7 +3,7 @@
     "long-text-stream-hashing",
     "measurement-system"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "The missing long-text unchanged-fanout benchmark was the blocker for evaluating byte-stream hash-loop work",
     "The archived 8-byte FNV byte fold becomes a clear win once the workload carries 4KB TEXT cells"

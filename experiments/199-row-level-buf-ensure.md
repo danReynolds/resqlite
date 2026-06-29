@@ -1,7 +1,7 @@
 # Experiment 199: Row-level capacity reservation in `write_json_to_buf`
 
 **Date:** 2026-06-25
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused A/B
 (`benchmark/experiments/select_bytes_int_heavy.dart`,

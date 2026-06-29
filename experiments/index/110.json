@@ -2,6 +2,6 @@
   "file": "110-long-text-fnv-8byte.md",
   "title": "Long-text stream hash benchmark + 8-byte FNV",
   "impact": "Adds a long-text unchanged-fanout benchmark and cuts its median latency by 76% with chunked byte-stream hashing",
-  "status": "in_review",
+  "status": "accepted",
   "link": "[#53](https://github.com/danReynolds/resqlite/pull/53)"
 }

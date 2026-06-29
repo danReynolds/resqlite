@@ -1,7 +1,7 @@
 # Experiment 149: Six-parameter batch packing
 
 **Date:** 2026-06-08
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`
 **Benchmark Run:** Tracelite profile, `exp149-six-param-batch-packing`
 

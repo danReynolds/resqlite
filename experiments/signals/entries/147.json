@@ -3,7 +3,7 @@
     "stream-rerun-dispatch",
     "measurement-system"
   ],
-  "outcomeClass": "in_review_measurement",
+  "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
     "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads: A11c overlap is 9.4% SQLite and keyed-PK is 18.1% SQLite",
     "After subtracting SQLite-facing calls and stream invalidation, residual writer/request wall remains the largest bucket on A11c overlap and keyed-PK",

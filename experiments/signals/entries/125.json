@@ -2,7 +2,7 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "Large wide ASCII-heavy batches still had removable per-string UTF-8 allocation after exp 113's matrix encoder",
     "A guarded ASCII fast path can improve wide batch parameter packing without changing the public API or weakening Unicode fallback behavior"

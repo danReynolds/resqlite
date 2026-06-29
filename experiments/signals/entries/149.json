@@ -2,7 +2,7 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "Tracelite profile merge rounds expose a material six-parameter batch shape between exp 146's rejected small/narrow guard and exp 125/126's large wide guard",
     "Lowering the ASCII batch-packing guard to 6 params / 600 total params improved merge-round executeBatch p50 from 88 us to 75 us and writer SQLite time from 87,895 us to 75,947 us",

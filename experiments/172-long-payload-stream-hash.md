@@ -1,7 +1,7 @@
 # Experiment 172: Long-payload stream hash coverage
 
 **Date:** 2026-06-15
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `long-text-stream-hashing`, `measurement-system`
 **Benchmark Run:** none (streaming-suite coverage row + focused `benchmark/suites/streaming.dart` long-payload addition; no exp-172 release artifact — see Results)
 

@@ -1,7 +1,7 @@
 # Experiment 195: Stmt-cache pre-encoded JSON column-name tokens
 
 **Date:** 2026-06-23
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused
   [`benchmark/experiments/select_bytes_repeated_calls.dart`](../benchmark/experiments/select_bytes_repeated_calls.dart)

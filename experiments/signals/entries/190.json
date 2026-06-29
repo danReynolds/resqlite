@@ -2,16 +2,16 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
-    "The C-side JSON encoder in `write_json_to_buf` (the only `selectBytes()` codepath) was re-running its per-column emission sequence (comma + `json_write_string` SWAR/escape scan + colon = four `buf_write*` calls) on every row even though the column name is invariant — the same per-row-amortizable pattern exp 034 caught at the Dart `RowSchema` layer and exp 037 caught at the json_buf layer was still firing at the byte-emission layer",
+    "The C-side JSON encoder in `write_json_to_buf` (the only `selectBytes()` codepath) was re-running its per-column emission sequence (comma + `json_write_string` SWAR/escape scan + colon = four `buf_write*` calls) on every row even though the column name is invariant \u2014 the same per-row-amortizable pattern exp 034 caught at the Dart `RowSchema` layer and exp 037 caught at the json_buf layer was still firing at the byte-emission layer",
     "Pre-building each column's `\"col\":` / `,\"col\":` token once at first-row time into a per-query scratch `resqlite_buf tokens_buf` and replacing the per-row inner loop with a single `buf_write(b, tokens_buf.data + token_offsets[i], token_lens[i])` removes that compounded work without behavior change (the pre-encode reuses `json_write_string`, so escape semantics for unusual column names are bit-identical)",
-    "Reproduced wins on the wide-many-row shapes the change targets: focused `select_bytes_wide_cols.dart` -4% to -11% across two order-flipped passes on 10k-row x 8 / 20-col shapes (largest shapes get the largest deltas, matching the compound hypothesis), and `large_bytes_transfer.dart` (exp 174's focused guard, ~650 KB per call) -8.7% / -8.2% on large/small lanes. Regression guards (1 row, 100 rows) stay inside the sub-microsecond noise floor — absolute deltas smaller than per-sample spread, with pass-to-pass signs not agreeing"
+    "Reproduced wins on the wide-many-row shapes the change targets: focused `select_bytes_wide_cols.dart` -4% to -11% across two order-flipped passes on 10k-row x 8 / 20-col shapes (largest shapes get the largest deltas, matching the compound hypothesis), and `large_bytes_transfer.dart` (exp 174's focused guard, ~650 KB per call) -8.7% / -8.2% on large/small lanes. Regression guards (1 row, 100 rows) stay inside the sub-microsecond noise floor \u2014 absolute deltas smaller than per-sample spread, with pass-to-pass signs not agreeing"
   ],
   "nextSignals": [
     "use `benchmark/experiments/select_bytes_wide_cols.dart` (and the existing exp 174 `large_bytes_transfer.dart` lane) before changing the selectBytes column-name emission path again",
-    "if a future selectBytes change wants to amortize more across rows (per-column value-prefix templates for constant-type integer columns, e.g.), the `tokens_buf` + `token_offsets` / `token_lens` arrays are the natural insertion point — extend them rather than adding a parallel scratch path",
+    "if a future selectBytes change wants to amortize more across rows (per-column value-prefix templates for constant-type integer columns, e.g.), the `tokens_buf` + `token_offsets` / `token_lens` arrays are the natural insertion point \u2014 extend them rather than adding a parallel scratch path",
     "promoting the token scratch into `resqlite_cached_stmt` to skip the first-row pre-encode pass on cache hits is a strictly-larger change (cache lifetime, FFI surface) and is only worth a pass if a workload shows repeated small `selectBytes()` calls dominating wall time; exp 190's 1-row regression guard already shows the per-query overhead is at noise on the smallest shape",
-    "exp 175's `selectBytes() large bytes` release lane and exp 185's `JSON buffer reclaim` SQLite Diagnostics row remain the public guards for selectBytes transfer policy / RSS — exp 190 does not change either signal"
+    "exp 175's `selectBytes() large bytes` release lane and exp 185's `JSON buffer reclaim` SQLite Diagnostics row remain the public guards for selectBytes transfer policy / RSS \u2014 exp 190 does not change either signal"
   ]
 }

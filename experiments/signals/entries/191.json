@@ -2,7 +2,7 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "in_review_correctness_guard",
+  "outcomeClass": "accepted_correctness_guard",
   "changedBeliefs": [
     "The broader embedded-NUL public API audit candidate is consumed as correctness support, not a performance result. Current main already covers wide executeBatch with multibyte embedded-NUL TEXT, and exp 187 covers single-row execute in flight; exp 191 adds the missing reader surfaces.",
     "selectBytes preserves embedded-NUL TEXT seeded by SQLite char(0): select() returns the expected Dart string, hex(CAST(body AS BLOB)) matches _hexUtf8(body), and native JSON bytes decode back to the same value.",

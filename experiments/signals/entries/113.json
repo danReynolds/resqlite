@@ -3,7 +3,7 @@
     "parameter-encoding-and-binding",
     "measurement-system"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "The two-parameter batch insert shape is not a sufficient proxy for batch parameter overhead",
     "Avoiding the temporary flat Dart parameter list becomes measurable once batch rows are wide enough"

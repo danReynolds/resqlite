@@ -1,7 +1,7 @@
 # Experiment 144: sqlite3mc 2.3.2 → 2.3.5 bump (SQLite 3.51.3 → 3.53.2)
 
 **Date:** 2026-06-08
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `sqlite-version-and-build-config`
 
 ## Problem

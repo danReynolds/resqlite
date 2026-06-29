@@ -1,7 +1,7 @@
 # Experiment 187: Single-row UTF-8 bind encoder
 
 **Date:** 2026-06-19
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`
 **Benchmark Run:** none - focused `single_row_large_text_bind.dart` CJK/ASCII
   order-flipped pass + `single_row_param_packing.dart` micro; no release-suite

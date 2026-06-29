@@ -1,7 +1,7 @@
 # Experiment 121: Invalidation traversal cost audit
 
 **Date:** 2026-05-03
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
 **Benchmark Run:** None
 

@@ -1,7 +1,7 @@
 # Experiment 205: per-cell `sqlite3_column_value` reuse in `resqlite_step_row`
 
 **Date:** 2026-06-29
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused
   [`benchmark/experiments/select_rows_step_row_ffi.dart`](../benchmark/experiments/select_rows_step_row_ffi.dart),

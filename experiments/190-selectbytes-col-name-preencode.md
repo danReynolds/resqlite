@@ -1,7 +1,7 @@
 # Experiment 190: selectBytes column-name token pre-encoding
 
 **Date:** 2026-06-20
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused
   [`benchmark/experiments/select_bytes_wide_cols.dart`](../benchmark/experiments/select_bytes_wide_cols.dart)

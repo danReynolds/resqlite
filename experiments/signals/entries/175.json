@@ -3,7 +3,7 @@
     "result-transfer-shape",
     "measurement-system"
   ],
-  "outcomeClass": "in_review_measurement",
+  "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
     "The release JSON-bytes suite now has an explicit large native-byte transfer row: `Large payload (~650KB) / resqlite selectBytes()` stays above the old 256KB sacrifice threshold and measured 0.323 ms wall / 0.000 ms main in the focused suite run",
     "The curated history now tracks `selectBytes() large bytes`, so exp 174's native-view transfer path is visible without relying on the existing 1K-row JSON-bytes metric that mostly exercises small-result copy behavior",

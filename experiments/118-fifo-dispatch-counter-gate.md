@@ -1,7 +1,7 @@
 # Experiment 118: FIFO dispatch waiters with counter gate
 
 **Date:** 2026-05-01
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `stream-rerun-dispatch`
 **Benchmark Run:** none (acceptance gated on exp 115 profile-mode counters dropping `dispatcherWakeRetryTotal` to zero; no release-suite run because the change is invisible to wall-time outside `kProfileMode`)
 

@@ -1,7 +1,7 @@
 # Experiment 203: Per-cell `sqlite3_column_value` reuse in `write_json_to_buf`
 
 **Date:** 2026-06-28
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused A/B only
 (`benchmark/experiments/select_bytes_int_heavy.dart`,

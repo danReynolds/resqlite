@@ -1,7 +1,7 @@
 # Experiment 175: Large selectBytes release coverage
 
 **Date:** 2026-06-16
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`, `measurement-system`
 
 ## Problem

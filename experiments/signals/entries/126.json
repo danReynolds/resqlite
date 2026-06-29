@@ -2,7 +2,7 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "Large wide non-ASCII batches have the same removable per-string allocation pattern exp 125 found for ASCII: direct UTF-8 payload writing improves focused Unicode 10k x20 by 13.5% and emoji 10k x20 by 27.8%",
     "Dart-compatible surrogate-pair and replacement-character encoding can stay private to the guarded batch encoder while preserving embedded-NUL byte lengths through sqlite3_bind_text"

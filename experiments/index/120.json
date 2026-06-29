@@ -1,7 +1,7 @@
 {
   "file": "120-flush-admit-bound.md",
   "title": "Bounded `_flushQueue` admission",
-  "impact": "Cap stream re-query admission at `ReaderPool.availableWorkerCount` per call so synchronous over-dispatch can no longer pile up against `_dispatchWaiters`. `dispatcherParkedTotal` drops from 3,590 → 0 (A11c overlap) and 1,198 → 0 (keyed-PK); `max_parked` 46 → 0. Release suite: 9 wins, 0 regressions, including neutral high-cardinality fan-out (the exp-100 killer)",
-  "status": "in_review",
+  "impact": "Cap stream re-query admission at `ReaderPool.availableWorkerCount` per call so synchronous over-dispatch can no longer pile up against `_dispatchWaiters`. `dispatcherParkedTotal` drops from 3,590 \u2192 0 (A11c overlap) and 1,198 \u2192 0 (keyed-PK); `max_parked` 46 \u2192 0. Release suite: 9 wins, 0 regressions, including neutral high-cardinality fan-out (the exp-100 killer)",
+  "status": "accepted",
   "link": ""
 }

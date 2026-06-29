@@ -2,7 +2,7 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "Exp 203's per-cell `sqlite3_column_value` reuse pattern is also measurable on the rows path. `Database.select()` decode on 10k-row INTEGER, short-TEXT, and mixed-schema lanes runs roughly 1-6% faster on `select_rows_step_row_ffi.dart` with same-sign deltas across two order-flipped passes.",
     "`resqlite_step_row`, `resqlite_step_row_hash`, and `resqlite_query_hash` share the same per-cell FFI prologue as `write_json_to_buf`, so the same `Mem*`-reuse mechanism applies to every prepared-statement decode loop in the codebase, not only the JSON encoder."

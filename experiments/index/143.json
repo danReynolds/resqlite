@@ -2,6 +2,6 @@
   "file": "143-tracelite-profile-insights.md",
   "title": "Tracelite profile insight audit",
   "impact": "Measurement-only: pinned Tracelite profile runs show stable dispatch floors (reader 12 us, writer 16 us), point queries at the dispatch floor, merge rounds with 77 us of floor-subtracted work, and memory/allocation signal that wall time alone hides; current `tracelite explain` only reports coverage, so richer workload-summary insight rules are the next measurement-system improvement",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

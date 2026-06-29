@@ -1,7 +1,7 @@
 # Experiment 097: One-pass initial stream decode and hash
 
 **Date:** 2026-04-23
-**Status:** In Review
+**Status:** Accepted
 
 ## Problem
 

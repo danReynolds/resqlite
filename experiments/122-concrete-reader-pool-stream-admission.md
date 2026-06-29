@@ -1,7 +1,7 @@
 # Experiment 122: Concrete reader-pool stream admission
 
 **Date:** 2026-05-02
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
 
 ## Problem

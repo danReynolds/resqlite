@@ -2,6 +2,6 @@
   "file": "147-writer-sqlite-wall-split.md",
   "title": "Writer SQLite wall split",
   "impact": "Measurement-only: profile-mode writer responses now report SQLite-facing write time back into `ProfileCounters`; on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%. Keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). Clears the writer-wall-vs-SQLite-wall blocker; next stream work should reduce completion/reply scheduling or residual writer/request wall rather than SQLite-step tuning",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }
