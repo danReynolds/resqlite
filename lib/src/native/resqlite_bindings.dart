@@ -753,7 +753,9 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
       for (var j = 0; j < len; j++) {
         if (value.codeUnitAt(j) > 0x7f) {
           allStringsAscii = false;
-          utf8Bytes = _utf8Length(value);
+          // Safe upper bound for the non-ASCII suffix. The write pass records
+          // the exact byte count, so this only avoids a full length prepass.
+          utf8Bytes = _utf8LengthUpperBoundFrom(len, j);
           break;
         }
       }
@@ -994,6 +996,11 @@ int _utf8Length(String value) {
     }
   }
   return bytes;
+}
+
+@pragma('vm:never-inline')
+int _utf8LengthUpperBoundFrom(int length, int firstNonAsciiIndex) {
+  return firstNonAsciiIndex + ((length - firstNonAsciiIndex) * 3);
 }
 
 int _writeUtf8(String value, Uint8List out, int offset) {
