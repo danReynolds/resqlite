@@ -1,7 +1,7 @@
 # Experiment 143: Tracelite profile insight audit
 
 **Date:** 2026-06-08
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `measurement-system`
 **Benchmark Run:** None
 

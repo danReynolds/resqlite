@@ -2,6 +2,6 @@
   "file": "175-large-selectbytes-coverage.md",
   "title": "Large selectBytes release coverage",
   "impact": "Adds a named `Large payload (~650KB)` `resqlite selectBytes()` row to the release JSON-bytes suite and curates it as `selectBytes() large bytes`, giving exp 174's native-view transfer path a release-history guard above the old 256 KB sacrifice threshold. Single-repeat release run measured 0.323 ms wall / 0.000 ms main for the new row.",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

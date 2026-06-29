@@ -1,7 +1,7 @@
 # Experiment 147: Writer SQLite wall split
 
 **Date:** 2026-06-08
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `stream-rerun-dispatch`, `measurement-system`
 **Benchmark Run:** None
 

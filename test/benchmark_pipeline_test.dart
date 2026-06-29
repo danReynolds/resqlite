@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../benchmark/check_experiment_dispositions.dart' as dispositions;
 import '../benchmark/generate_devices.dart' as generate_devices;
 import '../benchmark/generate_history.dart' as generate_history;
 import '../benchmark/shared/release_artifact.dart';
@@ -431,6 +432,86 @@ Tracelite decision artifacts live under build/.
         isEmpty,
         reason:
             'Live experiments tripped the missing-run guard:\n${issues.join('\n')}',
+      );
+    });
+  });
+
+  group('terminal-disposition guard', () {
+    Future<Directory> fixture({
+      required String indexStatus,
+      required String writeupStatus,
+      String? outcomeClass,
+    }) async {
+      final tmp = await Directory.systemTemp.createTemp('resqlite_disp_test_');
+      addTearDown(() => tmp.delete(recursive: true));
+      Directory('${tmp.path}/index').createSync(recursive: true);
+      Directory('${tmp.path}/signals/entries').createSync(recursive: true);
+      File('${tmp.path}/index/100.json').writeAsStringSync(
+        jsonEncode({'file': '100-test.md', 'title': 'T', 'status': indexStatus}),
+      );
+      File(
+        '${tmp.path}/100-test.md',
+      ).writeAsStringSync('# Experiment 100\n\n**Status:** $writeupStatus\n');
+      if (outcomeClass != null) {
+        File('${tmp.path}/signals/entries/100.json').writeAsStringSync(
+          jsonEncode({
+            'directions': ['x'],
+            'outcomeClass': outcomeClass,
+          }),
+        );
+      }
+      return tmp;
+    }
+
+    test('flags an in-review index status', () async {
+      final dir = await fixture(
+        indexStatus: 'in_review',
+        writeupStatus: 'Accepted',
+      );
+      final issues = dispositions.findStrandedInReview(root: dir.path);
+      expect(issues, hasLength(1));
+      expect(issues.single, contains('index/100.json'));
+      expect(issues.single, contains('not terminal'));
+    });
+
+    test('flags an in-review writeup Status line', () async {
+      final dir = await fixture(
+        indexStatus: 'accepted',
+        writeupStatus: 'In Review',
+      );
+      final issues = dispositions.findStrandedInReview(root: dir.path);
+      expect(issues, hasLength(1));
+      expect(issues.single, contains('100-test.md'));
+    });
+
+    test('flags an in-review signal outcomeClass', () async {
+      final dir = await fixture(
+        indexStatus: 'accepted',
+        writeupStatus: 'Accepted',
+        outcomeClass: 'in_review_accepted',
+      );
+      final issues = dispositions.findStrandedInReview(root: dir.path);
+      expect(issues, hasLength(1));
+      expect(issues.single, contains('entries/100.json'));
+    });
+
+    test('stays silent for terminal dispositions with descriptive text', () async {
+      final dir = await fixture(
+        indexStatus: 'rejected',
+        writeupStatus: 'Rejected (below noise floor)',
+        outcomeClass: 'rejected_below_signal',
+      );
+      expect(dispositions.findStrandedInReview(root: dir.path), isEmpty);
+    });
+
+    test('the live experiment set has no stranded in-review experiments', () {
+      // Regression anchor: once reconciled, the real tree must stay terminal so
+      // the CI guard does not start failing on already-merged work.
+      final issues = dispositions.findStrandedInReview(root: 'experiments');
+      expect(
+        issues,
+        isEmpty,
+        reason: 'Experiments stuck in review:\n${issues.join('\n')}',
       );
     });
   });

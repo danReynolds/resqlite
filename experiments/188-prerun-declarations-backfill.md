@@ -1,7 +1,7 @@
 # Experiment 188: Pre-178 benchmark-run declarations backfill
 
 **Date:** 2026-06-19
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `measurement-system`
 **Benchmark Run:** none (CI guardrail / methodology tooling extension; no runtime code, structural counter evidence below)
 

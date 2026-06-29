@@ -1,7 +1,7 @@
 # Experiment 185: JSON buffer reclaim release coverage
 
 **Date:** 2026-06-18
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`, `measurement-system`
 **Benchmark Run:** none - focused `dart run benchmark/suites/sqlite_diagnostics.dart` only; no full release run artifact.
 

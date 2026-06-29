@@ -2,7 +2,7 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "The SQLITE_FLOAT arm in write_json_to_buf still paid snprintf(\"%.17g\") for every REAL cell after exp 190 and exp 192 tightened neighboring selectBytes encoder work.",
     "Finite, exactly integral REAL values inside the exact double integer range (abs(v) <= 2^53) can reuse fast_i64_to_str without changing JSON spelling, while fractional values, huge values, non-finite values, and negative zero stay on snprintf.",

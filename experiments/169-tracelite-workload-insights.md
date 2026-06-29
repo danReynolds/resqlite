@@ -1,7 +1,7 @@
 # Experiment 169: Tracelite workload-summary insight guard
 
 **Date:** 2026-06-14
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `measurement-system`
 **Benchmark Run:** Tracelite profile, `exp-169-tracelite-workload-insights`
 

@@ -100,6 +100,8 @@ jobs:
         run: dart run benchmark/check_generated_data.dart
       - name: Verify experiment research map is valid
         run: dart run benchmark/check_experiment_signals.dart
+      - name: Verify experiments reach a terminal disposition
+        run: dart run benchmark/check_experiment_dispositions.dart
 
   tracelite-smoke:
     name: Tracelite smoke

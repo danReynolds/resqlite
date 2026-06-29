@@ -2,6 +2,6 @@
   "file": "177-ab-drift-discriminator.md",
   "title": "Order-flipped A/B drift discriminator",
   "impact": "Methodology tooling: mechanizes the JOURNAL's most-reapplied lesson (phase-ordered A/B gates confound code deltas with time-correlated drift). Adds `cvPct` + `classifyDriftFlag` to `benchmark/shared/stats.dart` and a `benchmark/ab_drift_check.dart` CLI that reads two order-flipped passes of per-run values and classifies a regression flag as `reproduced` (same-direction effect, comparable CVs), `drift-suspected` (CV asymmetry on the flagged phase, or sign reversal across the flip), or `inconclusive`. Re-run against the recorded flags from exp 159 (CV asymmetry) and exp 167 (sign reversal), it reproduces the verdicts those runners reached by hand. No runtime change; 14/14 unit tests pass",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

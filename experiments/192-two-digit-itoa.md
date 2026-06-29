@@ -1,7 +1,7 @@
 # Experiment 192: Two-digit table itoa for selectBytes integer columns
 
 **Date:** 2026-06-21
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused A/B (`benchmark/experiments/select_bytes_int_heavy.dart`),
 order-flipped pair on a quiet box; release-suite single-pass A/B + flip

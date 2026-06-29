@@ -1,7 +1,7 @@
 # Experiment 158: Row schema hash index
 
 **Date:** 2026-06-09
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused `row_map_facade`, `select_maps`, `point_query`
 

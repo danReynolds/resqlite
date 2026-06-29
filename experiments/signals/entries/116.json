@@ -3,7 +3,7 @@
     "parameter-encoding-and-binding",
     "measurement-system"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
   ],

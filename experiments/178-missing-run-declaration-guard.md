@@ -1,7 +1,7 @@
 # Experiment 178: Missing-benchmark-run declaration guard
 
 **Date:** 2026-06-16
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `measurement-system`
 **Benchmark Run:** none (CI guardrail / methodology tooling; no runtime code, structural counter evidence below)
 

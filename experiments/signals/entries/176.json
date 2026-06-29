@@ -2,7 +2,7 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "Exp 158 added the schema-name identity fast path to RowSchema.indexOf (serving Row.operator[]) but not to Row.containsKey, which still went straight to the private HashMap and hashed the key on every call. Exp 158's 'containsKey neutral' row compared Row vs LinkedHashMap with containsKey unchanged on both sides of that diff, so it was never evidence that routing containsKey through the identity path is neutral",
     "Routing Row.containsKey through the identity scan (via a shared RowSchema.containsName(name) => indexOf(name) >= 0) improved the focused row_map_facade containsKey lane ~13.0 -> ~10.0 ms (-23%) across three order-stable passes, with the hot lookup control lane flat, flipping Row from ~+3.6 ms slower than LinkedHashMap to at-parity. The win is smaller than exp 158's -52% on operator[] because containsKey still pays MapMixin dispatch and the key-is-String check that operator[] does not; the identity scan removes only the hash",

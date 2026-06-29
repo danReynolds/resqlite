@@ -1,7 +1,7 @@
 # Experiment 198: Direct-to-buffer integer and float JSON formatting
 
 **Date:** 2026-06-24
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused A/B (`benchmark/experiments/select_bytes_int_heavy.dart` and `benchmark/experiments/select_bytes_real_int_fastpath.dart`), order-flipped pair on a quiet box; release-suite single-pass A/B captured as a no-regression smoke (release lanes are not integer- or integer-real-heavy enough to register the focused signal, and the flagged single-pass rows live on writer-pipelining / scaling / re-emit paths this change cannot mechanically touch — same exp 159 / exp 177 phase-drift signature as exp 192 / exp 194).
 

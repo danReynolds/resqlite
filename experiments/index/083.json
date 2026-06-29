@@ -2,6 +2,6 @@
   "file": "083-stream-rerun-pre-dispatch-queue.md",
   "title": "Stream rerun pre-dispatch queue",
   "impact": "Eliminates the measured `A11` / `A11b` reader-pool wait bottleneck by coalescing reruns before pool admission",
-  "status": "in_review",
+  "status": "accepted",
   "link": "[#25](https://github.com/danReynolds/resqlite/pull/25)"
 }

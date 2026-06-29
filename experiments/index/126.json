@@ -1,7 +1,7 @@
 {
   "file": "126-wide-utf8-batch-packing.md",
   "title": "Wide UTF-8 batch parameter packing",
-  "impact": "Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 → 18.988 ms and emoji 10k x20 improves 24.187 → 17.458 ms while release write-suite guardrails remain neutral",
-  "status": "in_review",
+  "impact": "Direct UTF-8 payload packing extends exp 125's allocation win to guarded non-ASCII wide batches; focused Unicode 10k x20 improves 21.945 \u2192 18.988 ms and emoji 10k x20 improves 24.187 \u2192 17.458 ms while release write-suite guardrails remain neutral",
+  "status": "accepted",
   "link": ""
 }

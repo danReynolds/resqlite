@@ -1,7 +1,7 @@
 # Experiment 159: Writer request pipelining + persistent reply port
 
 **Date:** 2026-06-09
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `stream-rerun-dispatch`
 
 ## Problem

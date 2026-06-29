@@ -1,7 +1,7 @@
 {
   "file": "176-row-containskey-identity-fastpath.md",
   "title": "Row.containsKey identity fast path",
-  "impact": "Routes `Row.containsKey` through the exp 158 schema-name identity scan (via a shared `RowSchema.containsName`) instead of always hashing the key in the private `HashMap`. For interned-key probes on schemas ≤ 32 columns the membership test becomes a pointer-identity scan; equal-but-non-identical keys and wider schemas still fall back to the map. Focused `row_map_facade` `containsKey` lane improves **~13.0 → ~10.0 ms (−23%)** with a flat `hot lookup` control, flipping Row from ~+3.6 ms slower than `LinkedHashMap` to at-parity. Behavior-identical, no public API change",
-  "status": "in_review",
+  "impact": "Routes `Row.containsKey` through the exp 158 schema-name identity scan (via a shared `RowSchema.containsName`) instead of always hashing the key in the private `HashMap`. For interned-key probes on schemas \u2264 32 columns the membership test becomes a pointer-identity scan; equal-but-non-identical keys and wider schemas still fall back to the map. Focused `row_map_facade` `containsKey` lane improves **~13.0 \u2192 ~10.0 ms (\u221223%)** with a flat `hot lookup` control, flipping Row from ~+3.6 ms slower than `LinkedHashMap` to at-parity. Behavior-identical, no public API change",
+  "status": "accepted",
   "link": ""
 }

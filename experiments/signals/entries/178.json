@@ -2,14 +2,14 @@
   "directions": [
     "measurement-system"
   ],
-  "outcomeClass": "in_review_accepted",
+  "outcomeClass": "accepted",
   "changedBeliefs": [
     "The experiment->chart linker in generate_history.dart guarded the wrong-file case (_assertAcceptedExperimentsLinkToCandidates, the exp-109 mixup) but silently tolerated the more common missing-file case: a chartable experiment with no linked benchmark run AND no **Benchmark Run:** opt-out declaration drops off the chart with no CI error, which is exactly what a forgotten result file or a Date/timestamp mismatch produces",
-    "A structural tally on main confirmed the gap is live: of 23 accepted/in-review experiments whose linker produced a null run, only ~5 declared the **Benchmark Run:** opt-out header; the rest (several recent — 116, 118, 119, 125, 126, 136, 161, 172) are silently unmapped, indistinguishable from a forgotten file",
+    "A structural tally on main confirmed the gap is live: of 23 accepted/in-review experiments whose linker produced a null run, only ~5 declared the **Benchmark Run:** opt-out header; the rest (several recent \u2014 116, 118, 119, 125, 126, 136, 161, 172) are silently unmapped, indistinguishable from a forgotten file",
     "Adding _assertNewExperimentsLinkOrDeclareRun (over a pure, unit-testable findUndeclaredMissingRunExperiments detector) makes the declaration mandatory for accepted/in-review experiments numbered >= a cutoff (178) with a null run; the repo's existing _skipsReleaseBenchmarkRunMapping header (none/n/a/tracelite) is the escape hatch. Pre-cutoff experiments are grandfathered, history.json is byte-for-byte unchanged, and no runtime code (lib/native/hook) is touched"
   ],
   "nextSignals": [
-    "to pull the ~17 pre-178 silently-unmapped chartable experiments under the guard, backfill their **Benchmark Run:** headers (or commit their missing result files) and lower _benchmarkRunDeclarationCutoff in the same change — completed by exp 188 (cutoff walked to 1; 16 chartable experiments backfilled + exp 174 declaration tightened to start with `none — `; history.json byte-for-byte unchanged)",
+    "to pull the ~17 pre-178 silently-unmapped chartable experiments under the guard, backfill their **Benchmark Run:** headers (or commit their missing result files) and lower _benchmarkRunDeclarationCutoff in the same change \u2014 completed by exp 188 (cutoff walked to 1; 16 chartable experiments backfilled + exp 174 declaration tightened to start with `none \u2014 `; history.json byte-for-byte unchanged)",
     "if the experiments page ever charts rejected experiments that ship a result file, widen the guard's status scope (currently accepted/in-review only) rather than touching the cutoff"
   ]
 }

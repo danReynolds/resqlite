@@ -1,7 +1,7 @@
 # Experiment 191: embedded-NUL public API audit
 
 **Date:** 2026-06-21
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `parameter-encoding-and-binding`
 **Benchmark Run:** none - correctness guard; no runtime code changed.
 

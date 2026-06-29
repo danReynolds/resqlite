@@ -1,7 +1,7 @@
 {
   "file": "192-two-digit-itoa.md",
   "title": "Two-digit table itoa for selectBytes integer columns",
-  "impact": "Replaces the single-digit `fast_i64_to_str` body ([exp 023](023-fast-itoa.md)) with a two-digit `[00..99]` lookup table — one `% 100` / `/ 100` and one 2-byte `memcpy` per pair of output digits, halving the division count vs the old loop. Focused `select_bytes_int_heavy.dart` A/B (order-flipped pair): **10k × 8 small ints −11 %, 10k × 20 small ints −8 to −10 %, 10k × 20 big ints (~18 digits) −24 to −26 %**, with mixed-cell and small-payload regression guards inside ±1 %. Adds a 200-byte `kTwoDigits` `const` table; `LLONG_MIN` handling and the `val == 0` short circuit preserved bit-for-bit; new end-to-end int-extremes test covers 0, ±9, ±99, ±10000, ±1234567890, LLONG_MIN, LLONG_MAX through `selectBytes()`",
-  "status": "in_review",
+  "impact": "Replaces the single-digit `fast_i64_to_str` body ([exp 023](023-fast-itoa.md)) with a two-digit `[00..99]` lookup table \u2014 one `% 100` / `/ 100` and one 2-byte `memcpy` per pair of output digits, halving the division count vs the old loop. Focused `select_bytes_int_heavy.dart` A/B (order-flipped pair): **10k \u00d7 8 small ints \u221211 %, 10k \u00d7 20 small ints \u22128 to \u221210 %, 10k \u00d7 20 big ints (~18 digits) \u221224 to \u221226 %**, with mixed-cell and small-payload regression guards inside \u00b11 %. Adds a 200-byte `kTwoDigits` `const` table; `LLONG_MIN` handling and the `val == 0` short circuit preserved bit-for-bit; new end-to-end int-extremes test covers 0, \u00b19, \u00b199, \u00b110000, \u00b11234567890, LLONG_MIN, LLONG_MAX through `selectBytes()`",
+  "status": "accepted",
   "link": ""
 }

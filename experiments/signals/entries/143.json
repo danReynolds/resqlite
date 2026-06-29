@@ -2,7 +2,7 @@
   "directions": [
     "measurement-system"
   ],
-  "outcomeClass": "in_review_measurement",
+  "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
     "Pinned Tracelite profile runs already produce decision-useful structured evidence: dispatch floors, floor-subtracted work, operation tails, memory deltas, allocation counters, source provenance, and validated graph data",
     "The current canonical profile workload shows point queries are median dispatch-bound (0-1 us of floor-subtracted work), merge rounds are work-bound (77 us of floor-subtracted work), and point queries still carry allocation/RSS cost that wall time alone hides",

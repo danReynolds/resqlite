@@ -2,6 +2,6 @@
   "file": "122-concrete-reader-pool-stream-admission.md",
   "title": "Concrete reader-pool stream admission",
   "impact": "Initializes `StreamEngine` with a concrete `ReaderPool` so `_flushQueue` stays synchronous and bounded by `availableWorkerCount`; tests now use diagnostics for stream registry size, and post-rebase profile counters stay at zero parks/retries/max-parked on A11c overlap and keyed-PK workloads",
-  "status": "in_review",
+  "status": "accepted",
   "link": ""
 }

@@ -1,7 +1,7 @@
 # Experiment 183: json_buf retention audit + high-threshold reclaim
 
 **Date:** 2026-06-17
-**Status:** In Review
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** Focused `json_buf_retention.dart` (baseline + candidate, three workload shapes) + focused `large_bytes_transfer.dart` (perf neutrality A/B). See Results.
 
