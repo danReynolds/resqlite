@@ -69,16 +69,16 @@ void main(List<String> args) async {
     // -----------------------------------------------------------------------
     String? linkerScript;
     if (targetOS == OS.linux) {
-      final exportedSymbols = [
-        ..._exportedSymbols,
-        if (traceSqlite)
-          for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
-      ];
+      // strlen resolves from libc through the asset's dependency chain, not
+      // from our objects, so it is not an exportable symbol here.
+      final exported = _resolveFfiSymbols(packageRoot, traceSqlite)
+        ..remove('strlen');
+      final sorted = exported.toList()..sort();
       linkerScript = outputFilePath(input.outputDirectory, 'resqlite.map');
       await File(linkerScript).writeAsString('''
 {
   global:
-${exportedSymbols.map((s) => '    $s;').join('\n')}
+${sorted.map((s) => '    $s;').join('\n')}
   local:
     *;
 };
@@ -86,56 +86,25 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
     }
 
     // -----------------------------------------------------------------------
-    // Windows: export the FFI symbols from the DLL.
+    // Windows: MSVC exports no symbols from a DLL by default (no
+    // __declspec(dllexport), and CBuilder.library emits no .def). Generate
+    // /export: directives for the FFI symbols so runtime lookups resolve;
+    // without them every call fails with "The specified procedure could not be
+    // found" (error code 127). No-op on every other OS.
     //
-    // On Windows, MSVC exports NO symbols from a DLL by default (the sources
-    // carry no __declspec(dllexport), and CBuilder.library does not wire up
-    // LinkerOptions/.def generation). Without this, the DLL builds but exports
-    // nothing, and every FFI lookup fails at runtime with
-    // "The specified procedure could not be found" (error code 127).
-    //
-    // The hand-maintained _exportedSymbols list has historically missed
-    // symbols (e.g. the reader_* helpers and strlen), and the maintainer can
-    // only verify on non-Windows hosts — so rather than trust that list, we
-    // additionally SCAN the package's Dart sources for every `@Native(symbol:)`
-    // reference. The union is exported, which is correct by construction and
-    // stays correct as the bindings change. A symbol that is referenced but
-    // genuinely absent from the DLL fails the *build* (a visible LNK error)
-    // instead of failing silently at runtime.
-    //
-    // strlen is special: it is a libc function the bindings resolve from this
-    // asset, but on Windows the CRT strlen is an *import*, not an exportable
-    // DLL symbol. We provide our own definition and export it under the name
-    // `strlen` (matching @Native<Int Function(Pointer<Void>)>).
-    //
-    // This is generated only for Windows; a no-op on every other OS.
+    // strlen is a libc import on Windows, not an exportable DLL symbol, so we
+    // define our own and export it under that name to satisfy
+    // @Native<Int Function(Pointer<Void>)>.
+    // -----------------------------------------------------------------------
     String? windowsExportSource;
     if (targetOS == OS.windows) {
-      final referenced = <String>{
-        ..._exportedSymbols,
-        if (traceSqlite)
-          for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
-      };
-      final libDir = Directory.fromUri(packageRoot.resolve('lib/'));
-      if (libDir.existsSync()) {
-        final symbolPattern = RegExp('''symbol:\\s*['"]([A-Za-z0-9_]+)['"]''');
-        for (final entity in libDir.listSync(recursive: true)) {
-          if (entity is File && entity.path.endsWith('.dart')) {
-            for (final match in symbolPattern.allMatches(
-              entity.readAsStringSync(),
-            )) {
-              referenced.add(match.group(1)!);
-            }
-          }
-        }
-      }
+      final referenced = _resolveFfiSymbols(packageRoot, traceSqlite);
       final exportStrlen = referenced.remove('strlen');
       final buffer = StringBuffer();
       if (exportStrlen) {
         buffer
-          ..writeln('/* libc strlen, resolved from this asset by the Dart')
-          ..writeln('   bindings. The CRT strlen is an import on Windows, not')
-          ..writeln('   an exportable DLL symbol, so define and export ours. */')
+          ..writeln('/* libc strlen: a CRT import on Windows, not exportable;')
+          ..writeln('   define and export ours so the binding resolves. */')
           ..writeln('int resqlite_win_strlen(const char* s) {')
           ..writeln('  const char* p = s;')
           ..writeln('  while (*p) { ++p; }')
@@ -145,7 +114,7 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
             '#pragma comment(linker, "/export:strlen=resqlite_win_strlen")',
           );
       }
-      for (final symbol in referenced) {
+      for (final symbol in referenced.toList()..sort()) {
         buffer.writeln('#pragma comment(linker, "/export:$symbol")');
       }
       windowsExportSource = outputFilePath(
@@ -279,11 +248,45 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
   });
 }
 
+// FFI symbols that must be exported from the native library so Dart's `@Native`
+// lookups resolve at runtime: the union of the hand-maintained _exportedSymbols
+// base, the traced-build wrappers, and every `@Native(symbol:)` reference
+// scanned from the package's Dart sources. Scanning keeps the set complete as
+// bindings change instead of relying on the hand list; a referenced symbol that
+// the C sources do not define then fails the build rather than failing silently
+// at runtime.
+Set<String> _resolveFfiSymbols(Uri packageRoot, bool traceSqlite) {
+  final symbols = <String>{
+    ..._exportedSymbols,
+    if (traceSqlite)
+      for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
+  };
+  final libDir = Directory.fromUri(packageRoot.resolve('lib/'));
+  if (!libDir.existsSync()) {
+    throw StateError(
+      'resqlite build hook cannot scan @Native symbols: '
+      '${libDir.path} does not exist.',
+    );
+  }
+  final pattern = RegExp(
+    r'''@(?:\w+\.)?Native<[\s\S]*?symbol:\s*['"]([A-Za-z0-9_]+)['"]''',
+  );
+  for (final entity in libDir.listSync(recursive: true)) {
+    if (entity is File && entity.path.endsWith('.dart')) {
+      for (final match in pattern.allMatches(entity.readAsStringSync())) {
+        symbols.add(match.group(1)!);
+      }
+    }
+  }
+  return symbols;
+}
+
 // ---------------------------------------------------------------------------
-// Exported symbols for the Linux linker version script.
-//
-// These are all the SQLite and resqlite symbols referenced via FFI from Dart.
-// Everything else is hidden (local) to prevent conflicts with system SQLite.
+// Hand-maintained base of the FFI export set. _resolveFfiSymbols augments this
+// with every @Native(symbol:) reference scanned from lib/, so a new binding
+// need not be added here by hand. Consumed by both the Linux version script and
+// the Windows /export generation; everything else stays hidden (local) on Linux
+// to prevent conflicts with system SQLite.
 // ---------------------------------------------------------------------------
 const _exportedSymbols = [
   // SQLite core (used by database.dart FFI bindings)
