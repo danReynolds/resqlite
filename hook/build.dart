@@ -85,6 +85,76 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
 ''');
     }
 
+    // -----------------------------------------------------------------------
+    // Windows: export the FFI symbols from the DLL.
+    //
+    // On Windows, MSVC exports NO symbols from a DLL by default (the sources
+    // carry no __declspec(dllexport), and CBuilder.library does not wire up
+    // LinkerOptions/.def generation). Without this, the DLL builds but exports
+    // nothing, and every FFI lookup fails at runtime with
+    // "The specified procedure could not be found" (error code 127).
+    //
+    // The hand-maintained _exportedSymbols list has historically missed
+    // symbols (e.g. the reader_* helpers and strlen), and the maintainer can
+    // only verify on non-Windows hosts — so rather than trust that list, we
+    // additionally SCAN the package's Dart sources for every `@Native(symbol:)`
+    // reference. The union is exported, which is correct by construction and
+    // stays correct as the bindings change. A symbol that is referenced but
+    // genuinely absent from the DLL fails the *build* (a visible LNK error)
+    // instead of failing silently at runtime.
+    //
+    // strlen is special: it is a libc function the bindings resolve from this
+    // asset, but on Windows the CRT strlen is an *import*, not an exportable
+    // DLL symbol. We provide our own definition and export it under the name
+    // `strlen` (matching @Native<Int Function(Pointer<Void>)>).
+    //
+    // This is generated only for Windows; a no-op on every other OS.
+    String? windowsExportSource;
+    if (targetOS == OS.windows) {
+      final referenced = <String>{
+        ..._exportedSymbols,
+        if (traceSqlite)
+          for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
+      };
+      final libDir = Directory.fromUri(packageRoot.resolve('lib/'));
+      if (libDir.existsSync()) {
+        final symbolPattern = RegExp('''symbol:\\s*['"]([A-Za-z0-9_]+)['"]''');
+        for (final entity in libDir.listSync(recursive: true)) {
+          if (entity is File && entity.path.endsWith('.dart')) {
+            for (final match in symbolPattern.allMatches(
+              entity.readAsStringSync(),
+            )) {
+              referenced.add(match.group(1)!);
+            }
+          }
+        }
+      }
+      final exportStrlen = referenced.remove('strlen');
+      final buffer = StringBuffer();
+      if (exportStrlen) {
+        buffer
+          ..writeln('/* libc strlen, resolved from this asset by the Dart')
+          ..writeln('   bindings. The CRT strlen is an import on Windows, not')
+          ..writeln('   an exportable DLL symbol, so define and export ours. */')
+          ..writeln('int resqlite_win_strlen(const char* s) {')
+          ..writeln('  const char* p = s;')
+          ..writeln('  while (*p) { ++p; }')
+          ..writeln('  return (int)(p - s);')
+          ..writeln('}')
+          ..writeln(
+            '#pragma comment(linker, "/export:strlen=resqlite_win_strlen")',
+          );
+      }
+      for (final symbol in referenced) {
+        buffer.writeln('#pragma comment(linker, "/export:$symbol")');
+      }
+      windowsExportSource = outputFilePath(
+        input.outputDirectory,
+        'resqlite_windows_exports.c',
+      );
+      await File(windowsExportSource).writeAsString(buffer.toString());
+    }
+
     final sqliteSource = traceSqlite
         ? await _writeTracedSqliteSource(input, packageRoot)
         : packageFilePath(
@@ -107,6 +177,8 @@ ${exportedSymbols.map((s) => '    $s;').join('\n')}
         ],
         packageFilePath(packageRoot, 'native/resqlite_deps.c'),
         packageFilePath(packageRoot, 'native/resqlite.c'),
+        // Windows-only: linker /export directives for the FFI symbols.
+        if (windowsExportSource != null) windowsExportSource,
       ],
       includes: [
         packageFilePath(packageRoot, 'third_party/sqlite3mc'),
