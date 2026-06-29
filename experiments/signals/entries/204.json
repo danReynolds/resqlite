@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "The exact UTF-8 length prepass in single-row `allocateParams` is measurable on non-ASCII strings: `single_row_param_packing.dart` improved the unicode-1 shape from 296.5 ns/op to 236.2 ns/op when the prototype skipped `_utf8Length`.",
+    "Large CJK single-row binds have remaining headroom beyond exp 187's direct writer: the archived prototype improved 64 KB through 1 MB CJK payloads in both focused orderings, roughly -6% to -12%.",
+    "A broad safe upper bound is not a mergeable allocation policy for the public bind path. Reserving three bytes for every UTF-16 code unit after the first non-ASCII character is exact for pure CJK but can over-allocate for two-byte text, surrogate-heavy text, or mostly ASCII text with one non-ASCII character."
+  ],
+  "nextSignals": [
+    "Do not replace `_utf8Length` with a broad over-reserve in `allocateParams`; keep exp 187's exact direct UTF-8 path as the default.",
+    "Future Unicode bind candidates should include a mixed-Unicode guard before acceptance, especially strings with one non-ASCII character in otherwise ASCII text and two-byte-script payloads.",
+    "Reopen this only with a candidate that avoids the exact length prepass without broad over-allocation, or with production evidence for a CJK-only large-text workload and an explicit guard for that shape."
+  ]
+}
