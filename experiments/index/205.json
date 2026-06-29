@@ -1,0 +1,7 @@
+{
+  "file": "205-step-row-value-cache.md",
+  "title": "per-cell `sqlite3_column_value` reuse in `resqlite_step_row`",
+  "impact": "Mirrors exp 203's per-cell `sqlite3_column_value` cache pattern into `resqlite_step_row` (rows path), `resqlite_step_row_hash` (initial-stream hash decoder), and `resqlite_query_hash` (unchanged-fanout stream hash loop). Focused `select_rows_step_row_ffi.dart` shows the rows-path `Database.select` decode runs roughly 1-6% faster on 10k-row x 8/20 INTEGER and short-TEXT shapes plus the standard mixed schema, with the sign preserved across two order-flipped passes. Same correctness story as exp 203: `SQLITE_OPEN_NOMUTEX` + single-isolate worker makes the unprotected `sqlite3_value*` safe.",
+  "status": "in_review",
+  "link": ""
+}
