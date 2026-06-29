@@ -369,7 +369,7 @@
   <h1>Experiments &amp; Performance Over Time</h1>
   <p class="intro">
     resqlite was built through rigorous, benchmark-driven experimentation. This page tracks
-    every optimization attempt — accepted, in review, and rejected — alongside the performance data
+    every dispositioned optimization attempt — accepted and rejected — alongside the performance data
     behind each decision. Use the headline charts for broad health, the scenario charts
     for app-shaped workloads, and click any data point to see the experiment and metrics
     that drove the decision.
@@ -447,7 +447,6 @@
       <div class="filter-bar" id="filterBar">
         <button class="filter-btn" data-filter="all">All<span class="count" id="countAll"></span></button>
         <button class="filter-btn active" data-filter="accepted">Accepted<span class="count" id="countAccepted"></span></button>
-        <button class="filter-btn" data-filter="in_review">In Review<span class="count" id="countInReview"></span></button>
         <button class="filter-btn" data-filter="rejected">Rejected<span class="count" id="countRejected"></span></button>
       </div>
     </div>
@@ -470,7 +469,7 @@ Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Hel
 let DATA = null;
 const chartInstances = {};
 let selectedExpId = null;
-let currentFilter = 'accepted'; // 'all' | 'accepted' | 'in_review' | 'rejected'
+let currentFilter = 'accepted'; // 'all' | 'accepted' | 'rejected'
 let activePanelId = 'panelReads';
 
 const PANEL_TO_TAB = {
@@ -536,7 +535,7 @@ function activatePanel(panelId, sync = true) {
 function loadStateFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const filter = params.get('filter');
-  if (['all', 'accepted', 'in_review', 'rejected'].includes(filter)) {
+  if (['all', 'accepted', 'rejected'].includes(filter)) {
     currentFilter = filter;
   }
 
@@ -572,6 +571,10 @@ async function init() {
     document.getElementById('expList').innerHTML = '<div class="loading">Failed to load history.json</div>';
     return;
   }
+  // In-review experiments are staged pending disposition; the page only surfaces
+  // accepted/rejected ones. Filtering here keeps every downstream consumer
+  // (list, counts, chart overlays, deep-links) in sync from one place.
+  DATA.experiments = (DATA.experiments || []).filter(e => e.status !== 'in_review');
   METRIC_DISPLAY = DATA.metricDisplay || {};
   CHART_GROUPS = DATA.chartGroups || {};
   loadStateFromUrl();
@@ -620,7 +623,6 @@ function updateHeaderCounts() {
   const exps = DATA.experiments;
   document.getElementById('countAll').textContent = `(${exps.length})`;
   document.getElementById('countAccepted').textContent = `(${exps.filter(e => e.status === 'accepted').length})`;
-  document.getElementById('countInReview').textContent = `(${exps.filter(e => e.status === 'in_review').length})`;
   document.getElementById('countRejected').textContent = `(${exps.filter(e => e.status === 'rejected').length})`;
 }
 
