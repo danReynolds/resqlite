@@ -675,12 +675,15 @@ function buildCharts() {
       return {
         label: displayNameForMetric(key),
         // Runs flagged as noisy (single-sample or with an elevated sqlite3
-        // control envelope) appear as gaps so they don't pull the line
-        // through transient machine-load spikes. The underlying numbers
-        // are still in DATA.runs and visible in the experiment side panel.
-        data: chartRunIndices.map(ri =>
-          runs[ri].noisy ? null : (runs[ri].metrics[key] ?? null)
-        ),
+        // control envelope) OR built from a dirty tree appear as gaps, so the
+        // trend line isn't pulled through transient machine-load spikes or
+        // uncommitted-state runs. The underlying numbers are still in
+        // DATA.runs and visible in the experiment side panel.
+        data: chartRunIndices.map(ri => {
+          const r = runs[ri];
+          const dirty = r.environment && r.environment.gitDirty;
+          return (r.noisy || dirty) ? null : (r.metrics[key] ?? null);
+        }),
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,
@@ -1119,36 +1122,79 @@ function findPreviousRunIndexWithMetric(runIdx, key) {
   return -1;
 }
 
+// A run anchors trend deltas only when it isn't single-sample/noisy and was
+// built from a committed tree. Dirty or noisy runs still show their own
+// numbers in the detail panel, but they neither set a baseline nor earn a
+// confident delta — a single dirty/noisy run on an off-target metric is the
+// machine-drift artifact the acceptance A/B (order-flipped) already discounts.
+function runIsCleanForTrend(run) {
+  return !!run && !run.noisy && !(run.environment && run.environment.gitDirty);
+}
+
+// Short reason a run's own numbers shouldn't read as a confident delta, or
+// null when the run is clean.
+function runDeltaCaveat(run) {
+  if (!run) return null;
+  if (run.environment && run.environment.gitDirty) return 'dirty tree';
+  if (run.noisy) return run.noisyReason || 'noisy run';
+  return null;
+}
+
+// Robust baseline for `key`: the median of the trailing window of clean runs
+// carrying it before runIdx, so one noisy/dirty spike can't anchor the delta.
+// Falls back to the nearest earlier run with the metric only when no clean
+// baseline exists yet (early history).
+function trendBaselineForMetric(runIdx, key, window = 5) {
+  const vals = [];
+  for (let i = runIdx - 1; i >= 0 && vals.length < window; i--) {
+    const r = DATA.runs[i];
+    if (runIsCleanForTrend(r) && r.metrics[key] != null) vals.push(r.metrics[key]);
+  }
+  if (vals.length) {
+    const s = vals.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
+    return { value: s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2, clean: true };
+  }
+  const pIdx = findPreviousRunIndexWithMetric(runIdx, key);
+  return pIdx >= 0 ? { value: DATA.runs[pIdx].metrics[key], clean: false } : null;
+}
+
+// Unified delta descriptor shared by the impact table and the chart pills.
+function metricDeltaDescriptor(runIdx, key) {
+  const run = DATA.runs[runIdx];
+  const current = run ? run.metrics[key] : null;
+  if (current == null) return null;
+  const caveat = runDeltaCaveat(run);
+  const base = trendBaselineForMetric(runIdx, key);
+  if (!base) return { current, baseline: null, caveat };
+  const pct = base.value === 0 ? null : ((current - base.value) / base.value) * 100;
+  const improved = isHigherBetter(key) ? current > base.value : current < base.value;
+  return { current, baseline: base.value, baselineClean: base.clean, pct, improved, neutral: current === base.value, caveat };
+}
+
+// {klass, text} for the delta span, shared by both render sites. A caveated
+// (dirty/noisy) run is shown neutral with its reason rather than a colored %.
+function deltaBadge(desc) {
+  if (!desc || desc.baseline == null) return { klass: 'neutral', text: 'first measured run' };
+  if (desc.caveat) return { klass: 'neutral', text: `${desc.caveat} — Δ not gated` };
+  if (desc.neutral) return { klass: 'neutral', text: 'flat' };
+  if (desc.pct == null) return { klass: desc.improved ? 'good' : 'bad', text: 'changed' };
+  return { klass: desc.improved ? 'good' : 'bad', text: `${formatSignedPercent(desc.pct)} ${desc.improved ? 'better' : 'worse'}` };
+}
+
 function renderMetricImpactSection(title, metricKeys, runIdx) {
   if (runIdx == null || runIdx < 0 || !metricKeys?.length) return '';
 
   const rows = [];
   for (const key of metricKeys) {
-    const current = DATA.runs[runIdx].metrics[key];
-    if (current == null) continue;
-
-    const prevIdx = findPreviousRunIndexWithMetric(runIdx, key);
-    const prev = prevIdx >= 0 ? DATA.runs[prevIdx].metrics[key] : null;
-    const label = displayNameForMetric(key);
-
-    let deltaHtml = '<span class="metric-delta neutral">first measured run</span>';
-    if (prev != null) {
-      const pct = prev == 0 ? null : ((current - prev) / prev) * 100;
-      const improved = isHigherBetter(key) ? current > prev : current < prev;
-      const neutral = current === prev;
-      const klass = neutral ? 'neutral' : (improved ? 'good' : 'bad');
-      const summary = neutral
-        ? 'flat'
-        : (pct == null ? 'changed' : `${formatSignedPercent(pct)} ${improved ? 'better' : 'worse'}`);
-      deltaHtml = `<span class="metric-delta ${klass}">${summary}</span>`;
-    }
-
+    const desc = metricDeltaDescriptor(runIdx, key);
+    if (!desc) continue;
+    const badge = deltaBadge(desc);
     rows.push(
       `<tr>` +
-      `<td>${esc(label)}</td>` +
-      `<td>${esc(formatMetricValue(key, prev))}</td>` +
-      `<td>${esc(formatMetricValue(key, current))}</td>` +
-      `<td>${deltaHtml}</td>` +
+      `<td>${esc(displayNameForMetric(key))}</td>` +
+      `<td>${esc(formatMetricValue(key, desc.baseline))}</td>` +
+      `<td>${esc(formatMetricValue(key, desc.current))}</td>` +
+      `<td><span class="metric-delta ${badge.klass}">${esc(badge.text)}</span></td>` +
       `</tr>`
     );
   }
@@ -1158,9 +1204,9 @@ function renderMetricImpactSection(title, metricKeys, runIdx) {
   return (
     `<div class="detail-section">` +
     `<h4>${esc(title)}</h4>` +
-    `<p class="metric-context">Compared against the nearest earlier benchmark run carrying each metric.</p>` +
+    `<p class="metric-context">Compared against the trailing median of clean (committed, multi-sample) runs carrying each metric. Dirty or noisy runs show their value but are not gated into a delta.</p>` +
     `<table>` +
-    `<tr><td>Metric</td><td>Previous</td><td>This experiment</td><td>Delta</td></tr>` +
+    `<tr><td>Metric</td><td>Baseline</td><td>This experiment</td><td>Delta</td></tr>` +
     `${rows.join('')}` +
     `</table>` +
     `</div>`
@@ -1174,7 +1220,7 @@ function updateChartImprovementPills() {
     if (!improvEl) continue;
 
     if (!selectedExpId) {
-      improvEl.innerHTML = `<span class="metric-context">Select an experiment to see deltas versus the previous run on these metrics.</span>`;
+      improvEl.innerHTML = `<span class="metric-context">Select an experiment to see deltas versus the clean-run baseline on these metrics.</span>`;
       continue;
     }
 
@@ -1193,26 +1239,19 @@ function updateChartImprovementPills() {
 
     const pills = [];
     for (const key of metricKeys) {
-      const current = DATA.runs[runIdx].metrics[key];
-      if (current == null) continue;
-
-      const prevIdx = findPreviousRunIndexWithMetric(runIdx, key);
-      const prev = prevIdx >= 0 ? DATA.runs[prevIdx].metrics[key] : null;
-      if (prev == null) continue;
-
-      const improved = isHigherBetter(key) ? current > prev : current < prev;
-      const neutral = current === prev;
-      const pct = prev === 0 ? null : ((current - prev) / prev) * 100;
-      const deltaClass = neutral ? 'neutral' : (improved ? 'good' : 'bad');
-      const deltaText = neutral
-        ? 'flat'
-        : (pct == null ? 'changed' : `${formatSignedPercent(pct)} ${improved ? 'better' : 'worse'}`);
-
+      const desc = metricDeltaDescriptor(runIdx, key);
+      if (!desc || desc.baseline == null) continue;
+      const badge = deltaBadge(desc);
+      // A dirty/noisy run shows its own value but no baseline\u2192current arrow,
+      // since its number isn't a trustworthy comparison point.
+      const body = desc.caveat
+        ? `${esc(formatMetricValue(key, desc.current))} `
+        : `${esc(formatMetricValue(key, desc.baseline))} <span class="arrow">\u2192</span> ${esc(formatMetricValue(key, desc.current))} `;
       pills.push(
         `<span class="improv-pill">` +
         `<span class="metric-name">${esc(displayNameForMetric(key))}</span> ` +
-        `${esc(formatMetricValue(key, prev))} <span class="arrow">\u2192</span> ${esc(formatMetricValue(key, current))} ` +
-        `<strong class="metric-delta ${deltaClass}">(${esc(deltaText)})</strong>` +
+        body +
+        `<strong class="metric-delta ${badge.klass}">(${esc(badge.text)})</strong>` +
         `</span>`
       );
     }
