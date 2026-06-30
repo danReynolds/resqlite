@@ -2104,13 +2104,7 @@ fail:
 RESQLITE_HOT static int write_json_to_buf(
     sqlite3_stmt* stmt, resqlite_cached_stmt* entry, resqlite_buf* b,
     int* out_row_count) {
-    // [EXP-206] After exp 195 builds cached JSON column-name tokens, the
-    // prepared statement's column count is already stored on the cache entry.
-    // Reuse it on hot re-executions instead of asking SQLite again once per
-    // selectBytes() call.
-    int col_count = entry->json_name_tokens_col_count > 0
-        ? entry->json_name_tokens_col_count
-        : sqlite3_column_count(stmt);
+    int col_count = sqlite3_column_count(stmt);
     int rc;
     // Declared before the first `goto cleanup` below so cleanup always reads
     // an initialized count, even when token setup fails before any row.
