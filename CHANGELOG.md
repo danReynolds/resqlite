@@ -1,21 +1,75 @@
 ## 0.7.0
 
+Performance and correctness release with one small breaking change to
+`selectBytes`. The headline is a substantial speedup to `selectBytes` JSON
+serialization — integer- and REAL-heavy result sets especially — plus a build
+fix that makes resqlite work on **Windows**, where local databases previously
+failed to open.
+
 **Breaking:** `Database.selectBytes` now returns a `BytesResult`
 (`{Uint8List bytes, int rowCount}`) instead of a bare `Uint8List`. Update call
 sites to read `.bytes` where they previously used the result directly.
 
-- **New:** `selectBytes` reports `rowCount` — the number of rows serialized into
-  the JSON. It is counted in C during the same serialization pass, so reading it
-  is free: callers building a paging envelope (e.g. `has_more`) or logging a sent
-  count no longer need a second `COUNT(*)` or to parse the bytes. The serialization
-  hot loop is unchanged; the row count is a single store outside it, and the value
-  rides along on the existing reader→main SendPort transfer.
+### Fixed
+
+- **Windows: local databases now open.** `resqlite.dll` previously exported none
+  of its FFI symbols — MSVC exports nothing from a DLL by default — so every call
+  failed at runtime with `error code 127` ("The specified procedure could not be
+  found"). The build hook now emits linker `/export:` directives for the full FFI
+  surface. The same root cause (a hand-maintained export list) was also leaving
+  the `resqlite_reader_*` helpers — used on every read — hidden on **Linux**; the
+  export set is now derived by scanning the `@Native` bindings and shared between
+  the Linux version script and the Windows exports, so both platforms export the
+  complete set
+  ([#216](https://github.com/danReynolds/resqlite/pull/216)).
+
+### New
+
+- **`selectBytes` reports `rowCount`** — the number of rows serialized into the
+  JSON. It is counted in C during the same serialization pass, so reading it is
+  free: callers building a paging envelope (e.g. `has_more`) or logging a sent
+  count no longer need a second `COUNT(*)` or to parse the bytes. The
+  serialization hot loop is unchanged; the row count is a single store outside
+  it, and the value rides along on the existing reader→main SendPort transfer.
 
 ```dart
 final result = await db.selectBytes('SELECT * FROM events WHERE ... LIMIT 1000');
 // result.bytes    -> Uint8List of JSON
 // result.rowCount -> rows serialized (e.g. for has_more = rowCount == 1000)
 ```
+
+### Performance
+
+`selectBytes` JSON serialization (`write_json_to_buf` in `native/resqlite.c`)
+got materially faster across this release. Every number below is from
+order-flipped A/B passes on the focused suite named in the linked experiment,
+and the serialized JSON is byte-identical in every case.
+
+- **Integer-valued REAL fast path** — finite, exactly integral REAL values now
+  format through the integer itoa path instead of `snprintf("%.17g")`: **−72% to
+  −81%** on integral-REAL lanes
+  ([#200](https://github.com/danReynolds/resqlite/pull/200),
+  [exp 194](https://github.com/danReynolds/resqlite/blob/main/experiments/194-real-integer-fastpath.md)).
+- **Integer column formatting** — a two-digit itoa table plus direct-to-buffer
+  formatting and a single row-level capacity reservation cut per-cell work:
+  **−8% to −26%** on integer-heavy lanes
+  ([#198](https://github.com/danReynolds/resqlite/pull/198),
+  [#206](https://github.com/danReynolds/resqlite/pull/206),
+  [#208](https://github.com/danReynolds/resqlite/pull/208)).
+- **Column-name token pre-encoding** — each column's `"name":` token is encoded
+  once and cached on the prepared statement instead of being re-escaped per row:
+  **−4% to −11%** on wide-column lanes
+  ([#196](https://github.com/danReynolds/resqlite/pull/196),
+  [#201](https://github.com/danReynolds/resqlite/pull/201)).
+- **Per-cell `sqlite3_column_value` reuse** — collapses repeated `columnMem`
+  lookups in the bytes and rows decoders: **−1% to −6%**
+  ([#213](https://github.com/danReynolds/resqlite/pull/213),
+  [#215](https://github.com/danReynolds/resqlite/pull/215)).
+- **Large single-row text binds** — a direct UTF-8 encoder removes a temporary
+  allocation and copy for large single-row text/blob parameters: **−15% to −39%**
+  at 16 KB–1 MB payloads
+  ([#190](https://github.com/danReynolds/resqlite/pull/190),
+  [#193](https://github.com/danReynolds/resqlite/pull/193)).
 
 ## 0.6.0
 

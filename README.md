@@ -47,7 +47,7 @@ Visit the [project site](https://danreynolds.github.io/resqlite/) to browse inte
 
 ```yaml
 dependencies:
-  resqlite: ^0.6.0
+  resqlite: ^0.7.0
 ```
 
 Or via the CLI:
@@ -223,7 +223,7 @@ each extension on the writer and reader connections in that database pool.
 
 ```yaml
 dependencies:
-  resqlite: ^0.6.0
+  resqlite: ^0.7.0
   resqlite_vector: ^0.1.0
   resqlite_js: ^0.1.0
 ```
