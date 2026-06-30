@@ -1,0 +1,8 @@
+{
+  "file": "206-selectbytes-col-count-cache.md",
+  "title": "selectBytes column-count cache",
+  "impact": "Tried reusing exp 195's cached `json_name_tokens_col_count` so hot repeated `selectBytes()` calls skip one `sqlite3_column_count(stmt)` per execution. Rejected: the first two focused repeated-call pairs looked candidate-faster, but the warmed pair flipped the load-bearing 1-row and 10-row lanes candidate-slower while larger guards were flat. Prototype preserved at `archive/exp-206`; no runtime change kept.",
+  "status": "rejected",
+  "link": ""
+}
+
