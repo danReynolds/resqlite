@@ -174,10 +174,19 @@ typedef struct {
 typedef struct {
     resqlite_cached_stmt entries[STMT_CACHE_MAX];
     int count;
+    // [EXP-207] Hot-SQL fast-path bypass. Tracks the most recently
+    // matched (or just-inserted) entry; consulted before the linear
+    // scan in `stmt_cache_lookup_entry`. The linear scan currently
+    // walks every slot ahead of `count - 1` on a repeated hit because
+    // the move-to-MRU swap parks the match at the end of the array.
+    // Cleared on `stmt_cache_clear` so a post-close fast-path probe
+    // cannot deref a freed `sql` pointer.
+    resqlite_cached_stmt* last_lookup;
 } resqlite_stmt_cache;
 
 static void stmt_cache_init(resqlite_stmt_cache* c) {
     c->count = 0;
+    c->last_lookup = NULL;
     memset(c->entries, 0, sizeof(c->entries));
 }
 
@@ -228,6 +237,18 @@ static void stmt_cache_entry_init(resqlite_cached_stmt* entry,
 static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
                                                     const char* sql,
                                                     int sql_len) {
+    // [EXP-207] Hot-SQL fast path. Most workloads re-execute the same
+    // prepared SQL many times in a row (focused harnesses, hot ORM
+    // queries, stream re-queries). The post-match swap below already
+    // parks the matched entry at `entries[count - 1]`; without this
+    // check, every repeated lookup re-scans `count - 1` slots before
+    // landing on the same entry.
+    resqlite_cached_stmt* last = c->last_lookup;
+    if (last && last->sql_len == sql_len &&
+        memcmp(last->sql, sql, sql_len) == 0) {
+        return last;
+    }
+
     for (int i = 0; i < c->count; i++) {
         if (c->entries[i].sql_len == sql_len &&
             memcmp(c->entries[i].sql, sql, sql_len) == 0) {
@@ -236,7 +257,8 @@ static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
                 c->entries[i] = c->entries[c->count - 1];
                 c->entries[c->count - 1] = tmp;
             }
-            return &c->entries[c->count - 1];
+            c->last_lookup = &c->entries[c->count - 1];
+            return c->last_lookup;
         }
     }
     return NULL;
@@ -253,6 +275,12 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
                                               int sql_len,
                                               sqlite3_stmt* stmt) {
     if (c->count >= STMT_CACHE_MAX) {
+        // [EXP-207] Eviction disposes entries[0] (freeing its `sql`) and
+        // then memmoves entries[1..31] down; the slot `last_lookup`
+        // previously pointed at now holds a different entry's bytes.
+        // Drop the cached pointer rather than serve a misleading hit on
+        // the next call.
+        c->last_lookup = NULL;
         stmt_cache_entry_dispose(&c->entries[0]);
         memmove(&c->entries[0], &c->entries[1],
                 (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
@@ -265,7 +293,10 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
 
     stmt_cache_entry_init(&c->entries[c->count], sql_copy, sql_len, stmt);
     c->count++;
-    return &c->entries[c->count - 1];
+    // [EXP-207] The just-inserted entry is the new MRU; prime the
+    // fast-path pointer so the caller's very next lookup hits.
+    c->last_lookup = &c->entries[c->count - 1];
+    return c->last_lookup;
 }
 
 static void stmt_cache_clear(resqlite_stmt_cache* c) {
@@ -273,6 +304,9 @@ static void stmt_cache_clear(resqlite_stmt_cache* c) {
         stmt_cache_entry_dispose(&c->entries[i]);
     }
     c->count = 0;
+    // [EXP-207] All entries are now disposed; the cached pointer would
+    // dangle into freed `sql` memory if probed by a later lookup.
+    c->last_lookup = NULL;
 }
 
 static void stmt_cache_entry_set_read_tables(resqlite_cached_stmt* entry,
@@ -2310,32 +2344,22 @@ RESQLITE_HOT int resqlite_step_row(
     if (RESQLITE_UNLIKELY(rc != SQLITE_ROW)) return rc;
 
     for (int i = 0; i < col_count; i++) {
-        // [EXP-205] Mirror exp 203's pattern: take `sqlite3_column_value` once
-        // and dispatch through `sqlite3_value_*`, saving one `columnMem` lookup
-        // per fixed cell and two per TEXT/BLOB cell. The connection runs under
-        // `SQLITE_OPEN_NOMUTEX` and is owned by a single isolate worker, so the
-        // "unprotected sqlite3_value*" caveat in the SQLite docs does not apply.
-        sqlite3_value* val = sqlite3_column_value(stmt, i);
-        int type = sqlite3_value_type(val);
+        int type = sqlite3_column_type(stmt, i);
         cells[i].type = type;
         switch (type) {
             case SQLITE_INTEGER:
-                cells[i].i = sqlite3_value_int64(val);
+                cells[i].i = sqlite3_column_int64(stmt, i);
                 break;
             case SQLITE_FLOAT:
-                cells[i].d = sqlite3_value_double(val);
+                cells[i].d = sqlite3_column_double(stmt, i);
                 break;
             case SQLITE_TEXT:
-                // value_text must precede value_bytes for the same reason
-                // column_text must precede column_bytes: calling bytes first can
-                // trigger an implicit type conversion that invalidates the
-                // pointer.
-                cells[i].p = sqlite3_value_text(val);
-                cells[i].len = sqlite3_value_bytes(val);
+                cells[i].p = sqlite3_column_text(stmt, i);
+                cells[i].len = sqlite3_column_bytes(stmt, i);
                 break;
             case SQLITE_BLOB:
-                cells[i].p = sqlite3_value_blob(val);
-                cells[i].len = sqlite3_value_bytes(val);
+                cells[i].p = sqlite3_column_blob(stmt, i);
+                cells[i].len = sqlite3_column_bytes(stmt, i);
                 break;
             default:
                 // SQLITE_NULL or unknown
@@ -2438,37 +2462,32 @@ long long resqlite_query_hash(
         }
         if (skip_hash) continue;
         for (int i = 0; i < col_count; i++) {
-            // [EXP-205] Reuse the per-cell `sqlite3_value*` (see
-            // resqlite_step_row). For an unchanged-fanout stream we re-execute
-            // this hash loop on every rerun, so the per-cell `columnMem`
-            // savings amortize directly into the stream-fanout path.
-            sqlite3_value* val = sqlite3_column_value(stmt, i);
-            int type = sqlite3_value_type(val);
+            int type = sqlite3_column_type(stmt, i);
             h = fnv_combine_u64(h, (uint64_t)type);
             switch (type) {
                 case SQLITE_INTEGER:
-                    h = fnv_combine_u64(h, (uint64_t)sqlite3_value_int64(val));
+                    h = fnv_combine_u64(h, (uint64_t)sqlite3_column_int64(stmt, i));
                     break;
                 case SQLITE_FLOAT: {
-                    double d = sqlite3_value_double(val);
+                    double d = sqlite3_column_double(stmt, i);
                     uint64_t bits; memcpy(&bits, &d, 8);
                     h = fnv_combine_u64(h, bits);
                     break;
                 }
                 case SQLITE_TEXT: {
-                    const unsigned char* p = sqlite3_value_text(val);
-                    int len = sqlite3_value_bytes(val);
+                    const unsigned char* p = sqlite3_column_text(stmt, i);
+                    int len = sqlite3_column_bytes(stmt, i);
                     h = fnv_combine_u64(h, (uint64_t)len);
                     h = fnv_combine_bytes(h, p, len);
                     break;
                 }
                 case SQLITE_BLOB: {
-                    // sqlite3_value_blob returns const void*. Pass it through
-                    // as-is — fnv_combine_bytes reinterprets internally;
-                    // avoiding the const-qualified pointer cast keeps this
-                    // clean under strict compiler flags.
-                    const void* p = sqlite3_value_blob(val);
-                    int len = sqlite3_value_bytes(val);
+                    // sqlite3_column_blob returns const void*. Pass it
+                    // through as-is — fnv_combine_bytes reinterprets
+                    // internally; avoiding the const-qualified pointer
+                    // cast keeps this clean under strict compiler flags.
+                    const void* p = sqlite3_column_blob(stmt, i);
+                    int len = sqlite3_column_bytes(stmt, i);
                     h = fnv_combine_u64(h, (uint64_t)len);
                     h = fnv_combine_bytes(h, p, len);
                     break;
@@ -2514,28 +2533,26 @@ RESQLITE_HOT int resqlite_step_row_hash(
 
     uint64_t h = *hash;
     for (int i = 0; i < col_count; i++) {
-        // [EXP-205] Reuse the per-cell `sqlite3_value*` (see resqlite_step_row).
-        sqlite3_value* val = sqlite3_column_value(stmt, i);
-        int type = sqlite3_value_type(val);
+        int type = sqlite3_column_type(stmt, i);
         cells[i].type = type;
         h = fnv_combine_u64(h, (uint64_t)type);
         switch (type) {
             case SQLITE_INTEGER: {
-                sqlite3_int64 v = sqlite3_value_int64(val);
+                sqlite3_int64 v = sqlite3_column_int64(stmt, i);
                 cells[i].i = v;
                 h = fnv_combine_u64(h, (uint64_t)v);
                 break;
             }
             case SQLITE_FLOAT: {
-                double d = sqlite3_value_double(val);
+                double d = sqlite3_column_double(stmt, i);
                 uint64_t bits; memcpy(&bits, &d, 8);
                 cells[i].d = d;
                 h = fnv_combine_u64(h, bits);
                 break;
             }
             case SQLITE_TEXT: {
-                const unsigned char* p = sqlite3_value_text(val);
-                int len = sqlite3_value_bytes(val);
+                const unsigned char* p = sqlite3_column_text(stmt, i);
+                int len = sqlite3_column_bytes(stmt, i);
                 cells[i].p = p;
                 cells[i].len = len;
                 h = fnv_combine_u64(h, (uint64_t)len);
@@ -2543,8 +2560,8 @@ RESQLITE_HOT int resqlite_step_row_hash(
                 break;
             }
             case SQLITE_BLOB: {
-                const void* p = sqlite3_value_blob(val);
-                int len = sqlite3_value_bytes(val);
+                const void* p = sqlite3_column_blob(stmt, i);
+                int len = sqlite3_column_bytes(stmt, i);
                 cells[i].p = p;
                 cells[i].len = len;
                 h = fnv_combine_u64(h, (uint64_t)len);
