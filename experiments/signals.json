@@ -1564,6 +1564,21 @@
         "Continue treating `select_bytes_repeated_calls.dart` as the gate for tiny-rowset selectBytes setup work; require the 1-row and 10-row lanes to reproduce after warmup, not only in the first process pair.",
         "Do not generalize this rejection to `sqlite3_column_bytes`: TEXT/BLOB length lookup is per variable cell and needs a separate TEXT/BLOB-focused workload before accepting or rejecting it."
       ]
+    },
+    "207": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_below_signal_bar",
+      "changedBeliefs": [
+        "A `last_lookup` pointer fast-path on `stmt_cache_lookup_entry` does not move per-call wall on a hot-SQL workload, even when the cache is pre-filled with 31 length-matched cold SQLs to defeat the existing `sql_len` short-circuit. Three order-flipped pairs on `stmt_cache_hot_sql.dart` show no candidate-faster lane and a reproduced +6% to +30% regression on the very cache-pressure lanes the fast-path was meant to help.",
+        "The reason is not 'extra compare on every miss' — after warmup the fast-path should fire on every call. The candidate's added 8-byte `last_lookup` field shifts the layout of `resqlite_stmt_cache` and the surrounding `resqlite_db` / `resqlite_reader` structs, and the linear scan it replaces was already short on absolute work (most cached SQLs differ in length, so the `sql_len` shortcut elides the expensive `memcmp` body for most entries; per-reader cache pressure is bounded to ~8 entries even when 31 distinct cold SQLs have been issued across a 4-reader pool)."
+      ],
+      "nextSignals": [
+        "Do not retry a pointer-bump fast-path on `stmt_cache_lookup_entry`. The next attempt in this layer must change the lookup structure itself (precomputed 64-bit SQL hash matched before any `memcmp`, or a separate small linear-probe hash table) so the hot-path cost does not depend on cache-line shifts in `resqlite_db`.",
+        "Treat `benchmark/experiments/stmt_cache_hot_sql.dart` as the gate for any future stmt-cache layer change. Its length-matched cold SQLs defeat the `sql_len` short-circuit and expose actual per-call scan cost; without that workload, exp 195's `select_bytes_repeated_calls.dart` (single-SQL cache) makes any cache-layer change look flat by construction.",
+        "Reopen the direction only with a CPU profile or release-suite lane that names `stmt_cache_lookup_entry` as a top-N entry, or with a workload where the per-call stmt-cache scan is measurably dominant on the focused harness."
+      ]
     }
   }
 }
