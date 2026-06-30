@@ -1549,6 +1549,21 @@
         "Short-cell stream workloads (`single_stream_long_payload_hash.dart`) are still dominated by the FNV byte fold; do not retry per-cell FFI work on the unchanged-fanout hash path without a workload where the byte fold is not the floor.",
         "Future per-cell FFI savings should target the remaining `sqlite3_column_count` / `sqlite3_column_bytes` calls per query rather than re-attacking the typed-getter pattern."
       ]
+    },
+    "206": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_below_signal_bar",
+      "changedBeliefs": [
+        "Reusing exp 195's cached `json_name_tokens_col_count` to skip one `sqlite3_column_count(stmt)` per hot repeated `selectBytes()` execution is below the current signal bar. The first two `select_bytes_repeated_calls.dart` pairs were candidate-faster, but the warmed pair flipped the load-bearing 1-row lanes to +8.8%, +9.6%, and +10.9% candidate-slower.",
+        "After cached JSON name tokens, the remaining query-level column-count call is too small for the repeated-call harness to isolate reliably. Keeping an extra branch in `write_json_to_buf` is not justified without a new runtime or benchmark fact."
+      ],
+      "nextSignals": [
+        "Do not retry the cached `sqlite3_column_count` branch in `write_json_to_buf` without a more stable repeated-call harness or a new SQLite/Dart runtime fact.",
+        "Continue treating `select_bytes_repeated_calls.dart` as the gate for tiny-rowset selectBytes setup work; require the 1-row and 10-row lanes to reproduce after warmup, not only in the first process pair.",
+        "Do not generalize this rejection to `sqlite3_column_bytes`: TEXT/BLOB length lookup is per variable cell and needs a separate TEXT/BLOB-focused workload before accepting or rejecting it."
+      ]
     }
   }
 }
