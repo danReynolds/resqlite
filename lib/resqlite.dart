@@ -2,6 +2,7 @@ library;
 
 export 'src/database.dart' show BytesResult, Database;
 export 'src/diagnostics.dart' show Diagnostics;
+export 'src/read_statement.dart' show ReadStatement;
 export 'src/extensions/extension.dart'
     show
         ResqliteConnectionScope,

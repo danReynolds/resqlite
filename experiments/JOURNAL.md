@@ -265,6 +265,27 @@ Ask the symmetric question: what happens when the value is absent entirely? If
 artifact is indistinguishable from an intentional opt-out — add a required
 declaration so the two diverge.*
 
+### Parallelism and round-trip batching are complementary at the reader-pool round-trip floor
+
+[Exp 148](148-reader-reply-batching.md) rejected worker→main reader-reply
+batching under the load-bearing measured-elapsed gates. It was tempting to
+generalize that rejection into "batching along the reader path is not a real
+win." [Exp 209](209-heterogeneous-read-batch.md) proved the symmetric side of
+the story: main→worker *request* batching (`db.selectAll([...])`) reproduces
+same-direction wins on the shape where per-query SQLite work sits below the
+reader-pool round-trip floor (point-query lane ≈ 3× faster, medium-list lane
+≈ 1.8× faster), while its large-payload guard reproduces the *expected*
+regression (≈ 3× slower on 4×10 000-row selects). The regression is
+load-bearing, not a bug: it proves the batch path is not a hidden universal
+substitute for `Future.wait([db.select(...)])`, and the two APIs are
+complementary rather than competing at the reader-pool round-trip floor.
+
+*Reapplies whenever an idea batches work along a scarce-resource path. Ask
+which side is being batched (request vs reply, request vs completion), what
+the round-trip cost is on that side, and where the boundary lies at which
+parallelism starts to win. A single "batching does/does not work here"
+rejection rarely generalizes across the boundary.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

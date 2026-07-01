@@ -19,6 +19,7 @@ import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
+import '../read_statement.dart';
 import '../row.dart';
 import '../tracelite_profile.dart';
 
@@ -52,6 +53,21 @@ final class SelectWithDepsRequest extends ReadRequest {
 /// JSON bytes query — serialized entirely in C, no Dart objects for result data.
 final class SelectBytesRequest extends ReadRequest {
   SelectBytesRequest(super.sql, super.parameters, {super.traceCorrelationId});
+}
+
+/// Heterogeneous batch of SELECTs — one round trip, N results.
+///
+/// See [EXP-209](../../../experiments/209-heterogeneous-read-batch.md). The
+/// worker runs each statement in order on its dedicated reader connection
+/// and returns one list of [ResultSet] views. The base [ReadRequest.sql] /
+/// [ReadRequest.parameters] carry a synthetic marker used only for error
+/// wrapping; per-statement errors are re-wrapped with the failing
+/// statement's own SQL and parameters before propagating.
+final class SelectBatchRequest extends ReadRequest {
+  SelectBatchRequest(this.statements, {super.traceCorrelationId})
+      : super('[selectAll batch]', const []);
+
+  final List<ReadStatement> statements;
 }
 
 /// Stream re-query with worker-side hash comparison.
@@ -163,6 +179,40 @@ void readerEntrypoint(List<Object> args) {
           // at any size; the rowCount rides along for free.
           result = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           sacrifice = false;
+
+        case SelectBatchRequest(:final statements):
+          // Heterogeneous batch: run each SELECT on this reader's connection
+          // and collect the ResultSet views. Sacrifice when the aggregate
+          // estimated bytes cross the same threshold a single large select
+          // would trigger — a wide fanout of small results shouldn't
+          // sacrifice, but a batch containing one huge query should.
+          final batchResults = <List<Map<String, Object?>>>[];
+          var totalEstimatedBytes = 0;
+          for (final st in statements) {
+            try {
+              final raw = executeQuery(
+                dbHandleAddr,
+                readerId,
+                st.sql,
+                st.parameters,
+              );
+              totalEstimatedBytes += raw.estimatedBytes;
+              batchResults.add(_toRows(raw));
+            } catch (e) {
+              // Re-wrap the failing statement so the outer error path
+              // reports the concrete SQL / parameters, not the batch
+              // marker. Already-typed exceptions pass through.
+              throw e is ResqliteException
+                  ? e
+                  : ResqliteQueryException(
+                      e.toString(),
+                      sql: st.sql,
+                      parameters: st.parameters,
+                    );
+            }
+          }
+          sacrifice = totalEstimatedBytes > sacrificeByteThreshold;
+          result = batchResults;
 
         case SelectIfChangedRequest(
             :final sql,

@@ -1,0 +1,7 @@
+{
+  "file": "209-heterogeneous-read-batch.md",
+  "title": "Explicit heterogeneous read batch",
+  "impact": "Moonshot: symmetric read-side counterpart to exp 208's `executeStatements`. Adds `db.selectAll([...ReadStatement...])` — many unrelated SELECTs, one reader-isolate round trip, results returned in statement order. On the focused `heterogeneous_read_batch.dart` harness (20 point queries, 20 short-list SELECTs, and a 4×10k-row guard), two order-flipped passes reproduce same-direction wins on the small-read lanes (**point −72.9% / −60.2%**, ~3× faster; **medium −46.3% / −42.5%**, ~1.8× faster) and reproduce an expected regression on the large-payload guard (**+308% / +175%**, ~3× slower). The guard is load-bearing: it confirms `selectAll` is not a hidden replacement for `Future.wait([db.select(...)])` — the two are complementary at the reader-pool round-trip floor, and callers pick based on per-query size. Public API mirrors exp 208's shape: `ReadStatement` value + `Database.selectAll(List<ReadStatement>)`. Inside a transaction the batch falls back to sequential `Transaction.select` so it sees uncommitted writes.",
+  "status": "accepted",
+  "link": ""
+}

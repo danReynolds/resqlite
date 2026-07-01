@@ -15,6 +15,7 @@ import 'extensions/extension.dart';
 import 'native/resqlite_bindings.dart';
 import 'profile_counters.dart';
 import 'profile_mode.dart';
+import 'read_statement.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
 import 'tracelite_profile.dart';
@@ -319,6 +320,55 @@ final class Database {
       );
     }
     return BytesResult(result.bytes, result.rowCount);
+  }
+
+  /// Runs many SELECT statements in a single reader-isolate round trip.
+  ///
+  /// ```dart
+  /// final results = await db.selectAll([
+  ///   const ReadStatement('SELECT name FROM users WHERE id = ?', [1]),
+  ///   const ReadStatement('SELECT COUNT(*) AS c FROM tasks'),
+  ///   const ReadStatement('SELECT value FROM settings WHERE key = ?', ['theme']),
+  /// ]);
+  /// final user = results[0].single;
+  /// final taskCount = results[1].single['c'];
+  /// ```
+  ///
+  /// Each entry produces one row list, in the same order as [statements].
+  /// The whole batch runs on one reader connection and holds that
+  /// worker slot for its full duration, so pass batches of *small*
+  /// heterogeneous reads — the round-trip amortization dominates when
+  /// per-query SQLite work is below the reader-pool round-trip floor.
+  /// Independent large reads should stay on parallel [select] calls,
+  /// where the reader pool can fan them out across workers.
+  ///
+  /// If any statement fails, the batch aborts on that statement and the
+  /// original [ResqliteQueryException] propagates with the failing
+  /// SQL / parameters intact — statements before the failure have
+  /// already executed on their read snapshot, statements after have not
+  /// run.
+  ///
+  /// Inside a [transaction], the batch falls back to sequential
+  /// [Transaction.select] calls so it sees the transaction's uncommitted
+  /// writes.
+  Future<List<List<Map<String, Object?>>>> selectAll(
+    List<ReadStatement> statements,
+  ) async {
+    if (statements.isEmpty) return const [];
+
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      final results = <List<Map<String, Object?>>>[];
+      for (final st in statements) {
+        results.add(await transaction.select(st.sql, st.parameters));
+      }
+      return results;
+    }
+
+    _ensureOpen();
+
+    final _DatabaseRuntime(:readerPool) = await _runtime;
+    return readerPool.selectAll(statements);
   }
 
   // -------------------------------------------------------------------------

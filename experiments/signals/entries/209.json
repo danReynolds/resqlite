@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "accepted_moonshot",
+  "changedBeliefs": [
+    "Reader-pool parallelism does not universally beat round-trip amortization: below the reader-pool round-trip floor (per-query SQLite work < isolate send+reply cost), a serial single-worker batch outperforms `Future.wait([db.select(...)])` fan-out because the parallel path pays N round trips instead of one. On `heterogeneous_read_batch.dart` this reproduces same-direction across two order-flipped passes on the 20-point-query lane (−72.9% / −60.2%, ≈3× faster) and the 20 × ~10-row list lane (−46.3% / −42.5%, ≈1.8× faster).",
+    "The trade-off is a real knob, not a hidden default: the same experiment reproduces an expected regression on the 4 × 10 000-row large-payload guard (+308% / +175%, batch ≈ 3× slower) because one reader worker running four huge reads serially cannot beat four workers running them in parallel. That guard failing to regress would have been evidence the prototype leaked a cost that made it a strictly worse `select` fan-out; its reproduced regression confirms the boundary and closes the moonshot as *accepted with a documented trade-off*, not as a hidden replacement.",
+    "The read-side analog of exp 208's `executeStatements` needed its own moonshot pass, not a symmetric extrapolation from writes: the write-batch win derives partly from collapsing N SQLite autocommits into one transaction, which does not apply to reads. The read-batch win is purely round-trip amortization and would have been invisible on any workload where per-query SQLite work already exceeded the round trip. `heterogeneous_read_batch.dart`'s point + medium + large three-lane shape is the durable gate for that trade-off."
+  ],
+  "nextSignals": [
+    "Use `benchmark/experiments/heterogeneous_read_batch.dart` (point / medium / large lanes, order-flipped pair) as the durable gate for any future reader-pool round-trip amortization change. The large lane is load-bearing: a future prototype that erases the guard regression (batch keeping up with parallel fan-out on 10 k-row reads) would either indicate a genuine encoder win or leaked measurement — both worth investigating.",
+    "The `selectBytes` mirror (`selectBytesAll`) is a plausible follow-up but is *not* mechanical: `selectBytes` returns a `Uint8List` view over the reader's persistent `json_buf`, so a batch would either need per-item buffer copies (which erode the exp 174 view-transfer win) or a redesigned reply shape. Extend the harness with a bytes lane before attempting.",
+    "The reader-pool cap (`clamp(numProcessors - 1, 2, 4)` per exp 105) sets where the point-lane crossover sits. A future measurement change that varies pool cap alongside batch/parallel would let signal-map interpretations of this trade-off travel across host shapes without re-running the whole harness."
+  ]
+}

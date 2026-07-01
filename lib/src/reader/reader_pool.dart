@@ -13,6 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
+import '../read_statement.dart';
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
 
@@ -102,6 +103,22 @@ final class ReaderPool {
       ),
     );
     return result as (List<Map<String, Object?>>, TableDependencies, int, int);
+  }
+
+  /// Execute a heterogeneous batch of SELECTs in one reader-worker round trip.
+  ///
+  /// See [EXP-209](../../../experiments/209-heterogeneous-read-batch.md).
+  /// All statements run in order on a single reader connection; the batch
+  /// occupies one worker for its entire duration and blocks other
+  /// dispatches from that slot until it completes.
+  Future<List<List<Map<String, Object?>>>> selectAll(
+    List<ReadStatement> statements, [
+    int? traceCorrelationId,
+  ]) async {
+    final result = await _dispatch(
+      SelectBatchRequest(statements, traceCorrelationId: traceCorrelationId),
+    );
+    return result as List<List<Map<String, Object?>>>;
   }
 
   /// Execute a query returning JSON-encoded bytes plus the serialized row
