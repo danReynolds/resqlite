@@ -11,6 +11,35 @@ experiment with useful evidence. A measurement/profiling improvement is valid
 support work only when it unlocks a named future optimization decision or lets
 future runners reject a candidate confidently.
 
+### The public API is near-frozen
+
+Resqlite's value is a lean, stable public surface: the symbols exported from
+`lib/resqlite.dart` and the signatures of the types they expose. **Growing or
+changing that surface is discouraged by default** — a performance experiment
+must not add or alter public API as a matter of course.
+
+- **Deliver wins under the existing API.** The strong default is to make the
+  current surface faster transparently — a faster `select` / `selectBytes` /
+  `execute` path, a better internal representation, a smarter native encoder —
+  not to add a new method or type the caller must opt into. A new export is a
+  permanent maintenance and compatibility cost that every future release carries;
+  a niche or trade-off-shaped win rarely repays it.
+- **Only propose a public API change for a massive, broadly-applicable win.**
+  "Massive" means a large improvement on a *common* workload that genuinely
+  cannot be delivered under the existing surface — not a big multiplier on a
+  narrow shape, and not a win paired with a regression the caller has to steer
+  around. If the caller has to pick the new API based on the shape of their data,
+  it is a trade-off, not a massive win, and the answer is no.
+- **This applies to moonshots too.** A frontier experiment may still challenge an
+  architectural assumption, but if the only way to express it is new public
+  surface, that surface must clear the same bar and be named and justified in the
+  PR: the assumption, the size and breadth of the win, and why the existing API
+  cannot carry it. Prefer proving the mechanism behind the current API first.
+
+An experiment whose win exists only as new public API, and does not clear this
+bar, is rejected on those grounds. Record the surface cost as the reason so
+future runners do not re-propose it.
+
 Default toward implementation experiments when there is a plausible, bounded
 performance change to try. Measurement-only runs are lower-frequency support
 work: use them when implementation would otherwise be speculative, not as an
