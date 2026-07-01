@@ -21,6 +21,7 @@ import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
 import '../tracelite_profile.dart';
+import '../write_statement.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -74,6 +75,16 @@ final class BatchRequest extends WriterRequest {
   });
   final String sql;
   final List<List<Object?>> paramSets;
+}
+
+/// Heterogeneous write batch — many SQL statements, one transaction.
+final class StatementBatchRequest extends WriterRequest {
+  StatementBatchRequest(
+    this.statements,
+    super.replyPort, {
+    super.traceCorrelationId,
+  });
+  final List<WriteStatement> statements;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
@@ -132,6 +143,19 @@ final class QueryResponse {
 final class BatchResponse {
   const BatchResponse(this.modifications, {this.writerSqliteUs = 0});
 
+  final TableDependencies modifications;
+  final int writerSqliteUs;
+}
+
+/// Response to [StatementBatchRequest].
+final class StatementBatchResponse {
+  const StatementBatchResponse(
+    this.results,
+    this.modifications, {
+    this.writerSqliteUs = 0,
+  });
+
+  final List<WriteResult> results;
   final TableDependencies modifications;
   final int writerSqliteUs;
 }
@@ -226,6 +250,8 @@ void writerEntrypoint(List<Object> args) {
           _handleTxQuery(state, message);
         case BatchRequest():
           _handleBatch(state, message);
+        case StatementBatchRequest():
+          _handleStatementBatch(state, message);
         case BeginRequest():
           _handleBegin(state, message);
         case CommitRequest():
@@ -327,6 +353,81 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
         writerSqliteUs: writerSqliteUs,
       ),
     );
+  }
+}
+
+void _handleStatementBatch(_WriterState state, StatementBatchRequest msg) {
+  if (msg.statements.isEmpty) {
+    msg.replyPort.send(
+      const StatementBatchResponse([], TableDependencies.none),
+    );
+    return;
+  }
+
+  if (state.txDepth > 0) {
+    final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
+    final results = <WriteResult>[];
+    for (final statement in msg.statements) {
+      results.add(
+        executeWrite(state.dbHandle, statement.sql, statement.parameters),
+      );
+    }
+    msg.replyPort.send(
+      StatementBatchResponse(
+        results,
+        TableDependencies.none,
+        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+      ),
+    );
+    return;
+  }
+
+  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
+  final rc = resqliteTxBeginImmediate(state.dbHandle);
+  if (rc != 0) {
+    throw ResqliteTransactionException(
+      resqliteErrmsg(state.dbHandle).toDartString(),
+      operation: 'begin',
+      sqliteCode: rc,
+    );
+  }
+  state.txDepth = 1;
+
+  final results = <WriteResult>[];
+  try {
+    for (final statement in msg.statements) {
+      results.add(
+        executeWrite(state.dbHandle, statement.sql, statement.parameters),
+      );
+    }
+
+    final commitRc = resqliteTxCommit(state.dbHandle);
+    if (commitRc != 0) {
+      final errMsg = resqliteErrmsg(state.dbHandle).toDartString();
+      resqliteTxRollback(state.dbHandle);
+      discardDirtyTableDependencies(state.dbHandle);
+      state.txDepth = 0;
+      throw ResqliteTransactionException(
+        errMsg,
+        operation: 'commit',
+        sqliteCode: commitRc,
+      );
+    }
+    state.txDepth = 0;
+    msg.replyPort.send(
+      StatementBatchResponse(
+        results,
+        getDirtyTableDependencies(state.dbHandle),
+        writerSqliteUs: _stopSqliteTimer(sqliteSw),
+      ),
+    );
+  } catch (_) {
+    if (state.txDepth > 0) {
+      resqliteTxRollback(state.dbHandle);
+      discardDirtyTableDependencies(state.dbHandle);
+      state.txDepth = 0;
+    }
+    rethrow;
   }
 }
 

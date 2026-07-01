@@ -245,6 +245,27 @@ reproduces the manual exp 159 (CV asymmetry) and exp 167 (sign reversal)
 decisions. It interprets the order-flipped pass — it does not replace
 running it.
 
+### A hidden semantic change can become viable as an explicit operation
+
+[Exp 197](197-true-group-commit-moonshot.md) proved true group commit was a
+large writer ceiling, then rejected it as hidden `db.execute()` behavior because
+coalesced standalone writes would no longer have independent autocommit
+visibility, durability, or failure semantics. [Exp 208](208-heterogeneous-write-batch.md)
+reopened the same ceiling by changing the user contract instead of hiding the
+semantic shift: a static list of `WriteStatement`s is explicitly one
+all-or-nothing transaction and one writer request.
+
+That distinction matters. The performance mechanism was not made safer by more
+internal cleverness; it became acceptable because the operation named the
+trade-off the caller was making. The existing APIs stayed intact: `execute()` is
+still one standalone write, `executeBatch()` is still one SQL repeated, and
+`transaction()` still owns reads, branching, and savepoints.
+
+*Reapplies whenever a rejected optimization failed because it changed semantics,
+not because the performance signal was weak. Before discarding the direction,
+ask whether a small explicit operation can name the semantic trade without
+making the default API surprising.*
+
 ### A guard against the wrong value often leaves the missing value silent
 
 The experiment->chart pipeline had a build-time guard for the *wrong-file*

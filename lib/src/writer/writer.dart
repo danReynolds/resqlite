@@ -240,6 +240,26 @@ final class Writer {
     return reply;
   }
 
+  /// Heterogeneous batch variant of [executeBatch]. Sends many statements in
+  /// one writer request and one transaction.
+  Future<StatementBatchResponse?> executeStatements(
+    List<WriteStatement> statements, {
+    int? traceCorrelationId,
+  }) async {
+    await _mutex.lock();
+    final Future<StatementBatchResponse?> reply;
+    try {
+      _ensureOpen();
+      reply = executeStatementsLocked(
+        statements,
+        traceCorrelationId: traceCorrelationId,
+      );
+    } finally {
+      _mutex.unlock();
+    }
+    return reply;
+  }
+
   /// Sends a write while the writer lock is already held.
   ///
   /// Used by [Transaction.execute] (the enclosing transaction holds the
@@ -289,6 +309,27 @@ final class Writer {
       (replyPort) => BatchRequest(
         sql,
         paramSets,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
+  }
+
+  /// Sends heterogeneous writes while the writer lock is already held.
+  Future<StatementBatchResponse?> executeStatementsLocked(
+    List<WriteStatement> statements, {
+    int? traceCorrelationId,
+  }) {
+    assert(
+      _mutex.isLocked,
+      'executeStatementsLocked requires the writer lock to be held',
+    );
+    if (statements.isEmpty) {
+      return Future.value();
+    }
+    return _request<StatementBatchResponse>(
+      (replyPort) => StatementBatchRequest(
+        statements,
         replyPort,
         traceCorrelationId: traceCorrelationId,
       ),

@@ -178,6 +178,43 @@ final class Transaction {
     }
   }
 
+  /// Executes heterogeneous write statements within this transaction.
+  ///
+  /// Runs as a single writer-isolate round trip inside the already-open
+  /// transaction. On error this throws and the enclosing transaction body rolls
+  /// back.
+  Future<List<WriteResult>> executeStatements(
+    List<WriteStatement> statements,
+  ) async {
+    _ensureActive();
+    if (statements.isEmpty) return const [];
+
+    final correlationId = _traceCorrelationId;
+    if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
+      final response = await _writer.executeStatementsLocked(
+        statements,
+        traceCorrelationId: correlationId,
+      );
+      if (response != null) {
+        ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      }
+      return response?.results ?? const [];
+    }
+    final response = await TraceliteProfile.traceAsync(
+      TraceliteResqliteSpans.databaseExecuteStatements,
+      () => _writer.executeStatementsLocked(
+        statements,
+        traceCorrelationId: correlationId,
+      ),
+      correlationId: correlationId,
+      beginArgs: [statements.length],
+    );
+    if (response != null) {
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    }
+    return response?.results ?? const [];
+  }
+
   /// Initiates a nested transaction as a new savepoint. If [body] completes normally,
   /// the savepoint is released (changes become part of the enclosing transaction).
   /// If [body] throws, the savepoint is rolled back (only this nested transaction's changes are undone)

@@ -49,17 +49,25 @@ Future<void> main() async {
     await db.execute('INSERT INTO t(name) VALUES (?)', ['trace']);
     await _waitFor(() => emissions.length >= 2, 'stream invalidation');
 
+    await db.executeStatements([
+      WriteStatement('INSERT INTO t(name) VALUES (?)', ['statements']),
+    ]);
+    await _waitFor(() => emissions.length >= 3, 'statement invalidation');
+
     await db.transaction((tx) async {
       await tx.execute('INSERT INTO t(name) VALUES (?)', ['tx']);
       await tx.select('SELECT COUNT(*) AS c FROM t');
       await tx.executeBatch('INSERT INTO t(name) VALUES (?)', [
         ['batch'],
       ]);
+      await tx.executeStatements([
+        WriteStatement('INSERT INTO t(name) VALUES (?)', ['tx-statements']),
+      ]);
     });
-    await _waitFor(() => emissions.length >= 3, 'transaction invalidation');
+    await _waitFor(() => emissions.length >= 4, 'transaction invalidation');
 
     final rows = await db.select('SELECT name FROM t ORDER BY id');
-    if (rows.length != 3 || rows.first['name'] != 'trace') {
+    if (rows.length != 5 || rows.first['name'] != 'trace') {
       throw StateError('unexpected rows: \$rows');
     }
     await sub.cancel();
@@ -82,20 +90,26 @@ Future<void> _waitFor(bool Function() predicate, String label) async {
 ''');
 
     await _run('pub get', tempDir.path, ['pub', 'get']);
-    await _run('run smoke', tempDir.path, [
-      'run',
-      '-DRESQLITE_PROFILE=true',
-      '-DRESQLITE_TRACELITE=true',
-      'bin/main.dart',
-    ], environment: {
-      'TRACELITE_REGION': traceLogPath,
-      'TRACELITE_RUNTIME': runtimePath,
-    });
+    await _run(
+      'run smoke',
+      tempDir.path,
+      [
+        'run',
+        '-DRESQLITE_PROFILE=true',
+        '-DRESQLITE_TRACELITE=true',
+        'bin/main.dart',
+      ],
+      environment: {
+        'TRACELITE_REGION': traceLogPath,
+        'TRACELITE_RUNTIME': runtimePath,
+      },
+    );
 
     final traceLog = await File(traceLogPath).readAsString();
     _expectTrace(traceLog, 'attach');
     _expectTrace(traceLog, 'async_begin 16386'); // databaseExecute
     _expectTrace(traceLog, 'async_begin 16388'); // databaseTransaction
+    _expectTrace(traceLog, 'async_begin 16389'); // databaseExecuteStatements
     _expectTrace(traceLog, 'begin_correlated 16400'); // writerHandle
     _expectTrace(traceLog, 'begin_correlated 16401'); // readerHandle
     _expectTrace(traceLog, 'async_begin 16402'); // readerPoolDispatch

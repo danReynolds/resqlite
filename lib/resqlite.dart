@@ -22,3 +22,4 @@ export 'src/dependency_tracking.dart'
 export 'src/native/resqlite_bindings.dart' show WriteResult;
 export 'src/row.dart' show ResultSet, Row, RowSchema;
 export 'src/stream_engine.dart' show StreamEngine;
+export 'src/write_statement.dart' show WriteStatement;

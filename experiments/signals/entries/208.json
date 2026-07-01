@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "accepted_moonshot",
+  "changedBeliefs": [
+    "Exp 197's true-group-commit ceiling can be captured safely when the semantic surface is explicit. A `WriteStatement` + `executeStatements()` prototype applies static heterogeneous write groups as one writer-isolate request and one SQLite transaction, preserving `db.execute()`'s independent-autocommit behavior.",
+    "On `benchmark/experiments/heterogeneous_write_batch.dart`, 400 mixed insert/update statements improved from 4.895 ms to 0.517 ms in transaction-first order and from 4.819 ms to 0.633 ms in batch-first order (-89.4% / -86.9%). The baseline and candidate both use one SQLite transaction; the win is eliminating 399 extra writer round trips.",
+    "The lean API boundary is sharper after this run: `executeBatch()` is for one SQL repeated across parameter sets, `executeStatements()` is for static heterogeneous write groups, and `transaction()` remains the flexible path for reads, branching, savepoints, and per-step logic."
+  ],
+  "nextSignals": [
+    "Do not reopen hidden true group commit behind `execute()`. Future group-commit work should remain explicit about read visibility, failure atomicity, and crash-window durability.",
+    "Use `benchmark/experiments/heterogeneous_write_batch.dart` as the focused gate for changes to the static heterogeneous batch path.",
+    "Add release-suite coverage only if downstream workloads show static heterogeneous write groups are common enough to deserve a public dashboard row."
+  ]
+}

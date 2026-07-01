@@ -1,0 +1,7 @@
+{
+  "file": "208-heterogeneous-write-batch.md",
+  "title": "Heterogeneous write batch",
+  "impact": "Moonshot: Adds an explicit `WriteStatement` + `executeStatements()` surface for static heterogeneous write groups: many SQL statements, one writer-isolate request, one SQLite transaction, all-or-nothing commit, and one stream invalidation after commit. Focused `heterogeneous_write_batch.dart` shows 400 mixed insert/update statements run about 7.6x to 9.5x faster than the current interactive transaction loop across an order-flipped pair (-86.9% / -89.4%). Keeps exp 197's semantic boundary by making group commit opt-in rather than hidden behind `execute()`.",
+  "status": "accepted",
+  "link": ""
+}

@@ -18,6 +18,7 @@ import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
 import 'tracelite_profile.dart';
+import 'write_statement.dart';
 
 part 'extensions/registration.dart';
 part 'native/open_database.dart';
@@ -492,6 +493,63 @@ final class Database {
         traceCorrelationId: correlationId,
       );
     }
+  }
+
+  /// Executes heterogeneous write statements in one transaction and one
+  /// writer-isolate request.
+  ///
+  /// ```dart
+  /// await db.executeStatements([
+  ///   WriteStatement('INSERT INTO users(name) VALUES (?)', ['Ada']),
+  ///   WriteStatement('UPDATE counters SET value = value + 1 WHERE name = ?', [
+  ///     'users',
+  ///   ]),
+  /// ]);
+  /// ```
+  ///
+  /// This is the heterogeneous counterpart to [executeBatch]: statements may
+  /// have different SQL and parameter shapes, but they are applied as one
+  /// all-or-nothing transaction. Streams watching affected tables fire once
+  /// after commit.
+  Future<List<WriteResult>> executeStatements(
+    List<WriteStatement> statements,
+  ) async {
+    final transaction = Transaction.current;
+    if (transaction != null) {
+      return transaction.executeStatements(statements);
+    }
+
+    _ensureOpen();
+    if (statements.isEmpty) return const [];
+
+    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+
+    final int? correlationId = kProfileMode && kTraceliteProfileMode
+        ? TraceliteProfile.nextCorrelationId()
+        : null;
+
+    Future<StatementBatchResponse?> write() =>
+        writer.executeStatements(statements, traceCorrelationId: correlationId);
+
+    final StatementBatchResponse? response;
+    if (correlationId == null) {
+      response = await write();
+    } else {
+      response = await TraceliteProfile.traceAsync(
+        TraceliteResqliteSpans.databaseExecuteStatements,
+        write,
+        correlationId: correlationId,
+        beginArgs: [statements.length],
+      );
+    }
+
+    if (response == null) return const [];
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+    streamEngine.onDependencyChanges(
+      response.modifications,
+      traceCorrelationId: correlationId,
+    );
+    return response.results;
   }
 
   /// Runs [body] inside a database transaction.
