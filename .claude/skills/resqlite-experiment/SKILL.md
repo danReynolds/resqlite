@@ -46,6 +46,18 @@ so the diagnostic overhead cancels out in the delta. See
 [benchmark/EXPERIMENTS.md](../../../benchmark/EXPERIMENTS.md) for the
 full workflow.
 
+### The public API is near-frozen
+
+Default to delivering a win **under the existing public surface** — the symbols
+exported from `lib/resqlite.dart` and their signatures. Adding or changing public
+API (a new exported type, a new `Database` method, a changed return type) is
+discouraged, and only worth proposing for a **massive, broadly-applicable win**
+that genuinely cannot be delivered under the current surface — not a niche or
+trade-off-shaped win the caller opts into by data shape. If an experiment only
+pays off as new public API and doesn't clear that bar, reject it and record the
+surface cost as the reason. Full policy:
+[`RUNNER_INSTRUCTIONS.md`](../../../experiments/RUNNER_INSTRUCTIONS.md#the-public-api-is-near-frozen).
+
 ### What to commit from profile mode (and what not to)
 
 Profile JSONs are **~10–15 MB each** — raw per-sample timing arrays.
