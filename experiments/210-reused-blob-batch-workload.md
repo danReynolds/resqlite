@@ -70,10 +70,10 @@ BLOB payloads:
 
 | Shape | Baseline | Candidate | Delta |
 |---|---:|---:|---:|
-| 1,000 rows x 8 params | 0.297 | 0.211 | -29.0% |
-| 10,000 rows x 8 params | 3.544 | 2.049 | -42.2% |
-| 1,000 rows x 20 params | 0.727 | 0.515 | -29.2% |
-| 10,000 rows x 20 params | 10.496 | 5.562 | -47.0% |
+| 1,000 rows x 8 params | 0.297 | 0.210 | -29.3% |
+| 10,000 rows x 8 params | 3.563 | 2.031 | -43.0% |
+| 1,000 rows x 20 params | 0.732 | 0.510 | -30.3% |
+| 10,000 rows x 20 params | 10.494 | 5.642 | -46.2% |
 
 The implementation does remove marshal work when the payload is large enough.
 The threshold matters: a 256-byte sweep before narrowing the guard made the

@@ -22,12 +22,12 @@ Median ms per `allocateBatchParams` / `freeParamBuffer` cycle. Lower is better.
 
 | Shape | Baseline | Candidate | Delta | Read |
 |---|---:|---:|---:|---|
-| 100 rows x 8 params | 0.030 | 0.033 | +10.0% | guard disabled by total-count threshold; noise/tiny overhead |
-| 1,000 rows x 8 params | 0.297 | 0.211 | -29.0% | repeated-BLOB marshal win |
-| 10,000 rows x 8 params | 3.544 | 2.049 | -42.2% | repeated-BLOB marshal win |
-| 100 rows x 20 params | 0.071 | 0.080 | +12.7% | guard disabled by total-count threshold; noise/tiny overhead |
-| 1,000 rows x 20 params | 0.727 | 0.515 | -29.2% | repeated-BLOB marshal win |
-| 10,000 rows x 20 params | 10.496 | 5.562 | -47.0% | repeated-BLOB marshal win |
+| 100 rows x 8 params | 0.030 | 0.034 | +13.3% | guard disabled by total-count threshold; noise/tiny overhead |
+| 1,000 rows x 8 params | 0.297 | 0.210 | -29.3% | repeated-BLOB marshal win |
+| 10,000 rows x 8 params | 3.563 | 2.031 | -43.0% | repeated-BLOB marshal win |
+| 100 rows x 20 params | 0.074 | 0.081 | +9.5% | guard disabled by total-count threshold; noise/tiny overhead |
+| 1,000 rows x 20 params | 0.732 | 0.510 | -30.3% | repeated-BLOB marshal win |
+| 10,000 rows x 20 params | 10.494 | 5.642 | -46.2% | repeated-BLOB marshal win |
 
 The narrower 2-param rows are intentionally below the guard and did not use the
 prototype. A 256-byte reused-BLOB sweep was also run before tightening the

@@ -39,6 +39,18 @@ const int blobMergeColumnCount = 8;
 /// Bytes per reused BLOB payload in `workloadBlobMergeRounds`.
 const int blobMergePayloadBytes = 1024;
 
+final String _blobMergeColumnsSql = List.generate(
+  blobMergeColumnCount,
+  (i) => 'b$i',
+).join(', ');
+final String _blobMergePlaceholdersSql = List.filled(
+  blobMergeColumnCount,
+  '?',
+).join(', ');
+final String _blobMergeInsertSql =
+    'INSERT INTO blob_items($_blobMergeColumnsSql) '
+    'VALUES ($_blobMergePlaceholdersSql)';
+
 /// Noop op count per iteration — 100 reads + 100 writes.
 const int noopOpsPerSide = 100;
 
@@ -259,24 +271,9 @@ Future<void> workloadBlobMergeRounds(ProfiledDatabase db, int iter) async {
   for (var r = 0; r < blobMergeRoundCount; r++) {
     final rows = [
       for (var i = 0; i < blobMergeRowsPerRound; i++)
-        <Object?>[
-          payload,
-          payload,
-          payload,
-          payload,
-          payload,
-          payload,
-          payload,
-          payload,
-        ],
+        List<Object?>.generate(blobMergeColumnCount, (_) => payload),
     ];
-    await db.executeBatch(
-      'INSERT INTO blob_items'
-      '(b0, b1, b2, b3, b4, b5, b6, b7) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      rows,
-      tag: 'iter$iter round$r',
-    );
+    await db.executeBatch(_blobMergeInsertSql, rows, tag: 'iter$iter round$r');
   }
   await db.raw.execute('DELETE FROM blob_items');
 }

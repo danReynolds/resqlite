@@ -5,7 +5,7 @@
   ],
   "outcomeClass": "rejected_preserved_measurement",
   "changedBeliefs": [
-    "Repeated large-BLOB object identity does remove Dart-side marshalling work in isolation: the 1 KB reused-BLOB marshal lanes improved -29% to -47% on 1,000/10,000-row x 8/20-param shapes.",
+    "Repeated large-BLOB object identity does remove Dart-side marshalling work in isolation: the 1 KB reused-BLOB marshal lanes improved -29% to -46% on 1,000/10,000-row x 8/20-param shapes.",
     "The useful threshold is much higher than the older 64-byte prototype suggested. A 256-byte reused-BLOB sweep made the identity-map candidate slower on the target 10,000 x 8 lane, so small/medium BLOBs should not pay per-cell identity tracking.",
     "Marshal-only wins are not sufficient for BLOB parameter work. The new Tracelite `blob_merge_rounds` lane regressed with the prototype (`executeBatch` p50 909 us -> 1177 us; writer SQLite time +23.3%), showing SQLite storage and writer-side effects absorb or reverse the arena-copy saving."
   ],
