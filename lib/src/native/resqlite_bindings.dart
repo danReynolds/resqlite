@@ -1126,6 +1126,18 @@ external void resqliteFree(ffi.Pointer<ffi.Void> ptr);
 
 typedef NativeBuffer = ({ffi.Pointer<ffi.Uint8> ptr, int length, int rowCount});
 
+// [EXP-211] Persistent per-isolate out-parameter slots for [queryBytes].
+// resqlite_query_bytes writes three values every call — the json_buf view
+// pointer, its length, and the row count — so the slot boxes never carry
+// state between calls. Reader workers process one request at a time, so a
+// pair of shared per-isolate slots is safe. Retries the exp 108 shape now
+// that select_bytes_repeated_calls.dart (exp 195) resolves µs-scale
+// per-query setup wins the release suite (ms precision) could not see.
+final ffi.Pointer<ffi.Pointer<ffi.Uint8>> _queryBytesOutBuf =
+    calloc<ffi.Pointer<ffi.Uint8>>();
+final ffi.Pointer<ffi.Int> _queryBytesOutLen = calloc<ffi.Int>();
+final ffi.Pointer<ffi.Int> _queryBytesOutRowCount = calloc<ffi.Int>();
+
 NativeBuffer queryBytes(
   ffi.Pointer<ffi.Void> dbHandle,
   int readerId,
@@ -1134,9 +1146,6 @@ NativeBuffer queryBytes(
 ) {
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(params);
-  final pBuf = calloc<ffi.Pointer<ffi.Uint8>>();
-  final pLen = calloc<ffi.Int>();
-  final pRowCount = calloc<ffi.Int>();
   try {
     final rc = resqliteQueryBytes(
       dbHandle,
@@ -1144,15 +1153,15 @@ NativeBuffer queryBytes(
       sqlNative,
       paramsNative,
       params.length,
-      pBuf,
-      pLen,
-      pRowCount,
+      _queryBytesOutBuf,
+      _queryBytesOutLen,
+      _queryBytesOutRowCount,
     );
     if (rc != 0) {
-      // Don't free pBuf — it points to the reader's persistent json_buf,
-      // which is owned by the C connection pool. The C code sets it to
-      // NULL on error anyway, but even if it didn't, freeing it would
-      // corrupt the reader's buffer for future queries.
+      // The reader's persistent json_buf is C-owned; even on success we
+      // never free the pointer written into _queryBytesOutBuf. C sets all
+      // three slots to zero/NULL on every error path, so the values from a
+      // prior successful call are never observable to error handlers.
       throw ResqliteQueryException(
         'resqlite_query_bytes failed with code $rc',
         sql: sql,
@@ -1160,11 +1169,12 @@ NativeBuffer queryBytes(
         sqliteCode: rc,
       );
     }
-    return (ptr: pBuf.value, length: pLen.value, rowCount: pRowCount.value);
+    return (
+      ptr: _queryBytesOutBuf.value,
+      length: _queryBytesOutLen.value,
+      rowCount: _queryBytesOutRowCount.value,
+    );
   } finally {
     freeParams(paramsNative, params);
-    calloc.free(pBuf);
-    calloc.free(pLen);
-    calloc.free(pRowCount);
   }
 }
