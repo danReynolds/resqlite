@@ -6,6 +6,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'profile_sample.dart';
 import 'profiled_database.dart';
@@ -25,6 +26,18 @@ const int mergeRoundCount = 10;
 
 /// Rows per batch inside `workloadMergeRounds`.
 const int mergeRowsPerRound = 100;
+
+/// Batches per measured iteration of `workloadBlobMergeRounds`.
+const int blobMergeRoundCount = 4;
+
+/// Rows per BLOB batch inside `workloadBlobMergeRounds`.
+const int blobMergeRowsPerRound = 100;
+
+/// Columns per BLOB batch row inside `workloadBlobMergeRounds`.
+const int blobMergeColumnCount = 8;
+
+/// Bytes per reused BLOB payload in `workloadBlobMergeRounds`.
+const int blobMergePayloadBytes = 256;
 
 /// Noop op count per iteration — 100 reads + 100 writes.
 const int noopOpsPerSide = 100;
@@ -115,6 +128,19 @@ Future<void> setupSchema(ProfiledDatabase db) async {
       value REAL NOT NULL,
       category TEXT NOT NULL,
       created_at TEXT NOT NULL
+    )
+  ''');
+  await db.raw.execute('''
+    CREATE TABLE blob_items(
+      id INTEGER PRIMARY KEY,
+      b0 BLOB NOT NULL,
+      b1 BLOB NOT NULL,
+      b2 BLOB NOT NULL,
+      b3 BLOB NOT NULL,
+      b4 BLOB NOT NULL,
+      b5 BLOB NOT NULL,
+      b6 BLOB NOT NULL,
+      b7 BLOB NOT NULL
     )
   ''');
   await db.raw.executeBatch(
@@ -219,4 +245,46 @@ Future<void> workloadMergeRounds(ProfiledDatabase db, int iter) async {
     );
   }
   await db.raw.execute('DELETE FROM items WHERE id > $seedRowCount');
+}
+
+/// Repeated large-BLOB `executeBatch` shape.
+///
+/// The same [Uint8List] object is reused across every BLOB cell in the batch.
+/// This intentionally differs from the public release wide-batch guardrail,
+/// whose BLOB values are fresh and tiny; it exposes whether object-identity
+/// reuse can remove material parameter-marshalling work before SQLite storage
+/// copies dominate the write.
+Future<void> workloadBlobMergeRounds(ProfiledDatabase db, int iter) async {
+  final payload = _blobPayload(blobMergePayloadBytes);
+  for (var r = 0; r < blobMergeRoundCount; r++) {
+    final rows = [
+      for (var i = 0; i < blobMergeRowsPerRound; i++)
+        <Object?>[
+          payload,
+          payload,
+          payload,
+          payload,
+          payload,
+          payload,
+          payload,
+          payload,
+        ],
+    ];
+    await db.executeBatch(
+      'INSERT INTO blob_items'
+      '(b0, b1, b2, b3, b4, b5, b6, b7) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      rows,
+      tag: 'iter$iter round$r',
+    );
+  }
+  await db.raw.execute('DELETE FROM blob_items');
+}
+
+Uint8List _blobPayload(int bytes) {
+  final out = Uint8List(bytes);
+  for (var i = 0; i < bytes; i++) {
+    out[i] = (i * 17 + 0xa5) & 0xff;
+  }
+  return out;
 }
