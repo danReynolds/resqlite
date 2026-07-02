@@ -1,0 +1,7 @@
+{
+  "file": "211-persistent-query-bytes-slots.md",
+  "title": "Persistent `queryBytes` out-parameter slots (revisits exp 108)",
+  "impact": "Replaces the three per-call `calloc<Pointer<Uint8>>()` / `calloc<Int>()` / `calloc<Int>()` boxes in `queryBytes()` with three per-isolate scratch pointers, so every `selectBytes()` round-trip saves three `calloc` + three `calloc.free` calls. On `select_bytes_repeated_calls.dart` (exp 195), tiny-rowset lanes (1 row × 8/20 int, 1 row × 8 mixed) reproduce candidate-faster at −3.4 % to −6.6 % across two order-flipped passes; the load-bearing 1 row × 20 int lane holds −3.4 % to −4.6 % through a warmed third pair. 100 / 1000-row guard lanes stay inside 1.3 %. Exp 174 large-bytes guard on `large_bytes_transfer.dart` neutral within ±2 µs. Retries exp 108's rejected shape now that exp 195's µs-precision harness resolves the sub-microsecond per-call setup work the release suite could not.",
+  "status": "accepted",
+  "link": ""
+}
