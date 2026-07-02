@@ -167,8 +167,8 @@ void _runMarshalShape({
   for (var i = 0; i < iterations; i++) {
     final sw = Stopwatch()..start();
     final buf = allocateBatchParams(paramSets);
-    sw.stop();
     freeParamBuffer(buf);
+    sw.stop();
     timings.add(sw.elapsedMicroseconds);
   }
 
