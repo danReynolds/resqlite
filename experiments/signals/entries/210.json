@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_preserved_measurement",
+  "changedBeliefs": [
+    "Repeated large-BLOB object identity does remove Dart-side marshalling work in isolation: the 1 KB reused-BLOB marshal lanes improved -29% to -47% on 1,000/10,000-row x 8/20-param shapes.",
+    "The useful threshold is much higher than the older 64-byte prototype suggested. A 256-byte reused-BLOB sweep made the identity-map candidate slower on the target 10,000 x 8 lane, so small/medium BLOBs should not pay per-cell identity tracking.",
+    "Marshal-only wins are not sufficient for BLOB parameter work. The new Tracelite `blob_merge_rounds` lane regressed with the prototype (`executeBatch` p50 909 us -> 1177 us; writer SQLite time +23.3%), showing SQLite storage and writer-side effects absorb or reverse the arena-copy saving."
+  ],
+  "nextSignals": [
+    "Do not merge repeated-BLOB identity-map reuse based on marshal-only evidence. Require a traced workload or release lane showing end-to-end improvement.",
+    "Keep `benchmark/experiments/batch_param_flatten.dart --cell-mode=blob --blob-mode=reused` as the encoder-isolation gate for BLOB parameter ideas, and use `blob_merge_rounds` in the Tracelite profile driver to check whether the signal survives the writer/SQLite path.",
+    "Reopen BLOB parameter reuse only if a production trace shows reused 1 KB+ BLOB batches are hot, or if a cheaper representation avoids per-cell identity-map lookup overhead."
+  ]
+}
