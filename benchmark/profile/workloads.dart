@@ -37,7 +37,7 @@ const int blobMergeRowsPerRound = 100;
 const int blobMergeColumnCount = 8;
 
 /// Bytes per reused BLOB payload in `workloadBlobMergeRounds`.
-const int blobMergePayloadBytes = 256;
+const int blobMergePayloadBytes = 1024;
 
 /// Noop op count per iteration — 100 reads + 100 writes.
 const int noopOpsPerSide = 100;
