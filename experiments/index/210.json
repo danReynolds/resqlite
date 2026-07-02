@@ -1,0 +1,7 @@
+{
+  "file": "210-reused-blob-batch-workload.md",
+  "title": "reused BLOB batch workload and object-identity prototype",
+  "impact": "Added focused and Tracelite workload coverage for reused large-BLOB `executeBatch` matrices, then tested a private object-identity reuse prototype that copies each repeated 1 KB+ `Uint8List` once in the native parameter arena. Rejected: marshal-only lanes improved -29% to -46%, but the traced `blob_merge_rounds` workload regressed (`executeBatch` p50 909 us -> 1177 us, writer SQLite time +23.3%), so the identity-map overhead does not survive end-to-end writer/SQLite cost. Runtime prototype preserved at `archive/exp-210`; workload coverage is kept as the durable gate.",
+  "status": "rejected",
+  "link": ""
+}

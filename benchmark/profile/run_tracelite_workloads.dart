@@ -104,6 +104,19 @@ Future<void> main(List<String> args) async {
       readerFloor: readerFloor,
       writerFloor: writerFloor,
     );
+
+    print('');
+    print('=== Workload D: Reused BLOB Merge Rounds ===');
+    final blobMergeRounds = await _runWorkload(
+      name: 'blob_merge_rounds',
+      profiled: profiled,
+      body: (iter) => workloadBlobMergeRounds(profiled, iter),
+    );
+    _reportWorkload(
+      blobMergeRounds,
+      readerFloor: readerFloor,
+      writerFloor: writerFloor,
+    );
   } finally {
     TraceliteProfile.detach();
     await profiled.close();
