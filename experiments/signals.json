@@ -1596,6 +1596,21 @@
         "Keep `benchmark/experiments/batch_param_flatten.dart --cell-mode=blob --blob-mode=reused` as the encoder-isolation gate for BLOB parameter ideas, and use `blob_merge_rounds` in the Tracelite profile driver to check whether the signal survives the writer/SQLite path.",
         "Reopen BLOB parameter reuse only if a production trace shows reused 1 KB+ BLOB batches are hot, or if a cheaper representation avoids per-cell identity-map lookup overhead."
       ]
+    },
+    "211": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted",
+      "changedBeliefs": [
+        "Exp 108's rejection of persistent `queryBytes` scratch slots was correct at ms-precision release-suite granularity but does not settle the question at µs precision. Reusing three per-isolate slots (buf pointer + length + row count) removes three `calloc` + three `calloc.free` per `selectBytes()` call and reproduces −3.4 % to −6.6 % candidate-faster on tiny-rowset lanes across two order-flipped passes on `select_bytes_repeated_calls.dart`, while 100 / 1000-row guard lanes stay flat and the exp 174 large-bytes lane is neutral.",
+        "The load-bearing 1 row × 20 int lane holds −3.4 % to −4.6 % across all three pairs including the warmed one — the same warmed-pair third-pass gate that killed exp 206's `sqlite3_column_count` cache. Exp 195's `select_bytes_repeated_calls.dart` is the harness that discriminates: release-suite `Select JSON Bytes` cannot see µs-scale per-call setup, so exp 108 correctly rejected under it while exp 211 correctly accepts under the µs harness."
+      ],
+      "nextSignals": [
+        "The writer-side companion — `executeWrite()`'s per-call `calloc<Uint8>(_writeResultSize)` box in the same file — is structurally analogous, but its natural harness (`writer_pipelining.dart`) reports at ms resolution. Do not retest the writer scratch until a µs-precision writer harness exists, or the current mistake pattern from exp 095 / exp 108 repeats.",
+        "Any future persistent-slot work in this direction should follow exp 211's exp 108 revisit-condition framing: name what changed in the measurement, run the µs harness, guard the neighbouring transfer path (exp 174 `large_bytes_transfer.dart`), and keep the standing per-isolate cost to a small handful of pointers.",
+        "The next per-call setup lever after this experiment is not another Dart-side scratch slot — every remaining out-parameter slot is either shared already (e.g. `_dirtyTablesBuf`, `rowCountSlot`) or on the writer side. Look up-stream (request encoding, isolate dispatch) rather than at more `calloc` triples."
+      ]
     }
   }
 }
