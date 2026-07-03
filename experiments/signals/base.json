@@ -204,46 +204,49 @@
     },
     {
       "id": "transaction-control-paths",
-      "status": "low-current-signal",
+      "status": "active",
       "subsystems": [
         "writer",
         "transactions",
         "sqlite"
       ],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed.",
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed. Exp 213 then took the fresh 2026-07-03 `full savepoint-scope command batching` openCandidate in its narrowest safe form: buffer `Transaction.execute` calls per Transaction and flush them as a single `MultiExecuteRequest` when N were queued in one microtask (the `Future.wait([tx.execute(...) x N])` shape). Focused `tx_body_write_coalescing.dart` `tx-burst-future-wait` (20 tx x 100 writes) improved -26.0% / -31.2% across order-flipped passes with `ab_drift_check.dart` verdict REPRODUCED; sequential-await, single-write, and interleaved-select lanes all stayed inside the 3% effect floor (verdict: neutral) once a fast path plus a `hasPendingWrites` guard on `drainForClose` preserved the pre-213 microtask cost. The moonshot only wins on Future.wait-inside-tx bursts — sequential-await still hits the per-write round-trip floor — but it consumes the concurrent-inside-tx shape without changing public API and without touching the writer isolate (the existing `MultiExecuteRequest` handler already tolerates `txDepth > 0`).",
       "keyPriors": [
         "101",
-        "102",
         "111",
         "189",
-        "212"
+        "212",
+        "213"
       ],
       "archive": [
         "027",
+        "102",
         "103"
       ],
       "interestingIf": [
         "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching)",
         "a profile mode shows savepoint boundary round-trips, not string allocation, as a measurable spike under a realistic workload",
-        "the change reduces prepare/string work without adding much native API surface"
+        "the change reduces prepare/string work without adding much native API surface",
+        "a change collapses the BEGIN and COMMIT round-trips that exp 213 leaves in place while keeping callback semantics intact"
       ],
       "openQuestions": [
         "How often do realistic resqlite users nest transactions deeply?",
         "Can nested control be optimized without specialized C helpers for every operation?",
-        "Is there a multi-savepoint batching shape that collapses N round-trips into 1 without weakening rollback semantics?"
+        "Is there a multi-savepoint batching shape that collapses N round-trips into 1 without weakening rollback semantics?",
+        "How large is the residual after exp 213 — is BEGIN + COMMIT the next removable pair, or is per-call-microtask cost inside the closure still material?"
       ],
       "openCandidates": [
         {
-          "idea": "full savepoint-scope command batching that fuses begin/body/release-or-rollback into one writer request",
+          "idea": "extend exp 213's `Transaction.execute` buffering to full savepoint-scope batching by also coalescing the enclosing BEGIN/COMMIT (or SAVEPOINT/RELEASE) round-trips",
           "addedDate": "2026-07-03",
-          "addedAfter": "212",
-          "blockedOn": "needs production evidence or a design that preserves callback/rollback semantics without public API growth"
+          "addedAfter": "213",
+          "blockedOn": "needs a design that preserves callback semantics for readers/nested tx inside the closure, or a workload showing BEGIN/COMMIT dominates the post-213 residual"
         }
       ],
       "blockedOnMeasurement": [
         "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)"
       ],
-      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189/212 `savepoint_name_compression.dart` order-flipped evidence before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. Exp 212 also rejects lazy materialization plus `SAVEPOINT + first execute` fusion: it wins only on empty nested bodies and regresses the one-write fanout. The remaining headroom, if any, is full savepoint-scope batching or a production profile proving nested transaction control is hot; do not retry string/naming, lazy begin, or one-message first-write fusion without new workload evidence."
+      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark, exp 189/212 `savepoint_name_compression.dart`, and exp 213 `tx_body_write_coalescing.dart` (specifically the `tx-burst-future-wait` lane at -26% to -31% and the sequential-await / single-write / interleaved-select lanes inside the 3% effect floor) before claiming a win on any transaction-control change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. Exp 212 rejects lazy materialization plus `SAVEPOINT + first execute` fusion. Exp 213 accepts the Future.wait-inside-tx shape via `Transaction.execute` buffering + `MultiExecuteRequest` flush — the `hasPendingWrites` guard on `drainForClose` is load-bearing (without it single-write and interleaved-select regressed +1-5%). Full savepoint-scope batching (fusing BEGIN/COMMIT round-trips too) remains open, but only against a workload or design that clears the callback-semantics + no-public-API bar."
     },
     {
       "id": "result-transfer-shape",

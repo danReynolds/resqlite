@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "transaction-control-paths"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "The per-execute round-trip floor inside `db.transaction()` is not fundamental: when a caller lines up N writes in one microtask (`Future.wait([tx.execute(...) x N])`), they can be sent as a single `MultiExecuteRequest` against the still-open transaction with no public API change. Focused `tx_body_write_coalescing.dart` `tx-burst-future-wait` (20 tx x 100 writes) improved -26.0% / -31.2% across two order-flipped passes; ab_drift_check.dart returns REPRODUCED (real effect).",
+    "The sequential-await pattern (`await tx.execute(...); await tx.execute(...)`) stays neutral against a naive buffered design only when both the fast path (skip the microtask hop when no other write is in flight) AND the `hasPendingWrites` guard on `drainForClose` are present. Without the guard, single-write and interleaved-select regressed a consistent +1-5% from an otherwise-empty `await tx.drainForClose()` microtask hop per transaction; with the guard, both lanes are within the 3% effect floor per ab_drift_check.dart.",
+    "The `MultiExecuteRequest` handler already handles `txDepth > 0` correctly (each statement inherits the enclosing transaction, per-statement dirty sets accumulate through the outermost commit, per-statement failures return as ResqliteException entries in the outcomes list). Sending the message inside an open transaction needed no C-side change and no writer-isolate change — the plumbing was already there."
+  ],
+  "nextSignals": [
+    "Full savepoint-scope command batching (fusing BEGIN + body + RELEASE/ROLLBACK into one writer request) is now only partially consumed by exp 213 — the body coalesces, but BEGIN and COMMIT still round-trip. That remaining shape still requires either a design that preserves callback semantics without an opt-in API or a workload showing the BEGIN/COMMIT pair dominates the residual after exp 213 ships. Do not retry it as another eager fusion of one message.",
+    "The `Future.wait([tx.execute(...) x N])` pattern is now the load-bearing tx write-throughput shape a scheduler can measure with `benchmark/experiments/tx_body_write_coalescing.dart`'s `tx-burst-future-wait` lane. Any subsequent transaction-body change must keep that lane within the confirmed -26% to -31% band and the sequential-await lane within the 3% effect floor across an order-flipped pair.",
+    "Sequential-await inside `db.transaction()` is still bound by the per-write round-trip floor — nothing in exp 213 changes that, and users who write `await`/`await` pay pre-213 costs. Future runners looking at this direction should not retry per-call microtask trimming (exp 170, 171 territory) without a workload that isolates that floor from the exp 213 fast-path cost."
+  ]
+}
