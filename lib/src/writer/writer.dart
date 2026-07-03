@@ -274,15 +274,25 @@ final class Writer {
   /// accumulate through the outermost commit), so the same message type
   /// works both for exp 180's standalone coalescing pump and for
   /// inside-transaction bursts.
+  ///
+  /// [traceCorrelationId] preserves Tracelite writer-side span correlation
+  /// for the whole batch (pre-213 each individual `ExecuteRequest` carried
+  /// its own; a coalesced batch has one enclosing transaction, so one id
+  /// covers the group).
   Future<MultiExecuteResponse> multiExecuteLocked(
-    List<({String sql, List<Object?> params})> writes,
-  ) {
+    List<({String sql, List<Object?> params})> writes, {
+    int? traceCorrelationId,
+  }) {
     assert(
       _mutex.isLocked,
       'multiExecuteLocked requires the writer lock to be held',
     );
     return _request<MultiExecuteResponse>(
-      (replyPort) => MultiExecuteRequest(writes, replyPort),
+      (replyPort) => MultiExecuteRequest(
+        writes,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
     );
   }
 

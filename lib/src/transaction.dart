@@ -104,9 +104,16 @@ final class Transaction {
     // or already-buffered writes are waiting for the current microtask
     // to end. Buffer and let the scheduled flush turn the group into
     // one MultiExecuteRequest.
+    //
+    // Snapshot the caller's parameters (`List.of(...)`) at buffer time —
+    // the send is deferred to the next microtask, and a caller who
+    // reuses/mutates the same list instance between `tx.execute` calls
+    // would otherwise bind whatever the list held at flush time. The
+    // pre-213 immediate-send path bound at call time, so this preserves
+    // that semantic.
     final completer = Completer<WriteResult>.sync();
     _pendingWrites.add(
-      _PendingTxWrite(sql, parameters, correlationId, completer),
+      _PendingTxWrite(sql, List<Object?>.of(parameters), correlationId, completer),
     );
     if (!_flushScheduled) {
       _flushScheduled = true;
@@ -122,11 +129,23 @@ final class Transaction {
   ) async {
     _inFlightWrites++;
     try {
-      final response = await _writer.executeLocked(
-        sql,
-        parameters,
-        correlationId,
-      );
+      final ExecuteResponse response;
+      if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
+        response = await _writer.executeLocked(sql, parameters, correlationId);
+      } else {
+        // Preserve pre-213 Dart-side `databaseExecute` tracelite span on
+        // the fast path so profile builds see the same span shape they
+        // did before this experiment. The slow path traces the batch
+        // send via [_flushPending] instead.
+        final sqlId = TraceliteProfile.internString(sql);
+        response = await TraceliteProfile.traceAsync(
+          TraceliteResqliteSpans.databaseExecute,
+          () => _writer.executeLocked(sql, parameters, correlationId),
+          correlationId: correlationId,
+          beginArgs: [sqlId, parameters.length],
+          endArgs: (r) => [r.result.affectedRows],
+        );
+      }
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.result;
     } finally {
@@ -174,11 +193,15 @@ final class Transaction {
         // runs each statement inside the still-open transaction
         // (`txDepth > 0` returns `TableDependencies.none` per outcome —
         // dirty sets accumulate through the outermost commit) and
-        // returns one outcome per statement.
+        // returns one outcome per statement. The tx-level correlation
+        // id covers the whole batch — pre-213 each `ExecuteRequest`
+        // carried its own, but a coalesced group all belongs to the
+        // same enclosing transaction so one id is the right shape.
         try {
-          final response = await _writer.multiExecuteLocked([
-            for (final p in group) (sql: p.sql, params: p.parameters),
-          ]);
+          final response = await _writer.multiExecuteLocked(
+            [for (final p in group) (sql: p.sql, params: p.parameters)],
+            traceCorrelationId: _traceCorrelationId,
+          );
           final outcomes = response.outcomes;
           for (var i = 0; i < group.length; i++) {
             final p = group[i];

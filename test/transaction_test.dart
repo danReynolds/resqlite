@@ -1234,6 +1234,32 @@ void main() {
       expect(rows.map((r) => r['name']), ['x', 'y']);
     });
 
+    test('tx burst snapshots parameters at call time (no aliasing)',
+        () async {
+      // A caller who mutates the parameter list between execute() calls
+      // must not see the mutation reflected in the executed statement.
+      // Pre-213 the send was synchronous, so the list was bound before
+      // the caller could mutate it; the buffered path defers the send
+      // to a later microtask, so it must snapshot instead.
+      await db.transaction((tx) async {
+        final shared = <Object?>[1, 'first'];
+        final f1 = tx.execute(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          shared,
+        );
+        // Mutate before the flush runs.
+        shared[0] = 2;
+        shared[1] = 'second';
+        final f2 = tx.execute(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          shared,
+        );
+        await Future.wait([f1, f2]);
+      });
+      final rows = await db.select('SELECT id, name FROM items ORDER BY id');
+      expect(rows.map((r) => r['name']), ['first', 'second']);
+    });
+
     test('tx nested savepoint flushes outer buffered writes first',
         () async {
       // The outer's buffered writes must land in the outer scope before
