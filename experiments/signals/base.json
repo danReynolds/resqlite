@@ -213,6 +213,7 @@
       "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed.",
       "keyPriors": [
         "101",
+        "102",
         "111",
         "189",
         "212"
