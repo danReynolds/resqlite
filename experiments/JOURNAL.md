@@ -245,6 +245,43 @@ reproduces the manual exp 159 (CV asymmetry) and exp 167 (sign reversal)
 decisions. It interprets the order-flipped pass — it does not replace
 running it.
 
+### A reproduced win can still be the wrong thing to ship
+
+[Exp 213](213-tx-body-write-coalescing.md) built the buffered
+`Transaction.execute` path, measured **-26 % / -31 %** on the
+`Future.wait([tx.execute × N])` inside `db.transaction()` shape across two
+order-flipped focused passes, `ab_drift_check.dart` returned REPRODUCED, and
+every other lane (sequential-await, single-write, interleaved-select) stayed
+inside the 3 % effect floor. The measurement was clean. The moonshot was
+rejected anyway — because the winning shape is not one resqlite steers users
+toward: same-SQL bulk atomic writes belong on `executeBatch`, different-SQL
+non-atomic bursts have exp 180's standalone coalescing, and different-SQL
+atomic bursts are rare in practice. The runtime change required four
+load-bearing guards (`_inFlightWrites`, `hasPendingWrites` on `drainForClose`,
+parameter aliasing snapshot, tracelite span parity) plus persistent
+per-`Transaction` state — a maintenance floor every future writer-path change
+would have to reason about, all to accelerate a workload we are not
+promoting.
+
+The prior "you cannot merge a win under noise" lessons (measurement gap,
+sub-MDE memory, drift discrimination) are all about *whether the number is
+real*. This one is downstream: even when the number is real and the
+regressions on the important lanes are provably absent, the acceptance
+question is still whether the *pattern the win depends on* is one we want to
+optimize for. If it's a niche the API doesn't encourage, or one already
+covered by another well-fitted primitive, the win is orthogonal to the
+product direction and the complexity cost eats it.
+
+*Reapplies at the end of any experiment where the numbers cleared the drift
+check but the winning workload shape is niche or already covered by an
+existing primitive. Ask three concrete questions before proposing accept:
+does the API steer users toward this shape? Does another primitive already
+cover it? Is the win magnitude big enough that a user hitting the shape by
+accident would notice? If any answer is no, the reproduced win is not the
+whole case — write the rejection carefully so the harness/evidence is what
+lands on main, and preserve the runtime prototype at `archive/exp-NNN` for
+the case where a production signal ever reopens the shape.*
+
 ### A guard against the wrong value often leaves the missing value silent
 
 The experiment->chart pipeline had a build-time guard for the *wrong-file*
