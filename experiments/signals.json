@@ -210,40 +210,44 @@
         "transactions",
         "sqlite"
       ],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed.",
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed. Exp 213 then took the fresh 2026-07-03 `full savepoint-scope command batching` openCandidate in its narrowest safe form: buffer `Transaction.execute` calls per Transaction and flush them as a single `MultiExecuteRequest` when N were queued in one microtask (the `Future.wait([tx.execute(...) x N])` shape). The measurement was clean — `tx_body_write_coalescing.dart` `tx-burst-future-wait` (20 tx x 100 writes) improved -26.0% / -31.2% across order-flipped passes with `ab_drift_check.dart` verdict REPRODUCED, while sequential-await, single-write, and interleaved-select stayed inside the 3% effect floor once a fast path plus a `hasPendingWrites` guard on `drainForClose` preserved the pre-213 microtask cost — but the moonshot was rejected on pattern grounds. `Future.wait([tx.execute × N])` inside `db.transaction()` is not a shape resqlite steers users toward: same-SQL bulk atomic writes belong on `executeBatch`, different-SQL non-atomic bursts have exp 180's standalone coalescing, and different-SQL atomic bursts are rare. Accepting four load-bearing guards + persistent per-Transaction buffer state on the writer-path hot path for a workload not being promoted was not worth the maintenance cost, especially against the same-class exp 197 / exp 212 pattern (semantic-shape moonshots keep failing the value-vs-complexity trade even when the numbers reproduce). Runtime prototype preserved at `archive/exp-213`; focused harness retained. The full savepoint-scope variant (BEGIN + body + COMMIT in one round-trip) remains blocked on callback semantics + no-public-API-growth; body-only fusion is now closed.",
       "keyPriors": [
         "101",
-        "102",
         "111",
         "189",
-        "212"
+        "212",
+        "213"
       ],
       "archive": [
         "027",
+        "102",
         "103"
       ],
       "interestingIf": [
-        "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching)",
+        "a change collapses multiple savepoint open/close operations into a single isolate round-trip (analogous to exp 009's read-side batching) AND targets a shape resqlite steers users toward — not a Future.wait-inside-tx niche",
         "a profile mode shows savepoint boundary round-trips, not string allocation, as a measurable spike under a realistic workload",
-        "the change reduces prepare/string work without adding much native API surface"
+        "the change reduces prepare/string work without adding much native API surface",
+        "a change collapses the BEGIN and COMMIT round-trips inside `db.transaction()` while keeping callback semantics intact — the body-only fusion in exp 213 was ~1% of tx wall in absolute terms; BEGIN/COMMIT is where the remaining headroom sits, if any"
       ],
       "openQuestions": [
         "How often do realistic resqlite users nest transactions deeply?",
         "Can nested control be optimized without specialized C helpers for every operation?",
-        "Is there a multi-savepoint batching shape that collapses N round-trips into 1 without weakening rollback semantics?"
+        "Is there a multi-savepoint batching shape that collapses N round-trips into 1 without weakening rollback semantics?",
+        "Is BEGIN + COMMIT round-trip fusion tractable at all given callback semantics, or has this direction hit its no-public-API ceiling?"
       ],
       "openCandidates": [
         {
-          "idea": "full savepoint-scope command batching that fuses begin/body/release-or-rollback into one writer request",
+          "idea": "collapse the BEGIN + COMMIT round-trips inside `db.transaction()` into fewer isolate messages — the *ambitious* form of the full savepoint-scope openCandidate, not the body-only version exp 213 tested and rejected",
           "addedDate": "2026-07-03",
-          "addedAfter": "212",
-          "blockedOn": "needs production evidence or a design that preserves callback/rollback semantics without public API growth"
+          "addedAfter": "213",
+          "blockedOn": "needs a design that preserves callback semantics without a public API opt-in (exp 197 constraint) or a workload proving BEGIN/COMMIT round-trips dominate a shape resqlite steers users toward. No new angle emerged from exp 213 — do not retry another body-only variant."
         }
       ],
       "blockedOnMeasurement": [
-        "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)"
+        "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)",
+        "production profile or downstream user report showing `Future.wait([tx.execute × N])`-inside-tx as a real hot path — without one, do not reopen exp 213's body-only fusion"
       ],
-      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189/212 `savepoint_name_compression.dart` order-flipped evidence before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. Exp 212 also rejects lazy materialization plus `SAVEPOINT + first execute` fusion: it wins only on empty nested bodies and regresses the one-write fanout. The remaining headroom, if any, is full savepoint-scope batching or a production profile proving nested transaction control is hot; do not retry string/naming, lazy begin, or one-message first-write fusion without new workload evidence."
+      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark, exp 189/212 `savepoint_name_compression.dart`, and exp 213 `tx_body_write_coalescing.dart` (all four lanes: `tx-burst-future-wait`, `tx-sequential-await`, `tx-single-write`, `tx-interleaved-select`) before claiming a win on any transaction-control change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. Exp 212 rejects lazy materialization plus `SAVEPOINT + first execute` fusion. Exp 213 rejects `Transaction.execute` buffering + `MultiExecuteRequest` flush *not because the numbers failed* (-26% / -31% burst pattern, reproduced across order-flipped passes) but because the winning pattern (`Future.wait([tx.execute × N])` inside a transaction) is a niche shape resqlite is not steering users toward — same-SQL bulk atomic writes belong on `executeBatch`, different-SQL non-atomic bursts have exp 180. The runtime prototype at `archive/exp-213` shows the pattern of same-class-of-rejection accumulated moonshots (exp 197 / 212 / 213): even a reproduced win can be rejected if it depends on four load-bearing guards on a hot path for a workload we don't promote. Reopen only under: (a) production evidence of Future.wait-inside-tx as a real hot path, (b) a design collapsing the guard set from four to one, or (c) the full BEGIN/COMMIT-fusion variant becoming tractable — noting that (c) still has to clear the exp 197 semantic-hazard bar."
     },
     {
       "id": "result-transfer-shape",
@@ -1629,6 +1633,25 @@
         "Do not retry lazy nested savepoint begin or SAVEPOINT + first-write fusion without new workload evidence. The current focused harness already exercises the one-write nested body and rejects the shape.",
         "If the direction reopens, the candidate must be structurally stronger: a full savepoint-scope command batch that runs begin/body/release or rollback in one request, or a profile proving deeply nested transaction control is a real hot path.",
         "The public API is near-frozen. A public nested-batching surface would need a massive, broadly-applicable win; exp 212 provides evidence against that, not for it."
+      ]
+    },
+    "213": {
+      "directions": [
+        "transaction-control-paths"
+      ],
+      "experimentClass": "moonshot",
+      "outcomeClass": "rejected_pattern_not_encouraged",
+      "changedBeliefs": [
+        "The per-execute round-trip floor inside `db.transaction()` is measurably not fundamental for the `Future.wait([tx.execute(...) x N])` shape: buffering N calls in one microtask and flushing as a single `MultiExecuteRequest` against the still-open transaction improved the focused `tx_body_write_coalescing.dart` `tx-burst-future-wait` lane -26.0% / -31.2% across two order-flipped passes with `ab_drift_check.dart` verdict REPRODUCED. This is the reproducible measurement, not the acceptance verdict — see below.",
+        "The rejection is about the *pattern*, not the numbers. `Future.wait([tx.execute × N])` inside a transaction has no strong idiomatic case in the resqlite public API: same-SQL bulk atomic writes belong on `executeBatch` (one `BatchRequest`, whole matrix runs in C), different-SQL non-atomic bursts are covered by exp 180's standalone coalescing (`db.execute` outside a tx), and different-SQL atomic bursts are rare enough that the maintenance cost of the runtime change is not warranted.",
+        "The buffered path required four load-bearing guards to stay neutral on common patterns: `_inFlightWrites` (fast path vs slow path arbiter), `hasPendingWrites` on `drainForClose` (empty-drain microtask hop guard), `List<Object?>.of(parameters)` at buffer time (parameter aliasing snapshot for the deferred send), and restoring `TraceliteProfile.traceAsync` on the fast path (Dart-side span parity for profile builds). Each was required by a measured regression or a correctness hazard Copilot flagged during PR review. That guard footprint sets a high maintenance floor on every future writer-path change — enough to justify rejection at a niche-pattern win, though not at a common-pattern win.",
+        "`MultiExecuteRequest` cross-experiment semantics: pre-213 the handler treated each write as its own autocommit under `txDepth == 0`; the buffered path required extending the same message type to also cover `txDepth > 0` (each statement inherits the outer transaction, dirty sets accumulate through the outermost commit). The handler already had the branch, but future changes to exp 180's coalescing pump now have to remember both semantics. Documented in the retained focused harness."
+      ],
+      "nextSignals": [
+        "The `full savepoint-scope command batching` openCandidate remains open in the *ambitious* form only — fusing BEGIN + body + COMMIT into one writer request. Exp 213 shows the body-only variant of that vision is measurable (-26% to -31% on the burst pattern) but the remaining BEGIN/COMMIT round-trips are ~1% of tx wall in absolute terms. Do not retry the body-only variant. The full-scope variant still requires either a design that preserves callback semantics without a public API opt-in (exp 197's constraint) or a workload showing the BEGIN/COMMIT pair dominates the residual after this direction's other candidates ship — no new angle emerged from this run.",
+        "`benchmark/experiments/tx_body_write_coalescing.dart` is the durable harness for any future transaction-body write experiment. Its four lanes (tx-sequential-await, tx-burst-future-wait, tx-single-write, tx-interleaved-select) exercise the complexity/pattern trade-off explicitly: a future runner cannot claim a transaction-body write win without holding all four lanes to their exp 213 shape (the burst lane serves as the reachable-ceiling reference; the other three as neutrality guards).",
+        "Runtime prototype preserved at `archive/exp-213`. Reopen the direction if any of: (a) a production profile or downstream user report surfaces `Future.wait([tx.execute × N])`-inside-tx as a real hot path rather than a speculative shape; (b) a new design collapses the guard set from four to one (detection primitive that distinguishes burst from sequential without per-`Transaction` state, or a writer-side change that makes inside-tx multi-execute strictly cheaper without a Dart-side buffer); (c) the full savepoint-scope variant becomes tractable.",
+        "Sequential-await inside `db.transaction()` (`await tx.execute; await tx.execute`) remains bound by the per-write round-trip floor — nothing in exp 213 changes that, and users writing this common pattern paid pre-213 costs on the prototype. Future runners should not retry per-call microtask trimming (exp 170, 171 territory) without a workload that isolates that floor from the exp 213 fast-path cost."
       ]
     }
   }
