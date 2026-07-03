@@ -264,6 +264,38 @@ final class Writer {
     );
   }
 
+  /// Sends N writes as a single [MultiExecuteRequest] while the writer lock
+  /// is already held (exp 213). Used by [Transaction.execute]'s buffered
+  /// flush when a Future.wait-style burst inside `db.transaction()` queues
+  /// multiple writes in one microtask.
+  ///
+  /// The handler already tolerates `txDepth > 0` (each statement inherits
+  /// the enclosing transaction — no per-statement BEGIN/COMMIT, dirty sets
+  /// accumulate through the outermost commit), so the same message type
+  /// works both for exp 180's standalone coalescing pump and for
+  /// inside-transaction bursts.
+  ///
+  /// [traceCorrelationId] preserves Tracelite writer-side span correlation
+  /// for the whole batch (pre-213 each individual `ExecuteRequest` carried
+  /// its own; a coalesced batch has one enclosing transaction, so one id
+  /// covers the group).
+  Future<MultiExecuteResponse> multiExecuteLocked(
+    List<({String sql, List<Object?> params})> writes, {
+    int? traceCorrelationId,
+  }) {
+    assert(
+      _mutex.isLocked,
+      'multiExecuteLocked requires the writer lock to be held',
+    );
+    return _request<MultiExecuteResponse>(
+      (replyPort) => MultiExecuteRequest(
+        writes,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
+  }
+
   /// Sends a batch write while the writer lock is already held.
   /// See [executeLocked].
   Future<BatchResponse?> executeBatchLocked(
@@ -344,6 +376,27 @@ final class Writer {
           zoneValues: {Transaction.currentZoneKey: tx},
         );
       } finally {
+        // Exp 213: any un-awaited fire-and-forget `tx.execute()` calls
+        // must reach SQLite before the enclosing COMMIT/ROLLBACK —
+        // otherwise a caller who wrote `tx.execute(...)` without
+        // `await` would see the write silently dropped, and any Future
+        // they stashed would hang. Runs on both the success and
+        // exception paths so the buffer never leaks across a throwing
+        // body. Guarded by `hasPendingWrites` so the common
+        // sequential-await pattern (buffer drained inline by each
+        // await) never pays the extra microtask hop of an
+        // `await tx.drainForClose()` against an empty buffer.
+        if (tx.hasPendingWrites) {
+          try {
+            await tx.drainForClose();
+          } catch (_) {
+            // Whole-group drain failure is not the caller's error to
+            // see — the buffer's individual completers were already
+            // resolved with per-statement outcomes inside
+            // _flushPending, and the outer catch below handles the
+            // rollback.
+          }
+        }
         tx.close();
       }
     } catch (_) {

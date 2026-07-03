@@ -1,0 +1,7 @@
+{
+  "file": "213-tx-body-write-coalescing.md",
+  "title": "Transaction body write coalescing moonshot",
+  "impact": "Moonshot: attacks the assumption that every awaited `tx.execute()` inside `db.transaction()` requires its own writer round-trip. Buffers concurrent (Future.wait-inside-tx) execute calls per Transaction and flushes them as a single `MultiExecuteRequest`; the writer's existing handler already tolerates `txDepth > 0` so each statement inherits the outer transaction and per-statement outcomes distribute back to individual futures. A fast path plus a `hasPendingWrites` guard on `drainForClose` keep the common sequential-await pattern at pre-213 microtask cost. Focused `tx_body_write_coalescing.dart`: **tx-burst-future-wait −26% / −31%** across order-flipped passes (ab_drift_check verdict: REPRODUCED); sequential-await, single-write, and interleaved-select lanes all below the 3% effect floor (verdict: neutral). No public API change.",
+  "status": "accepted",
+  "link": ""
+}

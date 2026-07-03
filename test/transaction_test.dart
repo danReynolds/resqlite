@@ -1144,5 +1144,142 @@ void main() {
       expect(parents, hasLength(1));
       expect(parents[0]['id'], 2);
     });
+
+    // =================================================================
+    // Exp 213 — transaction body write coalescing
+    // =================================================================
+
+    test('tx Future.wait burst: all writes commit in order', () async {
+      // Pattern A (Future.wait inside tx): all execute() calls buffered
+      // and sent as one MultiExecuteRequest.
+      await db.transaction((tx) async {
+        await Future.wait([
+          for (var i = 0; i < 20; i++)
+            tx.execute('INSERT INTO items(name) VALUES (?)', ['name_$i']),
+        ]);
+      });
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows, hasLength(20));
+      for (var i = 0; i < 20; i++) {
+        expect(rows[i]['name'], 'name_$i');
+      }
+    });
+
+    test('tx burst returns per-statement WriteResult', () async {
+      // Individual per-statement results must be preserved through the
+      // batch: affectedRows and lastInsertId come back per future.
+      await db.transaction((tx) async {
+        final results = await Future.wait([
+          for (var i = 0; i < 5; i++)
+            tx.execute('INSERT INTO items(name) VALUES (?)', ['r$i']),
+        ]);
+        expect(results, hasLength(5));
+        for (final r in results) {
+          expect(r.affectedRows, 1);
+        }
+        // Last insert ids should be strictly ascending in issue order.
+        for (var i = 1; i < results.length; i++) {
+          expect(
+            results[i].lastInsertId,
+            greaterThan(results[i - 1].lastInsertId),
+          );
+        }
+      });
+    });
+
+    test('tx burst: a mid-batch failure surfaces on its own future', () async {
+      await db.execute("INSERT INTO items(id, name) VALUES (5, 'existing')");
+      await expectLater(
+        db.transaction((tx) async {
+          final futures = <Future<WriteResult>>[
+            tx.execute('INSERT INTO items(id, name) VALUES (1, ?)', ['ok1']),
+            // Primary-key collision — this one fails but siblings still run.
+            tx.execute('INSERT INTO items(id, name) VALUES (5, ?)', ['dupe']),
+            tx.execute('INSERT INTO items(id, name) VALUES (2, ?)', ['ok2']),
+          ];
+          // Rethrows the mid-batch failure; the successful siblings had
+          // already completed on their own futures before this line.
+          await Future.wait(futures);
+        }),
+        throwsA(isA<ResqliteQueryException>()),
+      );
+      // Whole tx rolled back — even the "successful" siblings are gone.
+      final rows = await db.select('SELECT id FROM items ORDER BY id');
+      expect(rows, hasLength(1));
+      expect(rows[0]['id'], 5);
+    });
+
+    test('tx.select flushes buffered writes before reading', () async {
+      // Interleaved pattern: buffered writes must reach SQLite before
+      // the subsequent select can observe them.
+      await db.transaction((tx) async {
+        final f1 = tx.execute('INSERT INTO items(name) VALUES (?)', ['a']);
+        final f2 = tx.execute('INSERT INTO items(name) VALUES (?)', ['b']);
+        // No `await f1/f2` yet — the select must drain them itself.
+        final rows = await tx.select('SELECT COUNT(*) AS c FROM items');
+        expect(rows[0]['c'], 2);
+        // Futures still resolve for the caller after the flush.
+        await Future.wait([f1, f2]);
+      });
+    });
+
+    test('tx fire-and-forget writes land before commit', () async {
+      // Un-awaited tx.execute() calls must still land in the transaction
+      // — matches pre-213 sync-send behavior.
+      await db.transaction((tx) async {
+        tx.execute('INSERT INTO items(name) VALUES (?)', ['x']);
+        tx.execute('INSERT INTO items(name) VALUES (?)', ['y']);
+      });
+      final rows = await db.select('SELECT name FROM items ORDER BY id');
+      expect(rows.map((r) => r['name']), ['x', 'y']);
+    });
+
+    test('tx burst snapshots parameters at call time (no aliasing)',
+        () async {
+      // A caller who mutates the parameter list between execute() calls
+      // must not see the mutation reflected in the executed statement.
+      // Pre-213 the send was synchronous, so the list was bound before
+      // the caller could mutate it; the buffered path defers the send
+      // to a later microtask, so it must snapshot instead.
+      await db.transaction((tx) async {
+        final shared = <Object?>[1, 'first'];
+        final f1 = tx.execute(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          shared,
+        );
+        // Mutate before the flush runs.
+        shared[0] = 2;
+        shared[1] = 'second';
+        final f2 = tx.execute(
+          'INSERT INTO items(id, name) VALUES (?, ?)',
+          shared,
+        );
+        await Future.wait([f1, f2]);
+      });
+      final rows = await db.select('SELECT id, name FROM items ORDER BY id');
+      expect(rows.map((r) => r['name']), ['first', 'second']);
+    });
+
+    test('tx nested savepoint flushes outer buffered writes first',
+        () async {
+      // The outer's buffered writes must land in the outer scope before
+      // the inner savepoint begins — otherwise an inner rollback would
+      // also drop them.
+      await db.transaction((outer) async {
+        final f = outer.execute('INSERT INTO items(name) VALUES (?)', ['keep']);
+        try {
+          await outer.transaction((inner) async {
+            await inner.execute('INSERT INTO items(name) VALUES (?)', ['drop']);
+            throw StateError('rollback the inner');
+          });
+        } on StateError {
+          // Expected.
+        }
+        // Buffered outer write's future still resolves.
+        await f;
+      });
+      final rows = await db.select('SELECT name FROM items');
+      expect(rows.map((r) => r['name']), ['keep']);
+    });
   });
 }
