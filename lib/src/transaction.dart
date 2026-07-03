@@ -4,7 +4,6 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/tracelite_profile.dart';
-import 'package:resqlite/src/writer/write_worker.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
 /// A transaction proxy object for executing writes and reads atomically.
@@ -33,19 +32,11 @@ import 'package:resqlite/src/writer/writer.dart';
 final class Transaction {
   final Writer _writer;
   final int? _traceCorrelationId;
-  final bool _lazyNestedSavepoint;
 
   bool _active = true;
-  bool _materializedSavepoint = false;
 
-  Transaction(
-    this._writer, {
-    int? traceCorrelationId,
-    bool lazyNestedSavepoint = false,
-  }) : _traceCorrelationId = traceCorrelationId,
-       _lazyNestedSavepoint = lazyNestedSavepoint;
-
-  bool get materializedSavepoint => _materializedSavepoint;
+  Transaction(this._writer, {int? traceCorrelationId})
+    : _traceCorrelationId = traceCorrelationId;
 
   /// Zone key storing the active [Transaction] when inside a transaction body.
   /// Database methods check this to transparently route through the transaction
@@ -68,35 +59,6 @@ final class Transaction {
     }
   }
 
-  Future<void> _materializeSavepoint() async {
-    if (!_lazyNestedSavepoint || _materializedSavepoint) return;
-    await _writer.beginLocked(traceCorrelationId: _traceCorrelationId);
-    _materializedSavepoint = true;
-  }
-
-  Future<ExecuteResponse> _executeAfterMaterializing(
-    String sql,
-    List<Object?> parameters,
-    int? correlationId,
-  ) async {
-    try {
-      final response = await _writer.executeAfterNestedBeginLocked(
-        sql,
-        parameters,
-        correlationId,
-      );
-      _materializedSavepoint = true;
-      return response;
-    } on ResqliteTransactionException catch (e) {
-      if (e.operation == 'savepoint') rethrow;
-      _materializedSavepoint = true;
-      rethrow;
-    } catch (_) {
-      _materializedSavepoint = true;
-      rethrow;
-    }
-  }
-
   /// Executes a write statement within this transaction.
   ///
   /// Same as [Database.execute], but the write is part of the enclosing
@@ -111,18 +73,18 @@ final class Transaction {
     _ensureActive();
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
-      final response = _lazyNestedSavepoint && !_materializedSavepoint
-          ? await _executeAfterMaterializing(sql, parameters, correlationId)
-          : await _writer.executeLocked(sql, parameters, correlationId);
+      final response = await _writer.executeLocked(
+        sql,
+        parameters,
+        correlationId,
+      );
       ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
       return response.result;
     }
     final sqlId = TraceliteProfile.internString(sql);
     final response = await TraceliteProfile.traceAsync(
       TraceliteResqliteSpans.databaseExecute,
-      () => _lazyNestedSavepoint && !_materializedSavepoint
-          ? _executeAfterMaterializing(sql, parameters, correlationId)
-          : _writer.executeLocked(sql, parameters, correlationId),
+      () => _writer.executeLocked(sql, parameters, correlationId),
       correlationId: correlationId,
       beginArgs: [sqlId, parameters.length],
       endArgs: (response) => [response.result.affectedRows],
@@ -187,9 +149,6 @@ final class Transaction {
   /// has returned.
   Future<void> executeBatch(String sql, List<List<Object?>> paramSets) async {
     _ensureActive();
-    if (paramSets.isNotEmpty) {
-      await _materializeSavepoint();
-    }
     final correlationId = _traceCorrelationId;
     if (correlationId == null || !(kProfileMode && kTraceliteProfileMode)) {
       final response = await _writer.executeBatchLocked(
@@ -239,10 +198,7 @@ final class Transaction {
   /// ```
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) {
     _ensureActive();
-    return () async {
-      await _materializeSavepoint();
-      return _writer.transaction(body, traceCorrelationId: _traceCorrelationId);
-    }();
+    return _writer.transaction(body, traceCorrelationId: _traceCorrelationId);
   }
 
   void close() {

@@ -44,21 +44,6 @@ final class ExecuteRequest extends WriterRequest {
   final List<Object?> params;
 }
 
-/// First write inside a lazily-materialized nested transaction.
-///
-/// Issues `SAVEPOINT sN` and the write in one writer-isolate message so the
-/// common one-write nested body pays one request instead of BEGIN + write.
-final class BeginExecuteRequest extends WriterRequest {
-  BeginExecuteRequest(
-    this.sql,
-    this.params,
-    super.replyPort, {
-    super.traceCorrelationId,
-  });
-  final String sql;
-  final List<Object?> params;
-}
-
 /// A coalesced group of standalone writes (exp 180), each run as its own
 /// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
@@ -235,8 +220,6 @@ void writerEntrypoint(List<Object> args) {
       switch (message) {
         case ExecuteRequest():
           _handleExecute(state, message);
-        case BeginExecuteRequest():
-          _handleBeginExecute(state, message);
         case MultiExecuteRequest():
           _handleMultiExecute(state, message);
         case QueryRequest():
@@ -296,19 +279,6 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
       : getDirtyTableDependencies(state.dbHandle);
   msg.replyPort.send(
     ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
-  );
-}
-
-void _handleBeginExecute(_WriterState state, BeginExecuteRequest msg) {
-  final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-  _beginNestedSavepoint(state);
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
-  msg.replyPort.send(
-    ExecuteResponse(
-      result,
-      TableDependencies.none,
-      writerSqliteUs: _stopSqliteTimer(sqliteSw),
-    ),
   );
 }
 
@@ -411,29 +381,22 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
       );
     }
   } else {
-    _beginNestedSavepoint(state);
-    msg.replyPort.send(true);
-    return;
+    final sp = 'SAVEPOINT s${state.txDepth}'.toNativeUtf8();
+    try {
+      final rc = resqliteExec(state.dbHandle, sp);
+      if (rc != 0) {
+        throw ResqliteTransactionException(
+          resqliteErrmsg(state.dbHandle).toDartString(),
+          operation: 'savepoint',
+          sqliteCode: rc,
+        );
+      }
+    } finally {
+      calloc.free(sp);
+    }
   }
   state.txDepth++;
   msg.replyPort.send(true);
-}
-
-void _beginNestedSavepoint(_WriterState state) {
-  final sp = 'SAVEPOINT s${state.txDepth}'.toNativeUtf8();
-  try {
-    final rc = resqliteExec(state.dbHandle, sp);
-    if (rc != 0) {
-      throw ResqliteTransactionException(
-        resqliteErrmsg(state.dbHandle).toDartString(),
-        operation: 'savepoint',
-        sqliteCode: rc,
-      );
-    }
-  } finally {
-    calloc.free(sp);
-  }
-  state.txDepth++;
 }
 
 void _handleCommit(_WriterState state, CommitRequest msg) {

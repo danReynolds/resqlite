@@ -264,29 +264,6 @@ final class Writer {
     );
   }
 
-  /// Sends the first write of a lazily-materialized nested transaction.
-  ///
-  /// The writer worker creates the SAVEPOINT and runs the write in the same
-  /// message, so a one-write nested body avoids the standalone BeginRequest.
-  Future<ExecuteResponse> executeAfterNestedBeginLocked(
-    String sql, [
-    List<Object?> parameters = const [],
-    int? traceCorrelationId,
-  ]) {
-    assert(
-      _mutex.isLocked,
-      'executeAfterNestedBeginLocked requires the writer lock to be held',
-    );
-    return _request<ExecuteResponse>(
-      (replyPort) => BeginExecuteRequest(
-        sql,
-        parameters,
-        replyPort,
-        traceCorrelationId: traceCorrelationId,
-      ),
-    );
-  }
-
   /// Sends a batch write while the writer lock is already held.
   /// See [executeLocked].
   Future<BatchResponse?> executeBatchLocked(
@@ -315,33 +292,6 @@ final class Writer {
         replyPort,
         traceCorrelationId: traceCorrelationId,
       ),
-    );
-  }
-
-  Future<bool> beginLocked({int? traceCorrelationId}) {
-    assert(_mutex.isLocked, 'beginLocked requires the writer lock to be held');
-    return _request<bool>(
-      (replyPort) =>
-          BeginRequest(replyPort, traceCorrelationId: traceCorrelationId),
-    );
-  }
-
-  Future<BatchResponse> commitLocked({int? traceCorrelationId}) {
-    assert(_mutex.isLocked, 'commitLocked requires the writer lock to be held');
-    return _request<BatchResponse>(
-      (replyPort) =>
-          CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
-    );
-  }
-
-  Future<bool> rollbackLocked({int? traceCorrelationId}) {
-    assert(
-      _mutex.isLocked,
-      'rollbackLocked requires the writer lock to be held',
-    );
-    return _request<bool>(
-      (replyPort) =>
-          RollbackRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
   }
 
@@ -380,16 +330,12 @@ final class Writer {
     Future<T> Function(Transaction tx) body, {
     int? traceCorrelationId,
   }) async {
-    final isNested = Transaction.current != null;
-    if (!isNested) {
-      await beginLocked(traceCorrelationId: traceCorrelationId);
-    }
-
-    final tx = Transaction(
-      this,
-      traceCorrelationId: traceCorrelationId,
-      lazyNestedSavepoint: isNested,
+    await _request<bool>(
+      (replyPort) =>
+          BeginRequest(replyPort, traceCorrelationId: traceCorrelationId),
     );
+
+    final tx = Transaction(this, traceCorrelationId: traceCorrelationId);
     final T result;
     try {
       try {
@@ -401,16 +347,19 @@ final class Writer {
         tx.close();
       }
     } catch (_) {
-      if (!isNested || tx.materializedSavepoint) {
-        try {
-          await rollbackLocked(traceCorrelationId: traceCorrelationId);
-        } catch (_) {
-          // Swallow rollback errors — propagating them would mask the
-          // original body error, which is what the caller actually needs
-          // to see. The writer isolate always leaves `txDepth` consistent
-          // after a rollback attempt, so state is already reset for the
-          // next caller.
-        }
+      try {
+        await _request<bool>(
+          (replyPort) => RollbackRequest(
+            replyPort,
+            traceCorrelationId: traceCorrelationId,
+          ),
+        );
+      } catch (_) {
+        // Swallow rollback errors — propagating them would mask the
+        // original body error, which is what the caller actually needs
+        // to see. The writer isolate always leaves `txDepth` consistent
+        // after a rollback attempt, so state is already reset for the
+        // next caller.
       }
       rethrow;
     }
@@ -418,18 +367,17 @@ final class Writer {
     // Commit is deliberately outside the try/catch: on commit failure the
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
-    if (!isNested || tx.materializedSavepoint) {
-      final response = await commitLocked(
+    final response = await _request<BatchResponse>(
+      (replyPort) =>
+          CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
+    );
+    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+
+    if (Transaction.current == null) {
+      _streamEngine.onDependencyChanges(
+        response.modifications,
         traceCorrelationId: traceCorrelationId,
       );
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
-
-      if (Transaction.current == null) {
-        _streamEngine.onDependencyChanges(
-          response.modifications,
-          traceCorrelationId: traceCorrelationId,
-        );
-      }
     }
 
     return result;
