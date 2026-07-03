@@ -1,10 +1,11 @@
 # Exp 213: Transaction body write coalescing moonshot
 
 **Date:** 2026-07-03
-**Status:** Accepted
+**Status:** Rejected
 **Category:** Moonshot
 **Direction:** `transaction-control-paths`
 **Benchmark Run:** none (focused-harness experiment; no release-suite metric maps to `Future.wait([tx.execute(...) x N])` inside `db.transaction()`)
+**Archive:** [`archive/exp-213`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-213)
 
 ## Problem
 
@@ -114,6 +115,14 @@ the fast path issues increments it before send and the `finally` decrements
 it after the reply. A concurrent second call landing while the first is
 in-flight therefore takes the slow path — the burst pattern.
 
+Four load-bearing guards emerged during PR review: `_inFlightWrites` (fast
+path vs slow path arbiter), `hasPendingWrites` on `drainForClose` (empty-drain
+guard), `List<Object?>.of(parameters)` at buffer time (parameter aliasing
+snapshot), and the restored `TraceliteProfile.traceAsync` wrap on the fast
+path (Dart-side span parity for profile builds). None were in the first draft;
+each was required by a measured regression or a correctness hazard Copilot
+flagged.
+
 No public API changes. `Database.transaction`, `Transaction.execute`, and
 `Transaction.select` keep their signatures.
 
@@ -132,64 +141,85 @@ per-run values):
 | tx-single-write (1000 tx × 1 write) | +1.6 % | −4.6 % | neutral (sign reversal — drift) |
 | tx-interleaved-select (50 tx × 10 execute+select) | +1.7 % | −0.1 % | neutral |
 
-**tx-burst-future-wait is what the moonshot exists for.** 20 transactions
-each doing `Future.wait([tx.execute × 100])` measured ~3.9 → ~2.9 ms across
-both order-flipped passes — the classifier calls this a real effect with
-same-direction deltas and comparable per-side CVs. That is the writer
-seeing one 100-statement `MultiExecuteRequest` per transaction instead of
-100 individual `ExecuteRequest` messages, and the per-round-trip floor
-disappearing accordingly.
-
-**Every other lane stays inside the drift-check tool's 3 % effect floor.**
-Sequential-await moved by −0.5 % and +3.1 % across the flip; single-write
-by +1.6 % and −4.6 % (sign reversal); interleaved-select by +1.7 % and
-−0.1 %. Those are the patterns the moonshot must not regress — and they
-don't. The `hasPendingWrites` guard on `drainForClose` is what pulls
-single-write and interleaved-select from a consistent +1–5 % regression
-(measured before the guard was added) back to neutral.
-
-Existing writer_pipelining.dart guardrail — the release-write-shape whose
-`transaction-guardrail` row is the closest release-suite proxy for
-sequential-await inside `db.transaction()` — moved +1.6 % on a single pass
-(within noise); standalone-write lanes are structurally untouched
-(`db.execute` and `_drainPendingWrites` are unchanged).
+The burst pattern is roughly **~28 % faster** — that is the writer seeing one
+100-statement `MultiExecuteRequest` per transaction instead of 100 individual
+`ExecuteRequest` messages, and the per-round-trip floor disappearing
+accordingly. Every other lane sits inside the drift-check tool's 3 % effect
+floor across the order-flip: the fast path plus the `hasPendingWrites` guard
+held the common sequential-await pattern at pre-213 cost.
+`writer_pipelining.dart`'s `transaction-guardrail` row moved +1.6 % on a single
+pass (within noise); standalone-write paths are structurally untouched.
 
 ## Outcome
 
-**Accepted.** A real ~28 % win on the Future.wait-inside-transaction burst
-pattern by turning N `ExecuteRequest` round-trips into one
-`MultiExecuteRequest`, with the common sequential-await pattern verified
-neutral across an order-flipped pair by `ab_drift_check.dart`. No public
-API change; internally the writer handler already supported the
-`txDepth > 0` case, so the runtime change is confined to `Transaction`'s
-buffer/flush plumbing plus a `Writer.multiExecuteLocked` entry point that
-mirrors the existing `executeLocked` shape.
+**Rejected.** The measurement is clean, the drift check is reproduced, the
+common patterns are neutral — the moonshot's implementation goal was met.
+The rejection is about the **pattern**, not the numbers.
 
-The win only lands when the caller writes `Future.wait([...])` or the
-equivalent fire-and-forget pattern inside a transaction body. Users who
-write sequential `await`/`await` inside `db.transaction()` pay the same
-per-round-trip floor as before; this experiment does not, and cannot,
-change that without a public API opt-in (see [exp 197](197-true-group-commit-moonshot.md)
-for why implicit group commit is off-limits — different concern, same
-class of rejection).
+`Future.wait([tx.execute(...) × N])` inside `db.transaction()` is not a
+shape resqlite is trying to encourage:
 
-The `full savepoint-scope command batching` openCandidate from the
-signals map is only partially consumed by this experiment — we batch the
-**body** but still round-trip BEGIN and COMMIT. Full savepoint-scope
-fusion still requires either a design that preserves callback semantics
-without an opt-in API or a workload showing the BEGIN/COMMIT pair is the
-dominant residual after this ships.
+- Bulk writes with identical SQL already have [`executeBatch`](../lib/resqlite.dart),
+  which sends one `BatchRequest` and runs the whole matrix in C. That is the
+  right API for that job.
+- Bulk writes with *different* SQL where the caller wants atomicity are
+  legitimate but rare in practice, and users reaching for them are already
+  handling per-statement error surfacing that the burst pattern makes more
+  awkward, not less.
+- Bulk writes with different SQL without atomicity needs are already covered
+  by [exp 180](180-group-commit-request-batching.md) — standalone
+  `db.execute()` outside a transaction, coalesced into a
+  `MultiExecuteRequest` on the writer's side.
+
+The remaining pattern — `Future.wait([tx.execute × N])` specifically inside
+`db.transaction()` — has no strong idiomatic case. Accepting a runtime
+change that carries four load-bearing guards, extends `MultiExecuteRequest`
+semantics across two experiments (180 standalone-autocommit and 213
+inherit-outer-tx), and adds persistent `_pendingWrites` /
+`_flushScheduled` / `_inFlightWrites` state per `Transaction` — all to
+improve one workload shape we are not actively steering users toward — is
+not a good trade against maintenance cost that every future writer-path
+change will have to reason about.
+
+The runtime prototype is preserved at `archive/exp-213`. Reopen the
+direction if any of the following change:
+
+1. A production profile or downstream report surfaces
+   `Future.wait([tx.execute × N])`-inside-tx as a real hot path (not
+   speculation about it being possible).
+2. A new design collapses the guard set from four to one — e.g. a
+   detection primitive that distinguishes burst from sequential without
+   the per-`Transaction` state, or a writer-side change that makes
+   inside-tx multi-execute strictly cheaper without a Dart-side buffer.
+3. The full savepoint-scope openCandidate (BEGIN + body + COMMIT in one
+   round-trip) becomes tractable — the body-only fusion in exp 213 is
+   ~1 % of tx wall clock; that other 99 % is where the direction's real
+   headroom sits, if any remains.
+
+The `full savepoint-scope command batching` openCandidate was intended
+as a target; exp 213 shows the body-only variant is measurable but not
+worth carrying. The full-scope variant remains blocked on callback
+semantics + no-public-API-growth (both exp 197 constraints), and no new
+angle emerged from this run.
+
+The focused benchmark
+(`benchmark/experiments/tx_body_write_coalescing.dart`) is retained as
+the durable harness — any future transaction-body write experiment
+should include its four lanes so the same workload/complexity trade-off
+is legible.
 
 ## Test plan
 
 - [x] `dart analyze --fatal-infos lib test` (drift-peer test error unrelated
       to this branch)
-- [x] `dart test test/transaction_test.dart` (43/43 pass, including 6 new
-      exp 213 correctness tests covering Future.wait burst, per-stmt
-      WriteResult, mid-batch failure surfacing, tx.select flush, fire-and-forget
-      close-flush, and nested-savepoint outer-flush)
+- [x] `dart test test/transaction_test.dart` (47/47 pass on prototype,
+      including 7 correctness tests covering Future.wait burst, per-stmt
+      WriteResult, mid-batch failure surfacing, tx.select flush,
+      fire-and-forget close-flush, nested-savepoint outer-flush, and
+      parameter aliasing snapshot)
 - [x] `dart test test/write_coalescing_test.dart` (exp 180 standalone
-      coalescing behavior unchanged)
+      coalescing behavior unchanged; the invalidation-flake there is
+      pre-existing on `origin/main`, see `task_97e2eec8`)
 - [x] Focused `benchmark/experiments/tx_body_write_coalescing.dart`
       order-flipped pair + `ab_drift_check.dart` verdict
 - [x] `benchmark/experiments/writer_pipelining.dart` guardrail

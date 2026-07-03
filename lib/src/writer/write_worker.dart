@@ -44,26 +44,10 @@ final class ExecuteRequest extends WriterRequest {
   final List<Object?> params;
 }
 
-/// A coalesced group of writes answered by one [MultiExecuteResponse].
-///
-/// Used for two shapes:
-/// - **exp 180 standalone coalescing** — sent when `txDepth == 0`, each
-///   statement is its own autocommit and its own dirty-set harvest.
-/// - **exp 213 tx-body coalescing** — sent when `txDepth > 0`, each
-///   statement inherits the enclosing transaction; per-statement dirty
-///   sets accumulate through the outermost commit (the handler's
-///   `state.txDepth > 0 ? TableDependencies.none : ...` branch already
-///   distinguishes them).
-///
-/// The optional [traceCorrelationId] preserves Tracelite writer-side
-/// span correlation for the whole batch (exp 213); pre-213 per-statement
-/// `ExecuteRequest`s each carried their own.
+/// A coalesced group of standalone writes (exp 180), each run as its own
+/// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
-  MultiExecuteRequest(
-    this.writes,
-    super.replyPort, {
-    super.traceCorrelationId,
-  });
+  MultiExecuteRequest(this.writes, super.replyPort);
   final List<({String sql, List<Object?> params})> writes;
 }
 
