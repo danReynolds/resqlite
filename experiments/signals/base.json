@@ -210,12 +210,13 @@
         "transactions",
         "sqlite"
       ],
-      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Per-isolate-round-trip cost dominates per-savepoint allocation/naming savings, so string/naming work is closed.",
+      "currentRead": "Cached top-level transaction control statements won. Nested-transaction string/native helpers stayed flat even after exp 111 added a worst-case shallow-fan-out savepoint workload (50× SAVEPOINT/RELEASE per iteration): exp 102's cache pattern measured -9 % (within the ±17 % decision threshold). Exp 189 then tried the smaller savepoint naming-compression variant: reusing same-name cached SQL (`SAVEPOINT s`, `RELEASE s`, `ROLLBACK TO s`) produced best-case focused wins on empty fanout (~-6%), rollback fanout (-17% / -13%), and repeated deep chains (-7% / -8%), but the representative nested-write fanout failed to reproduce (-1.3%, then +21.6% slower). Exp 212 tested the moonshot version of lazy nested-savepoint materialization: empty nested bodies improved sharply (-77.9% / -74.5%), but fusing `SAVEPOINT + first execute` made the representative write fanout slower in both pass orderings (+74.8% / +34.9%) and left rollback/deep neutral-to-slower. Per-isolate-round-trip cost still matters, but removing one nested-control message is not enough; string/naming work and lazy-begin/first-write fusion are closed.",
       "keyPriors": [
         "101",
         "102",
         "111",
-        "189"
+        "189",
+        "212"
       ],
       "archive": [
         "027",
@@ -233,15 +234,16 @@
       ],
       "openCandidates": [
         {
-          "idea": "multi-savepoint round-trip batching (analogous to exp 009 read-side batching)",
-          "addedDate": "2026-04-28",
-          "addedAfter": "111"
+          "idea": "full savepoint-scope command batching that fuses begin/body/release-or-rollback into one writer request",
+          "addedDate": "2026-07-03",
+          "addedAfter": "212",
+          "blockedOn": "needs production evidence or a design that preserves callback/rollback semantics without public API growth"
         }
       ],
       "blockedOnMeasurement": [
         "realistic deeply-nested transaction workload (exp 111 covers the shallow worst-case; deep cases still need a workload)"
       ],
-      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189's `savepoint_name_compression.dart` harness before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. The open headroom is round-trip-shaped, not allocation-shaped; do not retry savepoint string/naming tweaks without new evidence that the string path, rather than the isolate request boundary, has become dominant."
+      "notesForExperimenters": "Compare against the exp 111 nested-tx benchmark and exp 189/212 `savepoint_name_compression.dart` order-flipped evidence before claiming a win on any savepoint-related change. Per-call savepoint allocation, caching, and naming changes are below the merge bar on realistic nested-write fanout. Exp 212 also rejects lazy materialization plus `SAVEPOINT + first execute` fusion: it wins only on empty nested bodies and regresses the one-write fanout. The remaining headroom, if any, is full savepoint-scope batching or a production profile proving nested transaction control is hot; do not retry string/naming, lazy begin, or one-message first-write fusion without new workload evidence."
     },
     {
       "id": "result-transfer-shape",

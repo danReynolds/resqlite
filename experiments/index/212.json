@@ -1,0 +1,8 @@
+{
+  "file": "212-lazy-nested-savepoint-moonshot.md",
+  "title": "Lazy nested-savepoint materialization moonshot",
+  "impact": "Moonshot: tested whether nested transactions could defer SAVEPOINT creation and fuse SAVEPOINT + first write into one writer-isolate request, avoiding public API growth while challenging the eager-savepoint assumption. Rejected: empty nested bodies improved sharply (-77.9% / -74.5%), but the representative one-write nested fanout regressed in both orderings (+74.8% / +34.9%), rollback was neutral-to-slower, and the depth-5 chain slowed (+6.3% / +7.2%). Runtime prototype is preserved at `archive/exp-212`; final branch keeps only the evidence.",
+  "status": "rejected",
+  "link": ""
+}
+

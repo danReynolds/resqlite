@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "transaction-control-paths"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected",
+  "changedBeliefs": [
+    "Lazy nested-savepoint materialization is only attractive for empty nested transaction bodies. Skipping SAVEPOINT/RELEASE for empty fanout x500 improved -77.9% / -74.5% across an order-flipped focused pair, but that is not a representative production gate.",
+    "Fusing SAVEPOINT + first execute into one writer-isolate request does not improve the meaningful nested-write shape. `savepoint_name_compression.dart` write fanout x100 regressed +74.8% in the baseline-first pair and +34.9% in the candidate-first pair; rollback fanout was neutral-to-slower and the depth=5 chain slowed in both passes.",
+    "The round-trip hypothesis remains narrower than it looked after exp 111: simply removing one nested-control message is not enough. Any future transaction-control attempt must fuse a larger savepoint scope or bring production evidence that empty/select-only nested bodies dominate."
+  ],
+  "nextSignals": [
+    "Do not retry lazy nested savepoint begin or SAVEPOINT + first-write fusion without new workload evidence. The current focused harness already exercises the one-write nested body and rejects the shape.",
+    "If the direction reopens, the candidate must be structurally stronger: a full savepoint-scope command batch that runs begin/body/release or rollback in one request, or a profile proving deeply nested transaction control is a real hot path.",
+    "The public API is near-frozen. A public nested-batching surface would need a massive, broadly-applicable win; exp 212 provides evidence against that, not for it."
+  ]
+}
