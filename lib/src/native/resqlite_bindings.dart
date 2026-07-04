@@ -229,12 +229,9 @@ WriteResult executeWrite(
           sqliteCode: rc,
         );
       }
-      final view = ByteData.sublistView(
-        resultBuf.asTypedList(_writeResultSize),
-      );
       return WriteResult(
-        view.getInt32(_writeResultOffAffected, Endian.little),
-        view.getInt64(_writeResultOffLastId, Endian.little),
+        (resultBuf + _writeResultOffAffected).cast<ffi.Int>().value,
+        (resultBuf + _writeResultOffLastId).cast<ffi.Int64>().value,
       );
     } finally {
       calloc.free(resultBuf);
