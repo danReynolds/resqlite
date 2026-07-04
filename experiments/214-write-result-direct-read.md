@@ -52,10 +52,14 @@ The archived prototype changed only the `executeWrite()` result decode:
 
 ```dart
 return WriteResult(
-  (resultBuf + _writeResultOffAffected).cast<ffi.Int>().value,
+  (resultBuf + _writeResultOffAffected).cast<ffi.Int32>().value,
   (resultBuf + _writeResultOffLastId).cast<ffi.Int64>().value,
 );
 ```
+
+The direct-read shape above records the corrected Dart FFI width for
+`affected_rows`: the C field is a 4-byte `int`, matching the baseline
+`ByteData.getInt32()` decode.
 
 The native `resultBuf` allocation and free stayed unchanged, so the prototype
 does not add persistent native state and does not revisit exp 095's lifetime
