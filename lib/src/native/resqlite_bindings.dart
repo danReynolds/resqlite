@@ -198,12 +198,20 @@ final class WriteResult {
   final int lastInsertId;
 }
 
+// [EXP-215] Persistent per-isolate 16-byte writer-result scratch buffer.
+// resqlite_execute writes both scalar fields on every success return; on
+// rc != 0 executeWrite throws before reading the buffer, so stale values
+// from a prior successful call are never observable. The writer isolate
+// processes one FFI request at a time — executeWrite reads both fields in
+// the same synchronous frame before the handler yields — so a single
+// shared per-isolate slot is safe. Retries the exp 095 shape now that
+// write_result_direct_read.dart (exp 214) resolves µs-scale per-call setup
+// wins the release suite (ms precision) could not see; mirrors exp 211's
+// exp 108 revisit for the reader side.
+final ffi.Pointer<ffi.Uint8> _writeResultBuf =
+    calloc<ffi.Uint8>(_writeResultSize);
+
 /// Execute a write statement. Returns affected rows + last insert ID.
-///
-/// Uses nested try/finally so each allocation is protected by the time
-/// the next one runs — if `allocateParams` or `calloc` throws (e.g. OOM),
-/// the earlier resources are still released. Flat sequential allocation
-/// would leak on allocator failure, which is rare but real.
 WriteResult executeWrite(
   ffi.Pointer<ffi.Void> dbHandle,
   String sql,
@@ -212,33 +220,28 @@ WriteResult executeWrite(
   final sqlNative = cachedSqlUtf8(sql);
   final paramsNative = allocateParams(params);
   try {
-    final resultBuf = calloc<ffi.Uint8>(_writeResultSize);
-    try {
-      final rc = resqliteExecute(
-        dbHandle,
-        sqlNative,
-        paramsNative,
-        params.length,
-        resultBuf,
+    final rc = resqliteExecute(
+      dbHandle,
+      sqlNative,
+      paramsNative,
+      params.length,
+      _writeResultBuf,
+    );
+    if (rc != 0) {
+      throw ResqliteQueryException(
+        _queryErrorMessage(dbHandle, rc, params.length),
+        sql: sql,
+        parameters: params,
+        sqliteCode: rc,
       );
-      if (rc != 0) {
-        throw ResqliteQueryException(
-          _queryErrorMessage(dbHandle, rc, params.length),
-          sql: sql,
-          parameters: params,
-          sqliteCode: rc,
-        );
-      }
-      final view = ByteData.sublistView(
-        resultBuf.asTypedList(_writeResultSize),
-      );
-      return WriteResult(
-        view.getInt32(_writeResultOffAffected, Endian.little),
-        view.getInt64(_writeResultOffLastId, Endian.little),
-      );
-    } finally {
-      calloc.free(resultBuf);
     }
+    final view = ByteData.sublistView(
+      _writeResultBuf.asTypedList(_writeResultSize),
+    );
+    return WriteResult(
+      view.getInt32(_writeResultOffAffected, Endian.little),
+      view.getInt64(_writeResultOffLastId, Endian.little),
+    );
   } finally {
     freeParams(paramsNative, params);
   }

@@ -1,0 +1,7 @@
+{
+  "file": "215-persistent-write-result-slot.md",
+  "title": "Persistent `executeWrite` result-buffer slot (revisits exp 095)",
+  "impact": "Consumed exp 211's named revisit condition for exp 095: retested the persistent per-isolate 16-byte writer-result scratch buffer under exp 214's new µs writer harness (`write_result_direct_read.dart`), the mirror of exp 211's reader-side accept. Rejected: candidate `us/call` is stable across four pairs, but the primary order-flipped pair (P1/P2) does not reproduce same-sign candidate-faster on the lowest-baseline lane (P1 noop +1.5 % candidate-slower vs P2 noop -0.9 % faster). Together with exp 214's decode rejection, this closes both Dart-side writer-result micro-optimizations on the µs writer harness. Runtime prototype preserved at `archive/exp-215`.",
+  "status": "rejected",
+  "link": ""
+}
