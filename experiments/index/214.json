@@ -1,0 +1,7 @@
+{
+  "file": "214-write-result-direct-read.md",
+  "title": "Write result direct-read prototype",
+  "impact": "Tested a narrow writer-path cleanup that decoded `resqlite_write_result` fields directly from the native pointer instead of creating a typed-list plus `ByteData` view per `executeWrite()` call. Rejected: the focused `write_result_direct_read.dart` harness did not reproduce a stable win across order-flipped passes (pair 1 mixed/small, pair 2 broadly candidate-slower, pair 3 mixed/neutral). Runtime prototype preserved at `archive/exp-214`; the focused harness is retained for future writer-result floor checks.",
+  "status": "rejected",
+  "link": ""
+}

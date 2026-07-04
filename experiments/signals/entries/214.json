@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_preserved_measurement",
+  "changedBeliefs": [
+    "Directly reading the existing `resqlite_write_result` fields from the native pointer is not a stable public write-path win. The focused `write_result_direct_read.dart` harness produced mixed/small deltas in pair 1, a broad candidate-slower order flip in pair 2, and mixed/neutral confirmation in pair 3.",
+    "The narrow scalar-decode cleanup is distinct from exp 095's persistent writer result buffer, but it lands in the same conclusion class: tiny `executeWrite()` result-handling savings are below the public writer-path decision floor unless a future mechanism changes more than the Dart-side view decode.",
+    "`write_result_direct_read.dart` is now the µs-scale writer floor harness exp 211 said was missing. It is useful for rejecting writer-result micro-changes quickly, but the first candidate it measured did not justify runtime code."
+  ],
+  "nextSignals": [
+    "Do not retry direct `ByteData`-view removal for `executeWrite()` without a new Dart runtime behavior or a larger result-handling mechanism. The current pointer-read prototype is preserved at `archive/exp-214` and rejected.",
+    "Do not treat the new writer harness as permission to re-run exp 095 blindly. Persistent native writer-result state still carries lifetime cost and needs a reproduced public-path win, not just theoretical allocation removal.",
+    "Future writer residual work should change request structure, batching, or traced workload shape rather than shaving scalar result decode. Use `write_result_direct_read.dart` only as a focused guardrail for that narrow result-handling floor."
+  ]
+}
