@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "The exp 108 -> exp 211 revisit pattern (persistent per-isolate scratch slots re-tested under a µs harness after a ms-precision rejection) does not automatically transfer to the writer side. Exp 215 applied the exact same mechanism shape to `executeWrite()`'s `calloc<Uint8>(_writeResultSize)` under exp 214's `write_result_direct_read.dart` and did not reproduce a same-sign candidate-faster delta on the primary order-flipped pair (P1 noop +1.5 % candidate-slower vs P2 noop -0.9 % faster). Two other same-order passes (P2, P4) did show coherent 0.9-5.2 % candidate-faster shapes, but the pair 1 sign flip on the lowest-baseline lane — the lane a fixed ~200 ns mechanism should show its largest relative win on — is exactly the exp 214 failure pattern on this same harness.",
+    "Together with exp 214, this closes both Dart-side writer-result micro-optimizations under `write_result_direct_read.dart`: exp 214 rejected the ByteData-view decode change, exp 215 rejected the persistent native scratch slot. The 6.5-14 µs writer floor on this harness is neither calloc-limited nor view-limited; the remaining wall is SQLite step, isolate transport, and Dart-side param handling. Exp 095's release-suite rejection, exp 214's decode rejection, and exp 215's scratch rejection now form a consistent `writer-result path is not the next lever` signal."
+  ],
+  "nextSignals": [
+    "Do not retry writer-result scratch or writer-result decode under `write_result_direct_read.dart` without a mechanism larger than removing one Dart view allocation or one native calloc/free pair. The µs harness resolves stable candidate medians but its baseline exhibits enough per-pass drift to swamp a ~200 ns per-call mechanism on the noop-update lane.",
+    "The next writer-side lever after this experiment is not another `executeWrite()` micro-cleanup — write_worker.dart's request encoding, isolate dispatch, and dependency-tracking harvest (`getDirtyTableDependencies`) are the residual buckets exp 147 already sized on the stream side. On the standalone-write side, exp 159's pipelining already carries the concurrent-burst win; look at request structure or batching before returning to result-handling.",
+    "Exp 211's Future Notes revisit condition for exp 095 is now consumed. Future runners should not re-open exp 095 without a new mechanism class (not another decode-shape or lifetime tweak) or a harness that resolves sub-percent deltas cleanly on the noop-update lane."
+  ]
+}
