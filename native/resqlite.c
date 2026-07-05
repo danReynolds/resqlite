@@ -1902,16 +1902,30 @@ RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
     unsigned char* out = b->data + b->len;
     int i = 0;
 
-    // Process 3-byte groups.
-    for (; i + 2 < len; i += 3) {
-        unsigned int v = ((unsigned int)data[i] << 16) |
-                         ((unsigned int)data[i + 1] << 8) |
-                          (unsigned int)data[i + 2];
-        *out++ = b64_table[(v >> 18) & 0x3F];
-        *out++ = b64_table[(v >> 12) & 0x3F];
-        *out++ = b64_table[(v >> 6)  & 0x3F];
-        *out++ = b64_table[ v        & 0x3F];
+    // Process four 3-byte groups per loop trip. Exp 201 showed quote/framing
+    // was not the BLOB bottleneck; this keeps the same scalar encoder but
+    // trims loop-control work on medium/large payloads.
+#define RESQLITE_WRITE_B64_TRIPLET(idx) do { \
+        unsigned int v = ((unsigned int)data[(idx)] << 16) | \
+                         ((unsigned int)data[(idx) + 1] << 8) | \
+                          (unsigned int)data[(idx) + 2]; \
+        *out++ = b64_table[(v >> 18) & 0x3F]; \
+        *out++ = b64_table[(v >> 12) & 0x3F]; \
+        *out++ = b64_table[(v >> 6)  & 0x3F]; \
+        *out++ = b64_table[ v        & 0x3F]; \
+    } while (0)
+
+    for (; i <= len - 12; i += 12) {
+        RESQLITE_WRITE_B64_TRIPLET(i);
+        RESQLITE_WRITE_B64_TRIPLET(i + 3);
+        RESQLITE_WRITE_B64_TRIPLET(i + 6);
+        RESQLITE_WRITE_B64_TRIPLET(i + 9);
     }
+    for (; i <= len - 3; i += 3) {
+        RESQLITE_WRITE_B64_TRIPLET(i);
+    }
+
+#undef RESQLITE_WRITE_B64_TRIPLET
 
     // Remaining 1 or 2 bytes with padding.
     if (i < len) {

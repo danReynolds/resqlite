@@ -1,0 +1,7 @@
+{
+  "file": "216-base64-loop-unroll.md",
+  "title": "Base64 loop unroll for selectBytes BLOBs",
+  "impact": "Unrolls the native `json_write_base64` payload loop so each trip encodes four 3-byte groups instead of one. This consumes exp 201's specific BLOB follow-up by targeting the base64 loop rather than quote/framing. Focused `select_bytes_blob_base64.dart` A/B keeps the 4KB BLOB lane candidate-faster across all three passes (-13.6%, -12.9%, -11.9%), keeps 128B BLOBs same-direction faster (-1.1%, -9.3%, -4.7%), and leaves 3B tiny-cell lanes as neutral/noisy guards. Output bytes, padding, JSON framing, and public API are unchanged.",
+  "status": "accepted",
+  "link": ""
+}

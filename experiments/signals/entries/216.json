@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 201 correctly rejected quote/framing reservation for `json_write_base64`, but its future note left the base64 payload loop as the next real BLOB encoder target. Exp 216 consumes that follow-up: unrolling the scalar loop from one 3-byte group per trip to four groups per trip keeps the same base64 table, same JSON quotes, same encoded length, and same tail padding while reducing loop-control work on payload-heavy cells.",
+    "The load-bearing `select_bytes_blob_base64.dart` signal is strongest where the mechanism predicts. The 1k rows x 2 large blobs (4KB) lane reproduces candidate-faster across all three passes: -13.6%, -12.9%, and -11.9%. The 10k rows x 4 medium blobs (128B) lane is also same-direction faster: -1.1%, -9.3%, and -4.7%. The 10k rows x 8 small blobs (16B) lane is candidate-faster in the primary order-flipped pair (-5.9%, -6.9%), though the extra warmed baseline pass hit a slow outlier and is not load-bearing.",
+    "Tiny 3B BLOB cells are the right regression guard, not the throughput gate, for this mechanism: each cell has only one complete triplet, so it mostly bypasses the four-triplet loop. Those lanes are neutral/noisy (+1.5% and +0.6% on 8-column confirmations; -0.4% then +3.8% on 20-column confirmations) rather than reproduced regressions. Mixed BLOB/int/text rows stay candidate-faster across all passes (-2.1%, -3.7%, -5.1%)."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/select_bytes_blob_base64.dart` as the durable gate for future BLOB JSON encoder work. Treat the 4KB lane as the payload-loop throughput gate, 128B/16B as mid-size confirmation, and 3B tiny-cell lanes as regression guards.",
+    "Do not retry quote/framing reservation around `json_write_base64`; exp 201 closed that. After exp 216, a future BLOB encoder experiment needs a larger mechanism: a different base64 algorithm, a copy/transport change, or production/profile evidence that points at a new BLOB-specific cost.",
+    "The accepted unroll is intentionally scalar and portable. If a future compiler/runtime or platform-specific SIMD path appears, measure it against this unrolled scalar baseline rather than exp 201's older one-triplet loop."
+  ]
+}
