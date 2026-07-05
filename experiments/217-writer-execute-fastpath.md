@@ -13,7 +13,10 @@
   No release-suite run — `writer_pipelining.dart`'s ms-precision sequential
   lane cannot resolve the ~200-500 ns per-write mechanism this change removes
   (the exp 195 pattern), so the release write-suite would be less informative
-  than the focused µs harness that already resolves the signal.
+  than the focused µs harness that already resolves the signal. The linked
+  focused pair table is documentation, not a release-suite artifact (no
+  `resqlite metrics` section, so `generate_history.dart` skips it), which is
+  why the header opts out of release-run linking — the exp 211 pattern.
 
 ## Problem
 

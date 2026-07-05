@@ -140,9 +140,17 @@ final class Writer {
     // `List<_PendingWrite>.of` copy, an extra completer indirection, and
     // an async pump body that never coalesces more than one) is wasted.
     // Skip the pump when nothing else is in flight and the writer lock
-    // is free — the send happens exactly the way `executeLocked` does,
-    // and any *later* concurrent caller (mutex now held) falls into the
-    // pump below and coalesces with siblings as before.
+    // is free — the send happens exactly the way `executeLocked` does.
+    //
+    // Coalescing is preserved for the shape exp 180 targeted: `Mutex.lock`
+    // sets `_completer` **synchronously** before its Future yields, so the
+    // first burst caller locks the mutex within its synchronous prefix,
+    // and every sibling arriving during that hold observes
+    // `_mutex.isLocked == true` here and falls into the pump path below,
+    // buffering into `_pendingWrites` for the drain. A caller that arrives
+    // *after* the fast-path send (mutex free again, reply not yet in) also
+    // takes the fast path — that is the sequential-await shape the pump
+    // could not have helped, not a lost coalescing opportunity.
     if (_pendingWrites.isEmpty && !_draining && !_mutex.isLocked) {
       return _fastPathExecute(sql, parameters, traceCorrelationId);
     }
