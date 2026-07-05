@@ -134,12 +134,47 @@ final class Writer {
     if (_closed) {
       return Future.error(ResqliteConnectionException.databaseClosed());
     }
+    // Fast path — exp 217. The coalescing pump exists to batch concurrent
+    // bursts (exp 180); on the sequential-await pattern there is nothing
+    // to batch, and the pump's per-write cost (a `_PendingWrite`, a
+    // `List<_PendingWrite>.of` copy, an extra completer indirection, and
+    // an async pump body that never coalesces more than one) is wasted.
+    // Skip the pump when nothing else is in flight and the writer lock
+    // is free — the send happens exactly the way `executeLocked` does,
+    // and any *later* concurrent caller (mutex now held) falls into the
+    // pump below and coalesces with siblings as before.
+    if (_pendingWrites.isEmpty && !_draining && !_mutex.isLocked) {
+      return _fastPathExecute(sql, parameters, traceCorrelationId);
+    }
     final completer = Completer<ExecuteResponse>.sync();
     _pendingWrites.add(
       _PendingWrite(sql, parameters, traceCorrelationId, completer),
     );
     if (!_draining) _drainPendingWrites();
     return completer.future;
+  }
+
+  Future<ExecuteResponse> _fastPathExecute(
+    String sql,
+    List<Object?> parameters,
+    int? traceCorrelationId,
+  ) async {
+    await _mutex.lock();
+    final Future<ExecuteResponse> reply;
+    try {
+      _ensureOpen();
+      reply = _request<ExecuteResponse>(
+        (replyPort) => ExecuteRequest(
+          sql,
+          parameters,
+          replyPort,
+          traceCorrelationId: traceCorrelationId,
+        ),
+      );
+    } finally {
+      _mutex.unlock();
+    }
+    return reply;
   }
 
   /// Drains [_pendingWrites] under backpressure: each iteration sends what's

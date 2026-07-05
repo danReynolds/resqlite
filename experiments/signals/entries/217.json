@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "The exp 180 coalescing pump was not free on the sequential-await path — the assumption that its per-write cost (a `_PendingWrite` allocation, a `List<_PendingWrite>.of` copy, a `_pendingWrites.clear`, and a completer indirection) was below noise was slightly wrong. exp 214's `write_result_direct_read.dart` µs harness resolves it: adding a fast-path branch at the top of `Writer.execute()` that skips the pump when `_pendingWrites.isEmpty && !_draining && !_mutex.isLocked` reproduces **-2.0% / -3.0% on the noop-update floor** and **-3.2% / -4.6% on point-update** across two order-flipped passes. Param-update pair 1 reproduces at -1.6%; pair 2's -13.4% is dominated by a baseline slow-outlier and the candidate value matches pair 1's candidate.",
+    "Concurrent-burst coalescing (exp 180's win case) is preserved by construction. `Mutex.lock()` sets `_completer` synchronously before its Future yields, so the first fast-path caller in a burst locks the mutex within its synchronous prefix; every subsequent concurrent caller sees `_mutex.isLocked == true` and falls into the pump path, buffering into `_pendingWrites` exactly as before. `writer_pipelining.dart` `concurrent-burst` medians stay within run-to-run noise on both order-flipped passes (-0.3% / +4.1%, sign-reversal drift-suspected per exp 177) and the `transaction-guardrail` lane stays neutral for the same reason (transactions hold the mutex via `Database.transaction` → `writer.locked`).",
+    "`writer_pipelining.dart`'s ms-precision `sequential-awaited (2000 writes)` lane cannot resolve this experiment's expected magnitude (~200-500 ns × 2000 writes = 0.4-1.0 ms, below the median-of-7-rounds spread on a ~33 ms lane). Pair 1 measured -10.8% and pair 2 measured +0.1%; the pair-1 win is a baseline slow-round anomaly. This mirrors exp 195's finding that the ms-precision `wide_cols.dart` could not resolve sub-µs per-query work while `select_bytes_repeated_calls.dart` did. Use `write_result_direct_read.dart` as the load-bearing gate for any future writer-scheduling change."
+  ],
+  "nextSignals": [
+    "Future writer-scheduling changes should stage the fast-path check the same way — arm the pump only when there is actual concurrent work to coalesce — rather than reintroducing per-write pump machinery for uniformity. `write_result_direct_read.dart` is the µs-precision floor harness; do not re-check writer-path changes on `writer_pipelining.dart` alone.",
+    "If a future workload reopens the `execute()` pump path (e.g., a change that mitigates the concurrent-burst race and needs to serialize through the pump for a different reason), the fast-path is a single-line disable at the top of `Writer.execute()` — the pump path is preserved verbatim underneath. Exp 180's coalescing semantics are unchanged for the shape it targets.",
+    "Do not treat this fast-path as evidence that per-write Dart-side machinery removal is a general future direction. Exp 214 and exp 215 both rejected writer-result decode/scratch micro-optimizations on this same harness; the fast-path won because it removes an allocation *plus* a completer indirection on a shape (sequential await) where the pump's coalescing can never fire, not because the harness resolves arbitrary per-write scheduling deltas."
+  ]
+}

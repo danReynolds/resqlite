@@ -1,0 +1,7 @@
+{
+  "file": "217-writer-execute-fastpath.md",
+  "title": "Writer `execute()` fast-path bypasses exp 180 coalescing pump",
+  "impact": "Moonshot: Adds a fast-path branch at the top of `Writer.execute()` that skips the exp 180 coalescing pump when `_pendingWrites.isEmpty && !_draining && !_mutex.isLocked` — i.e., when there is no concurrent burst to coalesce. Removes one `_PendingWrite` allocation, a `List<_PendingWrite>.of` copy, and one completer indirection per uncontended standalone write, on a shape where the pump's coalescing can never fire. Focused `write_result_direct_read.dart` (µs/call, 2000 × 13) reproduces the noop-update floor at **−2.0% / −3.0%** across two order-flipped passes and point-update at **−3.2% / −4.6%**; param-update reproduces at −1.6% (pair-2 baseline slow-outlier pushed the second pass to −13.4%). Concurrent-burst and transaction-guardrail lanes stay neutral because the first burst caller locks the mutex synchronously and every later concurrent caller sees `_mutex.isLocked == true` and falls into the pump exactly as before. Falsifies the background assumption behind exp 180 that the coalescing pump's per-write cost was negligible on the sequential-await path.",
+  "status": "accepted",
+  "link": ""
+}
