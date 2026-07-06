@@ -1,0 +1,7 @@
+{
+  "file": "218-base64-8x-unroll.md",
+  "title": "8x base64 loop unroll for selectBytes BLOBs",
+  "impact": "Tested widening exp 216's native `json_write_base64` payload-loop unroll from four 3-byte groups per trip to eight. Rejected: the focused `select_bytes_blob_base64.dart` A/B kept the 128B medium-BLOB lane candidate-faster across four passes, but the load-bearing 4KB throughput gate was mixed (-10.0%, +2.0%, -13.6%, +0.8%) and guard lanes lost direction in the final pair. Runtime prototype preserved at `archive/exp-218`; exp 216's 4x scalar unroll remains the portable baseline.",
+  "status": "rejected",
+  "link": ""
+}
