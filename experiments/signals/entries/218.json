@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "changedBeliefs": [
+    "Exp 216 proved `json_write_base64` loop-control work was worth removing up to a four-triplet scalar unroll. Exp 218 tested the immediate follow-up: widening that same loop to eight triplets per iteration while preserving the base64 table, quotes, encoded length, and padding.",
+    "The 8x unroll is not a stable improvement over exp 216's scalar baseline. The focused `select_bytes_blob_base64.dart` 4KB throughput gate mixed across four paired passes: -10.0%, +2.0%, -13.6%, and +0.8%. The 128B medium-BLOB lane stayed candidate-faster, but that secondary signal is not enough when the load-bearing large-payload row fails to reproduce.",
+    "The result narrows future BLOB encoder work: loop-control overhead is no longer a clear scalar-unroll target after exp 216. Wider unroll bodies add native code shape without a reproduced payload-throughput win."
+  ],
+  "nextSignals": [
+    "Do not widen `json_write_base64` beyond exp 216's four-triplet scalar unroll without new compiler/platform evidence. The exact tested prototype is preserved at `archive/exp-218` and rejected.",
+    "Keep `benchmark/experiments/select_bytes_blob_base64.dart` as the BLOB encoder gate. The 4KB lane remains the throughput decision row; 128B can confirm a mechanism, but it should not override a mixed 4KB result.",
+    "Future BLOB work should target a larger mechanism than scalar unroll width: a different base64 algorithm, a copy/transport boundary, platform-specific SIMD/compiler behavior, or production/profile evidence showing a new BLOB-specific bottleneck."
+  ]
+}
