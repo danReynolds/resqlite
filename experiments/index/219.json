@@ -1,0 +1,7 @@
+{
+  "file": "219-json-control-escape.md",
+  "title": "Direct JSON control-character escapes",
+  "impact": "Replaces `json_write_string`'s `snprintf(\"\\\\u%04x\")` fallback for unnamed control bytes with direct `\\\\u00XX` emission from a small hex table. Focused `select_bytes_text_string_reserve.dart` A/B adds a control-character TEXT lane and reproduces the target win across the order flip: 35927 -> 6371 us/query (-82.3%) and 35824 -> 6370 us/query (-82.2%). Safe ASCII, named escaped text, mixed rows, and narrow rows stay as guards; JSON bytes and public API are unchanged.",
+  "status": "accepted",
+  "link": ""
+}

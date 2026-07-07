@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 202 correctly rejected quote/payload reservation for safe TEXT strings, but its future note left escaped control-character formatting as a narrower TEXT encoder target. Exp 219 consumes that follow-up for unnamed control bytes: `json_write_string` now emits `\\u00XX` directly from a hex table instead of formatting through `snprintf(\"\\\\u%04x\")`.",
+    "The target control-character TEXT lane in `select_bytes_text_string_reserve.dart` reproduced the candidate win across the order flip: 35927 -> 6371 us/query (-82.3%) and 35824 -> 6370 us/query (-82.2%). The result is mechanism-specific: bytes such as 0x01, 0x02, and 0x03 no longer pay a stdio formatter per escape.",
+    "Safe ASCII, named escaped text, mixed rows, and narrow rows remain guardrails for this TEXT harness rather than decision rows for the direct-hex helper. Those lanes showed the same noisy/sign-flipping behavior seen in prior TEXT measurements, and no reproduced regression landed on a mechanically touched path."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/select_bytes_text_string_reserve.dart` as the gate for future TEXT JSON encoder work. The control row is now the decision lane for unnamed `\\u00XX` emission; safe ASCII and named-escape rows are guards for unrelated fallout.",
+    "Do not retry exp 202's safe-string quote/payload reservation without new compiler/runtime evidence. It is still rejected.",
+    "Future TEXT `selectBytes()` work should target a different mechanism: the SWAR escape scan, a measurable copy/transport boundary, or production/profile evidence that TEXT cells dominate encoder wall. Direct control-character formatting is now the baseline."
+  ]
+}

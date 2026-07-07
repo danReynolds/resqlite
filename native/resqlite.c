@@ -1976,6 +1976,21 @@ static const char json_esc_char[256] = {
     ['\t'] = 't',
 };
 
+static const char json_hex_digits[] = "0123456789abcdef";
+
+RESQLITE_HOT static int json_write_u00_escape(resqlite_buf* b, unsigned char c) {
+    if (buf_ensure(b, 6) != 0) return -1;
+    unsigned char* out = b->data + b->len;
+    out[0] = '\\';
+    out[1] = 'u';
+    out[2] = '0';
+    out[3] = '0';
+    out[4] = (unsigned char)json_hex_digits[c >> 4];
+    out[5] = (unsigned char)json_hex_digits[c & 0x0f];
+    b->len += 6;
+    return 0;
+}
+
 RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
     if (buf_write_char(b, '"') != 0) return -1;
 
@@ -2023,9 +2038,7 @@ RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char
             if (buf_write(b, pair, 2) != 0) return -1;
         } else {
             // \uXXXX for control chars without named escapes.
-            char ubuf[7];
-            snprintf(ubuf, sizeof(ubuf), "\\u%04x", c);
-            if (buf_write(b, ubuf, 6) != 0) return -1;
+            if (json_write_u00_escape(b, c) != 0) return -1;
         }
         start = i + 1;
     }
