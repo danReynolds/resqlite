@@ -1,17 +1,22 @@
 // Focused A/B harness for exp 192 — two-digit table itoa for selectBytes
-// integer columns.
+// integer columns; extended by exp 220 with a 0..9999 small-non-negative lane.
 //
 // The selectBytes JSON encoder calls fast_i64_to_str once per integer cell.
 // Exp 023 introduced a single-digit loop (one `% 10` / `/ 10` per output digit)
 // that replaced snprintf. Exp 192 replaces it with a two-digit table lookup
 // (one `% 100` / `/ 100` and one 2-byte memcpy per pair of digits), halving
-// the division count.
+// the division count. Exp 220 adds a direct-write fast path for 0..9999 that
+// skips the tmp[] scratch, sign-normalization branch, and trailing memcpy for
+// the common row-id / small-key / count shape.
 //
 // Lanes target integer-heavy selectBytes payloads where this path dominates:
+//   - 10k rows x 20 small non-neg ints (0..9999)   -- exp 220's fast-path target
 //   - 10k rows x 8 INTEGER columns  (small-but-many ints, like row ids)
 //   - 10k rows x 20 INTEGER columns (wider rows, deeper i64 magnitudes)
 //   - 10k rows x 20 BIGINT columns  (~18-digit magnitudes — worst case for
-//                                    the digit loop)
+//                                    the digit loop, and exp 220's regression
+//                                    guard: every cell falls through the fast
+//                                    path)
 // A 10k rows x 8 mixed (int+text+real) lane and a 1k rows x 2 INTEGER
 // lane act as regression guards: integer encoding is one component, not the
 // whole row, and small payloads should stay within sub-millisecond noise.
@@ -48,6 +53,7 @@ Future<void> _lane({
   required int rows,
   required int intCols,
   bool bigMagnitude = false,
+  int? smallNonNegMax,
   int textCols = 0,
   int realCols = 0,
   required int iters,
@@ -78,6 +84,9 @@ Future<void> _lane({
           // 17-19 digit magnitudes — exercise the long path of the digit loop.
           final mag = (rng.nextInt(0x7fffffff) << 31) | rng.nextInt(0x7fffffff);
           row.add(rng.nextBool() ? -mag : mag);
+        } else if (smallNonNegMax != null) {
+          // Exp 220 fast-path target: every cell falls in [0, smallNonNegMax).
+          row.add(rng.nextInt(smallNonNegMax));
         } else {
           // Small-to-medium magnitudes (1-9 digits) — typical row ids.
           row.add(rng.nextInt(1 << 30) - (1 << 29));
@@ -111,9 +120,30 @@ Future<void> _lane({
 }
 
 Future<void> main() async {
-  stdout.writeln('=== selectBytes integer JSON encoding (exp 192) ===');
+  stdout.writeln('=== selectBytes integer JSON encoding (exp 192 / 220) ===');
 
-  // Primary target: many integers per row, deep digit counts.
+  // [EXP-220] Primary target: every int cell in [0, 9999] — the row-id /
+  // small-key / count shape that hits the direct-write fast path on every
+  // cell. Placed first so a candidate baseline is warmed before the wider
+  // lanes below.
+  await _lane(
+    label: '10k rows x 20 small non-neg ints (0..9999)',
+    rows: 10000,
+    intCols: 20,
+    smallNonNegMax: 10000,
+    iters: 12,
+  );
+  await _lane(
+    label: '10k rows x 8 small non-neg ints (0..9999)',
+    rows: 10000,
+    intCols: 8,
+    smallNonNegMax: 10000,
+    iters: 20,
+  );
+
+  // Exp 192 primary target: many integers per row, deep digit counts. Some
+  // cells land in the exp-220 fast path (positive values under 10000), most
+  // do not — a mixed win is expected here.
   await _lane(
     label: '10k rows x 8 small ints',
     rows: 10000,
