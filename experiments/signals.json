@@ -1720,6 +1720,23 @@
         "Keep `benchmark/experiments/select_bytes_blob_base64.dart` as the BLOB encoder gate. The 4KB lane remains the throughput decision row; 128B can confirm a mechanism, but it should not override a mixed 4KB result.",
         "Future BLOB work should target a larger mechanism than scalar unroll width: a different base64 algorithm, a copy/transport boundary, platform-specific SIMD/compiler behavior, or production/profile evidence showing a new BLOB-specific bottleneck."
       ]
+    },
+    "220": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_below_signal",
+      "changedBeliefs": [
+        "Exp 192 replaced the exp-023 single-digit `fast_i64_to_str` loop with a two-digit `[00..99]` table; exp 194 specialised the FLOAT arm for integral REALs; exp 195 promoted the per-query token scratch onto `resqlite_cached_stmt`. Exp 220 tested whether the `fast_i64_to_str` inner shape itself still had headroom for the very common `0..9999` row-id / small-key / small-count case by adding a direct-write branch that bypasses `tmp[]`, sign-normalization, and the trailing `memcpy` from `tmp` to `buf`.",
+        "The fast path reproduces its target win where every cell hits it. On `select_bytes_int_heavy.dart`'s new `10k x 20 small non-neg ints (0..9999)` and `10k x 8 small non-neg ints (0..9999)` lanes, medians move -11.6% / -10.4% and -10.9% / -9.7% across an order-flipped pair. The `~18-digit big ints` lane is neutral (+0.8% / +0.7%), confirming the fast path does not disturb the exp-192 general path when cells fall through.",
+        "The exp-192 baseline `small ints` lanes (uniform `[-2^29, 2^29)`, so essentially every cell falls through the fast-path gate) reproduce a small regression: `10k x 20` +3.4% / +2.9%, `10k x 8` +2.8% / +2.6%. Branch prediction is not the driver — the predictor cleanly learns `always fall through` — so the ~3% cost is the added compare-and-branch per cell as raw instruction count. Under- / over-predictor hints don't rescue the trade: `RESQLITE_LIKELY` on the fast-path gate mispredicts on this workload; `RESQLITE_UNLIKELY` mispredicts on the small-non-neg workload."
+      ],
+      "nextSignals": [
+        "Do not retry a `fast_i64_to_str` fast-path branch on top of the exp-192 layout without a mechanism that avoids per-cell overhead on cells that fall through — the reproduced ~3% cost is fundamental to a run-time gate on `val < 10000`, not a hint or predictor issue.",
+        "Recent encoder wins in this direction (exp 190 / 192 / 194 / 195 / 216) shipped with sub-1% guards. A future small-int encoder change must clear both `10k x 20 small non-neg ints (0..9999)` and `10k x 20 small ints` on `select_bytes_int_heavy.dart` — the second gate is what exp 220 failed.",
+        "The runtime prototype is preserved at `archive/exp-220`. A future runner with a fundamentally different mechanism (e.g. compile-time-specialised encoders per column-type hint, PGO on a workload known to be small-non-neg-heavy, or a workload profile showing 0..9999 INTEGER columns dominate a shipped app's selectBytes wall) can cherry-pick the archive commit as a starting point.",
+        "The extended `select_bytes_int_heavy.dart` harness — with two new small-non-neg lanes plus the existing exp-192 baseline lanes — is the durable contribution and now serves as the acceptance gate for any future small-int JSON encoder work in this direction."
+      ]
     }
   }
 }
