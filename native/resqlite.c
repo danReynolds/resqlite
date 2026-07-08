@@ -1794,6 +1794,35 @@ static const char kTwoDigits[200] =
 RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
     if (val == 0) { buf[0] = '0'; return 1; }
 
+    // [EXP-220] Small non-negative direct write (0..9999): row-id, count, and
+    // small-key column shapes hit this range on essentially every cell. Skip
+    // the tmp[] scratch, the sign-normalization branch, and the trailing
+    // memcpy that the general path pays. Negatives and |val| >= 10000 map to
+    // an unsigned value above the cap and fall through to the exp-192 path.
+    if ((unsigned long long)val < 10000ULL) {
+        unsigned uv = (unsigned)val;
+        if (uv < 10) {
+            buf[0] = (char)('0' + uv);
+            return 1;
+        }
+        if (uv < 100) {
+            memcpy(buf, kTwoDigits + uv * 2, 2);
+            return 2;
+        }
+        if (uv < 1000) {
+            unsigned d = uv / 100;
+            unsigned r = uv - d * 100;
+            buf[0] = (char)('0' + d);
+            memcpy(buf + 1, kTwoDigits + r * 2, 2);
+            return 3;
+        }
+        unsigned d = uv / 100; // 10..99
+        unsigned r = uv - d * 100;
+        memcpy(buf, kTwoDigits + d * 2, 2);
+        memcpy(buf + 2, kTwoDigits + r * 2, 2);
+        return 4;
+    }
+
     // Unsigned int64 magnitude fits in 20 decimal digits.
     char tmp[20];
     int pos = 20;

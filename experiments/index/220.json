@@ -1,0 +1,7 @@
+{
+  "file": "220-fast-i64-small-direct.md",
+  "title": "Reject `fast_i64_to_str` 0..9999 direct-write fast path",
+  "impact": "Tested a `0..9999` direct-write branch at the top of `fast_i64_to_str` in `native/resqlite.c` that skips the `tmp[]` scratch, sign-normalization branch, and trailing memcpy for the common row-id / small-key / small-count shape. Focused `select_bytes_int_heavy.dart` A/B reproduces the target win on the new small-non-neg lanes (`10k x 20`: -11.6% / -10.4%; `10k x 8`: -10.9% / -9.7%), but the exp-192 mixed-magnitude `small ints` lanes reproduce a small regression (`10k x 20`: +3.4% / +2.9%; `10k x 8`: +2.8% / +2.6%) from the added per-cell compare-and-branch on cells that fall through. Rejected: recent encoder wins (exp 190 / 192 / 194 / 195 / 216) shipped with sub-1% guards, and a reproduced +3% regression on realistic signed-int workloads is not a clear trade without production evidence that `0..9999` INTEGER columns dominate. Runtime prototype preserved at `archive/exp-220`; extended harness is the durable contribution.",
+  "status": "rejected",
+  "link": ""
+}
