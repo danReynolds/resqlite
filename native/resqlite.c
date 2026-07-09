@@ -1982,52 +1982,70 @@ RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char
     int start = 0;
     int i = 0;
 
-    // SWAR: scan 8 bytes at a time for the common case (no escapes needed).
-    // Check if any byte < 0x20, == '"' (0x22), or == '\\' (0x5C).
-    // Uses the standard "has zero byte" SWAR trick: for each target, XOR the
-    // word with the repeated target byte, then detect zero bytes via
-    // (v - 0x01..01) & ~v & 0x80..80. Pure portable C, no SIMD intrinsics.
-    while (i + 8 <= len) {
-        uint64_t word;
-        memcpy(&word, s + i, 8);
+    // [EXP-221] Alternate SWAR (8-byte fast scan) and byte-by-byte
+    // (escape-emit) phases, restarting SWAR after each escape byte so the
+    // tail after a sparse escape returns to SWAR speed. Before exp 221 the
+    // byte-by-byte fallback owned every remaining byte once the first
+    // escape was found; a URL-with-quote-in-the-middle string paid ~8x
+    // scan cost for its long safe tail.
+    while (i < len) {
+        // SWAR: scan 8 bytes at a time for the common case (no escapes
+        // needed). Check if any byte < 0x20, == '"' (0x22), or == '\\' (0x5C).
+        // Uses the standard "has zero byte" SWAR trick: for each target, XOR
+        // the word with the repeated target byte, then detect zero bytes via
+        // (v - 0x01..01) & ~v & 0x80..80. Pure portable C, no SIMD intrinsics.
+        while (i + 8 <= len) {
+            uint64_t word;
+            memcpy(&word, s + i, 8);
 
-        // Bytes < 0x20: subtract 0x20 from each byte, check for underflow.
-        uint64_t below_space = (word - 0x2020202020202020ULL) & ~word & 0x8080808080808080ULL;
-        // Bytes == '"' (0x22):
-        uint64_t xor_quote = word ^ 0x2222222222222222ULL;
-        uint64_t has_quote = (xor_quote - 0x0101010101010101ULL) & ~xor_quote & 0x8080808080808080ULL;
-        // Bytes == '\\' (0x5C):
-        uint64_t xor_bslash = word ^ 0x5C5C5C5C5C5C5C5CULL;
-        uint64_t has_bslash = (xor_bslash - 0x0101010101010101ULL) & ~xor_bslash & 0x8080808080808080ULL;
+            // Bytes < 0x20: subtract 0x20 from each byte, check for underflow.
+            uint64_t below_space = (word - 0x2020202020202020ULL) & ~word & 0x8080808080808080ULL;
+            // Bytes == '"' (0x22):
+            uint64_t xor_quote = word ^ 0x2222222222222222ULL;
+            uint64_t has_quote = (xor_quote - 0x0101010101010101ULL) & ~xor_quote & 0x8080808080808080ULL;
+            // Bytes == '\\' (0x5C):
+            uint64_t xor_bslash = word ^ 0x5C5C5C5C5C5C5C5CULL;
+            uint64_t has_bslash = (xor_bslash - 0x0101010101010101ULL) & ~xor_bslash & 0x8080808080808080ULL;
 
-        if ((below_space | has_quote | has_bslash) == 0) {
-            i += 8; // All 8 bytes safe — skip.
-            continue;
+            if ((below_space | has_quote | has_bslash) == 0) {
+                i += 8; // All 8 bytes safe — skip.
+                continue;
+            }
+            break; // Escape byte somewhere in this word — hand off to byte-by-byte.
         }
-        break; // Found something to escape — fall through to byte-by-byte.
-    }
 
-    // Byte-by-byte with lookup table for remaining bytes or after SWAR hit.
-    for (; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        unsigned char elen = json_esc_len[c];
+        // Byte-by-byte until we hit an escape byte (then emit + restart SWAR)
+        // or run off the end of the string (then exit both loops).
+        int escaped = 0;
+        while (i < len) {
+            unsigned char c = (unsigned char)s[i];
+            unsigned char elen = json_esc_len[c];
 
-        if (RESQLITE_LIKELY(elen == 0)) continue; // Common case: safe byte.
+            if (RESQLITE_LIKELY(elen == 0)) {
+                i++;
+                continue;
+            }
 
-        // Flush unescaped span before this character.
-        if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
+            // Flush unescaped span before this character.
+            if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
 
-        if (elen == 2) {
-            // Named two-char escape: \X
-            char pair[2] = { '\\', json_esc_char[c] };
-            if (buf_write(b, pair, 2) != 0) return -1;
-        } else {
-            // \uXXXX for control chars without named escapes.
-            char ubuf[7];
-            snprintf(ubuf, sizeof(ubuf), "\\u%04x", c);
-            if (buf_write(b, ubuf, 6) != 0) return -1;
+            if (elen == 2) {
+                // Named two-char escape: \X
+                char pair[2] = { '\\', json_esc_char[c] };
+                if (buf_write(b, pair, 2) != 0) return -1;
+            } else {
+                // \uXXXX for control chars without named escapes.
+                char ubuf[7];
+                snprintf(ubuf, sizeof(ubuf), "\\u%04x", c);
+                if (buf_write(b, ubuf, 6) != 0) return -1;
+            }
+            i++;
+            start = i;
+            escaped = 1;
+            break; // Restart outer while(i < len) so the next long safe run hits SWAR.
         }
-        start = i + 1;
+
+        if (!escaped) break; // Byte-by-byte reached len; nothing more to scan.
     }
 
     // Flush remaining unescaped span.

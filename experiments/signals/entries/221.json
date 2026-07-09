@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 202 rejected broad quote/payload reservation and exp 219 replaced the `snprintf(\"\\\\u%04x\")` fallback with a table-driven hex writer, but both left `json_write_string`'s loop *shape* untouched. Exp 221 tests exp 219's explicit future-note follow-up (the SWAR escape scan itself): rewrapping the SWAR and byte-by-byte loops so control re-enters SWAR after each escape byte, instead of leaving the byte-by-byte fallback to own every remaining byte in the string.",
+    "The load-bearing signal is the two `sparse-escape` lanes on `select_bytes_text_string_reserve.dart` — mostly-safe ASCII strings with a single `\"` at byte 4 and a long safe tail. The 256B lane reproduces −41.2% / −42.3% across an order-flipped pair (~1.7× faster; wall drops ~13.3 ms → ~7.7 ms per query on the same rowset). The 96B lane reproduces −14.8% / −26.4%, matching the shorter tail. Per exp 177 / `ab_drift_check.dart` the same-direction reproduced-large deltas clear the drift bar.",
+    "The mechanism activates only on sparse-escape shapes with a long safe tail. Fully-safe ASCII lanes (`short`, `medium`, `1k × 2`) stay within ±6% because the SWAR path already owns them end-to-end; the `escaped` mode packs an escape roughly every 8 characters so each SWAR re-entry is quickly re-broken (+4.7% / +5.6%, per-run variance not a mechanism regression); the `mixed` lane's TEXT cells are 24B safe ASCII so `json_write_string` never leaves the SWAR loop.",
+    "The remaining scan-shape headroom sits in a wider SWAR word (16-byte) or a branchless jump-to-first-escape-byte (`__builtin_ctzll` on the SWAR mask), but neither is worth trying against the exp 221 baseline without a concrete production or profile signal — the residual per-SWAR-chunk fallback is one byte-by-byte trip until the escape byte plus one emit, which is small relative to the tail wall exp 221 recovered."
+  ],
+  "nextSignals": [
+    "The two new `sparse-escape` lanes on `select_bytes_text_string_reserve.dart` (96B and 256B) become the acceptance gate for future `json_write_string` scan-shape work. The 256B lane is the throughput gate, the 96B lane is the mid-size confirmation, and the existing safe / escape / mixed / narrow lanes stay as regression guards.",
+    "Do not retry a wider SWAR (16-byte) or a `__builtin_ctzll`-based jump-to-first-escape variant against post-exp-221 without a production profile pointing at the residual byte-by-byte trip inside each SWAR chunk. The 8-byte SWAR + one-byte-per-escape fallback is the current portable baseline; a wider or branchless variant must clear both sparse-escape lanes without regressing the escape-heavy lane.",
+    "Exp 220 rejected an integer encoder fast path partly because per-cell falls-through cost added a reproduced ~3% regression. Exp 221's mechanism has no falls-through cost: safe strings still own the SWAR path with byte-identical work, so the outer-while adds at most one branch per fully-safe cell. This asymmetry is why the sub-1% guard exp 220 failed is not the right bar for exp 221; the mechanism only activates on strings that would already have entered the byte-by-byte fallback pre-exp-221.",
+    "TEXT `selectBytes()` work after exp 221 should target a different mechanism than the SWAR scan shape — for example, a copy-boundary change around the safe-span flush, a per-cell reservation shape that exploits the freshly SWAR-fast tail, or production-profile evidence that TEXT cells dominate encoder wall."
+  ]
+}

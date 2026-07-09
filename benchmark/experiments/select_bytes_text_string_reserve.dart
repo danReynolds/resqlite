@@ -5,6 +5,11 @@
 // able to reserve quote + payload + quote once and copy directly. Escaped lanes
 // guard the fallback path, and mixed/narrow lanes guard broader row-shape cost.
 //
+// The `sparse` mode is exp 221's load-bearing lane: strings that are safe
+// almost end-to-end but carry a single early escape byte, so the byte-by-byte
+// tail after the escape can be measured against exp 221's SWAR-restart-after-
+// escape variant.
+//
 // Run on a quiet machine; two order-flipped passes recommended.
 //   dart run benchmark/experiments/select_bytes_text_string_reserve.dart
 import 'dart:io';
@@ -34,6 +39,18 @@ String _textValue(String mode, int row, int col, int bytes) {
     case 'escaped':
       final seed = 'r$row"c$col\\n\t/';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
+    case 'sparse':
+      // Safe ASCII with a single `"` escape at position 4. The tail after
+      // the escape stays fully safe, so the byte-by-byte fallback that
+      // pre-exp-221 owns after the first escape must scan every remaining
+      // byte, while the exp 221 candidate re-enters SWAR for that tail.
+      final safeSeed = 'row_${row}_col_${col}_';
+      final padded =
+          (safeSeed * ((bytes ~/ safeSeed.length) + 1)).substring(0, bytes);
+      // Insert a `"` at index 4 (well inside the first SWAR word so the
+      // outer loop breaks quickly, exposing the tail to the fallback).
+      if (bytes <= 4) return padded;
+      return '${padded.substring(0, 4)}"${padded.substring(5)}';
     case 'cjk':
       final seed = '日本語$row-$col';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
@@ -140,6 +157,22 @@ Future<void> main() async {
     textBytes: 24,
     mode: 'escaped',
     iters: 10,
+  );
+  await _lane(
+    label: '10k rows x 8 sparse-escape 96B text',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 96,
+    mode: 'sparse',
+    iters: 8,
+  );
+  await _lane(
+    label: '10k rows x 8 sparse-escape 256B text',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'sparse',
+    iters: 6,
   );
   await _lane(
     label: '10k rows x 8 mixed (4 text + 2 int + 2 real)',

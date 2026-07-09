@@ -1,0 +1,7 @@
+{
+  "file": "221-json-swar-restart-after-escape.md",
+  "title": "SWAR restart after escape in `json_write_string`",
+  "impact": "Rewraps `json_write_string`'s two-loop shape into a `while (i < len)` outer loop so control re-enters the 8-byte SWAR fast scan after every escape byte, instead of leaving the byte-by-byte fallback to own the rest of the string. Consumes exp 219's future note that pointed at the SWAR escape scan as the next TEXT encoder target. Focused `select_bytes_text_string_reserve.dart` A/B adds two `sparse-escape` lanes (mostly-safe ASCII with a single `\"` at byte 4) and reproduces the target win across the order flip: 10k × 8 sparse-escape 96B moves −14.8% / −26.4% and 10k × 8 sparse-escape 256B moves −41.2% / −42.3% (~1.7× faster on the long-safe-tail shape). Safe ASCII, escape-heavy, mixed, and narrow lanes stay within noise as guards. JSON output bytes, escape spelling, buffer growth policy, and the public `selectBytes()` API are unchanged.",
+  "status": "accepted",
+  "link": ""
+}
