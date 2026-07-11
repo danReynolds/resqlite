@@ -2111,6 +2111,68 @@ fail:
 // Macro to bail out of write_json_to_buf on OOM without leaking.
 #define JSON_CHECK(expr) do { if ((expr) != 0) { rc = SQLITE_NOMEM; goto cleanup; } } while (0)
 
+// [EXP-223] Per-cell encoding block, extracted into a macro so the row-peel
+// refactor below shares one authoritative encoder between the row-0 path
+// (leading '[{' fused into a single 2-byte prelude) and the row-N>=1 path
+// (do-while over the shared ',{' prelude). Keeping this a macro instead of a
+// static inline avoids passing 6+ hot pointers on every iteration and keeps
+// the loop body identical to exp 199/203/205's tuned shape — the change is
+// strictly a control-flow refactor, not a cell-encoder change.
+#define RESQLITE_WRITE_JSON_ROW_CELLS()                                        \
+    do {                                                                       \
+        for (int i = 0; i < col_count; i++) {                                  \
+            memcpy(b->data + b->len, tokens_data + token_offsets[i],           \
+                   (size_t)token_lens[i]);                                     \
+            b->len += token_lens[i];                                           \
+                                                                               \
+            sqlite3_value* val = sqlite3_column_value(stmt, i);                \
+            int type = sqlite3_value_type(val);                                \
+            switch (type) {                                                    \
+                case SQLITE_NULL:                                              \
+                    memcpy(b->data + b->len, "null", 4);                       \
+                    b->len += 4;                                               \
+                    break;                                                     \
+                case SQLITE_INTEGER:                                           \
+                    b->len += fast_i64_to_str(                                 \
+                        sqlite3_value_int64(val),                              \
+                        (char*)(b->data + b->len));                            \
+                    break;                                                     \
+                case SQLITE_FLOAT:                                             \
+                    b->len += fast_double_to_json_num(                         \
+                        sqlite3_value_double(val),                             \
+                        (char*)(b->data + b->len), (size_t)cell_max);          \
+                    break;                                                     \
+                case SQLITE_TEXT: {                                            \
+                    const char* text = (const char*)sqlite3_value_text(val);   \
+                    int text_len = sqlite3_value_bytes(val);                   \
+                    JSON_CHECK(json_write_string(b, text, text_len));          \
+                    int remaining_tokens = tokens_total                        \
+                        - (token_offsets[i] + token_lens[i]);                  \
+                    int remaining_cells = (col_count - i - 1) * cell_max;      \
+                    JSON_CHECK(buf_ensure(b,                                   \
+                        remaining_tokens + remaining_cells + 1));              \
+                    break;                                                     \
+                }                                                              \
+                case SQLITE_BLOB: {                                            \
+                    int blob_len = sqlite3_value_bytes(val);                   \
+                    const unsigned char* blob =                                \
+                        (const unsigned char*)sqlite3_value_blob(val);         \
+                    JSON_CHECK(json_write_base64(b, blob, blob_len));          \
+                    int remaining_tokens = tokens_total                        \
+                        - (token_offsets[i] + token_lens[i]);                  \
+                    int remaining_cells = (col_count - i - 1) * cell_max;     \
+                    JSON_CHECK(buf_ensure(b,                                   \
+                        remaining_tokens + remaining_cells + 1));              \
+                    break;                                                     \
+                }                                                              \
+                default:                                                       \
+                    memcpy(b->data + b->len, "null", 4);                       \
+                    b->len += 4;                                               \
+                    break;                                                     \
+            }                                                                  \
+        }                                                                      \
+    } while (0)
+
 // `out_row_count` receives the number of rows serialized into `b`. It is
 // written on every exit path (including OOM/error) so the caller never reads
 // an uninitialized value — on error it holds the count of rows fully written
@@ -2135,102 +2197,47 @@ RESQLITE_HOT static int write_json_to_buf(
     const int* token_lens = entry->json_name_token_lens;
     int tokens_total = entry->json_name_tokens_len;
 
-    // [EXP-199] Per-row capacity reservation. Pre-reserve at row start for the
-    // brace/separator boilerplate, every column-name token, the trailing `}`,
-    // and a per-cell upper bound that covers NULL/INTEGER/FLOAT directly
-    // (`RESQLITE_JSON_FLOAT_MAX + 1` = 33 bytes; the FLOAT bound dominates the
-    // 24-byte INT bound and the 4-byte "null" literal, so a single multiply
-    // covers all three). NULL/INTEGER/FLOAT cells then write directly to
-    // `b->data + b->len` without a per-cell `buf_ensure`. TEXT/BLOB cells go
-    // through their existing helpers (`json_write_string` /
-    // `json_write_base64`), which manage their own `buf_ensure`; after such
-    // a cell we re-ensure headroom for the remaining tokens, fixed cells,
-    // and the row-closing `}`. The per-query bracket `[` and `]` stay on the
-    // existing per-call ensure path: they fire twice per query regardless of
-    // shape, so the row-level reservation cannot subsume them.
+    // [EXP-199] Per-row capacity reservation covers the row-open + every
+    // column-name token + the row-closing `}` + a per-cell upper bound that
+    // fits NULL/INTEGER/FLOAT directly (`RESQLITE_JSON_FLOAT_MAX + 1` = 33
+    // bytes; the FLOAT bound dominates INT's 24 and NULL's 4). TEXT/BLOB
+    // cells go through their own helpers (`json_write_string` /
+    // `json_write_base64`) and re-ensure the row's remaining budget after.
     const int cell_max = RESQLITE_JSON_FLOAT_MAX + 1;
     int fixed_cell_bytes_total = col_count * cell_max;
 
-    JSON_CHECK(buf_write_char(b, '['));
+    // [EXP-223] Row-0 peel: the previous shape wrote `[` before the loop and
+    // paid a per-iteration `if (row_index > 0)` inside every step. Peeling
+    // row 0 out fuses the leading `[` with row 0's `{` into a single 2-byte
+    // prelude, drops the per-row branch from the loop body, and lets the
+    // empty-result path short-circuit before the ensure/reserve pass. The
+    // cell encoder itself is unchanged — a macro shares one authoritative
+    // block between row 0 and the do-while over row N>=1.
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_DONE) {
+        // Empty result: `[]`, no row loop.
+        JSON_CHECK(buf_ensure(b, 2));
+        b->data[b->len++] = '[';
+        b->data[b->len++] = ']';
+        goto cleanup;
+    }
+    if (rc != SQLITE_ROW) goto cleanup;
+
+    // Row 0: fused `[{` prelude + cells + `}`.
+    JSON_CHECK(buf_ensure(b, 2 + tokens_total + fixed_cell_bytes_total + 1));
+    b->data[b->len++] = '[';
+    b->data[b->len++] = '{';
+    RESQLITE_WRITE_JSON_ROW_CELLS();
+    b->data[b->len++] = '}';
+    row_index = 1;
+
+    // Rows 1+: shared `,{` prelude + cells + `}` — the loop body no longer
+    // branches on `row_index` because there is no row-0 to distinguish.
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        int prelude = 1 + (row_index > 0 ? 1 : 0); // '{' (+ optional ',')
-        JSON_CHECK(buf_ensure(b, prelude + tokens_total
-            + fixed_cell_bytes_total + 1)); // + '}'
-
-        if (row_index > 0) b->data[b->len++] = ',';
+        JSON_CHECK(buf_ensure(b, 2 + tokens_total + fixed_cell_bytes_total + 1));
+        b->data[b->len++] = ',';
         b->data[b->len++] = '{';
-
-        for (int i = 0; i < col_count; i++) {
-            memcpy(b->data + b->len, tokens_data + token_offsets[i],
-                   (size_t)token_lens[i]);
-            b->len += token_lens[i];
-
-            // [EXP-203] Grab the cell's `sqlite3_value*` once per column and
-            // dispatch through `sqlite3_value_*` instead of `sqlite3_column_*`.
-            // Each `sqlite3_column_*` call runs a fresh `columnMem` lookup
-            // (mutex enter/leave + result-row index check) plus
-            // `columnMallocFailure` (mutex leave + ApiExit). The `sqlite3_value_*`
-            // family operates directly on the Mem* with no per-call lookup. For
-            // TEXT/BLOB this saves two redundant columnMem calls per cell
-            // (type + payload + bytes -> one column_value + three cheap value
-            // accesses); for INTEGER/FLOAT it saves one. Safe under
-            // SQLITE_OPEN_NOMUTEX because each connection is owned by a single
-            // isolate worker — the "unprotected sqlite3_value" warning applies
-            // only when threads can race on the underlying Mem cell.
-            sqlite3_value* val = sqlite3_column_value(stmt, i);
-            int type = sqlite3_value_type(val);
-            switch (type) {
-                case SQLITE_NULL:
-                    memcpy(b->data + b->len, "null", 4);
-                    b->len += 4;
-                    break;
-                case SQLITE_INTEGER:
-                    b->len += fast_i64_to_str(
-                        sqlite3_value_int64(val),
-                        (char*)(b->data + b->len));
-                    break;
-                case SQLITE_FLOAT:
-                    b->len += fast_double_to_json_num(
-                        sqlite3_value_double(val),
-                        (char*)(b->data + b->len), (size_t)cell_max);
-                    break;
-                case SQLITE_TEXT: {
-                    // value_text MUST be called before value_bytes — calling
-                    // bytes first can trigger an implicit type conversion that
-                    // invalidates the text pointer.
-                    const char* text = (const char*)sqlite3_value_text(val);
-                    int text_len = sqlite3_value_bytes(val);
-                    JSON_CHECK(json_write_string(b, text, text_len));
-                    // [EXP-199] json_write_string may have grown the buffer
-                    // past the row-start reservation. Re-ensure headroom for
-                    // the remaining tokens + fixed cells + '}' so subsequent
-                    // direct writes stay in-bounds.
-                    int remaining_tokens = tokens_total
-                        - (token_offsets[i] + token_lens[i]);
-                    int remaining_cells = (col_count - i - 1) * cell_max;
-                    JSON_CHECK(buf_ensure(b,
-                        remaining_tokens + remaining_cells + 1));
-                    break;
-                }
-                case SQLITE_BLOB: {
-                    int blob_len = sqlite3_value_bytes(val);
-                    const unsigned char* blob =
-                        (const unsigned char*)sqlite3_value_blob(val);
-                    JSON_CHECK(json_write_base64(b, blob, blob_len));
-                    int remaining_tokens = tokens_total
-                        - (token_offsets[i] + token_lens[i]);
-                    int remaining_cells = (col_count - i - 1) * cell_max;
-                    JSON_CHECK(buf_ensure(b,
-                        remaining_tokens + remaining_cells + 1));
-                    break;
-                }
-                default:
-                    memcpy(b->data + b->len, "null", 4);
-                    b->len += 4;
-                    break;
-            }
-        }
-
+        RESQLITE_WRITE_JSON_ROW_CELLS();
         b->data[b->len++] = '}';
         row_index++;
     }
@@ -2248,6 +2255,7 @@ cleanup:
 }
 
 #undef JSON_CHECK
+#undef RESQLITE_WRITE_JSON_ROW_CELLS
 
 int resqlite_query_bytes(
     resqlite_db* db,
