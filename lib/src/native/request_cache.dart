@@ -31,7 +31,11 @@ int _reusableParamStructBufBytes = 0;
 
 ffi.Pointer<ffi.Uint8> allocateReusableParamStructBuf(int byteCount) {
   if (byteCount > _maxReusableParamBufBytes) {
-    return calloc<ffi.Uint8>(byteCount);
+    // The parameter packer overwrites every struct field and payload byte that
+    // native code reads before the buffer crosses FFI. Large arenas are
+    // one-shot allocations, so zero-filling their untouched padding is wasted
+    // work.
+    return malloc<ffi.Uint8>(byteCount);
   }
   if (_reusableParamStructBuf == ffi.nullptr ||
       byteCount > _reusableParamStructBufBytes) {
@@ -46,6 +50,6 @@ ffi.Pointer<ffi.Uint8> allocateReusableParamStructBuf(int byteCount) {
 
 void freeReusableParamStructBuf(ffi.Pointer<ffi.Uint8> buf) {
   if (buf.address != _reusableParamStructBuf.address) {
-    calloc.free(buf);
+    malloc.free(buf);
   }
 }
