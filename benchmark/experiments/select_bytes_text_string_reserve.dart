@@ -3,7 +3,8 @@
 // The TEXT arm of write_json_to_buf calls json_write_string once per TEXT
 // cell. Safe strings with no JSON escapes are the common case: they should be
 // able to reserve quote + payload + quote once and copy directly. Escaped lanes
-// guard the fallback path, and mixed/narrow lanes guard broader row-shape cost.
+// guard the fallback path, control-character lanes isolate `\u00XX` emission,
+// and mixed/narrow lanes guard broader row-shape cost.
 //
 // Run on a quiet machine; two order-flipped passes recommended.
 //   dart run benchmark/experiments/select_bytes_text_string_reserve.dart
@@ -33,6 +34,9 @@ String _textValue(String mode, int row, int col, int bytes) {
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
     case 'escaped':
       final seed = 'r$row"c$col\\n\t/';
+      return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
+    case 'control':
+      final seed = 'r$row\x01c$col\x02\x03/';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
     case 'cjk':
       final seed = '日本語$row-$col';
@@ -107,7 +111,7 @@ Future<void> _lane({
 }
 
 Future<void> main() async {
-  stdout.writeln('=== selectBytes TEXT JSON string reserve ===');
+  stdout.writeln('=== selectBytes TEXT JSON string emission ===');
 
   await _lane(
     label: '10k rows x 8 short ASCII text',
@@ -139,6 +143,14 @@ Future<void> main() async {
     textCols: 8,
     textBytes: 24,
     mode: 'escaped',
+    iters: 10,
+  );
+  await _lane(
+    label: '10k rows x 8 control text',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 24,
+    mode: 'control',
     iters: 10,
   );
   await _lane(
