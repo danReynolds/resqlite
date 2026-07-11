@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "Exp 109 established the inline `[resqlite_param structs][TEXT/BLOB payload]` arena, and exp 186/187 made 64 KiB-1 MiB single-row ASCII/CJK binds representative public workloads. Exp 222 tested the remaining allocator-policy question: arenas above the 64 KiB reuse cap used per-call `calloc` even though the packer overwrites every field and payload byte that native `bind_params` reads.",
+    "Replacing the one-shot branch with `malloc` / `malloc.free` is behaviorally safe - the reusable arena already carries non-zero bytes between calls, `type` is always written, and C reads only the active union member - and all 53 database tests pass. Safety alone does not justify the change without a workload win.",
+    "The large-bind gate does not reproduce candidate-faster. ASCII 256 KiB is +5.9% / +0.2% slower across the order flip; ASCII 1 MiB is +0.8% / -2.4%; CJK 256 KiB is +1.5% / -6.0%; CJK 1 MiB is +2.2% / -2.5%. The sign flips and wide movements on unchanged small rows identify machine drift, while the 1 MiB rows show any allocator effect is below roughly 2.5% of end-to-end wall."
+  ],
+  "nextSignals": [
+    "Keep `calloc` for parameter arenas above the 64 KiB reuse cap. Do not retry `malloc` from source-level reasoning alone; require a platform allocator profile that attributes material bind wall to zero-fill or a new arena layout that leaves a large fraction of allocated pages untouched.",
+    "Do not turn this rejection into a reusable-cap increase. Exp 125 already tested raising the cap and rejected the retention tradeoff after an unstable small win; exp 222 only answers zero-filled versus uninitialized one-shot allocation.",
+    "Continue using both ASCII and CJK rows in `single_row_large_text_bind.dart` for single-row parameter changes, with the 256 KiB and 1 MiB rows as allocator/copy gates. The exact runtime prototype is preserved at `archive/exp-222`.",
+    "The next parameter candidate should remove a measurable copy or scan, or consume production/profile evidence. Swapping equivalent allocator entry points is below the current workload floor."
+  ]
+}

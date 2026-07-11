@@ -1,0 +1,7 @@
+{
+  "file": "222-param-arena-malloc.md",
+  "title": "Reject `malloc` for large one-shot parameter arenas",
+  "impact": "Tested whether parameter arenas above the 64 KiB reuse cap should use `malloc` instead of `calloc`, since the packer overwrites every field and payload byte C reads before FFI. The existing large single-row bind harness did not reproduce a win: ASCII 256 KiB was candidate-slower in both orderings (+5.9% / +0.2%), while the other 64 KiB-1 MiB ASCII/CJK rows flipped direction and the 1 MiB rows stayed within about 2.5%. Rejected: zero-fill is not a stable, material part of end-to-end bind wall on this machine. Runtime prototype preserved at `archive/exp-222` and reverted from the final branch.",
+  "status": "rejected",
+  "link": ""
+}
