@@ -1,0 +1,7 @@
+{
+  "file": "224-numeric-row-batching-moonshot.md",
+  "title": "Dynamic numeric-row batching moonshot",
+  "impact": "Moonshot: challenged the assumption that every `select()` row must cross leaf FFI before SQLite can step again. A dynamic no-copy prototype batched up to 64 contiguous INTEGER/FLOAT/NULL rows into a bounded row-major cell buffer, but returned immediately after any TEXT/BLOB row so SQLite-owned pointers stayed valid. Two order-flipped passes of `select_rows_step_row_ffi.dart` found no numeric win: 10k x 8 INTEGER was +1.9% / +0.5% slower and 10k x 20 INTEGER flipped +4.6% / -0.5%. The 20-column TEXT guard path reproduced a +6.5% / +5.3% regression despite copying no payload bytes. Rejected: leaf crossings are already too cheap for the combined batch-shaped decoder to pay back. Prototype preserved at `archive/exp-224`.",
+  "status": "rejected",
+  "link": ""
+}
