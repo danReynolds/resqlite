@@ -360,32 +360,10 @@ int resqlite_step_row(
     resqlite_cell* cells
 );
 
-// Step up to max_rows rows into a row-major cell buffer. Numeric/NULL rows
-// can be accumulated because their values are copied into resqlite_cell.
-// A row containing TEXT/BLOB is always the final row in the returned batch:
-// its borrowed SQLite pointers remain valid until the caller decodes the batch
-// and invokes this function again.
-int resqlite_step_rows(
-    sqlite3_stmt* stmt,
-    int col_count,
-    int max_rows,
-    resqlite_cell* cells,
-    int* out_row_count
-);
-
 int resqlite_step_row_hash(
     sqlite3_stmt* stmt,
     int col_count,
     resqlite_cell* cells,
-    uint64_t* hash
-);
-
-int resqlite_step_rows_hash(
-    sqlite3_stmt* stmt,
-    int col_count,
-    int max_rows,
-    resqlite_cell* cells,
-    int* out_row_count,
     uint64_t* hash
 );
 

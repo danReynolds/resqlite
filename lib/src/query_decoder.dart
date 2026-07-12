@@ -45,23 +45,6 @@ external int resqliteStepRow(
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,
     ffi.Int,
-    ffi.Int,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Pointer<ffi.Int>,
-  )
->(symbol: 'resqlite_step_rows', isLeaf: true)
-external int resqliteStepRows(
-  ffi.Pointer<ffi.Void> stmt,
-  int colCount,
-  int maxRows,
-  ffi.Pointer<ffi.Uint8> cells,
-  ffi.Pointer<ffi.Int> outRowCount,
-);
-
-@ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
     ffi.Pointer<ffi.Uint8>,
     ffi.Pointer<ffi.Uint64>,
   )
@@ -70,25 +53,6 @@ external int resqliteStepRowHash(
   ffi.Pointer<ffi.Void> stmt,
   int colCount,
   ffi.Pointer<ffi.Uint8> cells,
-  ffi.Pointer<ffi.Uint64> hash,
-);
-
-@ffi.Native<
-  ffi.Int Function(
-    ffi.Pointer<ffi.Void>,
-    ffi.Int,
-    ffi.Int,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Pointer<ffi.Int>,
-    ffi.Pointer<ffi.Uint64>,
-  )
->(symbol: 'resqlite_step_rows_hash', isLeaf: true)
-external int resqliteStepRowsHash(
-  ffi.Pointer<ffi.Void> stmt,
-  int colCount,
-  int maxRows,
-  ffi.Pointer<ffi.Uint8> cells,
-  ffi.Pointer<ffi.Int> outRowCount,
   ffi.Pointer<ffi.Uint64> hash,
 );
 
@@ -171,18 +135,18 @@ const int valI64 = cellOffVal ~/ 8; // 1
 
 /// Per-worker cell buffer. Reused across queries to avoid calloc/free per query.
 ffi.Pointer<ffi.Uint8> cellsBuf = ffi.nullptr;
-int cellsBufCellCount = 0;
+int cellsBufColCount = 0;
 Uint8List cellsTyped = Uint8List(0);
 Int32List cellsI32 = Int32List(0);
 Int64List cellsI64 = Int64List(0);
 Float64List cellsF64 = Float64List(0);
 
-ffi.Pointer<ffi.Uint8> ensureCellBuffer(int cellCount) {
-  if (cellCount <= cellsBufCellCount) return cellsBuf;
+ffi.Pointer<ffi.Uint8> ensureCellBuffer(int colCount) {
+  if (colCount <= cellsBufColCount) return cellsBuf;
   if (cellsBuf != ffi.nullptr) calloc.free(cellsBuf);
-  cellsBuf = calloc<ffi.Uint8>(cellSize * cellCount);
-  cellsBufCellCount = cellCount;
-  cellsTyped = cellsBuf.asTypedList(cellSize * cellCount);
+  cellsBuf = calloc<ffi.Uint8>(cellSize * colCount);
+  cellsBufColCount = colCount;
+  cellsTyped = cellsBuf.asTypedList(cellSize * colCount);
   cellsI32 = Int32List.view(
     cellsTyped.buffer,
     cellsTyped.offsetInBytes,
@@ -208,21 +172,6 @@ final ffi.Pointer<ffi.Int> rowCountSlot = calloc<ffi.Int>(1);
 
 /// Per-worker scratch slot for the one-pass initial stream decode+hash path.
 final ffi.Pointer<ffi.Uint64> initialHashSlot = calloc<ffi.Uint64>(1);
-
-/// Number of rows populated by the most recent batched native step.
-final ffi.Pointer<ffi.Int> batchRowCountSlot = calloc<ffi.Int>(1);
-
-/// Keep the persistent per-worker cell buffer bounded while still collapsing
-/// the common narrow numeric scan to at most one FFI call per 64 rows.
-const int _maxRowsPerStep = 64;
-const int _targetCellBufferBytes = 64 * 1024;
-
-int _rowsPerStep(int colCount) {
-  if (colCount <= 0) return 1;
-  final byBytes = _targetCellBufferBytes ~/ (cellSize * colCount);
-  if (byBytes < 1) return 1;
-  return byBytes < _maxRowsPerStep ? byBytes : _maxRowsPerStep;
-}
 
 /// Invoke [resqliteQueryHash] and return `(hash, rowCount)` as a record.
 /// Small wrapper that hides the out-parameter pointer.
@@ -317,29 +266,35 @@ final class RawQueryResult {
   final int estimatedBytes;
 }
 
-(int writeIdx, int byteEstimate) _decodeCellRows(
-  List<Object?> values,
-  int writeIdx,
-  int byteEstimate,
-  int rowCount,
-  int colCount,
-) {
-  final requiredLength = writeIdx + rowCount * colCount;
-  if (requiredLength > values.length) {
-    var nextLength = values.length;
-    if (nextLength == 0) nextLength = requiredLength;
-    while (nextLength < requiredLength) {
-      nextLength *= 2;
-    }
-    values.length = nextLength;
-  }
+// ---------------------------------------------------------------------------
+// Query decoder
+// ---------------------------------------------------------------------------
 
-  for (var row = 0; row < rowCount; row++) {
-    final rowBase = row * colCount;
+/// Decode a bound statement into a [RawQueryResult] using resqlite_step_row.
+///
+/// The statement must already be acquired and bound (via
+/// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
+/// The caller must NOT finalize the statement — it's owned by the C cache.
+RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
+  final colCount = sqlite3ColumnCount(stmt);
+  final schema = _schemaFor(stmt, sql, colCount);
+
+  final buf = ensureCellBuffer(colCount);
+
+  final values = List<Object?>.filled(colCount * 256, null, growable: true);
+  var writeIdx = 0;
+  var rowCount = 0;
+  var byteEstimate = 0;
+
+  var rc = resqliteStepRow(stmt, colCount, buf);
+  while (rc == sqliteRow) {
+    rowCount++;
+    if (writeIdx + colCount > values.length) {
+      values.length = values.length * 2;
+    }
     for (var i = 0; i < colCount; i++) {
-      final cellIndex = rowBase + i;
-      final i32Base = cellIndex * cellI32s;
-      final i64Base = cellIndex * cellI64s;
+      final i32Base = i * cellI32s;
+      final i64Base = i * cellI64s;
       final type = cellsI32[i32Base + typeI32];
 
       switch (type) {
@@ -376,54 +331,9 @@ final class RawQueryResult {
           values[writeIdx++] = null;
       }
     }
+    rc = resqliteStepRow(stmt, colCount, buf);
   }
-
-  return (writeIdx, byteEstimate);
-}
-
-// ---------------------------------------------------------------------------
-// Query decoder
-// ---------------------------------------------------------------------------
-
-/// Decode a bound statement into a [RawQueryResult] using resqlite_step_row.
-///
-/// The statement must already be acquired and bound (via
-/// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
-/// The caller must NOT finalize the statement — it's owned by the C cache.
-RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
-  final colCount = sqlite3ColumnCount(stmt);
-  final schema = _schemaFor(stmt, sql, colCount);
-
-  final rowsPerStep = _rowsPerStep(colCount);
-  final buf = ensureCellBuffer(colCount * rowsPerStep);
-
-  final values = List<Object?>.filled(colCount * 256, null, growable: true);
-  var writeIdx = 0;
-  var rowCount = 0;
-  var byteEstimate = 0;
-
-  while (true) {
-    final rc = resqliteStepRows(
-      stmt,
-      colCount,
-      rowsPerStep,
-      buf,
-      batchRowCountSlot,
-    );
-    final batchRows = batchRowCountSlot.value;
-    if (batchRows > 0) {
-      (writeIdx, byteEstimate) = _decodeCellRows(
-        values,
-        writeIdx,
-        byteEstimate,
-        batchRows,
-        colCount,
-      );
-      rowCount += batchRows;
-    }
-    if (rc == sqliteDone) break;
-    if (rc != sqliteRow) _throwStepException(stmt, sql, rc);
-  }
+  if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
   return RawQueryResult(values, schema, rowCount, byteEstimate);
@@ -440,8 +350,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final colCount = sqlite3ColumnCount(stmt);
   final schema = _schemaFor(stmt, sql, colCount);
 
-  final rowsPerStep = _rowsPerStep(colCount);
-  final buf = ensureCellBuffer(colCount * rowsPerStep);
+  final buf = ensureCellBuffer(colCount);
 
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
@@ -449,29 +358,54 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   var byteEstimate = 0;
   initialHashSlot.value = _fnvOffsetBasis;
 
-  while (true) {
-    final rc = resqliteStepRowsHash(
-      stmt,
-      colCount,
-      rowsPerStep,
-      buf,
-      batchRowCountSlot,
-      initialHashSlot,
-    );
-    final batchRows = batchRowCountSlot.value;
-    if (batchRows > 0) {
-      (writeIdx, byteEstimate) = _decodeCellRows(
-        values,
-        writeIdx,
-        byteEstimate,
-        batchRows,
-        colCount,
-      );
-      rowCount += batchRows;
+  var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
+  while (rc == sqliteRow) {
+    rowCount++;
+    if (writeIdx + colCount > values.length) {
+      values.length = values.length * 2;
     }
-    if (rc == sqliteDone) break;
-    if (rc != sqliteRow) _throwStepException(stmt, sql, rc);
+    for (var i = 0; i < colCount; i++) {
+      final i32Base = i * cellI32s;
+      final i64Base = i * cellI64s;
+      final type = cellsI32[i32Base + typeI32];
+
+      switch (type) {
+        case sqliteInteger:
+          values[writeIdx++] = cellsI64[i64Base + valI64];
+          byteEstimate += 8;
+        case sqliteFloat:
+          values[writeIdx++] = cellsF64[i64Base + valI64];
+          byteEstimate += 8;
+        case sqliteText:
+          final textAddr = cellsI64[i64Base + valI64];
+          final textLen = cellsI32[i32Base + lenI32];
+          byteEstimate += textLen;
+          if (textLen == 0) {
+            values[writeIdx++] = '';
+          } else {
+            values[writeIdx++] = fastDecodeText(
+              ffi.Pointer<ffi.Uint8>.fromAddress(textAddr),
+              textLen,
+            );
+          }
+        case sqliteBlob:
+          final blobAddr = cellsI64[i64Base + valI64];
+          final blobLen = cellsI32[i32Base + lenI32];
+          byteEstimate += blobLen;
+          if (blobLen == 0) {
+            values[writeIdx++] = Uint8List(0);
+          } else {
+            values[writeIdx++] = Uint8List.fromList(
+              ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
+            );
+          }
+        default:
+          values[writeIdx++] = null;
+      }
+    }
+    rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
   }
+  if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
   final raw = RawQueryResult(values, schema, rowCount, byteEstimate);
