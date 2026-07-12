@@ -131,6 +131,32 @@ void main() {
       expect(first[1]['name'], 'bob');
     });
 
+    test('initial decode preserves dynamic numeric and pointer runs', () async {
+      await db.execute('CREATE TABLE dynamic_values(value)');
+      final blob = Uint8List.fromList([1, 3, 5, 7]);
+      final values = <Object?>[
+        for (var i = 0; i < 70; i++) i,
+        'text-boundary',
+        for (var i = 0; i < 70; i++) i + 0.25,
+        blob,
+        null,
+      ];
+      await db.executeBatch('INSERT INTO dynamic_values VALUES (?)', [
+        for (final value in values) [value],
+      ]);
+
+      final rows = await db
+          .stream('SELECT value FROM dynamic_values ORDER BY rowid')
+          .first;
+      final actual = [for (final row in rows) row['value']];
+      expect(actual, hasLength(values.length));
+      expect(actual.take(70), values.take(70));
+      expect(actual[70], 'text-boundary');
+      expect(actual.skip(71).take(70), values.skip(71).take(70));
+      expect(actual[141], blob);
+      expect(actual[142], isNull);
+    });
+
     test('re-emits after write to dependent table', () async {
       await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
         'alice',

@@ -2373,6 +2373,64 @@ RESQLITE_HOT int resqlite_step_row(
     return SQLITE_ROW;
 }
 
+// [EXP-224] Batch contiguous numeric/NULL rows without copying SQLite-owned
+// TEXT/BLOB bytes. A pointer-backed row ends the batch immediately, so those
+// pointers are still valid while Dart decodes the returned cells. The next
+// sqlite3_step() happens only on the caller's next invocation.
+RESQLITE_HOT int resqlite_step_rows(
+    sqlite3_stmt* stmt,
+    int col_count,
+    int max_rows,
+    resqlite_cell* cells,
+    int* out_row_count
+) {
+    if (RESQLITE_UNLIKELY(max_rows <= 0 || !out_row_count)) {
+        return SQLITE_MISUSE;
+    }
+
+    int row_count = 0;
+    int rc = SQLITE_ROW;
+    while (row_count < max_rows) {
+        rc = sqlite3_step(stmt);
+        if (RESQLITE_UNLIKELY(rc != SQLITE_ROW)) break;
+
+        resqlite_cell* row_cells = cells + row_count * col_count;
+        int has_borrowed_bytes = 0;
+        for (int i = 0; i < col_count; i++) {
+            sqlite3_value* val = sqlite3_column_value(stmt, i);
+            int type = sqlite3_value_type(val);
+            row_cells[i].type = type;
+            switch (type) {
+                case SQLITE_INTEGER:
+                    row_cells[i].i = sqlite3_value_int64(val);
+                    break;
+                case SQLITE_FLOAT:
+                    row_cells[i].d = sqlite3_value_double(val);
+                    break;
+                case SQLITE_TEXT:
+                    row_cells[i].p = sqlite3_value_text(val);
+                    row_cells[i].len = sqlite3_value_bytes(val);
+                    has_borrowed_bytes = 1;
+                    break;
+                case SQLITE_BLOB:
+                    row_cells[i].p = sqlite3_value_blob(val);
+                    row_cells[i].len = sqlite3_value_bytes(val);
+                    has_borrowed_bytes = 1;
+                    break;
+                default:
+                    // SQLITE_NULL or unknown.
+                    break;
+            }
+        }
+
+        row_count++;
+        if (has_borrowed_bytes) break;
+    }
+
+    *out_row_count = row_count;
+    return rc;
+}
+
 // ---------------------------------------------------------------------------
 // Stream-hash helpers
 // ([EXP-075](../experiments/075-native-hash-selectifchanged.md), was 053 on
@@ -2585,6 +2643,82 @@ RESQLITE_HOT int resqlite_step_row_hash(
     }
     *hash = h;
     return SQLITE_ROW;
+}
+
+RESQLITE_HOT int resqlite_step_rows_hash(
+    sqlite3_stmt* stmt,
+    int col_count,
+    int max_rows,
+    resqlite_cell* cells,
+    int* out_row_count,
+    uint64_t* hash
+) {
+    if (RESQLITE_UNLIKELY(max_rows <= 0 || !out_row_count || !hash)) {
+        return SQLITE_MISUSE;
+    }
+
+    int row_count = 0;
+    int rc = SQLITE_ROW;
+    uint64_t h = *hash;
+    while (row_count < max_rows) {
+        rc = sqlite3_step(stmt);
+        if (RESQLITE_UNLIKELY(rc != SQLITE_ROW)) break;
+
+        resqlite_cell* row_cells = cells + row_count * col_count;
+        int has_borrowed_bytes = 0;
+        for (int i = 0; i < col_count; i++) {
+            sqlite3_value* val = sqlite3_column_value(stmt, i);
+            int type = sqlite3_value_type(val);
+            row_cells[i].type = type;
+            h = fnv_combine_u64(h, (uint64_t)type);
+            switch (type) {
+                case SQLITE_INTEGER: {
+                    sqlite3_int64 v = sqlite3_value_int64(val);
+                    row_cells[i].i = v;
+                    h = fnv_combine_u64(h, (uint64_t)v);
+                    break;
+                }
+                case SQLITE_FLOAT: {
+                    double d = sqlite3_value_double(val);
+                    uint64_t bits;
+                    memcpy(&bits, &d, 8);
+                    row_cells[i].d = d;
+                    h = fnv_combine_u64(h, bits);
+                    break;
+                }
+                case SQLITE_TEXT: {
+                    const unsigned char* p = sqlite3_value_text(val);
+                    int len = sqlite3_value_bytes(val);
+                    row_cells[i].p = p;
+                    row_cells[i].len = len;
+                    h = fnv_combine_u64(h, (uint64_t)len);
+                    h = fnv_combine_bytes(h, p, len);
+                    has_borrowed_bytes = 1;
+                    break;
+                }
+                case SQLITE_BLOB: {
+                    const void* p = sqlite3_value_blob(val);
+                    int len = sqlite3_value_bytes(val);
+                    row_cells[i].p = p;
+                    row_cells[i].len = len;
+                    h = fnv_combine_u64(h, (uint64_t)len);
+                    h = fnv_combine_bytes(h, p, len);
+                    has_borrowed_bytes = 1;
+                    break;
+                }
+                default:
+                    // SQLITE_NULL or unknown.
+                    break;
+            }
+        }
+
+        row_count++;
+        if (has_borrowed_bytes) break;
+    }
+
+    *out_row_count = row_count;
+    *hash = h;
+    return rc;
 }
 
 void resqlite_free(void* ptr) {
