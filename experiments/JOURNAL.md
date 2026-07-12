@@ -302,6 +302,23 @@ Ask the symmetric question: what happens when the value is absent entirely? If
 artifact is indistinguishable from an intentional opt-out — add a required
 declaration so the two diverge.*
 
+### Removing boundary crossings can still add more work than it removes
+
+[Exp 224](224-numeric-row-batching-moonshot.md) removed nearly all per-row
+leaf FFI crossings from numeric `select()` scans without repeating
+[exp 018](018-multi-row-step.md) / [exp 074](074-bulk-step-many.md)'s TEXT/BLOB
+copy mistake. The dynamic prototype accumulated up to 64 numeric/NULL rows but
+returned immediately after a pointer-backed row, preserving SQLite's borrowed
+buffer lifetime. Even then, the numeric targets stayed flat-to-slower and the
+TEXT guard regressed 5-7%: the integrated batched fill/decode path cost more
+than the leaf calls it removed, even without the earlier payload-copy confound.
+
+*Reapplies whenever a batching or fusion change is justified mainly by fewer
+crossings. Count the work that moves into the larger batch—buffer writes,
+working-set growth, guard branches, and the larger batched fill/decode
+traversal—and require the target lane to beat a control that keeps the old
+locality. A smaller boundary count is not itself a smaller end-to-end path.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
