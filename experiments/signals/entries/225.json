@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 218 closed loop-unroll variants of `json_write_base64` (8x unroll rejected; loop control was no longer the ceiling), and signals.json's future-work note said further BLOB work needs a different mechanism. Exp 225 consumes that follow-up: widening the inner lookup from a 6-bit table (four per triplet) to a 12-bit pair table (two per triplet) halves per-triplet loads/stores while keeping exp 216's 4x-unrolled outer loop.",
+    "The 4 KB (2 blob) and 128 B (4 blob) decision lanes reproduce candidate-faster across three order-flipped passes on `select_bytes_blob_base64.dart` (4 KB: -26.5%, -29.1%, -31.4%; 128 B: -17.4%, -26.4%, -31.2%). Roughly 1.3-1.5x faster BLOB base64 encoding for medium and large payloads at the cost of 8 KiB `.bss`.",
+    "3 B tiny-blob guards stay inside the noise floor (~-0.5% to -0.9%) — the LUT does change the single-triplet body they hit, but per-call wall on those lanes is dominated by JSON row framing / buf checks / cell dispatch, not encode work. The 1/2-byte padded tail intentionally stays on the scalar `b64_table` (~3-4 output bytes per query max)."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/select_bytes_blob_base64.dart` as the gate for future BLOB JSON encoder work. The 4 KB and 128 B lanes are now the decision rows; the 3 B lanes are guards that only exercise the padded tail.",
+    "Future BLOB encoder work in `result-transfer-shape` needs another mechanism change again: a scalar 24-bit LUT (16 MiB, too large), SIMD `_mm_shuffle_epi8` / `vqtbl4q_u8`, a base64 SIMD kernel, or a compiler-flag change. The scalar body is now two 16-bit loads + two 16-bit stores per four output bytes, which is at or below the memcpy cost.",
+    "Do not retry loop-unroll variants (exp 216 stayed at 4x; exp 218 rejected 8x). The unroll ceiling is unchanged; only the per-triplet body was the shrinking target."
+  ]
+}

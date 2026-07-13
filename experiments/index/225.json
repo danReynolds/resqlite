@@ -1,0 +1,7 @@
+{
+  "file": "225-base64-lut12.md",
+  "title": "12-bit LUT for `json_write_base64`",
+  "impact": "Widens `json_write_base64`'s inner-loop lookup from 6 bits (four per triplet) to 12 bits (two per triplet), halving per-triplet loads/stores. Three order-flipped focused passes of `select_bytes_blob_base64.dart` reproduce -26 to -31% on the 4 KB blob lane and -17 to -31% on the 128 B lane; the 3 B tiny-cell guards stay flat (~-0.5 to -0.9%). ~1.3-1.5x faster BLOB base64 encoding for medium and large payloads at the cost of 8 KiB `.bss`.",
+  "status": "accepted",
+  "link": ""
+}

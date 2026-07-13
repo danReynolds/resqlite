@@ -1890,6 +1890,22 @@ RESQLITE_HOT static int buf_write_double_json(resqlite_buf* b, double val) {
 static const char b64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+// [EXP-225] 12-bit lookup table: index carries two 6-bit base64 slots; each
+// entry stores the two encoded chars in byte order (`[0]` = high 6 bits,
+// `[1]` = low 6 bits). One 24-bit triplet becomes two 12-bit lookups + two
+// 16-bit stores instead of four 6-bit lookups + four 8-bit stores.
+// 4096 entries × 2 bytes = 8 KB in .bss; sits alongside the 64-byte b64_table.
+static unsigned char b64_pair_table[4096][2];
+static int b64_pair_table_initialized = 0;
+
+static void init_b64_pair_table(void) {
+    for (int i = 0; i < 4096; i++) {
+        b64_pair_table[i][0] = (unsigned char)b64_table[(i >> 6) & 0x3F];
+        b64_pair_table[i][1] = (unsigned char)b64_table[i & 0x3F];
+    }
+    b64_pair_table_initialized = 1;
+}
+
 /// Write a base64-encoded blob as a quoted JSON string.
 RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
                                                    const unsigned char* data,
@@ -1899,20 +1915,25 @@ RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
     if (buf_write_char(b, '"') != 0) return -1;
     if (buf_ensure(b, encoded_len) != 0) return -1;
 
+    if (RESQLITE_UNLIKELY(!b64_pair_table_initialized)) {
+        init_b64_pair_table();
+    }
+
     unsigned char* out = b->data + b->len;
     int i = 0;
 
-    // Process four 3-byte groups per loop trip. Exp 201 showed quote/framing
-    // was not the BLOB bottleneck; this keeps the same scalar encoder but
-    // trims loop-control work on medium/large payloads.
+    // Process four 3-byte groups per loop trip. Exp 216 kept the scalar loop
+    // but 4x-unrolled the trip; exp 218 rejected 8x unroll (loop-control
+    // ceiling reached). This variant keeps the 4x unroll and shortens the
+    // per-triplet body itself: two 12-bit pair lookups + two 16-bit stores
+    // instead of four 6-bit char lookups + four 8-bit stores.
 #define RESQLITE_WRITE_B64_TRIPLET(idx) do { \
         unsigned int v = ((unsigned int)data[(idx)] << 16) | \
                          ((unsigned int)data[(idx) + 1] << 8) | \
                           (unsigned int)data[(idx) + 2]; \
-        *out++ = b64_table[(v >> 18) & 0x3F]; \
-        *out++ = b64_table[(v >> 12) & 0x3F]; \
-        *out++ = b64_table[(v >> 6)  & 0x3F]; \
-        *out++ = b64_table[ v        & 0x3F]; \
+        memcpy(out,     b64_pair_table[(v >> 12) & 0xFFF], 2); \
+        memcpy(out + 2, b64_pair_table[ v        & 0xFFF], 2); \
+        out += 4; \
     } while (0)
 
     for (; i <= len - 12; i += 12) {
