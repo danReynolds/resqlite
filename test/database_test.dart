@@ -712,7 +712,7 @@ void main() {
       expect(rows[2]['created_at'], '2026-06-08T00:00:19Z');
     });
 
-    test('fixed-width batch packing falls back for late text and blobs', () async {
+    test('executeBatch preserves late text and blobs after numeric row 0', () async {
       await db.execute(
         'CREATE TABLE t('
         'id INTEGER PRIMARY KEY, c0, c1, c2, c3, c4, c5'
