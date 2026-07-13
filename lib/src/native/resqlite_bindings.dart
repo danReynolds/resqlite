@@ -816,37 +816,96 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   if (totalCount == 0) return ffi.nullptr.cast();
 
   if (paramCount >= _asciiBatchMinParamCount &&
-      totalCount >= _asciiBatchMinTotalParamCount &&
-      _firstBatchRowMayContainText(paramSets.first, paramCount)) {
-    final payload = _measureBatchPayload(paramSets, paramCount);
-    if (payload.hasString) {
-      if (payload.isAscii) {
-        return _allocateAsciiBatchParams(
+      totalCount >= _asciiBatchMinTotalParamCount) {
+    final firstRow = _classifyFirstBatchRow(paramSets.first, paramCount);
+    if (firstRow.mayContainText) {
+      final payload = _measureBatchPayload(paramSets, paramCount);
+      if (payload.hasString) {
+        if (payload.isAscii) {
+          return _allocateAsciiBatchParams(
+            paramSets,
+            paramCount,
+            totalCount,
+            payload.extraBytes,
+          );
+        }
+
+        return _allocateUtf8BatchParams(
           paramSets,
           paramCount,
           totalCount,
           payload.extraBytes,
         );
       }
-
-      return _allocateUtf8BatchParams(
+    } else if (firstRow.isFixedScalar) {
+      // [EXP-226] Fixed-width batches need no payload tail, so their native
+      // arena size is known from the matrix dimensions. Pack optimistically
+      // in one pass instead of scanning the whole matrix and then packing it.
+      // SQLite parameters are dynamically typed, so a later TEXT/BLOB value
+      // abandons this attempt and retries through the unchanged generic path.
+      final fixed = _tryAllocateFixedBatchParams(
         paramSets,
         paramCount,
         totalCount,
-        payload.extraBytes,
       );
+      if (fixed != null) return fixed;
     }
   }
 
   return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
 }
 
-bool _firstBatchRowMayContainText(List<Object?> params, int paramCount) {
+({bool mayContainText, bool isFixedScalar}) _classifyFirstBatchRow(
+  List<Object?> params,
+  int paramCount,
+) {
+  var isFixedScalar = true;
   for (var i = 0; i < paramCount; i++) {
     final value = params[i];
-    if (value is String || value == null) return true;
+    if (value is String || value == null) {
+      return (mayContainText: true, isFixedScalar: false);
+    }
+    if (value is! int && value is! double) isFixedScalar = false;
   }
-  return false;
+  return (mayContainText: false, isFixedScalar: isFixedScalar);
+}
+
+ffi.Pointer<ffi.Uint8>? _tryAllocateFixedBatchParams(
+  List<List<Object?>> paramSets,
+  int paramCount,
+  int totalCount,
+) {
+  final totalBytes = _paramStructSize * totalCount;
+  final buf = allocateReusableParamStructBuf(totalBytes);
+  final byteData = ByteData.sublistView(buf.asTypedList(totalBytes));
+
+  var flatIndex = 0;
+  for (final set in paramSets) {
+    for (var i = 0; i < paramCount; i++) {
+      final offset = flatIndex * _paramStructSize;
+      final value = set[i];
+
+      if (value == null) {
+        byteData.setInt32(offset, 0, Endian.little);
+      } else if (value is int) {
+        byteData.setInt32(offset, 1, Endian.little);
+        byteData.setInt64(offset + 8, value, Endian.little);
+      } else if (value is double) {
+        byteData.setInt32(offset, 2, Endian.little);
+        byteData.setFloat64(offset + 8, value, Endian.little);
+      } else if (value is String || value is Uint8List) {
+        freeParamBuffer(buf);
+        return null;
+      } else {
+        // Preserve the generic packer's unsupported-value behavior.
+        byteData.setInt32(offset, 0, Endian.little);
+      }
+
+      flatIndex++;
+    }
+  }
+
+  return buf;
 }
 
 ({int extraBytes, bool hasString, bool isAscii}) _measureBatchPayload(

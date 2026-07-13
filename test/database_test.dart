@@ -712,6 +712,57 @@ void main() {
       expect(rows[2]['created_at'], '2026-06-08T00:00:19Z');
     });
 
+    test('fixed-width batch packing falls back for late text and blobs', () async {
+      await db.execute(
+        'CREATE TABLE t('
+        'id INTEGER PRIMARY KEY, c0, c1, c2, c3, c4, c5'
+        ')',
+      );
+
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          for (var i = 0; i < 100; i++)
+            <Object?>[
+              i,
+              i + 0.25,
+              i * 2,
+              i + 0.75,
+              i * 3,
+              i == 50 ? null : i + 1.25,
+            ],
+        ],
+      );
+
+      final lateBlob = Uint8List.fromList([0, 1, 2, 255]);
+      await db.executeBatch(
+        'INSERT INTO t(c0, c1, c2, c3, c4, c5) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          for (var i = 0; i < 100; i++)
+            <Object?>[
+              i == 98 ? 'late text' : i,
+              i == 99 ? lateBlob : i + 0.25,
+              i * 2,
+              i + 0.75,
+              i * 3,
+              i + 1.25,
+            ],
+        ],
+      );
+
+      final rows = await db.select(
+        'SELECT id, c0, c1, c5 FROM t '
+        'WHERE id IN (1, 51, 199, 200) ORDER BY id',
+      );
+      expect(rows, hasLength(4));
+      expect(rows[0]['c0'], 0);
+      expect(rows[1]['c5'], isNull);
+      expect(rows[2]['c0'], 'late text');
+      expect(rows[3]['c1'], lateBlob);
+    });
+
     test('wide executeBatch fast path preserves ascii text and blobs', () async {
       await createWideBatchTable();
 

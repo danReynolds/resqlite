@@ -18,13 +18,21 @@ import 'package:resqlite/src/native/resqlite_bindings.dart';
 ///   dart run benchmark/experiments/batch_param_flatten.dart --text-mode=unicode
 ///   dart run benchmark/experiments/batch_param_flatten.dart --text-mode=nullable-ascii
 ///   dart run benchmark/experiments/batch_param_flatten.dart --cell-mode=blob --blob-bytes=256
+///   dart run benchmark/experiments/batch_param_flatten.dart --cell-mode=numeric
+///   dart run benchmark/experiments/batch_param_flatten.dart --cell-mode=numeric-late-text
 ///   dart run benchmark/experiments/batch_param_flatten.dart --cell-mode=blob --blob-mode=reused --measure=marshal
 const _defaultWarmup = 8;
 const _defaultIterations = 30;
 const _batchSizes = [100, 1000, 10000];
 const _paramWidths = [2, 8, 20];
 const _textModes = {'ascii', 'unicode', 'emoji', 'nul', 'nullable-ascii'};
-const _cellModes = {'mixed', 'blob'};
+const _cellModes = {
+  'mixed',
+  'blob',
+  'numeric',
+  'numeric-late-text',
+  'numeric-late-blob',
+};
 const _blobModes = {'fresh', 'reused'};
 const _measures = {'execute', 'marshal'};
 
@@ -214,12 +222,23 @@ List<List<Object?>> _buildParamSets(
   for (var row = 0; row < batchSize; row++)
     [
       for (var col = 0; col < paramWidth; col++)
-        _valueFor(row, col, textMode, cellMode, blobBytes, blobMode),
+        _valueFor(
+          row,
+          col,
+          textMode,
+          cellMode,
+          blobBytes,
+          blobMode,
+          row == batchSize - 1,
+        ),
     ],
 ];
 
 String _sqliteTypeFor(int col, String cellMode) => switch (cellMode) {
   'blob' => 'BLOB',
+  'numeric' ||
+  'numeric-late-text' ||
+  'numeric-late-blob' => col.isEven ? 'INTEGER' : 'REAL',
   _ => _mixedSqliteTypeFor(col),
 };
 
@@ -237,10 +256,23 @@ Object? _valueFor(
   String cellMode,
   int blobBytes,
   String blobMode,
+  bool isLastRow,
 ) => switch (cellMode) {
   'blob' => _blobValueFor(row, col, blobBytes, blobMode),
+  'numeric' => _numericValueFor(row, col),
+  'numeric-late-text' =>
+    isLastRow && col == 0 ? 'late_text_payload' : _numericValueFor(row, col),
+  'numeric-late-blob' =>
+    isLastRow && col == 0
+        ? _freshBlob(row, col, blobBytes)
+        : _numericValueFor(row, col),
   _ => _mixedValueFor(row, col, textMode),
 };
+
+Object? _numericValueFor(int row, int col) {
+  if (row > 0 && (row + col) % 97 == 0) return null;
+  return col.isEven ? row * 31 + col : row * 1.5 + col / 10;
+}
 
 Object? _mixedValueFor(int row, int col, String textMode) => switch (col % 4) {
   0 => _textValueFor(row, col, textMode),
