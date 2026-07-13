@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "After exp 113 removed the temporary flattened list, numeric-only batch matrices still made a payload-sizing pass and a struct-writing pass even though their arena size is exactly `24 * totalCount`. Exp 226 confirms that removing the sizing pass is a real encoder-local mechanism: marshal-only 10k x 8 improves -28.0% / -27.6% and 10k x 20 improves -25.4% / -25.8% across the order flip.",
+    "The marshal saving is only about 0.11-0.23 ms and does not clear the public workload gate. Numeric executeBatch 10k x 8 moves -0.9% / -6.0% with unstable magnitude; 10k x 20 moves -3.4% / -1.4%, below the predeclared 5% gate in both orderings.",
+    "Row-0 speculation is not free under SQLite's dynamic parameter contract. When the final row introduces TEXT, the candidate discards a 4.8 MB fixed-width arena before the generic retry; 10k x 20 reproduces a +7.0% / +4.9% regression. The runtime prototype is rejected and archived at `archive/exp-226`."
+  ],
+  "nextSignals": [
+    "Keep the current two-pass generic batch packer. Do not retry first-row or declared-affinity type specialization; a dynamically typed later value must remain correct and cannot pay a full discarded-arena penalty.",
+    "Use `batch_param_flatten.dart --cell-mode=numeric --measure=marshal|execute` together: marshal-only gains are supporting evidence, while the end-to-end execute row is the decision gate. Use `numeric-late-text` and `numeric-late-blob` as adversarial fallback guards.",
+    "Reopen fixed-width one-pass packing only if a representation can preserve the first-pass struct writes when payload appears without discarding the arena, and production/profile evidence shows numeric parameter packing is at least 5% of batch wall."
+  ]
+}

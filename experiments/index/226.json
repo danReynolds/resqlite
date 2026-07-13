@@ -1,0 +1,7 @@
+{
+  "file": "226-one-pass-numeric-batch.md",
+  "title": "Reject one-pass numeric batch packing",
+  "impact": "Tested removing the remaining payload-sizing scan for fixed-width NULL/INTEGER/FLOAT batch matrices. One-pass packing reproduced marshal-only wins at 10k x 8 (-28.0% / -27.6%) and 10k x 20 (-25.4% / -25.8%), but end-to-end executeBatch stayed below the 5% gate (x20: -3.4% / -1.4%). A final-row TEXT fallback also reproduced a +7.0% / +4.9% regression because the 4.8 MB speculative arena was discarded before the generic retry. Rejected; prototype preserved at archive/exp-226, numeric/adversarial harness modes retained.",
+  "status": "rejected",
+  "link": ""
+}
