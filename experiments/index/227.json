@@ -1,0 +1,7 @@
+{
+  "file": "227-json-token-overcopy.md",
+  "title": "Inline 16-byte over-copy for JSON column-name tokens",
+  "impact": "Rewrites the per-column-name token write in `write_json_to_buf` from a runtime-length `memcpy(dst, src, token_lens[i])` — which lowers to a libc `memcpy` call on every column of every row — to a compile-time-constant `memcpy(dst, src, 16)` when the token fits in 16 bytes, which clang / gcc lower to a single 128-bit load-store pair on ARM64 NEON and x86 SSE. `ensure_json_name_tokens` gains 16 bytes of zero-filled trailing padding so the over-read is always in-bounds; the row-start `col_count * cell_max` reservation covers the destination over-write, and only `token_lens[i]` bytes are counted as valid output, so the trailing over-written bytes are overwritten by the immediately following cell payload. Two order-flipped focused passes on `select_bytes_wide_cols.dart` reproduce same-sign candidate-faster on every 10k-row shape (**−3.0 % / −3.3 %** on the primary 10k rows x 20 int cols target; **−5.4 % / −2.1 %** on 10k rows x 20 mixed cols; **−2.2 % / −2.0 %** on 10k rows x 8 int cols); `select_bytes_repeated_calls.dart` reproduces **−2.5 % / −3.2 %** on the 1000 rows x 8 int guard. Long-name tokens (>16 bytes) stay on the runtime-length fallback. JSON bytes are unchanged. ~20 net additional lines of C; no public API change.",
+  "status": "accepted",
+  "link": ""
+}
