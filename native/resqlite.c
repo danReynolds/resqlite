@@ -2107,6 +2107,14 @@ static int ensure_json_name_tokens(
         lens[i] = tokens.len - offsets[i];
     }
 
+    // [EXP-227] Trailing 16-byte padding lets the row loop use a single
+    // fixed-width `memcpy(dst, src, 16)` per token (compiled to one 128-bit
+    // load-store) instead of a runtime-length libc `memcpy` call. The tail
+    // bytes are zero-filled so the over-read never carries indeterminate
+    // data. `tokens.len` still tracks the real logical length.
+    if (buf_ensure(&tokens, 16) != 0) goto fail;
+    memset(tokens.data + tokens.len, 0, 16);
+
     entry->json_name_tokens_buf = tokens.data;
     entry->json_name_tokens_len = tokens.len;
     entry->json_name_token_offsets = offsets;
@@ -2174,9 +2182,24 @@ RESQLITE_HOT static int write_json_to_buf(
         b->data[b->len++] = '{';
 
         for (int i = 0; i < col_count; i++) {
-            memcpy(b->data + b->len, tokens_data + token_offsets[i],
-                   (size_t)token_lens[i]);
-            b->len += token_lens[i];
+            // [EXP-227] Fixed-width 16-byte over-copy for the common
+            // short-token case. `ensure_json_name_tokens` pads the source
+            // buffer with 16 trailing zeros so the load is always in-bounds;
+            // the row-start reservation ((col_count - i) * cell_max + 1
+            // bytes remain after previous cells) leaves at least 34 bytes
+            // of destination headroom, so writing 16 bytes past `b->len`
+            // stays inside the buffer and the trailing over-written bytes
+            // are overwritten by the cell that follows this token. Only
+            // `token_lens[i]` bytes are counted as valid output.
+            int token_len = token_lens[i];
+            unsigned char* dst = b->data + b->len;
+            const unsigned char* src = tokens_data + token_offsets[i];
+            if (RESQLITE_LIKELY(token_len <= 16)) {
+                memcpy(dst, src, 16);
+            } else {
+                memcpy(dst, src, (size_t)token_len);
+            }
+            b->len += token_len;
 
             // [EXP-203] Grab the cell's `sqlite3_value*` once per column and
             // dispatch through `sqlite3_value_*` instead of `sqlite3_column_*`.

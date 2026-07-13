@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "After [exp 195](195-stmt-cache-name-tokens.md) caches the JSON column-name token (`\"name\":` / `,\"name\":`) on the prepared-statement entry, the row loop in `write_json_to_buf` writes each token with `memcpy(dst, src, token_lens[i])`. The runtime length is a per-column int and the compiler cannot bound it, so this lowers to a libc `memcpy` call on every column of every row (~200 k calls per query on 10k rows x 20 int cols). Realistic column names are almost always <=16 bytes; the compiler was hiding a constant-width copy behind a call boundary.",
+    "Giving the tokens buffer 16 bytes of zero-filled trailing padding (one `buf_ensure(&tokens, 16)` + `memset` at build time) lets the row loop issue `memcpy(dst, src, 16)` for the common `token_len <= 16` case, which clang / gcc lower to a single 128-bit load-store pair on ARM64 NEON and x86 SSE. `b->len` is still advanced by the real `token_len`, so the trailing over-written bytes are covered by the row-start `col_count * cell_max` reservation and are overwritten by the immediately following cell payload; long-name tokens stay on the runtime-length fallback. JSON output is byte-identical.",
+    "Two order-flipped focused passes reproduce same-sign candidate-faster on every multi-row shape. `select_bytes_wide_cols.dart`: 10k x 20 int -3.0%/-3.3%, 10k x 20 mixed -5.4%/-2.1%, 10k x 8 int -2.2%/-2.0%, 10k x 8 mixed -0.9%/-3.5%. `select_bytes_repeated_calls.dart` guards: 10 x 20 int -3.1%/-2.1%, 1000 x 8 int -2.5%/-3.2%. Single-row shapes stay in noise because they run the token loop once per query and have nothing to amortize."
+  ],
+  "nextSignals": [
+    "The token-writer is now compile-time-width in the common case. The remaining variable-length copy is `json_write_string` for TEXT / BLOB payloads themselves, which is already SWAR-scanned by exp 219 and has an in-flight SWAR-restart candidate on `exp-221-json-swar-restart-after-escape`. Future JSON-encoder work in this file should not resurrect a runtime-length copy for stmt-cache-stable data; those are now the cheapest possible constant-width form.",
+    "The 16-byte tail padding on the tokens buffer is a private layout invariant of `ensure_json_name_tokens`. Any future stmt-cache reshape that packs tokens differently (shared arena across cache entries, per-column split arrays, etc.) must preserve at least 16 bytes of readable memory past every valid `token_offsets[i]` or drop the constant-width write.",
+    "Do not speculatively widen the constant beyond 16 bytes. Every extra byte of over-write eats into the row-start `col_count * cell_max` (33 bytes per cell) reservation; the current 16-byte window is already conservative for realistic schemas and leaves ~17 bytes of headroom before the next cell's own payload writes."
+  ]
+}
