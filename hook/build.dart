@@ -145,6 +145,7 @@ ${sorted.map((s) => '    $s;').join('\n')}
           p.join(traceliteRoot, 'native', 'shim_sqlite3.c'),
         ],
         packageFilePath(packageRoot, 'native/resqlite_deps.c'),
+        packageFilePath(packageRoot, 'native/resqlite_json.c'),
         packageFilePath(packageRoot, 'native/resqlite.c'),
         // Windows-only: linker /export directives for the FFI symbols.
         if (windowsExportSource != null) windowsExportSource,
@@ -352,6 +353,8 @@ const _exportedSymbols = [
   'resqlite_step_row_hash',
   'resqlite_query_hash',
   'resqlite_free',
+  // Test-support: differential base64 fuzz test (test/native_encoder_diff_test.dart).
+  'resqlite_test_base64_encode',
 ];
 
 bool _isEnabled(Object? value) {

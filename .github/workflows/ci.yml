@@ -86,6 +86,24 @@ jobs:
       - name: Verify trace_sqlite native hook mode
         run: dart run tool/trace_sqlite_smoke.dart
 
+  encoder-diff-x86:
+    # The `test` job runs on macos-latest (AArch64), so it exercises the NEON
+    # base64 kernel. This job runs the encoder differential/fuzz test on x86_64
+    # Linux, where json_write_base64 compiles to the scalar 12-bit-LUT path — so
+    # both compile-time base64 paths are validated against the dart:convert
+    # oracle across the CI matrix, not just whichever arch happens to run first.
+    name: Encoder differential (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install dependencies
+        run: dart pub get
+      - name: Run encoder differential fuzz test
+        run: dart test test/native_encoder_diff_test.dart --timeout 60s
+
   benchmark-generated-data:
     name: Benchmark generated data freshness
     runs-on: ubuntu-latest
