@@ -925,10 +925,10 @@ Future<String> runStreamingBenchmark() async {
     // every cell byte, then comparison fails (hash changed), decode
     // pass runs. Work scales with current_row_count × col_count.
     //
-    // exp 077: row-count short-circuit fires as soon as the stream
-    // passes the previous row count (N + 1). Remaining rows are
-    // counted but not hashed. For a +100-row insert on a 1000-row
-    // stream, ~100 × 4 cells × ~250 ns = 100 μs saved per re-query.
+    // exp 077 tested a row-count short-circuit after N + 1 rows. Exp 228
+    // removed it because the prefix-only hash was then cached as the changed
+    // result's baseline, causing the next unchanged rerun to decode once.
+    // This lane guards the cost of restoring a canonical full-result hash.
     // -----------------------------------------------------------------
     {
       final tmp = await Directory.systemTemp.createTemp('bench_grow_');

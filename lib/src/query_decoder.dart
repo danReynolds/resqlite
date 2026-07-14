@@ -56,28 +56,19 @@ external int resqliteStepRowHash(
   ffi.Pointer<ffi.Uint64> hash,
 );
 
-// Hash-only pass ([EXP-075](../../experiments/075-native-hash-selectifchanged.md),
-// extended in [EXP-077](../../experiments/077-cheap-check-first-sweep.md)).
+// Hash-only pass ([EXP-075](../../experiments/075-native-hash-selectifchanged.md)).
 //
 // Steps the bound stmt to DONE, hashes every cell's raw bytes in C,
 // resets at both ends, returns the hash.
 //
-// `lastRowCount` is -1 on the initial-query path (no prior count
-// cached), or the previous emission's row count. When set,
-// [EXP-077](../../experiments/077-cheap-check-first-sweep.md)
-// short-circuits: if the fresh step count exceeds the cached value,
-// stop folding cell bytes — the hashes can't match anyway. The function
-// still drains the remaining rows to report the fresh count via
-// `outRowCount`.
-//
 // Safe to call on a freshly-bound stmt (selectIfChanged first pass)
 // or on one that decodeQuery just drained (initial-query baseline).
-@ffi.Native<
-  ffi.Int64 Function(ffi.Pointer<ffi.Void>, ffi.Int, ffi.Pointer<ffi.Int>)
->(symbol: 'resqlite_query_hash', isLeaf: true)
+@ffi.Native<ffi.Int64 Function(ffi.Pointer<ffi.Void>, ffi.Pointer<ffi.Int>)>(
+  symbol: 'resqlite_query_hash',
+  isLeaf: true,
+)
 external int resqliteQueryHash(
   ffi.Pointer<ffi.Void> stmt,
-  int lastRowCount,
   ffi.Pointer<ffi.Int> outRowCount,
 );
 
@@ -175,8 +166,8 @@ final ffi.Pointer<ffi.Uint64> initialHashSlot = calloc<ffi.Uint64>(1);
 
 /// Invoke [resqliteQueryHash] and return `(hash, rowCount)` as a record.
 /// Small wrapper that hides the out-parameter pointer.
-(int, int) callQueryHash(ffi.Pointer<ffi.Void> stmt, int lastRowCount) {
-  final hash = resqliteQueryHash(stmt, lastRowCount, rowCountSlot);
+(int, int) callQueryHash(ffi.Pointer<ffi.Void> stmt) {
+  final hash = resqliteQueryHash(stmt, rowCountSlot);
   return (hash, rowCountSlot.value);
 }
 

@@ -65,11 +65,8 @@ final class SelectIfChangedRequest extends ReadRequest {
   });
   final int lastResultHash;
 
-  /// Previously-emitted row count, or `-1` if unknown. Passed into
-  /// `resqlite_query_hash` to enable the
-  /// [EXP-077](../../../experiments/077-cheap-check-first-sweep.md)
-  /// short-circuit when
-  /// the fresh row count already diverges.
+  /// Previously-emitted row count, or `-1` if unknown. Compared with the
+  /// fresh count alongside the canonical result hash.
   final int lastRowCount;
 }
 
@@ -165,17 +162,15 @@ void readerEntrypoint(List<Object> args) {
           sacrifice = false;
 
         case SelectIfChangedRequest(
-            :final sql,
-            :final parameters,
-            :final lastResultHash,
-            :final lastRowCount,
-          ):
+          :final sql,
+          :final parameters,
+          :final lastResultHash,
+          :final lastRowCount,
+        ):
           // Two-pass selectIfChanged
           // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)).
-          // Row-count short-circuit
-          // ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md))
-          // stops the hash walk early if count-differ is already evident, so
-          // the changed case pays less pass-1 work.
+          // The hash and row count are both canonical baselines, so a changed
+          // result can be reused safely by the next rerun.
           final (newHash, newRowCount, raw) = executeQueryIfChanged(
             dbHandleAddr,
             readerId,
@@ -262,13 +257,14 @@ void readerEntrypoint(List<Object> args) {
 
 // Dedicated reader variant — no pool mutex.
 @ffi.Native<
-    ffi.Pointer<ffi.Void> Function(
-      ffi.Pointer<ffi.Void>,
-      ffi.Int,
-      ffi.Pointer<ffi.Void>,
-      ffi.Pointer<ffi.Uint8>,
-      ffi.Int,
-    )>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
+  ffi.Pointer<ffi.Void> Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Int,
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+  )
+>(symbol: 'resqlite_stmt_acquire_on', isLeaf: true)
 external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   ffi.Pointer<ffi.Void> db,
   int readerId,
@@ -330,14 +326,13 @@ RawQueryResult executeQuery(
   int readerId,
   String sql,
   List<Object?> parameters,
-) =>
-    _withAcquiredStmt(
-      handleAddr,
-      readerId,
-      sql,
-      parameters,
-      (_, stmt) => decodeQuery(stmt, sql),
-    );
+) => _withAcquiredStmt(
+  handleAddr,
+  readerId,
+  sql,
+  parameters,
+  (_, stmt) => decodeQuery(stmt, sql),
+);
 
 /// Execute a query returning JSON bytes as a view over the reader
 /// connection's persistent `json_buf`, plus the number of rows serialized
@@ -367,30 +362,26 @@ RawQueryResult executeQuery(
 /// ([TableDependencies.unknown] when the C-side reliability flag was tripped
 /// during prepare), the C-computed baseline hash
 /// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)), and
-/// the row count
-/// ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md) — cached so
-/// subsequent selectIfChanged calls can short-circuit on count mismatch).
+/// the row count ([EXP-077](../../../experiments/077-cheap-check-first-sweep.md)
+/// — cached as an additional equality guard for subsequent reruns).
 (RawQueryResult, TableDependencies, int, int) executeQueryWithDeps(
   int handleAddr,
   int readerId,
   String sql,
   List<Object?> parameters,
-) =>
-    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
-      final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
-      // Collect dependency metadata from the reader's most recent cached stmt entry.
-      return (
-        raw,
-        getReadTableDependencies(dbHandle, readerId),
-        hash,
-        raw.rowCount,
-      );
-    });
+) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
+  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
+  // Collect dependency metadata from the reader's most recent cached stmt entry.
+  return (
+    raw,
+    getReadTableDependencies(dbHandle, readerId),
+    hash,
+    raw.rowCount,
+  );
+});
 
 /// Two-pass selectIfChanged
-/// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md) +
-/// row-count short-circuit
-/// [EXP-077](../../../experiments/077-cheap-check-first-sweep.md)).
+/// ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)).
 ///
 /// Pass 1: `resqliteQueryHash` steps + hashes the bound stmt in C. If
 /// the fresh hash matches the stream's last-emitted value AND the row
@@ -408,11 +399,10 @@ RawQueryResult executeQuery(
   List<Object?> parameters,
   int lastResultHash,
   int lastRowCount,
-) =>
-    _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-      final (newHash, newRowCount) = callQueryHash(stmt, lastRowCount);
-      if (newHash == lastResultHash && newRowCount == lastRowCount) {
-        return (newHash, newRowCount, null);
-      }
-      return (newHash, newRowCount, decodeQuery(stmt, sql));
-    });
+) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+  final (newHash, newRowCount) = callQueryHash(stmt);
+  if (newHash == lastResultHash && newRowCount == lastRowCount) {
+    return (newHash, newRowCount, null);
+  }
+  return (newHash, newRowCount, decodeQuery(stmt, sql));
+});

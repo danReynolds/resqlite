@@ -68,7 +68,7 @@ void main() {
       );
 
       final (raw, initialHash) = decodeQueryWithInitialHash(stmt, sql);
-      final (hashOnly, rowCount) = callQueryHash(stmt, -1);
+      final (hashOnly, rowCount) = callQueryHash(stmt);
 
       expect(rowCount, raw.rowCount);
       expect(initialHash, hashOnly);
