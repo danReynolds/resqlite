@@ -35,7 +35,10 @@
 
 // Two-decimal-digit table: entry `d*2` holds the two ASCII digits of d in
 // [00..99]. Lets the itoa loop emit two digits per iteration instead of one.
-static const char resqlite_json_two_digits[200] =
+// Unsized so the literal's implicit NUL is kept (avoids the truncation warning
+// a `[200]` size triggers now that the table lives in a shared header); the
+// trailing byte is never indexed — reads only reach offset `99*2+1 = 199`.
+static const char resqlite_json_two_digits[] =
     "0001020304050607080910111213141516171819"
     "2021222324252627282930313233343536373839"
     "4041424344454647484950515253545556575859"
