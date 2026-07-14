@@ -319,6 +319,22 @@ working-set growth, guard branches, and the larger batched fill/decode
 traversal—and require the target lane to beat a control that keeps the old
 locality. A smaller boundary count is not itself a smaller end-to-end path.*
 
+### A fast-reject value is not necessarily a cacheable identity
+
+[Exp 077](077-cheap-check-first-sweep.md) stopped hashing a growing stream
+result once its row count proved the result had changed. That was a valid
+one-shot rejection, but the prefix-only accumulator was then cached as the
+changed result's complete hash. [Exp 228](228-canonical-stream-hash.md) exposed
+the delayed cost: the next identical rerun computed the canonical full hash,
+mismatched the partial baseline, and decoded and emitted every row again.
+Removing the shortcut fixed the public behavior and improved the complete
+grow-then-no-op sequence even though the first growth leg did slightly more
+work.
+
+*Reapplies whenever an early exit returns a value that crosses a state boundary.
+Separate “enough to decide this call” from “safe to persist for the next call”;
+only a canonical value can silently serve both roles.*
+
 ### A SIMD kernel co-located with a scalar hot path must be `noinline`
 
 [Exp 229](229-simd-base64-neon.md)'s first prototype placed the AArch64/NEON
