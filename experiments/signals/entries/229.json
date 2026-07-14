@@ -1,0 +1,19 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "The codebase-wide assumption that `native/resqlite.c` must be ISA-agnostic scalar C is no longer load-bearing. Exp 229 introduces the first SIMD kernel (`json_write_base64_neon_bulk`) gated on `defined(__aarch64__) && defined(__ARM_NEON)`, with the exp 225 scalar 12-bit-LUT encoder retained as fallback for non-ARM64 targets and for the < 48-byte tail on all targets.",
+    "A NEON `vld3q_u8` + `vqtbl4q_u8` base64 kernel materially moves BLOB encoding wall time past exp 225's scalar+LUT12 ceiling. Four order-flipped paired passes on `select_bytes_blob_base64.dart` reproduce ~-45% median (~2x) on the 4 KB payload-throughput lane and ~-18% median on the 128 B lane. Signals' 2026-05 note that 'future BLOB work needs a further mechanism change: SIMD `_mm_shuffle_epi8` / `vqtbl4q_u8` base64 kernels' is now consumed.",
+    "SIMD kernel placement in the same translation unit as scalar hot paths must be `noinline`, or the compiler's register allocation for the small-input path degrades. The first prototype (rounds 1-2, superseded) reproduced the 4 KB / 128 B wins but broke the 3 B tiny-cell guard at +3-9% reproduced regression because inline placement of the NEON body was affecting scalar code-gen; the `noinline` refactor collapsed the 3 B regression back into noise. This is a repeatable pattern for future SIMD kernels."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/select_bytes_blob_base64.dart` as the durable gate for future BLOB JSON encoder work. The 4 KB and 128 B lanes are the decision rows; the 3 B lanes are guards that stay on the scalar path (< 48 bytes never enters the NEON kernel).",
+    "SIMD kernels are now a viable mechanism for future work: SSSE3 (`_mm_shuffle_epi8`) base64 on x86_64 has the same shape and is the natural follow-up to widen platform coverage; SIMD JSON escape scan for `json_write_string`'s SWAR body is the signals-named TEXT-side mechanism now unlocked; a SIMD FNV hash body for `resqlite_query_hash` may help long-text stream hashing if a workload isolates it (exp 173 / 181 have the baselines).",
+    "New SIMD kernel authoring rule: place the SIMD body in its own `__attribute__((noinline))` function so the scalar hot path in the caller stays byte-identical to the pre-SIMD layout. Dispatch via a single length check in the caller (`if (len >= K) return simd_bulk(...)`); do not inline the SIMD body into the caller even under compiler pressure to do so.",
+    "Non-ARM64 targets (x86_64, 32-bit ARM, Windows) still hit the scalar 12-bit-LUT path exp 225 established. Wall time on those targets is unchanged; no non-ARM regression is possible.",
+    "Do not retry wider scalar unroll bodies (exp 218) or wider scalar LUTs (a 24-bit table is 16 MiB — signals note). The remaining scalar headroom is closed; further BLOB encoder wins require SIMD or a workload/profile that shifts what dominates."
+  ]
+}

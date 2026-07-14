@@ -1,0 +1,7 @@
+{
+  "file": "229-simd-base64-neon.md",
+  "title": "SIMD (NEON) `json_write_base64` kernel — first SIMD kernel in the codebase",
+  "impact": "Moonshot: introduces ISA-specific SIMD (`vld3q_u8` + `vqtbl4q_u8` + `vst4q_u8`) to `json_write_base64`, gated on `__aarch64__ && __ARM_NEON`, with the exp 225 scalar 12-bit-LUT encoder retained as fallback for non-ARM64 targets and for the < 48-byte tail. Four order-flipped paired passes of `select_bytes_blob_base64.dart` reproduce ~-45% median on the 4 KB payload-throughput lane (roughly 2x faster BLOB base64 encoding) and ~-18% on the 128 B lane; tiny-cell (3 B) and mixed guards stay inside the harness noise floor. Categorical implication: SIMD kernels are viable in resqlite when out-of-lined so the small-input path is unaffected, unlocking follow-ups in SSSE3 x86_64, SIMD JSON escape scan, and SIMD FNV hash.",
+  "status": "accepted",
+  "link": ""
+}

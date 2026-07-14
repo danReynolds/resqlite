@@ -319,6 +319,31 @@ working-set growth, guard branches, and the larger batched fill/decode
 traversal—and require the target lane to beat a control that keeps the old
 locality. A smaller boundary count is not itself a smaller end-to-end path.*
 
+### A SIMD kernel co-located with a scalar hot path must be `noinline`
+
+[Exp 229](229-simd-base64-neon.md)'s first prototype placed the AArch64/NEON
+`vqtbl4q_u8` base64 body directly inside `json_write_base64`, gated by
+`if (len >= 48)`. Even though small-blob calls (`len < 48`) never entered
+the SIMD branch, the 3 B tiny-cell lanes reproduced +3-9 % candidate-slower
+across order-flipped passes. The scalar body was byte-textually unchanged;
+the compiler's register allocation and code layout around it were not.
+On a lane that runs ~80,000 base64 calls per query, a ~5-10 cycle
+scalar-path overhead per call maps to ~400 µs / query — matching the
+observed regression exactly.
+
+Moving the NEON body into a separate `__attribute__((noinline))` function
+and calling it from `json_write_base64` (`if (len >= 48) { i = simd(...); }`)
+collapsed the 3 B regression back into noise while preserving the 4 KB /
+128 B wins in full. The scalar path's `.text` layout matched exp 225's
+byte-for-byte.
+
+*Reapplies to every future SIMD kernel added to a hot-path C function.
+Place the SIMD body in its own `__attribute__((noinline))` function; the
+caller dispatches with one length check. Don't let the compiler decide to
+inline it "back" — even when the SIMD branch is not taken, an inlined
+kernel body reshapes the scalar path's register allocation and code
+layout around it. The dispatch check is cheap; the layout cost isn't.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
