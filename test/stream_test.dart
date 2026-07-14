@@ -457,9 +457,9 @@ void main() {
       final grownRows = await probe.event(2);
       expect(grownRows, hasLength(2));
 
-      // The row-count shortcut must leave behind the canonical hash of the
-      // emitted two-row result. Otherwise this no-op write compares a full
-      // hash with the partial growth hash and spuriously emits the same rows.
+      // The growth path must leave behind the canonical hash of the emitted
+      // two-row result. Otherwise this no-op write compares a full hash with a
+      // partial growth hash and spuriously emits the same rows.
       await db.execute('UPDATE items SET value = value WHERE id = 1');
 
       await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
