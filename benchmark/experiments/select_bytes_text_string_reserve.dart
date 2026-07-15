@@ -1,8 +1,9 @@
 // Focused A/B harness for selectBytes TEXT JSON string emission.
 //
 // The TEXT arm of write_json_to_buf calls json_write_string once per TEXT
-// cell. Safe strings with no JSON escapes are the common case: they should be
-// able to reserve quote + payload + quote once and copy directly. Escaped lanes
+// cell. Safe strings with no JSON escapes are the common case. The 96 B, 256 B,
+// and 1 KiB lanes isolate the scan-then-copy cost that grows with a safe span;
+// the long CJK lane checks the same shape with high UTF-8 bytes. Escaped lanes
 // guard the fallback path, control-character lanes isolate `\u00XX` emission,
 // and mixed/narrow lanes guard broader row-shape cost.
 //
@@ -136,6 +137,30 @@ Future<void> main() async {
     textBytes: 96,
     mode: 'ascii',
     iters: 8,
+  );
+  await _lane(
+    label: '10k rows x 8 long ASCII text (256B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'ascii',
+    iters: 4,
+  );
+  await _lane(
+    label: '2k rows x 4 very long ASCII text (1KiB)',
+    rows: 2000,
+    textCols: 4,
+    textBytes: 1024,
+    mode: 'ascii',
+    iters: 8,
+  );
+  await _lane(
+    label: '2k rows x 4 very long CJK text (1K code units)',
+    rows: 2000,
+    textCols: 4,
+    textBytes: 1024,
+    mode: 'cjk',
+    iters: 4,
   );
   await _lane(
     label: '10k rows x 8 escaped text',
