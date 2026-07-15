@@ -202,6 +202,22 @@ Future<void> main() async {
     iters: 6,
   );
   await _lane(
+    label: '10k rows x 8 early-escape text (256B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'escaped',
+    iters: 3,
+  );
+  await _lane(
+    label: '10k rows x 8 late-escape text (256B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'lateEscape',
+    iters: 4,
+  );
+  await _lane(
     label: '10k rows x 8 control text',
     rows: 10000,
     textCols: 8,
