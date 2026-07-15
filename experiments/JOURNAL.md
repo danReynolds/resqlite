@@ -366,6 +366,33 @@ the load-bearing acceptance row; larger workloads are confirmation. If the
 boundary misses, archive the far-end potential and wait for production evidence
 rather than moving the threshold around noisy guards.*
 
+### A SIMD kernel needs bulk *per call*, not just a hot path — amortisation, not the algorithm, decides
+
+[Exp 229](229-simd-base64-neon.md) landed the first AArch64/NEON kernel by
+encoding base64 over whole BLOBs, and suggested out-of-lined ISA kernels are
+broadly viable. [Exp 231](231-neon-i64-decimal.md) tried the same mechanism on
+the integer arm — a byte-identical NEON i64→decimal kernel that breaks the
+scalar two-digit loop's serial `/100` chain — and it never beat the scalar itoa
+on the deep-magnitude BIGINT lane, across 11 A/B passes in three methodologies.
+
+The difference is *what one call processes*. Base64 amortises SIMD register
+setup and the out-of-line call over tens-to-thousands of bytes per invocation.
+The integer formatter converts exactly one scalar value per call, so the same
+fixed setup is paid per cell with nothing to spread it over, and it loses to a
+fully-inlined scalar loop the CPU already pipelines. Integer encoding *is* a
+material share of integer-heavy `selectBytes` wall (exp 192 won −25% there), so
+the path is hot — but a hot path is not a batched call. Inlining the kernel to
+kill the call boundary is the wrong escape: it bloats the per-cell hot loop and
+regresses the common small case, the code-gen regression exp 229/230 both hit
+when SIMD state leaked into a scalar path.
+
+*Reapplies before vectorising any per-element formatter/encoder. Ask how many
+elements one kernel call consumes, not whether the path is hot. If a call
+handles a single scalar value (one int, one small cell), the setup + call cost
+will not amortise no matter how good the vector body is — reopen only when the
+architecture can hand the kernel a batch (columnar/bulk transfer), not a stream
+of one-value calls.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
