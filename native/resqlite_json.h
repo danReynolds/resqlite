@@ -24,6 +24,15 @@
 
 #include "resqlite_buf.h"
 
+// AArch64 is the only target where resqlite currently ships NEON kernels.
+// Keep this gate in the shared JSON header so the TEXT call site can avoid a
+// scalar-path dispatcher call on every short value.
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#define RESQLITE_JSON_HAS_NEON 1
+#else
+#define RESQLITE_JSON_HAS_NEON 0
+#endif
+
 // Maximum bytes a JSON-encoded INTEGER cell can occupy: 20 digits + optional
 // '-' sign. resqlite_json_i64_to_str never writes a NUL terminator.
 #define RESQLITE_JSON_INT_MAX 24
@@ -117,6 +126,25 @@ RESQLITE_HOT static inline int resqlite_json_double_to_num(
 // Write `s` (len bytes) as a quoted, JSON-escaped string. Manages its own
 // buf_ensure; returns 0 on success, -1 on allocation failure.
 int resqlite_json_write_string(resqlite_buf* b, const char* s, int len);
+
+#if RESQLITE_JSON_HAS_NEON
+// Long safe-prefix encoder used by the TEXT dispatcher below. It remains an
+// internal native symbol; the Dart API and wire format are unchanged.
+int resqlite_json_write_string_neon(resqlite_buf* b, const char* s, int len);
+#endif
+
+// Dispatch only values large enough to amortize the vector setup. Column-name
+// tokens continue to call resqlite_json_write_string directly, and non-AArch64
+// targets compile this to the pre-existing scalar call.
+RESQLITE_HOT static inline int resqlite_json_write_text(
+    resqlite_buf* b, const char* s, int len) {
+#if RESQLITE_JSON_HAS_NEON
+    if (RESQLITE_UNLIKELY(len >= 256)) {
+        return resqlite_json_write_string_neon(b, s, len);
+    }
+#endif
+    return resqlite_json_write_string(b, s, len);
+}
 
 // Write `data` (len bytes) as a quoted base64 JSON string. On AArch64 this
 // dispatches to the NEON kernel for the bulk and the scalar 12-bit-LUT loop

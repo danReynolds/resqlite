@@ -1897,7 +1897,7 @@ RESQLITE_HOT static int write_json_to_buf(
                     // invalidates the text pointer.
                     const char* text = (const char*)sqlite3_value_text(val);
                     int text_len = sqlite3_value_bytes(val);
-                    JSON_CHECK(resqlite_json_write_string(b, text, text_len));
+                    JSON_CHECK(resqlite_json_write_text(b, text, text_len));
                     // [EXP-199] the string encoder may have grown the buffer
                     // past the row-start reservation. Re-ensure headroom for
                     // the remaining tokens + fixed cells + '}' so subsequent
