@@ -131,6 +131,14 @@ Future<void> main() async {
     iters: 8,
   );
   await _lane(
+    label: '10k rows x 8 threshold ASCII text (64B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 64,
+    mode: 'ascii',
+    iters: 8,
+  );
+  await _lane(
     label: '10k rows x 8 medium ASCII text',
     rows: 10000,
     textCols: 8,
@@ -169,6 +177,14 @@ Future<void> main() async {
     textBytes: 24,
     mode: 'escaped',
     iters: 10,
+  );
+  await _lane(
+    label: '10k rows x 8 early-escape text (96B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 96,
+    mode: 'escaped',
+    iters: 6,
   );
   await _lane(
     label: '10k rows x 8 control text',
