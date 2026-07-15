@@ -6,32 +6,11 @@
 #include <stdatomic.h>
 #include <math.h>
 
-#if defined(_MSC_VER)
-#define RESQLITE_HOT
-#else
-#define RESQLITE_HOT __attribute__((hot))
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
-#define RESQLITE_LIKELY(expr) __builtin_expect(!!(expr), 1)
-#define RESQLITE_UNLIKELY(expr) __builtin_expect(!!(expr), 0)
-#else
-#define RESQLITE_LIKELY(expr) (expr)
-#define RESQLITE_UNLIKELY(expr) (expr)
-#endif
-
-// [EXP-229] SIMD kernel gating: ARM64 (AArch64) with NEON is the first ISA
-// with a resqlite SIMD kernel — `vqtbl4q_u8` and `vld3q_u8`/`vst4q_u8` are
-// AArch64-only and cover macOS/iOS/Android arm64, where resqlite runs on
-// mobile hardware. 32-bit ARM lacks `vqtbl4q_u8`; x86_64 SSSE3 needs a
-// different table-lookup approach and is deferred to a follow-up. All other
-// targets fall through to the scalar 12-bit-LUT encoder (exp 225).
-#if defined(__aarch64__) && defined(__ARM_NEON)
-#define RESQLITE_HAS_NEON_BASE64 1
-#include <arm_neon.h>
-#else
-#define RESQLITE_HAS_NEON_BASE64 0
-#endif
+// resqlite_buf + RESQLITE_HOT/LIKELY macros (resqlite_buf.h), and the JSON
+// value encoders (base64, string escape, number formatters) live in their own
+// module. `resqlite_json.h` pulls in `resqlite_buf.h`.
+#include "resqlite_buf.h"
+#include "resqlite_json.h"
 
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
@@ -44,77 +23,10 @@ static int run_setup_sql(
 );
 
 // ---------------------------------------------------------------------------
-// Growable buffer
+// Growable buffer: type + hot helpers now live in resqlite_buf.h (shared with
+// resqlite_json.c). The unused width-tagged variants (buf_write_i32/i64/f64/
+// str) were removed — nothing serialized cells through them.
 // ---------------------------------------------------------------------------
-
-typedef struct {
-    unsigned char* data;
-    int len;
-    int cap;
-} resqlite_buf;
-
-static int buf_init(resqlite_buf* b, int initial_cap) {
-    b->data = (unsigned char*)malloc(initial_cap);
-    if (!b->data) { b->len = 0; b->cap = 0; return -1; }
-    b->len = 0;
-    b->cap = initial_cap;
-    return 0;
-}
-
-RESQLITE_HOT static int buf_ensure(resqlite_buf* b, int extra) {
-    if (RESQLITE_LIKELY(b->len + extra <= b->cap)) return 0;
-    int new_cap = b->cap;
-    while (new_cap < b->len + extra) new_cap *= 2;
-    unsigned char* p = (unsigned char*)realloc(b->data, new_cap);
-    if (!p) return -1;
-    b->data = p;
-    b->cap = new_cap;
-    return 0;
-}
-
-RESQLITE_HOT static int buf_write(resqlite_buf* __restrict b, const void* __restrict src, int n) {
-    if (buf_ensure(b, n) != 0) return -1;
-    memcpy(b->data + b->len, src, n);
-    b->len += n;
-    return 0;
-}
-
-static int buf_write_byte(resqlite_buf* b, unsigned char v) {
-    if (buf_ensure(b, 1) != 0) return -1;
-    b->data[b->len++] = v;
-    return 0;
-}
-
-static int buf_write_i32(resqlite_buf* b, int v) {
-    unsigned char tmp[4];
-    tmp[0] = (unsigned char)(v & 0xff);
-    tmp[1] = (unsigned char)((v >> 8) & 0xff);
-    tmp[2] = (unsigned char)((v >> 16) & 0xff);
-    tmp[3] = (unsigned char)((v >> 24) & 0xff);
-    return buf_write(b, tmp, 4);
-}
-
-static int buf_write_i64(resqlite_buf* b, long long v) {
-    unsigned char tmp[8];
-    for (int i = 0; i < 8; i++) {
-        tmp[i] = (unsigned char)((v >> (i * 8)) & 0xff);
-    }
-    return buf_write(b, tmp, 8);
-}
-
-static int buf_write_f64(resqlite_buf* b, double v) {
-    unsigned char tmp[8];
-    memcpy(tmp, &v, 8);
-    return buf_write(b, tmp, 8);
-}
-
-static int buf_write_char(resqlite_buf* b, char c) {
-    return buf_write_byte(b, (unsigned char)c);
-}
-
-static int buf_write_str(resqlite_buf* b, const char* s, int len) {
-    return buf_write(b, s, len);
-}
 
 static char* resqlite_strdup(const char* s) {
     size_t len = strlen(s) + 1;
@@ -1791,379 +1703,12 @@ sqlite3_stmt* resqlite_stmt_acquire_writer(
 }
 
 // ---------------------------------------------------------------------------
-// Fast int64-to-string (avoids snprintf format parsing overhead)
-// ---------------------------------------------------------------------------
-
-// Two-digit lookup table for the int64-to-string fast path: one division and
-// one 2-byte memcpy per pair of output digits. Halves the division count vs
-// the single-digit loop exp 023 introduced.
-static const char kTwoDigits[200] =
-    "0001020304050607080910111213141516171819"
-    "2021222324252627282930313233343536373839"
-    "4041424344454647484950515253545556575859"
-    "6061626364656667686970717273747576777879"
-    "8081828384858687888990919293949596979899";
-
-RESQLITE_HOT static int fast_i64_to_str(long long val, char* buf) {
-    if (val == 0) { buf[0] = '0'; return 1; }
-
-    // Unsigned int64 magnitude fits in 20 decimal digits.
-    char tmp[20];
-    int pos = 20;
-    int negative = 0;
-    unsigned long long uval;
-
-    if (val < 0) {
-        negative = 1;
-        uval = (unsigned long long)(-(val + 1)) + 1; // avoid UB on LLONG_MIN
-    } else {
-        uval = (unsigned long long)val;
-    }
-
-    while (uval >= 100) {
-        unsigned d = (unsigned)(uval % 100);
-        uval /= 100;
-        pos -= 2;
-        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
-    }
-    if (uval >= 10) {
-        unsigned d = (unsigned)uval;
-        pos -= 2;
-        memcpy(tmp + pos, kTwoDigits + d * 2, 2);
-    } else {
-        tmp[--pos] = (char)('0' + (unsigned)uval);
-    }
-
-    int digits = 20 - pos;
-    int len = 0;
-    if (negative) buf[len++] = '-';
-    memcpy(buf + len, tmp + pos, digits);
-    return len + digits;
-}
-
-RESQLITE_HOT static int fast_double_to_json_num(double val, char* buf, size_t buf_size) {
-    // Keep snprintf for negative zero: JSON permits `-0`, and snprintf preserves
-    // the sign bit while the integer fast path would collapse it to `0`.
-    if (val == 0.0) {
-        if (signbit(val)) {
-            return snprintf(buf, buf_size, "%.17g", val);
-        }
-        buf[0] = '0';
-        return 1;
-    }
-
-    // Only exact integer-valued doubles can reuse the integer encoder without
-    // changing spelling. 2^53 is the largest range where every integer is exactly
-    // representable as a double and where %.17g still chooses decimal notation.
-    const double max_exact_int = 9007199254740992.0;
-    if (isfinite(val) && val >= -max_exact_int && val <= max_exact_int) {
-        long long as_int = (long long)val;
-        if ((double)as_int == val) {
-            return fast_i64_to_str(as_int, buf);
-        }
-    }
-
-    return snprintf(buf, buf_size, "%.17g", val);
-}
-
-// Maximum bytes a JSON-encoded INTEGER cell can occupy: 20 digits + optional
-// '-' sign. fast_i64_to_str never writes a NUL terminator.
-#define RESQLITE_JSON_INT_MAX 24
-// Maximum bytes a JSON-encoded FLOAT cell can occupy through
-// fast_double_to_json_num. %.17g produces at most ~25 chars for finite
-// doubles; round up and reserve one extra for snprintf's NUL terminator,
-// which lands inside the buffer but is not counted toward the return length.
-#define RESQLITE_JSON_FLOAT_MAX 32
-
-// Write a SQLite INTEGER as JSON decimal digits directly into the output
-// buffer. Avoids the per-cell stack-scratch + memcpy pair that
-// `fast_i64_to_str` + `buf_write_str` used to do.
-RESQLITE_HOT static int buf_write_int_json(resqlite_buf* b, long long val) {
-    if (buf_ensure(b, RESQLITE_JSON_INT_MAX) != 0) return -1;
-    int num_len = fast_i64_to_str(val, (char*)(b->data + b->len));
-    b->len += num_len;
-    return 0;
-}
-
-// Write a SQLite FLOAT as JSON number directly into the output buffer.
-// Reserves one extra byte so the snprintf fallback's NUL terminator fits
-// inside the buffer without growing it.
-RESQLITE_HOT static int buf_write_double_json(resqlite_buf* b, double val) {
-    if (buf_ensure(b, RESQLITE_JSON_FLOAT_MAX + 1) != 0) return -1;
-    int num_len = fast_double_to_json_num(
-        val, (char*)(b->data + b->len), (size_t)(RESQLITE_JSON_FLOAT_MAX + 1));
-    b->len += num_len;
-    return 0;
-}
-
-// ---------------------------------------------------------------------------
-// JSON output
-// ---------------------------------------------------------------------------
-
-static const char b64_table[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-// [EXP-225] 12-bit lookup table: index carries two 6-bit base64 slots; each
-// entry stores the two encoded chars in byte order (`[0]` = high 6 bits,
-// `[1]` = low 6 bits). One 24-bit triplet becomes two 12-bit lookups + two
-// 16-bit stores instead of four 6-bit lookups + four 8-bit stores.
-// 4096 entries × 2 bytes = 8 KB in .bss; sits alongside the 64-byte b64_table.
-static unsigned char b64_pair_table[4096][2];
-static int b64_pair_table_initialized = 0;
-
-static void init_b64_pair_table(void) {
-    for (int i = 0; i < 4096; i++) {
-        b64_pair_table[i][0] = (unsigned char)b64_table[(i >> 6) & 0x3F];
-        b64_pair_table[i][1] = (unsigned char)b64_table[i & 0x3F];
-    }
-    b64_pair_table_initialized = 1;
-}
-
-#if RESQLITE_HAS_NEON_BASE64
-// [EXP-229] NEON base64 encoder — kept out-of-line so the small-blob hot
-// path in `json_write_base64` never carries the NEON kernel's register
-// footprint or ABI hints. The kernel is the standard `vld3q_u8` +
-// `vqtbl4q_u8` shape:
-//   1. Load 48 input bytes deinterleaved as 3 x uint8x16_t (lane j of vec
-//      0/1/2 is triplet j's A/B/C byte).
-//   2. Derive the four 6-bit encoded indices per triplet:
-//        idx0 = A >> 2
-//        idx1 = ((A & 0x03) << 4) | (B >> 4)
-//        idx2 = ((B & 0x0F) << 2) | (C >> 6)
-//        idx3 = C & 0x3F
-//   3. Look each index vector up in the 64-byte `b64_table` via 4 x
-//      `vqtbl4q_u8` (AArch64-only), producing four output vectors of
-//      encoded chars.
-//   4. Store 64 bytes interleaved via `vst4q_u8` — layout matches the
-//      scalar body's byte order (idx0,idx1,idx2,idx3 per triplet).
+// JSON row assembly
 //
-// Byte-for-byte identical output to the scalar path. Consumes as many
-// full 48-byte input blocks as fit and returns bytes consumed; the
-// caller runs the < 48-byte tail through the scalar 12-bit-LUT loop.
-__attribute__((noinline))
-RESQLITE_HOT static int json_write_base64_neon_bulk(
-    const unsigned char* __restrict data,
-    int len,
-    unsigned char* __restrict out
-) {
-    uint8x16x4_t table;
-    table.val[0] = vld1q_u8((const uint8_t*)b64_table);
-    table.val[1] = vld1q_u8((const uint8_t*)b64_table + 16);
-    table.val[2] = vld1q_u8((const uint8_t*)b64_table + 32);
-    table.val[3] = vld1q_u8((const uint8_t*)b64_table + 48);
-
-    const uint8x16_t mask_03 = vdupq_n_u8(0x03);
-    const uint8x16_t mask_0F = vdupq_n_u8(0x0F);
-    const uint8x16_t mask_3F = vdupq_n_u8(0x3F);
-
-    int i = 0;
-    unsigned char* p = out;
-    while (i <= len - 48) {
-        uint8x16x3_t in3 = vld3q_u8(data + i);
-        uint8x16_t a = in3.val[0];
-        uint8x16_t b_vec = in3.val[1];
-        uint8x16_t c = in3.val[2];
-
-        uint8x16_t idx0 = vshrq_n_u8(a, 2);
-        uint8x16_t idx1 = vorrq_u8(
-            vshlq_n_u8(vandq_u8(a, mask_03), 4),
-            vshrq_n_u8(b_vec, 4)
-        );
-        uint8x16_t idx2 = vorrq_u8(
-            vshlq_n_u8(vandq_u8(b_vec, mask_0F), 2),
-            vshrq_n_u8(c, 6)
-        );
-        uint8x16_t idx3 = vandq_u8(c, mask_3F);
-
-        uint8x16x4_t out4;
-        out4.val[0] = vqtbl4q_u8(table, idx0);
-        out4.val[1] = vqtbl4q_u8(table, idx1);
-        out4.val[2] = vqtbl4q_u8(table, idx2);
-        out4.val[3] = vqtbl4q_u8(table, idx3);
-
-        vst4q_u8(p, out4);
-        p += 64;
-        i += 48;
-    }
-    return i;
-}
-#endif // RESQLITE_HAS_NEON_BASE64
-
-/// Write a base64-encoded blob as a quoted JSON string.
-RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
-                                                   const unsigned char* data,
-                                                   int len) {
-    // Output size: 4 chars per 3 bytes, rounded up, plus quotes.
-    int encoded_len = ((len + 2) / 3) * 4;
-    if (buf_write_char(b, '"') != 0) return -1;
-    if (buf_ensure(b, encoded_len) != 0) return -1;
-
-    if (RESQLITE_UNLIKELY(!b64_pair_table_initialized)) {
-        init_b64_pair_table();
-    }
-
-    unsigned char* out = b->data + b->len;
-    int i = 0;
-
-#if RESQLITE_HAS_NEON_BASE64
-    // [EXP-229] SIMD bulk: 48 input bytes -> 64 output bytes per iteration
-    // on AArch64/NEON. The kernel is out-of-line (`noinline`) so the small-
-    // blob path — which never enters it — stays byte-identical to the exp
-    // 225 scalar layout in this function's `.text`.
-    if (len >= 48) {
-        int consumed = json_write_base64_neon_bulk(data, len, out);
-        i = consumed;
-        out += consumed / 3 * 4;
-    }
-#endif
-
-    // Process four 3-byte groups per loop trip. Exp 216 kept the scalar loop
-    // but 4x-unrolled the trip; exp 218 rejected 8x unroll (loop-control
-    // ceiling reached). This variant keeps the 4x unroll and shortens the
-    // per-triplet body itself: two 12-bit pair lookups + two 16-bit stores
-    // instead of four 6-bit char lookups + four 8-bit stores.
-#define RESQLITE_WRITE_B64_TRIPLET(idx) do { \
-        unsigned int v = ((unsigned int)data[(idx)] << 16) | \
-                         ((unsigned int)data[(idx) + 1] << 8) | \
-                          (unsigned int)data[(idx) + 2]; \
-        memcpy(out,     b64_pair_table[(v >> 12) & 0xFFF], 2); \
-        memcpy(out + 2, b64_pair_table[ v        & 0xFFF], 2); \
-        out += 4; \
-    } while (0)
-
-    for (; i <= len - 12; i += 12) {
-        RESQLITE_WRITE_B64_TRIPLET(i);
-        RESQLITE_WRITE_B64_TRIPLET(i + 3);
-        RESQLITE_WRITE_B64_TRIPLET(i + 6);
-        RESQLITE_WRITE_B64_TRIPLET(i + 9);
-    }
-    for (; i <= len - 3; i += 3) {
-        RESQLITE_WRITE_B64_TRIPLET(i);
-    }
-
-#undef RESQLITE_WRITE_B64_TRIPLET
-
-    // Remaining 1 or 2 bytes with padding.
-    if (i < len) {
-        unsigned int v = (unsigned int)data[i] << 16;
-        if (i + 1 < len) v |= (unsigned int)data[i + 1] << 8;
-        *out++ = b64_table[(v >> 18) & 0x3F];
-        *out++ = b64_table[(v >> 12) & 0x3F];
-        *out++ = (i + 1 < len) ? b64_table[(v >> 6) & 0x3F] : '=';
-        *out++ = '=';
-    }
-
-    b->len += encoded_len;
-    return buf_write_char(b, '"');
-}
-
-// Lookup table: maps each byte to its JSON escape string length (0 = safe).
-// Entries: 2 = two-char escape (\", \\, \b, \f, \n, \r, \t), 6 = \uXXXX.
-static const unsigned char json_esc_len[256] = {
-    // 0x00-0x1F: control chars
-    6,6,6,6,6,6,6,6, 2,2,2,6,2,2,6,6, // \b=08, \t=09, \n=0A, \f=0C, \r=0D
-    6,6,6,6,6,6,6,6, 6,6,6,6,6,6,6,6,
-    // 0x20-0x7F
-    0,0,2,0,0,0,0,0, 0,0,0,0,0,0,0,0, // '"'=0x22 -> 2
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,2,0,0,0, // '\\'=0x5C -> 2
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    // 0x80-0xFF: all safe (UTF-8 continuation/lead bytes)
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-};
-
-// Lookup table: maps escapable byte to its 2-char escape suffix.
-static const char json_esc_char[256] = {
-    ['"']  = '"',
-    ['\\'] = '\\',
-    ['\b'] = 'b',
-    ['\f'] = 'f',
-    ['\n'] = 'n',
-    ['\r'] = 'r',
-    ['\t'] = 't',
-};
-
-static const char json_hex_digits[] = "0123456789abcdef";
-
-RESQLITE_HOT static int json_write_u00_escape(resqlite_buf* b, unsigned char c) {
-    if (buf_ensure(b, 6) != 0) return -1;
-    unsigned char* out = b->data + b->len;
-    out[0] = '\\';
-    out[1] = 'u';
-    out[2] = '0';
-    out[3] = '0';
-    out[4] = (unsigned char)json_hex_digits[c >> 4];
-    out[5] = (unsigned char)json_hex_digits[c & 0x0f];
-    b->len += 6;
-    return 0;
-}
-
-RESQLITE_HOT static int json_write_string(resqlite_buf* __restrict b, const char* s, int len) {
-    if (buf_write_char(b, '"') != 0) return -1;
-
-    int start = 0;
-    int i = 0;
-
-    // SWAR: scan 8 bytes at a time for the common case (no escapes needed).
-    // Check if any byte < 0x20, == '"' (0x22), or == '\\' (0x5C).
-    // Uses the standard "has zero byte" SWAR trick: for each target, XOR the
-    // word with the repeated target byte, then detect zero bytes via
-    // (v - 0x01..01) & ~v & 0x80..80. Pure portable C, no SIMD intrinsics.
-    while (i + 8 <= len) {
-        uint64_t word;
-        memcpy(&word, s + i, 8);
-
-        // Bytes < 0x20: subtract 0x20 from each byte, check for underflow.
-        uint64_t below_space = (word - 0x2020202020202020ULL) & ~word & 0x8080808080808080ULL;
-        // Bytes == '"' (0x22):
-        uint64_t xor_quote = word ^ 0x2222222222222222ULL;
-        uint64_t has_quote = (xor_quote - 0x0101010101010101ULL) & ~xor_quote & 0x8080808080808080ULL;
-        // Bytes == '\\' (0x5C):
-        uint64_t xor_bslash = word ^ 0x5C5C5C5C5C5C5C5CULL;
-        uint64_t has_bslash = (xor_bslash - 0x0101010101010101ULL) & ~xor_bslash & 0x8080808080808080ULL;
-
-        if ((below_space | has_quote | has_bslash) == 0) {
-            i += 8; // All 8 bytes safe — skip.
-            continue;
-        }
-        break; // Found something to escape — fall through to byte-by-byte.
-    }
-
-    // Byte-by-byte with lookup table for remaining bytes or after SWAR hit.
-    for (; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        unsigned char elen = json_esc_len[c];
-
-        if (RESQLITE_LIKELY(elen == 0)) continue; // Common case: safe byte.
-
-        // Flush unescaped span before this character.
-        if (i > start && buf_write(b, s + start, i - start) != 0) return -1;
-
-        if (elen == 2) {
-            // Named two-char escape: \X
-            char pair[2] = { '\\', json_esc_char[c] };
-            if (buf_write(b, pair, 2) != 0) return -1;
-        } else {
-            // \uXXXX for control chars without named escapes.
-            if (json_write_u00_escape(b, c) != 0) return -1;
-        }
-        start = i + 1;
-    }
-
-    // Flush remaining unescaped span.
-    if (start < len && buf_write(b, s + start, len - start) != 0) return -1;
-
-    return buf_write_char(b, '"');
-}
+// The per-cell value encoders (int/double formatting, base64, string escape)
+// live in resqlite_json.{h,c}. What remains here is the row-assembly layer,
+// which is coupled to the stmt cache and reader state.
+// ---------------------------------------------------------------------------
 
 // [EXP-195] Lazily build the cached JSON column-name tokens on `entry`.
 // Returns SQLITE_OK once `entry->json_name_tokens_buf` and the per-column
@@ -2218,7 +1763,7 @@ static int ensure_json_name_tokens(
         }
         const char* name = sqlite3_column_name(stmt, i);
         int name_len = (int)strlen(name);
-        if (json_write_string(&tokens, name, name_len) != 0) goto fail;
+        if (resqlite_json_write_string(&tokens, name, name_len) != 0) goto fail;
         if (buf_write_char(&tokens, ':') != 0) goto fail;
         lens[i] = tokens.len - offsets[i];
     }
@@ -2279,8 +1824,8 @@ RESQLITE_HOT static int write_json_to_buf(
     // 24-byte INT bound and the 4-byte "null" literal, so a single multiply
     // covers all three). NULL/INTEGER/FLOAT cells then write directly to
     // `b->data + b->len` without a per-cell `buf_ensure`. TEXT/BLOB cells go
-    // through their existing helpers (`json_write_string` /
-    // `json_write_base64`), which manage their own `buf_ensure`; after such
+    // through the resqlite_json encoders (`resqlite_json_write_string` /
+    // `resqlite_json_write_base64`), which manage their own `buf_ensure`; after such
     // a cell we re-ensure headroom for the remaining tokens, fixed cells,
     // and the row-closing `}`. The per-query bracket `[` and `]` stay on the
     // existing per-call ensure path: they fire twice per query regardless of
@@ -2337,12 +1882,12 @@ RESQLITE_HOT static int write_json_to_buf(
                     b->len += 4;
                     break;
                 case SQLITE_INTEGER:
-                    b->len += fast_i64_to_str(
+                    b->len += resqlite_json_i64_to_str(
                         sqlite3_value_int64(val),
                         (char*)(b->data + b->len));
                     break;
                 case SQLITE_FLOAT:
-                    b->len += fast_double_to_json_num(
+                    b->len += resqlite_json_double_to_num(
                         sqlite3_value_double(val),
                         (char*)(b->data + b->len), (size_t)cell_max);
                     break;
@@ -2352,8 +1897,8 @@ RESQLITE_HOT static int write_json_to_buf(
                     // invalidates the text pointer.
                     const char* text = (const char*)sqlite3_value_text(val);
                     int text_len = sqlite3_value_bytes(val);
-                    JSON_CHECK(json_write_string(b, text, text_len));
-                    // [EXP-199] json_write_string may have grown the buffer
+                    JSON_CHECK(resqlite_json_write_string(b, text, text_len));
+                    // [EXP-199] the string encoder may have grown the buffer
                     // past the row-start reservation. Re-ensure headroom for
                     // the remaining tokens + fixed cells + '}' so subsequent
                     // direct writes stay in-bounds.
@@ -2368,7 +1913,7 @@ RESQLITE_HOT static int write_json_to_buf(
                     int blob_len = sqlite3_value_bytes(val);
                     const unsigned char* blob =
                         (const unsigned char*)sqlite3_value_blob(val);
-                    JSON_CHECK(json_write_base64(b, blob, blob_len));
+                    JSON_CHECK(resqlite_json_write_base64(b, blob, blob_len));
                     int remaining_tokens = tokens_total
                         - (token_offsets[i] + token_lens[i]);
                     int remaining_cells = (col_count - i - 1) * cell_max;
