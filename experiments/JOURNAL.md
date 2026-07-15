@@ -344,6 +344,28 @@ inline it "back" — even when the SIMD branch is not taken, an inlined
 kernel body reshapes the scalar path's register allocation and code
 layout around it. The dispatch check is cheap; the layout cost isn't.*
 
+### The smallest workload admitted to an optimized path is its adoption gate
+
+[Exp 230](230-neon-json-scan-copy.md) fused AArch64/NEON escape
+classification with copying for JSON TEXT values at least 256 bytes long.
+The mechanism was strong at the far end: safe 1 KiB ASCII improved
+33.6-34.1% and long CJK improved 25.2-25.5% across an order-flipped pair.
+But the 256-byte cutoff lane moved 17.7% and then 12.6%, missing the preset
+15% bar in the second ordering.
+
+The cutoff row is where the implementation first starts paying its dispatcher,
+extra encoder body, platform-specific correctness surface, and future
+maintenance cost. A much larger payload can confirm the mechanism, but it
+cannot substitute for the first admitted workload clearing the declared bar.
+Moving the cutoff after seeing the results would merely select the winning row
+post hoc.
+
+*Reapplies whenever an optimization is guarded by a size, width, or count
+threshold. Declare the first admitted workload before measuring and treat it as
+the load-bearing acceptance row; larger workloads are confirmation. If the
+boundary misses, archive the far-end potential and wait for production evidence
+rather than moving the threshold around noisy guards.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

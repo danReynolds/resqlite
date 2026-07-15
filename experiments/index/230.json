@@ -1,0 +1,7 @@
+{
+  "file": "230-neon-json-scan-copy.md",
+  "title": "Reject AArch64 NEON JSON safe-prefix scan + copy",
+  "impact": "Moonshot: fused AArch64/NEON JSON escape classification and safe-prefix copying for long TEXT. The mechanism reproduced 33.6-34.1% wins at 1 KiB and 25.2-25.5% on CJK, but the load-bearing 256 B lane moved -17.7% then only -12.6%, missing the predeclared 15% gate in the order flip. Rejected; runtime preserved at archive/exp-230 and reverted, while long safe/early-/late-escape harness lanes plus an exact dart:convert boundary oracle remain.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_below_signal_bar",
+  "changedBeliefs": [
+    "Exp 229's suggestion that SIMD JSON escape scan is a real TEXT-side mechanism is confirmed only for very long safe spans. The final AArch64/NEON fused classify-and-copy prototype improves the 1 KiB safe ASCII lane -33.6% / -34.1% and the CJK lane -25.2% / -25.5% across the order flip.",
+    "The practical break-even row is not strong enough to ship. Safe ASCII at 256 B improves -17.7% then -12.6%, missing the predeclared >=15% floor in the second ordering. A vector kernel can be compelling at 1 KiB while still failing the representative lower boundary where per-cell dispatch/setup is a material share.",
+    "Unsafe handling is the load-bearing design constraint. A speculative SIMD copy followed by scalar restart regressed a late escape at 96 B by 15-26%. Continuing scalar from the first unsafe vector and dispatching only TEXT >=256 B removed that double pass: early-escape 256 B moved +2.7% / -0.9% and late-escape 256 B improved -16.0% / -5.8%. The final runtime is still rejected and archived at `archive/exp-230` because the safe 256 B gate failed."
+  ],
+  "nextSignals": [
+    "Keep the portable SWAR scan + copy implementation as the canonical JSON TEXT encoder. Do not retry another length threshold, in-function NEON body, or speculative-copy-and-full-restart variant under the current workload.",
+    "Keep `benchmark/experiments/select_bytes_text_string_reserve.dart` as the durable TEXT encoder gate. Future work must include safe 64/96/256 B and 1 KiB/CJK lanes, plus early- and late-escape guards at both sides of its proposed cutoff. The exact long-string `dart:convert` oracle in `test/native_encoder_diff_test.dart` is the byte-identity gate.",
+    "Reopen fused SIMD classification-and-copy only with a production/AOT profile showing escape-free TEXT >=1 KiB materially dominates result-transfer wall, or a different mechanism that removes the 256 B dispatch/setup floor. The archived prototype demonstrates the reachable large-span ceiling without obligating runtime complexity."
+  ]
+}
