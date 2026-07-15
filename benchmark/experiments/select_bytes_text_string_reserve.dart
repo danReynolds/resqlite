@@ -36,6 +36,13 @@ String _textValue(String mode, int row, int col, int bytes) {
     case 'escaped':
       final seed = 'r$row"c$col\\n\t/';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
+    case 'lateEscape':
+      final seed = 'row_${row}_col_${col}_safe_';
+      final safe = (seed * ((bytes ~/ seed.length) + 1)).substring(
+        0,
+        bytes - 1,
+      );
+      return '$safe"';
     case 'control':
       final seed = 'r$row\x01c$col\x02\x03/';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
@@ -184,6 +191,14 @@ Future<void> main() async {
     textCols: 8,
     textBytes: 96,
     mode: 'escaped',
+    iters: 6,
+  );
+  await _lane(
+    label: '10k rows x 8 late-escape text (96B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 96,
+    mode: 'lateEscape',
     iters: 6,
   );
   await _lane(
