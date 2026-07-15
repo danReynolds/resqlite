@@ -20,6 +20,19 @@
 #define RESQLITE_UNLIKELY(expr) (expr)
 #endif
 
+// [EXP-229] SIMD kernel gating: ARM64 (AArch64) with NEON is the first ISA
+// with a resqlite SIMD kernel — `vqtbl4q_u8` and `vld3q_u8`/`vst4q_u8` are
+// AArch64-only and cover macOS/iOS/Android arm64, where resqlite runs on
+// mobile hardware. 32-bit ARM lacks `vqtbl4q_u8`; x86_64 SSSE3 needs a
+// different table-lookup approach and is deferred to a follow-up. All other
+// targets fall through to the scalar 12-bit-LUT encoder (exp 225).
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#define RESQLITE_HAS_NEON_BASE64 1
+#include <arm_neon.h>
+#else
+#define RESQLITE_HAS_NEON_BASE64 0
+#endif
+
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
@@ -1906,6 +1919,76 @@ static void init_b64_pair_table(void) {
     b64_pair_table_initialized = 1;
 }
 
+#if RESQLITE_HAS_NEON_BASE64
+// [EXP-229] NEON base64 encoder — kept out-of-line so the small-blob hot
+// path in `json_write_base64` never carries the NEON kernel's register
+// footprint or ABI hints. The kernel is the standard `vld3q_u8` +
+// `vqtbl4q_u8` shape:
+//   1. Load 48 input bytes deinterleaved as 3 x uint8x16_t (lane j of vec
+//      0/1/2 is triplet j's A/B/C byte).
+//   2. Derive the four 6-bit encoded indices per triplet:
+//        idx0 = A >> 2
+//        idx1 = ((A & 0x03) << 4) | (B >> 4)
+//        idx2 = ((B & 0x0F) << 2) | (C >> 6)
+//        idx3 = C & 0x3F
+//   3. Look each index vector up in the 64-byte `b64_table` via 4 x
+//      `vqtbl4q_u8` (AArch64-only), producing four output vectors of
+//      encoded chars.
+//   4. Store 64 bytes interleaved via `vst4q_u8` — layout matches the
+//      scalar body's byte order (idx0,idx1,idx2,idx3 per triplet).
+//
+// Byte-for-byte identical output to the scalar path. Consumes as many
+// full 48-byte input blocks as fit and returns bytes consumed; the
+// caller runs the < 48-byte tail through the scalar 12-bit-LUT loop.
+__attribute__((noinline))
+RESQLITE_HOT static int json_write_base64_neon_bulk(
+    const unsigned char* __restrict data,
+    int len,
+    unsigned char* __restrict out
+) {
+    uint8x16x4_t table;
+    table.val[0] = vld1q_u8((const uint8_t*)b64_table);
+    table.val[1] = vld1q_u8((const uint8_t*)b64_table + 16);
+    table.val[2] = vld1q_u8((const uint8_t*)b64_table + 32);
+    table.val[3] = vld1q_u8((const uint8_t*)b64_table + 48);
+
+    const uint8x16_t mask_03 = vdupq_n_u8(0x03);
+    const uint8x16_t mask_0F = vdupq_n_u8(0x0F);
+    const uint8x16_t mask_3F = vdupq_n_u8(0x3F);
+
+    int i = 0;
+    unsigned char* p = out;
+    while (i <= len - 48) {
+        uint8x16x3_t in3 = vld3q_u8(data + i);
+        uint8x16_t a = in3.val[0];
+        uint8x16_t b_vec = in3.val[1];
+        uint8x16_t c = in3.val[2];
+
+        uint8x16_t idx0 = vshrq_n_u8(a, 2);
+        uint8x16_t idx1 = vorrq_u8(
+            vshlq_n_u8(vandq_u8(a, mask_03), 4),
+            vshrq_n_u8(b_vec, 4)
+        );
+        uint8x16_t idx2 = vorrq_u8(
+            vshlq_n_u8(vandq_u8(b_vec, mask_0F), 2),
+            vshrq_n_u8(c, 6)
+        );
+        uint8x16_t idx3 = vandq_u8(c, mask_3F);
+
+        uint8x16x4_t out4;
+        out4.val[0] = vqtbl4q_u8(table, idx0);
+        out4.val[1] = vqtbl4q_u8(table, idx1);
+        out4.val[2] = vqtbl4q_u8(table, idx2);
+        out4.val[3] = vqtbl4q_u8(table, idx3);
+
+        vst4q_u8(p, out4);
+        p += 64;
+        i += 48;
+    }
+    return i;
+}
+#endif // RESQLITE_HAS_NEON_BASE64
+
 /// Write a base64-encoded blob as a quoted JSON string.
 RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
                                                    const unsigned char* data,
@@ -1921,6 +2004,18 @@ RESQLITE_HOT static int json_write_base64(resqlite_buf* __restrict b,
 
     unsigned char* out = b->data + b->len;
     int i = 0;
+
+#if RESQLITE_HAS_NEON_BASE64
+    // [EXP-229] SIMD bulk: 48 input bytes -> 64 output bytes per iteration
+    // on AArch64/NEON. The kernel is out-of-line (`noinline`) so the small-
+    // blob path — which never enters it — stays byte-identical to the exp
+    // 225 scalar layout in this function's `.text`.
+    if (len >= 48) {
+        int consumed = json_write_base64_neon_bulk(data, len, out);
+        i = consumed;
+        out += consumed / 3 * 4;
+    }
+#endif
 
     // Process four 3-byte groups per loop trip. Exp 216 kept the scalar loop
     // but 4x-unrolled the trip; exp 218 rejected 8x unroll (loop-control
