@@ -8,8 +8,9 @@
 // kernel. `vqtbl4q_u8` / `vld3q_u8` / `vst4q_u8` are AArch64-only and cover
 // macOS/iOS/Android arm64. 32-bit ARM lacks `vqtbl4q_u8`; x86_64 SSSE3 needs a
 // different table-lookup approach (deferred). Every other target uses the
-// scalar 12-bit-LUT encoder.
-#if defined(__aarch64__) && defined(__ARM_NEON)
+// scalar encoders. RESQLITE_JSON_HAS_NEON is defined in resqlite_json.h so the
+// header's number formatters and this TU's kernels agree on the ISA.
+#if RESQLITE_JSON_HAS_NEON
 #define RESQLITE_HAS_NEON_BASE64 1
 #include <arm_neon.h>
 #else
@@ -206,6 +207,81 @@ int resqlite_json_write_base64_scalar(resqlite_buf* __restrict b,
 #undef RESQLITE_WRITE_B64_TRIPLET
 
 // ---------------------------------------------------------------------------
+// Integer -> decimal (NEON)
+// ---------------------------------------------------------------------------
+
+#if RESQLITE_JSON_HAS_NEON
+// Convert one 8-digit group `v` (0..99999999) into exactly 8 ASCII bytes at
+// `out`, most-significant digit first, zero-padded. Two vector reciprocal
+// splits with no serial digit-by-digit dependency:
+//   1. scalar split into two 4-digit halves hi=v/10000, lo=v%10000
+//   2. NEON split each half into two 2-digit values (/100, %100) -> {a,b,c,d}
+//   3. NEON split each 2-digit value into tens/ones (/10, %10), interleave,
+//      add '0', and store 8 bytes.
+// Reciprocals: /100 for d<10000 is (d*5243)>>19; /10 for p<100 is (p*205)>>11
+// — both exact over their input ranges (verified by the differential test).
+static inline void neon_write_8_digits(uint32_t v, unsigned char* out) {
+    uint32_t hi = v / 10000;         // top 4 digits, 0..9999
+    uint32_t lo = v - hi * 10000;    // bottom 4 digits, 0..9999
+
+    uint32x2_t d4 = vset_lane_u32(lo, vdup_n_u32(hi), 1); // {hi, lo}
+    uint32x2_t q = vshr_n_u32(vmul_n_u32(d4, 5243), 19);  // {hi/100, lo/100}
+    uint32x2_t r = vsub_u32(d4, vmul_n_u32(q, 100));      // {hi%100, lo%100}
+
+    // Narrow to 16-bit and interleave into 2-digit-group order {q0,r0,q1,r1}.
+    uint16x4_t qn = vmovn_u32(vcombine_u32(q, vdup_n_u32(0)));
+    uint16x4_t rn = vmovn_u32(vcombine_u32(r, vdup_n_u32(0)));
+    uint16x4_t p = vzip_u16(qn, rn).val[0];               // {q0,r0,q1,r1}
+
+    uint16x4_t tens = vshr_n_u16(vmul_n_u16(p, 205), 11); // p/10
+    uint16x4_t ones = vsub_u16(p, vmul_n_u16(tens, 10));  // p%10
+    uint16x4x2_t io = vzip_u16(tens, ones);               // {t,o} pairs
+    uint16x8_t digits16 = vcombine_u16(io.val[0], io.val[1]);
+    uint8x8_t digits8 = vadd_u8(vmovn_u16(digits16), vdup_n_u8('0'));
+    vst1_u8(out, digits8);
+}
+
+// Format the most-significant group `v` (>= 1) with no leading zeros. Encodes
+// the full 8-digit field into a scratch buffer, then copies from the first
+// non-zero digit. Returns bytes written (1..8).
+static inline int neon_write_group_trimmed(uint32_t v, unsigned char* out) {
+    unsigned char tmp[8];
+    neon_write_8_digits(v, tmp);
+    int start = 0;
+    while (start < 7 && tmp[start] == '0') start++;
+    int n = 8 - start;
+    memcpy(out, tmp + start, n);
+    return n;
+}
+
+// See resqlite_json.h. `uval` is the magnitude (caller strips the sign) and is
+// >= 1e8 on the shipped path. Splits into a most-significant group plus up to
+// two full zero-padded 8-digit groups. The two `/1e8` divides are the only
+// serial dependency; each 8-digit group then formats independently.
+__attribute__((noinline))
+int resqlite_json_u64_digits_neon(unsigned long long uval, char* buf) {
+    unsigned long long low8 = uval % 100000000ULL;
+    unsigned long long t = uval / 100000000ULL;      // 0 .. ~1.8e11
+    unsigned long long mid8 = t % 100000000ULL;
+    unsigned long long high = t / 100000000ULL;       // 0..1844
+
+    unsigned char* p = (unsigned char*)buf;
+    if (high != 0) {
+        p += neon_write_group_trimmed((uint32_t)high, p);
+        neon_write_8_digits((uint32_t)mid8, p); p += 8;
+        neon_write_8_digits((uint32_t)low8, p); p += 8;
+    } else if (mid8 != 0) {
+        p += neon_write_group_trimmed((uint32_t)mid8, p);
+        neon_write_8_digits((uint32_t)low8, p); p += 8;
+    } else {
+        // Reachable only if a caller relaxes the >= 1e8 precondition.
+        p += neon_write_group_trimmed((uint32_t)low8, p);
+    }
+    return (int)(p - (unsigned char*)buf);
+}
+#endif // RESQLITE_JSON_HAS_NEON
+
+// ---------------------------------------------------------------------------
 // String escaping
 // ---------------------------------------------------------------------------
 
@@ -335,4 +411,15 @@ int resqlite_test_base64_encode(const unsigned char* data, int len,
     memcpy(out, b.data, n);
     free(b.data);
     return n;
+}
+
+// Encode `val` as JSON decimal digits into `out` (caller-allocated, at least
+// RESQLITE_JSON_INT_MAX bytes; no NUL written). `force_scalar` selects the
+// always-scalar two-digit path; otherwise the shipped dispatcher (NEON for
+// >= 9-digit magnitudes on AArch64). Returns bytes written. Used only by the
+// differential encoder test to assert NEON == scalar == oracle.
+int resqlite_test_i64_to_str(long long val, char* out, int force_scalar) {
+    return force_scalar
+        ? resqlite_json_i64_to_str_scalar(val, out)
+        : resqlite_json_i64_to_str(val, out);
 }

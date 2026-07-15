@@ -24,6 +24,15 @@
 
 #include "resqlite_buf.h"
 
+// SIMD kernel gating, shared by this header and resqlite_json.c so both TUs
+// agree on which integer/base64 path is compiled. AArch64+NEON is the only ISA
+// with a resqlite SIMD kernel; every other target uses the scalar encoders.
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#define RESQLITE_JSON_HAS_NEON 1
+#else
+#define RESQLITE_JSON_HAS_NEON 0
+#endif
+
 // Maximum bytes a JSON-encoded INTEGER cell can occupy: 20 digits + optional
 // '-' sign. resqlite_json_i64_to_str never writes a NUL terminator.
 #define RESQLITE_JSON_INT_MAX 24
@@ -45,9 +54,12 @@ static const char resqlite_json_two_digits[] =
     "6061626364656667686970717273747576777879"
     "8081828384858687888990919293949596979899";
 
-// Write a signed 64-bit integer as JSON decimal digits into `buf` (no NUL).
-// Returns the number of bytes written (<= RESQLITE_JSON_INT_MAX).
-RESQLITE_HOT static inline int resqlite_json_i64_to_str(long long val, char* buf) {
+// Scalar reference: write a signed 64-bit integer as JSON decimal digits into
+// `buf` (no NUL). Two-digit table lookup (exp 192). Returns bytes written
+// (<= RESQLITE_JSON_INT_MAX). This is the always-scalar path — the shipped
+// dispatcher below routes large magnitudes through the NEON kernel on AArch64.
+RESQLITE_HOT static inline int resqlite_json_i64_to_str_scalar(
+    long long val, char* buf) {
     if (val == 0) { buf[0] = '0'; return 1; }
 
     // Unsigned int64 magnitude fits in 20 decimal digits.
@@ -82,6 +94,37 @@ RESQLITE_HOT static inline int resqlite_json_i64_to_str(long long val, char* buf
     if (negative) buf[len++] = '-';
     memcpy(buf + len, tmp + pos, digits);
     return len + digits;
+}
+
+#if RESQLITE_JSON_HAS_NEON
+// NEON magnitude formatter: write the decimal digits of `uval` (>= 1e8, no
+// leading zeros, no sign) into `buf`, returning the digit count. Out-of-line in
+// resqlite_json.c so the small-int hot path below keeps the scalar layout.
+// Defined only on AArch64; the dispatcher gates calls to it on the same macro.
+int resqlite_json_u64_digits_neon(unsigned long long uval, char* buf);
+#endif
+
+// Write a signed 64-bit integer as JSON decimal digits into `buf` (no NUL).
+// Returns the number of bytes written (<= RESQLITE_JSON_INT_MAX). On AArch64,
+// magnitudes with >= 9 digits use the NEON kernel, which breaks the scalar
+// two-digit loop's serial `/100` dependency chain by converting three
+// independent 8-digit groups in parallel; everything shorter, and every
+// non-AArch64 target, stays on the scalar two-digit path (byte-identical).
+RESQLITE_HOT static inline int resqlite_json_i64_to_str(long long val, char* buf) {
+#if RESQLITE_JSON_HAS_NEON
+    if (val != 0) {
+        int negative = val < 0;
+        unsigned long long uval = negative
+            ? (unsigned long long)(-(val + 1)) + 1 // avoid UB on LLONG_MIN
+            : (unsigned long long)val;
+        if (uval >= 100000000ULL) { // >= 9 digits: worth the vector setup
+            int len = 0;
+            if (negative) buf[len++] = '-';
+            return len + resqlite_json_u64_digits_neon(uval, buf + len);
+        }
+    }
+#endif
+    return resqlite_json_i64_to_str_scalar(val, buf);
 }
 
 // Write a double as a JSON number into `buf` (capacity `buf_size`, includes
