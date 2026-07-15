@@ -52,6 +52,28 @@ external int resqliteTestBase64Encode(
   int forceScalar,
 );
 
+// Test-support entry defined in native/resqlite_json.c (added by exp 231).
+// Writes `val` as JSON decimal digits into `out` (no NUL) via the shipped
+// integer formatter. Returns bytes written.
+@ffi.Native<ffi.Int Function(ffi.Int64, ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'resqlite_test_i64_to_str',
+  isLeaf: true,
+)
+external int resqliteTestI64ToStr(int val, ffi.Pointer<ffi.Uint8> out);
+
+/// Formats `val` via the shipped native integer formatter.
+String _nativeI64(int val) {
+  // RESQLITE_JSON_INT_MAX (24) is the reserved width; a little headroom.
+  final outPtr = malloc<ffi.Uint8>(32);
+  try {
+    final n = resqliteTestI64ToStr(val, outPtr);
+    expect(n, greaterThanOrEqualTo(1), reason: 'encode returned nothing');
+    return utf8.decode(outPtr.asTypedList(n));
+  } finally {
+    malloc.free(outPtr);
+  }
+}
+
 /// Encodes `input` via the native path selected by [forceScalar] and returns
 /// the emitted JSON string (quotes included).
 String _nativeBase64(Uint8List input, {required bool forceScalar}) {
@@ -130,6 +152,49 @@ void main() {
         final oracle = '"${base64.encode(bytes)}"';
         expect(_nativeBase64(bytes, forceScalar: false), oracle);
         expect(_nativeBase64(bytes, forceScalar: true), oracle);
+      }
+    });
+  });
+
+  group('native i64 formatter differential', () {
+    // The integer JSON formatter (resqlite_json_i64_to_str) previously had no
+    // direct differential coverage — the selectBytes fuzz below only exercised
+    // 200 random ints. Exp 231 added this while prototyping (and rejecting) a
+    // NEON integer kernel; the coverage is worth keeping against the scalar
+    // two-digit-table path regardless of that outcome.
+    void check(int val) {
+      expect(
+        _nativeI64(val),
+        val.toString(),
+        reason: 'native i64 formatter diverged from Dart at val=$val',
+      );
+    }
+
+    test('boundary magnitudes and digit-group edges', () {
+      const edges = <int>[
+        0, 1, -1, 9, 10, 99, 100, 999, 1000,
+        99999999, 100000000, // 8 -> 9 digits
+        99999999999999, 100000000000000, // 14 -> 15 digits
+        9999999999999999, 10000000000000000, // 16 -> 17 digits
+        1234567890, 1000000000, 2000000010, // internal-zero shapes
+        1000000000000000000, // 19 digits, trailing zeros
+        1020304050607080900, // interleaved zeros across all digit groups
+        9223372036854775807, // LLONG_MAX
+        -9223372036854775808, // LLONG_MIN (sign-normalize edge)
+        4294967295, 4294967296, // u32 boundary
+      ];
+      for (final v in edges) {
+        check(v);
+      }
+    });
+
+    test('dense random fuzz across the full i64 range', () {
+      final rng = Random(0x1D07A);
+      for (var i = 0; i < 300000; i++) {
+        final hi = rng.nextInt(1 << 32);
+        final lo = rng.nextInt(1 << 32);
+        check((hi << 32) | lo); // may be negative — Dart int is 64-bit signed
+        check(rng.nextInt(100000000)); // dense sub-9-digit coverage too
       }
     });
   });

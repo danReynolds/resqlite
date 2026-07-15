@@ -1,0 +1,7 @@
+{
+  "file": "231-neon-i64-decimal.md",
+  "title": "Reject AArch64 NEON integer→decimal kernel",
+  "impact": "Moonshot: an out-of-lined AArch64/NEON i64→decimal kernel that breaks the scalar two-digit loop's serial /100 chain by formatting three independent 8-digit groups in parallel (byte-identical, gated ≥ 1e8). Across 11 focused A/B passes in three methodologies the ~18-digit BIGINT selectBytes lane never leaned candidate-faster (+1.2/+6.0/+9.8% baseline-first, +11.3% min-of-N, ~flat only in the one quiet pair) while identical-code controls drifted ±10-120%. Rejected: exp 229's out-of-line ISA-kernel win amortises SIMD setup over a whole BLOB per call, but the integer formatter converts one scalar value per call with nothing to amortise. Runtime reverted to archive/exp-231; the new i64 differential test (first direct coverage of the integer formatter) is kept.",
+  "status": "rejected",
+  "link": ""
+}

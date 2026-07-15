@@ -336,3 +336,13 @@ int resqlite_test_base64_encode(const unsigned char* data, int len,
     free(b.data);
     return n;
 }
+
+// Encode `val` as JSON decimal digits into `out` (caller-allocated, at least
+// RESQLITE_JSON_INT_MAX bytes; no NUL written). Returns bytes written. Used
+// only by the differential test to assert the shipped integer formatter
+// matches Dart's oracle across boundary magnitudes and the full i64 range —
+// added by exp 231, which found the scalar two-digit path had no such
+// coverage. Not part of the query hot path.
+int resqlite_test_i64_to_str(long long val, char* out) {
+    return resqlite_json_i64_to_str(val, out);
+}
