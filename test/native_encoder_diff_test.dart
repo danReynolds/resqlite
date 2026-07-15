@@ -86,10 +86,16 @@ void main() {
           List.generate(len, (_) => rng.nextInt(256)),
         );
         final oracle = '"${base64.encode(bytes)}"';
-        expect(_nativeBase64(bytes, forceScalar: false), oracle,
-            reason: 'dispatch path diverged from dart:convert at len=$len');
-        expect(_nativeBase64(bytes, forceScalar: true), oracle,
-            reason: 'scalar path diverged from dart:convert at len=$len');
+        expect(
+          _nativeBase64(bytes, forceScalar: false),
+          oracle,
+          reason: 'dispatch path diverged from dart:convert at len=$len',
+        );
+        expect(
+          _nativeBase64(bytes, forceScalar: true),
+          oracle,
+          reason: 'scalar path diverged from dart:convert at len=$len',
+        );
       }
     });
 
@@ -101,10 +107,16 @@ void main() {
           List.generate(len, (_) => rng.nextInt(256)),
         );
         final oracle = '"${base64.encode(bytes)}"';
-        expect(_nativeBase64(bytes, forceScalar: false), oracle,
-            reason: 'dispatch diverged at len=$len');
-        expect(_nativeBase64(bytes, forceScalar: true), oracle,
-            reason: 'scalar diverged at len=$len');
+        expect(
+          _nativeBase64(bytes, forceScalar: false),
+          oracle,
+          reason: 'dispatch diverged at len=$len',
+        );
+        expect(
+          _nativeBase64(bytes, forceScalar: true),
+          oracle,
+          reason: 'scalar diverged at len=$len',
+        );
       }
     });
 
@@ -197,12 +209,94 @@ void main() {
         final want = rows[r];
         expect(got['id'], want[0], reason: 'id mismatch row $r');
         expect(got['i'], want[1], reason: 'int mismatch row $r');
-        expect((got['d'] as num).toDouble(), want[2] as double,
-            reason: 'double mismatch row $r');
+        expect(
+          (got['d'] as num).toDouble(),
+          want[2] as double,
+          reason: 'double mismatch row $r',
+        );
         expect(got['s'], want[3], reason: 'string mismatch row $r');
-        expect(got['b'], base64.encode(want[4] as Uint8List),
-            reason: 'blob mismatch row $r');
+        expect(
+          got['b'],
+          base64.encode(want[4] as Uint8List),
+          reason: 'blob mismatch row $r',
+        );
       }
+    });
+
+    test('long string boundary output matches dart:convert exactly', () async {
+      await db.execute('CREATE TABLE strings(id INTEGER PRIMARY KEY, s TEXT)');
+
+      const safeAlphabet =
+          'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
+      String safeAscii(int length) => List.generate(
+        length,
+        (i) => safeAlphabet[i % safeAlphabet.length],
+      ).join();
+
+      final values = <String>[];
+      const lengths = [
+        0,
+        1,
+        15,
+        16,
+        17,
+        31,
+        32,
+        33,
+        47,
+        48,
+        49,
+        63,
+        64,
+        65,
+        79,
+        80,
+        81,
+        95,
+        96,
+        97,
+        127,
+        128,
+        129,
+        255,
+        256,
+        257,
+        1024,
+      ];
+
+      for (final length in lengths) {
+        final safe = safeAscii(length);
+        values.add(safe);
+        if (length > 0) {
+          for (final position in {
+            0,
+            if (length > 15) 15,
+            if (length > 16) 16,
+            length - 1,
+          }) {
+            for (final special in const ['"', '\\', '\u0001']) {
+              values.add(
+                '${safe.substring(0, position)}$special'
+                '${safe.substring(position + 1)}',
+              );
+            }
+          }
+        }
+      }
+
+      values.addAll(['日本語' * 64, 'éü中文Ω' * 64, '${'日本語' * 24}"${'中文' * 40}']);
+
+      await db.executeBatch('INSERT INTO strings(id, s) VALUES (?, ?)', [
+        for (var i = 0; i < values.length; i++) [i, values[i]],
+      ]);
+
+      final actual = utf8.decode(
+        (await db.selectBytes('SELECT s FROM strings ORDER BY id')).bytes,
+      );
+      final expected = jsonEncode([
+        for (final value in values) {'s': value},
+      ]);
+      expect(actual, expected);
     });
   });
 }
