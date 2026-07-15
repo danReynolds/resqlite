@@ -353,8 +353,9 @@ const _exportedSymbols = [
   'resqlite_step_row_hash',
   'resqlite_query_hash',
   'resqlite_free',
-  // Test-support: differential base64 fuzz test (test/native_encoder_diff_test.dart).
+  // Test-support: differential encoder tests (test/native_encoder_diff_test.dart).
   'resqlite_test_base64_encode',
+  'resqlite_test_i64_to_str',
 ];
 
 bool _isEnabled(Object? value) {
