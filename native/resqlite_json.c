@@ -4,16 +4,16 @@
 
 #include "resqlite_json.h"
 
-// SIMD kernel gating: AArch64 with NEON is the only ISA with resqlite SIMD
-// kernels. `vqtbl4q_u8` / `vld3q_u8` / `vst4q_u8` are AArch64-only and cover
+// SIMD kernel gating: AArch64 with NEON is the only ISA with a resqlite SIMD
+// kernel. `vqtbl4q_u8` / `vld3q_u8` / `vst4q_u8` are AArch64-only and cover
 // macOS/iOS/Android arm64. 32-bit ARM lacks `vqtbl4q_u8`; x86_64 SSSE3 needs a
 // different table-lookup approach (deferred). Every other target uses the
-// scalar encoders.
+// scalar 12-bit-LUT encoder.
 #if defined(__aarch64__) && defined(__ARM_NEON)
-#define RESQLITE_HAS_NEON 1
+#define RESQLITE_HAS_NEON_BASE64 1
 #include <arm_neon.h>
 #else
-#define RESQLITE_HAS_NEON 0
+#define RESQLITE_HAS_NEON_BASE64 0
 #endif
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ static void init_b64_pair_table(void) {
         out += 4; \
     } while (0)
 
-#if RESQLITE_HAS_NEON
+#if RESQLITE_HAS_NEON_BASE64
 // NEON base64 kernel — kept out-of-line (`noinline`) so the small-blob path in
 // the dispatcher never carries the kernel's register footprint. Standard
 // `vld3q_u8` + `vqtbl4q_u8` shape:
@@ -115,7 +115,7 @@ RESQLITE_HOT static int b64_neon_bulk(
     }
     return i;
 }
-#endif // RESQLITE_HAS_NEON
+#endif // RESQLITE_HAS_NEON_BASE64
 
 // Write the trailing 1 or 2 input bytes (data[i..len)) as a padded base64
 // group at `out`, advancing it by 4. No-op when `i == len`.
@@ -147,7 +147,7 @@ int resqlite_json_write_base64(resqlite_buf* __restrict b,
     unsigned char* out = b->data + b->len;
     int i = 0;
 
-#if RESQLITE_HAS_NEON
+#if RESQLITE_HAS_NEON_BASE64
     // SIMD bulk: 48 input bytes -> 64 output bytes per iteration on AArch64.
     // The kernel is out-of-line so the small-blob path — which never enters it
     // — keeps the scalar layout.
@@ -246,39 +246,6 @@ static const char json_esc_char[256] = {
 
 static const char json_hex_digits[] = "0123456789abcdef";
 
-#if RESQLITE_HAS_NEON
-// Fused safe-prefix scan + copy for long JSON strings. Each loaded vector is
-// classified for the only bytes that require JSON escaping (< 0x20, quote,
-// and backslash). A fully safe vector is stored directly to the destination,
-// removing the scalar path's separate scan and later memcpy traversal. The
-// first vector containing an escapable byte is left untouched for the exact
-// scalar fallback below. Kept out-of-line so short strings retain the scalar
-// function's register footprint and code layout.
-__attribute__((noinline))
-RESQLITE_HOT static int json_copy_safe_prefix_neon(
-    const unsigned char* __restrict src,
-    int len,
-    unsigned char* __restrict dst
-) {
-    const uint8x16_t space = vdupq_n_u8(0x20);
-    const uint8x16_t quote = vdupq_n_u8('"');
-    const uint8x16_t backslash = vdupq_n_u8('\\');
-
-    int i = 0;
-    while (i <= len - 16) {
-        uint8x16_t bytes = vld1q_u8(src + i);
-        uint8x16_t needs_escape = vorrq_u8(
-            vcltq_u8(bytes, space),
-            vorrq_u8(vceqq_u8(bytes, quote), vceqq_u8(bytes, backslash))
-        );
-        if (RESQLITE_UNLIKELY(vmaxvq_u8(needs_escape) != 0)) break;
-        vst1q_u8(dst + i, bytes);
-        i += 16;
-    }
-    return i;
-}
-#endif // RESQLITE_HAS_NEON
-
 RESQLITE_HOT static int json_write_u00_escape(resqlite_buf* b, unsigned char c) {
     if (buf_ensure(b, 6) != 0) return -1;
     unsigned char* out = b->data + b->len;
@@ -292,15 +259,8 @@ RESQLITE_HOT static int json_write_u00_escape(resqlite_buf* b, unsigned char c) 
     return 0;
 }
 
-#if RESQLITE_HAS_NEON
-__attribute__((noinline))
-RESQLITE_HOT static int json_write_string_scalar(resqlite_buf* __restrict b,
-                                                 const char* s, int len)
-#else
 int resqlite_json_write_string(resqlite_buf* __restrict b,
-                               const char* s, int len)
-#endif
-{
+                               const char* s, int len) {
     if (buf_write_char(b, '"') != 0) return -1;
 
     int start = 0;
@@ -353,52 +313,6 @@ int resqlite_json_write_string(resqlite_buf* __restrict b,
 
     return buf_write_char(b, '"');
 }
-
-#if RESQLITE_HAS_NEON
-// Long-string dispatcher. The SIMD attempt commits only when the complete
-// input is escape-free. If any full vector or scalar tail byte needs escaping,
-// reset the logical buffer length and run the byte-identical scalar encoder.
-// That keeps the scalar implementation and all post-first-escape behavior
-// isolated from the SIMD function's register state.
-__attribute__((noinline))
-RESQLITE_HOT static int json_write_string_neon_safe(
-    resqlite_buf* __restrict b, const char* s, int len
-) {
-    int original_len = b->len;
-    if (buf_write_char(b, '"') != 0) return -1;
-    if (buf_ensure(b, len) != 0) return -1;
-
-    unsigned char* out = b->data + b->len;
-    int copied = json_copy_safe_prefix_neon(
-        (const unsigned char*)s, len, out
-    );
-
-    int fully_safe = copied > len - 16;
-    if (fully_safe) {
-        for (int i = copied; i < len; i++) {
-            if (json_esc_len[(unsigned char)s[i]] != 0) {
-                fully_safe = 0;
-                break;
-            }
-        }
-    }
-
-    if (!fully_safe) {
-        b->len = original_len;
-        return json_write_string_scalar(b, s, len);
-    }
-
-    if (copied < len) memcpy(out + copied, s + copied, len - copied);
-    b->len += len;
-    return buf_write_char(b, '"');
-}
-
-int resqlite_json_write_string(resqlite_buf* __restrict b,
-                               const char* s, int len) {
-    if (len >= 64) return json_write_string_neon_safe(b, s, len);
-    return json_write_string_scalar(b, s, len);
-}
-#endif // RESQLITE_HAS_NEON
 
 // ---------------------------------------------------------------------------
 // Test support
