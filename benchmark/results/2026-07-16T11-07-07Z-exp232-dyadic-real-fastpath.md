@@ -1,12 +1,13 @@
-# Experiment 232: exact quarter-step REAL JSON fast path
+# Experiment 232: reject exact quarter-step REAL JSON fast path
 
 - **Date:** 2026-07-16
 - **Environment:** Apple M1 Pro, macOS 26.2, Dart 3.12.2 (`macos_arm64`)
 - **Baseline:** `0ae826fe397a569e374260a80e5fa9d421bf5ff7` (`origin/main`)
-- **Candidate:** `exp-232-dyadic-real-fastpath`
-- **Harness:** `benchmark/experiments/select_bytes_real_int_fastpath.dart`
+- **Candidate:** [`archive/exp-232`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-232) (`4b972ebbe60aa3627c0bff9b238eb183f828c586`)
+- **Harness:** [`archive/exp-232: benchmark/experiments/select_bytes_real_int_fastpath.dart`](https://github.com/danReynolds/resqlite/blob/archive/exp-232/benchmark/experiments/select_bytes_real_int_fastpath.dart)
+- **Decision:** Rejected
 
-## Decision gate
+## Original mechanism gate (insufficient)
 
 - 10k × 8 and 10k × 20 exact quarter-step REAL lanes: at least 20%
   candidate-faster in both orderings.
@@ -18,25 +19,29 @@
   admission/rejection assertions.
 - 1k × 2 quarter-step lane: supporting and non-regressing, not a primary gate.
 
+This gate established mechanism speed and compatibility, but omitted the three
+questions needed to ship a narrow hot-path specialization: representative
+incidence, expected aggregate value after miss tax, and permanent complexity.
+
 ## Methodology
 
 Each lane reports the median microseconds per `selectBytes()` query across six
 rounds after warmup. Both worktrees used the same harness, dependencies, SQLite
-fixtures, and native build settings. Untimed setup assertions prove that:
+fixtures, and native build settings. Untimed setup assertions proved that:
 
-- integral controls remain SQLite `REAL` and are exactly integral;
-- target cells remain non-integral SQLite `REAL` values in `.25/.5/.75` steps;
-- fallback controls remain SQLite `REAL` eighth steps that cannot enter the
+- integral controls remained SQLite `REAL` and exactly integral;
+- target cells remained non-integral SQLite `REAL` values in `.25/.5/.75` steps;
+- fallback controls remained SQLite `REAL` eighth steps that could not enter the
   quarter specialization.
 
 This was a heavily shared development host. A full candidate-first pass stayed
 clean and supplies the first ordering. Several later full passes were invalid
 because unrelated Dart/Rust/Chrome jobs started between late lanes. For the
-baseline-first confirmation, the same harness was temporarily given a
-lane-only switch so each baseline/candidate control was temporally adjacent;
-the switch was removed before publication. Controls used short B–C–B–C or
-B–C–B sequences (with one final baseline closeout), not a different workload:
-row generation, warmup, iterations, and six-round median logic were unchanged.
+baseline-first confirmation, the same harness was temporarily given a lane-only
+switch so each baseline/candidate control was temporally adjacent; the switch
+was removed before publication. Controls used short B–C–B–C or B–C–B sequences
+(with one final baseline closeout), not a different workload: row generation,
+warmup, iterations, and six-round median logic were unchanged.
 
 ## Candidate-first full pass
 
@@ -75,41 +80,67 @@ points, consistent with the host noise that required lane-adjacent confirmation.
 
 ## Interpretation
 
-The two primary quarter-step widths improve by roughly **4.5× to 7.8×** in
-both orderings, far beyond the 20% gate. The mixed lane is about **2× faster**,
-matching its four specialized cells. Every load-bearing control comparison is
-inside ±2.7% in the reported decision pairs, and each control sequence median
-is inside ±1.5%. Exp 194's integral path and the general `snprintf` fallback
-therefore remain inside the preset effect floor. The small lane confirms the
-fixed-cost case still benefits.
+The formatter mechanism is real. The primary quarter-step widths improve by
+roughly **4.5× to 7.8×** in both orderings, and the synthetic row with four
+quarter cells out of eight is about **2× faster**. Dense signed/magnitude
+coverage plus 100k deterministic random quarter values also proved byte
+identity with the historical formatter.
 
-The result applies to exact `.25`, `.5`, and `.75` REAL values below the
-conservative `abs(value) < 1e15` bound. It does not claim a general float
-formatter win.
+Those lanes measure a ceiling, not product value. The target rows are 100%
+eligible and the mixed row is 50% eligible, while no production trace,
+representative application, or measured schema distribution established the
+real eligible share. All three summaries of the non-quarter fractional control
+lean candidate-slower: +1.35%, +1.95%, and +0.65% for the repeat-sequence
+median. The differences are below the noise floor, but the direction is
+mechanistically plausible because each miss performs extra classification.
 
-## Correctness and placement evidence
+Using the 20-column target/control deltas as a rough linear estimate, exact
+quarters would need to represent about **1.6% to 2.6%** of non-integral REAL
+cells merely to offset that possible miss tax. There is no evidence that they
+clear that floor, nor that fractional REAL formatting contributes materially to
+end-to-end application wall time.
 
-- Dense signed/magnitude quarter coverage plus 100k deterministic random
-  quarter values matches forced `snprintf("%.17g")` byte for byte. Its path
-  assertion runs the shared production dispatch implementation, so a removed
-  or dead specialization cannot pass vacuously through fallback.
-- Integral, non-quarter, non-finite, negative-zero, and magnitude-boundary
-  values are explicitly rejected by the specialization and match the same
-  oracle through the shipped formatter.
-- AArch64 `-O3` assembly review found the integral per-cell predicate/encoder
-  instruction-equivalent to baseline and branching before quarter admission.
-  The final hybrid adds only once-per-query FP register preservation to the
-  caller; ordinary fractional cells keep exactly one `snprintf` call, while
-  admitted quarters alone call the out-of-line fixed-point writer.
-- Strict C warning builds produced no candidate-specific warning. The portable
-  `RESQLITE_NOINLINE` macro covers MSVC, GCC, and Clang spelling.
+## Correctness and implementation evidence
+
+The archived prototype was correct and well placed:
+
+- dense signed/magnitude quarters and 100k deterministic random quarters
+  matched forced `snprintf("%.17g")` byte for byte;
+- integral, non-quarter, non-finite, negative-zero, and magnitude-boundary
+  values were explicitly rejected and matched the same oracle through fallback;
+- AArch64 `-O3` assembly review found the integral predicate/encoder before
+  quarter admission and instruction-equivalent to baseline;
+- strict C warning builds produced no candidate-specific warning.
+
+But preserving that behavior required 114 native/build-hook lines plus
+quarter-specific tests and benchmark lanes: a value-lattice branch, strict
+magnitude boundary, negative-subunit formatting, portable no-inline wrapper,
+and two exported native test hooks, including one exposing production-path
+admission.
+
+## Decision
+
+**Rejected.** The mechanism cleared its synthetic speed and correctness gates,
+but its representative incidence and aggregate benefit were unproven, while
+its maintenance surface would be permanent in the generic REAL formatter.
+
+The runtime, native test exports, quarter-specific tests, and quarter-only
+harness lanes are removed from the publication branch. The exact tested
+prototype remains at `archive/exp-232`. The harness retains only a generic
+untimed invariant that exp 194's integral and fractional fixtures remain SQLite
+`REAL` and exercise their intended paths.
+
+Reopen only with production/downstream or representative-application evidence
+showing both that fractional REAL formatting is material and that exact quarter
+steps occur often enough to produce meaningful aggregate value after miss tax.
+Do not generalize this synthetic result to eighths or another value lattice.
 
 ## Invalidated observations
 
-Prototype and full-script passes taken while unrelated Fleury/Flark/Foreman
-test or build jobs were active were discarded before the decision. Their
+Prototype and full-script passes taken while unrelated Fleury/Flark/Foreman test
+or build jobs were active were discarded before the decision. Their
 code-identical controls moved by 4–100% and sometimes changed sign. One useful
-prototype finding was retained in the implementation: making every fractional
-miss call an out-of-line recognizer added a plausible per-cell fallback cost,
-so the final shape keeps admission inline and crosses the helper boundary only
-for admitted quarters.
+prototype finding remains part of the record: making every fractional miss call
+an out-of-line recognizer added a plausible per-cell fallback cost, so the final
+prototype kept admission inline and crossed the helper boundary only for
+admitted quarters.

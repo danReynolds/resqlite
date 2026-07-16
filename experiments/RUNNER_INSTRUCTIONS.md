@@ -40,10 +40,11 @@ An experiment whose win exists only as new public API, and does not clear this
 bar, is rejected on those grounds. Record the surface cost as the reason so
 future runners do not re-propose it.
 
-Default toward implementation experiments when there is a plausible, bounded
-performance change to try. Measurement-only runs are lower-frequency support
-work: use them when implementation would otherwise be speculative, not as an
-equal-priority substitute for changing the hot path.
+For exploit runs, default toward implementation experiments when a plausible,
+bounded change also clears the value and representativeness gate below.
+Moonshots follow their separate frontier-evidence rule. Measurement-only runs
+are lower-frequency support work: use them when implementation would otherwise
+be speculative, not as an equal-priority substitute for changing the hot path.
 
 When extra measurement is needed, prefer adding the few counters, profile lanes,
 or focused probes directly inside the performance experiment that will consume
@@ -127,6 +128,67 @@ the new counter or aggregate evidence, not a production code-path change.
 
 ## Experiment Selection
 
+### Value before mechanism
+
+A focused all-hit benchmark can prove that a mechanism works; it cannot prove
+that the mechanism matters to real users. Before claiming an **exploit** slot,
+briefly rank at least three plausible candidates from different live directions
+when available. Do not choose the easiest candidate to isolate merely because
+it can produce a large synthetic percentage.
+
+For each shortlisted exploit candidate, record:
+
+- **Representative incidence.** Name the evidence that the affected operation
+  and eligible data shape occur often enough to matter: a production/downstream
+  trace, an AOT trace from a representative application, a release workload, a
+  representative schema, or an existing measured distribution. An assertion
+  that a value or shape is "common" is not evidence.
+- **Expected aggregate value.** Estimate `operation frequency × eligible share
+  × per-hit saving`, then subtract any miss-path tax. The estimate may be rough,
+  but it must distinguish a broad win from a large multiplier on a tiny slice.
+- **Persistent complexity budget.** List the branches, helpers, platform paths,
+  exported test hooks, state, or semantic boundaries that would remain on main.
+  Narrower eligibility requires stronger incidence evidence as this maintenance
+  surface grows.
+
+For a distribution-dependent narrow specialization — such as a value lattice,
+rare query shape, or caller pattern — shipping requires a representative mixture
+backed by the incidence evidence above. A 100%-eligible target is a
+mechanism/ceiling lane, not a product-value adoption gate.
+
+For a size, width, or count threshold, keep two distinct gates. The first
+admitted threshold workload remains the load-bearing **path-level** adoption
+lane: it must clear the declared performance bar, and a far-end win cannot
+rescue it. Separately, representative incidence and aggregate value must show
+that the operation and admitted payload distribution matter enough to repay the
+complexity. Neither gate substitutes for the other.
+
+Moonshots may be claimed without representative incidence when they attack a
+meaningful architectural ceiling and the bounded prototype will leave useful
+falsification or feasibility evidence. They must still state their complexity
+risk. A narrow runtime win from that prototype may not ship until it clears the
+representative-incidence and aggregate-value gate; otherwise reject/archive the
+runtime while preserving the frontier evidence.
+
+If prevalence is unknown for an exploit, measure it in the same run. If the
+signal supports the candidate, execute it; if it refutes the premise, close the
+candidate under the existing **premise refuted** escape; if implementation is
+genuinely beyond the run, use the existing **out of budget** escape. This does
+not create a separate incidence-only exception to the measurement rule below.
+
+Apply a local-search brake as well: after two consecutive experiments in the
+same subsystem or mechanism family, another exploit there needs fresh
+production/release evidence, a relevant external runtime change, or a newly
+resolved measurement blocker. A prior experiment merely naming the next nearby
+micro-optimization is not enough.
+
+A direction marked `watch` with no unblocked candidate needs the same fresh
+trigger; adjacency to its last experiment is not enough. If no exploit clears
+this gate, do not manufacture one: choose a qualifying moonshot when cadence
+allows, or refresh/prune the signal map without claiming an experiment number.
+Any measurement-only claim still follows "A measurement run carries the
+experiment it unlocks" and its two named escape hatches.
+
 Before coding, write a short working note for yourself:
 
 - whether this run is **exploit** or **moonshot**, and why the current cadence
@@ -141,6 +203,10 @@ Before coding, write a short working note for yourself:
   why that candidate cannot be attempted in the same pass
 - what new evidence, benchmark, workload, implementation shape, or external
   change makes it worth trying now
+- for an exploit: the candidate shortlist, incidence evidence, expected
+  aggregate value, and persistent complexity budget from the gate above; for a
+  moonshot: the meaningful ceiling evidence and what product-value evidence
+  would still be required before shipping a narrow runtime result
 - what result would make you accept, reject, or defer the idea
 - for runs that add measurement, the specific implementation experiment the
   measurement unlocks — which this same run must then execute and report

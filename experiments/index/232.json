@@ -1,7 +1,7 @@
 {
   "file": "232-dyadic-real-fastpath.md",
-  "title": "Exact quarter-step REAL JSON fast path",
-  "impact": "Extends exp 194's selectBytes REAL encoder with a conservative exact `.25`/`.5`/`.75` specialization under `abs(value) < 1e15`: multiply by four, reuse the native i64 formatter, and append a fixed suffix while every miss retains `snprintf(\"%.17g\")`. Order-flipped focused measurements improve 10k x 8/20 quarter-step REAL lanes by -78% to -87% (roughly 4.5x-7.8x), mixed rows by -50% to -53%, with integral and non-quarter fractional controls inside +/-2.7%. Dense forced-snprintf differential coverage proves byte identity and explicit admission/rejection; no public API change.",
-  "status": "accepted",
+  "title": "Reject exact quarter-step REAL JSON fast path",
+  "impact": "Rejects exp 232's narrow `.25`/`.5`/`.75` selectBytes REAL specialization despite a real 78-87% all-hit mechanism win and 50-53% improvement in a synthetic 50%-eligible row. No production or representative distribution established sufficient incidence or aggregate user benefit; general fractional controls leaned 0.65-1.95% slower, while the candidate added 114 native/build-hook lines plus permanent value-lattice semantics and test surface. Runtime and quarter-only scaffolding are removed; the exact prototype is archived and a generic REAL fixture invariant is retained.",
+  "status": "rejected",
   "link": ""
 }

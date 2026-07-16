@@ -1,151 +1,140 @@
-# Experiment 232: Exact quarter-step REAL JSON fast path
+# Experiment 232: Reject exact quarter-step REAL JSON fast path
 
 **Date:** 2026-07-16
-**Status:** Accepted
+**Status:** Rejected
 **Direction:** `result-transfer-shape`
 **Benchmark Run:** none — focused
-  [`benchmark/experiments/select_bytes_real_int_fastpath.dart`](../benchmark/experiments/select_bytes_real_int_fastpath.dart);
-  order-flipped measurements recorded in
+  The exact tested harness and runtime are preserved at
+  [`archive/exp-232`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-232),
+  with order-flipped measurements recorded in
   [`benchmark/results/2026-07-16T11-07-07Z-exp232-dyadic-real-fastpath.md`](../benchmark/results/2026-07-16T11-07-07Z-exp232-dyadic-real-fastpath.md).
-  No release-suite run because the focused harness directly isolates
-  quarter-step REAL formatting, integral/fractional guards, mixed rows, and the
-  small fixed-cost case.
+  No release-suite run was used because no release lane isolates exact
+  quarter-step REAL formatting.
+**Archive:** [`archive/exp-232`](https://github.com/danReynolds/resqlite/compare/main...archive/exp-232)
 
 ## Problem
 
 [Exp 194](194-real-integer-fastpath.md) removed `snprintf("%.17g")` from
-`selectBytes()` for REAL cells that are exactly integral, producing roughly
-5× faster integral-REAL encoding while leaving genuine fractionals on the
-general formatter. Its future note explicitly allowed a much smaller
-fractional specialization than the broad Ryu/Grisu formatter rejected by
-[exp 041](041-ryu-double-to-string.md), provided a focused workload and exact
-compatibility gate justified it.
+`selectBytes()` for REAL cells that are exactly integral. Its future note was
+deliberately stricter about fractional work: pursue another specialization only
+if a real production profile shows fractional REAL formatting dominates.
 
-The narrowest useful next domain is exact quarter steps: `.25`, `.5`, and
-`.75`. They are common in ratings, prices, percentages, and bucketed metrics;
-binary doubles represent them exactly; multiplying by four produces an exact
-integer; and their canonical `%.17g` spelling is a whole-number prefix plus one
-of three fixed suffixes. Paying a general decimal formatter per cell removes
-work that this bounded domain does not need.
-
-This Thursday run is an **exploit** pass: a contained extension of exp 194's
-known REAL-cell hot path, not a retry of exp 041's general formatter.
+This run skipped that prerequisite. It reasoned that exact `.25`, `.5`, and
+`.75` values occur in domains such as ratings and prices, then moved directly
+to an all-quarter focused benchmark. That made the mechanism easy to isolate,
+but it did not establish how often the value lattice occurs in representative
+`selectBytes()` traffic.
 
 ## Hypothesis
 
 For a finite, non-integral REAL value with `abs(value) < 1e15`, if `value * 4`
 is exactly integral and not divisible by four, the historical
-`snprintf("%.17g")` output can be emitted byte-identically by reusing the native
-i64 formatter for the whole part and appending `.25`, `.5`, or `.75`.
+`snprintf("%.17g")` spelling can be emitted by reusing the native i64 formatter
+and appending `.25`, `.5`, or `.75`.
 
-Accept only if both 10k × 8 and 10k × 20 quarter-step lanes improve at least
-20% in both orderings, mixed rows improve at least 5%, and every integral plus
-general-fractional control stays inside ±3%. The shipped and forced-historical
-formatters must also agree byte for byte, with tests proving intended values
-are admitted and fallback values are rejected.
+The original acceptance gate required at least 20% improvement on synthetic
+10k × 8 and 10k × 20 quarter-step lanes in both orderings, at least 5% on a
+synthetic 50%-quarter mixed row, and integral/general-fractional controls inside
+±3%. That gate could prove a fast formatter. It was insufficient to prove that
+permanent specialization of the generic REAL path was worth shipping because
+it omitted activation prevalence, expected aggregate impact, and a persistent
+complexity budget.
 
 ## Approach
 
-The native REAL formatter now performs three ordered decisions:
+The archived prototype placed exp 194's zero and exact-integral checks first,
+then:
 
-1. Exp 194's zero and exact-integral checks run first and are unchanged.
-2. `resqlite_json_quarter_units` admits only finite values strictly inside
-   `[-1e15, 1e15]` whose four-times-scaled value converts exactly to
-   `long long` and has a non-zero remainder modulo four.
-3. Admitted values call the out-of-line `resqlite_json_write_quarter`, which
-   formats the whole part with `resqlite_json_i64_to_str` and appends the exact
-   suffix. Every miss falls directly through to the historical
-   `snprintf("%.17g")` call.
+1. multiplied other REAL values by four and admitted exact non-integral quarter
+   units inside a strict `abs(value) < 1e15` bound;
+2. called an out-of-line fixed-point writer that reused the i64 formatter and
+   appended the exact suffix;
+3. sent every miss to the historical `snprintf("%.17g")` fallback.
 
-The strict magnitude bound keeps the scaled cast far inside `long long` and
-keeps fixed notation at no more than 17 significant digits. Negative sub-unit
-values receive an explicit `-0` prefix because C integer division truncates
-toward zero. The specialization shares the formatter's existing C-locale
-assumption; no public API or JSON framing changes.
+Correctness required special handling for negative sub-unit values, the strict
+magnitude boundary, a portable no-inline wrapper, and two exported native test
+hooks, including one exposing production-path admission. The candidate added
+114 lines across `native/` and the build hook, plus quarter-specific tests and
+benchmark lanes. The behavior was byte-identical, but the maintenance surface
+was permanent and every non-integral REAL miss still evaluated the new
+recognizer.
 
-Admission is inline but spelling is out of line. That placement was selected
-after prototyping: calling an out-of-line recognizer on every fractional miss
-made fallback overhead plausible, while fully inlining the spelling body
-unnecessarily reshaped the caller. In the kept hybrid, exp 194's integral
-per-cell instructions branch before admission, ordinary fractionals retain one
-`snprintf` call, and only admitted quarters cross the helper boundary. A new
-portable `RESQLITE_NOINLINE` macro uses `__declspec(noinline)` on MSVC and the
-GCC/Clang attribute elsewhere.
-
-The existing REAL focused harness now includes quarter-step ×8/×20 lanes, a
-mixed lane, and a small confirmation lane. Untimed SQL invariants prove every
-integral, target, and fallback fixture retains the intended SQLite `REAL`
-storage class and exact numeric subdomain before timing. The native differential
-test exposes both the shipped formatter and forced `snprintf` oracle. Its path
-diagnostic runs the shared production dispatch implementation, while production
-passes a null diagnostic pointer that compiles away.
+The focused harness used 100%-quarter target lanes and a mixed row with four
+quarter cells out of eight. Those rows measure the ceiling cleanly; they are not
+representative-incidence evidence. During final review, the candidate was
+reassessed against the product-value question rather than only its preset
+mechanism gate.
 
 ## Results
 
-Medians in microseconds per query; full raw tables and the shared-host
-lane-adjacent methodology are in the linked result file.
+Medians in microseconds per query; full raw tables and shared-host control
+traces are in the linked result file.
 
-| Lane | Candidate-first Δ | Baseline-first Δ | Verdict |
+| Lane | Candidate-first Δ | Baseline-first Δ | Read |
 |---|---:|---:|---|
-| 10k × 8 integral REAL control | -2.67% | +0.38% | inside ±3% |
-| 10k × 20 integral REAL control | +1.63% | -0.35% | inside ±3% |
-| 10k × 8 quarter-step REAL | **-85.44%** | **-77.95%** | primary gate passed |
-| 10k × 20 quarter-step REAL | **-87.23%** | **-86.82%** | primary gate passed |
-| 10k × 20 non-quarter fractional REAL control | +1.35% | +1.95% | inside ±3% |
-| 10k × 8 mixed | **-52.90%** | **-50.22%** | confirmation passed |
-| 1k × 2 quarter-step REAL | -80.41% | -76.83% | supporting win |
+| 10k × 8 integral REAL control | -2.67% | +0.38% | neutral/mixed |
+| 10k × 20 integral REAL control | +1.63% | -0.35% | neutral/mixed |
+| 10k × 8 quarter-step REAL | **-85.44%** | **-77.95%** | mechanism reproduced |
+| 10k × 20 quarter-step REAL | **-87.23%** | **-86.82%** | mechanism reproduced |
+| 10k × 20 non-quarter fractional REAL | +1.35% | +1.95% | miss path leans slower |
+| 10k × 8 synthetic 50%-quarter mixed | **-52.90%** | **-50.22%** | expected synthetic mix |
+| 1k × 2 quarter-step REAL | -80.41% | -76.83% | supporting mechanism win |
 
-Quarter-heavy REAL encoding is roughly **4.5× to 7.8× faster** at the primary
-widths. The mixed rowset is about **2× faster**, moving in proportion to its
-four specialized cells. Integral and genuine-fractional controls stay inside
-the preset effect floor in both selected orderings, confirming that the win is
-confined to the intended decimal lattice.
+The quarter formatter itself is roughly **4.5× to 7.8× faster**. Correctness
+coverage also proved exact byte identity across dense signed quarters,
+bound-adjacent magnitudes, and 100k deterministic random quarter values.
 
-Direct differential coverage agrees with forced `snprintf("%.17g")` across
-dense signed quarters, bound-adjacent magnitudes, and 100k deterministic random
-quarter values. A diagnostic on the shared production dispatch separately
-proves quarter values enter the specialization and non-quarter, integral,
-non-finite, negative-zero, and out-of-bound values do not.
+That is not the same as product value. All three summaries of the non-quarter
+fractional control lean candidate-slower: +1.35%, +1.95%, and +0.65% for the
+repeat-sequence median. They remain below the noise floor, but the direction is
+mechanistically plausible because every miss performs extra classification.
+Using the 20-column target/control deltas as a rough linear estimate, exact
+quarters would need to comprise about **1.6% to 2.6%** of non-integral REAL
+cells merely to offset that miss tax. No production or representative
+distribution established even that incidence, and no evidence showed
+fractional REAL formatting materially affects end-to-end application wall time.
 
 ## Decision
 
-**Accepted.** Keep the exact quarter-step specialization. It is a conservative,
-behavior-preserving extension of exp 194 with a very large reproduced target
-win, flat load-bearing controls, no public API change, and a direct byte oracle.
+**Rejected.** Keep exp 194's exact-integral specialization and remove the
+quarter-step runtime path.
 
-The release suite is not the useful denominator: no current public lane
-isolates quarter-heavy REAL JSON formatting. The expanded
-`select_bytes_real_int_fastpath.dart` harness and native REAL differential are
-the durable gates.
+The mechanism cleared its synthetic speed and correctness gates, but the run
+did not prove a common workload, representative activation rate, or aggregate
+user benefit large enough to repay a value-specific branch in the generic REAL
+formatter. The exact candidate is preserved at `archive/exp-232`; runtime,
+quarter-specific test exports, and quarter-only harness lanes are removed from
+the publication branch. The only retained harness change is a generic untimed
+assertion that exp 194's integral and fractional fixtures remain SQLite `REAL`
+and exercise their intended formatter paths.
 
-## Future Notes
+Reopen only with a production/downstream trace or representative application
+showing both that fractional REAL formatting is material and that exact quarter
+steps occur often enough to produce a meaningful aggregate win. A smaller
+implementation or a broad fractional mechanism would lower the evidence burden.
+Do not generalize this result to eighths or another synthetic value lattice.
 
-- Keep the exact-integral check before quarter admission and preserve the
-  strict `abs(value) < 1e15` boundary. Values at or above it can require a
-  different `%.17g` rounded spelling.
-- Any further fractional lattice (for example exact eighths) needs its own
-  representative workload, at least the same target bar, the non-quarter
-  fallback guard, and forced-historical byte comparison. Do not infer a broad
-  float-formatting mandate from this narrow win.
-- The `native REAL formatter differential` group is now the compatibility gate
-  for future number spelling changes. Tests must assert path admission as well
-  as final bytes so a dead specialization cannot pass vacuously.
+## Selection lesson
+
+The failure happened before benchmarking: the runner optimized an easy-to-test
+subdomain without first ranking its expected product value against other live
+directions. The exploit-selection rubric now requires representative incidence,
+expected aggregate value after miss tax, an explicit persistent-complexity
+budget, and a cross-direction shortlist. Moonshots may still probe meaningful
+ceilings, but a narrow runtime result needs the product-value evidence before it
+ships. Synthetic 100%-eligible lanes are mechanism evidence only.
 
 ## Validation
 
-- `dart pub get` in candidate and baseline worktrees.
-- `dart run build_runner build --delete-conflicting-outputs`.
-- Strict Clang C11 syntax/warning build of `native/resqlite_json.c`.
-- `dart analyze --fatal-infos` — full repository, no issues.
-- `dart test test/native_encoder_diff_test.dart` — 9/9 pass.
-- `dart test test/database_test.dart --plain-name selectBytes` — 9/9 pass.
-- `dart test test/benchmark_pipeline_test.dart` — 20/20 pass.
-- `dart run benchmark/check_experiment_dispositions.dart` — no stranded
-  in-review sources.
-- `dart run benchmark/finalize_experiment.dart --experiment=experiments/232-dyadic-real-fastpath.md`
-  — generated-source and signal checks pass.
-- `dart test -j 1` — full serial suite, 328/328 pass.
-- Full candidate-first benchmark plus lane-adjacent baseline-first confirmation;
-  every target and control fixture invariant passed.
-- Independent AArch64/x86_64 code-generation, arithmetic, portability, and
-  warning audit; no correctness or platform blocker found.
+- Archived prototype: strict Clang C11 warning build, full analysis, direct
+  native differential 9/9, selectBytes 9/9, benchmark pipeline 20/20, and full
+  serial suite 328/328.
+- Final publication branch: runtime and quarter-specific test/harness changes
+  removed; generic REAL fixture invariant retained and exercised by the focused
+  harness.
+- `dart run benchmark/finalize_experiment.dart --experiment=experiments/232-dyadic-real-fastpath.md`.
+- `dart run benchmark/check_experiment_dispositions.dart`.
+- `dart analyze --fatal-infos`.
+- `dart test test/benchmark_pipeline_test.dart`.
+- Direct native differential 7/7 and full serial suite 326/326.
+- JSON validation and `git diff --check`.

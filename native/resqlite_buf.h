@@ -18,14 +18,6 @@
 #define RESQLITE_HOT __attribute__((hot))
 #endif
 
-#if defined(_MSC_VER)
-#define RESQLITE_NOINLINE __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-#define RESQLITE_NOINLINE __attribute__((noinline))
-#else
-#define RESQLITE_NOINLINE
-#endif
-
 #if defined(__GNUC__) || defined(__clang__)
 #define RESQLITE_LIKELY(expr) __builtin_expect(!!(expr), 1)
 #define RESQLITE_UNLIKELY(expr) __builtin_expect(!!(expr), 0)

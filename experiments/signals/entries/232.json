@@ -2,17 +2,17 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "accepted",
+  "outcomeClass": "rejected_preserved_potential",
   "changedBeliefs": [
-    "Exp 194's exact-integral REAL specialization can safely extend to one narrow fractional lattice without reviving exp 041's general float formatter: finite exact `.25`/`.5`/`.75` values under `abs(value) < 1e15` multiply by four to an exactly representable integer, reuse the native i64 formatter, and append a fixed suffix byte-identical to `snprintf(\"%.17g\")` under the formatter's existing C-locale assumption.",
-    "Order-flipped focused evidence clears the preset gate by a wide margin: 10k x 8 quarter-step REAL improves -85.44% / -77.95%, 10k x 20 improves -87.23% / -86.82%, mixed rows improve -52.90% / -50.22%, and the 1k x 2 confirmation improves -80.41% / -76.83%. Integral and non-quarter fractional controls are individually inside +/-2.7% in both selected orderings.",
-    "Placement matters even for scalar formatting: the kept hybrid leaves exp 194's integral per-cell instructions before admission, performs quarter recognition inline so general fractionals retain exactly one `snprintf` call, and calls the out-of-line fixed-point writer only for admitted values. An out-of-line miss recognizer and a fully inlined spelling body were both inferior structural shapes.",
-    "The REAL formatter now has a direct compatibility oracle, not only value-level JSON round trips. Dense and randomized tests compare shipped bytes to forced `snprintf`, and separately assert that quarter values are admitted while integral, non-quarter, non-finite, negative-zero, and magnitude-boundary values are rejected."
+    "The exact-quarter mechanism is technically valid: `.25`/`.5`/`.75` REAL values under `abs(value) < 1e15` can reuse the i64 formatter with byte-identical spelling, and synthetic all-hit lanes improve 78-87% across both orderings.",
+    "Synthetic eligibility is not adoption evidence. The 100%-quarter targets and 50%-quarter mixed row establish a ceiling, but exp 232 supplied no production trace, representative application, or schema distribution after exp 194 explicitly required a production profile before fractional specialization.",
+    "Every summary of the general fractional control leaned candidate-slower (+1.35%, +1.95%, and +0.65% sequence median). A rough linear estimate requires exact quarters to comprise about 1.6-2.6% of non-integral REAL cells merely to offset the possible miss tax, and no evidence established that incidence.",
+    "A narrow value-lattice win does not repay 114 native/build-hook lines plus permanent boundary, negative-subunit, and no-inline semantics and two exported test hooks, including one exposing production-path admission, without aggregate product evidence. The runtime is rejected and preserved only at `archive/exp-232`."
   ],
   "nextSignals": [
-    "Keep `benchmark/experiments/select_bytes_real_int_fastpath.dart` as the durable REAL JSON gate. Future changes must preserve its integral controls, 8/20-column quarter targets, non-quarter fractional control, mixed lane, small confirmation, and untimed SQLite REAL/subdomain invariants.",
-    "Preserve decision order and boundaries: exact integral first; exact quarter only when finite, `abs(value) < 1e15`, four-times scaling is exact, and modulo four is non-zero; everything else stays on `snprintf(\"%.17g\")`. The strict bound is compatibility policy, not a tuning knob.",
-    "A further fractional specialization (such as exact eighths) is interesting only with a representative workload, a >=20% reproduced target win, every existing control inside the effect floor, and forced-historical bytes plus explicit path-admission tests. Do not retry a broad Ryu/Grisu formatter from this result.",
-    "Use the `native REAL formatter differential` test group as the byte-identity gate for all future number-formatting work. Final-output equality alone is insufficient because a specialization that always rejects would pass vacuously."
+    "Keep exp 194's exact-integral REAL path as the only shipped REAL specialization and retain the generic fixture invariant in `select_bytes_real_int_fastpath.dart`.",
+    "Do not retry quarter, eighth, or another fractional lattice without production/downstream or representative-application evidence that fractional REAL formatting is material and the eligible distribution clears aggregate value after miss tax.",
+    "Treat 100%-eligible focused lanes as mechanism/ceiling evidence only. A narrow specialization needs a representative mixture backed by measured incidence as its adoption gate.",
+    "Use `archive/exp-232` if new prevalence evidence reopens the idea; do not reconstruct or broaden the prototype from the benchmark multiplier alone."
   ]
 }

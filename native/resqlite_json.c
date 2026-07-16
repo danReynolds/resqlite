@@ -68,7 +68,7 @@ static void init_b64_pair_table(void) {
 // Byte-for-byte identical output to the scalar path. Consumes as many full
 // 48-byte blocks as fit and returns the input bytes consumed; the caller runs
 // the < 48-byte tail through the scalar loop.
-RESQLITE_NOINLINE
+__attribute__((noinline))
 RESQLITE_HOT static int b64_neon_bulk(
     const unsigned char* __restrict data,
     int len,
@@ -246,41 +246,6 @@ static const char json_esc_char[256] = {
 
 static const char json_hex_digits[] = "0123456789abcdef";
 
-// Exact .25/.5/.75 values need no general float conversion. The inline caller
-// has already multiplied by four and proved this is a non-integral quarter
-// inside the strict 1e15 magnitude bound, where the fixed-point spelling has
-// <= 17 significant digits and is byte-identical to %.17g under the same
-// C-locale assumption as the historical formatter. Only admitted values cross
-// this out-of-line boundary.
-RESQLITE_NOINLINE
-RESQLITE_HOT int resqlite_json_write_quarter(
-    long long quarter_units, char* buf) {
-    // C integer division truncates toward zero, which gives the right whole
-    // spelling for negative values. Sub-unit negatives need an explicit sign
-    // because -1 / 4 is zero.
-    long long whole = quarter_units / 4;
-    int remainder = (int)(quarter_units % 4);
-    if (remainder < 0) remainder = -remainder;
-
-    int len;
-    if (whole == 0 && quarter_units < 0) {
-        buf[0] = '-';
-        buf[1] = '0';
-        len = 2;
-    } else {
-        len = resqlite_json_i64_to_str(whole, buf);
-    }
-
-    buf[len++] = '.';
-    if (remainder == 2) {
-        buf[len++] = '5';
-    } else {
-        buf[len++] = remainder == 1 ? '2' : '7';
-        buf[len++] = '5';
-    }
-    return len;
-}
-
 RESQLITE_HOT static int json_write_u00_escape(resqlite_buf* b, unsigned char c) {
     if (buf_ensure(b, 6) != 0) return -1;
     unsigned char* out = b->data + b->len;
@@ -380,24 +345,4 @@ int resqlite_test_base64_encode(const unsigned char* data, int len,
 // coverage. Not part of the query hot path.
 int resqlite_test_i64_to_str(long long val, char* out) {
     return resqlite_json_i64_to_str(val, out);
-}
-
-// Encode `val` through the shipped REAL formatter, or directly through its
-// historical snprintf("%.17g") fallback when `force_snprintf` is non-zero.
-// The differential test uses the latter as the byte-for-byte compatibility
-// oracle for narrow float fast paths. Caller provides at least 64 output bytes.
-int resqlite_test_double_to_num(double val, char* out, int force_snprintf) {
-    if (force_snprintf) return snprintf(out, 64, "%.17g", val);
-    return resqlite_json_double_to_num(val, out, 64);
-}
-
-// Run the shared production formatter implementation and expose whether that
-// exact dispatch took exp 232's specialization. Returning zero for a rejected
-// value lets the differential test prove a dead/removed production branch
-// cannot pass merely because snprintf emits the same bytes.
-int resqlite_test_try_quarter(double val, char* out) {
-    int used_quarter;
-    int len = resqlite_json_double_to_num_impl(
-        val, out, 64, &used_quarter);
-    return used_quarter ? len : 0;
 }
