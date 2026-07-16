@@ -356,6 +356,8 @@ const _exportedSymbols = [
   // Test-support: differential encoder tests (test/native_encoder_diff_test.dart).
   'resqlite_test_base64_encode',
   'resqlite_test_i64_to_str',
+  'resqlite_test_double_to_num',
+  'resqlite_test_try_quarter',
 ];
 
 bool _isEnabled(Object? value) {

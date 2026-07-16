@@ -84,12 +84,38 @@ RESQLITE_HOT static inline int resqlite_json_i64_to_str(long long val, char* buf
     return len + digits;
 }
 
-// Write a double as a JSON number into `buf` (capacity `buf_size`, includes
-// room for snprintf's NUL). Exact integer-valued doubles reuse the integer
-// encoder; everything else — fractionals, huge magnitudes, non-finite, and
-// negative zero — falls back to snprintf("%.17g"). Returns bytes written.
-RESQLITE_HOT static inline int resqlite_json_double_to_num(
-    double val, char* buf, size_t buf_size) {
+// Recognize exact .25/.5/.75 values inside the conservative fixed-notation
+// bound and return their signed quarter units through `out`. Admission stays
+// inline so ordinary fractional values fall straight through to snprintf
+// without paying an out-of-line miss call.
+static inline int resqlite_json_quarter_units(
+    double val, long long* out) {
+    const double max_exact_quarter = 1000000000000000.0;
+    if (!isfinite(val)
+            || val <= -max_exact_quarter || val >= max_exact_quarter) {
+        return 0;
+    }
+
+    double scaled = val * 4.0;
+    long long quarter_units = (long long)scaled;
+    if ((double)quarter_units != scaled || quarter_units % 4 == 0) return 0;
+    *out = quarter_units;
+    return 1;
+}
+
+// Format already-admitted signed quarter units. Only admitted values cross
+// this out-of-line boundary; general fractionals retain one snprintf call.
+int resqlite_json_write_quarter(long long quarter_units, char* buf);
+
+// Shared implementation for the production formatter and its test diagnostic.
+// Production always passes NULL for `used_quarter`, which lets the compiler
+// erase the diagnostic stores entirely; the direct differential test passes a
+// pointer so it can prove this exact dispatcher takes (or rejects) the narrow
+// quarter-step branch rather than merely observing byte-identical fallback.
+RESQLITE_HOT static inline int resqlite_json_double_to_num_impl(
+    double val, char* buf, size_t buf_size, int* used_quarter) {
+    if (used_quarter != NULL) *used_quarter = 0;
+
     // Keep snprintf for negative zero: JSON permits `-0`, and snprintf preserves
     // the sign bit while the integer fast path would collapse it to `0`.
     if (val == 0.0) {
@@ -111,7 +137,23 @@ RESQLITE_HOT static inline int resqlite_json_double_to_num(
         }
     }
 
+    long long quarter_units;
+    if (resqlite_json_quarter_units(val, &quarter_units)) {
+        if (used_quarter != NULL) *used_quarter = 1;
+        return resqlite_json_write_quarter(quarter_units, buf);
+    }
+
     return snprintf(buf, buf_size, "%.17g", val);
+}
+
+// Write a double as a JSON number into `buf` (capacity `buf_size`, includes
+// room for snprintf's NUL). Exact integer-valued doubles reuse the integer
+// encoder; exact quarter steps inside the conservative fixed-notation bound
+// use the fixed-point writer; everything else falls back to snprintf("%.17g").
+// Returns bytes written.
+RESQLITE_HOT static inline int resqlite_json_double_to_num(
+    double val, char* buf, size_t buf_size) {
+    return resqlite_json_double_to_num_impl(val, buf, buf_size, NULL);
 }
 
 // Write `s` (len bytes) as a quoted, JSON-escaped string. Manages its own

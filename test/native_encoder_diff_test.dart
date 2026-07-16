@@ -61,6 +61,28 @@ external int resqliteTestBase64Encode(
 )
 external int resqliteTestI64ToStr(int val, ffi.Pointer<ffi.Uint8> out);
 
+// Test-support entry for the REAL formatter. `forceSnprintf != 0` bypasses all
+// fast paths and returns the historical %.17g spelling, which is the exact
+// compatibility oracle for exp 232's quarter-step specialization.
+@ffi.Native<ffi.Int Function(ffi.Double, ffi.Pointer<ffi.Uint8>, ffi.Int)>(
+  symbol: 'resqlite_test_double_to_num',
+  isLeaf: true,
+)
+external int resqliteTestDoubleToNum(
+  double val,
+  ffi.Pointer<ffi.Uint8> out,
+  int forceSnprintf,
+);
+
+// Test-support entry that runs the shared production REAL dispatcher and
+// returns its bytes only when that exact dispatch took exp 232's quarter path.
+// A zero return means the value was rejected and used another path.
+@ffi.Native<ffi.Int Function(ffi.Double, ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'resqlite_test_try_quarter',
+  isLeaf: true,
+)
+external int resqliteTestTryQuarter(double val, ffi.Pointer<ffi.Uint8> out);
+
 /// Formats `val` via the shipped native integer formatter.
 String _nativeI64(int val) {
   // RESQLITE_JSON_INT_MAX (24) is the reserved width; a little headroom.
@@ -68,6 +90,29 @@ String _nativeI64(int val) {
   try {
     final n = resqliteTestI64ToStr(val, outPtr);
     expect(n, greaterThanOrEqualTo(1), reason: 'encode returned nothing');
+    return utf8.decode(outPtr.asTypedList(n));
+  } finally {
+    malloc.free(outPtr);
+  }
+}
+
+String _nativeDouble(double val, {required bool forceSnprintf}) {
+  final outPtr = malloc<ffi.Uint8>(64);
+  try {
+    final n = resqliteTestDoubleToNum(val, outPtr, forceSnprintf ? 1 : 0);
+    expect(n, greaterThanOrEqualTo(1), reason: 'encode returned nothing');
+    return utf8.decode(outPtr.asTypedList(n));
+  } finally {
+    malloc.free(outPtr);
+  }
+}
+
+String? _nativeQuarter(double val) {
+  final outPtr = malloc<ffi.Uint8>(64);
+  try {
+    final n = resqliteTestTryQuarter(val, outPtr);
+    if (n == 0) return null;
+    expect(n, greaterThan(0), reason: 'quarter dispatch returned an error');
     return utf8.decode(outPtr.asTypedList(n));
   } finally {
     malloc.free(outPtr);
@@ -195,6 +240,96 @@ void main() {
         final lo = rng.nextInt(1 << 32);
         check((hi << 32) | lo); // may be negative — Dart int is 64-bit signed
         check(rng.nextInt(100000000)); // dense sub-9-digit coverage too
+      }
+    });
+  });
+
+  group('native REAL formatter differential', () {
+    void checkQuarter(double val) {
+      final reference = _nativeDouble(val, forceSnprintf: true);
+      expect(
+        _nativeDouble(val, forceSnprintf: false),
+        reference,
+        reason: 'native REAL formatter diverged from %.17g at val=$val',
+      );
+      expect(
+        _nativeQuarter(val),
+        reference,
+        reason: 'exact quarter value did not take the exp 232 fast path',
+      );
+    }
+
+    void checkFallback(double val) {
+      expect(
+        _nativeDouble(val, forceSnprintf: false),
+        _nativeDouble(val, forceSnprintf: true),
+        reason: 'native REAL formatter diverged from %.17g at val=$val',
+      );
+      expect(
+        _nativeQuarter(val),
+        isNull,
+        reason: 'fallback value was incorrectly admitted by exp 232',
+      );
+    }
+
+    test('exact quarter steps match %.17g across signs and magnitudes', () {
+      for (var whole = -10000; whole <= 10000; whole++) {
+        for (final quarter in const [0.25, 0.5, 0.75]) {
+          checkQuarter(whole < 0 ? whole - quarter : whole + quarter);
+        }
+      }
+
+      const boundaryValues = <double>[
+        -999999999999999.75,
+        -999999999999999.5,
+        -999999999999999.25,
+        -0.75,
+        -0.5,
+        -0.25,
+        0.25,
+        0.5,
+        0.75,
+        123456789012345.25,
+        999999999999999.25,
+        999999999999999.5,
+        999999999999999.75,
+      ];
+      for (final value in boundaryValues) {
+        checkQuarter(value);
+      }
+
+      final rng = Random(0xD1AD1C);
+      for (var i = 0; i < 100000; i++) {
+        final magnitude = rng.nextInt(1000000) * 1000000 + rng.nextInt(1000000);
+        final quarter = const [0.25, 0.5, 0.75][rng.nextInt(3)];
+        checkQuarter(
+          rng.nextBool() ? magnitude + quarter : -magnitude - quarter,
+        );
+      }
+    });
+
+    test('fallback boundaries and non-quarter values match %.17g', () {
+      const values = <double>[
+        -0.0,
+        0.0,
+        1.0,
+        -1.0,
+        0.1,
+        -0.1,
+        0.125,
+        0.375,
+        1.0e-6,
+        1.0e16,
+        1000000000000000.25,
+        -1000000000000000.25,
+        9007199254740992.0,
+        -9007199254740992.0,
+        double.infinity,
+        double.negativeInfinity,
+        double.nan,
+      ];
+      for (final value in values) {
+        checkFallback(value);
       }
     });
   });

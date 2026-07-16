@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 194's exact-integral REAL specialization can safely extend to one narrow fractional lattice without reviving exp 041's general float formatter: finite exact `.25`/`.5`/`.75` values under `abs(value) < 1e15` multiply by four to an exactly representable integer, reuse the native i64 formatter, and append a fixed suffix byte-identical to `snprintf(\"%.17g\")` under the formatter's existing C-locale assumption.",
+    "Order-flipped focused evidence clears the preset gate by a wide margin: 10k x 8 quarter-step REAL improves -85.44% / -77.95%, 10k x 20 improves -87.23% / -86.82%, mixed rows improve -52.90% / -50.22%, and the 1k x 2 confirmation improves -80.41% / -76.83%. Integral and non-quarter fractional controls are individually inside +/-2.7% in both selected orderings.",
+    "Placement matters even for scalar formatting: the kept hybrid leaves exp 194's integral per-cell instructions before admission, performs quarter recognition inline so general fractionals retain exactly one `snprintf` call, and calls the out-of-line fixed-point writer only for admitted values. An out-of-line miss recognizer and a fully inlined spelling body were both inferior structural shapes.",
+    "The REAL formatter now has a direct compatibility oracle, not only value-level JSON round trips. Dense and randomized tests compare shipped bytes to forced `snprintf`, and separately assert that quarter values are admitted while integral, non-quarter, non-finite, negative-zero, and magnitude-boundary values are rejected."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/select_bytes_real_int_fastpath.dart` as the durable REAL JSON gate. Future changes must preserve its integral controls, 8/20-column quarter targets, non-quarter fractional control, mixed lane, small confirmation, and untimed SQLite REAL/subdomain invariants.",
+    "Preserve decision order and boundaries: exact integral first; exact quarter only when finite, `abs(value) < 1e15`, four-times scaling is exact, and modulo four is non-zero; everything else stays on `snprintf(\"%.17g\")`. The strict bound is compatibility policy, not a tuning knob.",
+    "A further fractional specialization (such as exact eighths) is interesting only with a representative workload, a >=20% reproduced target win, every existing control inside the effect floor, and forced-historical bytes plus explicit path-admission tests. Do not retry a broad Ryu/Grisu formatter from this result.",
+    "Use the `native REAL formatter differential` test group as the byte-identity gate for all future number-formatting work. Final-output equality alone is insufficient because a specialization that always rejects would pass vacuously."
+  ]
+}
