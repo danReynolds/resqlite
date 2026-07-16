@@ -272,15 +272,27 @@ optimize for. If it's a niche the API doesn't encourage, or one already
 covered by another well-fitted primitive, the win is orthogonal to the
 product direction and the complexity cost eats it.
 
+[Exp 232](232-dyadic-real-fastpath.md) exposed the same failure through a data
+distribution rather than an API pattern. Exact quarter-step REAL targets were
+78-87% faster and a synthetic row with 50% quarter cells improved 50-53%, but
+no production profile or representative schema established that exact
+`.25`/`.5`/`.75` cells occur often enough to matter. Meanwhile every summary
+of the general fractional control leaned 0.65-1.95% slower, and the candidate
+added a permanent value-lattice branch, magnitude boundary, negative-subunit
+formatting, and test-export surface to the generic REAL formatter. The
+mechanism was real; its expected product value was not established, so the
+runtime was rejected and archived.
+
 *Reapplies at the end of any experiment where the numbers cleared the drift
 check but the winning workload shape is niche or already covered by an
-existing primitive. Ask three concrete questions before proposing accept:
-does the API steer users toward this shape? Does another primitive already
-cover it? Is the win magnitude big enough that a user hitting the shape by
-accident would notice? If any answer is no, the reproduced win is not the
-whole case — write the rejection carefully so the harness/evidence is what
-lands on main, and preserve the runtime prototype at `archive/exp-NNN` for
-the case where a production signal ever reopens the shape.*
+existing primitive, or where the win depends on a narrow data distribution.
+Ask: does the API steer users toward this shape? Does another primitive cover
+it? What representative evidence establishes the eligible share? What is the
+expected aggregate benefit after miss-path tax? Does that benefit repay the
+permanent complexity budget? If the answers do not make a product case, the
+reproduced win is not the whole case — write the rejection carefully so the
+evidence is what lands on main, and preserve the runtime prototype at
+`archive/exp-NNN` for the case where a production signal reopens the shape.*
 
 ### A guard against the wrong value often leaves the missing value silent
 

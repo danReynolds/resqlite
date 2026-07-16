@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "The exact-quarter mechanism is technically valid: `.25`/`.5`/`.75` REAL values under `abs(value) < 1e15` can reuse the i64 formatter with byte-identical spelling, and synthetic all-hit lanes improve 78-87% across both orderings.",
+    "Synthetic eligibility is not adoption evidence. The 100%-quarter targets and 50%-quarter mixed row establish a ceiling, but exp 232 supplied no production trace, representative application, or schema distribution after exp 194 explicitly required a production profile before fractional specialization.",
+    "Every summary of the general fractional control leaned candidate-slower (+1.35%, +1.95%, and +0.65% sequence median). A rough linear estimate requires exact quarters to comprise about 1.6-2.6% of non-integral REAL cells merely to offset the possible miss tax, and no evidence established that incidence.",
+    "A narrow value-lattice win does not repay 114 native/build-hook lines plus permanent boundary, negative-subunit, and no-inline semantics and two exported test hooks, including one exposing production-path admission, without aggregate product evidence. The runtime is rejected and preserved only at `archive/exp-232`."
+  ],
+  "nextSignals": [
+    "Keep exp 194's exact-integral REAL path as the only shipped REAL specialization and retain the generic fixture invariant in `select_bytes_real_int_fastpath.dart`.",
+    "Do not retry quarter, eighth, or another fractional lattice without production/downstream or representative-application evidence that fractional REAL formatting is material and the eligible distribution clears aggregate value after miss tax.",
+    "Treat 100%-eligible focused lanes as mechanism/ceiling evidence only. A narrow specialization needs a representative mixture backed by measured incidence as its adoption gate.",
+    "Use `archive/exp-232` if new prevalence evidence reopens the idea; do not reconstruct or broaden the prototype from the benchmark multiplier alone."
+  ]
+}

@@ -81,6 +81,29 @@ Future<void> _lane({
     }
     await db.executeBatch(sql, batch);
 
+    // Untimed setup contract: storage affinity or fixture drift must not
+    // silently change which native formatter path either lane exercises.
+    final invariantTerms = <String>[
+      for (final name in integralNames)
+        "typeof($name) = 'real' AND "
+            'ABS($name) <= 9007199254740992.0 AND '
+            'CAST($name AS INTEGER) = $name',
+      for (final name in fractionalNames)
+        "typeof($name) = 'real' AND CAST($name AS INTEGER) != $name",
+    ];
+    if (invariantTerms.isNotEmpty) {
+      final violations = await db.select(
+        'SELECT COUNT(*) AS n FROM t WHERE NOT '
+        '(${invariantTerms.join(' AND ')})',
+      );
+      if (violations.single['n'] != 0) {
+        throw StateError(
+          'REAL benchmark fixture violated its formatter-path invariant: '
+          '${violations.single['n']} rows',
+        );
+      }
+    }
+
     final selectSql = 'SELECT ${cols.join(', ')} FROM t ORDER BY id';
     final probe = (await db.selectBytes(selectSql)).bytes;
     for (var i = 0; i < (iters ~/ 4) + 1; i++) {
