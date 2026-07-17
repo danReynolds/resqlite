@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "Inline checkpoint ownership is a real first-crossing ceiling: moving the existing 500-frame PASSIVE checkpoint to a dedicated keyed connection cuts the known 529-frame batch p50 by 46-56% across an order-flipped pair, with immediate NOOP state proving the writer replies before checkpoint backfill.",
+    "A level-triggered WAL hook is not safely converted to asynchronous work by adding coalescing alone. While `pages_in_wal >= 500` remains true, subsequent commits repeatedly move the four-state worker through requested/running/rerun, so sustained PASSIVE work competes with the writer instead of remaining one bounded maintenance event.",
+    "The sustained guard decisively reverses the one-shot win: 3,000 awaited 8 KiB writes regress 2.7-3.4x at p50, 3.3-4.5x at p95, and 2.3-2.5x at p99; foreground-read p95 regresses 19% and 57% in the two orderings, the WAL reaches 12,377 frames, and two candidate-first repeats remain thousands of frames behind after 250 ms.",
+    "The private runtime footprint is substantial even without public API growth: a second writable connection, Dart isolate and SendPort lifecycle, two FFI calls, mutex-protected four-state coalescing, key propagation, and cross-sender close draining. A first-crossing-only win cannot repay that surface while the sustained path regresses."
+  ],
+  "nextSignals": [
+    "Do not retry the exp 233 level-triggered checkpoint worker. Any asynchronous checkpoint design must re-arm on a WAL reset/generation or a fresh high-water delta so a continuously true threshold cannot create a checkpoint storm.",
+    "Use the exp 233 sustained lane, not only the 529-frame first crossing, as the load-bearing gate: sustained write p50/p95/p99 and foreground-read p95 must remain neutral or improve, and WAL progress must settle under a declared window.",
+    "Reopen off-writer checkpoint ownership only with both a no-storm trigger design and representative downstream/release evidence that synchronous checkpoint wall is materially user-visible. The exact prototype and harness are preserved at `archive/exp-233`."
+  ]
+}

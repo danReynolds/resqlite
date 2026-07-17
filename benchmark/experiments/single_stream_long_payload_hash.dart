@@ -16,6 +16,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:resqlite/src/checkpoint_worker.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/reader/reader_pool.dart';
 import 'package:resqlite/src/stream_engine.dart';
@@ -145,12 +146,14 @@ final class _ExperimentRuntime {
     this.handle,
     this.readerPool,
     this.streamEngine,
+    this.checkpointWorker,
     this.writer,
   );
 
   final ffi.Pointer<ffi.Void> handle;
   final ReaderPool readerPool;
   final StreamEngine streamEngine;
+  final CheckpointWorker checkpointWorker;
   final Writer writer;
 
   static Future<_ExperimentRuntime> open(String path) async {
@@ -168,8 +171,19 @@ final class _ExperimentRuntime {
     try {
       final readerPool = await ReaderPool.spawn(handle.address, 1);
       final streamEngine = StreamEngine(readerPool);
-      final writer = await Writer.spawn(streamEngine, handle);
-      return _ExperimentRuntime(handle, readerPool, streamEngine, writer);
+      final checkpointWorker = await CheckpointWorker.spawn(handle);
+      final writer = await Writer.spawn(
+        streamEngine,
+        handle,
+        checkpointWorker.sendPort,
+      );
+      return _ExperimentRuntime(
+        handle,
+        readerPool,
+        streamEngine,
+        checkpointWorker,
+        writer,
+      );
     } catch (_) {
       resqliteClose(handle);
       rethrow;
@@ -180,6 +194,7 @@ final class _ExperimentRuntime {
     streamEngine.close();
     await readerPool.close();
     await writer.close();
+    await checkpointWorker.close();
     resqliteClose(handle);
   }
 }

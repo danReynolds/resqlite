@@ -405,6 +405,23 @@ will not amortise no matter how good the vector body is — reopen only when the
 architecture can hand the kernel a batch (columnar/bulk transfer), not a stream
 of one-value calls.*
 
+### Asynchronous maintenance needs a re-arm rule, not just coalescing
+
+[Exp 233](233-async-checkpoint-worker.md) moved the writer hook's 500-frame
+PASSIVE checkpoint to a dedicated connection and isolate. The first crossing
+became 46-56% faster, proving the I/O was removed from the reply path. Under a
+sustained burst, however, write p50 became 2.7-3.4x slower and the WAL grew to
+12,377 frames. The inline trigger was a level check (`pages_in_wal >= 500`)
+whose work naturally completed before another commit. Once execution became
+asynchronous, the writer kept observing the same true level and requesting or
+rerunning checkpoints. A four-state coalescer bounded messages but did not
+bound maintenance work.
+
+*Reapplies whenever inline cleanup, refresh, compaction, or checkpoint work is
+moved to a background worker. Define what new generation or high-water delta
+re-arms the trigger, and benchmark sustained foreground contention; suppressing
+duplicate wakeups does not make a continuously true trigger edge-like.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

@@ -59,6 +59,7 @@ final class Writer {
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
+    SendPort checkpointPort,
   ) async {
     final writer = Writer._(streamEngine);
 
@@ -71,7 +72,11 @@ final class Writer {
       }
     });
 
-    Isolate.spawn(writerEntrypoint, [receivePort.sendPort, handle.address]);
+    Isolate.spawn(writerEntrypoint, [
+      receivePort.sendPort,
+      handle.address,
+      checkpointPort,
+    ]);
 
     writer._sendPort = await handshake.future;
 

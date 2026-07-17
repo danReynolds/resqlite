@@ -1,0 +1,7 @@
+{
+  "file": "233-async-checkpoint-worker.md",
+  "title": "Reject asynchronous WAL checkpoint worker",
+  "impact": "Moonshot: moving the 500-frame PASSIVE checkpoint from the writer hook to a dedicated keyed connection cuts the first threshold-crossing p50 by 46-56%, but sustained 8 KiB writes become 2.7-3.4x slower at p50, 3.3-4.5x slower at p95, and 2.3-2.5x slower at p99; foreground-read p95 also regresses and the WAL grows to 12,377 frames. The level trigger remains armed while work runs asynchronously, creating repeated checkpoint contention. Runtime is removed and the prototype is preserved at `archive/exp-233`; revisit only with reset-aware or high-water re-arming plus representative incidence evidence.",
+  "status": "rejected",
+  "link": ""
+}
