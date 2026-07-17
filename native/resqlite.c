@@ -2106,25 +2106,13 @@ static inline uint64_t fnv_combine_bytes(uint64_t h, const void* p, int len) {
 // ends so the caller can invoke this whether the stmt was just bound
 // (initial step) or had already been stepped through by decodeQuery.
 //
-// `last_row_count` is the caller's cached row count from the previous
-// emission, or -1 if unknown (initial-query path; or when row_count is
-// not being tracked). When set,
-// [EXP-077](../experiments/077-cheap-check-first-sweep.md) short-circuits: if we
-// step past `last_row_count` rows, the hashes CANNOT match regardless
-// of content, so we stop hashing cell bytes and just count remaining
-// rows to report the final size. `out_row_count` is written in all
-// success paths so the caller can update its cached value.
+// `out_row_count` is written in all success paths so the caller can pair the
+// canonical content hash with the fresh result size.
 //
-// Returns the final hash (or -1 error sentinel). `row_count` is always
-// folded LAST into the accumulator before return. On the fast-reject
-// path the accumulator already holds per-cell fold work for the first
-// `last_row_count` rows (everything seen before skip_hash flipped) —
-// we still fold the fresh `row_count` on top, which by itself
-// differentiates from the previous hash whenever the counts differ.
-// Zero-row results return 0 directly (no row_count fold).
-long long resqlite_query_hash(
-    sqlite3_stmt* stmt, int last_row_count, int* out_row_count
-) {
+// Returns the final hash (or -1 error sentinel). `row_count` is always folded
+// LAST into the accumulator before return. Zero-row results return 0 directly
+// (no row_count fold).
+long long resqlite_query_hash(sqlite3_stmt* stmt, int* out_row_count) {
     // Start from a known state so callers don't have to coordinate:
     // - After stmt_acquire_on: reset is a no-op.
     // - After decodeQuery drained the stmt to SQLITE_DONE: real reset.
@@ -2136,18 +2124,9 @@ long long resqlite_query_hash(
     int col_count = sqlite3_column_count(stmt);
     int row_count = 0;
     int rc;
-    int skip_hash = 0;  // flips to 1 once we know count-differ is guaranteed
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         row_count++;
-        // [EXP-077](../experiments/077-cheap-check-first-sweep.md): once
-        // row_count exceeds last_row_count, the
-        // final hash cannot possibly match (row_count is folded in at
-        // the end). Stop hashing cell bytes; just drain rows for count.
-        if (!skip_hash && last_row_count >= 0 && row_count > last_row_count) {
-            skip_hash = 1;
-        }
-        if (skip_hash) continue;
         for (int i = 0; i < col_count; i++) {
             // [EXP-205] Reuse the per-cell `sqlite3_value*` (see
             // resqlite_step_row). For an unchanged-fanout stream we re-execute
@@ -2200,15 +2179,8 @@ long long resqlite_query_hash(
         return -1;
     }
     // Fold row_count into the accumulator before returning. This keeps
-    // results with identical per-row content but different row counts
-    // from colliding, covering both the fast-reject path (more rows
-    // than last time — `h` contains fold work for just the first
-    // `last_row_count` rows) and the under-count case (fewer rows
-    // than last time — `h` contains fold work for every row we saw).
-    // In both cases the differing `row_count` fold at the tail pushes
-    // the hash away from the previous emission's value, so the
-    // caller's `hash != last_hash` check fires and the decode path
-    // runs. Zero-row result is the special case: returns 0 directly.
+    // results with identical per-row content but different row counts from
+    // colliding. Zero-row result is the special case: returns 0 directly.
     if (row_count == 0) return 0;
     h = fnv_combine_u64(h, (uint64_t)row_count);
     return (long long)h;

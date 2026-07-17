@@ -9,6 +9,7 @@ import 'package:ffi/ffi.dart';
 import 'package:resqlite/src/native/request_cache.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/query_decoder.dart';
+import 'package:resqlite/src/reader/read_worker.dart';
 import 'package:test/test.dart';
 
 @ffi.Native<
@@ -67,7 +68,7 @@ void main() {
       );
 
       final (raw, initialHash) = decodeQueryWithInitialHash(stmt, sql);
-      final (hashOnly, rowCount) = callQueryHash(stmt, -1);
+      final (hashOnly, rowCount) = callQueryHash(stmt);
 
       expect(rowCount, raw.rowCount);
       expect(initialHash, hashOnly);
@@ -82,6 +83,60 @@ void main() {
       expect(raw.values[6], isA<Uint8List>());
       expect(raw.values[6] as Uint8List, isEmpty);
       expect(raw.values[7], 'present');
+    } finally {
+      resqliteClose(db);
+      dir.deleteSync(recursive: true);
+    }
+  });
+
+  test('grow-then-no-op keeps a canonical selectIfChanged hash', () {
+    final dir = Directory.systemTemp.createTempSync('resqlite_decoder_test_');
+    final pathNative = '${dir.path}/growth.db'.toNativeUtf8();
+    final db = resqliteOpen(pathNative, 1, ffi.nullptr.cast());
+    calloc.free(pathNative);
+
+    expect(db, isNot(ffi.nullptr));
+
+    try {
+      _exec(
+        db,
+        'CREATE TABLE items(id INTEGER PRIMARY KEY, value TEXT);'
+        "INSERT INTO items(value) VALUES ('one');",
+      );
+
+      const sql = 'SELECT id, value FROM items ORDER BY id';
+      final (_, _, initialHash, initialCount) = executeQueryWithDeps(
+        db.address,
+        0,
+        sql,
+        const [],
+      );
+
+      _exec(db, "INSERT INTO items(value) VALUES ('two')");
+      final (grownHash, grownCount, grownRaw) = executeQueryIfChanged(
+        db.address,
+        0,
+        sql,
+        const [],
+        initialHash,
+        initialCount,
+      );
+
+      expect(grownRaw, isNotNull);
+      expect(grownCount, 2);
+
+      final (sameHash, sameCount, sameRaw) = executeQueryIfChanged(
+        db.address,
+        0,
+        sql,
+        const [],
+        grownHash,
+        grownCount,
+      );
+
+      expect(sameRaw, isNull);
+      expect(sameHash, grownHash);
+      expect(sameCount, grownCount);
     } finally {
       resqliteClose(db);
       dir.deleteSync(recursive: true);

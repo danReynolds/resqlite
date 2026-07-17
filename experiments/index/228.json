@@ -1,0 +1,7 @@
+{
+  "file": "228-canonical-stream-hash.md",
+  "title": "Restore canonical hashes after stream growth",
+  "impact": "Fixes a stream-baseline correctness bug introduced by exp 077: when a result grew, `resqlite_query_hash` stopped folding cells after the old row count and cached that prefix-only digest as the new baseline, so the next unchanged invalidation decoded and publicly re-emitted all rows once. Exp 228 removes the partial-hash shortcut and its dead private FFI argument, adds direct worker and public-stream regressions, and makes every cached hash canonical. Three order-flipped focused passes move redundant grow-then-no-op decodes from 9/9 to 0/9 and improve the combined cycle by 19-36%; the noisy pure-growth leg stays around parity. No public API change; net runtime simplification.",
+  "status": "accepted",
+  "link": ""
+}

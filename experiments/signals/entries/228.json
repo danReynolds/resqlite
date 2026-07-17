@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted_correctness_and_performance",
+  "changedBeliefs": [
+    "Exp 077's row-count shortcut correctly proved that a growing result differed, but `resqlite_query_hash` returned the prefix-only accumulator and `executeQueryIfChanged` cached it as the complete changed result's next baseline. Once the cached count advanced, the immediate identical rerun computed a full hash, mismatched the partial baseline, decoded all rows, and publicly re-emitted unchanged data once.",
+    "A stream result hash has two roles: change detection now and cached identity later. Any value stored in `StreamEntry.lastResultHash` must be canonical for the complete corresponding result; a fast-reject digest that stops early can only be safe as a visibly non-cacheable sentinel.",
+    "Deleting the shortcut and its private FFI row-count argument moves redundant immediate-no-op decodes from 9/9 to 0/9 in all three focused passes. The immediate unchanged p50 improves 56-64% and the complete growth-plus-no-op cycle improves 19-36%; the pure growth leg is noisy around parity, consistent with exp 077's original sub-noise saving."
+  ],
+  "nextSignals": [
+    "Keep `benchmark/experiments/canonical_stream_hash.dart` as the durable gate for native hash or stream-baseline changes. A growth-only lane misses the follow-on decode that made exp 077 incorrect.",
+    "Keep `lastRowCount` as an additional equality guard, but do not let it truncate a digest that will become the next `lastResultHash`. Reopen early rejection only if it returns a distinct non-cacheable sentinel or the changed-result decode can produce the canonical hash without another full pass.",
+    "PR #155's incremental-view prototype is orthogonal: it may reduce how often supported streams reach the fallback, but unsupported queries and ordinary reruns still require the fallback hash to be canonical."
+  ]
+}

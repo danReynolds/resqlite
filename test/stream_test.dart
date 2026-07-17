@@ -438,6 +438,36 @@ void main() {
       },
     );
 
+    test('does not re-emit unchanged rows after result growth', () async {
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'alice',
+        1,
+      ]);
+
+      final probe = _StreamProbe(
+        db.stream('SELECT name, value FROM items ORDER BY id'),
+      );
+      final initialRows = await probe.event(1);
+      expect(initialRows, hasLength(1));
+
+      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+        'bob',
+        2,
+      ]);
+      final grownRows = await probe.event(2);
+      expect(grownRows, hasLength(2));
+
+      // The growth path must leave behind the canonical hash of the emitted
+      // two-row result. Otherwise this no-op write compares a full hash with a
+      // partial growth hash and spuriously emits the same rows.
+      await db.execute('UPDATE items SET value = value WHERE id = 1');
+
+      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 200));
+      expect(probe.events, hasLength(2));
+
+      await probe.cancel();
+    });
+
     test('unchanged suppression handles all SQLite value types', () async {
       await db.execute(
         'CREATE TABLE mixed('

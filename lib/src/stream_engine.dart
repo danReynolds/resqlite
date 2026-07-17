@@ -466,9 +466,8 @@ final class StreamEntry {
 
   /// Row count of the last emitted result
   /// ([EXP-077](../../experiments/077-cheap-check-first-sweep.md)). -1 means
-  /// "no baseline yet" — the initial query hasn't returned. Passed into
-  /// `selectIfChanged` so the worker can short-circuit hashing once it
-  /// knows the fresh row count diverges.
+  /// "no baseline yet" — the initial query hasn't returned. Compared with the
+  /// fresh count as an additional equality guard alongside the result hash.
   int lastRowCount = -1;
 
   /// Whether the stream is dirty and needs to be requeried.
