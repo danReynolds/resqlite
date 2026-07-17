@@ -139,4 +139,13 @@ Archived prototype:
 - two order-flipped focused A/B comparisons, seven repeats per side
 - `git diff --check`
 
-Final publication branch validation is recorded after the runtime revert.
+Final publication branch:
+
+- runtime, checkpoint-worker-specific tests, and focused harness removed; all
+  restored package sources are byte-identical to `origin/main`
+- `dart run benchmark/finalize_experiment.dart \
+  --experiment=experiments/233-async-checkpoint-worker.md`
+- `dart run benchmark/check_experiment_dispositions.dart`
+- `dart analyze --fatal-infos`
+- full serial suite: 326/326
+- JSON validation and `git diff --check`

@@ -68,25 +68,6 @@ const char* resqlite_errmsg(resqlite_db* db);
 // Get the raw sqlite3* writer connection handle (for direct FFI calls).
 sqlite3* resqlite_writer_handle(resqlite_db* db);
 
-// Private async-checkpoint worker API. These are exported for the Dart FFI
-// implementation and are not part of Resqlite's public Dart surface.
-//
-// Atomically claim one coalesced request. Returns 1 only for the idle worker
-// that changed a pending request into running; returns 0 otherwise.
-int resqlite_checkpoint_take_request(resqlite_db* db);
-
-// Run SQLITE_CHECKPOINT_PASSIVE on the dedicated writable checkpoint
-// connection. The caller must be the checkpoint isolate that owns the claimed
-// request. Returns SQLite's result code and writes WAL frame counts when the
-// output pointers are non-NULL. Completion always restores the coalescing state
-// (including on BUSY/error), preserving one rerun requested during the call.
-// Dart must drain and join this worker before calling resqlite_close().
-int resqlite_checkpoint_run_passive(
-    resqlite_db* db,
-    int* out_log_frames,
-    int* out_checkpointed_frames
-);
-
 // Open-time extension setup scopes. These values are mirrored by
 // ResqliteConnectionScope in Dart.
 #define RESQLITE_SETUP_SCOPE_ALL     0
