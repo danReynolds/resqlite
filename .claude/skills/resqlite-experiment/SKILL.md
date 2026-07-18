@@ -165,6 +165,15 @@ accidentally created while iterating on a single experiment), PGO
 training outputs, or aborted pipeline runs. One clean "after experiment"
 run per experiment is the right unit.
 
+**A run only charts if it's clean and multi-sample.** `run_release.dart`
+stamps `git status` into the result's `.json`; `index.html` hides any run
+flagged `gitDirty` — or single-sample (`--repeat=1`) — as a **gap**, so it
+never becomes a point (the trend line skips untrusted/thin numbers). Commit
+your change *first*, then run
+`dart run benchmark/run_release.dart expNNN-slug --repeat=5 --no-auto-compare`,
+and confirm `"gitDirty": false` in the `.json`. A run captured with the change
+still unstaged lands in `history.json` but is silently dropped from the chart.
+
 ## Validating locally before pushing
 
 ```
