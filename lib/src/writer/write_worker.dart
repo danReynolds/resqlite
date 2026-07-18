@@ -21,6 +21,7 @@ import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
 import '../tracelite_profile.dart';
+import 'blob_param_transfer.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -36,10 +37,13 @@ sealed class WriterRequest {
 final class ExecuteRequest extends WriterRequest {
   ExecuteRequest(
     this.sql,
-    this.params,
+    List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-  });
+    // [EXP-234] Wrapping runs on the main isolate at construction time,
+    // before `SendPort.send`, so large blob params cross to the writer via
+    // `TransferableTypedData` instead of the VM serializer's deep copy.
+  }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -56,10 +60,10 @@ final class MultiExecuteRequest extends WriterRequest {
 final class QueryRequest extends WriterRequest {
   QueryRequest(
     this.sql,
-    this.params,
+    List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-  });
+  }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -269,7 +273,10 @@ void writerEntrypoint(List<Object> args) {
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  // [EXP-234] Materialize any TransferableTypedData blob params back to
+  // Uint8List before binding. No-op (no allocation) when nothing was wrapped.
+  final params = unwrapBlobParams(msg.params);
+  final result = executeWrite(state.dbHandle, msg.sql, params);
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
@@ -335,7 +342,8 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqlNative = cachedSqlUtf8(msg.sql);
-  final paramsNative = allocateParams(msg.params);
+  // [EXP-234] Materialize any TransferableTypedData blob params before binding.
+  final paramsNative = allocateParams(unwrapBlobParams(msg.params));
   try {
     final stmt = _resqliteStmtAcquireWriter(
       state.dbHandle,

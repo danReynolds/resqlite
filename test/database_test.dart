@@ -295,6 +295,40 @@ void main() {
       }
     });
 
+    test('large blob param survives TransferableTypedData transfer', () async {
+      // [EXP-234] Blobs >= blobParamTransferThreshold (256 KB) cross to the
+      // writer isolate via TransferableTypedData instead of the direct
+      // SendPort copy. Verify a large blob round-trips byte-identically on
+      // both the write (execute) and transaction-read (tx.select) paths, and
+      // that a same-size blob just under the threshold (direct path) matches.
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
+      );
+      final big = Uint8List.fromList(
+        List.generate(512 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+      final small = Uint8List.fromList(
+        List.generate(1024, (i) => (i * 13 + 3) & 0xFF),
+      );
+      await db.execute('INSERT INTO t(id, payload) VALUES (1, ?)', [big]);
+      await db.execute('INSERT INTO t(id, payload) VALUES (2, ?)', [small]);
+
+      final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
+      expect(rows[0]['payload'], equals(big));
+      expect(rows[1]['payload'], equals(small));
+
+      // Equality lookup binds the large blob as a param on the read path too
+      // (transaction-scoped select goes through the writer QueryRequest path).
+      await db.transaction((tx) async {
+        final hit = await tx.select(
+          'SELECT id FROM t WHERE payload = ?',
+          [big],
+        );
+        expect(hit, hasLength(1));
+        expect(hit[0]['id'], 1);
+      });
+    });
+
     test('row implements Map interface', () async {
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)');
       await db.execute('INSERT INTO t(name) VALUES (?)', ['test']);

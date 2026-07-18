@@ -438,6 +438,29 @@ moved to a background worker. Define what new generation or high-water delta
 re-arms the trigger, and benchmark sustained foreground contention; suppressing
 duplicate wakeups does not make a continuously true trigger edge-like.*
 
+### The VM SendPort serializer wins on structure, loses on raw bytes
+
+[Exp 005](005-dart-binary-codec-transferable-typed-data.md) rejected a Dart
+binary codec for structured map *results*: the VM's C++ serializer beat any
+Dart-level encode/decode of rows by 5–7×, because iterating values and packing
+them into a `ByteData` in Dart is slower than the native serializer's graph
+walk. That rejection is often read as "`TransferableTypedData` doesn't help."
+[Exp 234](234-blob-param-transfer.md) shows the boundary: for a raw
+`Uint8List` blob *parameter* there is **nothing to encode**, so
+`TransferableTypedData.fromList` (a plain memcpy into external memory, which
+does not neuter its source) beats the serializer's per-object deep copy — a
+reproduced ~15–20% end-to-end win on 256 KB–512 KB single-row blob INSERTs. The
+win is size-bounded and the bounds are measured: the wrap is *slower* at 64 KB
+(overhead) and neutral at multi-MB (`fromList`'s own copy grows while the WAL
+write dominates).
+
+*Reapplies whenever considering `TransferableTypedData` / zero-copy transfer.
+The question is not "does it help" but "is there structure to encode?" If the
+payload is already contiguous bytes, the serializer's per-object overhead is
+pure loss and the transfer wins — but only where the copy is a material
+fraction of the operation, so gate it on a measured size threshold rather than
+shipping it for all payloads.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

@@ -1,0 +1,7 @@
+{
+  "file": "234-blob-param-transfer.md",
+  "title": "Zero-copy blob parameter transfer via TransferableTypedData",
+  "impact": "A large `Uint8List` blob write param is deep-copied by the VM's C++ serializer on the `SendPort.send` hop from the main isolate to the writer isolate, on top of the unavoidable arena copy and SQLite page copy. Exp 234 wraps blob params `>= 256 KB` in `TransferableTypedData` (a byte move, not a serializer copy) before send and materializes them on the writer before binding; smaller blobs and non-blob params take the unchanged direct path (the fast path returns the input list with no allocation). Answers the direction's open question — for **256 KB–512 KB single-row blob INSERTs the transfer copy is a material fraction of the write, and the move is a reproduced ~15–20% end-to-end speedup** (256 KB −16.4% / −22.7%, 512 KB −10.4% / −11.8% across order-flipped passes; every 256 KB/512 KB leg candidate-faster across ~7 passes while sub-threshold 64 KB/128 KB controls flip sign as noise). The 256 KB floor is measured: the transport microbenchmark shows `TransferableTypedData` is −22.6% at 256 KB but **+22.7% slower at 64 KB** (wrap overhead) and neutral at 4 MB (`fromList`'s own copy catches up while the WAL write dominates). Distinct from exp 005 (which rejected a Dart codec for structured map *results*): a raw blob param has no structure to encode, so the byte transfer wins. Internal knob (not public API); adds a large-blob round-trip correctness test.",
+  "status": "accepted",
+  "link": ""
+}
