@@ -4,13 +4,17 @@
 **Status:** Accepted
 **Category:** Moonshot
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** none — focused
-  [`benchmark/experiments/select_bytes_blob_base64.dart`](../benchmark/experiments/select_bytes_blob_base64.dart);
-  four order-flipped paired passes recorded in
-  [`benchmark/results/2026-07-14T11-25-21Z-exp229-simd-base64-neon.md`](../benchmark/results/2026-07-14T11-25-21Z-exp229-simd-base64-neon.md).
-  No release-suite run because no current release lane isolates BLOB
-  base64 encoding wall time — the focused harness is the durable gate,
-  consistent with exp 216 / 218 / 225.
+**Benchmark Run:** Release headline suite re-captured at HEAD on 2026-07-17
+  (5-sample medians,
+  [`benchmark/results/2026-07-17T23-41-56-exp229-headline-refresh.md`](../benchmark/results/2026-07-17T23-41-56-exp229-headline-refresh.md)),
+  mapped to this experiment as the newest accepted milestone to restore the
+  dashboard timeline after the mid-year microbenchmark-only stretch (rejected
+  exps 230–233 changed no shipping code, so HEAD reflects this experiment's
+  state). The accept decision itself was the focused base64 A/B
+  ([`benchmark/experiments/select_bytes_blob_base64.dart`](../benchmark/experiments/select_bytes_blob_base64.dart);
+  four order-flipped paired passes in
+  [`benchmark/results/2026-07-14T11-25-21Z-exp229-simd-base64-neon.md`](../benchmark/results/2026-07-14T11-25-21Z-exp229-simd-base64-neon.md)),
+  since no release lane isolates BLOB base64 encoding wall time.
 
 ## Problem
 
