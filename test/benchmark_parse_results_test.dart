@@ -70,4 +70,49 @@ void main() {
       expect(metric.readersBusy, equals(0));
     });
   });
+
+  group('parseFilenameMetadata', () {
+    test('parses full local timestamp format', () {
+      final meta = parseFilenameMetadata(
+        '2026-04-08T15-43-57-with-streaming.md',
+      );
+      expect(meta, isNotNull);
+      expect(meta!.date, equals('2026-04-08'));
+      expect(meta.timestamp, equals('2026-04-08T15:43:57'));
+      expect(meta.label, equals('with-streaming'));
+    });
+
+    test('parses UTC timestamp with trailing Z suffix', () {
+      // Regression: harnesses that stamp filenames via
+      // DateTime.toUtc().toIso8601String() emit a `Z` after the seconds.
+      // Without accepting it, generate_history.dart silently skips the run.
+      final meta = parseFilenameMetadata(
+        '2026-07-14T11-25-21Z-exp229-simd-base64-neon.md',
+      );
+      expect(meta, isNotNull);
+      expect(meta!.date, equals('2026-07-14'));
+      expect(meta.timestamp, equals('2026-07-14T11:25:21'));
+      expect(meta.label, equals('exp229-simd-base64-neon'));
+    });
+
+    test('strips a directory prefix before parsing', () {
+      final meta = parseFilenameMetadata(
+        'benchmark/results/2026-07-14T11-25-21Z-exp229-simd-base64-neon.md',
+      );
+      expect(meta, isNotNull);
+      expect(meta!.label, equals('exp229-simd-base64-neon'));
+    });
+
+    test('parses date-only format', () {
+      final meta = parseFilenameMetadata('2026-04-08-codex-main-four-way.md');
+      expect(meta, isNotNull);
+      expect(meta!.date, equals('2026-04-08'));
+      expect(meta.timestamp, equals('2026-04-08T00:00:00'));
+      expect(meta.label, equals('codex-main-four-way'));
+    });
+
+    test('returns null for non-markdown files', () {
+      expect(parseFilenameMetadata('2026-07-14T11-25-21Z-exp229.json'), isNull);
+    });
+  });
 }
