@@ -345,6 +345,46 @@ then remove the local scaffolding before opening the PR.
 - If an idea targets memory or allocation, prefer profiler/RSS evidence over
   wall-time-only claims.
 
+### Keep the dashboard charts moving: clean headline runs
+
+The experiments dashboard ([`../docs/experiments/index.html`](../docs/experiments/index.html))
+plots one point per experiment that has a mapped **headline release run** —
+`benchmark/run_release.dart` output, the pristine peer-comparison suite that
+feeds `history.json`. Focused microbenchmarks under `benchmark/experiments/`
+never feed the charts; an experiment gets a chart point only when a release
+run is captured and linked. To contribute one:
+
+1. Run the headline suite **from a clean, committed tree**:
+
+   ```bash
+   dart run benchmark/run_release.dart expNNN-short-slug --repeat=5 --no-auto-compare
+   ```
+
+   Label it `expNNN-...` so `generate_history.dart` maps it to the experiment
+   by exact prefix. Commit the resulting `.md` + `.json` under
+   `benchmark/results/` as sources (the bot regenerates `history.json`).
+
+2. **The tree must be clean and multi-sample.** `run_release.dart` records
+   `git status` at run start; the chart intentionally hides any run flagged
+   `gitDirty` — or single-sample (`--repeat=1`) — as a **gap**, so the trend
+   line isn't pulled through uncommitted or statistically-thin numbers. A run
+   captured with your fix still unstaged is silently dropped. Commit first,
+   then benchmark, and confirm `"gitDirty": false` in the run's `.json` before
+   relying on it. (`.g.dart` / `.dart_tool` are gitignored and don't count as
+   dirty.)
+
+3. Don't point an accepted experiment at a run whose label contains
+   `baseline` / `pre` — that trips the linker's baseline guard. Name the
+   candidate run plainly (`expNNN-<slug>`).
+
+Declaring `**Benchmark Run:** none (…)` stays a valid opt-out for a
+focused-only change, but it means **no chart point** — and a run of
+focused-only accepted work stalls the headline timeline. When a stretch has
+gone focused-only, capture one clean headline run at HEAD and map it to the
+newest accepted milestone to refresh the timeline; that experiment's
+`**Benchmark Run:**` header then cites the run instead of opting out (see
+exp 229).
+
 ## Postflight
 
 When finished:

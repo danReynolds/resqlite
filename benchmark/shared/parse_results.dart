@@ -415,6 +415,7 @@ Sqlite3SingleInsertWall extractSqlite3SingleInsertWall(String content) {
 ///
 /// Handles formats like:
 /// - `2026-04-08T15-43-57-with-streaming.md`
+/// - `2026-07-14T11-25-21Z-exp229-simd-base64-neon.md` (UTC `Z` suffix)
 /// - `2026-04-08-codex-main-four-way.md`
 /// - `2026-04-13T14-44-30-MacBook Pro 14in.md`
 ({String date, String timestamp, String label})? parseFilenameMetadata(
@@ -425,8 +426,11 @@ Sqlite3SingleInsertWall extractSqlite3SingleInsertWall(String content) {
   if (!basename.endsWith('.md')) return null;
   final withoutExt = basename.substring(0, basename.length - 3);
 
-  // Try full timestamp format: YYYY-MM-DDTHH-MM-SS-label
-  final full = RegExp(r'^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(.+)$');
+  // Try full timestamp format: YYYY-MM-DDTHH-MM-SS[Z]-label. The optional `Z`
+  // appears when the producing harness stamps the name in UTC via
+  // DateTime.toUtc().toIso8601String(); it must be consumed here or the run is
+  // silently dropped before it can contribute a data point.
+  final full = RegExp(r'^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z?-(.+)$');
   final fullMatch = full.firstMatch(withoutExt);
   if (fullMatch != null) {
     final date = fullMatch.group(1)!;
