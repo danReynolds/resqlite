@@ -104,3 +104,40 @@ List<Object?> unwrapBlobParams(List<Object?> params) {
   }
   return unwrapped ?? params;
 }
+
+/// [EXP-237] Batch (`executeBatch`) variant of [wrapBlobParams]: wrap every
+/// qualifying blob across all parameter sets so a blob-heavy `executeBatch`
+/// crosses to the writer through `TransferableTypedData` instead of the
+/// object-graph copy — the exp 234 mechanism, applied per set.
+///
+/// Rebuilds only the sets that actually changed and only the outer list when at
+/// least one did, so a batch with no large blob (the common case) returns the
+/// input untouched with no allocation, exactly like [wrapBlobParams].
+List<List<Object?>> wrapBlobParamSets(List<List<Object?>> paramSets) {
+  List<List<Object?>>? wrapped;
+  for (var i = 0; i < paramSets.length; i++) {
+    final set = paramSets[i];
+    final wrappedSet = wrapBlobParams(set);
+    if (!identical(wrappedSet, set)) {
+      wrapped ??= List<List<Object?>>.of(paramSets);
+      wrapped[i] = wrappedSet;
+    }
+  }
+  return wrapped ?? paramSets;
+}
+
+/// [EXP-237] Batch variant of [unwrapBlobParams]: materialize any wrapped blob
+/// in any parameter set back into `Uint8List` on the writer before binding.
+/// Returns [paramSets] unchanged (no allocation) when nothing was wrapped.
+List<List<Object?>> unwrapBlobParamSets(List<List<Object?>> paramSets) {
+  List<List<Object?>>? unwrapped;
+  for (var i = 0; i < paramSets.length; i++) {
+    final set = paramSets[i];
+    final unwrappedSet = unwrapBlobParams(set);
+    if (!identical(unwrappedSet, set)) {
+      unwrapped ??= List<List<Object?>>.of(paramSets);
+      unwrapped[i] = unwrappedSet;
+    }
+  }
+  return unwrapped ?? paramSets;
+}
