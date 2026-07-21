@@ -73,16 +73,28 @@ New internal helper
   nothing was wrapped.
 
 Wrapping is wired into the `ExecuteRequest` and `QueryRequest` constructors
-(both built on the main isolate before send); unwrapping into `_handleExecute`
-and `_handleTxQuery` on the writer. `fromList` copies its source into external
-memory but does **not** neuter the caller's list, so the public contract (the
-caller keeps its blob) holds. The threshold is internal (not exported) and
-matches the read-side `sacrificeByteThreshold` (256 KB) by design.
+(both built on the main isolate before send) and into the coalescing pump's
+`MultiExecuteRequest` construction (added by the review pass — without it, a
+concurrent burst of standalone blob writes, the exact shape the exp 180 pump
+exists for, silently fell back to the graph-copy hop); unwrapping into
+`_handleExecute`, `_handleTxQuery`, and `_handleMultiExecute` on the writer.
+`fromList` copies its source into external memory but does **not** neuter the
+caller's list, so the public contract (the caller keeps its blob) holds. The
+threshold is internal (not exported) and matches the read-side
+`sacrificeByteThreshold` (256 KB) by design.
 
-Deliberately conservative: the batch (`BatchRequest`) and coalesced-write
-(`MultiExecuteRequest`) paths stay on the direct copy for now — the single
-large blob (an image / document / serialized payload) is the primary, cleanest
-shape and the one this run measures.
+Two review-pass hardenings on the error paths: exceptions embed the
+*unwrapped* params (a spent `TransferableTypedData` cannot cross a `SendPort`,
+so an exception carrying `msg.params` was unsendable and killed the writer
+isolate — permanent hang), and the writer entrypoint's reply-send falls back
+to a stripped exception copy if a payload ever proves unsendable. `_request`
+also builds the request before enqueueing its completer, since request
+constructors can now throw (native allocation in `fromList`) and a throw after
+enqueue would desync FIFO reply matching.
+
+Deliberately conservative: the batch (`BatchRequest`) path stays on the direct
+copy for now — the single large blob (an image / document / serialized
+payload) is the primary, cleanest shape and the one this run measures.
 
 ## Results
 
@@ -160,7 +172,7 @@ encoding *structure* in Dart is slower than the VM's native walk; a raw blob
 has no structure, so the only remaining costs are destination and machinery —
 both of which the wrap avoids.
 
-## Outcome
+## Decision
 
 **Accepted (in review).** A contained, threshold-gated ~15–20% win on
 moderate-large single-row blob INSERTs, in an active direction whose open
