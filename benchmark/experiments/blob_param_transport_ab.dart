@@ -5,18 +5,23 @@
 //
 // A blob param on the write path is copied three times before it lands in a
 // database page:
-//   1. main -> writer isolate, when `SendPort.send(request)` deep-copies the
-//      request graph (including the Uint8List blob bytes) via the VM's C++
-//      serializer;
+//   1. main -> writer isolate, when `SendPort.send(request)` copies the
+//      request graph (including the Uint8List blob bytes) via the VM's
+//      object-graph copy — one copy, on the sender, landing on the shared GC
+//      heap (Dart SDK `runtime/vm/object_graph_copy.cc`; blobs too large for
+//      the copier's fast-path new-space allocation redo the copy on a slow
+//      path in 100 KB safepoint-polled chunks);
 //   2. writer -> native param arena, in `allocateParams` (`view.setRange`);
 //   3. arena -> SQLite b-tree page, inside `sqlite3_step`.
 //
-// This harness isolates copy (1): the tempting idea is to wrap large blob
-// params in `TransferableTypedData` so the cross-isolate hop is zero-copy
-// (the bytes are moved, not serialized). exp 005 rejected a Dart *binary
+// This harness isolates hop (1): wrapping large blob params in
+// `TransferableTypedData` replaces the graph copy with a `fromList` memcpy
+// into malloc'd external memory plus a constant-time ownership move — same
+// copy count, GC-invisible destination. exp 005 rejected a Dart *binary
 // codec* for structured map *results*; it did not test raw `Uint8List`
 // *parameter* transport, where there is nothing to encode — so this is a
-// distinct question.
+// distinct question. (Per-claim attribution of where the costs actually
+// live: blob_param_mechanism_proof.dart.)
 //
 // It measures, for a range of blob sizes, the main-side round-trip wall of:
 //   (a) SendPort.send([blob])                 — the current mechanism
@@ -25,8 +30,8 @@
 // be optimized away and the receive-side cost of each mechanism is included.
 //
 // It also reports the isolated main-side cost of `TransferableTypedData.fromList`
-// itself: if that constructor copies the source into external memory, the
-// candidate trades the send-copy for a fromList-copy and nets nothing.
+// itself — the candidate's one copy; if it approached the round-trip cost the
+// wrap would trade the send-copy for a fromList-copy and net nothing.
 //
 //   dart run benchmark/experiments/blob_param_transport_ab.dart
 //

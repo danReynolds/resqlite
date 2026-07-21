@@ -72,9 +72,11 @@ import 'dart:typed_data';
 /// baseline lane by raising it above every tested payload.
 int blobParamTransferThreshold = 256 * 1024;
 
-/// Wrap large `Uint8List` blob params in `TransferableTypedData` for a
-/// zero-serializer-copy isolate hop. Returns [params] unchanged (no
-/// allocation) when no entry qualifies — the overwhelmingly common case.
+/// Wrap large `Uint8List` blob params in `TransferableTypedData` so their
+/// one isolate-hop copy lands in malloc'd external memory (then moves by
+/// ownership transfer) instead of riding the graph copy onto the GC heap.
+/// Returns [params] unchanged (no allocation) when no entry qualifies — the
+/// overwhelmingly common case.
 List<Object?> wrapBlobParams(List<Object?> params) {
   final threshold = blobParamTransferThreshold;
   List<Object?>? wrapped;

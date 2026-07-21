@@ -41,8 +41,10 @@ final class ExecuteRequest extends WriterRequest {
     super.replyPort, {
     super.traceCorrelationId,
     // [EXP-234] Wrapping runs on the main isolate at construction time,
-    // before `SendPort.send`, so large blob params cross to the writer via
-    // `TransferableTypedData` instead of the VM serializer's deep copy.
+    // before `SendPort.send`, so large blob params cross to the writer as
+    // `TransferableTypedData` (ownership move of a malloc'd buffer) instead
+    // of riding the object-graph copy onto the shared GC heap. Mechanism:
+    // lib/src/writer/blob_param_transfer.dart.
   }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;

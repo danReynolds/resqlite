@@ -6,15 +6,21 @@
 // both lanes equally (the exp 159 / exp 177 drift discipline).
 //
 //   candidate (enabled): blobParamTransferThreshold = 256 KB — large blobs
-//                        cross to the writer via TransferableTypedData.
+//                        cross to the writer via TransferableTypedData
+//                        (memcpy into malloc'd external memory + ownership
+//                        move; the GC never sees the payload).
 //   baseline (disabled): blobParamTransferThreshold = huge — every blob takes
-//                        the direct SendPort deep-copy path (origin/main
-//                        behavior).
+//                        the direct SendPort object-graph copy (origin/main
+//                        behavior): one sender-side copy landing on the
+//                        shared GC heap, chunked with safepoint polls on the
+//                        slow path for large payloads.
 //
 // The end-to-end wall includes the SQLite step (WAL write of the blob), so a
-// win only appears if the main->writer transfer copy is a material fraction of
-// the whole INSERT at that payload size. That is exactly the open question:
-// does blob param ENCODING/transfer dominate, or does SQLite stepping?
+// win only appears if the main->writer hop — transfer copy plus the GC/
+// safepoint cost of its heap landing — is a material fraction of the whole
+// INSERT at that payload size. That is exactly the open question: does the
+// blob param hop dominate, or does SQLite stepping? (Mechanism attribution:
+// blob_param_mechanism_proof.dart / blob_param_gc_split.dart.)
 //
 //   dart run benchmark/experiments/blob_param_write_ab.dart
 //
