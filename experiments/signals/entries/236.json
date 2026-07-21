@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "The read side paid three distinct costs for large blob cells that exp 234's write-side mechanism analysis predicted and exp 236 removes: (1) decodeQuery copied every blob cell native->heap; (2) results estimated > 256 KB sacrificed the reader isolate per query — Isolate.exit is zero-copy but costs ~2-5 ms respawn plus statement-cache and schema-cache warmth, a per-query tax no benchmark lane priced; (3) tx.select runs on the writer, which can never sacrifice, so large blob rows paid the full unmitigated graph copy. Decoding blob cells >= 256 KB directly into TransferableTypedData (native->malloc'd-external, one copy, GC-invisible) and weighing sacrifice on residual bytes only makes blob-dominated reads 3-6x faster (512 KB select -80% to -83% across three order-flipped passes) and tx.select ~6-7x faster (-84% to -87%).",
+    "selectBytes was already optimal and should not be touched: it sends a native-backed Uint8List view, and the VM's object-graph copy routes external typed data into a fresh malloc'd buffer — the GC-invisible destination. This retroactively explains part of exp 174's ~2x win and closes the 'should selectBytes use TransferableTypedData' question: same copy count, same destination class, wrapper overhead for nothing.",
+    "A/B lanes that change worker lifecycle contaminate later lanes: the baseline's per-query sacrifices handed its later (control) lanes freshly-respawned readers, making an identical-code-path 200 KB control read +14-20% candidate-slower until controls were reordered before any wrapped shape (then +2%, noise). Run controls before lifecycle-changing shapes."
+  ],
+  "nextSignals": [
+    "The multi-medium-blob shape — many cells each < 256 KB summing past the sacrifice threshold (e.g. 10 x 100 KB) — still sacrifices. A per-result rule (wrap when total blob bytes dominate, even if no single cell clears the floor) is the next candidate in this lane; the blob_read_transfer_ab.dart harness generalizes.",
+    "blobCellTransferThreshold is a compile-time define because worker isolates hold their own copies of file-level globals — a main-isolate runtime toggle cannot reach the decode loop. Any future runtime-tunable read-side knob needs a message-protocol field or spawn argument instead.",
+    "The exp 234 follow-up (executeBatch blob params) remains open in parameter-encoding-and-binding; with both hop directions now wrapped, batch params are the last graph-copied large-blob surface."
+  ]
+}

@@ -1,6 +1,32 @@
 import 'dart:collection';
+import 'dart:isolate';
 
 const _identityLookupMaxColumns = 32;
+
+/// [EXP-236] Materialize any `TransferableTypedData` blob cells in [rows]
+/// back into `Uint8List` views, in place.
+///
+/// Large blob cells cross the worker -> main isolate hop as
+/// `TransferableTypedData` (an ownership move of a malloc'd buffer, not a
+/// graph copy onto the GC heap — see `blobCellTransferThreshold` in
+/// query_decoder.dart). This runs once at each main-isolate receive boundary,
+/// before rows become visible to callers, so the public surface only ever
+/// exposes `Uint8List`. In-place mutation is safe: the values list arrived
+/// with this message and has no other observer yet. No-op (single type check
+/// per cell, no allocation) for results without wrapped cells.
+///
+/// Top-level and unexported (`lib/resqlite.dart` uses a `show` list), so this
+/// is internal despite being public to the package.
+void materializeTransferableBlobCells(List<Map<String, Object?>> rows) {
+  if (rows is! ResultSet) return;
+  final values = rows._values;
+  for (var i = 0; i < values.length; i++) {
+    final value = values[i];
+    if (value is TransferableTypedData) {
+      values[i] = value.materialize().asUint8List();
+    }
+  }
+}
 
 /// Column metadata shared across all rows in a [ResultSet].
 ///

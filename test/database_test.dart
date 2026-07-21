@@ -295,6 +295,75 @@ void main() {
       }
     });
 
+    test('large blob cells round-trip through select without sacrifice',
+        () async {
+      // [EXP-236] Blob cells >= blobCellTransferThreshold (256 KB) decode
+      // into TransferableTypedData on the reader and materialize back to
+      // Uint8List at the main-isolate receive boundary. Repeated reads
+      // exercise worker reuse (the blob-dominated result no longer
+      // sacrifices), and boundary sizes pin the >= threshold edge.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
+      Uint8List blobOf(int size, int seed) => Uint8List.fromList(
+        List.generate(size, (i) => (i * 31 + seed) & 0xFF),
+      );
+      final justUnder = blobOf(256 * 1024 - 1, 3); // direct heap cell
+      final atThreshold = blobOf(256 * 1024, 7); // wrapped cell
+      final big = blobOf(512 * 1024, 11); // wrapped cell
+      await db.execute('INSERT INTO t(id, payload) VALUES (1, ?)', [justUnder]);
+      await db.execute(
+        'INSERT INTO t(id, payload) VALUES (2, ?)',
+        [atThreshold],
+      );
+      await db.execute('INSERT INTO t(id, payload) VALUES (3, ?)', [big]);
+
+      for (var pass = 0; pass < 3; pass++) {
+        final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
+        expect(rows[0]['payload'], equals(justUnder), reason: 'pass $pass');
+        expect(rows[1]['payload'], equals(atThreshold), reason: 'pass $pass');
+        expect(rows[2]['payload'], equals(big), reason: 'pass $pass');
+        expect(rows[2]['payload'], isA<Uint8List>(), reason: 'pass $pass');
+      }
+    });
+
+    test('large blob cells round-trip through tx.select', () async {
+      // [EXP-236] The writer cannot sacrifice, so tx.select carries wrapped
+      // cells that materialize in Writer.selectLocked.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
+      final big = Uint8List.fromList(
+        List.generate(512 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+      await db.execute('INSERT INTO t(id, payload) VALUES (1, ?)', [big]);
+      await db.transaction((tx) async {
+        final rows = await tx.select('SELECT payload FROM t');
+        expect(rows.single['payload'], equals(big));
+        expect(rows.single['payload'], isA<Uint8List>());
+      });
+    });
+
+    test('text-heavy result with a wrapped blob cell still sacrifices intact',
+        () async {
+      // [EXP-236] A result whose residual (non-transferable) bytes exceed the
+      // sacrifice threshold still sacrifices; the wrapped blob cell rides the
+      // Isolate.exit message and must materialize on main like any other.
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT, payload BLOB)',
+      );
+      final bigText = 'x' * (400 * 1024); // residual > 256 KB -> sacrifice
+      final blob = Uint8List.fromList(
+        List.generate(300 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+      await db.execute(
+        'INSERT INTO t(id, body, payload) VALUES (1, ?, ?)',
+        [bigText, blob],
+      );
+      final rows = await db.select('SELECT body, payload FROM t');
+      expect((rows.single['body']! as String).length, bigText.length);
+      expect(rows.single['payload'], equals(blob));
+      // Pool must have respawned a healthy worker; a follow-up read works.
+      final again = await db.select('SELECT payload FROM t');
+      expect(again.single['payload'], equals(blob));
+    });
+
     test('large blob param survives TransferableTypedData transfer', () async {
       // [EXP-234] Blobs >= blobParamTransferThreshold (256 KB) cross to the
       // writer isolate via TransferableTypedData instead of the direct

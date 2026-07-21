@@ -11,6 +11,7 @@ import 'dart:typed_data';
 
 import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
+import '../row.dart' show materializeTransferableBlobCells;
 import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../tracelite_profile.dart';
@@ -75,7 +76,11 @@ final class ReaderPool {
     final result = await _dispatch(
       SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
     );
-    return result as List<Map<String, Object?>>;
+    final rows = result as List<Map<String, Object?>>;
+    // [EXP-236] Receive boundary: turn wrapped blob cells back into
+    // Uint8List views before rows are visible to callers.
+    materializeTransferableBlobCells(rows);
+    return rows;
   }
 
   /// Execute a query and capture read dependencies.
@@ -100,7 +105,10 @@ final class ReaderPool {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    return result as (List<Map<String, Object?>>, TableDependencies, int, int);
+    final typed =
+        result as (List<Map<String, Object?>>, TableDependencies, int, int);
+    materializeTransferableBlobCells(typed.$1);
+    return typed;
   }
 
   /// Execute a query returning JSON-encoded bytes plus the serialized row
@@ -139,7 +147,10 @@ final class ReaderPool {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    return result as (List<Map<String, Object?>>?, int, int);
+    final typed = result as (List<Map<String, Object?>>?, int, int);
+    final rows = typed.$1;
+    if (rows != null) materializeTransferableBlobCells(rows);
+    return typed;
   }
 
   Future<Object?> _dispatch(ReadRequest request) async {

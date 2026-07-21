@@ -7,6 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/row.dart' show materializeTransferableBlobCells;
 import 'package:resqlite/src/writer/blob_param_transfer.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
@@ -316,9 +317,9 @@ final class Writer {
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
-  ]) {
+  ]) async {
     assert(_mutex.isLocked, 'selectLocked requires the writer lock to be held');
-    return _request<QueryResponse>(
+    final response = await _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,
         parameters,
@@ -326,6 +327,11 @@ final class Writer {
         traceCorrelationId: traceCorrelationId,
       ),
     );
+    // [EXP-236] The writer cannot sacrifice, so tx.select results carry
+    // large blob cells as TransferableTypedData; materialize at this
+    // receive boundary before rows reach the caller.
+    materializeTransferableBlobCells(response.rows);
+    return response;
   }
 
   /// Runs a transaction. Used by both [Database.transaction] and [Transaction.transaction].
