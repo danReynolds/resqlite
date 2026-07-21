@@ -75,6 +75,15 @@ Median µs/select across three order-flipped per-process passes:
 | 400 KB text control (sacrifices both) | 0% to −11% | unchanged path |
 | 20×512 B control | sub-resolution | 24–47 µs lane |
 
+Mechanism attribution (temporary reader-spawn counter, removed before merge,
+270 blob reads/lane): baseline **270 spawns**, candidate **0** — the baseline
+sacrifices and respawns a reader isolate on every large-blob read, 1:1; the
+candidate never does. Interspersing a trivial query between blob reads still
+produced 270 baseline spawns, so the respawns do not hide: they outrun the
+~4-worker pool's respawn capacity (~2-5 ms each). Each avoided sacrifice is
+worth ~410 us even with pool overlap. The magnitude scales with how
+blob-read-heavy the workload is relative to pool size.
+
 The 200 KB control initially read +14–20% candidate-slower until pass 3
 reordered controls before any wrapped shape: the baseline's sacrifices hand
 its later lanes freshly-respawned readers, a cross-lane contamination worth

@@ -21,4 +21,23 @@ Median µs/select, 30 selects/sample × 9 samples. P1 base→cand, P2 cand→bas
 
 Control notes: the 200KB direct-path control read +14–20% candidate-slower in P1/P2 and collapsed to +2.4% in P3 once controls ran *before* any wrapped shape — in P1/P2 the baseline's blob lanes sacrificed their readers, so its later lanes ran on freshly-respawned workers while the candidate's were long-lived: cross-lane contamination, not a code-path effect. The text control (sacrifices in both lanes) stays within noise in every pass. The small-blob control trends candidate-faster in all passes but at 24–47µs it is below harness resolution (exp 221's narrow-lane rule).
 
+## Mechanism attribution (spawn count)
+
+The win is isolate lifecycle, not copy speed — proven by a temporary reader-
+spawn counter (removed before merge), 270 blob reads per lane:
+
+| Lane | median µs/blob-select | reader spawns / 270 reads |
+|---|---:|---:|
+| baseline (wrap off) | 517 | **270** |
+| candidate (wrap on) | 90 | **0** |
+
+Baseline sacrifices + respawns a reader isolate on every large-blob read (1:1);
+candidate never sacrifices. Interspersing a trivial query between blob reads
+still produced 270 baseline spawns and a ~5x gap — respawns don't hide because
+blob reads outrun the ~4-worker pool's respawn capacity (~2-5 ms each). Each
+avoided sacrifice is worth ~410 us here even with pool overlap. The magnitude
+therefore scales with how blob-read-heavy the workload is relative to pool
+size; a workload reading one large blob occasionally amid other work would let
+respawns hide and see a smaller delta.
+
 Interpretation: the baseline sacrifices the reader isolate on **every** blob-dominated query ≥ 256 KB — `Isolate.exit`, ~2–5 ms respawn amortized across the pool, statement-cache and schema-cache loss. The candidate decodes large blob cells straight into `TransferableTypedData` (one native→external copy, GC-invisible), keeps the worker, and moves the buffer across the hop. Repeated blob reads become **3–6× faster**; `tx.select` (which could never sacrifice and paid the full graph copy) improves **~6–7×**.
