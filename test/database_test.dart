@@ -295,6 +295,107 @@ void main() {
       }
     });
 
+    test('large blob param survives TransferableTypedData transfer', () async {
+      // [EXP-234] Blobs >= blobParamTransferThreshold (256 KB) cross to the
+      // writer isolate via TransferableTypedData instead of the direct
+      // SendPort copy. Verify byte-identical round-trips on both sides of the
+      // exact threshold boundary (256 KB - 1 direct, 256 KB wrapped) plus a
+      // comfortably-wrapped size, on both the write (execute) and
+      // transaction-read (tx.select) paths.
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
+      );
+      Uint8List blobOf(int size, int seed) => Uint8List.fromList(
+        List.generate(size, (i) => (i * 31 + seed) & 0xFF),
+      );
+      final justUnder = blobOf(256 * 1024 - 1, 3); // direct path
+      final atThreshold = blobOf(256 * 1024, 7); // wrapped (>= is inclusive)
+      final big = blobOf(512 * 1024, 11); // wrapped
+      await db.execute(
+        'INSERT INTO t(id, payload) VALUES (1, ?)',
+        [justUnder],
+      );
+      await db.execute(
+        'INSERT INTO t(id, payload) VALUES (2, ?)',
+        [atThreshold],
+      );
+      await db.execute('INSERT INTO t(id, payload) VALUES (3, ?)', [big]);
+
+      final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
+      expect(rows[0]['payload'], equals(justUnder));
+      expect(rows[1]['payload'], equals(atThreshold));
+      expect(rows[2]['payload'], equals(big));
+
+      // Equality lookup binds the large blob as a param on the read path too
+      // (transaction-scoped select goes through the writer QueryRequest path).
+      await db.transaction((tx) async {
+        final hit = await tx.select(
+          'SELECT id FROM t WHERE payload = ?',
+          [atThreshold],
+        );
+        expect(hit, hasLength(1));
+        expect(hit[0]['id'], 2);
+      });
+    });
+
+    test('failing query with large blob param propagates error and '
+        'writer survives', () async {
+      // [EXP-234] Regression: a failing tx.select whose params held a
+      // materialized (spent) TransferableTypedData built an exception the
+      // writer could not send back — the reply threw, killed the writer
+      // isolate, and hung the caller forever. The error must arrive as a
+      // ResqliteQueryException and the database must remain usable.
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
+      );
+      final big = Uint8List.fromList(
+        List.generate(512 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.select(
+            'SELECT * FROM missing_table WHERE payload = ?',
+            [big],
+          );
+        }),
+        throwsA(isA<ResqliteQueryException>()),
+      );
+
+      // Writer isolate must still be alive and consistent.
+      await db.execute('INSERT INTO t(payload) VALUES (?)', [big]);
+      final rows = await db.select('SELECT payload FROM t');
+      expect(rows.single['payload'], equals(big));
+    });
+
+    test('concurrent large blob writes coalesce and round-trip', () async {
+      // [EXP-234] A concurrent standalone-write burst rides the exp 180
+      // coalescing pump (MultiExecuteRequest), which wraps and unwraps blob
+      // params like single writes do. Distinct payloads must land intact.
+      await db.execute(
+        'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
+      );
+      final blobs = List.generate(
+        6,
+        (n) => Uint8List.fromList(
+          List.generate(300 * 1024, (i) => (i * 31 + n) & 0xFF),
+        ),
+      );
+      await Future.wait([
+        for (var n = 0; n < blobs.length; n++)
+          db.execute(
+            'INSERT INTO t(id, payload) VALUES (?, ?)',
+            [n + 1, blobs[n]],
+          ),
+      ]);
+
+      final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
+      expect(rows, hasLength(blobs.length));
+      for (var n = 0; n < blobs.length; n++) {
+        expect(rows[n]['payload'], equals(blobs[n]), reason: 'row ${n + 1}');
+      }
+    });
+
     test('row implements Map interface', () async {
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)');
       await db.execute('INSERT INTO t(name) VALUES (?)', ['test']);

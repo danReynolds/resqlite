@@ -438,6 +438,34 @@ moved to a background worker. Define what new generation or high-water delta
 re-arms the trigger, and benchmark sustained foreground contention; suppressing
 duplicate wakeups does not make a continuously true trigger edge-like.*
 
+### Cross-isolate transport costs live in the copy's destination, not its count
+
+[Exp 234](234-blob-param-transfer.md) initially shipped with the intuitive
+mechanism story — "`TransferableTypedData` avoids `SendPort.send`'s deep
+copy" — and a source-level dig proved it wrong twice over. Since Dart 2.15,
+same-group sends do a single object-graph copy **on the sender**
+(`runtime/vm/object_graph_copy.cc`); there is no receive-side rebuild, and
+the wrapped route (`fromList` memcpy + constant-time ownership move + ~1 µs
+`materialize()` view) copies the payload exactly as many times as the direct
+route: once, on main. The reproduced ~15–20% win on 256 KB–512 KB blob
+INSERTs comes from *where* that one copy lands: the direct route parks every
+in-flight payload on the shared GC heap, where scavenges must evacuate it as
+live young-generation data and every collection safepoints the whole isolate
+group — including the writer mid-step, which a serialized request/reply
+protocol converts straight into latency. The wrapped buffer is malloc'd
+external memory the GC never traces (real-path attribution: 8.6 ms vs 1.2 ms
+of GC pause per 300 × 256 KB inserts). The bounds are mechanistic: below
+~256 KB the graph copy's fast path is near-free and wrap bookkeeping loses;
+at ≥ 1 MB the WAL write dominates and huge payloads skip new space anyway.
+
+*Reapplies whenever comparing transports or attributing a transport win.
+Count where the bytes land, not just how many times they move — a GC-visible
+allocation carries deferred collection and group-safepoint costs that
+per-call timing never shows. And verify mechanism claims with per-claim
+measurement (a synchronous call's wall vs size proves where a copy runs;
+flat-vs-linear scaling proves view-vs-copy) rather than inferring the
+mechanism from an end-to-end delta.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

@@ -21,6 +21,7 @@ import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../row.dart';
 import '../tracelite_profile.dart';
+import 'blob_param_transfer.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -36,10 +37,15 @@ sealed class WriterRequest {
 final class ExecuteRequest extends WriterRequest {
   ExecuteRequest(
     this.sql,
-    this.params,
+    List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-  });
+    // [EXP-234] Wrapping runs on the main isolate at construction time,
+    // before `SendPort.send`, so large blob params cross to the writer as
+    // `TransferableTypedData` (ownership move of a malloc'd buffer) instead
+    // of riding the object-graph copy onto the shared GC heap. Mechanism:
+    // lib/src/writer/blob_param_transfer.dart.
+  }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -56,10 +62,10 @@ final class MultiExecuteRequest extends WriterRequest {
 final class QueryRequest extends WriterRequest {
   QueryRequest(
     this.sql,
-    this.params,
+    List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-  });
+  }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -241,7 +247,19 @@ void writerEntrypoint(List<Object> args) {
       // SendPort, so we send the typed exception directly. The main
       // isolate receives the exact subtype (ResqliteQueryException,
       // ResqliteTransactionException) with all structured fields intact.
-      message.replyPort.send(e);
+      try {
+        message.replyPort.send(e);
+      } catch (sendError) {
+        // [EXP-234] An exception payload can itself be unsendable — e.g. a
+        // `parameters` list holding an already-materialized (spent)
+        // TransferableTypedData. A throw here would escape the handler and
+        // kill the writer isolate, leaving the caller hanging forever, so
+        // fall back to a stripped copy that still delivers the failure.
+        message.replyPort.send(
+          ResqliteException('${e.runtimeType}: $e (reply payload was not '
+              'sendable across isolates: $sendError)'),
+        );
+      }
     } on Error catch (e, st) {
       // Errors (StackOverflowError, OutOfMemoryError, assertion failures,
       // etc.) indicate bugs or unrecoverable VM state — not query errors.
@@ -269,7 +287,10 @@ void writerEntrypoint(List<Object> args) {
 
 void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-  final result = executeWrite(state.dbHandle, msg.sql, msg.params);
+  // [EXP-234] Materialize any TransferableTypedData blob params back to
+  // Uint8List before binding. No-op (no allocation) when nothing was wrapped.
+  final params = unwrapBlobParams(msg.params);
+  final result = executeWrite(state.dbHandle, msg.sql, params);
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
@@ -290,7 +311,13 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   for (final write in msg.writes) {
     try {
       final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-      final result = executeWrite(state.dbHandle, write.sql, write.params);
+      // [EXP-234] Coalesced writes wrap large blobs like single writes do;
+      // materialize before binding (no-op when nothing was wrapped).
+      final result = executeWrite(
+        state.dbHandle,
+        write.sql,
+        unwrapBlobParams(write.params),
+      );
       final writerSqliteUs = _stopSqliteTimer(sqliteSw);
       final modifications = state.txDepth > 0
           ? TableDependencies.none
@@ -335,19 +362,25 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
 void _handleTxQuery(_WriterState state, QueryRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   final sqlNative = cachedSqlUtf8(msg.sql);
-  final paramsNative = allocateParams(msg.params);
+  // [EXP-234] Materialize any TransferableTypedData blob params before
+  // binding. The unwrapped list is also what error paths must embed: a
+  // materialized (spent) TransferableTypedData cannot cross a SendPort, so
+  // an exception carrying `msg.params` would be unsendable and kill the
+  // reply instead of delivering the failure.
+  final params = unwrapBlobParams(msg.params);
+  final paramsNative = allocateParams(params);
   try {
     final stmt = _resqliteStmtAcquireWriter(
       state.dbHandle,
       sqlNative.cast(),
       paramsNative,
-      msg.params.length,
+      params.length,
     );
     if (stmt == ffi.nullptr) {
       throw ResqliteQueryException(
         resqliteErrmsg(state.dbHandle).toDartString(),
         sql: msg.sql,
-        parameters: msg.params,
+        parameters: params,
       );
     }
     final raw = decodeQuery(stmt, msg.sql);
@@ -361,7 +394,7 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     // Both resources are freed in one finally regardless of which line
     // threw — an earlier version of this function had a paired try/finally
     // that leaked `paramsNative` when stmt acquisition failed.
-    freeParams(paramsNative, msg.params);
+    freeParams(paramsNative, params);
   }
 }
 

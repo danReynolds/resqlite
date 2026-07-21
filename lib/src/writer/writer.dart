@@ -7,6 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
+import 'package:resqlite/src/writer/blob_param_transfer.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -103,9 +104,14 @@ final class Writer {
     if (sendPort == null) {
       throw ResqliteConnectionException.databaseClosed();
     }
+    // [EXP-234] Build the request before enqueueing the completer: request
+    // constructors can now throw (`wrapBlobParams` allocates native memory
+    // for large blob params), and a throw after `_pending.addLast` would
+    // strand the completer at the queue head and desync every later reply.
+    final request = build(_replyPort.sendPort);
     final completer = Completer<T>.sync();
     _pending.addLast(completer);
-    sendPort.send(build(_replyPort.sendPort));
+    sendPort.send(request);
     return completer.future;
   }
 
@@ -175,7 +181,15 @@ final class Writer {
             } else {
               groupReply = _request<MultiExecuteResponse>(
                 (replyPort) => MultiExecuteRequest([
-                  for (final p in group) (sql: p.sql, params: p.parameters),
+                  // [EXP-234] Wrap here, not in the MultiExecuteRequest
+                  // constructor: this comprehension already builds fresh
+                  // records, so the no-blob common case pays no second list
+                  // rebuild. Without this, a concurrent burst of large-blob
+                  // writes — the exact shape the coalescing pump exists for —
+                  // would silently fall back to the graph-copy hop that
+                  // single writes avoid.
+                  for (final p in group)
+                    (sql: p.sql, params: wrapBlobParams(p.parameters)),
                 ], replyPort),
               );
             }
