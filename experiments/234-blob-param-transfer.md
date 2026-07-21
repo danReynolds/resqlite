@@ -5,9 +5,13 @@
 **Direction:** `parameter-encoding-and-binding`
 **Benchmark Run:** none — focused
   [`benchmark/experiments/blob_param_write_ab.dart`](../benchmark/experiments/blob_param_write_ab.dart)
-  (end-to-end INSERT) and
+  (end-to-end INSERT),
   [`benchmark/experiments/blob_param_transport_ab.dart`](../benchmark/experiments/blob_param_transport_ab.dart)
-  (isolated transport); raw pass tables in
+  (isolated transport), and
+  [`benchmark/experiments/blob_param_mechanism_proof.dart`](../benchmark/experiments/blob_param_mechanism_proof.dart)
+  (per-claim mechanism attribution, with
+  [`blob_param_gc_split.dart`](../benchmark/experiments/blob_param_gc_split.dart)
+  for per-lane GC attribution on the real path); raw pass tables in
   [`benchmark/results/2026-07-18T13-10-00Z-exp234-blob-param-transfer.md`](../benchmark/results/2026-07-18T13-10-00Z-exp234-blob-param-transfer.md).
   No release-suite run because no current release lane isolates large-blob
   parameter transfer; the focused harnesses are the durable gate.
@@ -23,15 +27,17 @@ but the **blob** arm was never measured in isolation.
 A `Uint8List` blob param on the write path is copied three times before it
 lands in a database page:
 
-1. **main → writer isolate**, when `SendPort.send(ExecuteRequest)` deep-copies
-   the request graph — including the blob bytes — through the VM's C++ object
-   serializer;
+1. **main → writer isolate**, when `SendPort.send(ExecuteRequest)` copies the
+   request graph — including the blob bytes — via the VM's object-graph copy
+   (Dart SDK `runtime/vm/object_graph_copy.cc`), landing the payload on the
+   shared GC heap;
 2. **writer → native param arena**, in `allocateParams` (`view.setRange`);
 3. **arena → SQLite b-tree page**, inside `sqlite3_step`.
 
 Copies (2) and (3) are unavoidable (the arena must outlive the bind, and SQLite
-owns its pages). Copy (1) is the tempting target: `TransferableTypedData` moves
-typed-data bytes across a `SendPort` without the serializer's deep copy.
+owns its pages). Copy (1) is the tempting target: `TransferableTypedData`
+carries typed-data bytes across a `SendPort` by ownership transfer of a
+malloc'd buffer instead of a graph copy onto the heap.
 
 [Exp 005](005-dart-binary-codec-transferable-typed-data.md) rejected a Dart
 binary **codec** for structured map **results** — but that lost because
@@ -43,9 +49,10 @@ structure to encode, so it is a distinct question that exp 005 never answered.
 
 For a large blob write param, wrapping the `Uint8List` in
 `TransferableTypedData` before `SendPort.send` (and materializing it on the
-writer before `allocateParams`) removes the serializer's deep copy on the
-main→writer hop. The win should appear where that copy is a material fraction
-of the whole INSERT, and wash out where the SQLite WAL write dominates.
+writer before `allocateParams`) replaces the graph copy on the main→writer hop
+with a plain memcpy into external memory plus a constant-time ownership move.
+The win should appear where that hop's cost is a material fraction of the
+whole INSERT, and wash out where the SQLite WAL write dominates.
 
 Acceptance: two order-flipped end-to-end passes must reproduce same-direction
 candidate-faster on a large-blob single-row INSERT, above the noise floor
@@ -99,20 +106,68 @@ microbenchmark isolates the cause: the transferable hop is −22.6% at 256 KB bu
 own copy catches up) — exactly the shape that justifies a 256 KB threshold.
 
 Interpretation: for **256 KB–512 KB single-row blob INSERTs** — thumbnails,
-documents, serialized protobuf/JSON blobs, small media — replacing the VM
-serializer's deep copy with a `TransferableTypedData` move is a **~15–20%
-end-to-end** speedup. Below 256 KB the wrap does not pay back (kept on the
-direct path); at ≥ 1 MB the SQLite WAL write dominates and the effect washes
-out. Non-blob and sub-threshold writes are structurally unaffected (fast-path
-returns the list unchanged).
+documents, serialized protobuf/JSON blobs, small media — the
+`TransferableTypedData` route is a **~15–20% end-to-end** speedup. Below
+256 KB the wrap does not pay back (kept on the direct path); at ≥ 1 MB the
+SQLite WAL write dominates and the effect washes out. Non-blob and
+sub-threshold writes are structurally unaffected (fast-path returns the list
+unchanged).
+
+## Mechanism (post-acceptance attribution)
+
+A follow-up deep-dive (VM source reading plus
+[`blob_param_mechanism_proof.dart`](../benchmark/experiments/blob_param_mechanism_proof.dart)
+and [`blob_param_gc_split.dart`](../benchmark/experiments/blob_param_gc_split.dart))
+corrected the mechanism story this experiment originally shipped with. The
+PR-era framing — "removes the VM serializer's deep copy" — is wrong in two
+ways: since Dart 2.15 same-group sends use an object-graph copy, not the
+serializer, and that copy happens **once, on the sender** — there is no
+receive-side rebuild. Both routes copy the payload exactly once, on the main
+isolate. What actually produces the win, each part measured separately:
+
+- **The copy's destination.** The direct route lands every in-flight blob on
+  the shared GC heap, where the scavenger must evacuate it as live
+  young-generation data — and every collection safepoints the whole isolate
+  group, including the writer mid-step, which the serialized request/reply
+  protocol converts directly into write latency. On the real INSERT path
+  (isolated single-lane processes under `--verbose_gc`, 300 × 256 KB inserts)
+  the direct lane cost 29 GCs / 8.6 ms of pause vs the wrapped lane's
+  20 GCs / 1.2 ms — the asymmetry is per-GC cost, not count, because the
+  wrapped route's payload lives in malloc'd memory the GC never traces.
+- **Copy machinery at large sizes.** `SendPort.send`'s synchronous wall
+  scales linearly with blob size (proving the sender-side copy), and blobs
+  too large for the copier's fast-path new-space allocation abort onto
+  `CopyTypedDataBaseWithSafepointChecks`, which restarts the copy in
+  `kChunkSize` (100 KB) safepoint-polled chunks — measured at roughly double
+  a plain memcpy at ≥ 1 MB. This is real but matters least where the win is
+  biggest: at 256 KB the fast path usually succeeds and `send(blob)` is only
+  ~15% over a plain copy.
+- **The wrapped route's costs are flat where they must be.** `fromList` is
+  one linear memcpy (≈ a plain heap copy), `send` of the wrapper is
+  constant-time at every size, `materialize()` is ~1 µs flat from 64 KB to
+  4 MB (a view, not a copy), and the writer's arena `setRange` from the
+  materialized view is equal-or-faster than from a heap `Uint8List` — no
+  cost was shifted to the writer.
+
+Honest residual: summing the directly-attributed send-path and GC-pause
+deltas covers part of the end-to-end win; the remainder is second-order
+effects of the same heap churn (safepoint stalls landing inside the writer's
+SQLite work, allocation slow paths), demonstrated collectively — isolated
+single-lane runs reproduce the full win — but not budgeted line-by-line.
+
+This also sharpens the exp 005 contrast: exp 005's codec lost because
+encoding *structure* in Dart is slower than the VM's native walk; a raw blob
+has no structure, so the only remaining costs are destination and machinery —
+both of which the wrap avoids.
 
 ## Outcome
 
 **Accepted (in review).** A contained, threshold-gated ~15–20% win on
 moderate-large single-row blob INSERTs, in an active direction whose open
-question this consumes. The mechanism (raw-byte transfer beats the VM
-serializer; `fromList` is cheap and non-neutering) and the boundaries (64 KB
-regresses, 1 MB+ is disk-dominated) are both directly measured.
+question this consumes. The mechanism (one copy either way — the wrapped
+route lands it in malloc'd memory the GC never traces and moves it in
+constant time; `fromList` is cheap and non-neutering) and the boundaries
+(64 KB regresses, 1 MB+ is disk-dominated) are both directly measured.
 
 Would reopen the batch/coalesced-write blob paths if a blob-heavy
 `executeBatch` workload shows the same transfer fraction; would revisit the
@@ -126,4 +181,7 @@ distribution.
   large-blob-survives-TransferableTypedData round-trip test on execute + tx.select)
 - [x] focused end-to-end A/B, interleaved + order-flipped, ~7 passes
 - [x] transport microbenchmark isolating the main→writer copy
+- [x] mechanism attribution: per-call cost table (`blob_param_mechanism_proof.dart`,
+  two passes) + per-lane GC attribution on the real path
+  (`blob_param_gc_split.dart` under `--verbose_gc`, isolated processes)
 - [x] `dart run benchmark/finalize_experiment.dart --experiment=experiments/234-blob-param-transfer.md`

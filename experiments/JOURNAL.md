@@ -438,28 +438,33 @@ moved to a background worker. Define what new generation or high-water delta
 re-arms the trigger, and benchmark sustained foreground contention; suppressing
 duplicate wakeups does not make a continuously true trigger edge-like.*
 
-### The VM SendPort serializer wins on structure, loses on raw bytes
+### Cross-isolate transport costs live in the copy's destination, not its count
 
-[Exp 005](005-dart-binary-codec-transferable-typed-data.md) rejected a Dart
-binary codec for structured map *results*: the VM's C++ serializer beat any
-Dart-level encode/decode of rows by 5–7×, because iterating values and packing
-them into a `ByteData` in Dart is slower than the native serializer's graph
-walk. That rejection is often read as "`TransferableTypedData` doesn't help."
-[Exp 234](234-blob-param-transfer.md) shows the boundary: for a raw
-`Uint8List` blob *parameter* there is **nothing to encode**, so
-`TransferableTypedData.fromList` (a plain memcpy into external memory, which
-does not neuter its source) beats the serializer's per-object deep copy — a
-reproduced ~15–20% end-to-end win on 256 KB–512 KB single-row blob INSERTs. The
-win is size-bounded and the bounds are measured: the wrap is *slower* at 64 KB
-(overhead) and neutral at multi-MB (`fromList`'s own copy grows while the WAL
-write dominates).
+[Exp 234](234-blob-param-transfer.md) initially shipped with the intuitive
+mechanism story — "`TransferableTypedData` avoids `SendPort.send`'s deep
+copy" — and a source-level dig proved it wrong twice over. Since Dart 2.15,
+same-group sends do a single object-graph copy **on the sender**
+(`runtime/vm/object_graph_copy.cc`); there is no receive-side rebuild, and
+the wrapped route (`fromList` memcpy + constant-time ownership move + ~1 µs
+`materialize()` view) copies the payload exactly as many times as the direct
+route: once, on main. The reproduced ~15–20% win on 256 KB–512 KB blob
+INSERTs comes from *where* that one copy lands: the direct route parks every
+in-flight payload on the shared GC heap, where scavenges must evacuate it as
+live young-generation data and every collection safepoints the whole isolate
+group — including the writer mid-step, which a serialized request/reply
+protocol converts straight into latency. The wrapped buffer is malloc'd
+external memory the GC never traces (real-path attribution: 8.6 ms vs 1.2 ms
+of GC pause per 300 × 256 KB inserts). The bounds are mechanistic: below
+~256 KB the graph copy's fast path is near-free and wrap bookkeeping loses;
+at ≥ 1 MB the WAL write dominates and huge payloads skip new space anyway.
 
-*Reapplies whenever considering `TransferableTypedData` / zero-copy transfer.
-The question is not "does it help" but "is there structure to encode?" If the
-payload is already contiguous bytes, the serializer's per-object overhead is
-pure loss and the transfer wins — but only where the copy is a material
-fraction of the operation, so gate it on a measured size threshold rather than
-shipping it for all payloads.*
+*Reapplies whenever comparing transports or attributing a transport win.
+Count where the bytes land, not just how many times they move — a GC-visible
+allocation carries deferred collection and group-safepoint costs that
+per-call timing never shows. And verify mechanism claims with per-claim
+measurement (a synchronous call's wall vs size proves where a copy runs;
+flat-vs-linear scaling proves view-vs-copy) rather than inferring the
+mechanism from an end-to-end delta.*
 
 ## How to add to this file
 

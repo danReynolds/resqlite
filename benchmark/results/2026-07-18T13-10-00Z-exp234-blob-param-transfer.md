@@ -34,13 +34,14 @@ Median µs per main→writer→reply round-trip; worker touches every byte.
 
 Reads: `TransferableTypedData.fromList` does a plain memcpy into external
 memory (cheap — 9 µs for 256 KB, vs the 316 µs round-trip) and does **not**
-neuter its source list. The transferable hop beats the VM serializer's
-per-object deep copy for raw bytes at 256 KB (−22.6%), but at 64 KB the wrap
-overhead makes it **slower** (+22.7%) and at 4 MB `fromList`'s own copy
-catches up to the saving (neutral). This is the inverse of exp 005: there was
-no structure to encode here, so a straight byte transfer wins where a Dart
-*codec* over structured maps lost. The 64 KB regression is exactly why the
-production threshold is 256 KB.
+neuter its source list. The transferable hop beats the direct `SendPort.send`
+route for raw bytes at 256 KB (−22.6%), but at 64 KB the wrap overhead makes
+it **slower** (+22.7%) and at 4 MB `fromList`'s own copy catches up to the
+saving (neutral). There was no structure to encode here, so exp 005's
+codec-vs-VM verdict does not apply. The 64 KB regression is exactly why the
+production threshold is 256 KB. (Mechanism attribution for *why* the direct
+route costs more — same copy count, different destination — is in the
+addendum below.)
 
 ## End-to-end single-row BLOB INSERT (representative clean pass)
 
@@ -79,11 +80,58 @@ same-direction reproduction across the order flip, not raw magnitude.
 
 ## Interpretation
 
-For 256 KB–512 KB single-row blob INSERTs the main→writer transfer copy is a
-material fraction of the write, and replacing the VM serializer's deep copy
-with a `TransferableTypedData` move is a **~15–20% end-to-end** speedup,
-reproduced same-direction across every order-flipped pass. Below 256 KB the
-wrap does not pay back (kept on the direct path); at ≥ 1 MB the SQLite WAL
-write dominates and the effect washes out to neutral. No change for non-blob
-or sub-threshold writes — `wrapBlobParams` returns the input list unchanged
-(no allocation) when nothing qualifies.
+For 256 KB–512 KB single-row blob INSERTs the main→writer hop cost is a
+material fraction of the write, and the `TransferableTypedData` route is a
+**~15–20% end-to-end** speedup, reproduced same-direction across every
+order-flipped pass. Below 256 KB the wrap does not pay back (kept on the
+direct path); at ≥ 1 MB the SQLite WAL write dominates and the effect washes
+out to neutral. No change for non-blob or sub-threshold writes —
+`wrapBlobParams` returns the input list unchanged (no allocation) when
+nothing qualifies.
+
+## Addendum: mechanism attribution (2026-07-20)
+
+A post-acceptance deep-dive with
+[`blob_param_mechanism_proof.dart`](../experiments/blob_param_mechanism_proof.dart)
+(per-call costs; no resqlite imports) and
+[`blob_param_gc_split.dart`](../experiments/blob_param_gc_split.dart)
+(real INSERT path, one lane per process under `--verbose_gc`) corrected the
+original "avoids the serializer deep copy" framing. Since Dart 2.15,
+same-group sends use a single object-graph copy on the sender
+(`runtime/vm/object_graph_copy.cc`); **both routes copy the payload exactly
+once, on the main isolate**. The win is the copy's destination.
+
+Per-call costs, median µs, two runs (synchronous wall of each single call;
+worker-side columns reported back):
+
+| Size | heapCopy | fromList | send(blob) | send(ttd) | materialize | setRange(direct) | setRange(ttd) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 64 KB | 6.9–7.0 | 5.7–6.3 | 1.8–2.8 | 0.6–0.7 | 0.5–0.7 | 2.6 | 2.2 |
+| 256 KB | 28.6–29.2 | 23.0–23.7 | 30.1–33.4 | 0.7–0.8 | 0.5–0.8 | 7.0 | 6.3 |
+| 1 MB | 102–113 | 100–112 | 188–206 | 16–26 | 0.9–1.3 | 30.4 | 21.2 |
+| 4 MB | 461–558 | 445–476 | 599–810 | 20–27 | 1.0–1.2 | 127.5 | 80.9 |
+
+- `send(blob)` scales linearly → the copy runs inside the synchronous call,
+  on the sender. At 256 KB it is ~15% over a plain copy (fast path: one
+  new-space alloc + unchunked memmove); at ≥ 1 MB it is ~2× a plain memcpy
+  (fast-path allocation fails → abort → `CopyTypedDataBaseWithSafepointChecks`
+  redoes the copy in 100 KB safepoint-polled chunks).
+- `send(ttd)` is near-constant at every size → ownership move, not a copy.
+- `materialize()` is ~1 µs flat from 64 KB to 4 MB → a view, not a copy.
+- `setRange` (the writer's real arena-consumption path) is equal-or-faster
+  from the materialized view → no cost shifted to the writer.
+
+Real-path GC attribution (300 × 256 KB INSERTs, isolated processes,
+A/B-matched DELETE cadence): direct lane **29 app-isolate GCs / 8.6 ms
+pause**; wrapped lane **20 GCs / 1.2–1.7 ms**. The asymmetry is per-GC cost,
+not count — direct-lane scavenges must evacuate live 256 KB payloads from new
+space; the wrapped payloads are malloc'd external memory the GC never traces.
+Each collection also safepoints the whole isolate group, including the writer
+mid-step. The isolated single-lane runs reproduce the end-to-end win
+(−4% to −28% per insert across passes).
+
+Residual: directly-attributed send-path + GC-pause deltas (~30 µs/insert at
+256 KB) cover part of the observed 60–350 µs/insert range; the remainder is
+second-order effects of the same heap churn (safepoint stalls inside the
+writer's SQLite work, allocation slow paths), demonstrated collectively but
+not budgeted line-by-line.
