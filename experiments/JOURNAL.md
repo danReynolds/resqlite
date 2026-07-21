@@ -466,6 +466,33 @@ measurement (a synchronous call's wall vs size proves where a copy runs;
 flat-vs-linear scaling proves view-vs-copy) rather than inferring the
 mechanism from an end-to-end delta.*
 
+## A transport win measured on many round-trips need not survive coalescing — round-trip topology is the load-bearing variable, not payload size
+
+Exp 234 accepted a ~15–20% win from wrapping ≥ 256 KB blob params in
+`TransferableTypedData` on the single-row write path, and its own signal
+predicted the win would "reproduce the same transfer fraction" on a blob-heavy
+`executeBatch`. Exp 237 tested exactly that and found the opposite: a
+*reproduced regression* (256 KB candidate-slower on 8/8 order-flipped legs,
++7.6% to +18.1%; no size wins). The reason is that exp 234's win was never
+about payload size in the abstract — it came from the interaction between
+*per-round-trip* heap churn and the writer being safepointed **mid-step**:
+across N single-row INSERTs, each `SendPort.send` parks a blob on the
+young-generation heap, and a scavenge triggered while the writer is
+mid-`sqlite3_step` on the previous blob stalls it, a cost that compounds over N
+round-trips. `executeBatch` carries all N sets across **one** send and runs
+them in **one** writer round-trip inside one transaction, so that interleaving
+is gone — leaving only the wrap's per-blob `fromList`/`materialize` tax with
+nothing to reclaim. Batching is a form of round-trip coalescing (cf. exp 180),
+and coalescing removes precisely the churn the wrap reclaimed.
+
+*Reapplies whenever a transport/scheduling win is proposed for a
+coalesced, batched, or pipelined path on the strength of a per-item result.
+The number of isolate round-trips — not the total payload moved — is what
+determines whether a GC/safepoint-interaction win survives. Re-measure on the
+collapsed path; do not extend by payload similarity. (Two adjacent runs on the
+same shared file: exp 235 also touches JOURNAL.md — keep both entries on
+merge.)*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
