@@ -74,16 +74,10 @@ final class QueryRequest extends WriterRequest {
 final class BatchRequest extends WriterRequest {
   BatchRequest(
     this.sql,
-    List<List<Object?>> paramSets,
+    this.paramSets,
     super.replyPort, {
     super.traceCorrelationId,
-    // [EXP-237] Wrap large blob params across every set on the main isolate
-    // before send, so a blob-heavy batch crosses to the writer as
-    // TransferableTypedData (ownership move of a malloc'd buffer) rather than
-    // riding the object-graph copy onto the shared GC heap — extends exp 234's
-    // single-row/coalesced blob transfer to executeBatch. No-op (input
-    // returned unchanged) when no set carries a large blob.
-  }) : paramSets = wrapBlobParamSets(paramSets);
+  });
   final String sql;
   final List<List<Object?>> paramSets;
 }
@@ -339,16 +333,11 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
-  // [EXP-237] Materialize any TransferableTypedData blob params back to
-  // Uint8List before binding, across every set. No-op (no allocation) when
-  // nothing was wrapped. allocateBatchParams requires concrete Uint8List
-  // blobs, so this must run before either batch-write path.
-  final paramSets = unwrapBlobParamSets(msg.paramSets);
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-    executeNestedBatchWrite(state.dbHandle, msg.sql, paramSets);
+    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     msg.replyPort.send(
       BatchResponse(
         TableDependencies.none,
@@ -357,7 +346,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     );
   } else {
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-    executeBatchWrite(state.dbHandle, msg.sql, paramSets);
+    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     msg.replyPort.send(
       BatchResponse(

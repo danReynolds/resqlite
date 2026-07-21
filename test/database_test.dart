@@ -396,53 +396,6 @@ void main() {
       }
     });
 
-    test('large blob params survive TransferableTypedData transfer in '
-        'executeBatch', () async {
-      // [EXP-237] A BatchRequest carries every parameter set across one
-      // SendPort.send; wrapping runs per set, so a batch mixing wrapped
-      // (>= 256 KB) and direct (< 256 KB) blobs must round-trip byte-identical.
-      // Exercised both as a standalone batch and as a nested batch inside a
-      // transaction (executeNestedBatchWrite), since both consume the unwrapped
-      // sets.
-      await db.execute(
-        'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
-      );
-      Uint8List blobOf(int size, int seed) => Uint8List.fromList(
-        List.generate(size, (i) => (i * 31 + seed) & 0xFF),
-      );
-      final justUnder = blobOf(256 * 1024 - 1, 3); // direct path
-      final atThreshold = blobOf(256 * 1024, 7); // wrapped (>= is inclusive)
-      final big = blobOf(512 * 1024, 11); // wrapped
-
-      await db.executeBatch(
-        'INSERT INTO t(id, payload) VALUES (?, ?)',
-        [
-          [1, justUnder],
-          [2, atThreshold],
-          [3, big],
-        ],
-      );
-
-      // Nested batch: same shape inside an interactive transaction.
-      await db.transaction((tx) async {
-        await tx.executeBatch(
-          'INSERT INTO t(id, payload) VALUES (?, ?)',
-          [
-            [4, big],
-            [5, justUnder],
-          ],
-        );
-      });
-
-      final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
-      expect(rows, hasLength(5));
-      expect(rows[0]['payload'], equals(justUnder));
-      expect(rows[1]['payload'], equals(atThreshold));
-      expect(rows[2]['payload'], equals(big));
-      expect(rows[3]['payload'], equals(big));
-      expect(rows[4]['payload'], equals(justUnder));
-    });
-
     test('row implements Map interface', () async {
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)');
       await db.execute('INSERT INTO t(name) VALUES (?)', ['test']);
