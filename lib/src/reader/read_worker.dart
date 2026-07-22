@@ -39,6 +39,32 @@ final class SelectRequest extends ReadRequest {
   SelectRequest(super.sql, super.parameters, {super.traceCorrelationId});
 }
 
+/// Internal envelope for a bounded prefix of plain selects that had already
+/// overflowed the reader pool.
+final class PlainSelectBatchRequest extends ReadRequest {
+  PlainSelectBatchRequest(this.requests)
+    : assert(requests.length > 1),
+      super(requests.first.sql, requests.first.parameters);
+
+  final List<SelectRequest> requests;
+}
+
+sealed class PlainSelectBatchOutcome {
+  const PlainSelectBatchOutcome();
+}
+
+final class PlainSelectBatchSuccess extends PlainSelectBatchOutcome {
+  const PlainSelectBatchSuccess(this.rows);
+
+  final List<Map<String, Object?>> rows;
+}
+
+final class PlainSelectBatchFailure extends PlainSelectBatchOutcome {
+  const PlainSelectBatchFailure(this.error);
+
+  final ResqliteException error;
+}
+
 /// Row query that also captures read table dependencies via the SQLite
 /// authorizer hook. Used for initial stream registration in [StreamEngine].
 final class SelectWithDepsRequest extends ReadRequest {
@@ -139,6 +165,26 @@ void readerEntrypoint(List<Object> args) {
           sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
           result = _toRows(raw);
 
+        case PlainSelectBatchRequest(:final requests):
+          var estimatedBytes = 0;
+          final outcomes = <PlainSelectBatchOutcome>[];
+          for (final member in requests) {
+            try {
+              final raw = executeQuery(
+                dbHandleAddr,
+                readerId,
+                member.sql,
+                member.parameters,
+              );
+              estimatedBytes += raw.estimatedBytes;
+              outcomes.add(PlainSelectBatchSuccess(_toRows(raw)));
+            } catch (error) {
+              outcomes.add(PlainSelectBatchFailure(_readError(error, member)));
+            }
+          }
+          sacrifice = estimatedBytes > sacrificeByteThreshold;
+          result = outcomes;
+
         case SelectWithDepsRequest(:final sql, :final parameters):
           // Initial stream query produces hash + row-count baselines
           // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)
@@ -226,13 +272,7 @@ void readerEntrypoint(List<Object> args) {
       // via SendPort — the VM deep-copies them. Wrap non-resqlite errors
       // with the request's SQL context so callers always get a typed
       // exception with sql/parameters intact.
-      final error = e is ResqliteException
-          ? e
-          : ResqliteQueryException(
-              e.toString(),
-              sql: request.sql,
-              parameters: request.parameters,
-            );
+      final error = _readError(e, request);
       eventPort.send((null, false, error));
     } finally {
       resqliteReaderSetBusy(
@@ -250,6 +290,15 @@ void readerEntrypoint(List<Object> args) {
     }
   };
 }
+
+ResqliteException _readError(Object error, ReadRequest request) =>
+    error is ResqliteException
+    ? error
+    : ResqliteQueryException(
+        error.toString(),
+        sql: request.sql,
+        parameters: request.parameters,
+      );
 
 // ---------------------------------------------------------------------------
 // Reader-specific FFI bindings
