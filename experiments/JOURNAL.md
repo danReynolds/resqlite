@@ -466,6 +466,78 @@ measurement (a synchronous call's wall vs size proves where a copy runs;
 flat-vs-linear scaling proves view-vs-copy) rather than inferring the
 mechanism from an end-to-end delta.*
 
+## A transport win measured on many round-trips need not survive coalescing — round-trip topology is the load-bearing variable, not payload size
+
+Exp 234 accepted a ~15–20% win from wrapping ≥ 256 KB blob params in
+`TransferableTypedData` on the single-row write path, and its own signal
+predicted the win would "reproduce the same transfer fraction" on a blob-heavy
+`executeBatch`. Exp 237 tested exactly that and found the opposite: a
+*reproduced regression* (256 KB candidate-slower on 8/8 order-flipped legs,
++7.6% to +18.1%; no size wins). The reason is that exp 234's win was never
+about payload size in the abstract — it came from the interaction between
+*per-round-trip* heap churn and the writer being safepointed **mid-step**:
+across N single-row INSERTs, each `SendPort.send` parks a blob on the
+young-generation heap, and a scavenge triggered while the writer is
+mid-`sqlite3_step` on the previous blob stalls it, a cost that compounds over N
+round-trips. `executeBatch` carries all N sets across **one** send and runs
+them in **one** writer round-trip inside one transaction, so that interleaving
+is gone — leaving only the wrap's per-blob `fromList`/`materialize` tax with
+nothing to reclaim. Batching is a form of round-trip coalescing (cf. exp 180),
+and coalescing removes precisely the churn the wrap reclaimed.
+
+*Reapplies whenever a transport/scheduling win is proposed for a
+coalesced, batched, or pipelined path on the strength of a per-item result.
+The number of isolate round-trips — not the total payload moved — is what
+determines whether a GC/safepoint-interaction win survives. Re-measure on the
+collapsed path; do not extend by payload similarity. (Two adjacent runs on the
+same shared file: exp 235 also touches JOURNAL.md — keep both entries on
+merge.)*
+
+### A batch can preserve aggregate throughput and still destroy independent completion latency
+
+Exp 239 transparently grouped only plain SELECTs already parked behind a full
+reader pool. The mechanism looked unusually well bounded: homogeneous
+twenty-way point and short-list bursts improved 21-33%, the first four-way wave
+was untouched, and even twenty large reads stayed neutral-to-faster because
+the overflow remained sharded across workers. Yet alternating large and point
+queries exposed the semantic scheduling cost. A point query sharing one worker
+envelope with large reads could not resolve until the whole envelope returned;
+point-completion p95 regressed 11-17% and total median 13-26% in both
+orderings. Queue pressure says work is waiting, not whether it is equally
+costly or equally latency-sensitive.
+
+*Reapplies whenever an internal scheduler coalesces independently completable
+work. Aggregate throughput and pool utilisation are insufficient guards: add a
+heterogeneous lane and measure each latency-sensitive member's completion,
+because an indivisible reply can create head-of-line blocking even when total
+work stays parallel. Hidden batching needs a cost/priority signal or
+independently deliverable member results; queue depth alone is not policy.*
+
+## A cross-value pipelining win measured on a packed array dies when the real path fetches the inputs serially
+
+Exp 240 built exp 231's named reopen — hand the integer formatter an *array* of
+i64 cells so per-value latency amortises. In a pure-conversion microbench (values
+already sitting in a contiguous `int64` array) a 2-way software-pipelined scalar
+formatter overlapped two values' independent divide chains and won −6 to −13% on
+mid/big magnitudes. Wired into `write_json_to_buf`, the same code was uniformly
++1 to +12% *slower* — worst on the exact lane the microbench won most. The
+premise that made the microbench win — two independent conversions in flight at
+once — silently evaporated on the real path, because each cell's value is fetched
+through its own `sqlite3_value_int64` call, so the two "parallel" chains are
+actually gated behind serial source reads. The overlap the batch was built to
+exploit never existed once the inputs came from SQLite one at a time, leaving
+only the lookahead machinery's added hot-loop cost.
+
+*Reapplies whenever an ILP/pipelining/SIMD-over-array optimisation is validated
+on a pre-materialised buffer of inputs. Before integrating, check how the inputs
+arrive on the real path: if each is produced by a separate upstream call
+(an FFI/value accessor, a decode step, a cursor advance), the cross-item overlap
+the benchmark measured will not occur, and the batching scaffold becomes pure
+overhead. The array-in-hand microbench must feed from the same source the hot
+path does, or its win is an artefact of the packed fixture. Distinct from exp
+226's "isolated win below the end-to-end gate" (a magnitude gap): here the sign
+flips, because the mechanism itself is absent in production.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

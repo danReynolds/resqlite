@@ -61,6 +61,50 @@ external int resqliteTestBase64Encode(
 )
 external int resqliteTestI64ToStr(int val, ffi.Pointer<ffi.Uint8> out);
 
+// Test-support entries defined in native/resqlite_json.c (exp 240). Each
+// formats an array of `n` i64 values as a comma-separated decimal string into
+// `out` (no NUL) and returns bytes written. `scalar` is the shipped per-value
+// two-digit-LUT formatter; `pipe2` and `neon` are the batched candidates that
+// exp 240 evaluated. All three must produce byte-identical output.
+@ffi.Native<
+  ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'resqlite_test_i64_array_scalar', isLeaf: true)
+external int resqliteTestI64ArrayScalar(
+    ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+
+@ffi.Native<
+  ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'resqlite_test_i64_array_pipe2', isLeaf: true)
+external int resqliteTestI64ArrayPipe2(
+    ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+
+@ffi.Native<
+  ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'resqlite_test_i64_array_neon', isLeaf: true)
+external int resqliteTestI64ArrayNeon(
+    ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+
+/// Formats `vals` via one of the three exp 240 native array encoders and
+/// returns the emitted comma-separated string.
+String _nativeI64Array(
+  List<int> vals,
+  int Function(ffi.Pointer<ffi.Int64>, int, ffi.Pointer<ffi.Uint8>) enc,
+) {
+  final n = vals.length;
+  final valsPtr = malloc<ffi.Int64>(n == 0 ? 1 : n);
+  final out = malloc<ffi.Uint8>(n * 24 + 16);
+  try {
+    for (var i = 0; i < n; i++) {
+      valsPtr[i] = vals[i];
+    }
+    final len = enc(valsPtr, n, out);
+    return utf8.decode(out.asTypedList(len));
+  } finally {
+    malloc.free(valsPtr);
+    malloc.free(out);
+  }
+}
+
 /// Formats `val` via the shipped native integer formatter.
 String _nativeI64(int val) {
   // RESQLITE_JSON_INT_MAX (24) is the reserved width; a little headroom.
@@ -195,6 +239,62 @@ void main() {
         final lo = rng.nextInt(1 << 32);
         check((hi << 32) | lo); // may be negative — Dart int is 64-bit signed
         check(rng.nextInt(100000000)); // dense sub-9-digit coverage too
+      }
+    });
+  });
+
+  group('exp 240 batched i64 array encoders differential', () {
+    // The batched candidates (pipe2 software-pipelining, neon vector kernel)
+    // must be byte-identical to the shipped per-value scalar formatter and to
+    // Dart's oracle. The pipe2 path pairs adjacent values, so parity has to
+    // hold across the odd/even boundary and the intra-pair digit-length mix;
+    // the neon path formats each value through the vector 8-digit kernel.
+    void checkArray(List<int> vals) {
+      final oracle = vals.join(',');
+      expect(_nativeI64Array(vals, resqliteTestI64ArrayScalar), oracle,
+          reason: 'scalar array encoder diverged: $vals');
+      expect(_nativeI64Array(vals, resqliteTestI64ArrayPipe2), oracle,
+          reason: 'pipe2 array encoder diverged: $vals');
+      expect(_nativeI64Array(vals, resqliteTestI64ArrayNeon), oracle,
+          reason: 'neon array encoder diverged: $vals');
+    }
+
+    test('boundary shapes, mixed lengths, odd/even counts', () {
+      const edges = <int>[
+        0, 1, -1, 9, 10, 99, 100, 999, 1000,
+        99999999, 100000000, 9999999999999999, 10000000000000000,
+        1020304050607080900, 9223372036854775807, -9223372036854775808,
+        4294967295, 4294967296,
+      ];
+      // Every ordered pair (covers the pair path's intra-pair length mix), plus
+      // odd-length arrays that force the scalar tail after a pipelined pair.
+      for (var a = 0; a < edges.length; a++) {
+        for (var b = 0; b < edges.length; b++) {
+          checkArray([edges[a], edges[b]]);
+        }
+      }
+      checkArray(edges); // 18 values — odd tail after pairs
+      checkArray([1]); // single value, no pair
+      checkArray([1, 2, 3]); // one pair + tail
+    });
+
+    test('dense random arrays across the full i64 range', () {
+      final rng = Random(0x240F42);
+      for (var iter = 0; iter < 4000; iter++) {
+        final n = rng.nextInt(33); // include 0-length and odd lengths
+        final vals = List.generate(n, (_) {
+          switch (rng.nextInt(3)) {
+            case 0:
+              return rng.nextInt(10000); // short
+            case 1:
+              return rng.nextInt(1 << 31); // mid
+            default:
+              final hi = rng.nextInt(1 << 32);
+              final lo = rng.nextInt(1 << 32);
+              return (hi << 32) | lo; // full range, may be negative
+          }
+        });
+        checkArray(vals);
       }
     });
   });

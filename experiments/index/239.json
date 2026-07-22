@@ -1,0 +1,7 @@
+{
+  "file": "239-select-overflow-batching.md",
+  "title": "Transparent select overflow batching",
+  "impact": "Moonshot: revisits exp 209's proven small-read request amortization without restoring its rejected public `selectAll` API. A private reader-pool prototype preserved the first four-way wave and batched only already-parked plain `select()` requests, sharded across readers in envelopes capped at four. The homogeneous mechanism reproduced: twenty point reads improved -26.2% / -33.2% and twenty roughly-ten-row reads improved -21.1% / -30.3% across the order flip; twenty 10k-row reads stayed neutral-to-faster with bounded RSS. Rejected on the load-bearing hidden-policy guard: alternating ten large + ten point reads made point-completion p95 +16.9% / +11.4% slower and total median +25.6% / +13.1% slower. Queue depth reveals waiting, not query cost; a point future sharing an indivisible envelope with large reads cannot complete independently. Runtime reverted, durable heterogeneous harness kept, prototype archived at `archive/exp-239`. Do not retry queue-depth-only hidden batching without a reliable private cost signal or independently completable member replies.",
+  "status": "rejected",
+  "link": ""
+}
