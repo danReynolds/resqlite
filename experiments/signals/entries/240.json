@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "Exp 231 rejected per-value NEON i64 formatting for lack of amortisation and named a reopen: batch many integer cells into one encode call (a columnar/bulk transfer that hands the kernel an array of i64s). Exp 240 built that batched form as three test-only native array encoders and measured it directly in isolation.",
+    "Isolated conversion (i64_batch_encode.dart, no JSON tokens/no SQLite): a 2-way software-pipelined SCALAR encoder (`pipe2`) overlaps two values' divide chains and reproduces -6 to -13% on mid/big magnitudes across passes, flat on short/mixed. The NEON vector kernel run over the array still loses +45 to +60% on realistic short (<9 digit) values because the fixed vector setup can't amortise below ~9 digits — exp 231's per-value finding reproduced WITH an array in hand, so the SIMD reopen door is closed harder, not opened.",
+    "The isolated pipelined-scalar win inverts end-to-end. Wired into write_json_to_buf's SQLITE_INTEGER arm (adjacent integer cells formatted as a pipelined pair), integer-heavy selectBytes is uniformly +1 to +12% slower across four interleaved passes vs origin/main, worst (+12.1%) on the 10k x 20 big-ints lane where the microbench won most. Integer conversion is not the encoder's bottleneck (SQLite value access, per-cell token writes, buffer bookkeeping dominate), the pair-lookahead machinery costs more than it saves, and a pair's two i64s are fetched serially via sqlite3_value_int64 so the two-independent-chains premise never holds on the hot path. Same shape as exp 226's isolated-packer win that missed the end-to-end gate."
+  ],
+  "nextSignals": [
+    "Do not retry batched/columnar integer FORMATTING as a formatter tweak under the current row-major encoder: exp 231 closes per-value SIMD, and exp 240 closes both the NEON array-batch and the zero-SIMD pipelined-scalar array-batch. The integer formatter stays on exp 192's shipped per-cell two-digit-LUT scalar.",
+    "Reopen only if a future result representation encodes integer columns COLUMNAR — the encoder receives a contiguous array of already-fetched i64 values with JSON framing decoupled from the per-value SQLite fetch — so cross-value pipelining actually holds on the hot path. That is a transfer-shape change, not a formatter change.",
+    "Keep benchmark/experiments/i64_batch_encode.dart and the three resqlite_test_i64_array_* encoders as the durable conversion gate; the full-range differential test in test/native_encoder_diff_test.dart asserts scalar == pipe2 == neon == Dart oracle."
+  ]
+}

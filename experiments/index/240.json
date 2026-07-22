@@ -1,0 +1,7 @@
+{
+  "file": "240-batched-i64-encode-moonshot.md",
+  "title": "Batched i64 encode moonshot",
+  "impact": "Moonshot: challenged the assumption that `selectBytes` integer encoding must format one cell at a time in row-major order. Built exp 231's named reopen — array encoders that hand the formatter a batch of adjacent i64 cells — as three test-only native paths and a focused microbench. Isolated conversion, a 2-way software-pipelined scalar (`pipe2`) won -6 to -13% on mid/big magnitudes, while the NEON vector kernel over an array still lost +45 to +60% on realistic short values (setup can't amortise below ~9 digits, closing exp 231's SIMD door harder). But wiring `pipe2` into `write_json_to_buf` inverted the win: end-to-end integer-heavy `selectBytes` was uniformly +1 to +12% slower across four passes, worst on the big-ints lane the microbench won most. Rejected: integer conversion is not the encoder's bottleneck, and a pair's two i64s are fetched serially from SQLite so the cross-value pipelining premise never holds on the hot path. Runtime reverted; array encoders + microbench + full-range differential test kept as the durable gate.",
+  "status": "rejected",
+  "link": ""
+}

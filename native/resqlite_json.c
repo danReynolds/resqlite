@@ -346,3 +346,170 @@ int resqlite_test_base64_encode(const unsigned char* data, int len,
 int resqlite_test_i64_to_str(long long val, char* out) {
     return resqlite_json_i64_to_str(val, out);
 }
+
+// ---------------------------------------------------------------------------
+// exp 240 — batched i64 -> decimal encoders (test/bench only)
+//
+// exp 231 rejected a per-value NEON i64 formatter: a scalar per-cell value has
+// "nothing to amortise" over the SIMD setup. Its explicit reopen condition was
+// "a future architecture that batches many integer cells into one encode call
+// (a columnar/bulk transfer that hands the kernel an array of i64s)". These
+// three implementations format a comma-separated array of i64 in ONE call so
+// the batch can (a) drop exp 231's per-value out-of-line call overhead and
+// (b) expose cross-value ILP that per-cell dispatch cannot. All three emit
+// byte-identical output; `i64_batch_encode.dart` A/Bs them and a differential
+// test asserts parity. None ship in the query path.
+// ---------------------------------------------------------------------------
+
+// Baseline: what write_json_to_buf's SQLITE_INTEGER arm does today, once per
+// cell — the shipped scalar two-digit-LUT formatter, comma-separated.
+int resqlite_test_i64_array_scalar(const long long* vals, int n, char* out) {
+    char* p = out;
+    for (int i = 0; i < n; i++) {
+        if (i) *p++ = ',';
+        p += resqlite_json_i64_to_str(vals[i], p);
+    }
+    return (int)(p - out);
+}
+
+// 2-way software-pipelined scalar: peel two decimal digits off two independent
+// values per loop trip so their (magic-number) division chains overlap in the
+// out-of-order window instead of serialising one value fully before the next.
+// Same two-digit-LUT primitive as the baseline; the only change is the batch
+// shape. Tail (odd last value) falls back to the scalar formatter.
+static inline void split_magnitude(long long v, unsigned long long* uval,
+                                    int* negative) {
+    if (v < 0) {
+        *negative = 1;
+        *uval = (unsigned long long)(-(v + 1)) + 1; // avoid UB on LLONG_MIN
+    } else {
+        *negative = 0;
+        *uval = (unsigned long long)v;
+    }
+}
+
+int resqlite_test_i64_array_pipe2(const long long* vals, int n, char* out) {
+    char* p = out;
+    int i = 0;
+    for (; i + 2 <= n; i += 2) {
+        unsigned long long u0, u1;
+        int neg0, neg1;
+        split_magnitude(vals[i], &u0, &neg0);
+        split_magnitude(vals[i + 1], &u1, &neg1);
+
+        // Generate both values' digits LSB-first into separate scratch fields,
+        // peeling a two-digit pair from each per trip. The two chains are data
+        // independent, so the CPU can issue value 1's multiply while value 0's
+        // is still retiring.
+        char t0[20], t1[20];
+        int p0 = 20, p1 = 20;
+        while (u0 >= 100 && u1 >= 100) {
+            unsigned d0 = (unsigned)(u0 % 100); u0 /= 100;
+            unsigned d1 = (unsigned)(u1 % 100); u1 /= 100;
+            p0 -= 2; memcpy(t0 + p0, resqlite_json_two_digits + d0 * 2, 2);
+            p1 -= 2; memcpy(t1 + p1, resqlite_json_two_digits + d1 * 2, 2);
+        }
+        while (u0 >= 100) {
+            unsigned d = (unsigned)(u0 % 100); u0 /= 100;
+            p0 -= 2; memcpy(t0 + p0, resqlite_json_two_digits + d * 2, 2);
+        }
+        while (u1 >= 100) {
+            unsigned d = (unsigned)(u1 % 100); u1 /= 100;
+            p1 -= 2; memcpy(t1 + p1, resqlite_json_two_digits + d * 2, 2);
+        }
+        if (u0 >= 10) { p0 -= 2; memcpy(t0 + p0, resqlite_json_two_digits + u0 * 2, 2); }
+        else { t0[--p0] = (char)('0' + (unsigned)u0); }
+        if (u1 >= 10) { p1 -= 2; memcpy(t1 + p1, resqlite_json_two_digits + u1 * 2, 2); }
+        else { t1[--p1] = (char)('0' + (unsigned)u1); }
+
+        if (i) *p++ = ',';
+        if (neg0) *p++ = '-';
+        int dg0 = 20 - p0; memcpy(p, t0 + p0, dg0); p += dg0;
+        *p++ = ',';
+        if (neg1) *p++ = '-';
+        int dg1 = 20 - p1; memcpy(p, t1 + p1, dg1); p += dg1;
+    }
+    for (; i < n; i++) {
+        if (i) *p++ = ',';
+        p += resqlite_json_i64_to_str(vals[i], p);
+    }
+    return (int)(p - out);
+}
+
+#if RESQLITE_HAS_NEON_BASE64
+// Convert one 8-digit group `v` (0..99999999) into exactly 8 zero-padded ASCII
+// bytes at `out`, MSD first. Reused verbatim from exp 231's archived kernel
+// (differential-verified). Two vector reciprocal splits, no serial digit
+// dependency: /100 for d<10000 is (d*5243)>>19; /10 for p<100 is (p*205)>>11.
+static inline void neon_write_8_digits(uint32_t v, unsigned char* out) {
+    uint32_t hi = v / 10000;
+    uint32_t lo = v - hi * 10000;
+    uint32x2_t d4 = vset_lane_u32(lo, vdup_n_u32(hi), 1); // {hi, lo}
+    uint32x2_t q = vshr_n_u32(vmul_n_u32(d4, 5243), 19);  // {hi/100, lo/100}
+    uint32x2_t r = vsub_u32(d4, vmul_n_u32(q, 100));      // {hi%100, lo%100}
+    uint16x4_t qn = vmovn_u32(vcombine_u32(q, vdup_n_u32(0)));
+    uint16x4_t rn = vmovn_u32(vcombine_u32(r, vdup_n_u32(0)));
+    uint16x4_t p = vzip_u16(qn, rn).val[0];               // {q0,r0,q1,r1}
+    uint16x4_t tens = vshr_n_u16(vmul_n_u16(p, 205), 11); // p/10
+    uint16x4_t ones = vsub_u16(p, vmul_n_u16(tens, 10));  // p%10
+    uint16x4x2_t io = vzip_u16(tens, ones);
+    uint16x8_t digits16 = vcombine_u16(io.val[0], io.val[1]);
+    uint8x8_t digits8 = vadd_u8(vmovn_u16(digits16), vdup_n_u8('0'));
+    vst1_u8(out, digits8);
+}
+
+static inline int neon_write_group_trimmed(uint32_t v, unsigned char* out) {
+    unsigned char tmp[8];
+    neon_write_8_digits(v, tmp);
+    int start = 0;
+    while (start < 7 && tmp[start] == '0') start++;
+    int n = 8 - start;
+    memcpy(out, tmp + start, n);
+    return n;
+}
+
+// Full-range magnitude formatter (handles < 1e8 too, unlike exp 231's shipped
+// >= 1e8 variant). Inlined into the array loop so adjacent values' independent
+// 8-digit-group formatting overlaps — the amortisation exp 231's out-of-line
+// per-value kernel could not provide.
+static inline int neon_write_u64(unsigned long long uval, char* buf) {
+    unsigned char* p = (unsigned char*)buf;
+    if (uval < 100000000ULL) {
+        return neon_write_group_trimmed((uint32_t)uval, p);
+    }
+    unsigned long long low8 = uval % 100000000ULL;
+    unsigned long long t = uval / 100000000ULL;
+    unsigned long long mid8 = t % 100000000ULL;
+    unsigned long long high = t / 100000000ULL;   // 0..1844
+    if (high != 0) {
+        p += neon_write_group_trimmed((uint32_t)high, p);
+        neon_write_8_digits((uint32_t)mid8, p); p += 8;
+    } else {
+        p += neon_write_group_trimmed((uint32_t)mid8, p);
+    }
+    neon_write_8_digits((uint32_t)low8, p); p += 8;
+    return (int)(p - (unsigned char*)buf);
+}
+#endif // RESQLITE_HAS_NEON_BASE64
+
+// NEON batch: the faithful form of exp 231's reopen — a SIMD kernel handed an
+// array of i64s. Formats each value with the vector digit kernel, inlined so
+// values pipeline. Non-AArch64 falls back to the scalar baseline.
+int resqlite_test_i64_array_neon(const long long* vals, int n, char* out) {
+#if RESQLITE_HAS_NEON_BASE64
+    char* p = out;
+    for (int i = 0; i < n; i++) {
+        if (i) *p++ = ',';
+        long long v = vals[i];
+        if (v == 0) { *p++ = '0'; continue; }
+        unsigned long long uval;
+        int negative;
+        split_magnitude(v, &uval, &negative);
+        if (negative) *p++ = '-';
+        p += neon_write_u64(uval, p);
+    }
+    return (int)(p - out);
+#else
+    return resqlite_test_i64_array_scalar(vals, n, out);
+#endif
+}
