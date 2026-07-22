@@ -39,12 +39,11 @@ final class ReaderPool {
   int _next = 0;
   bool _closed = false;
 
-  /// FIFO requests parked by [_dispatch] while no worker is available.
+  /// FIFO waiters parked by _dispatch while no worker is available.
   ///
-  /// Keeping the concrete request lets the pool collapse a bounded prefix of
-  /// already-parked plain selects into one worker message. Requests that can
-  /// use the pool's first parallel wave are still dispatched immediately.
-  final Queue<_PendingRead> _pendingReads = Queue();
+  /// Each worker-free event wakes one waiter instead of completing a
+  /// shared future observed by every parked dispatcher.
+  final Queue<Completer<void>> _dispatchWaiters = Queue();
 
   int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
 
@@ -60,8 +59,12 @@ final class ReaderPool {
     return pool;
   }
 
-  /// Admit queued work whenever a worker becomes available.
-  void _notifyAvailable() => _pumpPending();
+  /// Wake up any callers waiting for an available worker.
+  void _notifyAvailable() {
+    if (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
+    }
+  }
 
   /// Execute a query on the next available worker.
   Future<List<Map<String, Object?>>> select(
@@ -139,168 +142,96 @@ final class ReaderPool {
     return result as (List<Map<String, Object?>>?, int, int);
   }
 
-  Future<Object?> _dispatch(ReadRequest request) {
+  Future<Object?> _dispatch(ReadRequest request) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever waiting for a worker
     // that will never come back.
     if (_closed) {
-      return Future.error(
-        ResqliteConnectionException('Reader pool is closed.'),
-      );
+      throw ResqliteConnectionException('Reader pool is closed.');
     }
 
-    // Never let a newly-arrived request overtake work that is already parked.
-    if (_pendingReads.isEmpty) {
-      final slot = _takeAvailableSlot();
-      if (slot != null) return _requestOnSlot(slot, request);
-    }
-
-    final completer = Completer<Object?>.sync();
-    _pendingReads.add(_PendingRead(request, completer));
-    _recordParked();
-    _pumpPending();
-    return completer.future;
-  }
-
-  _WorkerSlot? _takeAvailableSlot() {
     final count = _workers.length;
-    for (var attempt = 0; attempt < count; attempt++) {
-      final slot = _workers[_next % count];
-      _next++;
-      if (slot.isAvailable) return slot;
-    }
-    return null;
-  }
+    var hasPreviouslyParked = false;
 
-  Future<Object?> _requestOnSlot(_WorkerSlot slot, ReadRequest request) {
-    if (kProfileMode && kTraceliteProfileMode) {
-      final typeId = TraceliteProfile.internString(
-        request.runtimeType.toString(),
-      );
-      return TraceliteProfile.traceAsync(
-        TraceliteResqliteSpans.readerPoolDispatch,
-        () => slot.request(request),
-        correlationId:
-            request.traceCorrelationId ?? TraceliteProfile.nextCorrelationId(),
-        beginArgs: [typeId],
-      );
-    }
-    return slot.request(request);
-  }
-
-  void _pumpPending() {
-    if (_closed) return;
-
-    while (_pendingReads.isNotEmpty) {
-      final slot = _takeAvailableSlot();
-      if (slot == null) return;
-
-      final batchSize = _plainSelectBatchSize();
-      if (batchSize > 1) {
-        final batch = <_PendingRead>[];
-        for (var i = 0; i < batchSize; i++) {
-          batch.add(_pendingReads.removeFirst());
-          _recordAdmitted();
+    while (true) {
+      for (var attempt = 0; attempt < count; attempt++) {
+        final slot = _workers[_next % count];
+        _next++;
+        if (slot.isAvailable) {
+          if (kProfileMode && kTraceliteProfileMode) {
+            final typeId = TraceliteProfile.internString(
+              request.runtimeType.toString(),
+            );
+            return TraceliteProfile.traceAsync(
+              TraceliteResqliteSpans.readerPoolDispatch,
+              () => slot.request(request),
+              correlationId:
+                  request.traceCorrelationId ??
+                  TraceliteProfile.nextCorrelationId(),
+              beginArgs: [typeId],
+            );
+          }
+          return slot.request(request);
         }
-        unawaited(_runPlainSelectBatch(slot, batch));
-      } else {
-        final pending = _pendingReads.removeFirst();
-        _recordAdmitted();
-        unawaited(_runSingle(slot, pending));
       }
-    }
-  }
 
-  int _plainSelectBatchSize() {
-    // Tracelite correlates each public call with one reader message. Keep that
-    // diagnostic mode on the single-request path until batched correlations
-    // have a first-class representation.
-    if (kProfileMode && kTraceliteProfileMode) return 1;
-
-    var plainPrefix = 0;
-    for (final pending in _pendingReads) {
-      if (pending.request is! SelectRequest) break;
-      plainPrefix++;
-    }
-    if (plainPrefix <= _workers.length) return 1;
-
-    final balanced = (plainPrefix + _workers.length - 1) ~/ _workers.length;
-    return balanced > 4 ? 4 : balanced;
-  }
-
-  Future<void> _runSingle(_WorkerSlot slot, _PendingRead pending) async {
-    try {
-      pending.completer.complete(await _requestOnSlot(slot, pending.request));
-    } catch (error, stackTrace) {
-      pending.completer.completeError(error, stackTrace);
-    }
-  }
-
-  Future<void> _runPlainSelectBatch(
-    _WorkerSlot slot,
-    List<_PendingRead> pending,
-  ) async {
-    try {
-      final response = await slot.request(
-        PlainSelectBatchRequest([
-          for (final item in pending) item.request as SelectRequest,
-        ]),
-      );
-      final outcomes = response as List<PlainSelectBatchOutcome>;
-      if (outcomes.length != pending.length) {
-        throw StateError(
-          'Reader batch returned ${outcomes.length} outcomes for '
-          '${pending.length} requests.',
+      // [EXP-115](../../../experiments/115-dispatcher-park-counters.md):
+      // a previous park already incremented `dispatcherParkedTotal`;
+      // landing back at this scan-fail point means the wake didn't
+      // produce a slot for us, so this is a spurious wake. Counted
+      // once per re-park, not per scan.
+      if (kProfileMode && hasPreviouslyParked) {
+        ProfileCounters.dispatcherWakeRetryTotal++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherWakeRetryTotal,
+          ProfileCounters.dispatcherWakeRetryTotal,
         );
       }
-      for (var i = 0; i < pending.length; i++) {
-        switch (outcomes[i]) {
-          case PlainSelectBatchSuccess(:final rows):
-            pending[i].completer.complete(rows);
-          case PlainSelectBatchFailure(:final error):
-            pending[i].completer.completeError(error);
+
+      // All workers busy or dead. Wait for a worker-free event.
+      final waiter = Completer<void>.sync();
+      _dispatchWaiters.add(waiter);
+      if (kProfileMode) {
+        ProfileCounters.dispatcherParkedTotal++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherParkedTotal,
+          ProfileCounters.dispatcherParkedTotal,
+        );
+        ProfileCounters.dispatcherCurrentParked++;
+        TraceliteProfile.counter(
+          TraceliteResqliteCounters.dispatcherCurrentParked,
+          ProfileCounters.dispatcherCurrentParked,
+        );
+        if (ProfileCounters.dispatcherCurrentParked >
+            ProfileCounters.dispatcherMaxParkedConcurrent) {
+          ProfileCounters.dispatcherMaxParkedConcurrent =
+              ProfileCounters.dispatcherCurrentParked;
+          TraceliteProfile.counter(
+            TraceliteResqliteCounters.dispatcherMaxParkedConcurrent,
+            ProfileCounters.dispatcherMaxParkedConcurrent,
+          );
         }
       }
-    } catch (error, stackTrace) {
-      for (final item in pending) {
-        if (!item.completer.isCompleted) {
-          item.completer.completeError(error, stackTrace);
+      try {
+        await waiter.future;
+      } finally {
+        if (kProfileMode) {
+          ProfileCounters.dispatcherCurrentParked--;
+          TraceliteProfile.counter(
+            TraceliteResqliteCounters.dispatcherCurrentParked,
+            ProfileCounters.dispatcherCurrentParked,
+          );
         }
       }
-    }
-  }
+      hasPreviouslyParked = true;
 
-  void _recordParked() {
-    if (!kProfileMode) return;
-    ProfileCounters.dispatcherParkedTotal++;
-    TraceliteProfile.counter(
-      TraceliteResqliteCounters.dispatcherParkedTotal,
-      ProfileCounters.dispatcherParkedTotal,
-    );
-    ProfileCounters.dispatcherCurrentParked++;
-    TraceliteProfile.counter(
-      TraceliteResqliteCounters.dispatcherCurrentParked,
-      ProfileCounters.dispatcherCurrentParked,
-    );
-    if (ProfileCounters.dispatcherCurrentParked >
-        ProfileCounters.dispatcherMaxParkedConcurrent) {
-      ProfileCounters.dispatcherMaxParkedConcurrent =
-          ProfileCounters.dispatcherCurrentParked;
-      TraceliteProfile.counter(
-        TraceliteResqliteCounters.dispatcherMaxParkedConcurrent,
-        ProfileCounters.dispatcherMaxParkedConcurrent,
-      );
+      // Re-check after waking: close() may have run while we were
+      // parked and we must not loop forever over dead slots.
+      if (_closed) {
+        throw ResqliteConnectionException('Reader pool is closed.');
+      }
     }
-  }
-
-  void _recordAdmitted() {
-    if (!kProfileMode) return;
-    ProfileCounters.dispatcherCurrentParked--;
-    TraceliteProfile.counter(
-      TraceliteResqliteCounters.dispatcherCurrentParked,
-      ProfileCounters.dispatcherCurrentParked,
-    );
   }
 
   /// Drains any in-flight read and then shuts every worker down.
@@ -311,25 +242,17 @@ final class ReaderPool {
   /// `Database.close()` so `resqliteClose(handle)` never runs while a
   /// reader worker is still stepping over the handle.
   ///
-  /// Any dispatch caller still queued is failed with
-  /// [ResqliteConnectionException].
+  /// Any dispatch caller parked on a per-dispatch waiter is woken up
+  /// so `_dispatch` can observe `_closed` and throw
+  /// [ResqliteConnectionException] rather than looping over dead slots.
   Future<void> close() async {
     _closed = true;
-    final error = ResqliteConnectionException('Reader pool is closed.');
-    while (_pendingReads.isNotEmpty) {
-      final pending = _pendingReads.removeFirst();
-      _recordAdmitted();
-      pending.completer.completeError(error);
+    // Wake any parked dispatch waiters so they can re-check _closed.
+    while (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
     }
     await Future.wait(_workers.map((slot) => slot.close()));
   }
-}
-
-final class _PendingRead {
-  const _PendingRead(this.request, this.completer);
-
-  final ReadRequest request;
-  final Completer<Object?> completer;
 }
 
 /// Manages a single worker isolate's lifecycle.
