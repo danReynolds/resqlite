@@ -356,6 +356,11 @@ const _exportedSymbols = [
   // Test-support: differential encoder tests (test/native_encoder_diff_test.dart).
   'resqlite_test_base64_encode',
   'resqlite_test_i64_to_str',
+  // Test/bench-support: exp 240 batched i64-array encoders
+  // (benchmark/experiments/i64_batch_encode.dart, test/native_encoder_diff_test.dart).
+  'resqlite_test_i64_array_scalar',
+  'resqlite_test_i64_array_pipe2',
+  'resqlite_test_i64_array_neon',
 ];
 
 bool _isEnabled(Object? value) {
