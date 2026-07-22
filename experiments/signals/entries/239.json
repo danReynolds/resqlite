@@ -1,0 +1,18 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "Exp 209's small-read request-amortization win does not require a public `selectAll` API to exist mechanically. Exp 239 kept ordinary `Future.wait(db.select(...))`, preserved the pool's first four-way wave, and batched only already-parked plain selects in pool-sharded envelopes capped at four. Twenty point reads improve -26.2% / -33.2% and twenty roughly-ten-row reads improve -21.1% / -30.3% across the lane-isolated order flip, clearing the preset 15% target in both orderings.",
+    "Sharding parked work across the pool avoids exp 209's one-worker large-read collapse. Twenty concurrent 10k-row reads are -21.6% then -0.3% at median, with p95 and peak RSS inside the declared guards. Aggregate sacrifice can amortize reader respawns as well as messages, so large homogeneous overflow is not itself the hidden-batching blocker.",
+    "Queue depth is not a safe private batching policy because it reveals waiting but not query cost or latency priority. On alternating ten large + ten point reads, an indivisible worker envelope makes point-completion p95 +16.9% / +11.4% slower and total median +25.6% / +13.1% slower across the order flip. Baseline can admit the next point on a different free reader; the batch holds it until every neighboring large result is ready. This load-bearing guard rejects the runtime despite the homogeneous wins.",
+    "Review found a lifecycle interaction beyond the measured performance decision: aggregate sacrifice makes the existing reader respawn-versus-close startup race reachable from several individually-sub-threshold results. Any future design that deliberately increases sacrifice frequency must first track/join or kill in-progress reader spawns during close."
+  ],
+  "nextSignals": [
+    "Do not retry queue-depth-only transparent select batching, tune its batch width, or move its threshold around the heterogeneous guard. Hidden grouping needs either a reliable private pre-execution cost signal (without SQL parsing/public annotations) or a protocol that can complete members independently while retaining enough message amortization.",
+    "Keep `benchmark/experiments/select_overflow_batch.dart` as the durable gate for any request-coalescing revisit: both twenty-way homogeneous small-read targets must clear 15%, four-way/sequential controls must stay neutral, twenty 10k-row throughput/RSS must stay bounded, and alternating large/point completion p95 must remain inside 10% in both orderings.",
+    "If resqlite's public-API policy changes, exp 209 remains the simpler explicit batching implementation because caller choice exposes the batch-versus-parallel trade-off instead of guessing it. The transparent prototype is preserved at `archive/exp-239`; do not restore it without solving heterogeneous head-of-line blocking and the sacrifice close race."
+  ]
+}

@@ -493,6 +493,26 @@ collapsed path; do not extend by payload similarity. (Two adjacent runs on the
 same shared file: exp 235 also touches JOURNAL.md — keep both entries on
 merge.)*
 
+### A batch can preserve aggregate throughput and still destroy independent completion latency
+
+Exp 239 transparently grouped only plain SELECTs already parked behind a full
+reader pool. The mechanism looked unusually well bounded: homogeneous
+twenty-way point and short-list bursts improved 21-33%, the first four-way wave
+was untouched, and even twenty large reads stayed neutral-to-faster because
+the overflow remained sharded across workers. Yet alternating large and point
+queries exposed the semantic scheduling cost. A point query sharing one worker
+envelope with large reads could not resolve until the whole envelope returned;
+point-completion p95 regressed 11-17% and total median 13-26% in both
+orderings. Queue pressure says work is waiting, not whether it is equally
+costly or equally latency-sensitive.
+
+*Reapplies whenever an internal scheduler coalesces independently completable
+work. Aggregate throughput and pool utilisation are insufficient guards: add a
+heterogeneous lane and measure each latency-sensitive member's completion,
+because an indivisible reply can create head-of-line blocking even when total
+work stays parallel. Hidden batching needs a cost/priority signal or
+independently deliverable member results; queue depth alone is not policy.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
