@@ -2036,6 +2036,20 @@
         "Reopen only if a future result representation encodes integer columns COLUMNAR — the encoder receives a contiguous array of already-fetched i64 values with JSON framing decoupled from the per-value SQLite fetch — so cross-value pipelining actually holds on the hot path. That is a transfer-shape change, not a formatter change.",
         "Keep benchmark/experiments/i64_batch_encode.dart and the three resqlite_test_i64_array_* encoders as the durable conversion gate; the full-range differential test in test/native_encoder_diff_test.dart asserts scalar == pipe2 == neon == Dart oracle."
       ]
+    },
+    "242": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected",
+      "changedBeliefs": [
+        "The exp 234/236 `TransferableTypedData` win does NOT generalize to the `selectBytes` result buffer, and the reason is the source representation of the bytes. Exp 234 (blob param) and exp 236 (blob cell) both start from a heap-allocated `Uint8List` whose `SendPort` graph copy lands on the shared GC heap — the wrap wins by relocating that copy to external memory. `selectBytes` bytes are `result.ptr.asTypedList(length)`: a view directly over the reader's native `json_buf` (a per-reader malloc'd C buffer reused across queries). The single mandatory `SendPort.send` copy of the `(bytes, rowCount)` record is the snapshot that protects the view from json_buf reuse — there is no separate heap-destination copy for a wrap to escape.",
+        "Measured A/B (prototype behind `RESQLITE_SELECTBYTES_TTD`, reverted): wrapping the selectBytes view in `TransferableTypedData` is neutral-to-worse at every JSON size spanning the 256 KB new-space cap — dead even at 142 KB (297.3 vs 305.3 us) and 362 KB (700.1 vs 702.0), ~25% SLOWER at 731 KB (1391.7 vs 1742.3). Both lanes showed the same steady tiny `Scavenge(external)` stream under --verbose_gc (sub-0.2 ms pauses); there was no heap-pressure difference for the wrap to relieve. The wrap does not remove the one copy; it relocates it to a `fromList` memcpy into a fresh external buffer on the reader and adds malloc + finalizer + ownership-move machinery — same copy count, extra work, so it loses at size and breaks even below it."
+      ],
+      "nextSignals": [
+        "selectBytes result transport is closed for the TransferableTypedData idea while its bytes remain a native `json_buf` view. Reopen ONLY if the buffer's source representation changes — e.g. if selectBytes ever returns a heap `Uint8List` rather than a native view, which would restore the GC-heap destination that makes the wrap pay. Do not re-test the wrap against the current native-view path.",
+        "General rule for `result-transfer-shape`: the TransferableTypedData wrap wins iff the payload's default `SendPort` destination is the GC heap (heap `Uint8List`), and is dead weight when the payload is already a view over native/external memory. Use the source representation, not the payload size, to decide whether a wrap can help. This is the 'read cell vs read buffer' distinction: exp 236 blob cells are heap objects (wrap wins); the selectBytes buffer is a native view (wrap loses)."
+      ]
     }
   }
 }
