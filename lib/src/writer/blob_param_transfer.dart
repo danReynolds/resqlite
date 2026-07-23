@@ -48,6 +48,7 @@
 /// benchmark/experiments/blob_param_mechanism_proof.dart.
 library;
 
+import 'dart:collection';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -75,32 +76,100 @@ int blobParamTransferThreshold = 256 * 1024;
 /// Wrap large `Uint8List` blob params in `TransferableTypedData` so their
 /// one isolate-hop copy lands in malloc'd external memory (then moves by
 /// ownership transfer) instead of riding the graph copy onto the GC heap.
+///
+/// [EXP-243] Identity-aware: a buffer referenced more than once shares **one**
+/// wrapper, referenced at all its positions (the "table protocol"). The graph
+/// copier then sends that wrapper once (identity preserved), the writer
+/// materializes it once, and it is never duplicated into N external copies.
+///
 /// Returns [params] unchanged (no allocation) when no entry qualifies — the
 /// overwhelmingly common case.
 List<Object?> wrapBlobParams(List<Object?> params) {
   final threshold = blobParamTransferThreshold;
-  List<Object?>? wrapped;
+  if (!_hasLargeBlob(params, threshold)) return params;
+  return _wrapShared(params, _newWrapCache(), threshold);
+}
+
+/// [EXP-243] Envelope-level variant for a coalesced write group
+/// (`MultiExecuteRequest`). Shares one wrapper per unique backing buffer across
+/// **all** the group's writes, so a buffer reused across writes crosses as a
+/// single `TransferableTypedData` referenced by every occurrence. Returns
+/// [writes] unchanged (no allocation) when nothing qualifies.
+List<({String sql, List<Object?> params})> wrapBlobParamsGroup(
+  List<({String sql, List<Object?> params})> writes,
+) {
+  final threshold = blobParamTransferThreshold;
+  var anyLarge = false;
+  for (final w in writes) {
+    if (_hasLargeBlob(w.params, threshold)) {
+      anyLarge = true;
+      break;
+    }
+  }
+  if (!anyLarge) return writes;
+  final cache = _newWrapCache(); // shared across the whole envelope
+  return [
+    for (final w in writes)
+      (sql: w.sql, params: _wrapShared(w.params, cache, threshold)),
+  ];
+}
+
+/// True if [params] holds any `Uint8List` at or above [threshold]. Fast
+/// pre-scan that keeps the common no-large-blob path allocation-free.
+bool _hasLargeBlob(List<Object?> params, int threshold) {
+  for (final value in params) {
+    if (value is Uint8List && value.length >= threshold) return true;
+  }
+  return false;
+}
+
+Map<Uint8List, TransferableTypedData> _newWrapCache() =>
+    HashMap<Uint8List, TransferableTypedData>(
+      equals: identical,
+      hashCode: identityHashCode,
+    );
+
+/// Wrap each large blob, sharing one wrapper per unique backing buffer via
+/// [cache] (`putIfAbsent` on an identity map). Distinct buffers each get their
+/// own wrapper; an aliased buffer reuses its wrapper at every position.
+List<Object?> _wrapShared(
+  List<Object?> params,
+  Map<Uint8List, TransferableTypedData> cache,
+  int threshold,
+) {
+  List<Object?>? out;
   for (var i = 0; i < params.length; i++) {
     final value = params[i];
     if (value is Uint8List && value.length >= threshold) {
-      wrapped ??= List<Object?>.of(params);
-      wrapped[i] = TransferableTypedData.fromList([value]);
+      out ??= List<Object?>.of(params);
+      out[i] = cache[value] ??= TransferableTypedData.fromList([value]);
     }
   }
-  return wrapped ?? params;
+  return out ?? params;
 }
 
 /// Materialize any `TransferableTypedData` blob params back into `Uint8List`
-/// on the writer isolate before binding. Returns [params] unchanged (no
-/// allocation) when nothing was wrapped.
-List<Object?> unwrapBlobParams(List<Object?> params) {
-  List<Object?>? unwrapped;
+/// views before binding. [cache] dedups by wrapper identity so a wrapper shared
+/// across positions (or, for a coalesced group, across writes) is materialized
+/// **exactly once** — a second `materialize()` on the same wrapper would throw.
+/// A caller processing one param list may omit [cache] (a local one is made);
+/// a caller spanning multiple lists (`_handleMultiExecute`) must pass one shared
+/// cache. Returns [params] unchanged (no allocation) when nothing was wrapped.
+List<Object?> unwrapBlobParams(
+  List<Object?> params, [
+  Map<TransferableTypedData, Uint8List>? cache,
+]) {
+  List<Object?>? out;
   for (var i = 0; i < params.length; i++) {
     final value = params[i];
     if (value is TransferableTypedData) {
-      unwrapped ??= List<Object?>.of(params);
-      unwrapped[i] = value.materialize().asUint8List();
+      out ??= List<Object?>.of(params);
+      cache ??= HashMap<TransferableTypedData, Uint8List>(
+        equals: identical,
+        hashCode: identityHashCode,
+      );
+      out[i] = cache[value] ??= value.materialize().asUint8List();
     }
   }
-  return unwrapped ?? params;
+  return out ?? params;
 }

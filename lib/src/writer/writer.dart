@@ -180,17 +180,18 @@ final class Writer {
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
-                (replyPort) => MultiExecuteRequest([
-                  // [EXP-234] Wrap here, not in the MultiExecuteRequest
-                  // constructor: this comprehension already builds fresh
-                  // records, so the no-blob common case pays no second list
-                  // rebuild. Without this, a concurrent burst of large-blob
-                  // writes — the exact shape the coalescing pump exists for —
-                  // would silently fall back to the graph-copy hop that
-                  // single writes avoid.
-                  for (final p in group)
-                    (sql: p.sql, params: wrapBlobParams(p.parameters)),
-                ], replyPort),
+                // [EXP-234] Wrap large blob params so a concurrent burst of
+                // large-blob writes uses the TTD hop instead of the graph
+                // copy. [EXP-243] Census identities across the WHOLE group so
+                // a buffer reused across writes (or twice within one write) is
+                // left aliased on the graph-copy path rather than duplicated
+                // into one external buffer per occurrence.
+                (replyPort) => MultiExecuteRequest(
+                  wrapBlobParamsGroup([
+                    for (final p in group) (sql: p.sql, params: p.parameters),
+                  ]),
+                  replyPort,
+                ),
               );
             }
           } finally {

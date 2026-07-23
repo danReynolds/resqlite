@@ -10,6 +10,7 @@ library;
 import 'dart:developer' show Timeline;
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -308,15 +309,18 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
   // so outcomes[i] holds exactly statement i's modifications.
   final outcomes = <Object>[];
+  // [EXP-243] One materialize cache shared across the whole group: a buffer
+  // reused across writes crosses as a single TransferableTypedData, and a
+  // wrapper is single-use, so the second write's unwrap must reuse the first
+  // write's materialized view rather than re-materialize a spent wrapper.
+  final unwrapCache = <TransferableTypedData, Uint8List>{};
   for (final write in msg.writes) {
     try {
       final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-      // [EXP-234] Coalesced writes wrap large blobs like single writes do;
-      // materialize before binding (no-op when nothing was wrapped).
       final result = executeWrite(
         state.dbHandle,
         write.sql,
-        unwrapBlobParams(write.params),
+        unwrapBlobParams(write.params, unwrapCache),
       );
       final writerSqliteUs = _stopSqliteTimer(sqliteSw);
       final modifications = state.txDepth > 0
