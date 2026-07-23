@@ -247,14 +247,13 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount, this.estimatedBytes);
+  RawQueryResult(this.values, this.schema, this.rowCount);
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
 
   /// Estimated byte size of the result data, accumulated during the cell loop.
   /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
-  final int estimatedBytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +274,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
@@ -291,14 +289,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -310,7 +305,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else {
@@ -327,7 +321,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(values, schema, rowCount, byteEstimate);
+  return RawQueryResult(values, schema, rowCount);
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -346,7 +340,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
   initialHashSlot.value = _fnvOffsetBasis;
 
   var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
@@ -363,14 +356,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -382,7 +372,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else {
@@ -399,6 +388,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(values, schema, rowCount, byteEstimate);
+  final raw = RawQueryResult(values, schema, rowCount);
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }

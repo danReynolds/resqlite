@@ -45,13 +45,6 @@ final class ReaderPool {
   /// shared future observed by every parked dispatcher.
   final Queue<Completer<void>> _dispatchWaiters = Queue();
 
-  /// [EXP-246] Benchmark-only: counts sacrifice (Isolate.exit) events across the
-  /// pool, so an A/B can prove the sacrifice trigger's routing (e.g. a
-  /// slot-count vs byte-count trigger sacrificing a big-string result 0 vs N
-  /// times). Not gated by profile mode; a plain counter incremented on the
-  /// sacrifice path, read by harnesses. Reset by the harness between lanes.
-  static int debugSacrificeCount = 0;
-
   int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
 
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
@@ -368,7 +361,6 @@ class _WorkerSlot {
       // then the pending request is resolved with the response and the worker
       // spawns a new isolate to replace it.
       if (sacrificed) {
-        ReaderPool.debugSacrificeCount++; // [EXP-246] benchmark-only routing counter
         _sendPort = null;
         _workerPort?.close();
         _workerPort = null;

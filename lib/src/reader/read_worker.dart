@@ -70,47 +70,40 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
-/// Byte-size threshold for sacrifice. If the estimated transfer size of
-/// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
-/// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
-/// above it the zero-copy transfer outweighs the ~2-5ms respawn cost.
+/// Slot-count threshold for sacrifice — the number of flat-list cells
+/// (rows × columns) above which a row result is handed over by `Isolate.exit`
+/// (zero-copy; the worker dies and the pool respawns it) instead of
+/// `SendPort.send`.
 ///
-/// Applies to both row results (estimated during the cell loop) and
-/// selectBytes results (exact byte length of the JSON buffer).
-const int sacrificeByteThreshold = 256 * 1024; // 256 KB
-
-/// [EXP-246] Slot-count sacrifice threshold — the number of flat-list cells
-/// (rows x columns) above which a row result is sacrificed.
+/// **Slot count, not byte size, is the cost axis on both sides of this choice**
+/// ([EXP-245](../../../experiments/245-prepared-result-handoff.md)):
+/// `SendPort.send` copies the mutable flat values array while *sharing* the
+/// immutable string/number leaves by reference, and `Isolate.exit`'s sendability
+/// walk visits each slot — so both scale with slot count and neither with
+/// decoded bytes. `Isolate.exit` additionally carries a ~47 µs fixed premium
+/// that its cheaper per-slot walk only repays once the array is large enough.
 ///
-/// Exp 245 measured the intrinsic transfer: `SendPort.send`'s copy cost tracks
-/// the **mutable flat-list slot count**, not payload bytes — strings and other
-/// immutable leaves are *shared* on send for free, and `Isolate.exit`'s
-/// zero-copy transfer only overtakes send past ~48k slots (its ~47 us fixed
-/// premium). The byte threshold therefore misroutes large-STRING results (few
-/// slots, many bytes) into a needless sacrifice + reader respawn. Routing on
-/// slot count fixes that without disturbing the large-structural regime.
-/// Default `32 * 1024` slots = the exact all-integer equivalent of the legacy
-/// 256 KB byte threshold (8 bytes/cell), so numeric/structural results keep
-/// their prior routing while string-heavy results (few slots, many bytes) stop
-/// being misrouted into a sacrifice. Measured at ~32k on an M1 Pro: the
-/// end-to-end crossover sits below exp 245's ~48k *intrinsic* crossover because
-/// the send-side copy is on the worker's critical path (see exp 244).
-const int sacrificeSlotThreshold =
-    int.fromEnvironment('RESQLITE_SLOT_THRESHOLD', defaultValue: 32 * 1024);
+/// Routing on *bytes* instead misroutes results that are large in bytes but
+/// small in slots — a few rows holding a big TEXT/BLOB — into a sacrifice that
+/// respawns a reader to avoid a copy that never happens, because those leaves
+/// are shared on send anyway
+/// ([EXP-246](../../../experiments/246-slot-sacrifice-guard.md)).
+///
+/// `32 * 1024` is the exact all-integer equivalent of the 256 KB byte threshold
+/// this replaced (8 bytes/cell), so numeric/structural results keep their prior
+/// routing. It sits deliberately *below* exp 245's ~48k **intrinsic** crossover:
+/// the send-side copy runs on the worker before it can accept the next request,
+/// so at the production pool size sacrifice becomes favorable earlier
+/// ([EXP-244](../../../experiments/244-pool-burst-eager-respawn.md)). A
+/// compile-time define so a benchmark can force either lane per process.
+const int sacrificeSlotThreshold = int.fromEnvironment(
+  'RESQLITE_SLOT_THRESHOLD',
+  defaultValue: 32 * 1024,
+);
 
-/// [EXP-246] Selects the slot-count trigger (default) or the legacy
-/// estimated-byte trigger. The byte path is retained as a compile-time rollback
-/// during the soak window; set `-DRESQLITE_SLOT_TRIGGER=false` to restore it (or
-/// to reproduce the A/B). Can be removed once the slot trigger has soaked.
-const bool kSlotSacrificeTrigger =
-    bool.fromEnvironment('RESQLITE_SLOT_TRIGGER', defaultValue: true);
-
-/// Whether a decoded row result should be sacrificed (`Isolate.exit` zero-copy)
-/// instead of sent. [EXP-246] routes on flat-list slot count; the legacy path
-/// routes on the decoder's per-cell byte estimate.
-bool _shouldSacrifice(RawQueryResult raw) => kSlotSacrificeTrigger
-    ? raw.values.length > sacrificeSlotThreshold
-    : raw.estimatedBytes > sacrificeByteThreshold;
+/// Whether a decoded row result should be sacrificed rather than sent.
+bool _shouldSacrifice(RawQueryResult raw) =>
+    raw.values.length > sacrificeSlotThreshold;
 
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
