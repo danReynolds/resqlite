@@ -381,6 +381,13 @@ class _WorkerSlot {
         } else {
           pending.complete(result);
         }
+        // Replacement is started AFTER completing the caller — even though
+        // `pending` is a `Completer.sync()`, so `complete()` runs the whole
+        // downstream dispatch/emit chain first. [EXP-244] measured the
+        // alternative (eager respawn: spawn before completing) and found no
+        // benefit at the production pool size — the respawn overlaps other
+        // workers' in-flight queries and is off the parked caller's critical
+        // path — so the simpler complete-then-respawn ordering stands.
         if (!_closed) unawaited(spawn(_dbHandleAddr));
 
         // Otherwise, deliver the result and notify the pool that this worker is available
