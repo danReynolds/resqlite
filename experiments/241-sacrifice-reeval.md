@@ -88,29 +88,78 @@ Text lane (200 B strings, 1 col):
 Send is faster or level across the entire practical numeric range and **wins
 everywhere on text** — large, at 1000 rows (149 vs 438 µs), exactly because
 strings are shared on send while sacrifice pays a respawn for a copy it never
-needed to make. Sacrifice only edges ahead on the numeric lane above **~32k
-structural slots**, and by a noisy ~3–4%.
+needed to make. Sacrifice only appears ahead on the numeric lane above **~32k
+structural slots**, by a noisy ~3–4%.
+
+## The instrument is confounded — don't over-read the tail
+
+This A/B alternates send and sacrifice within one long-lived pool, and that is
+**not a clean comparison**. Sacrifice is a *state-changing treatment*: each fire
+destroys a worker, starts a replacement, clears statement/schema caches, and
+changes which slot serves the next request. So measurement *i* alters the
+environment of measurement *i+1*, and the repeated respawns accumulate heap and
+warmup state across the run. Critically, that accumulation biases **toward**
+sacrifice (fresh readers keep young-gen heaps clean) — so the ~3–4% tail edge is
+measured with the scale already tipped in sacrifice's favor, and its true size is
+smaller, possibly zero. This experiment therefore **cannot** establish that
+sacrifice has a real edge anywhere; it can only show that send is at least
+competitive-to-better across the board and decisively better on text. Peer review
+(2026-07-22) confirmed this: send-vs-exit is several distinct *estimands*
+(intrinsic transfer, pool-replacement capacity, decode) and no single
+through-the-pool harness can isolate them.
+
+## A concrete lead: sacrifice's pool cost may be self-inflicted
+
+While reviewing why sacrifice would ever cost pool throughput, a lifecycle
+asymmetry surfaced in `ReaderPool._WorkerSlot`'s reply handler:
+
+- the **non-sacrifice** branch calls `_notifyPool()` **before**
+  `pending.complete(result)`, deliberately (its comment: make a worker available
+  *before* the caller can request more work);
+- the **sacrifice** branch does the opposite — `pending.complete(result)` first,
+  `unawaited(spawn(...))` after. And `_pendingCompleter` is a `Completer.sync()`
+  (see exp 136), so `complete()` runs the entire `_dispatch` / `_requery` /
+  `entry.emit` / `_flushQueue` chain synchronously *before* the replacement spawn
+  is even initiated.
+
+So the replacement launch is delayed by arbitrary caller work — exactly the wrong
+ordering when the concern is pool capacity, and the opposite of what the sibling
+branch already does. If that ordering is the source of sacrifice's replacement-gap
+cost, then "sacrifice hurts pool throughput" is an artifact of launch ordering,
+not the transfer policy — fixable by an **eager respawn** (start the replacement
+before completing the caller, with close/generation guards).
 
 ## Outcome
 
-**Rejected — keep the current 256 KB estimated-byte sacrifice policy unchanged.**
-Two candidate changes, both declined:
+**Rejected — no policy change, but this is a status-quo hold under a confounded
+instrument, not evidence that sacrifice earns its keep.** Both candidate changes
+are declined *on this evidence*:
 
-- **Retire sacrifice (send-always):** rejected. Send wins across most of the
-  range, but sacrifice retains a real (if small) edge on the high-structural-count
-  tail (>= ~32k slots); a blanket send-always would regress the very large
-  structural results the mechanism exists for.
-- **Re-trigger on structural slot count instead of estimated bytes:** rejected.
-  The crossover is real but sits at a high slot count with a ~3–4% noisy margin,
-  and estimated bytes already correlates with slot count for structural results.
-  A slot-count threshold adds accounting complexity the measured edge doesn't pay
-  for.
+- **Retire sacrifice (send-always):** not adopted here — but only because ripping
+  out a shipped mechanism on a confounded benchmark is unjustified, not because
+  sacrifice was shown to help. The data leans toward retirement; it just isn't
+  clean enough to act on yet.
+- **Re-trigger on structural slot count:** declined — the crossover is noisy
+  (~3–4% at the tail) and estimated bytes already tracks slot count for
+  structural results.
 
-The run is also honest about a **measurement confound**: within one process the
-repeated sacrifice respawns accumulate and interfere, so this A/B cannot cleanly
-isolate a single sacrifice-vs-send at a fixed size — it biases the sacrifice lane
-by the respawn history. Would reopen if a clean **single-shot per-process**
-sacrifice-vs-send harness removed that confound and still showed send winning at
-the high-structural tail, or if a production profile showed results clustering in
-the send-favored range where sacrifice fires unnecessarily. Until then the
-existing threshold stands.
+Two things are **clean and actionable regardless** of the middle-numeric
+question:
+
+1. **Text/shared-leaf misroute** — sacrifice firing on a *byte* threshold for
+   shared-string results is a measured ~2.9× loss (send shares the strings;
+   sacrifice respawns for a copy that never happens). A routing guard that keeps
+   shared-leaf-dominated results on send is a standalone win.
+2. **Eager-respawn lifecycle fix** — the ordering lead above.
+
+The clean resolution is a two-experiment split that measures the distinct
+estimands separately (peer-recommended, 2026-07-22): **(A)** a prepared-result,
+process-isolated handoff harness (result built *before* the timing barrier; one
+fresh AOT process per observation; ABBA-matched) to isolate the intrinsic
+send-vs-exit transfer; and **(B)** an 8-request / 4-worker barrier burst measuring
+queue-wait for requests 5–8 across three lanes — send, sacrifice-current, and
+sacrifice-eager-respawn — to isolate replacement-capacity loss. Conclude with
+equivalence testing (TOST) against a pre-registered margin rather than waiting for
+a noisy median to acquire a sign. Those become follow-up experiments; this run's
+lasting contribution is the confound diagnosis, the text-misroute result, and the
+eager-respawn lead.
