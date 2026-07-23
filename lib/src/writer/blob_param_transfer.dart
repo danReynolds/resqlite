@@ -66,10 +66,13 @@ import 'dart:typed_data';
 ///   and the wrap still trims main-isolate blocking — so oversized blobs keep
 ///   the wrap rather than getting an upper cutoff.
 ///
-/// Matches the read-side `sacrificeByteThreshold` (256 KB) by design. Set on
-/// the main isolate, where the wrapping decision is made. Internal (not part
-/// of the public API surface); mutable so the A/B harness can force the
-/// baseline lane by raising it above every tested payload.
+/// 256 KB by design — the size at which a single blob's malloc+finalizer wrap
+/// cost is repaid by the graph copy it avoids. (This is the write-side *wrap*
+/// threshold; it is distinct from the read-side *sacrifice* decision, which
+/// exp 246 moved onto mutable slot count rather than bytes.) Set on the main
+/// isolate, where the wrapping decision is made. Internal (not part of the
+/// public API surface); mutable so the A/B harness can force the baseline lane
+/// by raising it above every tested payload.
 int blobParamTransferThreshold = 256 * 1024;
 
 /// Wrap large `Uint8List` blob params in `TransferableTypedData` so their
