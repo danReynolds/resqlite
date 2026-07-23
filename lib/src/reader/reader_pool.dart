@@ -6,6 +6,7 @@
 /// read_worker.dart.
 import 'dart:async';
 import 'dart:collection';
+import 'dart:developer' show Timeline;
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -44,6 +45,13 @@ final class ReaderPool {
   /// Each worker-free event wakes one waiter instead of completing a
   /// shared future observed by every parked dispatcher.
   final Queue<Completer<void>> _dispatchWaiters = Queue();
+
+  /// [EXP-244] Benchmark-only: when non-null, `_dispatch` appends
+  /// `[enqueuedAtUs, assignedAtUs]` (VM-timeline microseconds) for each request
+  /// so a harness can measure pure dispatch queue-wait — the gap from a request
+  /// arriving to a worker being assigned — without SQLite/decode contamination.
+  /// Null in production; the only cost is a nullable check per dispatch.
+  static List<List<int>>? debugDispatchTimings;
 
   int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
 
@@ -153,6 +161,8 @@ final class ReaderPool {
 
     final count = _workers.length;
     var hasPreviouslyParked = false;
+    final timings = debugDispatchTimings;
+    final enqUs = timings != null ? Timeline.now : 0;
 
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
@@ -172,6 +182,7 @@ final class ReaderPool {
               beginArgs: [typeId],
             );
           }
+          timings?.add([enqUs, Timeline.now]);
           return slot.request(request);
         }
       }
