@@ -79,6 +79,39 @@ final class SelectIfChangedRequest extends ReadRequest {
 /// selectBytes results (exact byte length of the JSON buffer).
 const int sacrificeByteThreshold = 256 * 1024; // 256 KB
 
+/// [EXP-246] Slot-count sacrifice threshold — the number of flat-list cells
+/// (rows x columns) above which a row result is sacrificed.
+///
+/// Exp 245 measured the intrinsic transfer: `SendPort.send`'s copy cost tracks
+/// the **mutable flat-list slot count**, not payload bytes — strings and other
+/// immutable leaves are *shared* on send for free, and `Isolate.exit`'s
+/// zero-copy transfer only overtakes send past ~48k slots (its ~47 us fixed
+/// premium). The byte threshold therefore misroutes large-STRING results (few
+/// slots, many bytes) into a needless sacrifice + reader respawn. Routing on
+/// slot count fixes that without disturbing the large-structural regime.
+/// Default `32 * 1024` slots = the exact all-integer equivalent of the legacy
+/// 256 KB byte threshold (8 bytes/cell), so numeric/structural results keep
+/// their prior routing while string-heavy results (few slots, many bytes) stop
+/// being misrouted into a sacrifice. Measured at ~32k on an M1 Pro: the
+/// end-to-end crossover sits below exp 245's ~48k *intrinsic* crossover because
+/// the send-side copy is on the worker's critical path (see exp 244).
+const int sacrificeSlotThreshold =
+    int.fromEnvironment('RESQLITE_SLOT_THRESHOLD', defaultValue: 32 * 1024);
+
+/// [EXP-246] Selects the slot-count trigger (default) or the legacy
+/// estimated-byte trigger. The byte path is retained as a compile-time rollback
+/// during the soak window; set `-DRESQLITE_SLOT_TRIGGER=false` to restore it (or
+/// to reproduce the A/B). Can be removed once the slot trigger has soaked.
+const bool kSlotSacrificeTrigger =
+    bool.fromEnvironment('RESQLITE_SLOT_TRIGGER', defaultValue: true);
+
+/// Whether a decoded row result should be sacrificed (`Isolate.exit` zero-copy)
+/// instead of sent. [EXP-246] routes on flat-list slot count; the legacy path
+/// routes on the decoder's per-cell byte estimate.
+bool _shouldSacrifice(RawQueryResult raw) => kSlotSacrificeTrigger
+    ? raw.values.length > sacrificeSlotThreshold
+    : raw.estimatedBytes > sacrificeByteThreshold;
+
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
 // ---------------------------------------------------------------------------
@@ -136,7 +169,7 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
@@ -149,7 +182,7 @@ void readerEntrypoint(List<Object> args) {
           // engine can perform writer-side dispatch elision.
           final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
@@ -179,8 +212,7 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
           );
-          sacrifice =
-              raw != null && raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 

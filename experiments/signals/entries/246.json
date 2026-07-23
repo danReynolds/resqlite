@@ -1,0 +1,16 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "The sacrifice trigger now routes on MUTABLE SLOT COUNT (`raw.values.length`, i.e. rows x columns), not estimated bytes. Exp 245 established that send's copy cost tracks slot count while strings/immutable leaves are shared free, so the byte threshold misrouted big-string/big-blob results (few slots, many bytes) into a needless sacrifice + reader respawn. Slot routing fixes that: the misroute shape (4 rows x 100 KB string) stopped sacrificing (1.00 -> 0.00 per select) and got 31% faster (131 -> 91 us end-to-end), while every numeric/structural shape kept byte-for-byte identical routing at parity latency. Slot count is also free (the flat list's length), unlike the decoder's per-cell byte estimate.",
+    "The chosen slot threshold is 32*1024 = the exact all-integer equivalent of the legacy 256 KB byte threshold (8 bytes/cell). This is END-TO-END tuning, deliberately BELOW exp 245's ~48k INTRINSIC crossover: a first pass at 48k regressed the 40k-slot band by +12% (it sent a result that should sacrifice), because exp 244 showed the send copy sits on the worker's critical path so at the production pool sacrifice becomes favorable earlier. 32k reconciles the intrinsic transfer, the pool dynamics, and numeric parity with the old byte trigger.",
+    "This is the shippable payoff of the whole send-vs-sacrifice arc: exp 241 (confounded through-the-pool A/B) -> exp 244 (pool capacity: no penalty at pool-4, sacrifice neutral-to-favorable, eager respawn rejected) -> exp 245 (intrinsic: send cost ~ slot count, strings shared free, exit zero-copy with ~47us fixed premium, ~48k intrinsic crossover) -> exp 246 (route on slot count). The policy's INTENT (sacrifice large structural, send small/text) was always right; only the byte TRIGGER was wrong for strings."
+  ],
+  "nextSignals": [
+    "Cleanup after the soak: the legacy byte path (kSlotSacrificeTrigger toggle, sacrificeByteThreshold) and the decoder's per-cell byteEstimate + RawQueryResult.estimatedBytes are now used ONLY by the retained rollback path. Once exp 246 has soaked with no regression, remove them — estimatedBytes has no other readers (verified), so this deletes dead code and a small per-cell decode cost. Retire together with exp 236's transferableBytes subtraction, which slot routing makes moot (blob size no longer influences the decision).",
+    "The send-vs-sacrifice DIRECTION is now closed end to end: mechanism understood (exp 245), pool behavior understood (exp 244), and the one real defect (byte trigger misrouting strings) fixed (exp 246). Do not reopen with more transfer A/Bs. The only remaining tuning knob is the exact slot threshold on non-M1 hardware — 32k is machine-measured; a production profile showing a different result-shape distribution or a different pool size could justify re-tuning `sacrificeSlotThreshold` (a compile-time define).",
+    "Interaction to watch when exp 236 (#253) and exp 246 both land: slot routing makes blob byte-size irrelevant to the sacrifice decision, so exp 236's `estimatedBytes - transferableBytes` accounting is redundant for routing. Reconcile by dropping the byte accounting entirely (see cleanup above) rather than maintaining two size notions."
+  ]
+}
