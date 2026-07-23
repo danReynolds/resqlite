@@ -75,7 +75,6 @@ Future<void> main() async {
   await replies.close();
 }
 
-Object? _sink;
 void _worker(SendPort main) {
   final port = ReceivePort();
   main.send(port.sendPort);
@@ -102,7 +101,6 @@ void _worker(SendPort main) {
         fold ^= b[i];
       }
     }
-    _sink = fold;
     main.send(fold);
   });
 }
