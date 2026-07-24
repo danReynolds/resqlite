@@ -77,7 +77,14 @@ final class SelectIfChangedRequest extends ReadRequest {
 ///
 /// Applies to both row results (estimated during the cell loop) and
 /// selectBytes results (exact byte length of the JSON buffer).
-const int sacrificeByteThreshold = 256 * 1024; // 256 KB
+///
+/// [EXP-244] Compile-time define (benchmark scaffolding — reverted before
+/// merge) so the burst harness can force the no-sacrifice "send" lane by
+/// setting the threshold above every tested result. Default unchanged.
+const int sacrificeByteThreshold = int.fromEnvironment(
+  'RESQLITE_SACRIFICE_THRESHOLD',
+  defaultValue: 256 * 1024, // 256 KB
+);
 
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
