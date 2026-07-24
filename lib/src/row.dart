@@ -82,6 +82,14 @@ final class RowSchema {
 /// This design minimizes the object count for isolate transfer — only the
 /// flat values list, [RowSchema], and the [ResultSet] wrapper cross the
 /// isolate boundary. [Row] objects are created on the receiving side.
+///
+/// The length of [_values] (rows × columns — the "slot count") is the unit that
+/// governs transfer cost, which is why the reader routes its send-vs-sacrifice
+/// decision on it (`sacrificeSlotThreshold`, exp 246): `SendPort.send` copies
+/// this slot array while sharing the immutable string/number leaves by
+/// reference, and `Isolate.exit`'s sendability walk visits each slot — both
+/// scale with slot count, not decoded byte size. Keeping the array flat (rather
+/// than a `Map` per row) keeps that count minimal.
 final class ResultSet with ListMixin<Row> {
   ResultSet(this._values, this._schema, this._rowCount);
 
@@ -139,8 +147,7 @@ final class Row with MapMixin<String, Object?> {
   }
 
   @override
-  bool containsKey(Object? key) =>
-      key is String && _schema.containsName(key);
+  bool containsKey(Object? key) => key is String && _schema.containsName(key);
 
   @override
   bool containsValue(Object? value) {

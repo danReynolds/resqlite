@@ -12,7 +12,7 @@
 // respawn debt carries across the treatment unit.
 //
 // Two lanes, one process each (compile-time define):
-//   send             : -DRESQLITE_SACRIFICE_THRESHOLD=1099511627776  (never sacrifices)
+//   send             : -DRESQLITE_SLOT_THRESHOLD=1099511627776  (never sacrifices)
 //   sacrifice-current: (default)
 //
 // A third lane, sacrifice-eager (start the replacement spawn before completing
@@ -27,15 +27,17 @@
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/reader/read_worker.dart' show sacrificeByteThreshold;
+import 'package:resqlite/src/reader/read_worker.dart' show sacrificeSlotThreshold;
 import 'package:resqlite/src/reader/reader_pool.dart' show ReaderPool;
 
 const _bursts = 40;
 const _rows = 5000; // full-scan result comfortably exceeds the 256 KB threshold
 const _warmup = 12;
 
+// Exp 246 moved the sacrifice trigger from estimated bytes to mutable slot
+// count, so the no-sacrifice lane is now forced via the slot threshold.
 String get _lane =>
-    sacrificeByteThreshold > (1 << 40) ? 'send' : 'sacrifice-current';
+    sacrificeSlotThreshold > (1 << 40) ? 'send' : 'sacrifice-current';
 
 double _pct(List<double> xs, double p) {
   final s = [...xs]..sort();

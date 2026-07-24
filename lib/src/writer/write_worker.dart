@@ -257,8 +257,10 @@ void writerEntrypoint(List<Object> args) {
         // kill the writer isolate, leaving the caller hanging forever, so
         // fall back to a stripped copy that still delivers the failure.
         message.replyPort.send(
-          ResqliteException('${e.runtimeType}: $e (reply payload was not '
-              'sendable across isolates: $sendError)'),
+          ResqliteException(
+            '${e.runtimeType}: $e (reply payload was not '
+            'sendable across isolates: $sendError)',
+          ),
         );
       }
     } on Error catch (e, st) {

@@ -50,6 +50,18 @@ text-heavy results keep sacrificing unchanged.
   cannot reach — a const define reaches every isolate identically.
 - [`read_worker.dart`](../lib/src/reader/read_worker.dart): sacrifice fires
   on `estimatedBytes - transferableBytes > sacrificeByteThreshold`.
+
+> **Superseded on landing (exp 246).** The `transferableBytes` subtraction above
+> was this experiment's way of stopping TTD-wrapped cells from forcing a
+> sacrifice. [Exp 246](246-slot-sacrifice-guard.md) — landing in the same change
+> — moved the sacrifice decision onto **mutable slot count**, under which blob
+> *size* cannot influence the decision at all, so the subtraction (and the byte
+> accounting behind it: `estimatedBytes`, `transferableBytes`, the decoder's
+> per-cell `byteEstimate`) became dead and was removed. **This experiment's
+> substance is unaffected** — large blob cells still decode into
+> `TransferableTypedData` and still materialize at the receive boundary; only the
+> sacrifice arithmetic it added is gone. The results below were measured against
+> the byte-threshold routing described here.
 - [`row.dart`](../lib/src/row.dart): internal (unexported)
   `materializeTransferableBlobCells` rewrites TTD cells to `Uint8List` views
   in place at every main-isolate receive boundary —

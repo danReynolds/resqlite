@@ -70,21 +70,40 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
-/// Byte-size threshold for sacrifice. If the estimated transfer size of
-/// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
-/// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
-/// above it the zero-copy transfer outweighs the ~2-5ms respawn cost.
+/// Slot-count threshold for sacrifice — the number of flat-list cells
+/// (rows × columns) above which a row result is handed over by `Isolate.exit`
+/// (zero-copy; the worker dies and the pool respawns it) instead of
+/// `SendPort.send`.
 ///
-/// Applies to both row results (estimated during the cell loop) and
-/// selectBytes results (exact byte length of the JSON buffer).
+/// **Slot count, not byte size, is the cost axis on both sides of this choice**
+/// ([EXP-245](../../../experiments/245-prepared-result-handoff.md)):
+/// `SendPort.send` copies the mutable flat values array while *sharing* the
+/// immutable string/number leaves by reference, and `Isolate.exit`'s sendability
+/// walk visits each slot — so both scale with slot count and neither with
+/// decoded bytes. `Isolate.exit` additionally carries a ~47 µs fixed premium
+/// that its cheaper per-slot walk only repays once the array is large enough.
 ///
-/// [EXP-244] Compile-time define (benchmark scaffolding — reverted before
-/// merge) so the burst harness can force the no-sacrifice "send" lane by
-/// setting the threshold above every tested result. Default unchanged.
-const int sacrificeByteThreshold = int.fromEnvironment(
-  'RESQLITE_SACRIFICE_THRESHOLD',
-  defaultValue: 256 * 1024, // 256 KB
+/// Routing on *bytes* instead misroutes results that are large in bytes but
+/// small in slots — a few rows holding a big TEXT/BLOB — into a sacrifice that
+/// respawns a reader to avoid a copy that never happens, because those leaves
+/// are shared on send anyway
+/// ([EXP-246](../../../experiments/246-slot-sacrifice-guard.md)).
+///
+/// `32 * 1024` is the exact all-integer equivalent of the 256 KB byte threshold
+/// this replaced (8 bytes/cell), so numeric/structural results keep their prior
+/// routing. It sits deliberately *below* exp 245's ~48k **intrinsic** crossover:
+/// the send-side copy runs on the worker before it can accept the next request,
+/// so at the production pool size sacrifice becomes favorable earlier
+/// ([EXP-244](../../../experiments/244-pool-burst-eager-respawn.md)). A
+/// compile-time define so a benchmark can force either lane per process.
+const int sacrificeSlotThreshold = int.fromEnvironment(
+  'RESQLITE_SLOT_THRESHOLD',
+  defaultValue: 32 * 1024,
 );
+
+/// Whether a decoded row result should be sacrificed rather than sent.
+bool _shouldSacrifice(RawQueryResult raw) =>
+    raw.values.length > sacrificeSlotThreshold;
 
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
@@ -143,11 +162,7 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          // [EXP-236] TransferableTypedData-wrapped blob cells cross the hop
-          // by ownership move, so only the residual heap payload argues for
-          // sacrificing the worker.
-          sacrifice = raw.estimatedBytes - raw.transferableBytes >
-              sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
@@ -160,8 +175,7 @@ void readerEntrypoint(List<Object> args) {
           // engine can perform writer-side dispatch elision.
           final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes - raw.transferableBytes >
-              sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
@@ -191,9 +205,7 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
           );
-          sacrifice = raw != null &&
-              raw.estimatedBytes - raw.transferableBytes >
-                  sacrificeByteThreshold;
+          sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 

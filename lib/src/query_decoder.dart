@@ -117,11 +117,21 @@ const int asciiMask = 0x8080808080808080;
 /// [EXP-236] Minimum blob-cell size (bytes) to decode into
 /// `TransferableTypedData` instead of a heap `Uint8List`.
 ///
-/// Mirrors the write-side `blobParamTransferThreshold` (exp 234) and the
-/// sacrifice threshold (256 KB): below it the wrap bookkeeping outweighs the
-/// graph-copy it avoids; at or above it the cell's one copy lands in
-/// malloc'd external memory, the hop is an ownership move, and a
-/// blob-dominated result no longer needs to sacrifice its reader isolate.
+/// Mirrors the write-side `blobParamTransferThreshold` (exp 234): below it the
+/// wrap bookkeeping outweighs the graph-copy it avoids; at or above it the
+/// cell's one copy lands in malloc'd external memory the GC never traces, and
+/// the hop becomes an ownership move.
+///
+/// This is a *byte* threshold, and correctly so — a `Uint8List` is mutable, so
+/// `SendPort.send` genuinely copies it byte for byte. That is the opposite of
+/// the *sacrifice* decision, which routes on mutable slot count
+/// ([EXP-246](../../experiments/246-slot-sacrifice-guard.md)) because strings
+/// and other immutable leaves are shared rather than copied. The two thresholds
+/// answer different questions and are no longer tied to a common 256 KB figure:
+/// bytes for a mutable payload, slots for result structure. (Exp 236 originally
+/// also credited the wrap with avoiding a sacrifice; under slot routing a
+/// blob-heavy result with few rows never sacrifices in the first place, so the
+/// wrap's remaining benefit is purely the allocation domain.)
 /// Compile-time (`-DRESQLITE_BLOB_CELL_TRANSFER_THRESHOLD=<bytes>`) because
 /// the decode loop runs on worker isolates, where a main-isolate runtime
 /// toggle would never arrive — each isolate holds its own copy of file-level
@@ -266,25 +276,13 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(
-    this.values,
-    this.schema,
-    this.rowCount,
-    this.estimatedBytes, {
-    this.transferableBytes = 0,
-  });
+  RawQueryResult(this.values, this.schema, this.rowCount);
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
 
   /// Estimated byte size of the result data, accumulated during the cell loop.
   /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
-  final int estimatedBytes;
-
-  /// [EXP-236] Bytes held in TransferableTypedData-wrapped blob cells.
-  /// These cross the isolate hop by ownership move rather than copy, so the
-  /// sacrifice decision weighs only `estimatedBytes - transferableBytes`.
-  final int transferableBytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,8 +303,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
-  var transferableBytes = 0;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
@@ -322,14 +318,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -341,7 +334,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else if (blobLen >= blobCellTransferThreshold) {
@@ -354,7 +346,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);
-            transferableBytes += blobLen;
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -369,13 +360,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(
-    values,
-    schema,
-    rowCount,
-    byteEstimate,
-    transferableBytes: transferableBytes,
-  );
+  return RawQueryResult(values, schema, rowCount);
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -394,8 +379,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
-  var transferableBytes = 0;
   initialHashSlot.value = _fnvOffsetBasis;
 
   var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
@@ -412,14 +395,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -431,7 +411,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else if (blobLen >= blobCellTransferThreshold) {
@@ -444,7 +423,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);
-            transferableBytes += blobLen;
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -459,12 +437,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(
-    values,
-    schema,
-    rowCount,
-    byteEstimate,
-    transferableBytes: transferableBytes,
-  );
+  final raw = RawQueryResult(values, schema, rowCount);
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }
