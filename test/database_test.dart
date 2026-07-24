@@ -295,6 +295,39 @@ void main() {
       }
     });
 
+    test('aliased large blob params round-trip (same object twice in one write)',
+        () async {
+      // [EXP-243] `[blob, blob]` — the census must leave the shared buffer on
+      // the graph-copy path (aliased), and both columns must still round-trip.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, a BLOB, b BLOB)');
+      final blob = Uint8List.fromList(
+        List.generate(400 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+      await db.execute('INSERT INTO t(a, b) VALUES (?, ?)', [blob, blob]);
+      final rows = await db.select('SELECT a, b FROM t');
+      expect(rows.single['a'], equals(blob));
+      expect(rows.single['b'], equals(blob));
+    });
+
+    test('coalesced burst reusing one blob object round-trips', () async {
+      // [EXP-243] Concurrent standalone writes reusing the same blob object
+      // coalesce into one MultiExecuteRequest; the envelope census keeps the
+      // shared buffer aliased. All writes must land intact.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
+      final blob = Uint8List.fromList(
+        List.generate(300 * 1024, (i) => (i * 13 + 5) & 0xFF),
+      );
+      await Future.wait([
+        for (var i = 0; i < 6; i++)
+          db.execute('INSERT INTO t(payload) VALUES (?)', [blob]),
+      ]);
+      final rows = await db.select('SELECT payload FROM t');
+      expect(rows, hasLength(6));
+      for (final r in rows) {
+        expect(r['payload'], equals(blob));
+      }
+    });
+
     test('large blob param survives TransferableTypedData transfer', () async {
       // [EXP-234] Blobs >= blobParamTransferThreshold (256 KB) cross to the
       // writer isolate via TransferableTypedData instead of the direct
