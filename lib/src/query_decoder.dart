@@ -9,6 +9,7 @@ library;
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -112,6 +113,24 @@ const int cellOffLen = 4;
 const int cellOffVal = 8;
 
 const int asciiMask = 0x8080808080808080;
+
+/// [EXP-236] Minimum blob-cell size (bytes) to decode into
+/// `TransferableTypedData` instead of a heap `Uint8List`.
+///
+/// Mirrors the write-side `blobParamTransferThreshold` (exp 234) and the
+/// sacrifice threshold (256 KB): below it the wrap bookkeeping outweighs the
+/// graph-copy it avoids; at or above it the cell's one copy lands in
+/// malloc'd external memory, the hop is an ownership move, and a
+/// blob-dominated result no longer needs to sacrifice its reader isolate.
+/// Compile-time (`-DRESQLITE_BLOB_CELL_TRANSFER_THRESHOLD=<bytes>`) because
+/// the decode loop runs on worker isolates, where a main-isolate runtime
+/// toggle would never arrive — each isolate holds its own copy of file-level
+/// globals. A const define reaches every isolate identically and lets the
+/// A/B harness force the baseline lane per process; internal, not public API.
+const int blobCellTransferThreshold = int.fromEnvironment(
+  'RESQLITE_BLOB_CELL_TRANSFER_THRESHOLD',
+  defaultValue: 256 * 1024,
+);
 
 // Pre-computed typed-index strides.
 const int cellI32s = cellSize ~/ 4; // 4
@@ -247,7 +266,13 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount, this.estimatedBytes);
+  RawQueryResult(
+    this.values,
+    this.schema,
+    this.rowCount,
+    this.estimatedBytes, {
+    this.transferableBytes = 0,
+  });
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
@@ -255,6 +280,11 @@ final class RawQueryResult {
   /// Estimated byte size of the result data, accumulated during the cell loop.
   /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
   final int estimatedBytes;
+
+  /// [EXP-236] Bytes held in TransferableTypedData-wrapped blob cells.
+  /// These cross the isolate hop by ownership move rather than copy, so the
+  /// sacrifice decision weighs only `estimatedBytes - transferableBytes`.
+  final int transferableBytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +306,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   var writeIdx = 0;
   var rowCount = 0;
   var byteEstimate = 0;
+  var transferableBytes = 0;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
@@ -313,6 +344,17 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
+          } else if (blobLen >= blobCellTransferThreshold) {
+            // [EXP-236] Large blob cells decode straight into
+            // TransferableTypedData: one native -> malloc'd-external copy the
+            // GC never traces, in place of the native -> heap copy below. The
+            // isolate hop then moves the buffer by ownership transfer, and
+            // the main-isolate receive boundary materializes it back to a
+            // Uint8List view (see materializeTransferableBlobCells).
+            values[writeIdx++] = TransferableTypedData.fromList([
+              ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
+            ]);
+            transferableBytes += blobLen;
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -327,7 +369,13 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(values, schema, rowCount, byteEstimate);
+  return RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    byteEstimate,
+    transferableBytes: transferableBytes,
+  );
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -347,6 +395,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   var writeIdx = 0;
   var rowCount = 0;
   var byteEstimate = 0;
+  var transferableBytes = 0;
   initialHashSlot.value = _fnvOffsetBasis;
 
   var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
@@ -385,6 +434,17 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
+          } else if (blobLen >= blobCellTransferThreshold) {
+            // [EXP-236] Large blob cells decode straight into
+            // TransferableTypedData: one native -> malloc'd-external copy the
+            // GC never traces, in place of the native -> heap copy below. The
+            // isolate hop then moves the buffer by ownership transfer, and
+            // the main-isolate receive boundary materializes it back to a
+            // Uint8List view (see materializeTransferableBlobCells).
+            values[writeIdx++] = TransferableTypedData.fromList([
+              ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
+            ]);
+            transferableBytes += blobLen;
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -399,6 +459,12 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(values, schema, rowCount, byteEstimate);
+  final raw = RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    byteEstimate,
+    transferableBytes: transferableBytes,
+  );
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }

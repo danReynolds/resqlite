@@ -565,6 +565,40 @@ void main() {
       await probe.cancel();
     });
 
+    test('stream emits large blob cells intact across initial and change '
+        'emissions', () async {
+      // [EXP-236] Stream results ride selectWithDeps (initial) and
+      // selectIfChanged (rerun); both materialize TransferableTypedData
+      // blob cells at the reader-pool receive boundary before the
+      // StreamEngine emits rows to subscribers.
+      await db.execute(
+        'CREATE TABLE big_blob(id INTEGER PRIMARY KEY, payload BLOB NOT NULL)',
+      );
+      final original = Uint8List.fromList(
+        List.generate(400 * 1024, (i) => (i * 31 + 7) & 0xFF),
+      );
+      final changed = Uint8List.fromList(
+        List.generate(400 * 1024, (i) => (i * 13 + 5) & 0xFF),
+      );
+      await db.execute('INSERT INTO big_blob(payload) VALUES (?)', [original]);
+
+      final probe = _StreamProbe(
+        db.stream('SELECT payload FROM big_blob ORDER BY id'),
+      );
+      final initialRows = await probe.event(1);
+      expect(initialRows.single['payload'], equals(original));
+      expect(initialRows.single['payload'], isA<Uint8List>());
+
+      await db.execute('UPDATE big_blob SET payload = ? WHERE id = 1', [
+        changed,
+      ]);
+      final changedRows = await probe.event(2);
+      expect(changedRows.single['payload'], equals(changed));
+      expect(changedRows.single['payload'], isA<Uint8List>());
+
+      await probe.cancel();
+    });
+
     test('long blob hash detects changes after chunk boundary', () async {
       await db.execute(
         'CREATE TABLE long_blob(id INTEGER PRIMARY KEY, payload BLOB NOT NULL)',

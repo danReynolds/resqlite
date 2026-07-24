@@ -143,7 +143,11 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          // [EXP-236] TransferableTypedData-wrapped blob cells cross the hop
+          // by ownership move, so only the residual heap payload argues for
+          // sacrificing the worker.
+          sacrifice = raw.estimatedBytes - raw.transferableBytes >
+              sacrificeByteThreshold;
           result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
@@ -156,7 +160,8 @@ void readerEntrypoint(List<Object> args) {
           // engine can perform writer-side dispatch elision.
           final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = raw.estimatedBytes - raw.transferableBytes >
+              sacrificeByteThreshold;
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
@@ -186,8 +191,9 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
           );
-          sacrifice =
-              raw != null && raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = raw != null &&
+              raw.estimatedBytes - raw.transferableBytes >
+                  sacrificeByteThreshold;
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 
