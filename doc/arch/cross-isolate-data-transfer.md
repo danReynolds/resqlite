@@ -1,9 +1,22 @@
-# Cross-Isolate Data Transfer: Memory Model, Mechanisms, and the Blob-Wrap Rule
+# Cross-Isolate Data Transfer: Memory Model, Mechanisms, and the Two Routing Rules
 
 This document explains how query results and write parameters move between
-isolates in resqlite, why moving them is expensive, and the rule that decides
-which transfer mechanism to use for a given value. It assumes no prior
-knowledge of Dart's memory model — the necessary pieces are built up here.
+isolates in resqlite, why moving them is expensive, and the rules that decide
+which transfer mechanism to use. It assumes no prior knowledge of Dart's memory
+model — the necessary pieces are built up here.
+
+Two rules run **orthogonally**, and keeping them apart is the single most
+important thing to take away:
+
+- **the blob-wrap rule (§5)** — decided per byte buffer, in **bytes**, because a
+  `Uint8List` really is copied byte-for-byte;
+- **the sacrifice rule (§6a)** — decided per result, in **mutable slots**,
+  because strings and numbers are *shared* rather than copied, so byte size says
+  nothing about what a result costs to send.
+
+They once shared a 256 KB figure, which made them look like one rule. That was a
+coincidence, and reading it as coupling is what produced a real routing bug
+(§6a).
 
 It is the reference companion to the experiments that established the model:
 [exp 234](../../experiments/234-blob-param-transfer.md) (write params),
@@ -168,8 +181,11 @@ their byte sizes**: a `Uint8List` is a single node whether it holds 1 KB or
   measured `Isolate.exit` validation at **~38 % of the whole query**. resqlite's
   flat-list `ResultSet` exists precisely to keep that object count minimal (the
   values list + schema + the value objects, rather than a map per row).
-- **Best for:** large results, *especially heterogeneous ones* — it is the only
-  mechanism that moves strings and structure without copying their bytes.
+- **Best for:** large **structural** results — many slots (rows × columns).
+  It is the only mechanism that moves the *structure* without copying it. Note
+  it is **not** uniquely good for strings: `send` already shares string bytes
+  rather than copying them (§2b), so a string-heavy result gains nothing from
+  sacrificing and merely pays the respawn (§6a).
 - **Reaches:** the entire result graph, of any shape.
 - **Catch:** the transferred objects are adopted onto **main's GC heap**, so a
   large payload still pays §2c's recurring GC cost on the receiver.
@@ -306,8 +322,10 @@ The two thresholds it composes:
 - **Size gate — ≥ 256 KB.** Below this, the per-buffer machinery fee (§3c)
   exceeds the GC saving (a small blob barely churns the collector), so wrapping
   *loses*. Measured: wrapping was +23 % *slower* at 64 KB and only turned
-  positive at 256 KB. The 256 KB figure matches the read-side sacrifice
-  threshold by design.
+  positive at 256 KB. This is a **byte** gate, and correctly so — a `Uint8List`
+  really is copied byte-for-byte. It is *independent* of the sacrifice decision,
+  which counts slots (§6a); the two used to share a 256 KB figure, but that
+  coupling was coincidental and is now gone.
 
 ### Why the rule is *local* (and why that's the real justification)
 
@@ -328,7 +346,9 @@ wrap decision is genuinely local — for *read cells* there is no relevant
 context, and every "smarter" variant we tried *lost*:
 
 - **Cumulative / tipping** (wrap sub-threshold blobs when they collectively push
-  a result toward sacrifice): made a 20 × 150 KB gallery result **2× slower**.
+  a result toward sacrifice — a motivation that no longer exists at all, since
+  slot routing means blob bytes cannot trigger a sacrifice): made a
+  20 × 150 KB gallery result **2× slower**.
   Wrapping 20 medium blobs pays the per-buffer machinery 20 times, which exceeds
   the single sacrifice it was trying to avoid. And computing this decision needs
   the whole-result totals, which are only known *after* decode — by which point
@@ -349,10 +369,11 @@ wrap.
 
 | Result shape | What happens | Why |
 |---|---|---|
-| 1 × 512 KB blob | wrap, no sacrifice | big enough to wrap; wrapping drops residual below the sacrifice threshold, so the worker also survives (~5× faster) |
+| 1 × 512 KB blob | wrap, no sacrifice | big enough to wrap (allocation domain); 1 slot, so it was never a sacrifice candidate (~5× faster) |
 | 10 × 512 KB blobs | wrap all 10, no sacrifice | each blob individually clears the gate; 10 independent wins (~12-40 %) |
-| 400 KB text + 512 KB blob | wrap the blob **and** sacrifice | text residual > threshold forces sacrifice; the blob still wins by staying off main's GC heap during `Isolate.exit` (~30-55 %) |
-| 20 × 150 KB blobs | **no wrap**, sacrifice | every cell is sub-threshold; wrapping them all would cost more machinery than the one sacrifice saves |
+| 400 KB text + 512 KB blob | wrap the blob, **no** sacrifice | 2 slots — far under the slot threshold, and the text is *shared* by `send` rather than copied, so nothing forces a sacrifice. The blob is wrapped purely for the allocation domain |
+| 20 × 150 KB blobs | **no wrap**, no sacrifice | every cell is sub-threshold, and 20 slots is nowhere near the slot threshold |
+| 20k rows × 2 cols, one row holding a 300 KB blob | wrap that cell **and** sacrifice | the two rules are orthogonal: the cell clears the byte gate, while 40k slots independently clears the slot threshold — so a wrapped buffer rides `Isolate.exit` rather than a graph copy (covered by a round-trip test) |
 | large **numeric/structural** result (≥ ~32k slots) | **sacrifice** (no wrap) | no byte buffer for TTD; the flat slot array is large enough that `Isolate.exit`'s zero-copy beats `send`'s per-slot copy (§6a) |
 | large **string** result (few rows, big `TEXT`) | **send** (no wrap, no sacrifice) | strings are *shared* on send (§2b) — few slots, so `send` copies almost nothing; sacrificing it would respawn a reader for no copy avoided (§6a, exp 246) |
 | small result of any shape | graph copy | cheap; no reason to involve heavier machinery |
@@ -439,10 +460,12 @@ domain.
 This reconciles a subtlety with §4's Q1 result (a heap-backed BLOB cell can win
 via TTD *even when the outer result still sacrifices*, by changing the BLOB's
 allocation domain). The unified statement: **for heap-backed BLOB cells, TTD
-helps by avoiding sacrifice and/or moving the BLOB out of the managed heap; for
-selectBytes the bytes are already external and the path never sacrifices, so
-TTD removes neither a copy nor a managed destination.** ("Where nothing
-sacrifices, TTD never helps" was too broad — Q1 is the counterexample.)
+helps by moving the BLOB out of the managed heap; for selectBytes the bytes are
+already external, so TTD changes no allocation domain and only adds machinery.**
+Under slot routing this is cleaner than it was when first written — TTD never
+"avoids a sacrifice" any more, because blob bytes no longer feed that decision.
+Its only benefit is the allocation domain, which is exactly why Q1 (a win even
+when the result sacrifices anyway) was the right result all along.
 
 ---
 
@@ -453,8 +476,8 @@ sacrifices, TTD never helps" was too broad — Q1 is the counterexample.)
   heap-configuration-dependent; re-measure if shipping broadly.
 - **Very large blobs (≥ ~1 MB)** allocate straight into old space, which is not
   scavenge-evacuated, so the GC-relief component shrinks toward neutral. On the
-  *read* path this doesn't matter — a large blob still wins by avoiding the
-  sacrifice. On the *write* path (no sacrifice) the end-to-end win washes out to
+  *read* path the wrap still keeps the payload off main's managed heap for its
+  whole life. On the *write* path the end-to-end win washes out to
   neutral at multi-MB (never negative). Hence the threshold is a **floor with no
   upper cutoff**: wrapping an oversized blob is at worst harmless.
 - **Extreme counts are reasoned, not measured.** Independence of count is
