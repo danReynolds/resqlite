@@ -1,6 +1,8 @@
 # Exp 246 — slot-count vs byte-count sacrifice trigger (A/B)
 
-Harness: `benchmark/experiments/slot_sacrifice_ab.dart`. Apple M1 Pro.
+Harness: `benchmark/experiments/slot_sacrifice_ab.dart` (temporary A/B scaffolding,
+removed on landing together with the byte machinery it toggled — see
+`experiments/246-slot-sacrifice-guard.md`). Apple M1 Pro.
 End-to-end `select`, median µs over 9×200 iters, sacrifices/select from
 `ReaderPool.debugSacrificeCount`. Lanes: default (slot trigger), and
 `-DRESQLITE_SLOT_TRIGGER=false` (legacy byte trigger). Slot threshold via

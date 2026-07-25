@@ -8,7 +8,7 @@ knowledge of Dart's memory model — the necessary pieces are built up here.
 It is the reference companion to the experiments that established the model:
 [exp 234](../../experiments/234-blob-param-transfer.md) (write params),
 [exp 236](../../experiments/236-blob-cell-transfer.md) (read blob cells),
-exp 238 (blob tipping) (validating the blob-wrap rule),
+exp 238 (validating the blob-wrap rule; writeup not yet published),
 [exp 243](../../experiments/243-blob-alias-table-protocol.md) (the write-param
 aliasing fix in §5), and the four-experiment **send-vs-sacrifice arc** behind §6a:
 [exp 241](../../experiments/241-sacrifice-reeval.md) (why the first A/B was
@@ -231,7 +231,7 @@ land and therefore what happens to them afterward**:
 > recurring, size-proportional tax that hosting it in external memory does not.
 
 This is why wrapping a large blob wins **even when the result sacrifices
-anyway** (exp 238 (blob tipping), "Q1"): the wrapped
+anyway** (exp 238, "Q1"): the wrapped
 blob rides the `Isolate.exit` transfer as an embedded TTD, but because it lives
 in external memory it never joins main's GC-managed churn. Measured ~30-55%
 faster than the same result with the blob on the heap, on an operation that
@@ -257,7 +257,7 @@ This is **not** one universal rule — it is **two** rules, because reads and
 writes differ in whether object identity matters.
 
 > **Read-cell rule (local).** A freshly decoded BLOB cell ≥
-> `readBlobCellTransferThreshold` (currently 256 KB) is externalized through
+> `blobCellTransferThreshold` (currently 256 KB) is externalized through
 > TTD. The decision is local to that cell — every result cell is independently
 > materialized, so there is no aliasing to preserve.
 
@@ -314,7 +314,7 @@ The two thresholds it composes:
 The wrap decision for a given blob depends **only on that blob's size** — not
 on the other cells, not on the total result size, and not on whether the result
 will sacrifice. Two independence results, both measured in
-exp 238 (blob tipping):
+exp 238:
 
 - **Independent of sacrifice** (Q1): a big blob wins whether or not the result
   sacrifices, because the GC-relief applies either way; sacrifice-avoidance is
@@ -420,7 +420,8 @@ Measured: the misroute shape (4 rows × 100 KB string) stopped sacrificing
 (1.00 → 0.00 sacrifices per select) and ran **31% faster**, eliminating the reader
 churn it previously caused on every call; every numeric/structural shape stayed at
 parity. Slot count is also *free* — it is the flat list's length, needing none of
-the decoder's per-cell byte accounting. (The byte machinery — `sacrificeByteThreshold`, `RawQueryResult.estimatedBytes`,
+the decoder's per-cell byte accounting. (The byte machinery — the old
+byte threshold, `RawQueryResult.estimatedBytes`,
 and the decoder's per-cell `byteEstimate` — was **deleted** in the same change:
 routing on slot count left it with no readers. Exp 236's `transferableBytes`
 subtraction went with it, since blob size can no longer influence the decision.)
@@ -505,7 +506,7 @@ isolates.
   — the original narrative on `Isolate.exit` graph-validation cost.
 - Experiments: [234](../../experiments/234-blob-param-transfer.md) (write
   params), [236](../../experiments/236-blob-cell-transfer.md) (read blob cells),
-  exp 238 (blob-wrap rule validation, writeup pending),
+  exp 238 (blob-wrap rule validation; writeup not yet published),
   [243](../../experiments/243-blob-alias-table-protocol.md) (write-param aliasing,
   §5); and the send-vs-sacrifice arc behind §6a:
   [241](../../experiments/241-sacrifice-reeval.md) (confound),

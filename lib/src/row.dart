@@ -147,7 +147,8 @@ final class Row with MapMixin<String, Object?> {
   }
 
   @override
-  bool containsKey(Object? key) => key is String && _schema.containsName(key);
+  bool containsKey(Object? key) =>
+      key is String && _schema.containsName(key);
 
   @override
   bool containsValue(Object? value) {

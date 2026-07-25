@@ -12,9 +12,9 @@ import 'dart:typed_data';
 
 import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
-import '../row.dart' show materializeTransferableBlobCells;
 import '../profile_counters.dart';
 import '../profile_mode.dart';
+import '../row.dart' show materializeTransferableBlobCells;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
 

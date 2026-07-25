@@ -358,6 +358,35 @@ void main() {
       }
     });
 
+    test('wrapped blob cells survive a sacrificing result', () async {
+      // [EXP-236] + [EXP-246] A result can now both sacrifice (slot count over
+      // sacrificeSlotThreshold) AND carry TransferableTypedData cells, so the
+      // wrapped buffers ride `Isolate.exit` rather than a graph copy and must
+      // still materialize at the receive boundary. Exp 246 made this shape
+      // reachable: sacrifice used to key on estimated bytes minus the wrapped
+      // bytes, which steered blob-carrying results away from sacrificing; slot
+      // routing makes blob size irrelevant to the decision.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
+      final big = Uint8List.fromList(
+        List.generate(300 * 1024, (i) => (i * 17 + 3) & 0xFF),
+      );
+      await db.execute('INSERT INTO t(id, payload) VALUES (1, ?)', [big]);
+      // 2 columns x 20k rows = 40k slots, comfortably over the 32k threshold.
+      await db.executeBatch('INSERT INTO t(id, payload) VALUES (?, NULL)', [
+        for (var i = 2; i <= 20000; i++) [i],
+      ]);
+
+      // Repeat: each sacrifice kills its reader, so a second pass also proves
+      // the replacement worker decodes and transfers the wrapped cell.
+      for (var pass = 0; pass < 2; pass++) {
+        final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
+        expect(rows, hasLength(20000), reason: 'pass $pass');
+        expect(rows[0]['payload'], isA<Uint8List>(), reason: 'pass $pass');
+        expect(rows[0]['payload'], equals(big), reason: 'pass $pass');
+        expect(rows[1]['payload'], isNull, reason: 'pass $pass');
+      }
+    });
+
     test('large blob cells round-trip through tx.select', () async {
       // [EXP-236] The writer cannot sacrifice, so tx.select carries wrapped
       // cells that materialize in Writer.selectLocked.

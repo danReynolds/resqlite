@@ -132,6 +132,7 @@ const int asciiMask = 0x8080808080808080;
 /// also credited the wrap with avoiding a sacrifice; under slot routing a
 /// blob-heavy result with few rows never sacrifices in the first place, so the
 /// wrap's remaining benefit is purely the allocation domain.)
+///
 /// Compile-time (`-DRESQLITE_BLOB_CELL_TRANSFER_THRESHOLD=<bytes>`) because
 /// the decode loop runs on worker isolates, where a main-isolate runtime
 /// toggle would never arrive — each isolate holds its own copy of file-level
@@ -280,9 +281,6 @@ final class RawQueryResult {
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
-
-  /// Estimated byte size of the result data, accumulated during the cell loop.
-  /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
 }
 
 // ---------------------------------------------------------------------------
