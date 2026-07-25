@@ -94,27 +94,15 @@ typedef struct {
     // at build time. The cached prepared stmt's column count never changes
     // across re-executions, so this also serves as a "tokens ready" flag.
     int json_name_tokens_col_count;
-    // [EXP-248] Recency stamp for LRU eviction. Slots are stable (entries are
-    // never moved to promote them), so ordering is carried here instead of by
-    // array position: every lookup/insert stamps `lru_seq` from the cache's
-    // monotonic `lru_clock`, and eviction reuses the slot with the smallest
-    // stamp. This replaces the move-to-back swap, which copied ~1.6 KB per
-    // struct (three copies per promotion) on every interleaved-statement hit.
-    uint64_t lru_seq;
 } resqlite_cached_stmt;
 
 typedef struct {
     resqlite_cached_stmt entries[STMT_CACHE_MAX];
     int count;
-    // [EXP-248] Monotonic recency counter. Bumped on every lookup hit and
-    // insert; the resulting value is stamped onto the touched entry's
-    // `lru_seq`. Eviction picks the entry with the smallest stamp.
-    uint64_t lru_clock;
 } resqlite_stmt_cache;
 
 static void stmt_cache_init(resqlite_stmt_cache* c) {
     c->count = 0;
-    c->lru_clock = 0;
     memset(c->entries, 0, sizeof(c->entries));
 }
 
@@ -168,18 +156,12 @@ static resqlite_cached_stmt* stmt_cache_lookup_entry(resqlite_stmt_cache* c,
     for (int i = 0; i < c->count; i++) {
         if (c->entries[i].sql_len == sql_len &&
             memcmp(c->entries[i].sql, sql, sql_len) == 0) {
-            // [EXP-248] Stamp recency in place instead of swapping the matched
-            // entry to the MRU tail. The old move-to-back copied three full
-            // ~1.6 KB `resqlite_cached_stmt` structs (~5 KB of memcpy) on every
-            // hit where the entry was not already last — which fires on every
-            // lookup once a workload interleaves two or more hot statements
-            // (multiple active streams, or DML across several tables). Slots
-            // are stable now, so the returned pointer refers to a fixed struct
-            // for the life of the entry, and `reader->last_entry` /
-            // `writer_active_entry` no longer alias a slot that a later
-            // promotion could repopulate with a different entry.
-            c->entries[i].lru_seq = ++c->lru_clock;
-            return &c->entries[i];
+            if (i != c->count - 1) {
+                resqlite_cached_stmt tmp = c->entries[i];
+                c->entries[i] = c->entries[c->count - 1];
+                c->entries[c->count - 1] = tmp;
+            }
+            return &c->entries[c->count - 1];
         }
     }
     return NULL;
@@ -195,35 +177,20 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
                                               const char* sql,
                                               int sql_len,
                                               sqlite3_stmt* stmt) {
-    // Allocate the SQL copy before touching the cache so an OOM here leaves the
-    // existing entries intact (the pre-EXP-248 code evicted first, then could
-    // still fail the malloc and lose an entry for nothing).
+    if (c->count >= STMT_CACHE_MAX) {
+        stmt_cache_entry_dispose(&c->entries[0]);
+        memmove(&c->entries[0], &c->entries[1],
+                (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
+        c->count = STMT_CACHE_MAX - 1;
+    }
     char* sql_copy = (char*)malloc(sql_len + 1);
     if (!sql_copy) return NULL;
     memcpy(sql_copy, sql, sql_len);
     sql_copy[sql_len] = '\0';
 
-    resqlite_cached_stmt* slot;
-    if (c->count >= STMT_CACHE_MAX) {
-        // [EXP-248] Evict the least-recently-used entry in place — the slot
-        // with the smallest recency stamp — and reuse it. Stable slots mean no
-        // memmove of the trailing ~30 * 1.6 KB entries on every eviction. This
-        // preserves the pre-EXP-248 LRU policy (move-to-back kept the LRU entry
-        // at index 0, which is exactly what this min-stamp scan selects).
-        int lru = 0;
-        for (int i = 1; i < c->count; i++) {
-            if (c->entries[i].lru_seq < c->entries[lru].lru_seq) lru = i;
-        }
-        stmt_cache_entry_dispose(&c->entries[lru]);
-        slot = &c->entries[lru];
-    } else {
-        slot = &c->entries[c->count];
-        c->count++;
-    }
-
-    stmt_cache_entry_init(slot, sql_copy, sql_len, stmt);
-    slot->lru_seq = ++c->lru_clock;
-    return slot;
+    stmt_cache_entry_init(&c->entries[c->count], sql_copy, sql_len, stmt);
+    c->count++;
+    return &c->entries[c->count - 1];
 }
 
 static void stmt_cache_clear(resqlite_stmt_cache* c) {
