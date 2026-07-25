@@ -538,6 +538,28 @@ path does, or its win is an artefact of the packed fixture. Distinct from exp
 226's "isolated win below the end-to-end gate" (a magnitude gap): here the sign
 flips, because the mechanism itself is absent in production.*
 
+## A configuration where the candidate is mechanically inert is the cheapest noise gauge you can build
+
+Exp 248 removed a struct swap from the statement cache's MRU promotion. Its
+harness cycled N distinct hot SQLs, and `N = 1` was included as a control —
+with one SQL the matched entry already sits at the MRU tail, so the promotion
+branch is unreachable and candidate and baseline execute *the same
+instructions*. Those control lanes moved +24% and +27% on the first pass and
++103% and +42% on the order flip. Since the delta there is definitionally zero,
+that swing is a direct reading of the harness's own floor — and it instantly
+disqualified the primary lanes' apparent −22% and −35% "wins," which reversed
+sign on the flip anyway.
+
+*Reapplies whenever a candidate is gated by a branch, threshold, size class, or
+type check. Pick inputs that provably cannot reach the changed code and run them
+as a labelled lane beside the real ones. Unlike a general control workload, this
+one is exactly comparable — same harness, same call shape, same allocation
+pattern — so its delta measures nothing but noise, and it converts "is this
+drift?" from a judgement call into an observation. It costs one array entry and
+is far cheaper than the extra confirmation passes it replaces. It is also the
+one control that stays valid when a rejected experiment's numbers look good:
+exp 248's primary lanes looked like a win until the inert lanes moved more.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
