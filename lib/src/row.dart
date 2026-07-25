@@ -3,22 +3,13 @@ import 'dart:isolate';
 
 const _identityLookupMaxColumns = 32;
 
-/// [EXP-236] Materialize any `TransferableTypedData` blob cells in [rows]
-/// back into `Uint8List` views, in place.
+/// Materializes wrapped blob cells back to `Uint8List` at a main-isolate
+/// receive boundary, so the public surface only ever exposes `Uint8List`.
 ///
-/// Large blob cells cross the worker -> main isolate hop as
-/// `TransferableTypedData` (an ownership move of a malloc'd buffer, not a
-/// graph copy onto the GC heap — see `blobCellTransferThreshold` in
-/// query_decoder.dart). This runs once at each main-isolate receive boundary,
-/// before rows become visible to callers, so the public surface only ever
-/// exposes `Uint8List`. In-place mutation is safe: the values list arrived
-/// with this message and has no other observer yet. No-op (single type check
-/// per cell, no allocation) for results without wrapped cells.
-///
-/// Top-level and unexported (`lib/resqlite.dart` uses a `show` list), so this
-/// is internal despite being public to the package.
+/// Mutates in place: the values list arrived with this message and has no
+/// other observer yet.
 void materializeTransferableBlobCells(List<Map<String, Object?>> rows) {
-  if (rows is! ResultSet) return;
+  if (rows is! ResultSet || !rows.hasWrappedCells) return;
   final values = rows._values;
   for (var i = 0; i < values.length; i++) {
     final value = values[i];
@@ -81,21 +72,24 @@ final class RowSchema {
 ///
 /// This design minimizes the object count for isolate transfer — only the
 /// flat values list, [RowSchema], and the [ResultSet] wrapper cross the
-/// isolate boundary. [Row] objects are created on the receiving side.
-///
-/// The length of [_values] (rows × columns — the "slot count") is the unit that
-/// governs transfer cost, which is why the reader routes its send-vs-sacrifice
-/// decision on it (`sacrificeSlotThreshold`, exp 246): `SendPort.send` copies
-/// this slot array while sharing the immutable string/number leaves by
-/// reference, and `Isolate.exit`'s sendability walk visits each slot — both
-/// scale with slot count, not decoded byte size. Keeping the array flat (rather
-/// than a `Map` per row) keeps that count minimal.
+/// isolate boundary. [Row] objects are created on the receiving side. That
+/// count is also what transfer cost scales with, so it is what the reader's
+/// sacrifice decision keys on (`sacrificeSlotThreshold`).
 final class ResultSet with ListMixin<Row> {
-  ResultSet(this._values, this._schema, this._rowCount);
+  ResultSet(
+    this._values,
+    this._schema,
+    this._rowCount, [
+    this.hasWrappedCells = false,
+  ]);
 
   final List<Object?> _values;
   final RowSchema _schema;
   final int _rowCount;
+
+  /// Whether any cell crossed as [TransferableTypedData]; see
+  /// [materializeTransferableBlobCells].
+  final bool hasWrappedCells;
 
   @override
   int get length => _rowCount;
@@ -147,8 +141,7 @@ final class Row with MapMixin<String, Object?> {
   }
 
   @override
-  bool containsKey(Object? key) =>
-      key is String && _schema.containsName(key);
+  bool containsKey(Object? key) => key is String && _schema.containsName(key);
 
   @override
   bool containsValue(Object? value) {

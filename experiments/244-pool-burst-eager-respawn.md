@@ -3,9 +3,7 @@
 **Date:** 2026-07-22
 **Status:** Rejected
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** none — focused pool-burst harness
-  [`benchmark/experiments/pool_burst_eager_respawn.dart`](../benchmark/experiments/pool_burst_eager_respawn.dart);
-  raw table in
+**Benchmark Run:** none — focused pool-burst harness; raw table in
   [`benchmark/results/2026-07-22-exp244-pool-burst.md`](../benchmark/results/2026-07-22-exp244-pool-burst.md).
 
 ## Problem
@@ -112,9 +110,10 @@ re-examining sacrifice: at pool-4, sacrifice is neutral-to-favorable, not harmfu
 That removes pool capacity from the send-vs-sacrifice debate and turns exp 241's
 hand-wavy "keep sacrifice" into a measured result for the pool regime.
 
-Kept: the reusable `debugDispatchTimings` queue-wait instrument (benchmark-only,
-null in production) and the `RESQLITE_SACRIFICE_THRESHOLD` knob — both reused by
-this harness and future pool experiments. Still open from the exp 241 split:
+The harness and its `ReaderPool.debugDispatchTimings` hook were removed with the
+rejected candidate rather than left in the reader for a rerun that may never come;
+re-add the hook (it is a nullable list appended to in `_dispatch`) if a future pool
+experiment needs queue-wait again. Still open from the exp 241 split:
 **Experiment A** (prepared-result, process-isolated handoff) for the *intrinsic*
 transfer estimand, and the **text/shared-leaf misroute** guard. Would revisit
 eager respawn only if a future change made the completion chain heavy enough to

@@ -114,30 +114,14 @@ const int cellOffVal = 8;
 
 const int asciiMask = 0x8080808080808080;
 
-/// [EXP-236] Minimum blob-cell size (bytes) to decode into
-/// `TransferableTypedData` instead of a heap `Uint8List`.
+/// Minimum blob-cell size to decode into `TransferableTypedData` rather than a
+/// heap `Uint8List`, putting the payload in external memory the GC never traces.
 ///
-/// Mirrors the write-side `blobParamTransferThreshold` (exp 234): below it the
-/// wrap bookkeeping outweighs the graph-copy it avoids; at or above it the
-/// cell's one copy lands in malloc'd external memory the GC never traces, and
-/// the hop becomes an ownership move.
+/// Bytes here, unlike the slot-based sacrifice threshold: a `Uint8List` is
+/// mutable, so `send` really does copy it byte for byte.
 ///
-/// This is a *byte* threshold, and correctly so — a `Uint8List` is mutable, so
-/// `SendPort.send` genuinely copies it byte for byte. That is the opposite of
-/// the *sacrifice* decision, which routes on mutable slot count
-/// ([EXP-246](../../experiments/246-slot-sacrifice-guard.md)) because strings
-/// and other immutable leaves are shared rather than copied. The two thresholds
-/// answer different questions and are no longer tied to a common 256 KB figure:
-/// bytes for a mutable payload, slots for result structure. (Exp 236 originally
-/// also credited the wrap with avoiding a sacrifice; under slot routing a
-/// blob-heavy result with few rows never sacrifices in the first place, so the
-/// wrap's remaining benefit is purely the allocation domain.)
-///
-/// Compile-time (`-DRESQLITE_BLOB_CELL_TRANSFER_THRESHOLD=<bytes>`) because
-/// the decode loop runs on worker isolates, where a main-isolate runtime
-/// toggle would never arrive — each isolate holds its own copy of file-level
-/// globals. A const define reaches every isolate identically and lets the
-/// A/B harness force the baseline lane per process; internal, not public API.
+/// A define rather than a variable because the decode loop runs on worker
+/// isolates, which never see a main-isolate assignment.
 const int blobCellTransferThreshold = int.fromEnvironment(
   'RESQLITE_BLOB_CELL_TRANSFER_THRESHOLD',
   defaultValue: 256 * 1024,
@@ -277,10 +261,14 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount);
+  RawQueryResult(this.values, this.schema, this.rowCount, this.hasWrappedCells);
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
+
+  /// Whether any cell was wrapped in [TransferableTypedData]. Lets the receive
+  /// boundary skip its scan entirely when nothing needs materializing.
+  final bool hasWrappedCells;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +289,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
+  var hasWrappedCells = false;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
@@ -335,12 +324,9 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else if (blobLen >= blobCellTransferThreshold) {
-            // [EXP-236] Large blob cells decode straight into
-            // TransferableTypedData: one native -> malloc'd-external copy the
-            // GC never traces, in place of the native -> heap copy below. The
-            // isolate hop then moves the buffer by ownership transfer, and
-            // the main-isolate receive boundary materializes it back to a
-            // Uint8List view (see materializeTransferableBlobCells).
+            hasWrappedCells = true;
+            // Copies native -> external instead of native -> heap; see
+            // [blobCellTransferThreshold].
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);
@@ -358,7 +344,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(values, schema, rowCount);
+  return RawQueryResult(values, schema, rowCount, hasWrappedCells);
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -377,6 +363,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
+  var hasWrappedCells = false;
   initialHashSlot.value = _fnvOffsetBasis;
 
   var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
@@ -412,12 +399,9 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else if (blobLen >= blobCellTransferThreshold) {
-            // [EXP-236] Large blob cells decode straight into
-            // TransferableTypedData: one native -> malloc'd-external copy the
-            // GC never traces, in place of the native -> heap copy below. The
-            // isolate hop then moves the buffer by ownership transfer, and
-            // the main-isolate receive boundary materializes it back to a
-            // Uint8List view (see materializeTransferableBlobCells).
+            hasWrappedCells = true;
+            // Copies native -> external instead of native -> heap; see
+            // [blobCellTransferThreshold].
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);
@@ -435,6 +419,6 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(values, schema, rowCount);
+  final raw = RawQueryResult(values, schema, rowCount, hasWrappedCells);
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }

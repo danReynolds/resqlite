@@ -181,12 +181,8 @@ final class Writer {
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
-                // [EXP-234] Wrap large blob params so a concurrent burst of
-                // large-blob writes uses the TTD hop instead of the graph
-                // copy. [EXP-243] Census identities across the WHOLE group so
-                // a buffer reused across writes (or twice within one write) is
-                // left aliased on the graph-copy path rather than duplicated
-                // into one external buffer per occurrence.
+                // Wrapped across the whole group, so a buffer reused
+                // between coalesced writes crosses once.
                 (replyPort) => MultiExecuteRequest(
                   wrapBlobParamsGroup([
                     for (final p in group) (sql: p.sql, params: p.parameters),
@@ -328,9 +324,6 @@ final class Writer {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    // [EXP-236] The writer cannot sacrifice, so tx.select results carry
-    // large blob cells as TransferableTypedData; materialize at this
-    // receive boundary before rows reach the caller.
     materializeTransferableBlobCells(response.rows);
     return response;
   }

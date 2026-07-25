@@ -1,6 +1,8 @@
 # Exp 244 — pool-burst replacement capacity + eager respawn (rejected)
 
-Harness: `benchmark/experiments/pool_burst_eager_respawn.dart`. Apple M1 Pro.
+Harness: a pool-burst driver plus a `ReaderPool.debugDispatchTimings` hook, both
+removed on landing with the rejected candidate (see
+`experiments/244-pool-burst-eager-respawn.md`). Apple M1 Pro.
 Production 4-worker pool; 8 identical large (sacrificing) selects behind a
 barrier per burst; queue-wait = assignedAt − enqueuedAt from
 `ReaderPool.debugDispatchTimings` (decode-free). Pool reset (DB reopened) between
