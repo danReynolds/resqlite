@@ -9,6 +9,7 @@ import 'package:resqlite/src/transaction.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 import 'package:resqlite/src/writer/writer.dart';
 
+import 'checkpoint_worker.dart';
 import 'diagnostics.dart';
 import 'exceptions.dart';
 import 'extensions/extension.dart';
@@ -69,10 +70,19 @@ final class Database {
       // Start the reactive query stream engine.
       final streamEngine = StreamEngine(readerPool);
 
+      // Spawn the worker that owns the dedicated PASSIVE checkpoint
+      // connection before the writer so every commit can signal it directly.
+      final checkpointWorker = await CheckpointWorker.spawn(_handle);
+
       // Spawn the single writer isolate.
-      final writer = await Writer.spawn(streamEngine, _handle);
+      final writer = await Writer.spawn(
+        streamEngine,
+        _handle,
+        checkpointWorker.sendPort,
+      );
 
       return (
+        checkpointWorker: checkpointWorker,
         readerPool: readerPool,
         streamEngine: streamEngine,
         writer: writer,
@@ -179,12 +189,17 @@ final class Database {
     final completer = _closedCompleter = Completer<void>();
 
     try {
-      final _DatabaseRuntime(:readerPool, :streamEngine, :writer) =
-          await _runtime;
+      final _DatabaseRuntime(
+        :checkpointWorker,
+        :readerPool,
+        :streamEngine,
+        :writer,
+      ) = await _runtime;
 
       streamEngine.close();
       await readerPool.close();
       await writer.close();
+      await checkpointWorker.close();
 
       resqliteClose(_handle);
 
@@ -619,6 +634,7 @@ final class Database {
 }
 
 typedef _DatabaseRuntime = ({
+  CheckpointWorker checkpointWorker,
   ReaderPool readerPool,
   StreamEngine streamEngine,
   Writer writer,

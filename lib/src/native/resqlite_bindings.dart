@@ -98,6 +98,34 @@ external int resqliteTxCommit(ffi.Pointer<ffi.Void> db);
 )
 external int resqliteTxRollback(ffi.Pointer<ffi.Void> db);
 
+// Private asynchronous checkpoint scheduler. The writer WAL hook marks a
+// coalesced request; the writer isolate claims it after commit and wakes the
+// dedicated checkpoint isolate, which owns the separate checkpoint connection.
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_checkpoint_take_request',
+  isLeaf: true,
+)
+external int resqliteCheckpointTakeRequest(ffi.Pointer<ffi.Void> db);
+
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_checkpoint_claim_for_close',
+  isLeaf: true,
+)
+external int resqliteCheckpointClaimForClose(ffi.Pointer<ffi.Void> db);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Int>,
+    ffi.Pointer<ffi.Int>,
+  )
+>(symbol: 'resqlite_checkpoint_run_passive')
+external int resqliteCheckpointRunPassive(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<ffi.Int> outLogFrames,
+  ffi.Pointer<ffi.Int> outCheckpointedFrames,
+);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,

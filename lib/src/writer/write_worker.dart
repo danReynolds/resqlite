@@ -13,6 +13,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
+import '../checkpoint_worker.dart';
 import '../dependency_tracking.dart';
 import '../exceptions.dart';
 import '../native/request_cache.dart';
@@ -169,11 +170,14 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
 /// Passed to per-request handlers so each handler is a small, self-contained
 /// function that can be reasoned about in isolation.
 final class _WriterState {
-  _WriterState({required this.dbHandle});
+  _WriterState({required this.dbHandle, required this.checkpointPort});
 
   /// Native SQLite connection handle. Shared with the main isolate via
   /// `dbHandle.address` — the writer isolate owns all access.
   final ffi.Pointer<ffi.Void> dbHandle;
+
+  /// Direct signal path to the isolate that owns the checkpoint connection.
+  final SendPort checkpointPort;
 
   /// Transaction nesting depth.
   ///
@@ -192,9 +196,11 @@ final class _WriterState {
 void writerEntrypoint(List<Object> args) {
   final mainPort = args[0] as SendPort;
   final dbHandleAddr = args[1] as int;
+  final checkpointPort = args[2] as SendPort;
 
   final state = _WriterState(
     dbHandle: ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+    checkpointPort: checkpointPort,
   );
   final receivePort = RawReceivePort();
 
@@ -256,8 +262,10 @@ void writerEntrypoint(List<Object> args) {
         // kill the writer isolate, leaving the caller hanging forever, so
         // fall back to a stripped copy that still delivers the failure.
         message.replyPort.send(
-          ResqliteException('${e.runtimeType}: $e (reply payload was not '
-              'sendable across isolates: $sendError)'),
+          ResqliteException(
+            '${e.runtimeType}: $e (reply payload was not '
+            'sendable across isolates: $sendError)',
+          ),
         );
       }
     } on Error catch (e, st) {
@@ -298,6 +306,7 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
+  if (state.txDepth == 0) _signalCheckpointIfNeeded(state);
   msg.replyPort.send(
     ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
   );
@@ -322,6 +331,7 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
       final modifications = state.txDepth > 0
           ? TableDependencies.none
           : getDirtyTableDependencies(state.dbHandle);
+      if (state.txDepth == 0) _signalCheckpointIfNeeded(state);
       outcomes.add(
         ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
       );
@@ -348,6 +358,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
+    _signalCheckpointIfNeeded(state);
     msg.replyPort.send(
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
@@ -460,6 +471,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     }
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     state.txDepth = newDepth;
+    _signalCheckpointIfNeeded(state);
     msg.replyPort.send(
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
@@ -508,6 +520,12 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     msg.replyPort.send(
       BatchResponse(TableDependencies.none, writerSqliteUs: writerSqliteUs),
     );
+  }
+}
+
+void _signalCheckpointIfNeeded(_WriterState state) {
+  if (resqliteCheckpointTakeRequest(state.dbHandle) == 1) {
+    state.checkpointPort.send(const CheckpointRun());
   }
 }
 
