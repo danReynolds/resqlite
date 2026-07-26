@@ -299,19 +299,6 @@ struct resqlite_db {
     resqlite_stmt_cache writer_cache;
     sqlite3_mutex* writer_mutex;
 
-    // Dedicated writable connection owned exclusively by the Dart checkpoint
-    // worker isolate. The writer WAL hook never checkpoints on its connection;
-    // it only advances checkpoint request state under the request mutex.
-    sqlite3* checkpoint;
-    sqlite3_mutex* checkpoint_request_mutex;
-    int checkpoint_request_state;
-    // The hook's last observed main-WAL size detects a restart even when the
-    // first commit in the new generation is already above the 500-page
-    // threshold. The next-request mark advances by one threshold per
-    // coalesced request instead of rearming on every above-threshold commit.
-    sqlite3_int64 checkpoint_last_wal_pages;
-    sqlite3_int64 checkpoint_next_request_pages;
-
     // Persistently prepared transaction-control statements
     // ([EXP-101](../experiments/101-tx-stmt-cache.md)).
     // The writer fires these on every transaction boundary; preparing them
@@ -343,9 +330,6 @@ struct resqlite_db {
     // merge the stmt's pre-captured `dep_columns` into `dirty_columns`
     // whenever a row is actually modified. NULL outside of stepping.
     resqlite_cached_stmt* writer_active_entry;
-    // Attached WAL databases cannot be opened by the main-only background
-    // checkpoint connection. Preserve the pre-experiment inline PASSIVE path
-    // for those schemas, including its recursion guard.
     int writer_checkpoint_running;
 
     // Reader pool.
@@ -359,11 +343,6 @@ struct resqlite_db {
 };
 
 #define RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES 500
-
-#define RESQLITE_CHECKPOINT_IDLE          0
-#define RESQLITE_CHECKPOINT_REQUESTED     1
-#define RESQLITE_CHECKPOINT_RUNNING       2
-#define RESQLITE_CHECKPOINT_RUNNING_RERUN 3
 
 // ---------------------------------------------------------------------------
 // Authorizer callback — records read tables/columns (stream deps) or, on
@@ -476,68 +455,25 @@ static int writer_wal_hook(
     int pages_in_wal
 ) {
     resqlite_db* sdb = (resqlite_db*)user_data;
-
-    // The dedicated checkpoint connection only has the main database
-    // attached. Keep the existing bounded inline behavior for attached WAL
-    // schemas; otherwise installing this hook would silently disable their
-    // autocheckpoint path and allow unbounded growth.
-    if (db_name != NULL && strcmp(db_name, "main") != 0) {
-        if (pages_in_wal < RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES ||
-            sdb->writer_checkpoint_running) {
-            return SQLITE_OK;
-        }
-
-        sdb->writer_checkpoint_running = 1;
-        int rc = sqlite3_wal_checkpoint_v2(
-            db,
-            db_name,
-            SQLITE_CHECKPOINT_PASSIVE,
-            NULL,
-            NULL
-        );
-        sdb->writer_checkpoint_running = 0;
-        return rc == SQLITE_BUSY ? SQLITE_OK : rc;
-    }
-
-    sqlite3_mutex_enter(sdb->checkpoint_request_mutex);
-
-    if (pages_in_wal < sdb->checkpoint_last_wal_pages) {
-        // A completed checkpoint lets a subsequent writer restart the WAL.
-        // Rearm on any observed page-count drop, including when the first
-        // commit in the new generation itself writes 500 or more pages.
-        sdb->checkpoint_next_request_pages =
-            RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES;
-    }
-    sdb->checkpoint_last_wal_pages = pages_in_wal;
-
-    if ((sqlite3_int64)pages_in_wal <
-        sdb->checkpoint_next_request_pages) {
-        sqlite3_mutex_leave(sdb->checkpoint_request_mutex);
+    if (pages_in_wal < RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES ||
+        sdb->writer_checkpoint_running) {
         return SQLITE_OK;
     }
 
-    // An already-requested checkpoint will see all growth before it starts,
-    // and one queued rerun will see all growth during the current run.
-    // Advance the covered high-water even when state is already REQUESTED or
-    // RUNNING_RERUN, without queueing another worker message.
-    sdb->checkpoint_next_request_pages =
-        (sqlite3_int64)pages_in_wal +
-        RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES;
-    if (sdb->checkpoint_request_state == RESQLITE_CHECKPOINT_IDLE) {
-        sdb->checkpoint_request_state = RESQLITE_CHECKPOINT_REQUESTED;
-    } else if (
-        sdb->checkpoint_request_state == RESQLITE_CHECKPOINT_RUNNING
-    ) {
-        sdb->checkpoint_request_state =
-            RESQLITE_CHECKPOINT_RUNNING_RERUN;
-    }
+    sdb->writer_checkpoint_running = 1;
+    int rc = sqlite3_wal_checkpoint_v2(
+        db,
+        db_name,
+        SQLITE_CHECKPOINT_PASSIVE,
+        NULL,
+        NULL
+    );
+    sdb->writer_checkpoint_running = 0;
 
-    sqlite3_mutex_leave(sdb->checkpoint_request_mutex);
-
-    // A checkpoint failure must never be returned from the writer's commit.
-    // The dedicated worker observes the result from
-    // resqlite_checkpoint_run_passive() instead.
-    return SQLITE_OK;
+    // PASSIVE checkpoints can legitimately report BUSY if readers pin the WAL.
+    // Treat that as "try again later" instead of surfacing an error from commit.
+    if (rc == SQLITE_BUSY) return SQLITE_OK;
+    return rc;
 }
 
 // sqlite3_exec callback for PRAGMA journal_mode — sets *arg to 1 if the
@@ -644,18 +580,9 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     if (!writer) return NULL;
 
     resqlite_db* db = (resqlite_db*)calloc(1, sizeof(resqlite_db));
-    if (!db) {
-        sqlite3_close_v2(writer);
-        return NULL;
-    }
     atomic_init(&db->closed, 0);
     db->writer = writer;
     db->path = resqlite_strdup(path);
-    if (!db->path) {
-        sqlite3_close_v2(writer);
-        free(db);
-        return NULL;
-    }
     stmt_cache_init(&db->writer_cache);
     resqlite_dirty_set_init(&db->dirty_tables);
     resqlite_column_set_init(&db->dirty_columns);
@@ -663,43 +590,6 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     db->writer_active_entry = NULL;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
-    db->checkpoint_request_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
-    if (!db->writer_mutex || !db->pool_mutex ||
-        !db->checkpoint_request_mutex) {
-        if (db->writer_mutex) sqlite3_mutex_free(db->writer_mutex);
-        if (db->pool_mutex) sqlite3_mutex_free(db->pool_mutex);
-        if (db->checkpoint_request_mutex) {
-            sqlite3_mutex_free(db->checkpoint_request_mutex);
-        }
-        resqlite_dirty_set_free(&db->dirty_tables);
-        resqlite_column_set_free(&db->dirty_columns);
-        resqlite_column_set_free(&db->writer_authz_scratch);
-        sqlite3_close_v2(writer);
-        free(db->path);
-        free(db);
-        return NULL;
-    }
-    db->checkpoint_request_state = RESQLITE_CHECKPOINT_IDLE;
-    db->checkpoint_last_wal_pages = 0;
-    db->checkpoint_next_request_pages =
-        RESQLITE_WRITER_PASSIVE_CHECKPOINT_PAGES;
-
-    // The checkpoint worker gets a separate writable NOMUTEX connection. It
-    // follows the same key-before-PRAGMA and connection configuration path as
-    // the writer, and is exclusively owned by that worker after open.
-    db->checkpoint = open_connection(path, 0, encryption_key_hex);
-    if (!db->checkpoint) {
-        sqlite3_mutex_free(db->checkpoint_request_mutex);
-        sqlite3_mutex_free(db->writer_mutex);
-        sqlite3_mutex_free(db->pool_mutex);
-        resqlite_dirty_set_free(&db->dirty_tables);
-        resqlite_column_set_free(&db->dirty_columns);
-        resqlite_column_set_free(&db->writer_authz_scratch);
-        sqlite3_close_v2(writer);
-        free(db->path);
-        free(db);
-        return NULL;
-    }
 
     // Pre-prepare transaction-control stmts
     // ([EXP-101](../experiments/101-tx-stmt-cache.md)). These are
@@ -856,11 +746,6 @@ void resqlite_close(resqlite_db* db) {
         sqlite3_close_v2(db->readers[i].db);
     }
 
-    // Dart drains and joins the checkpoint worker before calling close, so no
-    // isolate can still be inside resqlite_checkpoint_run_passive() while this
-    // exclusively-owned connection is closed.
-    sqlite3_close_v2(db->checkpoint);
-
     // Close writer.
     sqlite3_mutex_enter(db->writer_mutex);
     stmt_cache_clear(&db->writer_cache);
@@ -875,85 +760,8 @@ void resqlite_close(resqlite_db* db) {
 
     sqlite3_mutex_free(db->writer_mutex);
     sqlite3_mutex_free(db->pool_mutex);
-    sqlite3_mutex_free(db->checkpoint_request_mutex);
     free(db->path);
     free(db);
-}
-
-int resqlite_checkpoint_take_request(resqlite_db* db) {
-    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
-        return 0;
-    }
-
-    int claimed = 0;
-    sqlite3_mutex_enter(db->checkpoint_request_mutex);
-    if (db->checkpoint_request_state == RESQLITE_CHECKPOINT_REQUESTED) {
-        db->checkpoint_request_state = RESQLITE_CHECKPOINT_RUNNING;
-        claimed = 1;
-    }
-    sqlite3_mutex_leave(db->checkpoint_request_mutex);
-    return claimed;
-}
-
-int resqlite_checkpoint_claim_for_close(resqlite_db* db) {
-    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
-        return 0;
-    }
-
-    int should_run = 0;
-    sqlite3_mutex_enter(db->checkpoint_request_mutex);
-    if (db->checkpoint_request_state == RESQLITE_CHECKPOINT_REQUESTED) {
-        db->checkpoint_request_state = RESQLITE_CHECKPOINT_RUNNING;
-        should_run = 1;
-    } else if (
-        db->checkpoint_request_state == RESQLITE_CHECKPOINT_RUNNING ||
-        db->checkpoint_request_state == RESQLITE_CHECKPOINT_RUNNING_RERUN
-    ) {
-        // A CheckpointRun message may have been sent by the writer but
-        // overtaken by the main isolate's close message. This worker now owns
-        // that existing claim and must finish it before the native handle is
-        // released.
-        should_run = 1;
-    }
-    sqlite3_mutex_leave(db->checkpoint_request_mutex);
-    return should_run;
-}
-
-int resqlite_checkpoint_run_passive(
-    resqlite_db* db,
-    int* out_log_frames,
-    int* out_checkpointed_frames
-) {
-    if (out_log_frames) *out_log_frames = -1;
-    if (out_checkpointed_frames) *out_checkpointed_frames = -1;
-    if (!db || !db->checkpoint ||
-        atomic_load_explicit(&db->closed, memory_order_acquire)) {
-        return SQLITE_MISUSE;
-    }
-
-    // No connection mutex is needed: the Dart checkpoint worker exclusively
-    // owns this NOMUTEX sqlite3 connection, and close joins that worker first.
-    int rc = sqlite3_wal_checkpoint_v2(
-        db->checkpoint,
-        "main",
-        SQLITE_CHECKPOINT_PASSIVE,
-        out_log_frames,
-        out_checkpointed_frames
-    );
-
-    // Complete the claimed request even on BUSY/error. SQLITE_OK may still
-    // represent partial PASSIVE progress when readers pin WAL frames. If a
-    // fresh 500-page high-water was crossed during the call, leave one
-    // coalesced request for the worker's take/run loop; otherwise return idle.
-    sqlite3_mutex_enter(db->checkpoint_request_mutex);
-    if (db->checkpoint_request_state == RESQLITE_CHECKPOINT_RUNNING_RERUN) {
-        db->checkpoint_request_state = RESQLITE_CHECKPOINT_REQUESTED;
-    } else if (db->checkpoint_request_state == RESQLITE_CHECKPOINT_RUNNING) {
-        db->checkpoint_request_state = RESQLITE_CHECKPOINT_IDLE;
-    }
-    sqlite3_mutex_leave(db->checkpoint_request_mutex);
-
-    return rc;
 }
 
 const char* resqlite_errmsg(resqlite_db* db) {
