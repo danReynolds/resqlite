@@ -27,7 +27,9 @@
         "streaming",
         "dispatch",
         "reader-pool",
-        "invalidation"
+        "invalidation",
+        "wal",
+        "checkpoint"
       ],
       "currentRead": "Stream fan-out performance is shaped by rerun scheduling, reader-pool admission, completion-side churn, writer/request residual, and dependency precision. Queue changes have produced both strong wins and sharp regressions. Exp 120 closed the upstream over-dispatch in StreamEngine._flushQueue (parked_total drops 3,590 -> 0 on A11c overlap and 1,198 -> 0 on keyed-PK; max_parked 46 -> 0), and exp 122 removed the remaining stream-admission async boundary by constructing StreamEngine with a concrete ReaderPool. Exp 121 ruled out invalidation traversal as the active implementation target: overlap invalidation is 10-15% of wall, column intersection is 2.5-5.7%, and the structural ceiling is at the per-benchmark decision-threshold edge. Exp 134 proved row-level dirty precision can halve keyed-PK writer-burst wall for a narrow `WHERE id = ?` proof, but its internal SQL recognizer is rejected; revive that area only through explicit API/design or real workload evidence. Exp 136 ships the completion-side reader-handler counter: on A11c overlap the reader worker port handler is 28.57% of total wall (burst + drain) at ~18 us per call across 4,228 calls/burst, and subscriber-fanout emit is only 0.35% of the chain. Exp 147 split writer-side burst wall from SQLite-facing writer calls: on A11c overlap, SQLite is 15.7 ms / 166.8 ms (9.4%), invalidation is 18.8%, and residual writer/request wall is 71.8%; keyed-PK shows the same shape (18.1% SQLite, 18.7% invalidation, 63.3% residual). Exp 148 tested the natural reader-reply batching follow-up and rejected it: the profile smoke cut A11c overlap completion callbacks 4,527 -> 1,425 and completion wall 109.6 ms -> 55.6 ms, but Tracelite measured elapsed stayed neutral/slower (+5.18% high-cardinality, +3.28% many-streams, +13.5% keyed-PK). Exp 151 tested synchronous writer response resolution against the residual writer/request bucket and rejected it: high-cardinality fanout stayed neutral (+2.92%), keyed-PK trended slower with too-noisy evidence (+18.5%), and many-streams writer throughput trended slower (+14.0%). Exp 170 tested the matching request-side variant — `Mutex.tryLock` plus a non-`async` `Writer.execute` / `executeBatch` to drop the uncontended `await _mutex.lock()` microtask hop — and rejected it: the primary Single Inserts (100 sequential) / sequential-awaited (2000 writes) lanes stayed within ±2 % (wrong direction) across paired runs, while the only positive signal (-7.8 % on Concurrent Single Inserts) is a row exp 159 already drives at -58 % to -61 %. SQLite-step tuning, stream admission, invalidation traversal, plain worker-side reader-reply batching, synchronous writer response resolution, synchronous writer request acquisition, SQL-recognizer-based keyed-PK precision, allocation-only `_flushQueue` cleanup, and standalone residual-split profiling are not active targets on currently-measured workloads. Exp 159 attacked the residual structurally: persistent writer reply port + cached SendPort + sync FIFO completion remove fixed per-round-trip scheduling cost, and releasing the write lock at send time pipelines concurrent standalone writes through the worker port FIFO; the focused concurrent-burst benchmark improved 36-45%, exp 147 residual_us dropped on all four audit workloads, and stream-dispatch Tracelite guardrails were neutral on the clean order-flipped pass. Exp 161 closes the release-suite gap by promoting the concurrent-burst shape into `benchmark/suites/writes.dart` as a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair, so exp 159's pipelining win and future writer-scheduling experiments are evaluable on a public release lane (resqlite concurrent median ~1.1 ms vs ~2.9 ms sequential). Exp 171 then tried to apply exp 159's `_sendPort` cache pattern one layer up — a sync-readable `_resolvedRuntime` field on `Database` so post-open hot paths skip the `await _runtime` microtask hop — and rejected it: two order-flipped passes on writer_pipelining.dart produced alternating-sign deltas inside per-round variance (sequential-awaited -2.3%/+2.5%, transaction-guardrail -7.5%/+6.1%), so a ~1-2 us per-call hop sits at or below the harness floor. Database-layer microtask hop trimming is now off the candidate list. Exp 214 tested an even narrower writer-result decode cleanup after adding a microsecond public-write harness: direct pointer reads removed the typed-list/ByteData view around the 16-byte native result struct, but `write_result_direct_read.dart` did not reproduce a stable win across order-flipped passes (pair 1 mixed/small, pair 2 broadly candidate-slower, pair 3 mixed/neutral), so scalar `executeWrite()` result decoding is not an active target. Exp 197 then tested the moonshot version of the named group-commit ceiling by wrapping a coalesced standalone write burst in one SQLite transaction: writer_pipelining.dart's concurrent-burst lane improved -88.1% / -87.3% across order-flipped passes while sequential writes and explicit transactions stayed neutral, but the prototype is rejected as a hidden db.execute() default because it changes independent-autocommit read visibility, crash-window durability, and failure/atomicity semantics. Reopen true group commit only behind an explicit opt-in API or named mode, not another transport micro-path cleanup. Exp 228 found a correctness leak in exp 077's row-count hash shortcut: growth returned a partial digest that was cached as canonical, so the next unchanged rerun decoded and re-emitted once. Removing the shortcut took redundant grow-then-no-op decodes from 9/9 to 0/9 in each of three passes; combined grow + no-op p50 improved 19-36%, while pure-growth timing remained noisy around parity. Exp 239 revisited exp 209's request amortization without public API: bounded batching of only already-parked plain selects improves homogeneous twenty-way point reads 26-33% and roughly-ten-row reads 21-30%, while pool sharding keeps twenty 10k-row reads neutral-to-faster. It is rejected because queue depth cannot encode query cost: alternating large/point bursts regress point-completion p95 11-17% and total median 13-26%. Queue-depth-only hidden batching is closed; reopen only with a reliable private cost signal or independently completable batch members. Exp 249 (moonshot) then tested invalidation-grouped rerun batching — one write dirties every stream projecting the changed column, so it packed the dirtied set into one batched reader message per worker (SelectIfChangedBatchRequest + worker loop + batched _flushQueue/_requeryBatch, plus a lastRowCount cost-gate dispatching large partitions individually), all internal. Rejected: clean cross-worktree A/B measured single-write emission latency SLOWER on every lane (homogeneous +22% p50 / +59% p95, heterogeneous +66% p50 / +52% p95) because a batched reply is indivisible — the one changed stream waits behind its ~24 cheap unchanged batch-mates re-hashes. Message-count amortization is the wrong lever for this latency-bound workload (third rejection of the shared-indivisible-reply trade after exp 148 and exp 239). An in-process A/B toggle had reported a false -27% reproduced win; only cross-worktree exposed the true sign.",
       "keyPriors": [
@@ -35,8 +37,8 @@
         "134",
         "136",
         "147",
-        "148",
-        "239"
+        "239",
+        "250"
       ],
       "archive": [
         "045",
@@ -54,24 +56,28 @@
         "121",
         "122",
         "145",
+        "148",
         "151",
         "164",
         "170",
         "171",
         "182",
-        "214"
+        "214",
+        "233"
       ],
       "interestingIf": [
         "a change reduces duplicate reruns before reader-pool admission",
         "a workload shows row-level precision is worth explicit API or metadata design outside a SQL text recognizer",
         "a trace shows completion-side churn dominating a many-stream workload",
-        "a scheduler policy improves fan-out without harming unrelated reads"
+        "a scheduler policy improves fan-out without harming unrelated reads",
+        "a downstream trace shows synchronous WAL checkpoint wall is frequent and materially user-visible"
       ],
       "openQuestions": [
         "Can duplicate stream work be coalesced earlier without reintroducing stale delivery or starvation?",
         "Should explicit row-observer APIs cover aliases, joins, composite keys, or WITHOUT ROWID tables that exp 134 could not cover cleanly as an internal recognizer?",
         "Which bounded stream scheduling or workload-shape implementation can be tried next with in-branch measurement, rather than another standalone residual split?",
-        "Can request amortization preserve independent completion latency without guessing query cost from queue depth?"
+        "Can request amortization preserve independent completion latency without guessing query cost from queue depth?",
+        "Can a materially simpler SQLite-native checkpoint policy move maintenance off the writer while carrying a real WAL generation and bounded partial-progress semantics?"
       ],
       "openCandidates": [
         {
