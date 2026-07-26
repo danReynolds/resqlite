@@ -10,7 +10,6 @@ import 'dependency_tracking.dart'
         UnknownTableDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
-import 'reader/read_worker.dart' show BatchRerunItem;
 import 'reader/reader_pool.dart';
 import 'tracelite_profile.dart';
 import 'extensions/set.dart';
@@ -225,160 +224,16 @@ final class StreamEngine {
     }
   }
 
-  /// [EXP-249] Maximum stream reruns packed into one batched reader message.
-  /// Bounds the reply size and preserves some re-dirty responsiveness under a
-  /// very large fan-out (an entry re-dirtied mid-wave is picked up on the next
-  /// flush rather than waiting behind an unbounded batch).
-  static const int _maxRerunBatchSize = 64;
-
-  /// [EXP-249] Row-count ceiling for a rerun to be eligible for batching. A
-  /// batched reply is indivisible — every member is delivered only when the
-  /// whole batch finishes — so a member expensive to re-hash (a large result
-  /// set) would delay delivery of the small members sharing its message,
-  /// regressing their emission latency (the hazard exp 239 hit with
-  /// queue-depth batching). `lastRowCount` is a cheap per-entry cost proxy the
-  /// stream engine already tracks: streams above this ceiling, or without a
-  /// baseline yet (`lastRowCount < 0`), are dispatched individually so they
-  /// never block a cheap batch-mate.
-  static const int _batchRowCountCap = 256;
-
   void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
     }
 
-    var free = _pool.availableWorkerCount;
-    if (free <= 0) {
-      return;
-    }
+    final dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();
 
-    final queued = _requeryQueue.length;
-
-    // [EXP-249] Below the pool size there is one worker per dirty stream, so
-    // dispatch each rerun on its own — this keeps first-result latency lowest
-    // and leaves the common 1–few-stream case byte-identical to the pre-249
-    // path. Batch only when a single write dirtied more streams than there are
-    // workers (the reactive fan-out case), where reruns would otherwise queue
-    // behind busy workers in waves and pay one isolate message each.
-    if (queued <= free) {
-      final dequeued = _requeryQueue.take(free).toList();
-      for (final entry in dequeued) {
-        _requeryQueue.remove(entry);
-        _requery(entry);
-      }
-      return;
-    }
-
-    // Take up to one full batch per available worker this wave; any overflow
-    // stays queued and is picked up when a worker frees and re-flushes.
-    final take = queued < free * _maxRerunBatchSize
-        ? queued
-        : free * _maxRerunBatchSize;
-    final taken = _requeryQueue.take(take).toList();
-
-    // Cost-gate: large-result reruns are dispatched individually (their own
-    // reply), cheap ones are batched. This keeps the message-amortization win
-    // for the many small reruns while never making a small stream wait behind
-    // a large one's re-hash in a shared reply.
-    final cheap = <StreamEntry>[];
-    for (final entry in taken) {
-      if (entry.lastRowCount >= 0 && entry.lastRowCount <= _batchRowCountCap) {
-        cheap.add(entry);
-      } else if (free > 0) {
-        _requeryQueue.remove(entry);
-        _requery(entry);
-        free--;
-      }
-      // Expensive entries beyond the free worker budget stay queued.
-    }
-
-    if (free <= 0 || cheap.isEmpty) {
-      return;
-    }
-
-    // Split the cheap entries into one batched message per remaining worker
-    // (bounded by _maxRerunBatchSize per message); parallelism across the pool
-    // is preserved — only the per-rerun message count drops.
-    final groups = free < cheap.length ? free : cheap.length;
-    final maxBatch = groups * _maxRerunBatchSize;
-    final batchCount = cheap.length < maxBatch ? cheap.length : maxBatch;
-    final toBatch = cheap.sublist(0, batchCount);
-    for (final entry in toBatch) {
+    for (final entry in dequeued) {
+      _requery(entry);
       _requeryQueue.remove(entry);
-    }
-
-    final groupSize = (batchCount + groups - 1) ~/ groups; // ceil
-    for (var start = 0; start < batchCount; start += groupSize) {
-      final end = start + groupSize < batchCount ? start + groupSize : batchCount;
-      _requeryBatch(toBatch.sublist(start, end));
-    }
-  }
-
-  /// [EXP-249] Re-query a group of dirtied streams in one batched reader
-  /// round-trip. Mirrors [_requery]'s per-entry bookkeeping (in-flight guard,
-  /// mid-flight re-dirty re-queue, hash/row-count baseline update, emit) but
-  /// amortizes the isolate message across the whole group.
-  Future<void> _requeryBatch(List<StreamEntry> entries) async {
-    int? batchTraceCorrelationId;
-    final items = <BatchRerunItem>[];
-    for (final entry in entries) {
-      entry.inFlight = true;
-      entry.dirty = false;
-      batchTraceCorrelationId ??= entry.pendingTraceCorrelationId;
-      entry.pendingTraceCorrelationId = null;
-      items.add((
-        sql: entry.sql,
-        params: entry.params,
-        lastResultHash: entry.lastResultHash,
-        lastRowCount: entry.lastRowCount,
-      ));
-    }
-
-    try {
-      final results = await _pool.selectBatchIfChanged(
-        items,
-        batchTraceCorrelationId,
-      );
-
-      for (var i = 0; i < entries.length; i++) {
-        final entry = entries[i];
-        final result = results[i];
-
-        // Re-dirtied while the batch was in flight: discard this member's
-        // result and re-schedule, exactly as the scalar path does.
-        if (entry.dirty) {
-          entry.pendingTraceCorrelationId ??= batchTraceCorrelationId;
-          _requeryQueue.add(entry);
-          continue;
-        }
-
-        if (result.error case final Object error) {
-          entry.emitError(error, null);
-          continue;
-        }
-
-        // Null rows means the query result was unchanged — nothing to emit.
-        final rows = result.rows;
-        if (rows == null) {
-          continue;
-        }
-
-        entry.lastResultHash = result.hash;
-        entry.lastRowCount = result.rowCount;
-        entry.lastResult = rows;
-        entry.emit(rows);
-      }
-    } catch (e, st) {
-      // Whole-batch dispatch failure (e.g. pool closed / worker crash): surface
-      // to every member's subscribers so none is left silently stale.
-      for (final entry in entries) {
-        entry.emitError(e, st);
-      }
-    } finally {
-      for (final entry in entries) {
-        entry.inFlight = false;
-      }
-      _flushQueue();
     }
   }
 

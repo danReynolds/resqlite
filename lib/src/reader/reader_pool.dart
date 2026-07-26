@@ -142,22 +142,6 @@ final class ReaderPool {
     return result as (List<Map<String, Object?>>?, int, int);
   }
 
-  /// [EXP-249] Dispatch a group of stream reruns as one message to a single
-  /// worker, which runs them serially and replies with per-member results.
-  /// Amortizes the per-rerun isolate-message overhead across the group without
-  /// changing parallelism (a worker's connection steps one query at a time
-  /// regardless). Used by [StreamEngine] under fan-out, when a single write
-  /// dirties more streams than there are workers.
-  Future<List<BatchRerunResult>> selectBatchIfChanged(
-    List<BatchRerunItem> items, [
-    int? traceCorrelationId,
-  ]) async {
-    final result = await _dispatch(
-      SelectIfChangedBatchRequest(items, traceCorrelationId: traceCorrelationId),
-    );
-    return result as List<BatchRerunResult>;
-  }
-
   Future<Object?> _dispatch(ReadRequest request) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
