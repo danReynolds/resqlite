@@ -50,6 +50,16 @@ text-heavy results keep sacrificing unchanged.
   cannot reach — a const define reaches every isolate identically.
 - [`read_worker.dart`](../lib/src/reader/read_worker.dart): sacrifice fires
   on `estimatedBytes - transferableBytes > sacrificeByteThreshold`.
+- [`row.dart`](../lib/src/row.dart): internal (unexported)
+  `materializeTransferableBlobCells` rewrites TTD cells to `Uint8List` views
+  in place at every main-isolate receive boundary —
+  [`reader_pool.dart`](../lib/src/reader/reader_pool.dart) `select` /
+  `selectWithDeps` / `selectIfChanged` (streams ride these) and
+  [`writer.dart`](../lib/src/writer/writer.dart) `selectLocked` (tx.select) —
+  so the public surface only ever exposes `Uint8List`. The sacrifice path's
+  `Isolate.exit` message may also carry TTDs; the same boundary materializes
+  them.
+- `selectBytes` untouched (already optimal); no public API change.
 
 > **Superseded on landing (exp 246).** The `transferableBytes` subtraction above
 > was this experiment's way of stopping TTD-wrapped cells from forcing a
@@ -62,16 +72,17 @@ text-heavy results keep sacrificing unchanged.
 > `TransferableTypedData` and still materialize at the receive boundary; only the
 > sacrifice arithmetic it added is gone. The results below were measured against
 > the byte-threshold routing described here.
-- [`row.dart`](../lib/src/row.dart): internal (unexported)
-  `materializeTransferableBlobCells` rewrites TTD cells to `Uint8List` views
-  in place at every main-isolate receive boundary —
-  [`reader_pool.dart`](../lib/src/reader/reader_pool.dart) `select` /
-  `selectWithDeps` / `selectIfChanged` (streams ride these) and
-  [`writer.dart`](../lib/src/writer/writer.dart) `selectLocked` (tx.select) —
-  so the public surface only ever exposes `Uint8List`. The sacrifice path's
-  `Isolate.exit` message may also carry TTDs; the same boundary materializes
-  them.
-- `selectBytes` untouched (already optimal); no public API change.
+
+> **Refined on landing: the receive boundary is flag-gated.** As first written,
+> that boundary scanned the whole flat values list on the **main** isolate for
+> every result, wrapped cells or not — measured at ~0.86 ns/slot, so ~171 µs at
+> 200k slots and ~1 ms at 1M, all of it wasted on the blob-free majority.
+> `RawQueryResult`/`ResultSet` now carry a `hasWrappedCells` flag set during
+> decode, and the scan early-returns unless it is set. The materialization
+> itself needed no change: `materialize()` is flat in payload size (0.63 µs at
+> 256 KB, 0.97 µs at 16 MB) and main's total unwrap cost scales with the *number*
+> of wrapped cells (~0.5 µs each), which the 256 KB size gate already bounds —
+> 200 cells is a 50 MB result and costs 93 µs.
 
 ## Results
 
