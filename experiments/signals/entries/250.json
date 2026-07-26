@@ -1,0 +1,20 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_preserved_potential",
+  "changedBeliefs": [
+    "Exp 233's asynchronous checkpoint storm was a trigger-policy failure, not an unavoidable property of moving PASSIVE work off the writer. Observed-reset/high-water re-arming schedules the first 500-frame crossing, advances only on a fresh 500-frame delta, preserves one coalesced rerun for growth during an active checkpoint, and re-arms after an observed WAL page-count drop. That removes the continuously-true level trigger that previously requested work on every sustained commit.",
+    "The off-writer mechanism retains substantial local value once the storm is fixed. First threshold-crossing p50 improves 53.0% / 63.9% across the order flip, and foreground reads improve as well, confirming that inline PASSIVE ownership is a real latency ceiling when the crossing occurs.",
+    "Reset/high-water gating is not sufficient for sustained health because SQLITE_CHECKPOINT_PASSIVE is best-effort. A checkpoint may return SQLITE_OK with only partial progress; consuming that attempt without bounded retry can leave a burst with no future commit to create another high-water request. Two candidate repeats strand 9,165 / 10,316 pending frames, while sustained awaited 8 KiB writes regress +152.5% / +138.1% at p50, +148.8% / +163.0% at p95, and +203.9% / +161.7% at p99.",
+    "The below-threshold control keeps p50 neutral, so the sustained regression is not explained by merely owning a second connection/isolate or checking an idle request flag. The damage appears when checkpoint and WAL work overlap. That makes bounded partial-progress policy part of the mechanism, not an optional cleanup.",
+    "Page-count drop is only a proxy for WAL generation. If the first commit after restart lands equal to or above the prior observed count but below the next high-water, the candidate cannot identify the new generation and can leave an already-above-threshold WAL unscheduled. Strict reset semantics require an actual generation signal.",
+    "The preserved first-crossing and read wins do not repay the current lifecycle surface without incidence evidence: a second keyed writable connection, dedicated isolate and SendPort, three private FFI calls, mutex-protected request/high-water state, worker-failure propagation, error and partial-progress handling, and cross-sender close draining are all required for a behavior whose representative user frequency remains unknown. The archived isolate has no onExit/onError channel, so startup/runtime death can hang open or close and strand native state."
+  ],
+  "nextSignals": [
+    "Do not restore `archive/exp-250` with page-count-driven high-water re-arming alone. Any revisit must carry a real WAL-generation signal, add bounded backoff/retry when PASSIVE reports partial progress, propagate worker failure, coalesce retries so they cannot recreate exp 233's storm, and prove that the WAL settles after the burst ends.",
+    "Require a representative downstream trace showing that synchronous threshold crossings are frequent and materially user-visible before paying the worker lifecycle cost. Re-run the first-crossing, sustained write p50/p95/p99, foreground-read, below-threshold control, and post-burst pending-frame gates together.",
+    "Prefer a materially simpler SQLite-native checkpoint policy if one can preserve the first-crossing benefit without a second Dart isolate and cross-sender close protocol. The measured mechanism and harness remain available at `archive/exp-250` for comparison, not restoration."
+  ]
+}

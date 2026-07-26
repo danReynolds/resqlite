@@ -582,6 +582,27 @@ change with a single-process toggle, however rigorous the order-flip and
 drift-check look; use two worktrees (or the tracelite two-root wrapper). Treat a
 single-process toggle delta as a hypothesis, not a result.*
 
+## Bounded admission is not bounded completion
+
+Exp 250 fixed exp 233's continuously true asynchronous checkpoint trigger by
+rearming only after an observed WAL reset or another 500-page high-water
+advance. That removed the read-side checkpoint storm and preserved the
+first-crossing win, but it did not make the maintenance operation complete:
+SQLite PASSIVE can return `SQLITE_OK` with `checkpointed < log` when a reader
+pins frames. Consuming the request on that return stranded 9,165 and 10,316
+frames in two repeats; immediately retrying would instead spin against a
+long-lived reader. The request trigger and the unfinished-work retry policy are
+separate state machines. Page count is also only a reset proxy: an equal-or-
+larger first commit in a new WAL generation is indistinguishable without a real
+generation signal.
+
+*Reapplies whenever background maintenance can make partial progress under
+contention — checkpointing, compaction, cache eviction, cleanup, or replication.
+Do not equate a successful call with completed work. Declare how partial
+progress is detected, backed off, retried, cancelled, and drained at shutdown;
+if generation matters, carry a generation rather than inferring one from a
+monotonic-looking counter.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
