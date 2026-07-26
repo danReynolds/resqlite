@@ -560,6 +560,28 @@ is far cheaper than the extra confirmation passes it replaces. It is also the
 one control that stays valid when a rejected experiment's numbers look good:
 exp 248's primary lanes looked like a win until the inert lanes moved more.*
 
+## An in-process A/B toggle can manufacture a reproduced-looking win that a cross-worktree comparison reverses
+
+Exp 249 compared two rerun-dispatch paths by flipping a `batchRerunsEnabled`
+static inside one long-lived process, order-flipped, and `ab_drift_check.dart`
+classified the homogeneous-fan-out emission latency as REPRODUCED at −25.8% /
+−27.9%. It looked like a clean win. Then the same code, measured as two separate
+binaries (baseline `origin/main` worktree vs candidate worktree, alternated over
+three rounds), came out **+22% to +66% slower** on every lane. The sign flipped.
+
+The toggle's two arms were not independent: they shared warm JIT and inline
+caches, a reader pool warmed by the other arm's traffic, and a drain probe that
+kept the main isolate spinning. Order-flipping cancels cross-*phase* ordering
+bias but not shared-warm-state bias, so the drift classifier — which only sees
+per-run values — certified an artifact. Only two cold, separate processes
+isolate the change from the state it rides on.
+
+*Reapplies to any dispatch, scheduling, isolate-message, or pool change, where
+the effect is a few microseconds against warm-state noise. Do not A/B such a
+change with a single-process toggle, however rigorous the order-flip and
+drift-check look; use two worktrees (or the tracelite two-root wrapper). Treat a
+single-process toggle delta as a hypothesis, not a result.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

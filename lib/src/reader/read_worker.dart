@@ -70,6 +70,43 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
+/// One member of a [SelectIfChangedBatchRequest]: a single stream's rerun
+/// with its cached hash/row-count baseline, mirroring the scalar
+/// [SelectIfChangedRequest] fields.
+typedef BatchRerunItem = ({
+  String sql,
+  List<Object?> params,
+  int lastResultHash,
+  int lastRowCount,
+});
+
+/// One member of a batched rerun reply. `rows` is null when the query result
+/// was unchanged (hash + row-count matched the baseline). `error` is non-null
+/// when this member's query failed — errors are isolated per member so one
+/// dropped/renamed table cannot fail the healthy members sharing the batch.
+typedef BatchRerunResult = ({
+  List<Map<String, Object?>>? rows,
+  int hash,
+  int rowCount,
+  ResqliteException? error,
+});
+
+/// [EXP-249] Batched stream re-query. Carries N independent
+/// [SelectIfChangedRequest]-equivalent members in one isolate message so a
+/// single write that dirties many streams (the reactive fan-out case) pays one
+/// round-trip's message overhead instead of N. Each reader worker owns one
+/// SQLite connection and can only step one query at a time, so the members run
+/// serially on the worker either way — batching removes only the per-message
+/// isolate-scheduling cost, not any parallelism. Unchanged members return a
+/// null `rows` (nothing to transfer), so a mostly-unchanged fan-out reply stays
+/// tiny. Batched replies never use the sacrifice (Isolate.exit) path; a rare
+/// large changed member is SendPort-copied instead.
+final class SelectIfChangedBatchRequest extends ReadRequest {
+  SelectIfChangedBatchRequest(this.items, {super.traceCorrelationId})
+    : super('', const []);
+  final List<BatchRerunItem> items;
+}
+
 /// Byte-size threshold for sacrifice. If the estimated transfer size of
 /// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
 /// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
@@ -182,6 +219,53 @@ void readerEntrypoint(List<Object> args) {
           sacrifice =
               raw != null && raw.estimatedBytes > sacrificeByteThreshold;
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
+
+        case SelectIfChangedBatchRequest(:final items):
+          // [EXP-249] Run each member serially on this worker's single
+          // connection (the only option — one stmt steps at a time) and
+          // collect per-member results into one reply. Unchanged members
+          // contribute a null `rows` and cost nothing to transfer. Errors are
+          // isolated per member so a dropped/renamed table only fails its own
+          // stream. Batched replies never sacrifice — a large changed member is
+          // copied like any other SendPort payload.
+          final batchResults = List<BatchRerunResult>.filled(
+            items.length,
+            (rows: null, hash: 0, rowCount: 0, error: null),
+          );
+          for (var bi = 0; bi < items.length; bi++) {
+            final item = items[bi];
+            try {
+              final (newHash, newRowCount, raw) = executeQueryIfChanged(
+                dbHandleAddr,
+                readerId,
+                item.sql,
+                item.params,
+                item.lastResultHash,
+                item.lastRowCount,
+              );
+              batchResults[bi] = (
+                rows: raw == null ? null : _toRows(raw),
+                hash: newHash,
+                rowCount: newRowCount,
+                error: null,
+              );
+            } catch (e) {
+              batchResults[bi] = (
+                rows: null,
+                hash: item.lastResultHash,
+                rowCount: item.lastRowCount,
+                error: e is ResqliteException
+                    ? e
+                    : ResqliteQueryException(
+                        e.toString(),
+                        sql: item.sql,
+                        parameters: item.params,
+                      ),
+              );
+            }
+          }
+          result = batchResults;
+          sacrifice = false;
       }
 
       if (sacrifice) {
