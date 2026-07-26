@@ -258,12 +258,23 @@ pause versus 20 / 1.2 ms over 300 large writes).
 ### What the TTD path costs on receive
 
 TTD does add one thing the heap path lacks: a `materialize()` call per buffer
-on main. It is **~1 µs and constant** (it wraps, it does not copy). After that,
-*interacting* with the data is **equal effort** — an external-backed
-`Uint8List` and a heap-backed one have identical element-access cost. So the
-receive-side trade is: pay ~1 µs to unwrap once, and in exchange the collector
-ignores the bytes for their entire life, instead of "arrives ready, then the
-collector keeps working on it."
+on main. It is **~0.6-1 µs and flat in payload size** — measured 0.63 µs at
+256 KB and 0.97 µs at 16 MB, a 64x size increase for 1.5x the cost, which is
+what confirms it wraps rather than copies. After that, *interacting* with the
+data is **equal effort** — an external-backed `Uint8List` and a heap-backed one
+have identical element-access cost.
+
+Main's total unwrap cost therefore scales with the **number of wrapped cells**,
+not their bytes: ~0.5 µs each, so 93 µs for 200 cells. That count is bounded by
+the size gate — every wrapped cell is ≥ 256 KB, so 200 of them is already a
+50 MB result. Reaching even 1 ms of unwrapping would take ~2,000 cells (~500 MB
+in one result), which exhausts memory long before it costs a frame. This is the
+*cheap* side of the trade: the heap alternative copies those same bytes onto
+main, and that cost **is** size-proportional.
+
+(The receive boundary also has to *find* the wrapped cells. That scan is
+O(slots) and unbounded, so it is skipped entirely via a flag the decoder sets —
+see `materializeTransferableBlobCells`.)
 
 ---
 
