@@ -43,19 +43,32 @@ import 'package:resqlite/resqlite.dart';
 @ffi.Native<
   ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
 >(symbol: 'resqlite_test_i64_array_scalar', isLeaf: true)
-external int i64ArrScalar(ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+external int i64ArrScalar(
+  ffi.Pointer<ffi.Int64> vals,
+  int n,
+  ffi.Pointer<ffi.Uint8> out,
+);
 
 @ffi.Native<
   ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
 >(symbol: 'resqlite_test_i64_array_pipe2', isLeaf: true)
-external int i64ArrPipe2(ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+external int i64ArrPipe2(
+  ffi.Pointer<ffi.Int64> vals,
+  int n,
+  ffi.Pointer<ffi.Uint8> out,
+);
 
 @ffi.Native<
   ffi.Int Function(ffi.Pointer<ffi.Int64>, ffi.Int, ffi.Pointer<ffi.Uint8>)
 >(symbol: 'resqlite_test_i64_array_neon', isLeaf: true)
-external int i64ArrNeon(ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
+external int i64ArrNeon(
+  ffi.Pointer<ffi.Int64> vals,
+  int n,
+  ffi.Pointer<ffi.Uint8> out,
+);
 
-typedef _Enc = int Function(ffi.Pointer<ffi.Int64>, int, ffi.Pointer<ffi.Uint8>);
+typedef _Enc =
+    int Function(ffi.Pointer<ffi.Int64>, int, ffi.Pointer<ffi.Uint8>);
 
 int _median(List<int> xs) {
   xs.sort();
@@ -115,10 +128,14 @@ void _lane({
     final nn = i64ArrNeon(valsPtr, n, out);
     final sNeon = _decode(out, nn);
     if (sPipe != sRef) {
-      throw StateError('pipe2 mismatch in "$label":\n  ref =$sRef\n  pipe=$sPipe');
+      throw StateError(
+        'pipe2 mismatch in "$label":\n  ref =$sRef\n  pipe=$sPipe',
+      );
     }
     if (sNeon != sRef) {
-      throw StateError('neon mismatch in "$label":\n  ref =$sRef\n  neon=$sNeon');
+      throw StateError(
+        'neon mismatch in "$label":\n  ref =$sRef\n  neon=$sNeon',
+      );
     }
 
     final scalar = _timeNsPerPass(i64ArrScalar, valsPtr, n, out, iters, rounds);
@@ -131,10 +148,12 @@ void _lane({
       return '$sign${d.toStringAsFixed(1)}%';
     }
 
-    print('${label.padRight(28)}'
-        ' scalar=${scalar.toString().padLeft(7)}ns'
-        '  pipe2=${pipe2.toString().padLeft(7)}ns (${pct(pipe2).padLeft(7)})'
-        '  neon=${neon.toString().padLeft(7)}ns (${pct(neon).padLeft(7)})');
+    print(
+      '${label.padRight(28)}'
+      ' scalar=${scalar.toString().padLeft(7)}ns'
+      '  pipe2=${pipe2.toString().padLeft(7)}ns (${pct(pipe2).padLeft(7)})'
+      '  neon=${neon.toString().padLeft(7)}ns (${pct(neon).padLeft(7)})',
+    );
   } finally {
     malloc.free(valsPtr);
     malloc.free(out);
@@ -170,10 +189,7 @@ void main() {
   );
 
   // Small 1..4 digit (row ids, counts) — short chain, most common shape.
-  _lane(
-    label: 'small 0..9999',
-    vals: gen(arrLen, () => rng.nextInt(10000)),
-  );
+  _lane(label: 'small 0..9999', vals: gen(arrLen, () => rng.nextInt(10000)));
 
   // Mixed magnitudes — representative real column.
   _lane(

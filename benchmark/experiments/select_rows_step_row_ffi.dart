@@ -54,8 +54,8 @@ const _intHeavy20Insert =
     'c11, c12, c13, c14, c15, c16, c17, c18, c19) VALUES (?, ?, ?, ?, ?, ?, '
     '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 List<Object?> _intHeavy20Row(int i) => [
-      for (var j = 1; j < 20; j++) i * 31 + j,
-    ];
+  for (var j = 1; j < 20; j++) i * 31 + j,
+];
 
 const _intHeavy8Create = '''
   CREATE TABLE items(
@@ -66,9 +66,7 @@ const _intHeavy8Create = '''
 ''';
 const _intHeavy8Insert =
     'INSERT INTO items(c1, c2, c3, c4, c5, c6, c7) VALUES (?, ?, ?, ?, ?, ?, ?)';
-List<Object?> _intHeavy8Row(int i) => [
-      for (var j = 1; j < 8; j++) i * 31 + j,
-    ];
+List<Object?> _intHeavy8Row(int i) => [for (var j = 1; j < 8; j++) i * 31 + j];
 
 const _wideText20Create = '''
   CREATE TABLE items(
@@ -84,8 +82,8 @@ const _wideText20Insert =
     'c11, c12, c13, c14, c15, c16, c17, c18, c19) VALUES (?, ?, ?, ?, ?, ?, '
     '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 List<Object?> _wideText20Row(int i) => [
-      for (var j = 1; j < 20; j++) 's_${i}_$j',
-    ];
+  for (var j = 1; j < 20; j++) 's_${i}_$j',
+];
 
 const _standardCreate = '''
   CREATE TABLE items(
@@ -101,12 +99,12 @@ const _standardInsert =
     'INSERT INTO items(name, description, value, category, created_at) '
     'VALUES (?, ?, ?, ?, ?)';
 List<Object?> _standardRow(int i) => [
-      'Item $i',
-      'desc for $i',
-      i * 1.5,
-      'cat_${i % 10}',
-      '2026-04-01T12:00:00Z',
-    ];
+  'Item $i',
+  'desc for $i',
+  i * 1.5,
+  'cat_${i % 10}',
+  '2026-04-01T12:00:00Z',
+];
 
 const _cases = <_Case>[
   _Case('10k x 8 INTEGER', _intHeavy8Create, _intHeavy8Insert, _intHeavy8Row),
@@ -116,10 +114,18 @@ const _cases = <_Case>[
     _intHeavy20Insert,
     _intHeavy20Row,
   ),
-  _Case('10k x 20 short TEXT', _wideText20Create, _wideText20Insert,
-      _wideText20Row),
-  _Case('10k x 6 mixed (default)', _standardCreate, _standardInsert,
-      _standardRow),
+  _Case(
+    '10k x 20 short TEXT',
+    _wideText20Create,
+    _wideText20Insert,
+    _wideText20Row,
+  ),
+  _Case(
+    '10k x 6 mixed (default)',
+    _standardCreate,
+    _standardInsert,
+    _standardRow,
+  ),
 ];
 
 const _rowCount = 10000;
@@ -156,8 +162,10 @@ Future<void> main() async {
       samples.sort();
       final p50 = _median(List.of(samples));
       final p90 = samples[(samples.length * 0.9).floor()];
-      print('| ${c.label} | ${p50.toStringAsFixed(3)} | '
-          '${p90.toStringAsFixed(3)} |');
+      print(
+        '| ${c.label} | ${p50.toStringAsFixed(3)} | '
+        '${p90.toStringAsFixed(3)} |',
+      );
       await db.close();
     } finally {
       await tempDir.delete(recursive: true);

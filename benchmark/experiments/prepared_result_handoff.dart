@@ -33,7 +33,12 @@ import 'package:resqlite/src/row.dart' show ResultSet, RowSchema;
 ResultSet _build(String shape) {
   switch (shape) {
     case 'empty':
-      return ResultSet(<Object?>[], RowSchema(const ['a']), 0);
+      return ResultSet(
+        <Object?>[],
+        RowSchema(const ['a']),
+        0,
+        hasWrappedCells: false,
+      );
     case 'num10kx20':
       return _numeric(10000, 20);
     case 'mixed10kx8':
@@ -65,7 +70,7 @@ ResultSet _numeric(int rows, int cols) {
       values[k++] = r * 31 + c;
     }
   }
-  return ResultSet(values, RowSchema(names), rows);
+  return ResultSet(values, RowSchema(names), rows, hasWrappedCells: false);
 }
 
 ResultSet _mixed(int rows) {
@@ -83,7 +88,7 @@ ResultSet _mixed(int rows) {
     values[k++] = 'status_${r % 5}';
     values[k++] = 'tag_$r';
   }
-  return ResultSet(values, RowSchema(names), rows);
+  return ResultSet(values, RowSchema(names), rows, hasWrappedCells: false);
 }
 
 ResultSet _bigString(int bytes) {
@@ -91,7 +96,12 @@ ResultSet _bigString(int bytes) {
   for (var i = 0; i < bytes; i++) {
     sb.writeCharCode(65 + (i % 26));
   }
-  return ResultSet(<Object?>[sb.toString()], RowSchema(const ['s']), 1);
+  return ResultSet(
+    <Object?>[sb.toString()],
+    RowSchema(const ['s']),
+    1,
+    hasWrappedCells: false,
+  );
 }
 
 // ---- child: exactly one timed observation, then exit ----
@@ -132,10 +142,12 @@ Future<int> _observe(String shape, String mode) async {
     if (!done.isCompleted) done.complete(t1 - t0);
   };
 
-  final iso = await Isolate.spawn(
-    _worker,
-    [shape, mode, readyPort.sendPort, resultPort.sendPort],
-  );
+  final iso = await Isolate.spawn(_worker, [
+    shape,
+    mode,
+    readyPort.sendPort,
+    resultPort.sendPort,
+  ]);
   final wall = await done.future;
   readyPort.close();
   resultPort.close();
@@ -166,8 +178,12 @@ double _median(List<double> xs) {
 Future<void> _orchestrate() async {
   final exe = Platform.resolvedExecutable;
   final script = Platform.script.toFilePath();
-  stdout.writeln('Experiment A — prepared-result handoff (Go-sent -> received, µs)');
-  stdout.writeln('shape | send med | exit med | exit-send | send-empty | exit-empty');
+  stdout.writeln(
+    'Experiment A — prepared-result handoff (Go-sent -> received, µs)',
+  );
+  stdout.writeln(
+    'shape | send med | exit med | exit-send | send-empty | exit-empty',
+  );
   stdout.writeln('---|---:|---:|---:|---:|---:');
 
   final sendMed = <String, double>{};
@@ -209,10 +225,12 @@ Future<void> _orchestrate() async {
   for (final shape in _shapes) {
     final s = sendMed[shape]!;
     final e = exitMed[shape]!;
-    stdout.writeln('$shape | ${s.toStringAsFixed(1)} | ${e.toStringAsFixed(1)} '
-        '| ${(e - s).toStringAsFixed(1)} '
-        '| ${(s - emptySend).toStringAsFixed(1)} '
-        '| ${(e - emptyExit).toStringAsFixed(1)}');
+    stdout.writeln(
+      '$shape | ${s.toStringAsFixed(1)} | ${e.toStringAsFixed(1)} '
+      '| ${(e - s).toStringAsFixed(1)} '
+      '| ${(s - emptySend).toStringAsFixed(1)} '
+      '| ${(e - emptyExit).toStringAsFixed(1)}',
+    );
   }
 }
 

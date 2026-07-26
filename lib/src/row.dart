@@ -79,9 +79,9 @@ final class ResultSet with ListMixin<Row> {
   ResultSet(
     this._values,
     this._schema,
-    this._rowCount, [
-    this.hasWrappedCells = false,
-  ]);
+    this._rowCount, {
+    required this.hasWrappedCells,
+  });
 
   final List<Object?> _values;
   final RowSchema _schema;

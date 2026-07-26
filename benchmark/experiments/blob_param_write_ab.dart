@@ -51,7 +51,9 @@ Future<void> main() async {
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp234-');
   final dbPath = '${tmp.path}/exp234.db';
   final db = await Database.open(dbPath);
-  await db.execute('CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)');
+  await db.execute(
+    'CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)',
+  );
 
   stdout.writeln(
     'blob param write A/B — $_writesPerSample INSERTs/sample, '

@@ -40,9 +40,11 @@ Future<void> main(List<String> args) async {
     if (i % 60 == 59) await db.execute('DELETE FROM b');
   }
   sw.stop();
-  stdout.writeln('lane=${candidate ? 'cand' : 'base'} '
-      'inserts=$_inserts wall_ms=${(sw.elapsedMicroseconds / 1000).toStringAsFixed(1)} '
-      'us_per_insert=${(sw.elapsedMicroseconds / _inserts).toStringAsFixed(1)}');
+  stdout.writeln(
+    'lane=${candidate ? 'cand' : 'base'} '
+    'inserts=$_inserts wall_ms=${(sw.elapsedMicroseconds / 1000).toStringAsFixed(1)} '
+    'us_per_insert=${(sw.elapsedMicroseconds / _inserts).toStringAsFixed(1)}',
+  );
 
   await db.close();
   await tmp.delete(recursive: true);

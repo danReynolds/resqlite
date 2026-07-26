@@ -112,10 +112,7 @@ Future<void> _setupShape(Database db, _Shape shape) async {
   }
 
   final placeholders = List.filled(shape.cols, '?').join(', ');
-  await db.executeBatch(
-    'INSERT INTO t VALUES ($placeholders)',
-    valueLists,
-  );
+  await db.executeBatch('INSERT INTO t VALUES ($placeholders)', valueLists);
 }
 
 String _selectSql(_Shape shape) {

@@ -96,14 +96,26 @@ Future<void> main() async {
       final overheadPerRow = overheadMs / rowCount * 1000; // microseconds
 
       print('--- $rowCount rows ---');
-      print('  select() (maps + isolate):          ${medSelect.toStringAsFixed(2)} ms');
-      print('  selectBytes() (bytes + isolate):    ${medBytes.toStringAsFixed(2)} ms');
-      print('  direct queryBytes() (leaf FFI):     ${medCBulk.toStringAsFixed(2)} ms');
+      print(
+        '  select() (maps + isolate):          ${medSelect.toStringAsFixed(2)} ms',
+      );
+      print(
+        '  selectBytes() (bytes + isolate):    ${medBytes.toStringAsFixed(2)} ms',
+      );
+      print(
+        '  direct queryBytes() (leaf FFI):     ${medCBulk.toStringAsFixed(2)} ms',
+      );
       print('');
-      print('  select() overhead vs direct bytes:  ${overheadMs.toStringAsFixed(2)} ms');
-      print('  Per-row overhead:                   ${overheadPerRow.toStringAsFixed(1)} us');
+      print(
+        '  select() overhead vs direct bytes:  ${overheadMs.toStringAsFixed(2)} ms',
+      );
+      print(
+        '  Per-row overhead:                   ${overheadPerRow.toStringAsFixed(1)} us',
+      );
       print('  Estimated row/cell work in select(): ~$ffiCalls');
-      print('  Direct native query floor:          ${medCBulk.toStringAsFixed(2)} ms');
+      print(
+        '  Direct native query floor:          ${medCBulk.toStringAsFixed(2)} ms',
+      );
       print('');
     } finally {
       await tempDir.delete(recursive: true);

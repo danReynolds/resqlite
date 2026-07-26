@@ -28,12 +28,7 @@ import 'dart:math' as math;
 
 import 'package:resqlite/resqlite.dart';
 
-Future<int> _medianUs(
-  Database db,
-  String sql,
-  int iters,
-  int rounds,
-) async {
+Future<int> _medianUs(Database db, String sql, int iters, int rounds) async {
   final samples = <int>[];
   for (var r = 0; r < rounds; r++) {
     final sw = Stopwatch()..start();
@@ -64,7 +59,12 @@ Future<void> _lane({
     final intDefs = [for (var i = 0; i < intCols; i++) 'i$i INTEGER'];
     final textDefs = [for (var i = 0; i < textCols; i++) 't$i TEXT'];
     final realDefs = [for (var i = 0; i < realCols; i++) 'r$i REAL'];
-    final defs = ['id INTEGER PRIMARY KEY', ...intDefs, ...textDefs, ...realDefs];
+    final defs = [
+      'id INTEGER PRIMARY KEY',
+      ...intDefs,
+      ...textDefs,
+      ...realDefs,
+    ];
     await db.execute('CREATE TABLE t(${defs.join(', ')})');
 
     final intNames = [for (var i = 0; i < intCols; i++) 'i$i'];
@@ -72,8 +72,7 @@ Future<void> _lane({
     final realNames = [for (var i = 0; i < realCols; i++) 'r$i'];
     final cols = ['id', ...intNames, ...textNames, ...realNames];
     final placeholders = List.filled(cols.length, '?').join(', ');
-    final sql =
-        'INSERT INTO t(${cols.join(', ')}) VALUES ($placeholders)';
+    final sql = 'INSERT INTO t(${cols.join(', ')}) VALUES ($placeholders)';
 
     final rng = math.Random(7);
     final batch = <List<Object?>>[];
@@ -173,10 +172,5 @@ Future<void> main() async {
     realCols: 2,
     iters: 20,
   );
-  await _lane(
-    label: '1k rows x 2 ints',
-    rows: 1000,
-    intCols: 2,
-    iters: 200,
-  );
+  await _lane(label: '1k rows x 2 ints', rows: 1000, intCols: 2, iters: 200);
 }

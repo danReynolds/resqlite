@@ -392,7 +392,12 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     final raw = decodeQuery(stmt, msg.sql);
     msg.replyPort.send(
       QueryResponse(
-        ResultSet(raw.values, raw.schema, raw.rowCount, raw.hasWrappedCells),
+        ResultSet(
+          raw.values,
+          raw.schema,
+          raw.rowCount,
+          hasWrappedCells: raw.hasWrappedCells,
+        ),
         writerSqliteUs: _stopSqliteTimer(sqliteSw),
       ),
     );

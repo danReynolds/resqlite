@@ -30,10 +30,7 @@ final class _Config {
 }
 
 final class _Sample {
-  const _Sample({
-    required this.transferUs,
-    required this.consumeUs,
-  });
+  const _Sample({required this.transferUs, required this.consumeUs});
 
   final int transferUs;
   final int consumeUs;
@@ -47,32 +44,31 @@ final class _TimingSummary {
   final String label;
   final List<_Sample> samples;
 
-  Stats get transfer => Stats([
-        for (final sample in samples) sample.transferUs,
-      ]);
-  Stats get consume => Stats([
-        for (final sample in samples) sample.consumeUs,
-      ]);
-  Stats get total => Stats([
-        for (final sample in samples) sample.totalUs,
-      ]);
+  Stats get transfer =>
+      Stats([for (final sample in samples) sample.transferUs]);
+  Stats get consume => Stats([for (final sample in samples) sample.consumeUs]);
+  Stats get total => Stats([for (final sample in samples) sample.totalUs]);
 }
 
 void main() async {
-  final runtime = bool.fromEnvironment('dart.vm.product') ? 'AOT/product' : 'JIT/profile-debug';
+  final runtime = bool.fromEnvironment('dart.vm.product')
+      ? 'AOT/product'
+      : 'JIT/profile-debug';
 
   print('');
   print('=== Isolate Message Graph ===');
   print('Runtime: $runtime');
-  print('Measures hand-off vs main-isolate row consumption for result-shaped payloads.');
-  print('`exit` mode measures hand-off after spawn/handshake, not respawn lifecycle.');
+  print(
+    'Measures hand-off vs main-isolate row consumption for result-shaped payloads.',
+  );
+  print(
+    '`exit` mode measures hand-off after spawn/handshake, not respawn lifecycle.',
+  );
   print('');
 
   for (final dataset in _DatasetKind.values) {
     for (final rowCount in _rowCounts) {
-      print(
-        '=== ${_datasetLabel(dataset)} / $rowCount rows ===',
-      );
+      print('=== ${_datasetLabel(dataset)} / $rowCount rows ===');
       for (final mode in _TransferMode.values) {
         final results = <_TimingSummary>[];
         for (final shape in _PayloadShape.values) {
@@ -111,10 +107,12 @@ Future<_TimingSummary> _runCase(_TransferMode mode, _Config config) async {
           _consumeRows(rows);
           swConsume.stop();
 
-          samples.add(_Sample(
-            transferUs: swTransfer.elapsedMicroseconds,
-            consumeUs: swConsume.elapsedMicroseconds,
-          ));
+          samples.add(
+            _Sample(
+              transferUs: swTransfer.elapsedMicroseconds,
+              consumeUs: swConsume.elapsedMicroseconds,
+            ),
+          );
         }
       } finally {
         await worker.close();
@@ -133,10 +131,12 @@ Future<_TimingSummary> _runCase(_TransferMode mode, _Config config) async {
         _consumeRows(rows);
         swConsume.stop();
 
-        samples.add(_Sample(
-          transferUs: swTransfer.elapsedMicroseconds,
-          consumeUs: swConsume.elapsedMicroseconds,
-        ));
+        samples.add(
+          _Sample(
+            transferUs: swTransfer.elapsedMicroseconds,
+            consumeUs: swConsume.elapsedMicroseconds,
+          ),
+        );
       }
   }
 
@@ -145,7 +145,9 @@ Future<_TimingSummary> _runCase(_TransferMode mode, _Config config) async {
 
 void _printSection(String title, List<_TimingSummary> results) {
   print(title);
-  print('| Shape | Transfer p50 | Transfer p90 | Consume p50 | Consume p90 | Total p50 | Total p90 |');
+  print(
+    '| Shape | Transfer p50 | Transfer p90 | Consume p50 | Consume p90 | Total p50 | Total p90 |',
+  );
   print('|---|---:|---:|---:|---:|---:|---:|');
   for (final result in results) {
     print(
@@ -162,20 +164,20 @@ void _printSection(String title, List<_TimingSummary> results) {
 }
 
 String _modeLabel(_TransferMode mode) => switch (mode) {
-      _TransferMode.send => 'SendPort.send (same-group copy path)',
-      _TransferMode.exit => 'Isolate.exit (handoff after handshake)',
-    };
+  _TransferMode.send => 'SendPort.send (same-group copy path)',
+  _TransferMode.exit => 'Isolate.exit (handoff after handshake)',
+};
 
 String _datasetLabel(_DatasetKind dataset) => switch (dataset) {
-      _DatasetKind.numeric => 'numeric-heavy',
-      _DatasetKind.mixed => 'mixed-schema',
-    };
+  _DatasetKind.numeric => 'numeric-heavy',
+  _DatasetKind.mixed => 'mixed-schema',
+};
 
 String _shapeLabel(_PayloadShape shape) => switch (shape) {
-      _PayloadShape.current => 'current ResultSet',
-      _PayloadShape.materializedMaps => 'materialized maps',
-      _PayloadShape.binaryRows => 'binary row facade',
-    };
+  _PayloadShape.current => 'current ResultSet',
+  _PayloadShape.materializedMaps => 'materialized maps',
+  _PayloadShape.binaryRows => 'binary row facade',
+};
 
 Future<List<Map<String, Object?>>> _requestViaExit(_Config config) async {
   final port = ReceivePort();
@@ -227,7 +229,10 @@ final class _PersistentWorker {
       completer.complete(message as List<Map<String, Object?>>);
     });
 
-    final isolate = await Isolate.spawn(_sendWorkerMain, (port.sendPort, config));
+    final isolate = await Isolate.spawn(_sendWorkerMain, (
+      port.sendPort,
+      config,
+    ));
     final commandPort = await handshake.future;
     final worker = _PersistentWorker(isolate, port, commandPort, sub);
     worker._pending = pending;
@@ -289,7 +294,7 @@ List<Map<String, Object?>> _buildPayload(_Config config) {
   final (schema, values) = _buildFlatValues(config.dataset, config.rowCount);
   switch (config.shape) {
     case _PayloadShape.current:
-      return ResultSet(values, schema, config.rowCount)
+      return ResultSet(values, schema, config.rowCount, hasWrappedCells: false)
           as List<Map<String, Object?>>;
     case _PayloadShape.materializedMaps:
       final rows = List<Map<String, Object?>>.generate(config.rowCount, (row) {
@@ -306,7 +311,10 @@ List<Map<String, Object?>> _buildPayload(_Config config) {
   }
 }
 
-(RowSchema, List<Object?>) _buildFlatValues(_DatasetKind dataset, int rowCount) {
+(RowSchema, List<Object?>) _buildFlatValues(
+  _DatasetKind dataset,
+  int rowCount,
+) {
   return switch (dataset) {
     _DatasetKind.numeric => _buildNumericValues(rowCount),
     _DatasetKind.mixed => _buildMixedValues(rowCount),
@@ -325,7 +333,11 @@ List<Map<String, Object?>> _buildPayload(_Config config) {
     'f2',
     'f3',
   ]);
-  final values = List<Object?>.filled(rowCount * schema.columnCount, null, growable: false);
+  final values = List<Object?>.filled(
+    rowCount * schema.columnCount,
+    null,
+    growable: false,
+  );
   var writeIdx = 0;
   for (var i = 0; i < rowCount; i++) {
     values[writeIdx++] = i;
@@ -350,7 +362,11 @@ List<Map<String, Object?>> _buildPayload(_Config config) {
     'amount',
     'note',
   ]);
-  final values = List<Object?>.filled(rowCount * schema.columnCount, null, growable: false);
+  final values = List<Object?>.filled(
+    rowCount * schema.columnCount,
+    null,
+    growable: false,
+  );
   var writeIdx = 0;
   for (var i = 0; i < rowCount; i++) {
     values[writeIdx++] = i;
@@ -368,7 +384,9 @@ List<Map<String, Object?>> _buildBinaryRows(
   List<Object?> flatValues,
   int rowCount,
 ) {
-  final columnKinds = List<_BinaryColumnKind>.generate(schema.columnCount, (col) {
+  final columnKinds = List<_BinaryColumnKind>.generate(schema.columnCount, (
+    col,
+  ) {
     var sawInt = false;
     var sawDouble = false;
     var sawOther = false;
@@ -390,7 +408,12 @@ List<Map<String, Object?>> _buildBinaryRows(
     return _BinaryColumnKind.object;
   }, growable: false);
 
-  return _BenchBinaryResultSet.fromFlat(schema, flatValues, rowCount, columnKinds)
+  return _BenchBinaryResultSet.fromFlat(
+        schema,
+        flatValues,
+        rowCount,
+        columnKinds,
+      )
       as List<Map<String, Object?>>;
 }
 
@@ -451,11 +474,20 @@ final class _BenchBinaryResultSet with ListMixin<_BenchBinaryRow> {
     for (var col = 0; col < schema.columnCount; col++) {
       switch (kinds[col]) {
         case _BinaryColumnKind.int64:
-          columns[col] = _BinaryColumn(_BinaryColumnKind.int64, fixedColumnCount++);
+          columns[col] = _BinaryColumn(
+            _BinaryColumnKind.int64,
+            fixedColumnCount++,
+          );
         case _BinaryColumnKind.float64:
-          columns[col] = _BinaryColumn(_BinaryColumnKind.float64, fixedColumnCount++);
+          columns[col] = _BinaryColumn(
+            _BinaryColumnKind.float64,
+            fixedColumnCount++,
+          );
         case _BinaryColumnKind.object:
-          columns[col] = _BinaryColumn(_BinaryColumnKind.object, objectColumnCount++);
+          columns[col] = _BinaryColumn(
+            _BinaryColumnKind.object,
+            objectColumnCount++,
+          );
       }
     }
 
@@ -463,7 +495,11 @@ final class _BenchBinaryResultSet with ListMixin<_BenchBinaryRow> {
     final fixedBytes = Uint8List(rowStrideBytes * rowCount);
     final fixedData = ByteData.sublistView(fixedBytes);
     final nullBitmap = Uint8List(((rowCount * fixedColumnCount) + 7) >> 3);
-    final objects = List<Object?>.filled(rowCount * objectColumnCount, null, growable: false);
+    final objects = List<Object?>.filled(
+      rowCount * objectColumnCount,
+      null,
+      growable: false,
+    );
 
     for (var row = 0; row < rowCount; row++) {
       final base = row * schema.columnCount;
@@ -476,7 +512,11 @@ final class _BenchBinaryResultSet with ListMixin<_BenchBinaryRow> {
             if (value == null) {
               nullBitmap[bitIndex >> 3] |= 1 << (bitIndex & 7);
             } else {
-              fixedData.setInt64(row * rowStrideBytes + column.slot * 8, value as int, Endian.host);
+              fixedData.setInt64(
+                row * rowStrideBytes + column.slot * 8,
+                value as int,
+                Endian.host,
+              );
             }
           case _BinaryColumnKind.float64:
             final bitIndex = row * fixedColumnCount + column.slot;

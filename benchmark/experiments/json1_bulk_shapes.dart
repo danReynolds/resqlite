@@ -205,10 +205,7 @@ Future<void> _measure(
 List<List<Object?>> _buildCustomerRows(int count) {
   return List<List<Object?>>.generate(
     count,
-    (index) => <Object?>[
-      'Customer $index',
-      'customer$index@example.com',
-    ],
+    (index) => <Object?>['Customer $index', 'customer$index@example.com'],
     growable: false,
   );
 }

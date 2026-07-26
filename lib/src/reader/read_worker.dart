@@ -293,7 +293,12 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
 /// The cast is a type-system formality — `ResultSet implements List<Row>`
 /// and `Row implements Map<String, Object?>`, so it's always safe.
 List<Map<String, Object?>> _toRows(RawQueryResult raw) =>
-    ResultSet(raw.values, raw.schema, raw.rowCount, raw.hasWrappedCells)
+    ResultSet(
+          raw.values,
+          raw.schema,
+          raw.rowCount,
+          hasWrappedCells: raw.hasWrappedCells,
+        )
         as List<Map<String, Object?>>;
 
 /// Acquire the stmt on the dedicated reader, run `body`, and release

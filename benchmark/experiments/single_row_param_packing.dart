@@ -29,8 +29,10 @@ void main() {
     'blob-int': [7, Uint8List(256)],
   };
 
-  print('single-row param packing — $_iterations cycles/sample, '
-      '$_samples samples\n');
+  print(
+    'single-row param packing — $_iterations cycles/sample, '
+    '$_samples samples\n',
+  );
   print('| Shape | Median ns/op | Min | Max |');
   print('|---|---|---|---|');
   shapes.forEach((name, params) {
@@ -46,9 +48,11 @@ void main() {
     }
     medians.sort();
     final med = medians[medians.length ~/ 2];
-    print('| $name | ${med.toStringAsFixed(1)} | '
-        '${medians.first.toStringAsFixed(1)} | '
-        '${medians.last.toStringAsFixed(1)} |');
+    print(
+      '| $name | ${med.toStringAsFixed(1)} | '
+      '${medians.first.toStringAsFixed(1)} | '
+      '${medians.last.toStringAsFixed(1)} |',
+    );
   });
 }
 

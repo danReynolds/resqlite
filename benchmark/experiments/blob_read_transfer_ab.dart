@@ -27,8 +27,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/query_decoder.dart'
-    show blobCellTransferThreshold;
+import 'package:resqlite/src/query_decoder.dart' show blobCellTransferThreshold;
 
 const _selectsPerSample = 30;
 const _samples = 9;
@@ -42,9 +41,8 @@ Future<void> main() async {
     'CREATE TABLE b(id INTEGER PRIMARY KEY, body TEXT, payload BLOB)',
   );
 
-  Uint8List blobOf(int size, int seed) => Uint8List.fromList(
-    List.generate(size, (i) => (i * 31 + seed) & 0xFF),
-  );
+  Uint8List blobOf(int size, int seed) =>
+      Uint8List.fromList(List.generate(size, (i) => (i * 31 + seed) & 0xFF));
 
   // Row sets per lane label; recreated fresh per shape.
   stdout.writeln('| Lane | Shape | median µs/select | min | max |');
@@ -86,11 +84,15 @@ Future<void> main() async {
     ]);
   }, () => db.select(q));
 
-  await shape('1×400KB text (control: sacrifices both lanes)', () async {
-    await db.execute('INSERT INTO b(id, body) VALUES (1, ?)', [
-      'x' * (400 * 1024),
-    ]);
-  }, () => db.select('SELECT id, body FROM b ORDER BY id'));
+  await shape(
+    '1×400KB text (control: sacrifices both lanes)',
+    () async {
+      await db.execute('INSERT INTO b(id, body) VALUES (1, ?)', [
+        'x' * (400 * 1024),
+      ]);
+    },
+    () => db.select('SELECT id, body FROM b ORDER BY id'),
+  );
 
   await shape('20×512B blobs (control: small)', () async {
     for (var n = 0; n < 20; n++) {
@@ -100,7 +102,6 @@ Future<void> main() async {
       ]);
     }
   }, () => db.select(q));
-
 
   await shape('1×512KB blob', () async {
     await db.execute('INSERT INTO b(id, payload) VALUES (1, ?)', [

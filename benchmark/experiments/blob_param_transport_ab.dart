@@ -75,8 +75,10 @@ Future<void> main() async {
     await next;
   }
 
-  print('blob param transport A/B — '
-      '$_roundTripsPerSample round-trips/sample, $_samples samples\n');
+  print(
+    'blob param transport A/B — '
+    '$_roundTripsPerSample round-trips/sample, $_samples samples\n',
+  );
   print('| Size | send([blob]) us/rt | Transferable us/rt | Δ | fromList us |');
   print('|---|---:|---:|---:|---:|');
 
@@ -132,11 +134,13 @@ Future<void> main() async {
     final t = transMedians[transMedians.length ~/ 2];
     final fl = fromListMedians[fromListMedians.length ~/ 2];
     final deltaPct = (t - d) / d * 100;
-    print('| ${_sizeLabel(size)} '
-        '| ${d.toStringAsFixed(2)} '
-        '| ${t.toStringAsFixed(2)} '
-        '| ${deltaPct >= 0 ? '+' : ''}${deltaPct.toStringAsFixed(1)}% '
-        '| ${fl.toStringAsFixed(2)} |');
+    print(
+      '| ${_sizeLabel(size)} '
+      '| ${d.toStringAsFixed(2)} '
+      '| ${t.toStringAsFixed(2)} '
+      '| ${deltaPct >= 0 ? '+' : ''}${deltaPct.toStringAsFixed(1)}% '
+      '| ${fl.toStringAsFixed(2)} |',
+    );
   }
 
   workerPort.send('stop');
@@ -148,8 +152,10 @@ Future<void> main() async {
 // list, the way `ExecuteRequest(sql, parameters, ...)` carries it.
 Object _wrapDirect(Uint8List blob) => <Object?>['INSERT', blob];
 
-Object _wrapTransferable(Uint8List blob) =>
-    <Object?>['INSERT', TransferableTypedData.fromList([blob])];
+Object _wrapTransferable(Uint8List blob) => <Object?>[
+  'INSERT',
+  TransferableTypedData.fromList([blob]),
+];
 
 Uint8List _makeBlob(int size) {
   final b = Uint8List(size);

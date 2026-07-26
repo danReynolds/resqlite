@@ -56,19 +56,33 @@ Future<void> main() async {
   print('| N | census (1 graph copy) | old (N TTD) | table (1 TTD ×N) |');
   print('|---|---:|---:|---:|');
   for (final n in [1, 2, 4, 8, 32]) {
-    final census = await bench(() => ['c', [for (var i = 0; i < n; i++) blob]]);
-    final old = await bench(() => [
-          'o',
-          [for (var i = 0; i < n; i++) TransferableTypedData.fromList([blob])],
-        ]);
+    final census = await bench(
+      () => [
+        'c',
+        [for (var i = 0; i < n; i++) blob],
+      ],
+    );
+    final old = await bench(
+      () => [
+        'o',
+        [
+          for (var i = 0; i < n; i++) TransferableTypedData.fromList([blob]),
+        ],
+      ],
+    );
     // Table protocol: ONE ttd, referenced N times (graph copier sends it once
     // by identity); receiver materializes the unique ttd once and substitutes.
     final table = await bench(() {
       final ttd = TransferableTypedData.fromList([blob]);
-      return ['tab', [for (var i = 0; i < n; i++) ttd]];
+      return [
+        'tab',
+        [for (var i = 0; i < n; i++) ttd],
+      ];
     });
-    print('| $n | ${census.toStringAsFixed(1)} | ${old.toStringAsFixed(1)} '
-        '| ${table.toStringAsFixed(1)} |');
+    print(
+      '| $n | ${census.toStringAsFixed(1)} | ${old.toStringAsFixed(1)} '
+      '| ${table.toStringAsFixed(1)} |',
+    );
   }
   port.send(['stop']);
   rp.close();

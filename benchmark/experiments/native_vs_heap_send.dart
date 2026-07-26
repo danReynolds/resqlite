@@ -72,10 +72,16 @@ Future<void> main() async {
     final nv = await bench(() => ['n', nativeView]); // reuse view, no rebuild
     final hp = await bench(() => ['h', heap]); // reuse heap list, no rebuild
     final td = await bench(
-        () => ['t', TransferableTypedData.fromList([nativeView])]);
+      () => [
+        't',
+        TransferableTypedData.fromList([nativeView]),
+      ],
+    );
 
-    print('| ${size ~/ 1024}KB | ${nv.toStringAsFixed(1)} '
-        '| ${hp.toStringAsFixed(1)} | ${td.toStringAsFixed(1)} |');
+    print(
+      '| ${size ~/ 1024}KB | ${nv.toStringAsFixed(1)} '
+      '| ${hp.toStringAsFixed(1)} | ${td.toStringAsFixed(1)} |',
+    );
     calloc.free(nativePtr);
   }
   port.send(['stop']);

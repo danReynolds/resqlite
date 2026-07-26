@@ -51,7 +51,9 @@ Future<void> main() async {
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp237-');
   final dbPath = '${tmp.path}/exp237.db';
   final db = await Database.open(dbPath);
-  await db.execute('CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)');
+  await db.execute(
+    'CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)',
+  );
 
   stdout.writeln(
     'blob batch write A/B — executeBatch of $_rowsPerBatch rows/sample, '

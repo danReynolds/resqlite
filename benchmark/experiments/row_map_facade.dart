@@ -36,7 +36,7 @@ void main() {
     'Toronto',
     'Canada',
   ];
-  final row = ResultSet(values, schema, 1)[0];
+  final row = ResultSet(values, schema, 1, hasWrappedCells: false)[0];
   final map = LinkedHashMap<String, Object?>.fromIterables(
     schema.names,
     values,
