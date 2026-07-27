@@ -330,7 +330,7 @@ void main() {
 
     test('large blob cells round-trip through select without sacrifice',
         () async {
-      // [EXP-236] Blob cells >= blobCellTransferThreshold (256 KB) decode
+      // [EXP-236] Blob cells >= BlobTransfer.cellThreshold (256 KB) decode
       // into TransferableTypedData on the reader and materialize back to
       // Uint8List at the main-isolate receive boundary. Repeated reads
       // exercise worker reuse (the blob-dominated result no longer
@@ -427,7 +427,7 @@ void main() {
     });
 
     test('large blob param survives TransferableTypedData transfer', () async {
-      // [EXP-234] Blobs >= blobParamTransferThreshold (256 KB) cross to the
+      // [EXP-234] Blobs >= BlobTransfer.paramThreshold (256 KB) cross to the
       // writer isolate via TransferableTypedData instead of the direct
       // SendPort copy. Verify byte-identical round-trips on both sides of the
       // exact threshold boundary (256 KB - 1 direct, 256 KB wrapped) plus a

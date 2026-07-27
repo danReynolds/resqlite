@@ -53,6 +53,13 @@ alternatives on the table:
 
 ## Approach
 
+> Naming note: on landing, these helpers were consolidated behind the
+> `blobTransfer` object (lib/src/blob_transfer.dart) — `wrapBlobParams` →
+> `blobTransfer.wrapParams`, `wrapBlobParamsGroup` → `wrapParamsGroup`, and the
+> unwrap-with-shared-cache pattern became a per-envelope `BlobUnwrapper`. The
+> behavior described below is unchanged.
+
+
 All changes are in the existing write-side transfer helper; the fast path (no
 qualifying blob) still returns the input list unchanged with no allocation.
 

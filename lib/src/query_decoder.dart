@@ -14,7 +14,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
-import 'blob_transfer.dart' show blobCellTransferThreshold;
+import 'blob_transfer.dart' show BlobTransfer;
 import 'exceptions.dart';
 import 'row.dart';
 
@@ -319,10 +319,10 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           final blobLen = cellsI32[i32Base + lenI32];
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
-          } else if (blobLen >= blobCellTransferThreshold) {
+          } else if (blobLen >= BlobTransfer.cellThreshold) {
             hasWrappedCells = true;
             // Copies native -> external instead of native -> heap; see
-            // [blobCellTransferThreshold].
+            // [BlobTransfer.cellThreshold].
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);
@@ -394,10 +394,10 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           final blobLen = cellsI32[i32Base + lenI32];
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
-          } else if (blobLen >= blobCellTransferThreshold) {
+          } else if (blobLen >= BlobTransfer.cellThreshold) {
             hasWrappedCells = true;
             // Copies native -> external instead of native -> heap; see
-            // [blobCellTransferThreshold].
+            // [BlobTransfer.cellThreshold].
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);

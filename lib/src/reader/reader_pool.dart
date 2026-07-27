@@ -13,7 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
-import '../blob_transfer.dart' show materializeTransferableBlobCells;
+import '../blob_transfer.dart' show blobTransfer;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
 
@@ -77,7 +77,7 @@ final class ReaderPool {
       SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
     );
     final rows = result as List<Map<String, Object?>>;
-    materializeTransferableBlobCells(rows);
+    blobTransfer.materializeCells(rows);
     return rows;
   }
 
@@ -105,7 +105,7 @@ final class ReaderPool {
     );
     final typed =
         result as (List<Map<String, Object?>>, TableDependencies, int, int);
-    materializeTransferableBlobCells(typed.$1);
+    blobTransfer.materializeCells(typed.$1);
     return typed;
   }
 
@@ -147,7 +147,7 @@ final class ReaderPool {
     );
     final typed = result as (List<Map<String, Object?>>?, int, int);
     final rows = typed.$1;
-    if (rows != null) materializeTransferableBlobCells(rows);
+    if (rows != null) blobTransfer.materializeCells(rows);
     return typed;
   }
 

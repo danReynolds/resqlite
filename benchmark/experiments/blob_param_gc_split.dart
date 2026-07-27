@@ -18,7 +18,7 @@ const _inserts = 300;
 
 Future<void> main(List<String> args) async {
   final candidate = args.isNotEmpty && args.first == 'cand';
-  blobParamTransferThreshold = candidate ? 256 * 1024 : (1 << 40);
+  BlobTransfer.paramThreshold = candidate ? 256 * 1024 : (1 << 40);
 
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp234-gcs-');
   final db = await Database.open('${tmp.path}/g.db');

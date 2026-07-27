@@ -274,7 +274,7 @@ main, and that cost **is** size-proportional.
 
 (The receive boundary also has to *find* the wrapped cells. That scan is
 O(slots) and unbounded, so it is skipped entirely via a flag the decoder sets —
-see `materializeTransferableBlobCells`.)
+see `blobTransfer.materializeCells`.)
 
 ---
 
@@ -284,7 +284,7 @@ This is **not** one universal rule — it is **two** rules, because reads and
 writes differ in whether object identity matters.
 
 > **Read-cell rule (local).** A freshly decoded BLOB cell ≥
-> `blobCellTransferThreshold` (currently 256 KB) is externalized through
+> `BlobTransfer.cellThreshold` (currently 256 KB) is externalized through
 > TTD. The decision is local to that cell — every result cell is independently
 > materialized, so there is no aliasing to preserve.
 

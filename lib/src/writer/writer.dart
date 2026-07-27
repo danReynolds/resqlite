@@ -7,7 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/blob_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart' show blobTransfer;
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -105,7 +105,7 @@ final class Writer {
       throw ResqliteConnectionException.databaseClosed();
     }
     // [EXP-234] Build the request before enqueueing the completer: request
-    // constructors can now throw (`wrapBlobParams` allocates native memory
+    // constructors can now throw (`blobTransfer.wrapParams` allocates native
     // for large blob params), and a throw after `_pending.addLast` would
     // strand the completer at the queue head and desync every later reply.
     final request = build(_replyPort.sendPort);
@@ -183,7 +183,7 @@ final class Writer {
                 // Wrapped across the whole group, so a buffer reused
                 // between coalesced writes crosses once.
                 (replyPort) => MultiExecuteRequest(
-                  wrapBlobParamsGroup([
+                  blobTransfer.wrapParamsGroup([
                     for (final p in group) (sql: p.sql, params: p.parameters),
                   ]),
                   replyPort,
@@ -323,7 +323,7 @@ final class Writer {
         traceCorrelationId: traceCorrelationId,
       ),
     );
-    materializeTransferableBlobCells(response.rows);
+    blobTransfer.materializeCells(response.rows);
     return response;
   }
 

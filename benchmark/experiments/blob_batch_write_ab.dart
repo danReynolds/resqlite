@@ -13,8 +13,8 @@
 // its own `TransferableTypedData` (memcpy into malloc'd external memory +
 // ownership move; the GC never traces the payload).
 //
-//   candidate (enabled): blobParamTransferThreshold = 256 KB
-//   baseline (disabled): blobParamTransferThreshold = huge — every blob takes
+//   candidate (enabled): BlobTransfer.paramThreshold = 256 KB
+//   baseline (disabled): BlobTransfer.paramThreshold = huge — every blob takes
 //                        the direct object-graph copy (origin/main behavior)
 //
 // The batch runs as one transaction, so its per-row SQLite/WAL cost is
@@ -88,7 +88,9 @@ Future<double> _measure(
   List<List<Object?>> paramSets, {
   required bool enabled,
 }) async {
-  blobParamTransferThreshold = enabled ? _thresholdEnabled : _thresholdDisabled;
+  BlobTransfer.paramThreshold = enabled
+      ? _thresholdEnabled
+      : _thresholdDisabled;
   const sql = 'INSERT INTO blob_doc(payload) VALUES (?)';
 
   // Warm: bind cache, statement cache, page cache, writer isolate.

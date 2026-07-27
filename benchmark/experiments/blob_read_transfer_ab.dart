@@ -27,14 +27,14 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/blob_transfer.dart' show blobCellTransferThreshold;
+import 'package:resqlite/src/blob_transfer.dart' show BlobTransfer;
 
 const _selectsPerSample = 30;
 const _samples = 9;
 const _warmup = 10;
 
 Future<void> main() async {
-  final lane = blobCellTransferThreshold <= 1024 * 1024 ? 'cand' : 'base';
+  final lane = BlobTransfer.cellThreshold <= 1024 * 1024 ? 'cand' : 'base';
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp236-');
   final db = await Database.open('${tmp.path}/exp236.db');
   await db.execute(
