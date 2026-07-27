@@ -12,6 +12,11 @@
 #include "resqlite_buf.h"
 #include "resqlite_json.h"
 
+_Static_assert(
+    RESQLITE_MAX_DEP_COLUMNS <= 64,
+    "writer pending-dependency mask must cover every cached column"
+);
+
 // Forward declarations.
 static int bind_params(sqlite3_stmt* stmt, const resqlite_param* params,
                        int param_count, int expected);
@@ -330,6 +335,11 @@ struct resqlite_db {
     // merge the stmt's pre-captured `dep_columns` into `dirty_columns`
     // whenever a row is actually modified. NULL outside of stepping.
     resqlite_cached_stmt* writer_active_entry;
+    // Bits for active-entry columns that have not yet been merged for their
+    // actual preupdate table. A batch reuses one static dependency set, so
+    // matching bits can be cleared after the first affected row instead of
+    // re-running the same string comparisons for every parameter set.
+    uint64_t writer_pending_dep_columns;
     int writer_checkpoint_running;
 
     // Reader pool.
@@ -422,15 +432,36 @@ static void dirty_columns_add_for_active_stmt(resqlite_db* sdb,
         return;
     }
 
+    uint64_t pending = sdb->writer_pending_dep_columns;
+    if (pending == 0) return;
+
     int table_name_len = (int)strlen(table_name);
     for (int i = 0; i < entry->dep_column_count; i++) {
+        uint64_t bit = UINT64_C(1) << i;
+        if ((pending & bit) == 0) continue;
+
         const char* column = NULL;
         if (resqlite_column_dep_belongs_to_table(&entry->dep_columns[i],
                                                  table_name, table_name_len,
                                                  &column)) {
             resqlite_column_set_add(&sdb->dirty_columns, table_name, column);
+            sdb->writer_pending_dep_columns &= ~bit;
         }
     }
+}
+
+static void writer_activate_entry(resqlite_db* db,
+                                  resqlite_cached_stmt* entry) {
+    db->writer_active_entry = entry;
+    db->writer_pending_dep_columns =
+        entry->dep_column_count >= 64
+            ? UINT64_MAX
+            : (UINT64_C(1) << entry->dep_column_count) - 1;
+}
+
+static void writer_deactivate_entry(resqlite_db* db) {
+    db->writer_active_entry = NULL;
+    db->writer_pending_dep_columns = 0;
 }
 
 static void preupdate_hook(
@@ -588,6 +619,7 @@ static resqlite_db* resqlite_open_impl(const char* path, int max_readers,
     resqlite_column_set_init(&db->dirty_columns);
     resqlite_column_set_init(&db->writer_authz_scratch);
     db->writer_active_entry = NULL;
+    db->writer_pending_dep_columns = 0;
     db->writer_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
     db->pool_mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
@@ -865,6 +897,7 @@ int resqlite_run_connection_setup(
         resqlite_column_set_reset(&db->dirty_columns);
         resqlite_column_set_reset(&db->writer_authz_scratch);
         db->writer_active_entry = NULL;
+        db->writer_pending_dep_columns = 0;
     }
 
     if (scope == RESQLITE_SETUP_SCOPE_ALL ||
@@ -1039,9 +1072,9 @@ int resqlite_execute(
     // `dirty_columns` on each per-row firing. Cleared after step so unrelated
     // callers (e.g. trigger bodies driven by sqlite3_exec) fall back to the
     // wildcard path.
-    db->writer_active_entry = entry;
+    writer_activate_entry(db, entry);
     rc = sqlite3_step(stmt);
-    db->writer_active_entry = NULL;
+    writer_deactivate_entry(db);
     if (out_result) {
         out_result->affected_rows = sqlite3_changes(db->writer);
         out_result->last_insert_id = sqlite3_last_insert_rowid(db->writer);
@@ -1088,28 +1121,36 @@ static int run_batch_locked(
     }
     const int expected = entry->param_count;
 
+    // Preserve the pending mask across parameter sets, but keep the active
+    // entry scoped strictly to sqlite3_step just as it is for single writes.
+    // That way callbacks from any future bind/reset behavior still take the
+    // conservative wildcard path instead of being misattributed.
+    db->writer_pending_dep_columns =
+        entry->dep_column_count >= 64
+            ? UINT64_MAX
+            : (UINT64_C(1) << entry->dep_column_count) - 1;
     for (int i = 0; i < set_count; i++) {
         sqlite3_reset(stmt);
 
         int rc = bind_params(
             stmt, &param_sets[i * param_count], param_count, expected);
         if (rc != SQLITE_OK) {
+            writer_deactivate_entry(db);
             sqlite3_reset(stmt);
             return rc;
         }
 
-        // [EXP-106](../experiments/106-column-level-deps.md): tag the active
-        // entry so the preupdate hook can merge cached columns. Cleared after
-        // step on every iteration.
         db->writer_active_entry = entry;
         rc = sqlite3_step(stmt);
         db->writer_active_entry = NULL;
         if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+            writer_deactivate_entry(db);
             sqlite3_reset(stmt);
             return rc;
         }
     }
 
+    writer_deactivate_entry(db);
     sqlite3_reset(stmt);
     return SQLITE_OK;
 }
