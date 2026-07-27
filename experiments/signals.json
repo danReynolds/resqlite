@@ -2129,6 +2129,23 @@
         "Require a representative downstream trace showing that synchronous threshold crossings are frequent and materially user-visible before paying the worker lifecycle cost. Re-run the first-crossing, sustained write p50/p95/p99, foreground-read, below-threshold control, and post-burst pending-frame gates together.",
         "Prefer a materially simpler SQLite-native checkpoint policy if one can preserve the first-crossing benefit without a second Dart isolate and cross-sender close protocol. The measured mechanism and harness remain available at `archive/exp-250` for comparison, not restoration."
       ]
+    },
+    "252": {
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "rejected_below_signal",
+      "changedBeliefs": [
+        "Writer dirty-column merging has fresh representative incidence: Dune runs two executeBatch UPDATEs every 2 seconds for the first 20 seconds after connect and every 5 seconds thereafter, updating three columns across all devices and two columns across all peers. That downstream evidence was strong enough to justify an exploit even though exp 057 rejected the analogous dirty-table dedup and exp 182 bounded all dependency-tracking savings at roughly 3-6% on wide no-stream writes.",
+        "A per-batch pending dependency mask removes substantial real work only at extreme width and row count. The archived candidate makes a synthetic 10,000-row x 20-SET-column UPDATE 64.5% / 60.9% faster across the order flip, proving that repeated dependency merges can dominate that ceiling.",
+        "The mechanism does not create aggregate value on the workload that motivated it. A full-footprint 100-device + 100-peer Dune-shaped pair regresses 49.1% / 15.4% at p50 instead of clearing the predeclared 3% gate, while 1000+1000 moves +9.1% / -2.0%. Two public writer requests, binding, SQLite row writes, transaction work, dependency harvest, and replies dominate the 2-3-column merge loop.",
+        "A precision-preserving implementation is possible without public API: retain one pending bit per cached dependency, clear bits only when an actual preupdate callback names their table, check reliability before the fast path, and clear lifecycle state on normal, bind-error, step-error, setup, and no-row exits. Conditional triggers and FK cascades remain correct, but that native state is not justified for ordinary narrow batches without a product-shaped win."
+      ],
+      "nextSignals": [
+        "Do not retry per-row dirty-column merge caching for ordinary 2-3-column status batches. The exact Dune-shaped harness is the product gate; a 10k x 20 synthetic improvement alone is insufficient.",
+        "Reopen only with representative downstream evidence of repeated UPDATE batches in the thousands of rows with materially wider SET lists, or a native profile showing dirty_columns_add_for_active_stmt consumes enough public write wall to clear at least 3% on the downstream-shaped operation.",
+        "If reopened, start from archive/exp-252 and keep the conditional-later-row, all-no-op normal-exit, and nested batch-error/savepoint tests. A single merge-done boolean is simpler but can eagerly add dependencies for trigger tables that never fire and prematurely exhaust precise column metadata."
+      ]
     }
   }
 }
