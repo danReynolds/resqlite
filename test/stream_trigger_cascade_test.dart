@@ -132,6 +132,169 @@ void main() {
     );
 
     test(
+      'batch keeps unmatched trigger columns pending until a later row fires',
+      () async {
+        await db.execute(
+          'CREATE TABLE batch_target('
+          'id INTEGER PRIMARY KEY, '
+          'watched INTEGER NOT NULL, unrelated INTEGER NOT NULL)',
+        );
+        await db.execute(
+          'CREATE TABLE batch_source('
+          'id INTEGER PRIMARY KEY, fire INTEGER NOT NULL)',
+        );
+        await db.execute('''
+          CREATE TRIGGER conditional_batch_mirror
+          AFTER UPDATE OF fire ON batch_source
+          WHEN NEW.fire = 1
+          BEGIN
+            UPDATE batch_target
+            SET watched = watched + 1
+            WHERE id = 1;
+          END;
+        ''');
+        await db.execute(
+          'INSERT INTO batch_target(id, watched, unrelated) VALUES (?, ?, ?)',
+          [1, 0, 0],
+        );
+        await db.executeBatch(
+          'INSERT INTO batch_source(id, fire) VALUES (?, ?)',
+          [
+            [1, 0],
+            [2, 0],
+          ],
+        );
+
+        final probe = _StreamProbe(
+          db.stream('SELECT watched FROM batch_target WHERE id = 1'),
+        );
+        final initial = await probe.event(1);
+        expect(initial.single['watched'], 0);
+
+        await db.transaction((tx) async {
+          // Leave a precise unrelated-column detail for batch_target in this
+          // commit. If the later trigger's watched bit is lost, dispatch
+          // cannot hide the bug behind table-level fallback.
+          await tx.execute(
+            'UPDATE batch_target '
+            'SET unrelated = unrelated + 1 WHERE id = 1',
+          );
+          await tx.executeBatch(
+            'UPDATE batch_source SET fire = ? WHERE id = ?',
+            [
+              [1, 999], // no matching row: no preupdate callback
+              [2, 1], // source changes, conditional trigger does not fire
+              [1, 2], // later row fires the cross-table trigger
+            ],
+          );
+        });
+
+        final after = await probe.event(2);
+        expect(after.single['watched'], 1);
+
+        await probe.cancel();
+      },
+    );
+
+    test(
+      'all-no-op batch clears pending column state on normal exit',
+      () async {
+        await db.execute(
+          'CREATE TABLE batch_noop_mask('
+          'id INTEGER PRIMARY KEY, '
+          'watched INTEGER NOT NULL, unrelated INTEGER NOT NULL)',
+        );
+        await db.execute(
+          'INSERT INTO batch_noop_mask(id, watched, unrelated) '
+          'VALUES (?, ?, ?)',
+          [1, 0, 0],
+        );
+        final probe = _StreamProbe(
+          db.stream('SELECT watched FROM batch_noop_mask WHERE id = 1'),
+        );
+        expect((await probe.event(1)).single['watched'], 0);
+
+        await db.executeBatch(
+          'UPDATE batch_noop_mask SET unrelated = ? WHERE id = ?',
+          [
+            [10, 999],
+            [20, 998],
+          ],
+        );
+        // Multi-statement execution uses sqlite3_exec and therefore has no
+        // active cache entry. A stale no-op batch entry would misattribute this
+        // callback to `unrelated` instead of taking the wildcard fallback.
+        await db.execute('''
+        UPDATE batch_noop_mask
+        SET watched = watched + 1
+        WHERE id = 1;
+        SELECT 1;
+      ''');
+
+        final after = await probe.event(2);
+        expect(after.single['watched'], 1);
+        await probe.cancel();
+      },
+    );
+
+    test(
+      'failed nested batch clears pending column state after rollback',
+      () async {
+        await db.execute(
+          'CREATE TABLE batch_error_mask('
+          'id INTEGER PRIMARY KEY, watched INTEGER NOT NULL, '
+          'unrelated INTEGER NOT NULL UNIQUE)',
+        );
+        await db.executeBatch(
+          'INSERT INTO batch_error_mask(id, watched, unrelated) '
+          'VALUES (?, ?, ?)',
+          [
+            [1, 0, 10],
+            [2, 0, 20],
+          ],
+        );
+        final probe = _StreamProbe(
+          db.stream('SELECT watched FROM batch_error_mask WHERE id = 1'),
+        );
+        expect((await probe.event(1)).single['watched'], 0);
+
+        await db.transaction((tx) async {
+          try {
+            await tx.transaction((inner) async {
+              await inner.executeBatch(
+                'UPDATE batch_error_mask '
+                'SET unrelated = ? WHERE id = ?',
+                [
+                  [30, 1],
+                  [30, 2],
+                ],
+              );
+            });
+            fail('Expected the second batch row to violate UNIQUE');
+          } on ResqliteQueryException {
+            // The inner savepoint rolls back while the outer transaction stays
+            // usable. Its conservative dirty detail intentionally remains.
+          }
+
+          await tx.execute('''
+            UPDATE batch_error_mask
+            SET watched = watched + 1
+            WHERE id = 1;
+            SELECT 1;
+          ''');
+        });
+
+        final values = await db.select(
+          'SELECT unrelated FROM batch_error_mask ORDER BY id',
+        );
+        expect(values.map((row) => row['unrelated']), [10, 20]);
+        final after = await probe.event(2);
+        expect(after.single['watched'], 1);
+        await probe.cancel();
+      },
+    );
+
+    test(
       'same-table different-column trigger: stream watching col_b re-emits when writer updates col_a',
       () async {
         await db.execute(
