@@ -31,6 +31,8 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
 
   // Per-experiment rows from index fragments (split experiments: first row
   // carries the canonical title/file; statuses are joined).
+  // The writeup's **Date:** header supplies the timeline axis for viewers.
+  final dateRe = RegExp(r'\*\*Date:\*\*\s*(\d{4}-\d{2}(?:-\d{2})?)');
   final experiments = <String, Map<String, Object?>>{};
   final indexDir = Directory('${experimentsDir.path}/index');
   for (final file in indexDir.listSync().whereType<File>()) {
@@ -40,10 +42,17 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
     final rows = (decoded is List ? decoded : [decoded]).cast<Map>();
     if (rows.isEmpty) continue;
     final first = rows.first;
+    final writeup = File(
+      '${experimentsDir.path}/${first['file'] ?? '$id.md'}',
+    );
+    final date = writeup.existsSync()
+        ? dateRe.firstMatch(writeup.readAsStringSync())?.group(1)
+        : null;
     experiments[id] = {
       'id': id,
       'title': first['title'],
       'file': first['file'] ?? '$id.md',
+      if (date != null) 'date': date,
       'status': rows.length == 1
           ? first['status']
           : rows.map((r) => r['status']).join('+'),
