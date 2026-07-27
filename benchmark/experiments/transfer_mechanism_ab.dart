@@ -92,7 +92,9 @@ Future<void> main(List<String> args) async {
       for (var i = 0; i < l; i += 4096) {
         s += v[i];
       }
-      malloc.free(p); // explicit free (B best case; real B uses NativeFinalizer)
+      malloc.free(
+        p,
+      ); // explicit free (B best case; real B uses NativeFinalizer)
     }
     return s;
   }
@@ -114,7 +116,9 @@ Future<void> main(List<String> args) async {
     return meds[meds.length ~/ 2];
   }
 
-  stdout.writeln('=== transfer mechanism A/B (${len}B payload, round-trip per query) ===');
+  stdout.writeln(
+    '=== transfer mechanism A/B (${len}B payload, round-trip per query) ===',
+  );
   for (var pass = 1; pass <= 3; pass++) {
     final firstMode = pass.isOdd ? 0 : 1;
     final r1 = await bench(firstMode);

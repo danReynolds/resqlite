@@ -5,11 +5,11 @@
 // process with interleaved, order-flipped sampling so machine drift indicts
 // both lanes equally (the exp 159 / exp 177 drift discipline).
 //
-//   candidate (enabled): blobParamTransferThreshold = 256 KB — large blobs
+//   candidate (enabled): BlobTransfer.paramThreshold = 256 KB — large blobs
 //                        cross to the writer via TransferableTypedData
 //                        (memcpy into malloc'd external memory + ownership
 //                        move; the GC never sees the payload).
-//   baseline (disabled): blobParamTransferThreshold = huge — every blob takes
+//   baseline (disabled): BlobTransfer.paramThreshold = huge — every blob takes
 //                        the direct SendPort object-graph copy (origin/main
 //                        behavior): one sender-side copy landing on the
 //                        shared GC heap, chunked with safepoint polls on the
@@ -30,7 +30,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 
 const _sizes = <int>[
   64 * 1024, // control (< threshold): candidate == baseline, both direct
@@ -51,7 +51,9 @@ Future<void> main() async {
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp234-');
   final dbPath = '${tmp.path}/exp234.db';
   final db = await Database.open(dbPath);
-  await db.execute('CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)');
+  await db.execute(
+    'CREATE TABLE blob_doc(id INTEGER PRIMARY KEY, payload BLOB)',
+  );
 
   stdout.writeln(
     'blob param write A/B — $_writesPerSample INSERTs/sample, '
@@ -83,7 +85,9 @@ Future<double> _measure(
   Uint8List blob, {
   required bool enabled,
 }) async {
-  blobParamTransferThreshold = enabled ? _thresholdEnabled : _thresholdDisabled;
+  BlobTransfer.paramThreshold = enabled
+      ? _thresholdEnabled
+      : _thresholdDisabled;
 
   // Warm: bind cache, statement cache, page cache, writer isolate.
   for (var i = 0; i < _warmup; i++) {

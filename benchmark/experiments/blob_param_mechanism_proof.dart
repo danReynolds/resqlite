@@ -86,8 +86,9 @@ void _worker(SendPort main) {
         main.send(['ack', -1.0, _touchUs(bytes), _setRangeUs(bytes)]);
       case 'ttd':
         final sw = Stopwatch()..start();
-        final bytes =
-            (list[1] as TransferableTypedData).materialize().asUint8List();
+        final bytes = (list[1] as TransferableTypedData)
+            .materialize()
+            .asUint8List();
         sw.stop();
         final matUs = sw.elapsedTicks * 1e6 / sw.frequency;
         main.send(['ack', matUs, _touchUs(bytes), _setRangeUs(bytes)]);
@@ -138,11 +139,15 @@ double _median(List<double> xs) {
 Future<void> _mechanismTables() async {
   final w = await _spawnWorker();
 
-  stdout.writeln('per-call costs, median µs (main-isolate columns are the '
-      'synchronous wall of that single call)\n');
-  stdout.writeln('| Size | heapCopy | fromList | send(blob) | send(ttd) '
-      '| materialize | touch(direct) | touch(ttd) '
-      '| setRange(direct) | setRange(ttd) |');
+  stdout.writeln(
+    'per-call costs, median µs (main-isolate columns are the '
+    'synchronous wall of that single call)\n',
+  );
+  stdout.writeln(
+    '| Size | heapCopy | fromList | send(blob) | send(ttd) '
+    '| materialize | touch(direct) | touch(ttd) '
+    '| setRange(direct) | setRange(ttd) |',
+  );
   stdout.writeln('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
 
   for (final size in _sizes) {
@@ -153,7 +158,10 @@ Future<void> _mechanismTables() async {
     for (var i = 0; i < 10; i++) {
       sink = Uint8List.fromList(blob);
       w.port.send(['direct', blob]);
-      w.port.send(['ttd', TransferableTypedData.fromList([blob])]);
+      w.port.send([
+        'ttd',
+        TransferableTypedData.fromList([blob]),
+      ]);
     }
     await w.acks.take(20).drain<void>();
 
@@ -205,16 +213,18 @@ Future<void> _mechanismTables() async {
     final setRangeTtd = [for (final a in ttdAcks) a[3] as double];
     final setRangeDirect = [for (final a in directAcks) a[3] as double];
 
-    stdout.writeln('| ${_sizeLabel(size)} '
-        '| ${_median(heapCopy).toStringAsFixed(1)} '
-        '| ${_median(fromList).toStringAsFixed(1)} '
-        '| ${_median(sendDirect).toStringAsFixed(1)} '
-        '| ${_median(sendTtd).toStringAsFixed(1)} '
-        '| ${_median(materialize).toStringAsFixed(1)} '
-        '| ${touchDirect.isEmpty ? '-' : _median(touchDirect).toStringAsFixed(1)} '
-        '| ${_median(touchTtd).toStringAsFixed(1)} '
-        '| ${setRangeDirect.isEmpty ? '-' : _median(setRangeDirect).toStringAsFixed(1)} '
-        '| ${_median(setRangeTtd).toStringAsFixed(1)} |');
+    stdout.writeln(
+      '| ${_sizeLabel(size)} '
+      '| ${_median(heapCopy).toStringAsFixed(1)} '
+      '| ${_median(fromList).toStringAsFixed(1)} '
+      '| ${_median(sendDirect).toStringAsFixed(1)} '
+      '| ${_median(sendTtd).toStringAsFixed(1)} '
+      '| ${_median(materialize).toStringAsFixed(1)} '
+      '| ${touchDirect.isEmpty ? '-' : _median(touchDirect).toStringAsFixed(1)} '
+      '| ${_median(touchTtd).toStringAsFixed(1)} '
+      '| ${setRangeDirect.isEmpty ? '-' : _median(setRangeDirect).toStringAsFixed(1)} '
+      '| ${_median(setRangeTtd).toStringAsFixed(1)} |',
+    );
   }
 
   w.dispose();
@@ -237,7 +247,10 @@ Future<void> _gcBurst({required bool direct}) async {
     if (direct) {
       w.port.send(['direct', blob]);
     } else {
-      w.port.send(['ttd', TransferableTypedData.fromList([blob])]);
+      w.port.send([
+        'ttd',
+        TransferableTypedData.fromList([blob]),
+      ]);
     }
     if (i % 16 == 15) await Future<void>.delayed(Duration.zero);
   }

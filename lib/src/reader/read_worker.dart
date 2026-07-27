@@ -70,14 +70,23 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
-/// Byte-size threshold for sacrifice. If the estimated transfer size of
-/// a result exceeds this, the worker uses Isolate.exit (zero-copy) instead
-/// of SendPort.send (memcpy). Below this threshold the copy is sub-millisecond;
-/// above it the zero-copy transfer outweighs the ~2-5ms respawn cost.
+/// How large a result's *structure* (rows × columns) can grow before handing
+/// it to main via `Isolate.exit` — sacrificing this worker — beats sending it.
 ///
-/// Applies to both row results (estimated during the cell loop) and
-/// selectBytes results (exact byte length of the JSON buffer).
-const int sacrificeByteThreshold = 256 * 1024; // 256 KB
+/// Structure is the only thing `send` actually copies; string and number
+/// leaves are shared. So the result's shape, never its byte size, picks the
+/// cheaper transfer — a byte threshold here once respawned a reader on every
+/// big-TEXT read to avoid a copy that was never going to happen.
+/// Full mechanism and the measurements behind this value (exp 244/245/246):
+/// doc/arch/cross-isolate-data-transfer.md §6a.
+const int sacrificeSlotThreshold = int.fromEnvironment(
+  'RESQLITE_SLOT_THRESHOLD',
+  defaultValue: 32 * 1024,
+);
+
+/// Whether a decoded row result should be sacrificed rather than sent.
+bool _shouldSacrifice(RawQueryResult raw) =>
+    raw.values.length > sacrificeSlotThreshold;
 
 // ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
@@ -136,7 +145,7 @@ void readerEntrypoint(List<Object> args) {
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
           final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = _toRows(raw);
 
         case SelectWithDepsRequest(:final sql, :final parameters):
@@ -149,7 +158,7 @@ void readerEntrypoint(List<Object> args) {
           // engine can perform writer-side dispatch elision.
           final (raw, dependencies, initialHash, initialRowCount) =
               executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
-          sacrifice = raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
@@ -179,8 +188,7 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
           );
-          sacrifice =
-              raw != null && raw.estimatedBytes > sacrificeByteThreshold;
+          sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 
@@ -281,9 +289,7 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
 /// `List<Map<String, Object?>>` shape the pool / stream engine consumes.
 /// The cast is a type-system formality — `ResultSet implements List<Row>`
 /// and `Row implements Map<String, Object?>`, so it's always safe.
-List<Map<String, Object?>> _toRows(RawQueryResult raw) =>
-    ResultSet(raw.values, raw.schema, raw.rowCount)
-        as List<Map<String, Object?>>;
+List<Map<String, Object?>> _toRows(RawQueryResult raw) => raw.toResultSet();
 
 /// Acquire the stmt on the dedicated reader, run `body`, and release
 /// native params + SQL buffer. All `executeQuery*` helpers below share

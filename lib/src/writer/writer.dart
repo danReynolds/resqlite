@@ -7,7 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart' show blobTransfer;
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -105,7 +105,7 @@ final class Writer {
       throw ResqliteConnectionException.databaseClosed();
     }
     // [EXP-234] Build the request before enqueueing the completer: request
-    // constructors can now throw (`wrapBlobParams` allocates native memory
+    // constructors can now throw (`blobTransfer.wrapParams` allocates native
     // for large blob params), and a throw after `_pending.addLast` would
     // strand the completer at the queue head and desync every later reply.
     final request = build(_replyPort.sendPort);
@@ -181,15 +181,7 @@ final class Writer {
             } else {
               groupReply = _request<MultiExecuteResponse>(
                 (replyPort) => MultiExecuteRequest([
-                  // [EXP-234] Wrap here, not in the MultiExecuteRequest
-                  // constructor: this comprehension already builds fresh
-                  // records, so the no-blob common case pays no second list
-                  // rebuild. Without this, a concurrent burst of large-blob
-                  // writes — the exact shape the coalescing pump exists for —
-                  // would silently fall back to the graph-copy hop that
-                  // single writes avoid.
-                  for (final p in group)
-                    (sql: p.sql, params: wrapBlobParams(p.parameters)),
+                  for (final p in group) (sql: p.sql, params: p.parameters),
                 ], replyPort),
               );
             }
@@ -316,9 +308,9 @@ final class Writer {
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
-  ]) {
+  ]) async {
     assert(_mutex.isLocked, 'selectLocked requires the writer lock to be held');
-    return _request<QueryResponse>(
+    final response = await _request<QueryResponse>(
       (replyPort) => QueryRequest(
         sql,
         parameters,
@@ -326,6 +318,8 @@ final class Writer {
         traceCorrelationId: traceCorrelationId,
       ),
     );
+    blobTransfer.materializeCells(response.rows);
+    return response;
   }
 
   /// Runs a transaction. Used by both [Database.transaction] and [Transaction.transaction].

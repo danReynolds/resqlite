@@ -11,14 +11,14 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 
 const _size = 256 * 1024;
 const _inserts = 300;
 
 Future<void> main(List<String> args) async {
   final candidate = args.isNotEmpty && args.first == 'cand';
-  blobParamTransferThreshold = candidate ? 256 * 1024 : (1 << 40);
+  BlobTransfer.paramThreshold = candidate ? 256 * 1024 : (1 << 40);
 
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp234-gcs-');
   final db = await Database.open('${tmp.path}/g.db');
@@ -40,9 +40,11 @@ Future<void> main(List<String> args) async {
     if (i % 60 == 59) await db.execute('DELETE FROM b');
   }
   sw.stop();
-  stdout.writeln('lane=${candidate ? 'cand' : 'base'} '
-      'inserts=$_inserts wall_ms=${(sw.elapsedMicroseconds / 1000).toStringAsFixed(1)} '
-      'us_per_insert=${(sw.elapsedMicroseconds / _inserts).toStringAsFixed(1)}');
+  stdout.writeln(
+    'lane=${candidate ? 'cand' : 'base'} '
+    'inserts=$_inserts wall_ms=${(sw.elapsedMicroseconds / 1000).toStringAsFixed(1)} '
+    'us_per_insert=${(sw.elapsedMicroseconds / _inserts).toStringAsFixed(1)}',
+  );
 
   await db.close();
   await tmp.delete(recursive: true);

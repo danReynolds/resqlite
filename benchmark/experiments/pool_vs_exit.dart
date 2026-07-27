@@ -31,7 +31,9 @@ Future<void> main() async {
       final sw = Stopwatch()..start();
       final result = await db.select(sql);
       sw.stop();
-      for (final row in result) { row.values; }
+      for (final row in result) {
+        row.values;
+      }
       timing.wallUs.add(sw.elapsedMicroseconds);
       timing.mainUs.add(sw.elapsedMicroseconds);
     }
@@ -58,7 +60,9 @@ Future<void> main() async {
     sw.stop();
     final us = sw.elapsedMicroseconds;
     final qps = (count * 1000000 / us).round();
-    print('Pool: ${(us / count / 1000).toStringAsFixed(2)} ms/query ($qps qps)');
+    print(
+      'Pool: ${(us / count / 1000).toStringAsFixed(2)} ms/query ($qps qps)',
+    );
   }
 
   // selectBytes throughput test.

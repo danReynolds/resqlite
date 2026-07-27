@@ -9,10 +9,12 @@ library;
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'blob_transfer.dart' show BlobTransfer;
 import 'exceptions.dart';
 import 'row.dart';
 
@@ -247,14 +249,27 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount, this.estimatedBytes);
+  RawQueryResult(
+    this.values,
+    this.schema,
+    this.rowCount, {
+    required this.hasWrappedCells,
+  });
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
 
-  /// Estimated byte size of the result data, accumulated during the cell loop.
-  /// Ints/doubles = 8 bytes, strings/blobs = their byte length, nulls = 0.
-  final int estimatedBytes;
+  /// Whether any cell was wrapped in [TransferableTypedData]. Lets the receive
+  /// boundary skip its scan entirely when nothing needs materializing.
+  final bool hasWrappedCells;
+
+  /// The one conversion from decoded result to caller-facing [ResultSet].
+  ///
+  /// Threads [hasWrappedCells] across the isolate hop so the main-isolate
+  /// receive boundary knows whether [materializeTransferableBlobCells] has any
+  /// work; build decode-derived [ResultSet]s through this, not by hand.
+  ResultSet toResultSet() =>
+      ResultSet(values, schema, rowCount, hasWrappedCells: hasWrappedCells);
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +290,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
+  var hasWrappedCells = false;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
@@ -291,14 +306,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -310,9 +322,15 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
+          } else if (blobLen >= BlobTransfer.cellThreshold) {
+            hasWrappedCells = true;
+            // Copies native -> external instead of native -> heap; see
+            // [BlobTransfer.cellThreshold].
+            values[writeIdx++] = TransferableTypedData.fromList([
+              ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
+            ]);
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -327,7 +345,12 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(values, schema, rowCount, byteEstimate);
+  return RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    hasWrappedCells: hasWrappedCells,
+  );
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -346,7 +369,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   final values = List<Object?>.filled(colCount * 256, null, growable: true);
   var writeIdx = 0;
   var rowCount = 0;
-  var byteEstimate = 0;
+  var hasWrappedCells = false;
   initialHashSlot.value = _fnvOffsetBasis;
 
   var rc = resqliteStepRowHash(stmt, colCount, buf, initialHashSlot);
@@ -363,14 +386,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
       switch (type) {
         case sqliteInteger:
           values[writeIdx++] = cellsI64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-          byteEstimate += 8;
         case sqliteText:
           final textAddr = cellsI64[i64Base + valI64];
           final textLen = cellsI32[i32Base + lenI32];
-          byteEstimate += textLen;
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -382,9 +402,15 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          byteEstimate += blobLen;
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
+          } else if (blobLen >= BlobTransfer.cellThreshold) {
+            hasWrappedCells = true;
+            // Copies native -> external instead of native -> heap; see
+            // [BlobTransfer.cellThreshold].
+            values[writeIdx++] = TransferableTypedData.fromList([
+              ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
+            ]);
           } else {
             values[writeIdx++] = Uint8List.fromList(
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
@@ -399,6 +425,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(values, schema, rowCount, byteEstimate);
+  final raw = RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    hasWrappedCells: hasWrappedCells,
+  );
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }

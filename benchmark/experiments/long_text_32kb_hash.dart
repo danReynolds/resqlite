@@ -67,8 +67,7 @@ Future<int> _roundUs(String dirPath, int round) async {
   const insertSql =
       'INSERT INTO long_items32(id, body, marker) VALUES (?, ?, ?)';
   await db.executeBatch(insertSql, [
-    for (var i = 0; i < _rowCount; i++)
-      [i, _payload(_cellBytes, i), i],
+    for (var i = 0; i < _rowCount; i++) [i, _payload(_cellBytes, i), i],
   ]);
 
   final unchangedEmissions = List<int>.filled(_unchangedStreamCount, 0);
@@ -95,7 +94,8 @@ Future<int> _roundUs(String dirPath, int round) async {
   // wave has reached the main isolate.
   final barrierReady = Completer<void>();
   Completer<void>? waitBarrier;
-  final barrierSub = db.stream('SELECT id, body FROM long_items32 ORDER BY id')
+  final barrierSub = db
+      .stream('SELECT id, body FROM long_items32 ORDER BY id')
       .listen((_) {
         if (!barrierReady.isCompleted) {
           barrierReady.complete();
@@ -104,8 +104,9 @@ Future<int> _roundUs(String dirPath, int round) async {
         }
       });
 
-  await Future.wait(unchangedReady.map((c) => c.future))
-      .timeout(const Duration(seconds: 60));
+  await Future.wait(
+    unchangedReady.map((c) => c.future),
+  ).timeout(const Duration(seconds: 60));
   await barrierReady.future.timeout(const Duration(seconds: 60));
 
   final before = List<int>.from(unchangedEmissions);

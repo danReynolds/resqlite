@@ -40,10 +40,7 @@ Future<void> main() async {
   }
 
   _report('sequential-awaited ($_sequentialWrites writes)', sequential);
-  _report(
-    'concurrent-burst ($_burstsPerRound x $_burstSize writes)',
-    burst,
-  );
+  _report('concurrent-burst ($_burstsPerRound x $_burstSize writes)', burst);
   _report('transaction-guardrail ($_txPerRound tx x $_writesPerTx)', tx);
 
   await dir.delete(recursive: true);

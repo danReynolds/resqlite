@@ -14,12 +14,7 @@ import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
 
-Future<int> _medianUs(
-  Database db,
-  String sql,
-  int iters,
-  int rounds,
-) async {
+Future<int> _medianUs(Database db, String sql, int iters, int rounds) async {
   final samples = <int>[];
   for (var r = 0; r < rounds; r++) {
     final sw = Stopwatch()..start();
@@ -45,10 +40,9 @@ Future<void> _lane({
   try {
     await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
     final body = 'x' * bodyLen;
-    await db.executeBatch(
-      'INSERT INTO t(id, body) VALUES (?, ?)',
-      [for (var i = 0; i < rows; i++) [i, '$body-$i']],
-    );
+    await db.executeBatch('INSERT INTO t(id, body) VALUES (?, ?)', [
+      for (var i = 0; i < rows; i++) [i, '$body-$i'],
+    ]);
     const sql = 'SELECT id, body FROM t ORDER BY id';
     final probe = await db.selectBytes(sql);
     // warm up
@@ -68,6 +62,16 @@ Future<void> _lane({
 
 Future<void> main() async {
   stdout.writeln('=== selectBytes native-view transfer (exp 174) ===');
-  await _lane(label: 'large-bytes (>256KB)', rows: 2000, bodyLen: 300, iters: 150);
-  await _lane(label: 'small-bytes (<256KB)', rows: 1000, bodyLen: 40, iters: 2000);
+  await _lane(
+    label: 'large-bytes (>256KB)',
+    rows: 2000,
+    bodyLen: 300,
+    iters: 150,
+  );
+  await _lane(
+    label: 'small-bytes (<256KB)',
+    rows: 1000,
+    bodyLen: 40,
+    iters: 2000,
+  );
 }

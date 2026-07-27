@@ -95,11 +95,16 @@ Future<String> _sequentialAwaitedShape(String dirPath) async {
     await db.execute('DELETE FROM items');
   }
   await db.close();
-  return _format('sequential-awaited ($_sequentialWrites writes, no streams)', timings);
+  return _format(
+    'sequential-awaited ($_sequentialWrites writes, no streams)',
+    timings,
+  );
 }
 
 String _wideCreate() {
-  final cols = [for (var i = 0; i < _wideBatchParams; i++) 'c$i TEXT'].join(', ');
+  final cols = [
+    for (var i = 0; i < _wideBatchParams; i++) 'c$i TEXT',
+  ].join(', ');
   return 'CREATE TABLE wide(id INTEGER PRIMARY KEY, $cols)';
 }
 
@@ -161,7 +166,10 @@ Future<String> _streamGuardShape(String dirPath) async {
   }
   await sub.cancel();
   await db.close();
-  return _format('with-streams guardrail ($_streamGuardWrites writes, 1 stream)', timings);
+  return _format(
+    'with-streams guardrail ($_streamGuardWrites writes, 1 stream)',
+    timings,
+  );
 }
 
 String _format(String name, List<int> roundsUs) {

@@ -27,8 +27,12 @@ Future<void> main() async {
   await Future<void>.delayed(const Duration(milliseconds: 100));
 
   print('=== resqlite db_status probe ===\n');
-  print('This aggregates sqlite3_db_status() across the writer and idle readers.');
-  print('High cache hit rates and zero spill usually mean page-cache tuning is not urgent.\n');
+  print(
+    'This aggregates sqlite3_db_status() across the writer and idle readers.',
+  );
+  print(
+    'High cache hit rates and zero spill usually mean page-cache tuning is not urgent.\n',
+  );
 
   await _runWorkload(
     db,
@@ -89,21 +93,21 @@ Future<void> _runWriteBurst(Database db, int writes) async {
 }
 
 _Snapshot _snapshot(Database db) => {
-      'cache_used': native.getDbStatusTotal(db.handle, _dbStatusCacheUsed),
-      'cache_hit': native.getDbStatusTotal(db.handle, _dbStatusCacheHit),
-      'cache_miss': native.getDbStatusTotal(db.handle, _dbStatusCacheMiss),
-      'cache_spill': native.getDbStatusTotal(db.handle, _dbStatusCacheSpill),
-      'lookaside_used': native.getDbStatusTotal(db.handle, _dbStatusLookasideUsed),
-      'lookaside_hit': native.getDbStatusTotal(db.handle, _dbStatusLookasideHit),
-      'lookaside_miss_size': native.getDbStatusTotal(
-        db.handle,
-        _dbStatusLookasideMissSize,
-      ),
-      'lookaside_miss_full': native.getDbStatusTotal(
-        db.handle,
-        _dbStatusLookasideMissFull,
-      ),
-    };
+  'cache_used': native.getDbStatusTotal(db.handle, _dbStatusCacheUsed),
+  'cache_hit': native.getDbStatusTotal(db.handle, _dbStatusCacheHit),
+  'cache_miss': native.getDbStatusTotal(db.handle, _dbStatusCacheMiss),
+  'cache_spill': native.getDbStatusTotal(db.handle, _dbStatusCacheSpill),
+  'lookaside_used': native.getDbStatusTotal(db.handle, _dbStatusLookasideUsed),
+  'lookaside_hit': native.getDbStatusTotal(db.handle, _dbStatusLookasideHit),
+  'lookaside_miss_size': native.getDbStatusTotal(
+    db.handle,
+    _dbStatusLookasideMissSize,
+  ),
+  'lookaside_miss_full': native.getDbStatusTotal(
+    db.handle,
+    _dbStatusLookasideMissFull,
+  ),
+};
 
 void _printWorkload(
   String name,

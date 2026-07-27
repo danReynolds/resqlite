@@ -1,6 +1,26 @@
 import 'dart:collection';
+import 'dart:isolate';
 
 const _identityLookupMaxColumns = 32;
+
+/// Materializes wrapped blob cells back to `Uint8List` at a main-isolate
+/// receive boundary, so the public surface only ever exposes `Uint8List`.
+/// The receive half of the system in blob_transfer.dart; rationale in
+/// doc/arch/cross-isolate-data-transfer.md.
+///
+/// Mutates in place: the values list arrived with this message and has no
+/// other observer yet. Lives here, not blob_transfer.dart, for private access
+/// to [ResultSet]'s values.
+void materializeTransferableBlobCells(List<Map<String, Object?>> rows) {
+  if (rows is! ResultSet || !rows.hasWrappedCells) return;
+  final values = rows._values;
+  for (var i = 0; i < values.length; i++) {
+    final value = values[i];
+    if (value is TransferableTypedData) {
+      values[i] = value.materialize().asUint8List();
+    }
+  }
+}
 
 /// Column metadata shared across all rows in a [ResultSet].
 ///
@@ -55,13 +75,25 @@ final class RowSchema {
 ///
 /// This design minimizes the object count for isolate transfer — only the
 /// flat values list, [RowSchema], and the [ResultSet] wrapper cross the
-/// isolate boundary. [Row] objects are created on the receiving side.
+/// isolate boundary. [Row] objects are created on the receiving side. That
+/// count is also what transfer cost scales with, so it is what the reader's
+/// sacrifice decision keys on (`sacrificeSlotThreshold`).
 final class ResultSet with ListMixin<Row> {
-  ResultSet(this._values, this._schema, this._rowCount);
+  ResultSet(
+    this._values,
+    this._schema,
+    this._rowCount, {
+    this.hasWrappedCells = false,
+  });
 
   final List<Object?> _values;
   final RowSchema _schema;
   final int _rowCount;
+
+  /// Whether any cell crossed as [TransferableTypedData]; see
+  /// [materializeTransferableBlobCells]. Decode-derived results must be built
+  /// via `RawQueryResult.toResultSet`, which threads this correctly.
+  final bool hasWrappedCells;
 
   @override
   int get length => _rowCount;
@@ -113,8 +145,7 @@ final class Row with MapMixin<String, Object?> {
   }
 
   @override
-  bool containsKey(Object? key) =>
-      key is String && _schema.containsName(key);
+  bool containsKey(Object? key) => key is String && _schema.containsName(key);
 
   @override
   bool containsValue(Object? value) {

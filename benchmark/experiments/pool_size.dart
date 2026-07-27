@@ -56,7 +56,9 @@ Future<void> main() async {
       final totalQueries = batches * concurrency;
       final wallMs = sw.elapsedMicroseconds / 1000;
       final perQueryMs = wallMs / totalQueries;
-      print('  Concurrent $concurrency × 100 rows: ${perQueryMs.toStringAsFixed(2)} ms/query  (${wallMs.toStringAsFixed(0)} ms total for $totalQueries queries)');
+      print(
+        '  Concurrent $concurrency × 100 rows: ${perQueryMs.toStringAsFixed(2)} ms/query  (${wallMs.toStringAsFixed(0)} ms total for $totalQueries queries)',
+      );
     }
 
     // --- Sacrifice recovery (large result triggers respawn) ---
@@ -74,7 +76,9 @@ Future<void> main() async {
         await Future.delayed(Duration(milliseconds: 100)); // respawn time
       }
       times.sort();
-      print('  Sacrifice + respawn (5k rows): ${(times[times.length ~/ 2] / 1000).toStringAsFixed(2)} ms median');
+      print(
+        '  Sacrifice + respawn (5k rows): ${(times[times.length ~/ 2] / 1000).toStringAsFixed(2)} ms median',
+      );
     }
 
     print('');

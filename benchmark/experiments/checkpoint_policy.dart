@@ -70,7 +70,9 @@ Future<_PolicyResult> _runPolicy(
 
     if ((i + 1) % 200 == 0) {
       final readSw = Stopwatch()..start();
-      await db.select('SELECT count(*) AS count FROM events WHERE id > ?', [i - 100]);
+      await db.select('SELECT count(*) AS count FROM events WHERE id > ?', [
+        i - 100,
+      ]);
       readSw.stop();
       readLatenciesUs.add(readSw.elapsedMicroseconds);
     }
@@ -86,14 +88,20 @@ Future<_PolicyResult> _runPolicy(
     writeP95Ms: _percentileMs(latenciesUs, 0.95),
     writeP99Ms: _percentileMs(latenciesUs, 0.99),
     writeMaxMs: _percentileMs(latenciesUs, 1.0),
-    readP95Ms: readLatenciesUs.isEmpty ? 0 : _percentileMs(readLatenciesUs, 0.95),
-    checkpointP95Ms: checkpointUs.isEmpty ? null : _percentileMs(checkpointUs, 0.95),
+    readP95Ms: readLatenciesUs.isEmpty
+        ? 0
+        : _percentileMs(readLatenciesUs, 0.95),
+    checkpointP95Ms: checkpointUs.isEmpty
+        ? null
+        : _percentileMs(checkpointUs, 0.95),
     walStats: walStats.first,
   );
 }
 
 void _printComparison(_PolicyResult baseline, _PolicyResult manual) {
-  print('| Policy | Write p50 | Write p95 | Write p99 | Write max | Read p95 | Checkpoint p95 | WAL noop |');
+  print(
+    '| Policy | Write p50 | Write p95 | Write p99 | Write max | Read p95 | Checkpoint p95 | WAL noop |',
+  );
   print('|---|---:|---:|---:|---:|---:|---:|---|');
   for (final result in [baseline, manual]) {
     final walBusy = result.walStats['busy'];

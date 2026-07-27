@@ -85,14 +85,12 @@ Future<void> _oneShotLargeShape() async {
     );
     final smallBody = 'x' * _smallBodyLen;
     final bigBody = 'B' * _largeBodyLen;
-    await db.executeBatch(
-      'INSERT INTO small(id, body) VALUES (?, ?)',
-      [for (var i = 0; i < _smallRows; i++) [i, '$smallBody-$i']],
-    );
-    await db.executeBatch(
-      'INSERT INTO big(id, body) VALUES (?, ?)',
-      [for (var i = 0; i < _largeRows; i++) [i, '$bigBody-$i']],
-    );
+    await db.executeBatch('INSERT INTO small(id, body) VALUES (?, ?)', [
+      for (var i = 0; i < _smallRows; i++) [i, '$smallBody-$i'],
+    ]);
+    await db.executeBatch('INSERT INTO big(id, body) VALUES (?, ?)', [
+      for (var i = 0; i < _largeRows; i++) [i, '$bigBody-$i'],
+    ]);
 
     final smallSql = 'SELECT id, body FROM small ORDER BY id';
     final bigSql = 'SELECT id, body FROM big ORDER BY id';
@@ -139,14 +137,12 @@ Future<void> _recurringLargeShape() async {
     );
     final smallBody = 'x' * _smallBodyLen;
     final bigBody = 'B' * _largeBodyLen;
-    await db.executeBatch(
-      'INSERT INTO small(id, body) VALUES (?, ?)',
-      [for (var i = 0; i < _smallRows; i++) [i, '$smallBody-$i']],
-    );
-    await db.executeBatch(
-      'INSERT INTO big(id, body) VALUES (?, ?)',
-      [for (var i = 0; i < _largeRows; i++) [i, '$bigBody-$i']],
-    );
+    await db.executeBatch('INSERT INTO small(id, body) VALUES (?, ?)', [
+      for (var i = 0; i < _smallRows; i++) [i, '$smallBody-$i'],
+    ]);
+    await db.executeBatch('INSERT INTO big(id, body) VALUES (?, ?)', [
+      for (var i = 0; i < _largeRows; i++) [i, '$bigBody-$i'],
+    ]);
 
     final smallSql = 'SELECT id, body FROM small ORDER BY id';
     final bigSql = 'SELECT id, body FROM big ORDER BY id';
@@ -174,10 +170,9 @@ Future<void> _seed(Database db, int rows, int bodyLen) async {
     'CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT NOT NULL)',
   );
   final body = 'x' * bodyLen;
-  await db.executeBatch(
-    'INSERT INTO t(id, body) VALUES (?, ?)',
-    [for (var i = 0; i < rows; i++) [i, '$body-$i']],
-  );
+  await db.executeBatch('INSERT INTO t(id, body) VALUES (?, ?)', [
+    for (var i = 0; i < rows; i++) [i, '$body-$i'],
+  ]);
 }
 
 Future<void> _snap(Database db, String label) async {

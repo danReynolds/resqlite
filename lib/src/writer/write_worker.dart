@@ -19,9 +19,8 @@ import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
-import '../row.dart';
 import '../tracelite_profile.dart';
-import 'blob_param_transfer.dart';
+import '../blob_transfer.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -40,12 +39,8 @@ final class ExecuteRequest extends WriterRequest {
     List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-    // [EXP-234] Wrapping runs on the main isolate at construction time,
-    // before `SendPort.send`, so large blob params cross to the writer as
-    // `TransferableTypedData` (ownership move of a malloc'd buffer) instead
-    // of riding the object-graph copy onto the shared GC heap. Mechanism:
-    // lib/src/writer/blob_param_transfer.dart.
-  }) : params = wrapBlobParams(params);
+    // Wraps on the main isolate, before send; see blob_transfer.dart.
+  }) : params = blobTransfer.wrapParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -53,7 +48,13 @@ final class ExecuteRequest extends WriterRequest {
 /// A coalesced group of standalone writes (exp 180), each run as its own
 /// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
-  MultiExecuteRequest(this.writes, super.replyPort);
+  MultiExecuteRequest(
+    List<({String sql, List<Object?> params})> writes,
+    super.replyPort,
+  )
+    // Wraps on the main isolate like ExecuteRequest/QueryRequest — the
+    // group form shares one wrapper per unique buffer across the envelope.
+    : writes = blobTransfer.wrapParamsGroup(writes);
   final List<({String sql, List<Object?> params})> writes;
 }
 
@@ -65,7 +66,7 @@ final class QueryRequest extends WriterRequest {
     List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-  }) : params = wrapBlobParams(params);
+  }) : params = blobTransfer.wrapParams(params);
   final String sql;
   final List<Object?> params;
 }
@@ -256,8 +257,10 @@ void writerEntrypoint(List<Object> args) {
         // kill the writer isolate, leaving the caller hanging forever, so
         // fall back to a stripped copy that still delivers the failure.
         message.replyPort.send(
-          ResqliteException('${e.runtimeType}: $e (reply payload was not '
-              'sendable across isolates: $sendError)'),
+          ResqliteException(
+            '${e.runtimeType}: $e (reply payload was not '
+            'sendable across isolates: $sendError)',
+          ),
         );
       }
     } on Error catch (e, st) {
@@ -289,7 +292,7 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
   // [EXP-234] Materialize any TransferableTypedData blob params back to
   // Uint8List before binding. No-op (no allocation) when nothing was wrapped.
-  final params = unwrapBlobParams(msg.params);
+  final params = blobTransfer.unwrapParams(msg.params);
   final result = executeWrite(state.dbHandle, msg.sql, params);
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
@@ -308,15 +311,16 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
   // so outcomes[i] holds exactly statement i's modifications.
   final outcomes = <Object>[];
+  // One unwrapper spanning the group: a blob reused across its writes
+  // arrives as a single shared, single-use wrapper (see BlobUnwrapper).
+  final unwrapper = blobTransfer.unwrapper();
   for (final write in msg.writes) {
     try {
       final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-      // [EXP-234] Coalesced writes wrap large blobs like single writes do;
-      // materialize before binding (no-op when nothing was wrapped).
       final result = executeWrite(
         state.dbHandle,
         write.sql,
-        unwrapBlobParams(write.params),
+        unwrapper.unwrap(write.params),
       );
       final writerSqliteUs = _stopSqliteTimer(sqliteSw);
       final modifications = state.txDepth > 0
@@ -367,7 +371,7 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
   // materialized (spent) TransferableTypedData cannot cross a SendPort, so
   // an exception carrying `msg.params` would be unsendable and kill the
   // reply instead of delivering the failure.
-  final params = unwrapBlobParams(msg.params);
+  final params = blobTransfer.unwrapParams(msg.params);
   final paramsNative = allocateParams(params);
   try {
     final stmt = _resqliteStmtAcquireWriter(
@@ -386,7 +390,7 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     final raw = decodeQuery(stmt, msg.sql);
     msg.replyPort.send(
       QueryResponse(
-        ResultSet(raw.values, raw.schema, raw.rowCount),
+        raw.toResultSet(),
         writerSqliteUs: _stopSqliteTimer(sqliteSw),
       ),
     );
