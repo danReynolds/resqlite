@@ -1,0 +1,7 @@
+{
+  "file": "251-step-vs-decode.md",
+  "title": "SQLite step vs Dart decode (measurement)",
+  "impact": "Accepted measurement; motivating premise refuted. A native-asset-aware AOT harness directly decomposed the production worker query/decode code path across five fresh processes and four representative shapes. The direct worker-path full proxy is typically 84-94% of separately measured main-observed select() latency, but the split changes by shape: the mixed row is result-construction-heavy (63%), the small integer row is step-heavy (60%), and the other two are roughly even. Estimated result construction is 34-58% of observed latency, so neither phase generally dominates and a broad row-storage/decode rewrite has no universal target. This bounds exp 258's synthetic no-boxing build win inside the real path; its narrow Int64List main-consumer candidate remains workload-gated. Ships the focused harness and evidence only; no runtime or public API change.",
+  "status": "accepted",
+  "link": ""
+}
