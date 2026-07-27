@@ -91,7 +91,8 @@ final class BlobTransfer {
   BlobUnwrapper unwrapper() => BlobUnwrapper._();
 
   /// Restores wrapped params in a single-list envelope. A coalesced group
-  /// must use one [unwrapper] across all its lists instead.
+  /// must use one [unwrapper] across all its lists instead — a wrapper shared
+  /// across the group is single-use (see [BlobUnwrapper]).
   List<Object?> unwrapParams(List<Object?> params) =>
       BlobUnwrapper._().unwrap(params);
 
@@ -105,16 +106,20 @@ final class BlobTransfer {
 /// Restores wrapped params on the receiving isolate — one instance per
 /// message envelope.
 ///
-/// A blob reused within an envelope arrives as a single shared wrapper, and
-/// `materialize()` is single-use, so the *same* unwrapper must process every
-/// param list of the envelope: it materializes each wrapper once and hands
-/// every later occurrence the same view. See the write-envelope rule in
-/// doc/arch/cross-isolate-data-transfer.md §5.
+/// The per-wrapper dedup here is *correctness*, not caching: an aliased blob
+/// arrives as ONE wrapper referenced at every position (possibly spanning a
+/// coalesced group's writes), and `materialize()` is single-use — a second
+/// call on the same wrapper throws. So each wrapper is materialized exactly
+/// once and every other occurrence receives that same view — which also
+/// restores the sender's aliasing: positions that shared a buffer going in
+/// share one `Uint8List` coming out. Hence the lifetime rule: one unwrapper
+/// spans the whole envelope, and never outlives it. See the write-envelope
+/// rule in doc/arch/cross-isolate-data-transfer.md §5.
 final class BlobUnwrapper {
   BlobUnwrapper._();
 
-  /// Wrapper → materialized view; lazy so an envelope with nothing wrapped
-  /// allocates nothing.
+  /// Wrapper → its one materialized view (see class doc: dedup for
+  /// correctness). Lazy so an envelope with nothing wrapped allocates nothing.
   Map<TransferableTypedData, Uint8List>? _views;
 
   /// Returns [params] with any wrapped blob restored to a `Uint8List` view,
