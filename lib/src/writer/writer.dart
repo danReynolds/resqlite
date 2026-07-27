@@ -180,14 +180,9 @@ final class Writer {
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
-                // Wrapped across the whole group, so a buffer reused
-                // between coalesced writes crosses once.
-                (replyPort) => MultiExecuteRequest(
-                  blobTransfer.wrapParamsGroup([
-                    for (final p in group) (sql: p.sql, params: p.parameters),
-                  ]),
-                  replyPort,
-                ),
+                (replyPort) => MultiExecuteRequest([
+                  for (final p in group) (sql: p.sql, params: p.parameters),
+                ], replyPort),
               );
             }
           } finally {

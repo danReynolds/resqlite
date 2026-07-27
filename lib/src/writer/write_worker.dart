@@ -48,7 +48,13 @@ final class ExecuteRequest extends WriterRequest {
 /// A coalesced group of standalone writes (exp 180), each run as its own
 /// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
-  MultiExecuteRequest(this.writes, super.replyPort);
+  MultiExecuteRequest(
+    List<({String sql, List<Object?> params})> writes,
+    super.replyPort,
+  )
+    // Wraps on the main isolate like ExecuteRequest/QueryRequest — the
+    // group form shares one wrapper per unique buffer across the envelope.
+    : writes = blobTransfer.wrapParamsGroup(writes);
   final List<({String sql, List<Object?> params})> writes;
 }
 

@@ -249,7 +249,12 @@ String fastDecodeText(ffi.Pointer<ffi.Uint8> ptr, int len) {
 
 /// Raw query result before wrapping in ResultSet.
 final class RawQueryResult {
-  RawQueryResult(this.values, this.schema, this.rowCount, this.hasWrappedCells);
+  RawQueryResult(
+    this.values,
+    this.schema,
+    this.rowCount, {
+    required this.hasWrappedCells,
+  });
   final List<Object?> values;
   final RowSchema schema;
   final int rowCount;
@@ -340,7 +345,12 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  return RawQueryResult(values, schema, rowCount, hasWrappedCells);
+  return RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    hasWrappedCells: hasWrappedCells,
+  );
 }
 
 /// Decode a bound statement and compute the stream result hash in the same
@@ -415,6 +425,11 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
   values.length = writeIdx;
-  final raw = RawQueryResult(values, schema, rowCount, hasWrappedCells);
+  final raw = RawQueryResult(
+    values,
+    schema,
+    rowCount,
+    hasWrappedCells: hasWrappedCells,
+  );
   return (raw, _finishInitialHash(initialHashSlot.value, rowCount));
 }
