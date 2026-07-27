@@ -33,12 +33,7 @@ import 'package:resqlite/src/row.dart' show ResultSet, RowSchema;
 ResultSet _build(String shape) {
   switch (shape) {
     case 'empty':
-      return ResultSet(
-        <Object?>[],
-        RowSchema(const ['a']),
-        0,
-        hasWrappedCells: false,
-      );
+      return ResultSet(<Object?>[], RowSchema(const ['a']), 0);
     case 'num10kx20':
       return _numeric(10000, 20);
     case 'mixed10kx8':
@@ -70,7 +65,7 @@ ResultSet _numeric(int rows, int cols) {
       values[k++] = r * 31 + c;
     }
   }
-  return ResultSet(values, RowSchema(names), rows, hasWrappedCells: false);
+  return ResultSet(values, RowSchema(names), rows);
 }
 
 ResultSet _mixed(int rows) {
@@ -88,7 +83,7 @@ ResultSet _mixed(int rows) {
     values[k++] = 'status_${r % 5}';
     values[k++] = 'tag_$r';
   }
-  return ResultSet(values, RowSchema(names), rows, hasWrappedCells: false);
+  return ResultSet(values, RowSchema(names), rows);
 }
 
 ResultSet _bigString(int bytes) {
@@ -96,12 +91,7 @@ ResultSet _bigString(int bytes) {
   for (var i = 0; i < bytes; i++) {
     sb.writeCharCode(65 + (i % 26));
   }
-  return ResultSet(
-    <Object?>[sb.toString()],
-    RowSchema(const ['s']),
-    1,
-    hasWrappedCells: false,
-  );
+  return ResultSet(<Object?>[sb.toString()], RowSchema(const ['s']), 1);
 }
 
 // ---- child: exactly one timed observation, then exit ----

@@ -7,8 +7,7 @@ import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/row.dart' show materializeTransferableBlobCells;
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {

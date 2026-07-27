@@ -5,9 +5,12 @@ const _identityLookupMaxColumns = 32;
 
 /// Materializes wrapped blob cells back to `Uint8List` at a main-isolate
 /// receive boundary, so the public surface only ever exposes `Uint8List`.
+/// The receive half of the system in blob_transfer.dart; rationale in
+/// doc/arch/cross-isolate-data-transfer.md.
 ///
 /// Mutates in place: the values list arrived with this message and has no
-/// other observer yet.
+/// other observer yet. Lives here, not blob_transfer.dart, for private access
+/// to [ResultSet]'s values.
 void materializeTransferableBlobCells(List<Map<String, Object?>> rows) {
   if (rows is! ResultSet || !rows.hasWrappedCells) return;
   final values = rows._values;
@@ -80,7 +83,7 @@ final class ResultSet with ListMixin<Row> {
     this._values,
     this._schema,
     this._rowCount, {
-    required this.hasWrappedCells,
+    this.hasWrappedCells = false,
   });
 
   final List<Object?> _values;
@@ -88,7 +91,8 @@ final class ResultSet with ListMixin<Row> {
   final int _rowCount;
 
   /// Whether any cell crossed as [TransferableTypedData]; see
-  /// [materializeTransferableBlobCells].
+  /// [materializeTransferableBlobCells]. Decode-derived results must be built
+  /// via `RawQueryResult.toResultSet`, which threads this correctly.
   final bool hasWrappedCells;
 
   @override

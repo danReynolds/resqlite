@@ -11,7 +11,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 
 const _size = 256 * 1024;
 const _inserts = 300;

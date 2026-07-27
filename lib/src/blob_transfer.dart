@@ -1,56 +1,30 @@
-/// [EXP-234] How a BLOB write parameter travels from the main isolate to the
-/// writer isolate.
+/// How BLOBs cross isolate boundaries.
 ///
-/// Isolates share no mutable memory, so a `Uint8List` param has to be handed
-/// off. [wrapBlobParams], called where write requests are built on the main
-/// isolate, picks one of two routes per blob:
+/// A `Uint8List` is the one result/param value that `SendPort.send` must copy
+/// byte for byte (strings and numbers are shared by reference), so large blobs
+/// in either direction are wrapped in `TransferableTypedData`: the same single
+/// copy, but into malloc'd external memory the GC never traces, followed by an
+/// ownership move across the hop instead of a graph copy.
 ///
-/// - **direct** — blobs under [blobParamTransferThreshold] stay in the param
-///   list as-is and ride the `SendPort.send` object-graph copy like every
-///   other param value.
-/// - **wrapped** — larger blobs are replaced by a `TransferableTypedData`:
-///   a VM container whose constructor copies the bytes into malloc'd memory
-///   outside the GC heap, and which a send then hands to the receiver by
-///   ownership transfer instead of another copy. [unwrapBlobParams] on the
-///   writer turns it back into a `Uint8List` view via `materialize()` before
-///   binding.
+/// The whole system:
 ///
-/// Both routes copy the payload exactly once, on the main isolate — the win is
-/// not a removed copy, it is where the copy lands. For
-/// `db.execute('INSERT INTO doc(body) VALUES (?)', [blob])`:
+/// - **main → writer (params):** [wrapBlobParams] / [wrapBlobParamsGroup] wrap
+///   blobs ≥ [blobParamTransferThreshold]; the writer restores them with
+///   [unwrapBlobParams] before binding.
+/// - **worker → main (result cells):** the decode loop (query_decoder.dart)
+///   wraps cells ≥ [blobCellTransferThreshold]; main restores them with
+///   [materializeTransferableBlobCells] at each receive boundary.
 ///
-///   direct:  blob --graph copy--> GC-heap TypedData --> writer
-///            --> allocateParams arena --> SQLite page
-///   wrapped: blob --memcpy--> malloc'd buffer --ownership move--> writer
-///            materialize() view --> allocateParams arena --> SQLite page
-///
-/// Why the destination matters (Dart SDK `runtime/vm/object_graph_copy.cc`):
-/// the direct route's graph copy allocates its destination on the shared GC
-/// heap, so every in-flight blob is live young-generation data that the GC's
-/// copying young-generation collector (the "scavenger") must drag through
-/// each collection — and each collection safepoints the whole isolate group,
-/// including the writer mid-step, which the serialized request/reply protocol
-/// converts directly into write latency. A blob too large for the copier's
-/// fast-path new-space allocation also aborts onto the slow path
-/// (`CopyTypedDataBaseWithSafepointChecks`), which restarts the copy and
-/// memmoves in `kChunkSize` (100 KB) chunks with a safepoint poll between
-/// chunks — the send-side transfer of a multi-MB blob then costs roughly
-/// double a single plain memcpy of the same bytes. The wrapped route's buffer
-/// (`TransferableTypedData_factory`, Dart SDK `runtime/lib/isolate.cc`) is
-/// invisible to the GC, its send is a constant-time ownership move, and
-/// `materialize()` is a zero-copy view over the same buffer (single-use).
-///
-/// `TransferableTypedData.fromList` copies rather than takes — it does *not*
-/// neuter the caller's list — so the public contract (the caller keeps its
-/// blob) is preserved.
-///
-/// Evidence and measurements: experiments/234-blob-param-transfer.md and
-/// benchmark/experiments/blob_param_mechanism_proof.dart.
+/// Mechanism, measurements, and the bytes-vs-slots threshold split:
+/// doc/arch/cross-isolate-data-transfer.md. Experiments: 234 (params),
+/// 236 (cells), 243 (aliased params).
 library;
 
 import 'dart:collection';
 import 'dart:isolate';
 import 'dart:typed_data';
+
+export 'row.dart' show materializeTransferableBlobCells;
 
 /// Minimum blob size (bytes) to route through `TransferableTypedData`.
 ///
@@ -71,6 +45,18 @@ import 'dart:typed_data';
 /// repaid by the graph copy it avoids. Mutable so a benchmark can force the
 /// unwrapped lane.
 int blobParamTransferThreshold = 256 * 1024;
+
+/// Minimum blob-cell size for the worker→main direction: result cells at or
+/// above this decode straight into `TransferableTypedData` instead of a heap
+/// `Uint8List` (see query_decoder.dart's decode loops).
+///
+/// A const define, not a variable like [blobParamTransferThreshold]: the
+/// decode loop runs on worker isolates, which never see a main-isolate
+/// assignment, so only a compile-time value reaches every isolate.
+const int blobCellTransferThreshold = int.fromEnvironment(
+  'RESQLITE_BLOB_CELL_TRANSFER_THRESHOLD',
+  defaultValue: 256 * 1024,
+);
 
 /// Wrap large `Uint8List` blob params in `TransferableTypedData` so their
 /// one isolate-hop copy lands in malloc'd external memory (then moves by

@@ -27,7 +27,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/query_decoder.dart' show blobCellTransferThreshold;
+import 'package:resqlite/src/blob_transfer.dart' show blobCellTransferThreshold;
 
 const _selectsPerSample = 30;
 const _samples = 9;

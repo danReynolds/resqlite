@@ -45,7 +45,7 @@ floor — the same bar exp 234 cleared.
 ## Approach
 
 Extend the exp 234 helper family in
-[`lib/src/writer/blob_param_transfer.dart`](../lib/src/writer/blob_param_transfer.dart)
+[`lib/src/blob_transfer.dart`](../lib/src/blob_transfer.dart)
 with `wrapBlobParamSets` / `unwrapBlobParamSets`, which apply the existing
 per-list `wrapBlobParams` / `unwrapBlobParams` across a `List<List<Object?>>`,
 rebuilding only the sets that changed and only the outer list when at least one

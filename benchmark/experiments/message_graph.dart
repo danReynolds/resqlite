@@ -294,7 +294,7 @@ List<Map<String, Object?>> _buildPayload(_Config config) {
   final (schema, values) = _buildFlatValues(config.dataset, config.rowCount);
   switch (config.shape) {
     case _PayloadShape.current:
-      return ResultSet(values, schema, config.rowCount, hasWrappedCells: false)
+      return ResultSet(values, schema, config.rowCount)
           as List<Map<String, Object?>>;
     case _PayloadShape.materializedMaps:
       final rows = List<Map<String, Object?>>.generate(config.rowCount, (row) {

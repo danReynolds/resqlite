@@ -14,6 +14,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'blob_transfer.dart' show blobCellTransferThreshold;
 import 'exceptions.dart';
 import 'row.dart';
 
@@ -113,19 +114,6 @@ const int cellOffLen = 4;
 const int cellOffVal = 8;
 
 const int asciiMask = 0x8080808080808080;
-
-/// Minimum blob-cell size to decode into `TransferableTypedData` rather than a
-/// heap `Uint8List`, putting the payload in external memory the GC never traces.
-///
-/// Bytes here, unlike the slot-based sacrifice threshold: a `Uint8List` is
-/// mutable, so `send` really does copy it byte for byte.
-///
-/// A define rather than a variable because the decode loop runs on worker
-/// isolates, which never see a main-isolate assignment.
-const int blobCellTransferThreshold = int.fromEnvironment(
-  'RESQLITE_BLOB_CELL_TRANSFER_THRESHOLD',
-  defaultValue: 256 * 1024,
-);
 
 // Pre-computed typed-index strides.
 const int cellI32s = cellSize ~/ 4; // 4
@@ -269,6 +257,14 @@ final class RawQueryResult {
   /// Whether any cell was wrapped in [TransferableTypedData]. Lets the receive
   /// boundary skip its scan entirely when nothing needs materializing.
   final bool hasWrappedCells;
+
+  /// The one conversion from decoded result to caller-facing [ResultSet].
+  ///
+  /// Threads [hasWrappedCells] across the isolate hop so the main-isolate
+  /// receive boundary knows whether [materializeTransferableBlobCells] has any
+  /// work; build decode-derived [ResultSet]s through this, not by hand.
+  ResultSet toResultSet() =>
+      ResultSet(values, schema, rowCount, hasWrappedCells: hasWrappedCells);
 }
 
 // ---------------------------------------------------------------------------

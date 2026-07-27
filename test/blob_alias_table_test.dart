@@ -7,7 +7,7 @@
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 import 'package:test/test.dart';
 
 Uint8List bigOf(int seed) =>

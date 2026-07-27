@@ -70,18 +70,15 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int lastRowCount;
 }
 
-/// Flat-list cells (rows × columns) above which a row result is handed over by
-/// `Isolate.exit` instead of `SendPort.send`.
+/// How large a result's *structure* (rows × columns) can grow before handing
+/// it to main via `Isolate.exit` — sacrificing this worker — beats sending it.
 ///
-/// Slots, not bytes: `send` copies the values array but *shares* string/number
-/// leaves, so decoded size says nothing about transfer cost. Routing on bytes
-/// sacrificed few-row/big-TEXT results to avoid a copy that never happened
-/// ([EXP-246](../../../experiments/246-slot-sacrifice-guard.md)).
-///
-/// Set below the ~48k intrinsic crossover because the send copy blocks the
-/// worker from taking its next request
-/// ([EXP-245](../../../experiments/245-prepared-result-handoff.md),
-/// [EXP-244](../../../experiments/244-pool-burst-eager-respawn.md)).
+/// Structure is the only thing `send` actually copies; string and number
+/// leaves are shared. So the result's shape, never its byte size, picks the
+/// cheaper transfer — a byte threshold here once respawned a reader on every
+/// big-TEXT read to avoid a copy that was never going to happen.
+/// Full mechanism and the measurements behind this value (exp 244/245/246):
+/// doc/arch/cross-isolate-data-transfer.md §6a.
 const int sacrificeSlotThreshold = int.fromEnvironment(
   'RESQLITE_SLOT_THRESHOLD',
   defaultValue: 32 * 1024,
@@ -292,14 +289,7 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
 /// `List<Map<String, Object?>>` shape the pool / stream engine consumes.
 /// The cast is a type-system formality — `ResultSet implements List<Row>`
 /// and `Row implements Map<String, Object?>`, so it's always safe.
-List<Map<String, Object?>> _toRows(RawQueryResult raw) =>
-    ResultSet(
-          raw.values,
-          raw.schema,
-          raw.rowCount,
-          hasWrappedCells: raw.hasWrappedCells,
-        )
-        as List<Map<String, Object?>>;
+List<Map<String, Object?>> _toRows(RawQueryResult raw) => raw.toResultSet();
 
 /// Acquire the stmt on the dedicated reader, run `body`, and release
 /// native params + SQL buffer. All `executeQuery*` helpers below share

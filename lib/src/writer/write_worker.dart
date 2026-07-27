@@ -20,9 +20,8 @@ import '../native/request_cache.dart';
 import '../native/resqlite_bindings.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart';
-import '../row.dart';
 import '../tracelite_profile.dart';
-import 'blob_param_transfer.dart';
+import '../blob_transfer.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -41,11 +40,7 @@ final class ExecuteRequest extends WriterRequest {
     List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-    // [EXP-234] Wrapping runs on the main isolate at construction time,
-    // before `SendPort.send`, so large blob params cross to the writer as
-    // `TransferableTypedData` (ownership move of a malloc'd buffer) instead
-    // of riding the object-graph copy onto the shared GC heap. Mechanism:
-    // lib/src/writer/blob_param_transfer.dart.
+    // Wraps on the main isolate, before send; see blob_transfer.dart.
   }) : params = wrapBlobParams(params);
   final String sql;
   final List<Object?> params;
@@ -311,10 +306,11 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   // statement is its own autocommit. resqlite_get_dirty_tables resets on read,
   // so outcomes[i] holds exactly statement i's modifications.
   final outcomes = <Object>[];
-  // [EXP-243] One materialize cache shared across the whole group: a buffer
-  // reused across writes crosses as a single TransferableTypedData, and a
-  // wrapper is single-use, so the second write's unwrap must reuse the first
-  // write's materialized view rather than re-materialize a spent wrapper.
+  // A blob reused across the group's writes arrives as ONE shared wrapper,
+  // and materialize() is single-use — so unwrapping must share this cache
+  // across the loop, or the second write would materialize a spent wrapper
+  // and throw. See the write-envelope rule in
+  // doc/arch/cross-isolate-data-transfer.md §5.
   final unwrapCache = <TransferableTypedData, Uint8List>{};
   for (final write in msg.writes) {
     try {
@@ -392,12 +388,7 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     final raw = decodeQuery(stmt, msg.sql);
     msg.replyPort.send(
       QueryResponse(
-        ResultSet(
-          raw.values,
-          raw.schema,
-          raw.rowCount,
-          hasWrappedCells: raw.hasWrappedCells,
-        ),
+        raw.toResultSet(),
         writerSqliteUs: _stopSqliteTimer(sqliteSw),
       ),
     );

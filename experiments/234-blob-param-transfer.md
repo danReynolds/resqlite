@@ -61,7 +61,7 @@ established by same-code-path controls below the wrap threshold.
 ## Approach
 
 New internal helper
-[`lib/src/writer/blob_param_transfer.dart`](../lib/src/writer/blob_param_transfer.dart):
+[`lib/src/blob_transfer.dart`](../lib/src/blob_transfer.dart):
 
 - `wrapBlobParams(params)` — on the main isolate, replace any `Uint8List` with
   `length >= blobParamTransferThreshold` (256 KB) by

@@ -54,10 +54,12 @@ double _p95(List<double> xs) {
 }
 
 void _report(String label, List<double> samples) {
-  print('$label  single-write emit latency ms: '
-      'p50=${_median(samples).toStringAsFixed(3)} '
-      'p95=${_p95(samples).toStringAsFixed(3)} '
-      '(n=${samples.length})');
+  print(
+    '$label  single-write emit latency ms: '
+    'p50=${_median(samples).toStringAsFixed(3)} '
+    'p95=${_p95(samples).toStringAsFixed(3)} '
+    '(n=${samples.length})',
+  );
 }
 
 class _LatencyHarness {
@@ -82,8 +84,10 @@ class _LatencyHarness {
     final dir = await Directory.systemTemp.createTemp('exp249lat_');
     final db = await Database.open('${dir.path}/t.db');
 
-    await db.execute('CREATE TABLE items('
-        'id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL, value INTEGER)');
+    await db.execute(
+      'CREATE TABLE items('
+      'id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL, value INTEGER)',
+    );
     await db.execute('CREATE INDEX items_owner ON items(owner_id)');
 
     final rows = <List<Object?>>[];
@@ -94,7 +98,9 @@ class _LatencyHarness {
       }
     }
     await db.executeBatch(
-        'INSERT INTO items(owner_id, value) VALUES (?, ?)', rows);
+      'INSERT INTO items(owner_id, value) VALUES (?, ?)',
+      rows,
+    );
 
     final repId = <int, int>{};
     var id = 1;
@@ -120,15 +126,18 @@ class _LatencyHarness {
     for (var owner = 1; owner <= 100; owner++) {
       final o = owner;
       final sub = _db
-          .stream('SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
-              [o]).listen((_) {
-        drained[o] = true;
-        final w = _emitWaiters[o];
-        if (w != null && !w.isCompleted) {
-          _emitWaiters[o] = null;
-          w.complete();
-        }
-      });
+          .stream(
+            'SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
+            [o],
+          )
+          .listen((_) {
+            drained[o] = true;
+            final w = _emitWaiters[o];
+            if (w != null && !w.isCompleted) {
+              _emitWaiters[o] = null;
+              w.complete();
+            }
+          });
       _subs.add(sub);
     }
     await _waitUntil(() {
@@ -154,8 +163,10 @@ class _LatencyHarness {
     final waiter = _emitWaiters[target] = Completer<void>();
     final id = _ownerRepId[target]!;
     final sw = Stopwatch()..start();
-    await _db.execute(
-        'UPDATE items SET value = ? WHERE id = ?', [_nextVal++, id]);
+    await _db.execute('UPDATE items SET value = ? WHERE id = ?', [
+      _nextVal++,
+      id,
+    ]);
     await waiter.future;
     sw.stop();
     // Short inter-trial pause: keeps the reader pool warm (the sustained
@@ -174,8 +185,10 @@ class _LatencyHarness {
   }
 }
 
-Future<void> _waitUntil(bool Function() predicate,
-    {Duration timeout = const Duration(seconds: 120)}) async {
+Future<void> _waitUntil(
+  bool Function() predicate, {
+  Duration timeout = const Duration(seconds: 120),
+}) async {
   final deadline = DateTime.now().add(timeout);
   while (!predicate()) {
     if (DateTime.now().isAfter(deadline)) {

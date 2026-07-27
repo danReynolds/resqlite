@@ -30,7 +30,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
-import 'package:resqlite/src/writer/blob_param_transfer.dart';
+import 'package:resqlite/src/blob_transfer.dart';
 
 const _sizes = <int>[
   64 * 1024, // control (< threshold): candidate == baseline, both direct
