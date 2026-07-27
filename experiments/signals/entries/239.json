@@ -14,5 +14,12 @@
     "Do not retry queue-depth-only transparent select batching, tune its batch width, or move its threshold around the heterogeneous guard. Hidden grouping needs either a reliable private pre-execution cost signal (without SQL parsing/public annotations) or a protocol that can complete members independently while retaining enough message amortization.",
     "Keep `benchmark/experiments/select_overflow_batch.dart` as the durable gate for any request-coalescing revisit: both twenty-way homogeneous small-read targets must clear 15%, four-way/sequential controls must stay neutral, twenty 10k-row throughput/RSS must stay bounded, and alternating large/point completion p95 must remain inside 10% in both orderings.",
     "If resqlite's public-API policy changes, exp 209 remains the simpler explicit batching implementation because caller choice exposes the batch-versus-parallel trade-off instead of guessing it. The transparent prototype is preserved at `archive/exp-239`; do not restore it without solving heterogeneous head-of-line blocking and the sacrifice close race."
+  ],
+  "claims": [
+    {
+      "id": "239.1",
+      "text": "Batching only already-parked plain selects in pool-sharded envelopes (capped at four) improves 20 point reads ~-26/-33% without a new public API; sharding avoids exp 209's one-worker large-read collapse. Rejected as shipped complexity, preserved as potential.",
+      "conditions": "M1 Pro · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

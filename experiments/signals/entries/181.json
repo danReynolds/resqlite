@@ -12,5 +12,12 @@
     "do not retry FNV loop unrolling on the existing long-text, long-payload, or single-stream public stream workloads",
     "if long-payload unchanged hashing becomes hot again, use a direct resqlite_query_hash microbenchmark or production profile to split SQLite value access, hashing, reader dispatch, and reply delivery before implementing another hash-loop variant",
     "the one-reader harness is a measurement tool only; it is not evidence for a public Database.open reader-count option"
+  ],
+  "claims": [
+    {
+      "id": "181.1",
+      "text": "Removing reader-pool parallelism (one-reader runtime, 64x64KB payloads) still shows no 16-byte FNV win over the 8-byte fold; the single-stream candidate from exp 173 is consumed.",
+      "conditions": "M1 Pro · single reader · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

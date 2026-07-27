@@ -15,5 +15,12 @@
     "New SIMD kernel authoring rule: place the SIMD body in its own `__attribute__((noinline))` function so the scalar hot path in the caller stays byte-identical to the pre-SIMD layout. Dispatch via a single length check in the caller (`if (len >= K) return simd_bulk(...)`); do not inline the SIMD body into the caller even under compiler pressure to do so.",
     "Non-ARM64 targets (x86_64, 32-bit ARM, Windows) still hit the scalar 12-bit-LUT path exp 225 established. Wall time on those targets is unchanged; no non-ARM regression is possible.",
     "Do not retry wider scalar unroll bodies (exp 218) or wider scalar LUTs (a 24-bit table is 16 MiB — signals note). The remaining scalar headroom is closed; further BLOB encoder wins require SIMD or a workload/profile that shifts what dominates."
+  ],
+  "claims": [
+    {
+      "id": "229.1",
+      "text": "native/resqlite.c is no longer ISA-agnostic-scalar-only: a NEON vqtbl4q_u8 base64 kernel (~2x on 4KB payloads) ships behind an __aarch64__ gate with the scalar 12-bit-LUT encoder as fallback. Keep SIMD kernels noinline so the small-input scalar path's code gen is untouched.",
+      "conditions": "M1 Pro · AOT · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

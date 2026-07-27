@@ -11,5 +11,12 @@
   "nextSignals": [
     "do not retry this by broadening the SQL/schema recognizer; use `archive/exp-134` only as implementation evidence",
     "revive row-level dependency precision only if a real workload shows keyed-PK miss writes dominate or the API/design can express watched row identity directly"
+  ],
+  "claims": [
+    {
+      "id": "134.1",
+      "text": "Row-level dirty precision can remove the keyed-PK miss-path cost (intersection_entries 10000 -> 3; writer-burst wall 25.54 -> 12.45 ms) — rejected as shipped complexity, preserved as potential.",
+      "conditions": "M1 Pro · prototype · 2026-05 · backfilled 2026-07"
+    }
   ]
 }

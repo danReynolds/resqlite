@@ -10,5 +10,12 @@
   "nextSignals": [
     "watch release-suite Wide Batch Insert and narrow Batch Insert together because the public suite is still ASCII-heavy",
     "only pursue blob-heavy or broader embedded-NUL work with a workload that crosses the same large/wide guard"
+  ],
+  "claims": [
+    {
+      "id": "126.1",
+      "text": "Direct UTF-8 payload writing removes the same per-string allocation for non-ASCII batches (focused Unicode 10k x20 -13.5%, emoji -27.8%), with Dart-compatible surrogate handling private to the encoder.",
+      "conditions": "M1 Pro · 2026-05 · backfilled 2026-07"
+    }
   ]
 }

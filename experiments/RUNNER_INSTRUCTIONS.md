@@ -91,6 +91,14 @@ explain why the attempt is worth a bounded pass in light of prior work.
 
 Inside each direction, the fields you should actually read first:
 
+- `beliefs` — the generated current belief set: what this direction currently
+  holds true (`live`), each claim with its source experiment and measurement
+  conditions, plus what has been revised (`superseded` / `refuted`). Read this
+  *before* the prose: it is the fastest correct answer to "what do we know,
+  and on what evidence." Check `coverage` — where `entriesWithClaims` is well
+  below `entriesInDirection`, `currentRead` still holds beliefs that were
+  never distilled into claims, so read it too. **Never cite a superseded or
+  refuted claim's number as current**; cite what superseded it.
 - `keyPriors` — the experiments you must understand to evaluate work in
   this direction. Read all of them.
 - `blockedOnMeasurement` — if non-empty, the next implementation
@@ -195,7 +203,9 @@ Before coding, write a short working note for yourself:
   requires or allows that lane
 - for a moonshot: the architecture assumption being challenged, the frontier it
   attacks, and the risk budget you are intentionally allowing for the prototype
-- what prior experiments are adjacent
+- what prior experiments are adjacent — search the belief sets (or
+  `docs/experiments/knowledge-graph.json`) for claims about the mechanism you
+  are targeting before trusting a README-table skim
 - why this is not just a duplicate attempt — neither of a prior *rejected*
   experiment nor of any open PR or branch **in flight right now** (two runs
   shipping the same follow-up is how exp 175 collided)
@@ -390,6 +400,10 @@ exp 229).
 When finished:
 
 - write or update the experiment record. Keep markdown human-readable;
+  when a *load-bearing number* from a prior experiment appears in your
+  reasoning, cite its claim id (e.g. "claim 245.2") rather than restating the
+  figure bare — the CI linter warns on citations of claims that later become
+  superseded, which is how stale numbers get caught instead of quoted forever;
   machine-oriented direction metadata belongs in `signals.json`. For rejected
   experiments, the writeup should explain why the direction looked plausible,
   what was measured, and what would make the area interesting again — a

@@ -9,5 +9,12 @@
   "nextSignals": [
     "sqlite3mc release tracking a stable SQLite point release",
     "planner/API changes that map to resqlite hot paths"
+  ],
+  "claims": [
+    {
+      "id": "090.1",
+      "text": "sqlite3mc version bumps should wait for safer point releases when the newest SQLite release is a fresh .0.",
+      "conditions": "policy · 2026-04 · backfilled 2026-07"
+    }
   ]
 }

@@ -12,5 +12,12 @@
   "nextSignals": [
     "reader-reply batching candidate should reduce exp 136 completion_us / total_us on A11c overlap",
     "if residual writer/request detail is needed, gather only the split required by a concrete reduction candidate and remove temporary scaffolding before merge unless it is reusable"
+  ],
+  "claims": [
+    {
+      "id": "147.1",
+      "text": "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads (A11c 9.4%, keyed-PK 18.1%); residual writer/request wall is the largest bucket after subtracting SQLite and invalidation.",
+      "conditions": "M1 Pro · profile · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

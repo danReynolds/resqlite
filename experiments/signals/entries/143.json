@@ -12,5 +12,12 @@
     "add Tracelite workload-summary explain rules before adding another resqlite-local interpretation harness",
     "keep raw trace regions local while committing aggregate markdown and graph data only when it feeds Pages",
     "use repeated Tracelite profile runs before making p99 or max-tail claims"
+  ],
+  "claims": [
+    {
+      "id": "143.1",
+      "text": "Pinned Tracelite profile runs produce decision-useful structured evidence: point queries are median dispatch-bound, merge rounds are work-bound, and allocation/RSS costs hide behind wall time alone.",
+      "conditions": "M1 Pro · profile · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

@@ -12,5 +12,12 @@
     "Do not retry savepoint string caching, savepoint naming compression, or native helpers that still send one request per savepoint boundary without new evidence that string work is dominant.",
     "Use benchmark/experiments/savepoint_name_compression.dart for quick savepoint-control probes, but treat the write-fanout row as the representative gate.",
     "The remaining open implementation shape is multi-savepoint round-trip batching with preserved callback semantics and rollback legality."
+  ],
+  "claims": [
+    {
+      "id": "189.1",
+      "text": "Savepoint naming compression moves best-case control rows but the representative nested-write fanout does not reproduce across the order flip — rejected on the load-bearing row.",
+      "conditions": "M1 Pro · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

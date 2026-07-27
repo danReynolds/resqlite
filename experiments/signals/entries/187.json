@@ -12,5 +12,12 @@
     "use benchmark/experiments/single_row_large_text_bind.dart for both ASCII and CJK rows before accepting any future single-row bind encoder rewrite",
     "the old single-row Unicode fallback is gone; future correctness changes to _utf8Length/_writeUtf8 must preserve multibyte, surrogate-pair, and embedded-NUL behavior on execute() as well as executeBatch()",
     "if a release-suite large single-row text lane is added later, it should include a non-ASCII shape rather than only repeating exp 186's ASCII gate"
+  ],
+  "claims": [
+    {
+      "id": "187.1",
+      "text": "Direct UTF-8 packing for single-row non-ASCII params removes one temp allocation plus one copy per string; CJK rows improve ~31-39% from 16KB through 1MB.",
+      "conditions": "M1 Pro · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

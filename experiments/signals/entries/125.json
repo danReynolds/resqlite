@@ -10,5 +10,12 @@
   "nextSignals": [
     "watch release-suite Wide Batch Insert and narrow Batch Insert together",
     "benchmark non-ASCII-heavy wide batches before broadening the fallback path"
+  ],
+  "claims": [
+    {
+      "id": "125.1",
+      "text": "A guarded ASCII fast path removes per-string UTF-8 allocation in wide batch parameter packing without changing the public API or weakening Unicode fallback.",
+      "conditions": "M1 Pro · 2026-05 · backfilled 2026-07"
+    }
   ]
 }
