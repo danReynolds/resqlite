@@ -119,6 +119,17 @@ void _injectBeliefs(
   for (final dir in directions) {
     if (dir is! Map<String, Object?> || dir['id'] is! String) continue;
     final dirId = dir['id'] as String;
+    var entriesInDirection = 0;
+    var entriesWithClaims = 0;
+    for (final note in experiments.values) {
+      if (note is! Map<String, Object?>) continue;
+      final dirs = (note['directions'] as List? ?? const []);
+      if (!dirs.map((d) => d.toString()).contains(dirId)) continue;
+      entriesInDirection++;
+      if ((note['claims'] as List? ?? const []).isNotEmpty) {
+        entriesWithClaims++;
+      }
+    }
     final live = <Map<String, Object?>>[];
     final superseded = <Map<String, Object?>>[];
     final refuted = <Map<String, Object?>>[];
@@ -145,6 +156,13 @@ void _injectBeliefs(
       'note':
           'Generated from entries[].claims — record new claims in your own '
           'signals/entries/NNN.json; never edit this block.',
+      // PARTIAL until this direction's entries all carry claims: coverage
+      // says how much of the direction's history has been distilled, so a
+      // reader knows whether currentRead still holds beliefs not listed here.
+      'coverage': {
+        'entriesWithClaims': entriesWithClaims,
+        'entriesInDirection': entriesInDirection,
+      },
       'live': live,
       if (superseded.isNotEmpty) 'superseded': superseded,
       if (refuted.isNotEmpty) 'refuted': refuted,

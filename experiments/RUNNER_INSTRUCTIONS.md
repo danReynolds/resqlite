@@ -409,7 +409,12 @@ When finished:
   `docs/experiments/knowledge-graph.json`) is built from them. If you
   supersede another *experiment's* headline wholesale, also add
   `supersededBy` / `amendedBy` to that experiment's `index/NNN.json` row so
-  the README shows the lineage. When the run
+  the README shows the lineage. When the result you are revising predates
+  claims, **mint the old claim on demand**: add it to *that experiment's*
+  entry file, worded from its own `changedBeliefs`, in the same run — then
+  edge to it. Claims are adopted incrementally; the generated belief sets
+  carry a `coverage` count so nobody mistakes a partially-migrated direction
+  for a complete one. When the run
   changes how future agents should read a whole *direction*, also update that
   direction's synthesis in [`signals/base.json`](signals/base.json). For
   moonshots, record the class in the signal source too:
