@@ -3,5 +3,8 @@
   "title": "Reader blob-cell TransferableTypedData transfer",
   "impact": "Applies exp 234's isolate-hop mechanism to the read side, where the costs were worse: blob cells decoded native->heap, results > 256 KB then sacrificed the reader isolate on every query (Isolate.exit + ~2-5 ms respawn + statement/schema cache loss), and tx.select — which can never sacrifice — paid the full graph copy back to main. Blob cells >= 256 KB now decode straight into TransferableTypedData (one native->malloc'd-external copy, skipping the heap copy; GC never traces the payload), the sacrifice decision weighs only residual non-transferable bytes, and every main-isolate receive boundary materializes cells back to Uint8List views so the public surface is unchanged. Three order-flipped per-process passes: 1x512 KB select **-80% to -83%**, 1x1 MB -70% to -81%, 4x300 KB -67% to -82%, tx.select 1x512 KB **-84% to -87%** (~3-7x), with direct-path, text-sacrifice, and small controls flat once controls run before lifecycle-changing lanes. Threshold is a compile-time define (worker isolates hold their own globals). Also records that selectBytes was already optimal (native-backed view -> malloc'd copy destination).",
   "status": "accepted",
-  "link": ""
+  "link": "",
+  "amendedBy": [
+    "246"
+  ]
 }

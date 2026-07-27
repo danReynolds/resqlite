@@ -12,6 +12,13 @@
     "exp 175 promoted a large-byte (>256KB) selectBytes lane into the release suite and curated metric list; use `selectBytes() large bytes` as the guard for future bytes-transfer policy changes",
     "if a memory-sensitive workload shows problematic json_buf retention, reopen with a high memory-reclaim sacrifice threshold for bytes (e.g. >8MB) or a C-side json_buf shrink, preserving the view-send win for the realistic large range",
     "do not extend view-send to the rows path: there the payload is Dart objects and sacrifice's zero-copy object transfer is the real win (exp 008b/019)",
-    "do not pursue true zero-copy bytes transfer (fresh malloc per query + send address + NativeFinalizer): a size sweep 256KB->64MB (benchmark/experiments/transfer_mechanism_ab.dart) showed it 14-24% SLOWER at every size, no crossover. The decisive factor is buffer reuse, not the copy: the current path reuses a warm json_buf (no per-query allocation), while zero-copy must malloc a fresh buffer per query (mmap/munmap syscalls + cold-page faults that scale with size) and that exceeds the memcpy it saves. Reuse is incompatible with handing the buffer to main, and the buffer can't be safely recycled because callers can retain the returned Uint8List. The single copy is structurally the floor. Do not reopen without a fundamentally different mechanism (e.g. a recycled WARM native transfer-buffer pool with cross-isolate finalizer recycling \u2014 complex, GC-timing-dependent, unbounded under load)"
+    "do not pursue true zero-copy bytes transfer (fresh malloc per query + send address + NativeFinalizer): a size sweep 256KB->64MB (benchmark/experiments/transfer_mechanism_ab.dart) showed it 14-24% SLOWER at every size, no crossover. The decisive factor is buffer reuse, not the copy: the current path reuses a warm json_buf (no per-query allocation), while zero-copy must malloc a fresh buffer per query (mmap/munmap syscalls + cold-page faults that scale with size) and that exceeds the memcpy it saves. Reuse is incompatible with handing the buffer to main, and the buffer can't be safely recycled because callers can retain the returned Uint8List. The single copy is structurally the floor. Do not reopen without a fundamentally different mechanism (e.g. a recycled WARM native transfer-buffer pool with cross-isolate finalizer recycling — complex, GC-timing-dependent, unbounded under load)"
+  ],
+  "claims": [
+    {
+      "id": "174.1",
+      "text": "selectBytes sends a Uint8List view over the reader's native json_buf and never sacrifices; the single send copy is the floor for this path.",
+      "conditions": "M1 Pro · AOT · 2026-03"
+    }
   ]
 }

@@ -400,7 +400,16 @@ When finished:
 - record the run's signal in its own file,
   `experiments/signals/entries/NNN.json` (directions, outcomeClass,
   changedBeliefs, nextSignals) — never the generated `signals.json`, and never
-  a shared file, so two concurrent runs can't collide on it. When the run
+  a shared file, so two concurrent runs can't collide on it. Record each
+  *durable, citable* result as a typed claim too: `claims: [{id: "NNN.x",
+  text, conditions, edges}]`. When your result revises an earlier claim, say
+  so with an edge (`supersedes` / `refutes` / `refines` / `validates` →
+  `"MMM.y"`) instead of prose — claim state is derived from edges, and the
+  generated per-direction belief set (plus
+  `docs/experiments/knowledge-graph.json`) is built from them. If you
+  supersede another *experiment's* headline wholesale, also add
+  `supersededBy` / `amendedBy` to that experiment's `index/NNN.json` row so
+  the README shows the lineage. When the run
   changes how future agents should read a whole *direction*, also update that
   direction's synthesis in [`signals/base.json`](signals/base.json). For
   moonshots, record the class in the signal source too:

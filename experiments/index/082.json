@@ -3,5 +3,8 @@
   "title": "Message-graph hand-off benchmark",
   "impact": "Current `ResultSet` / `Row` shape is already near-optimal for the shipped `select()` contract; materialized maps and binary row facades both lose on end-to-end total",
   "status": "rejected",
-  "link": ""
+  "link": "",
+  "supersededBy": [
+    "245"
+  ]
 }

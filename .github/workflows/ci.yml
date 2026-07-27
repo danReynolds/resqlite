@@ -52,7 +52,7 @@ jobs:
       - name: Check PR diff for bot-owned generated files
         run: |
           base="origin/${{ github.base_ref }}"
-          generated="docs/experiments/history.json docs/benchmarks/devices.json experiments/signals.json experiments/README.md"
+          generated="docs/experiments/history.json docs/experiments/knowledge-graph.json docs/benchmarks/devices.json experiments/signals.json experiments/README.md"
           changed=$(git diff --name-only "$base...HEAD" -- $generated || true)
           if [ -n "$changed" ]; then
             echo "::error::Generated aggregates are bot-owned; do not commit them on a branch. Edit the per-experiment sources instead: experiments/index/NNN.json (README row), experiments/signals/entries/NNN.json (signal entry), or experiments/signals/base.json (direction synthesis)."
@@ -118,6 +118,8 @@ jobs:
         run: dart run benchmark/check_generated_data.dart
       - name: Verify experiment research map is valid
         run: dart run benchmark/check_experiment_signals.dart
+      - name: Verify knowledge links and claim citations
+        run: dart run benchmark/check_knowledge_links.dart
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
 

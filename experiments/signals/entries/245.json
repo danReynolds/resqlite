@@ -13,5 +13,23 @@
     "ACTIONABLE, and the one shippable win the whole send-vs-sacrifice arc produced: the sacrifice trigger keys on estimated BYTES, but the true intrinsic cost driver is MUTABLE STRUCTURAL SLOT COUNT (strings are shared free on send). So a large STRING (e.g. 400 KB, one slot) is send-favored (96 vs 167 us intrinsic) yet is wrongly sacrificed at the 256 KB byte threshold, AND pays a reader respawn for nothing. Follow-up experiment: route the sacrifice decision on mutable slot count instead of estimated bytes, or minimally add a shared-leaf guard that keeps string-heavy results on send. Fixes the misroute without touching the large-structural regime where exit correctly wins.",
     "The send-vs-sacrifice DIRECTION is otherwise closed: intrinsic transfer (this run) + pool capacity (exp 244) both resolved, and both point the same way. Do NOT re-open with more through-the-pool A/Bs (exp 241's confound) or with attempts to retire sacrifice wholesale (exp 244 showed it is favorable at pool-4 for large results, this run shows it is the correct intrinsic choice above ~48k slots). Consider updating the result-transfer-shape synthesis in signals/base.json on the next curation pass to record the resolved mechanism.",
     "Reusable measurement pattern established for any future intrinsic isolate-transfer question: prepared-result barrier (build + hold BEFORE a Go barrier), one fresh PROCESS per observation (kills heap accumulation / mode carryover), ABBA blocks, empty-envelope control to separate fixed overhead from payload cost, timestamps kept on one isolate (main) for clock comparability. This is the clean alternative to through-the-pool alternation, which is a state-changing treatment that cannot isolate transfer."
+  ],
+  "claims": [
+    {
+      "id": "245.1",
+      "text": "SendPort.send's cost tracks the mutable flat-list slot count, not payload bytes: strings and numbers are shared by reference (a 400 KB string adds ~0 us), while the values array is copied per slot.",
+      "conditions": "M1 Pro · AOT · process-isolated barrier · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "241.1"
+        }
+      ]
+    },
+    {
+      "id": "245.2",
+      "text": "Isolate.exit is zero-copy with a ~47 us fixed premium; its sendability walk also scales with slots, just more gently than send's copy. Intrinsic crossover ~48k slots.",
+      "conditions": "M1 Pro · AOT · process-isolated barrier · 2026-07"
+    }
   ]
 }

@@ -13,5 +13,12 @@
     "Sacrifice retirement/retuning is REJECTED but not closed. Reopen only with a clean SINGLE-SHOT per-process sacrifice-vs-send harness (one fresh measurement per process, no respawn accumulation) that removes the confound documented here — if that still shows send winning at the high-structural tail (>= ~32k slots), send-always becomes viable. Do not re-run the per-process accumulating A/B expecting a cleaner answer; it structurally can't give one.",
     "A production profile showing real result-size/shape distribution would settle it faster than more microbenchmarks: if results cluster in the send-favored range (text-heavy, or < ~32k structural slots) and sacrifice is firing on the 256 KB byte threshold anyway, that is direct evidence to lower or retire the threshold. The byte threshold is a proxy; the real cost driver is structural slot count of the MUTABLE graph.",
     "General result-transfer-shape rule reinforced: send is cheap for immutable-heavy (shared leaves) and native/external-backed content, expensive only for large mutable structure. Sacrifice pays off only when the mutable structural graph is large enough that the copy exceeds a reader respawn — a narrow, high-slot-count regime, not a general large-result regime."
+  ],
+  "claims": [
+    {
+      "id": "241.1",
+      "text": "Sacrifice is a state-changing treatment (kills a worker, respawns, clears caches): it cannot be A/B'd in place inside one live pool. Send-vs-exit decomposes into distinct estimands — intrinsic transfer, pool capacity, decode — that must be measured separately.",
+      "conditions": "methodology · 2026-07"
+    }
   ]
 }

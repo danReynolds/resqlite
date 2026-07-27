@@ -27,6 +27,7 @@ String buildReadme({required Directory experimentsDir}) {
     'in_review': [],
     'rejected': [],
   };
+  final fileById = <String, String>{};
   if (indexDir.existsSync()) {
     for (final file in indexDir.listSync().whereType<File>()) {
       if (!file.path.endsWith('.json')) continue;
@@ -47,6 +48,7 @@ String buildReadme({required Directory experimentsDir}) {
             '(expected accepted | in_review | rejected).',
           );
         }
+        fileById.putIfAbsent(id, () => entry['file'] as String? ?? '$id.md');
         bucket.add(
           _Row(
             id: id,
@@ -55,6 +57,14 @@ String buildReadme({required Directory experimentsDir}) {
             impact: (entry['impact'] as String? ?? '').trim(),
             link: (entry['link'] as String? ?? '').trim(),
             rejected: status == 'rejected',
+            supersededBy: [
+              for (final t in (entry['supersededBy'] as List? ?? const []))
+                t.toString(),
+            ],
+            amendedBy: [
+              for (final t in (entry['amendedBy'] as List? ?? const []))
+                t.toString(),
+            ],
           ),
         );
       }
@@ -64,7 +74,7 @@ String buildReadme({required Directory experimentsDir}) {
   var out = templateFile.readAsStringSync();
   for (final status in rows.keys) {
     final sorted = rows[status]!..sort((a, b) => _compareIds(b.id, a.id));
-    final body = sorted.map((r) => r.render()).join('\n');
+    final body = sorted.map((r) => r.render(fileById)).join('\n');
     out = out.replaceAll('{{ROWS:$status}}', body);
   }
   return out;
@@ -78,6 +88,8 @@ class _Row {
     required this.impact,
     required this.link,
     required this.rejected,
+    this.supersededBy = const [],
+    this.amendedBy = const [],
   });
 
   final String id;
@@ -87,9 +99,27 @@ class _Row {
   final String link;
   final bool rejected;
 
-  String render() => rejected
-      ? '| [$id]($file) | $title | $impact |'
-      : '| [$id]($file) | $title | $impact | $link |';
+  /// ADR-style experiment lineage: later experiments that replaced or
+  /// partially revised this one's conclusion. Rendered under the id so the
+  /// tables show at a glance which results are no longer the current word.
+  final List<String> supersededBy;
+  final List<String> amendedBy;
+
+  String render(Map<String, String> fileById) {
+    var idCell = '[$id]($file)';
+    String refs(List<String> ids) => ids
+        .map((t) => '[$t](${fileById[t] ?? '$t.md'})')
+        .join(', ');
+    if (supersededBy.isNotEmpty) {
+      idCell += '<br><sub>superseded by ${refs(supersededBy)}</sub>';
+    }
+    if (amendedBy.isNotEmpty) {
+      idCell += '<br><sub>amended by ${refs(amendedBy)}</sub>';
+    }
+    return rejected
+        ? '| $idCell | $title | $impact |'
+        : '| $idCell | $title | $impact | $link |';
+  }
 }
 
 int _compareIds(String a, String b) {

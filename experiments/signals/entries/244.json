@@ -14,5 +14,18 @@
     "The pool-4 result dilutes the raw per-sacrifice respawn gap (parked requests wait on a busy worker's ms-scale query regardless of lane). `Database.open` clamps readerCount to a minimum of 2, so the peer's pool-size-1 diagnostic ceiling is not reachable through the public API; a benchmark-only pool-size override (or a direct ReaderPool.spawn(handle, 1) harness) would be needed to expose the raw gap. Low priority — pool-4 is the production regime and the direction there (sacrifice favorable) is unambiguous.",
     "Standalone win independent of the transfer question, carried over from exp 241 and untouched here: the TEXT/shared-leaf misroute (sacrifice firing on a byte threshold for shared-string results that send ~2.9x cheaper). A routing guard keeping shared-leaf-dominated results on send is shippable now.",
     "Eager respawn (and by extension the sacrifice reply-handler lifecycle) is closed unless the completion chain gets materially heavier (e.g. a future change that does more synchronous work inside `entry.emit`/`_flushQueue`), which would re-open the question of whether replacement launch should precede caller completion. Re-run this exact burst harness to check."
+  ],
+  "claims": [
+    {
+      "id": "244.1",
+      "text": "Sacrifice opens no pool-capacity hole at the production pool size: the no-sacrifice lane had the highest parked queue-wait (~+19%), because send's copy blocks the worker longer than Isolate.exit plus an overlapped respawn. Eager respawn measured inert.",
+      "conditions": "M1 Pro · pool-4 · barrier burst · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "241.1"
+        }
+      ]
+    }
   ]
 }

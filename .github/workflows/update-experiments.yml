@@ -10,6 +10,7 @@ on:
       - 'experiments/README.template.md'
       - 'benchmark/generate_signals.dart'
       - 'benchmark/generate_readme.dart'
+      - 'benchmark/generate_knowledge_graph.dart'
       - 'benchmark/results/*.md'
       - 'benchmark/results/*.json'
       - 'benchmark/HARDWARE_RESULTS.md'
@@ -49,6 +50,9 @@ jobs:
 
       - name: Generate experiments README
         run: dart run benchmark/generate_readme.dart
+
+      - name: Generate knowledge graph JSON
+        run: dart run benchmark/generate_knowledge_graph.dart
 
       - name: Generate devices JSON
         run: dart run benchmark/generate_devices.dart
