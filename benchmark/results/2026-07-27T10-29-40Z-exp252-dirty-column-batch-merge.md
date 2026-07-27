@@ -139,4 +139,3 @@ only with representative downstream evidence of repeated UPDATE batches in
 the thousands of rows with materially wider SET lists, or a native profile
 showing this merge loop consumes enough public write wall to clear the product
 gate.
-
