@@ -1,15 +1,23 @@
 {
-  "directions": ["stream-rerun-dispatch"],
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
   "outcomeClass": "accepted",
   "changedBeliefs": [
-    "A stream's initial emission was not guaranteed: if a write dirtied the entry while its initial query was in flight, `_createStream` discarded the initial rows unemitted and relied on a catch-up re-query, which then compared against the hash baseline taken from those same discarded rows and reported 'unchanged'. Both emissions suppressed each other and the stream stayed permanently silent. The initial result is always emitted now, with the catch-up re-query following when the entry was dirtied.",
+    "A stream's initial emission was not guaranteed: if a write dirtied the entry while its initial query was in flight, `_createStream` discarded the initial rows unemitted and relied on a catch-up re-query, which then compared against the hash baseline taken from those same discarded rows and reported 'unchanged'. Both emissions suppressed each other and the stream stayed permanently silent. The fix keeps the suppression (exp 256 measured it as the better semantics) but poisons the baseline so the re-query always emits.",
     "The failure mode of this class of bug is silence, not staleness — the hardest kind for an application to notice, and the reason it survived so long behind an intermittent test failure."
   ],
   "claims": [
     {
       "id": "255.1",
-      "text": "A stream always emits its initial result, even when a write dirties it mid-query; the catch-up re-query follows and self-suppresses via selectIfChanged when nothing changed. Suppressing the initial emission in favour of the re-query stranded streams permanently silent, because the re-query's baseline came from the very rows it replaced.",
-      "conditions": "M1 Pro · deterministic regression test (40k-row seed) · 2026-07"
+      "text": "A stream always resolves to an emission or an error, never silence. When a write dirties an entry mid-initial-query the comparison baseline is poisoned so the catch-up re-query is guaranteed to emit, and that emission is the stream's first. Suppressing the initial emission while leaving the baseline set to the rows it replaced is what stranded streams permanently silent.",
+      "conditions": "M1 Pro · deterministic regression test (40k-row seed) · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "256.1"
+        }
+      ]
     },
     {
       "id": "255.2",

@@ -65,22 +65,32 @@ example — which is why this was reachable at all.
 
 ## Approach
 
-Always emit the initial result; it is a valid observation of the database at
-the moment it was read, and the stream's contract is to deliver it. Then
-re-query if the entry was dirtied, so anything the initial query missed still
-arrives:
+The stream must always resolve to an emission — but *which* rows it emits when
+a write raced is a second question, and the two answers were measured against
+each other in [exp 256](256-stale-initial-emission-tradeoff.md) before choosing.
+The shipped behaviour poisons the comparison baseline so the catch-up re-query
+is guaranteed to emit, and lets that emission be the stream's first:
 
 ```dart
-entry.emit(initialRows);
-
 if (entry.dirty) {
+  entry.lastResultHash = _poisonedHash;   // guarantees the re-query emits
+  entry.lastRowCount = -1;
   _requeryQueue.add(entry);
   _flushQueue();
+} else {
+  entry.emit(initialRows);
 }
 ```
 
-No duplicate-emission risk: the catch-up re-query still runs through
-`selectIfChanged`, which suppresses itself when nothing actually changed.
+The poisoning is what makes suppression safe, and is exactly what the bug was
+missing: suppressing the initial emission while leaving the baseline set to
+those same rows is what let both emissions cancel each other. `_requery`
+propagates errors to subscribers, so the stream always resolves to a value or
+an error — never silence.
+
+The alternative — emit the known-stale rows immediately, then correct — is
+simpler and also fixes the silence, but exp 256 measured it rendering exactly
+one stale frame on every raced stream while saving ~1 ms of time-to-correct.
 
 Two hypotheses were tried and discarded before this one — worth recording,
 because both looked plausible and neither moved the failure rate:
