@@ -13,5 +13,12 @@
     "Do not retry lazy nested savepoint begin or SAVEPOINT + first-write fusion without new workload evidence. The current focused harness already exercises the one-write nested body and rejects the shape.",
     "If the direction reopens, the candidate must be structurally stronger: a full savepoint-scope command batch that runs begin/body/release or rollback in one request, or a profile proving deeply nested transaction control is a real hot path.",
     "The public API is near-frozen. A public nested-batching surface would need a massive, broadly-applicable win; exp 212 provides evidence against that, not for it."
+  ],
+  "claims": [
+    {
+      "id": "212.1",
+      "text": "Lazy nested-savepoint materialization only helps empty nested bodies; fusing SAVEPOINT + first execute regresses the meaningful nested-write shape in both pass orders.",
+      "conditions": "M1 Pro · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

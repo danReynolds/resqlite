@@ -138,7 +138,7 @@ single-row UTF-8 encoder: the public release suite's `selectBytes()` lanes
 wide-many-row shape the change targets. The focused harness above is the
 representative workload — modeled after the existing focused harness
 templates ([exp 186](186-single-row-large-text-bind-encoder.md),
-[exp 173](173-long-text-32kb-fnv16.md)) — and the
+[exp 173](173-long-text-32kb-hash.md)) — and the
 `large_bytes_transfer.dart` lane already on exp 174's guard list confirms
 the change does not regress the established large-bytes path. Future
 runners should reach for `select_bytes_wide_cols.dart` before changing the

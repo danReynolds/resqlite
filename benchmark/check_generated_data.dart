@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'generate_devices.dart' as generate_devices;
 import 'generate_history.dart' as generate_history;
+import 'generate_knowledge_graph.dart' as generate_knowledge_graph;
 import 'generate_readme.dart' as generate_readme;
 import 'generate_signals.dart' as generate_signals;
 
@@ -38,6 +39,9 @@ Future<void> main() async {
     ),
     'README.md': () =>
         generate_readme.buildReadme(experimentsDir: Directory('experiments')),
+    'knowledge-graph.json': () => generate_knowledge_graph.buildKnowledgeGraph(
+      experimentsDir: Directory('experiments'),
+    ),
   };
 
   final failures = <String>[];

@@ -13,5 +13,12 @@
     "use benchmark/experiments/single_row_large_text_bind.dart as the durable workload for any future single-row bind change; the 1 MB shape is the load-bearing acceptance gate",
     "do not extend the single-row encoder to UTF-8 long payloads (extending the Unicode fallback in the same shape exp 126 did for batches) without a representative non-ASCII large single-row workload; the encoder mechanism is settled but the materiality threshold is workload-specific",
     "exp 142 / exp 179 small-bind rejections are sharpened (not overturned) by this run: do not retry direct encoding on small single-row text shapes without new evidence that the round-trip floor has moved"
+  ],
+  "claims": [
+    {
+      "id": "186.1",
+      "text": "The single-row direct-ASCII allocateParams rewrite is materially beneficial once bound text crosses mid-tens-of-KB (-15% at 16KB to -32% at larger sizes); encoder isolation separates the mechanism question from workload materiality.",
+      "conditions": "M1 Pro · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

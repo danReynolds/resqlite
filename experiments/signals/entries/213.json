@@ -15,5 +15,12 @@
     "`benchmark/experiments/tx_body_write_coalescing.dart` is the durable harness for any future transaction-body write experiment. Its four lanes (tx-sequential-await, tx-burst-future-wait, tx-single-write, tx-interleaved-select) exercise the complexity/pattern trade-off explicitly: a future runner cannot claim a transaction-body write win without holding all four lanes to their exp 213 shape (the burst lane serves as the reachable-ceiling reference; the other three as neutrality guards).",
     "Runtime prototype preserved at `archive/exp-213`. Reopen the direction if any of: (a) a production profile or downstream user report surfaces `Future.wait([tx.execute × N])`-inside-tx as a real hot path rather than a speculative shape; (b) a new design collapses the guard set from four to one (detection primitive that distinguishes burst from sequential without per-`Transaction` state, or a writer-side change that makes inside-tx multi-execute strictly cheaper without a Dart-side buffer); (c) the full savepoint-scope variant becomes tractable.",
     "Sequential-await inside `db.transaction()` (`await tx.execute; await tx.execute`) remains bound by the per-write round-trip floor — nothing in exp 213 changes that, and users writing this common pattern paid pre-213 costs on the prototype. Future runners should not retry per-call microtask trimming (exp 170, 171 territory) without a workload that isolates that floor from the exp 213 fast-path cost."
+  ],
+  "claims": [
+    {
+      "id": "213.1",
+      "text": "The per-execute round-trip floor inside db.transaction() is mechanically removable for Future.wait bursts, but the pattern has no idiomatic case in the public API — bulk atomic writes belong on executeBatch. Rejected on pattern, not numbers.",
+      "conditions": "M1 Pro · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

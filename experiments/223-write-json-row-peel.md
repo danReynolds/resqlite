@@ -13,8 +13,8 @@
 
 ## Problem
 
-After [exp 195](195-cached-json-name-tokens.md),
-[exp 198](198-cell-direct-write.md), [exp 203/205](205-step-row-value-cache.md),
+After [exp 195](195-stmt-cache-name-tokens.md),
+[exp 198](198-direct-buf-int-float-json.md), [exp 203/205](205-step-row-value-cache.md),
 `write_json_to_buf` in [`native/resqlite.c`](../native/resqlite.c) is a tight
 per-row loop. What remains at the row boundary is a small amount of unfused
 control flow. On every iteration, the code checks `if (row_index > 0)` to

@@ -10,5 +10,18 @@
   "nextSignals": [
     "selectBytes result transport is closed for the TransferableTypedData idea while its bytes remain a native `json_buf` view. Reopen ONLY if the buffer's source representation changes — e.g. if selectBytes ever returns a heap `Uint8List` rather than a native view, which would restore the GC-heap destination that makes the wrap pay. Do not re-test the wrap against the current native-view path.",
     "General rule for `result-transfer-shape`: the TransferableTypedData wrap wins iff the payload's default `SendPort` destination is the GC heap (heap `Uint8List`), and is dead weight when the payload is already a view over native/external memory. Use the source representation, not the payload size, to decide whether a wrap can help. This is the 'read cell vs read buffer' distinction: exp 236 blob cells are heap objects (wrap wins); the selectBytes buffer is a native view (wrap loses)."
+  ],
+  "claims": [
+    {
+      "id": "242.1",
+      "text": "A TransferableTypedData wrap helps iff the payload's default SendPort destination is the GC heap; a native-backed view gains nothing — the wrap relocates the one copy and adds machinery.",
+      "conditions": "M1 Pro · AOT · 2026-07",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "174.1"
+        }
+      ]
+    }
   ]
 }

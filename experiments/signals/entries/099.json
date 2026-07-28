@@ -9,5 +9,12 @@
   ],
   "nextSignals": [
     "representative long-text streaming benchmark"
+  ],
+  "claims": [
+    {
+      "id": "099.1",
+      "text": "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable.",
+      "conditions": "measurement gap · 2026-04 · backfilled 2026-07"
+    }
   ]
 }

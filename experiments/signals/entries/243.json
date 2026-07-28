@@ -12,5 +12,18 @@
     "The write-side blob transfer story is now complete for aliasing: single reference (exp 234), coalesced envelopes (exp 234 review pass), and multi-reference/aliased buffers (exp 243). No open aliasing sub-case remains on the write path.",
     "Census (leave aliased buffers on the graph-copy path) would only become competitive if a future Dart VM change gave large heap typed-data a fast unchunked graph-copy path — then 'leave it on the graph copy' would stop paying the slow-path tax and could rival table without wrapper bookkeeping. Nothing in current SDK behavior points that way; revisit only if `object_graph_copy.cc`'s large-typed-data handling changes.",
     "The table protocol is a write-envelope concern and does NOT transfer to reads: a read response's blob cells are distinct materialized objects with no caller aliasing to collapse (exp 236 handles read-cell transfer). Do not add an identity-dedup layer to the read path looking for a symmetric win — the shape that makes table pay off (one caller object referenced N times) does not exist there."
+  ],
+  "claims": [
+    {
+      "id": "243.1",
+      "text": "Blob-param wrapping is identity-keyed (one wrapper per unique buffer, referenced at every position, materialized once per envelope), so caller aliasing survives the hop instead of exploding into N external copies (~27x at N=32 under per-occurrence wrapping).",
+      "conditions": "M1 Pro · AOT · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "234.1"
+        }
+      ]
+    }
   ]
 }

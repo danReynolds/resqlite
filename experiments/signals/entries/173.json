@@ -12,5 +12,12 @@
     "do not retry FNV unrolling variants on the existing parallel-fanout long-text shapes without a workload that isolates the hash loop",
     "if a mixed BLOB + long-TEXT unchanged-fanout workload becomes interesting, exp 173's focused harness is a reusable template",
     "a single-stream long-payload microbenchmark (one stream, no reader-pool parallelism) would expose hash-loop overhead that the current shape hides"
+  ],
+  "claims": [
+    {
+      "id": "173.1",
+      "text": "At 32KB cells on a pool-of-4 fleet the byte-stream fold is no longer the dominant wall component; unrolling beyond the 8-byte FNV body is below noise. Hash-loop unrolling on this shape is closed.",
+      "conditions": "M1 Pro · pool-4 · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

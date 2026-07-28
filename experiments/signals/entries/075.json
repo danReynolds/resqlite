@@ -1,0 +1,13 @@
+{
+  "directions": [
+    "long-text-stream-hashing"
+  ],
+  "outcomeClass": "accepted",
+  "claims": [
+    {
+      "id": "075.1",
+      "text": "Computing the selectIfChanged result hash in C during the step loop is a large win (-39%) on the re-query path with zero measurable regression; hash code consolidates to a single C implementation.",
+      "conditions": "2025 · backfilled 2026-07"
+    }
+  ]
+}

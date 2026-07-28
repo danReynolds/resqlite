@@ -4,12 +4,19 @@
   ],
   "outcomeClass": "accepted",
   "changedBeliefs": [
-    "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within \u00b110% noise",
+    "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within ±10% noise",
     "After this, every measured stream workload reports `dispatcherParkedTotal == 0` on top of `dispatcherWakeRetryTotal == 0`. Future reader-pool dispatch optimizations need a different counter (completion-side scheduling, writer-side dispatch wall, invalidation traversal) before they are worth implementing"
   ],
   "nextSignals": [
     "profile completion-side microtask scheduling cost on A11c overlap",
     "exp 147 split writer-isolate wall vs SQLite wall; follow up on residual writer/request scheduling rather than SQLite-step tuning",
     "audit invalidation traversal cost (`invalidateUs`/`intersectionUs`) as a fraction of overlap wall"
+  ],
+  "claims": [
+    {
+      "id": "120.1",
+      "text": "Exp 119's 3,590-park signal was upstream over-dispatch from StreamEngine._flushQueue, not reader-pool admission; snapshotting availableWorkerCount once and decrementing per pop drops parking to zero. Future dispatch work needs a different counter.",
+      "conditions": "M1 Pro · 2026-05 · backfilled 2026-07"
+    }
   ]
 }

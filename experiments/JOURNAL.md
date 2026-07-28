@@ -24,7 +24,7 @@ structurally sound win for long-text streams — and measured nothing. The cause
 wasn't the implementation; the streaming benchmarks at the time only carried
 ≤ 8-byte cells, so the new main loop never executed. Before declaring an
 optimization dead, verify the workload actually exercises its hot path.
-[Exp 110](110-long-text-stream-benchmark.md) later built the long-cell workload
+[Exp 110](110-long-text-fnv-8byte.md) later built the long-cell workload
 that exp 099 should have been measured against.
 
 *Reapplies whenever a structurally plausible change shows a flat result. The
@@ -70,7 +70,7 @@ change" signal.*
 ### Measurement is a first-class outcome
 
 Three of the most useful experiments in the recent map ([exp 097](097-one-pass-initial-stream-hash.md),
-[exp 099](099-fnv-8byte-bytestream.md)'s rejection, [exp 110](110-long-text-stream-benchmark.md))
+[exp 099](099-fnv-8byte-bytestream.md)'s rejection, [exp 110](110-long-text-fnv-8byte.md))
 were either pure measurement work or surfaced their main value by exposing a
 gap in the existing benchmarks. When the bottleneck signal is missing, build
 the signal — don't force an implementation experiment against a workload that

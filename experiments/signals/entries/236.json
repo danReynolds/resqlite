@@ -12,5 +12,17 @@
     "The multi-medium-blob shape — many cells each < 256 KB summing past the sacrifice threshold (e.g. 10 x 100 KB) — still sacrifices. A per-result rule (wrap when total blob bytes dominate, even if no single cell clears the floor) is the next candidate in this lane; the blob_read_transfer_ab.dart harness generalizes.",
     "blobCellTransferThreshold is a compile-time define because worker isolates hold their own copies of file-level globals — a main-isolate runtime toggle cannot reach the decode loop. Any future runtime-tunable read-side knob needs a message-protocol field or spawn argument instead.",
     "The exp 234 follow-up (executeBatch blob params) remains open in parameter-encoding-and-binding; with both hop directions now wrapped, batch params are the last graph-copied large-blob surface."
+  ],
+  "claims": [
+    {
+      "id": "236.1",
+      "text": "Blob result cells >= 256 KB decode straight into TransferableTypedData (native->external, one copy) and cross by ownership move; main-isolate receive boundaries materialize them back to Uint8List views. Blob-heavy reads 3-6x faster; tx.select ~6-7x.",
+      "conditions": "M1 Pro · AOT · 2026-07"
+    },
+    {
+      "id": "236.2",
+      "text": "The sacrifice decision weighs estimatedBytes - transferableBytes so TTD-wrapped cells do not force a sacrifice.",
+      "conditions": "byte-trigger era · M1 Pro · 2026-07"
+    }
   ]
 }

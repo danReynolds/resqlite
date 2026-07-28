@@ -4,14 +4,21 @@
   ],
   "outcomeClass": "accepted",
   "changedBeliefs": [
-    "Once SQLite ships a `.2` point release and sqlite3mc cuts a tracking release, exp 090's vendoring-bump audit moves from `defer` to `do` without any further policy debate \u2014 the 3.53.x line is the canonical case",
+    "Once SQLite ships a `.2` point release and sqlite3mc cuts a tracking release, exp 090's vendoring-bump audit moves from `defer` to `do` without any further policy debate — the 3.53.x line is the canonical case",
     "The 3.53.0 default-FP-rounding hazard does not reach resqlite output because we never use `sqlite3_column_text` for REAL values; the proposed `SQLITE_DBCONFIG_FP_DIGITS=15` shim is unnecessary",
     "Single-pass release-suite A/B on a vendoring bump is direction signal only; the first pass on this worktree showed 19/18/124 and the rerun 30/2/129, so a regression flag should be reconfirmed across two independent passes before being treated as real",
-    "The Concurrent Reads 8\u00d7 wall-median metric is the only regression that persisted across both candidate passes (+~20%); 4\u00d7 concurrency wins on the same baseline, so the slowdown is not a generic read-pool effect and is the canonical soak-window question for this bump"
+    "The Concurrent Reads 8× wall-median metric is the only regression that persisted across both candidate passes (+~20%); 4× concurrency wins on the same baseline, so the slowdown is not a generic read-pool effect and is the canonical soak-window question for this bump"
   ],
   "nextSignals": [
     "promote exp 144 from In Review to Accepted once the soak window closes with no release-suite regression",
-    "if a multi-pass rerun of Concurrent Reads 8\u00d7 under 3.53.x stays slower than 2.3.2-baseline, open a follow-up against the read-pool path or revert the bump",
+    "if a multi-pass rerun of Concurrent Reads 8× under 3.53.x stays slower than 2.3.2-baseline, open a follow-up against the read-pool path or revert the bump",
     "future bump audits should run two independent single-pass A/Bs before claiming a behavioral change in SQLite or release-suite signal"
+  ],
+  "claims": [
+    {
+      "id": "144.1",
+      "text": "The 3.53.0 default-FP-rounding hazard does not reach resqlite output (REAL values never go through sqlite3_column_text); the vendoring bump waits on a .2 point release per exp 090's policy.",
+      "conditions": "2026-06 · backfilled 2026-07"
+    }
   ]
 }

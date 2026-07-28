@@ -253,6 +253,7 @@ void _checkSignals(
   final experimentMap = _map(experiments, 'experiments', errors);
   if (experimentMap == null) return;
 
+  final allClaims = <String, _Claim>{};
   for (final entry in experimentMap.entries) {
     final expId = entry.key?.toString();
     final path = 'experiments.$expId';
@@ -288,7 +289,10 @@ void _checkSignals(
     _checkOutcomeConsistency(experiment, outcomeClass, path, errors);
     _stringList(note, 'changedBeliefs', path, errors);
     _stringList(note, 'nextSignals', path, errors);
+    _collectClaims(note, expId, path, allClaims, errors);
   }
+
+  _checkClaimEdges(allClaims, errors);
 
   _checkFutureCoverage(
     experimentIndex,
@@ -630,6 +634,122 @@ void _checkOpenCandidates(
     if (blockedOn != null &&
         (blockedOn is! String || blockedOn.trim().isEmpty)) {
       _signalError(errors, '$itemPath.blockedOn must be a non-empty string.');
+    }
+  }
+}
+
+/// Allowed typed-edge relations between claims. A claim's state is *derived*
+/// from inbound edges (superseded / refuted / live), never stored — so the
+/// edge list is the single source of truth for staleness.
+const Set<String> _claimEdgeTypes = {
+  'supersedes',
+  'refutes',
+  'refines',
+  'validates',
+};
+
+class _Claim {
+  _Claim(this.id, this.path);
+  final String id;
+  final String path;
+  final List<(String, String)> edges = []; // (type, target)
+}
+
+/// Validates an entry's optional `claims` array shape and collects the claims
+/// for the cross-entry edge pass. Claim ids must be `<expId>.<n>` — the entry
+/// number is the namespace, so two concurrent runs can never mint colliding
+/// claim ids any more than they can collide on entry files.
+void _collectClaims(
+  Map<Object?, Object?> note,
+  String expId,
+  String path,
+  Map<String, _Claim> allClaims,
+  List<_ValidationError> errors,
+) {
+  final raw = note['claims'];
+  if (raw == null) return;
+  if (raw is! List) {
+    _signalError(errors, '$path.claims must be a list.');
+    return;
+  }
+  for (var i = 0; i < raw.length; i++) {
+    final cpath = '$path.claims[$i]';
+    final c = raw[i];
+    if (c is! Map<String, Object?>) {
+      _signalError(errors, '$cpath must be an object.');
+      continue;
+    }
+    final id = c['id'];
+    if (id is! String || !RegExp('^' + RegExp.escape(expId) + r'\.\d+$').hasMatch(id)) {
+      _signalError(errors, '$cpath.id must be "$expId.<n>", got "$id".');
+      continue;
+    }
+    if (allClaims.containsKey(id)) {
+      _signalError(errors, '$cpath duplicates claim id "$id".');
+      continue;
+    }
+    if (c['text'] is! String || (c['text'] as String).trim().isEmpty) {
+      _signalError(errors, '$cpath.text is required.');
+    }
+    if (c.containsKey('conditions') && c['conditions'] is! String) {
+      _signalError(errors, '$cpath.conditions must be a string when present.');
+    }
+    final claim = _Claim(id, cpath);
+    final edges = c['edges'];
+    if (edges != null) {
+      if (edges is! List) {
+        _signalError(errors, '$cpath.edges must be a list.');
+      } else {
+        for (var j = 0; j < edges.length; j++) {
+          final e = edges[j];
+          if (e is! Map<String, Object?> ||
+              e['type'] is! String ||
+              e['target'] is! String) {
+            _signalError(
+              errors,
+              '$cpath.edges[$j] must be {type, target}.',
+            );
+            continue;
+          }
+          final type = e['type'] as String;
+          if (!_claimEdgeTypes.contains(type)) {
+            _signalError(
+              errors,
+              '$cpath.edges[$j].type "$type" is not one of '
+              '${_claimEdgeTypes.join(' | ')}.',
+            );
+            continue;
+          }
+          claim.edges.add((type, e['target'] as String));
+        }
+      }
+    }
+    final unknown = c.keys.toSet().difference(
+      {'id', 'text', 'conditions', 'edges'},
+    );
+    if (unknown.isNotEmpty) {
+      _signalError(errors, '$cpath has unknown keys: ${unknown.join(', ')}.');
+    }
+    allClaims[id] = claim;
+  }
+}
+
+void _checkClaimEdges(
+  Map<String, _Claim> allClaims,
+  List<_ValidationError> errors,
+) {
+  for (final claim in allClaims.values) {
+    for (final (type, target) in claim.edges) {
+      if (target == claim.id) {
+        _signalError(errors, '${claim.path}: claim may not $type itself.');
+      } else if (!allClaims.containsKey(target)) {
+        _signalError(
+          errors,
+          '${claim.path}: edge $type -> "$target" targets a claim that does '
+          'not exist. (Experiment-level lineage for experiments without '
+          'claims belongs in index/NNN.json supersededBy/amendedBy.)',
+        );
+      }
     }
   }
 }

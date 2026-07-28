@@ -12,5 +12,12 @@
     "use the profile wrapper's generated `insights.md` before opening raw workload-summary JSON for dispatch-vs-work and memory/allocation shape",
     "keep raw profile regions and workload JSON local under `build/`; commit compact aggregates unless graph data is feeding Pages",
     "if future profile workload shape changes remove a required stable insight ID, update the guard and signal map in the same experiment rather than weakening the contract silently"
+  ],
+  "claims": [
+    {
+      "id": "169.1",
+      "text": "The Tracelite workload-summary explanation layer emits the interpretation exp 143 had to recover manually, and validates stable insight IDs so a thin artifact fails loudly instead of looking complete.",
+      "conditions": "tooling · 2026-06 · backfilled 2026-07"
+    }
   ]
 }

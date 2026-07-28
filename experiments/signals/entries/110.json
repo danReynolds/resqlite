@@ -11,5 +11,12 @@
   "nextSignals": [
     "watch normal short-cell streaming metrics for platform-specific regressions",
     "use the long-text unchanged-fanout benchmark before trying future hash-loop variants"
+  ],
+  "claims": [
+    {
+      "id": "110.1",
+      "text": "The archived 8-byte FNV byte fold is a clear win once the workload carries 4KB TEXT cells; the long-text unchanged-fanout benchmark was the blocker to seeing it.",
+      "conditions": "M1 Pro · 4KB TEXT · 2026-04 · backfilled 2026-07"
+    }
   ]
 }

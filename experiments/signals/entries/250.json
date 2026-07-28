@@ -16,5 +16,12 @@
     "Do not restore `archive/exp-250` with page-count-driven high-water re-arming alone. Any revisit must carry a real WAL-generation signal, add bounded backoff/retry when PASSIVE reports partial progress, propagate worker failure, coalesce retries so they cannot recreate exp 233's storm, and prove that the WAL settles after the burst ends.",
     "Require a representative downstream trace showing that synchronous threshold crossings are frequent and materially user-visible before paying the worker lifecycle cost. Re-run the first-crossing, sustained write p50/p95/p99, foreground-read, below-threshold control, and post-burst pending-frame gates together.",
     "Prefer a materially simpler SQLite-native checkpoint policy if one can preserve the first-crossing benefit without a second Dart isolate and cross-sender close protocol. The measured mechanism and harness remain available at `archive/exp-250` for comparison, not restoration."
+  ],
+  "claims": [
+    {
+      "id": "250.1",
+      "text": "Exp 233's checkpoint storm was a trigger-policy failure, not inherent to off-writer PASSIVE work: observed-reset/high-water re-arming fixes the storm and first threshold-crossing p50 improves ~53-64%. Rejected for now, mechanism preserved.",
+      "conditions": "M1 Pro · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

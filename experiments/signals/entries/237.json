@@ -12,5 +12,12 @@
     "Batch blob transfer is closed under the many-mid-size-blob shape. Reopen only under: (a) a Dart runtime change that makes `TransferableTypedData` wrapping cheap enough that the per-blob tax disappears (then a small batch benefit could surface), or (b) a production workload showing a SINGLE `executeBatch` carrying one or few VERY LARGE blobs, where per-blob wrap cost amortizes over fewer sets and the batch's own WAL cost is large — a materially different shape from the 30x mid-size batch tested here. Do not retry the many-mid-size shape without new runtime evidence.",
     "`benchmark/experiments/blob_batch_write_ab.dart` is the durable gate for any batch-blob-transfer revisit (30 rows/batch, 64 KB-1 MB, runtime-toggled threshold, order-flipped). The runtime prototype (`wrapBlobParamSets`/`unwrapBlobParamSets` + `BatchRequest`/`_handleBatch` wiring) is preserved at `archive/exp-237` for cherry-pick.",
     "Generalizable methodology note: exp 234's own signal predicted this would 'reproduce the same transfer fraction'; it did not, because the batch changes the round-trip count, not just the blob-size total. A blob-transfer win measured on single-row writes does not transfer to a coalesced/batched path by blob-size similarity — the round-trip topology is the load-bearing variable."
+  ],
+  "claims": [
+    {
+      "id": "237.1",
+      "text": "Exp 234's blob-transfer win does not extend to executeBatch: wrapping per-set blobs is a reproduced regression. The mechanism is many independent write round-trips parking fresh blobs on the young heap — one batch round-trip does not have it.",
+      "conditions": "M1 Pro · AOT · 2026-07 · backfilled 2026-07"
+    }
   ]
 }

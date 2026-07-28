@@ -12,5 +12,12 @@
     "The batch (`BatchRequest`) path still routes blob params through the graph copy — exp 234 covers single-row `ExecuteRequest`/`QueryRequest` and (post-review) the coalesced `MultiExecuteRequest` standalone-write pump. Open candidate: a blob-heavy `executeBatch` workload (e.g. N rows each carrying a >=256 KB blob) to test whether wrapping per-set blobs reproduces the same transfer fraction. Blocked on nothing but a bounded pass; the `blob_param_write_ab.dart` harness generalizes to batch.",
     "The 256 KB threshold is a measured floor on an Apple M1 Pro / macOS box; the crossover between wrap-overhead and graph-copy-plus-GC cost is machine- and heap-configuration-dependent. A production profile showing a different blob-size distribution (many 64-256 KB blobs, or predominantly multi-MB) would justify re-tuning `blobParamTransferThreshold` or gating it per-arch.",
     "The main->writer hop is now GC-invisible for large blobs, but the writer->arena copy (2) and arena->page copy (3) remain. Neither is reducible through the current Dart FFI surface (the arena must own stable native bytes for SQLITE_STATIC across the bind+step, and SQLite owns its pages), so future blob-param work should target transfer/scheduling, not copy elimination, unless a zero-copy Dart->native pin primitive ships. The Dart shared-memory multithreading proposal (dart-lang/language #333) would dissolve the isolate-hop copy entirely; it is the same watch-condition already tracked for `result-transfer-shape`."
+  ],
+  "claims": [
+    {
+      "id": "234.1",
+      "text": "A mutable Uint8List param is the one write value SendPort.send truly copies; wrapping params >= 256 KB in TransferableTypedData lands that one copy in external memory instead of on the GC heap (~15-20% on 256-512 KB single-row inserts).",
+      "conditions": "M1 Pro · AOT · 2026-07"
+    }
   ]
 }

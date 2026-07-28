@@ -130,6 +130,19 @@ Run this mental (or literal) checklist:
       `README.md` is generated from these — don't hand-edit the table.
 - [ ] Is the signal entry in its own file, `experiments/signals/entries/NNN.json`
       (not hand-edited into the generated `signals.json`)?
+- [ ] Are the run's *durable, citable* results recorded as typed `claims`
+      (`{id: "NNN.x", text, conditions, edges}`) — with an edge
+      (`supersedes` / `refutes` / `refines` / `validates`) wherever this run
+      revises an earlier claim? If the revised result predates claims, mint
+      the old claim in *that* experiment's entry from its own
+      `changedBeliefs` wording, then edge to it. Wholesale supersessions also
+      get `supersededBy` / `amendedBy` on the old experiment's
+      `index/NNN.json` row.
+- [ ] Did `check_knowledge_links.dart` pass? Dead links and citations of
+      undefined claims are CI errors; before choosing the experiment, the
+      direction's generated `beliefs` block (live + coverage) is the fastest
+      read of what is currently held true — never quote a superseded claim's
+      number as current.
 - [ ] Does the experiment doc have the headings the parser expects?
       (`Problem`, `Hypothesis`, `Approach` or `What We Built`, `Results`,
       `Decision` or `Why Accepted` / `Why Rejected`)

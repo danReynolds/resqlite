@@ -1,0 +1,13 @@
+{
+  "directions": [
+    "sqlite-version-and-build-config"
+  ],
+  "outcomeClass": "accepted",
+  "claims": [
+    {
+      "id": "016.1",
+      "text": "The tuned SQLite compile-flag set (with prepare_v3) is accepted; per-call savings are individually too small to measure but stack with isLeaf bindings.",
+      "conditions": "2025 · backfilled 2026-07"
+    }
+  ]
+}

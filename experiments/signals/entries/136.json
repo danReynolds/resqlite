@@ -5,14 +5,21 @@
   ],
   "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
-    "On A11c overlap the reader-worker port handler accounts for 28.57% of total wall (burst + drain) at ~18 \u00b5s per call across 4,228 calls per burst \u2014 the largest remaining reachable main-isolate slice",
+    "On A11c overlap the reader-worker port handler accounts for 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls per burst — the largest remaining reachable main-isolate slice",
     "Subscriber-fanout emit is < 1% of the completion chain on every measured workload; batching `controller.add` is not the optimization target",
-    "Most reader replies on A11c overlap short-circuit via `selectIfChanged` hash comparison (4,228 completions \u2192 29 emits in the fresh pass); the per-call cost is handler bootstrap + Future resolution + hash check + `_flushQueue` admit, not real query result work",
+    "Most reader replies on A11c overlap short-circuit via `selectIfChanged` hash comparison (4,228 completions → 29 emits in the fresh pass); the per-call cost is handler bootstrap + Future resolution + hash check + `_flushQueue` admit, not real query result work",
     "Most reader-completion wall fires AFTER the writer-burst stopwatch stops; the shared `audit_workloads.dart` now snapshots counters BOTH at burst-end and after the drain so future main-isolate audits can pick the right denominator. A11c drain switched from a fixed 50 ms wait to the same quiet-window pattern keyed-PK already uses"
   ],
   "nextSignals": [
     "evaluate reader-reply batching as the bounded implementation candidate that follows: must drop `completion_us / total_us` on A11c overlap AND stay neutral on A11c disjoint and keyed-PK (otherwise overall release-suite delta is workload-specific)",
     "treat `stream_emit_us` as evidence-of-absence for subscriber-fanout optimization candidates until a workload with very many listeners per stream surfaces",
     "future main-isolate counters should follow the exp 136 pattern (counter + post-drain snapshot in `audit_workloads.dart`) rather than redoing the harness wiring"
+  ],
+  "claims": [
+    {
+      "id": "136.1",
+      "text": "On A11c overlap the reader-worker port handler is the largest remaining reachable main-isolate slice (28.57% of burst+drain wall); subscriber-fanout emit is <1% and is not the optimization target.",
+      "conditions": "M1 Pro · profile · 2026-05 · backfilled 2026-07"
+    }
   ]
 }

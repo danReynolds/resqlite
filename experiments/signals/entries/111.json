@@ -11,5 +11,12 @@
   "nextSignals": [
     "look for round-trip-batching opportunities for savepoint open/close pairs (analogous to exp 009 read-side batching)",
     "compare any future savepoint-path change against the exp 111 nested-tx benchmark before claiming a win"
+  ],
+  "claims": [
+    {
+      "id": "111.1",
+      "text": "Savepoint string-allocation cost is below the decision threshold even at 50 SAVEPOINTs per iteration — per-isolate-round-trip cost dominates nested transaction control.",
+      "conditions": "M1 Pro · 2026-04 · backfilled 2026-07"
+    }
   ]
 }

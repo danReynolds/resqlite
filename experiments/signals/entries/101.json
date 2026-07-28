@@ -8,5 +8,12 @@
   ],
   "nextSignals": [
     "nested transaction benchmark before revisiting savepoint control"
+  ],
+  "claims": [
+    {
+      "id": "101.1",
+      "text": "Top-level transaction control had removable SQLite prepare/finalize work; cached control statements remove it.",
+      "conditions": "M1 Pro · 2026-04 · backfilled 2026-07"
+    }
   ]
 }

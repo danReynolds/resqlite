@@ -91,6 +91,14 @@ explain why the attempt is worth a bounded pass in light of prior work.
 
 Inside each direction, the fields you should actually read first:
 
+- `beliefs` — the generated current belief set: what this direction currently
+  holds true (`live`), each claim with its source experiment and measurement
+  conditions, plus what has been revised (`superseded` / `refuted`). Read this
+  *before* the prose: it is the fastest correct answer to "what do we know,
+  and on what evidence." Check `coverage` — where `entriesWithClaims` is well
+  below `entriesInDirection`, `currentRead` still holds beliefs that were
+  never distilled into claims, so read it too. **Never cite a superseded or
+  refuted claim's number as current**; cite what superseded it.
 - `keyPriors` — the experiments you must understand to evaluate work in
   this direction. Read all of them.
 - `blockedOnMeasurement` — if non-empty, the next implementation
@@ -195,7 +203,9 @@ Before coding, write a short working note for yourself:
   requires or allows that lane
 - for a moonshot: the architecture assumption being challenged, the frontier it
   attacks, and the risk budget you are intentionally allowing for the prototype
-- what prior experiments are adjacent
+- what prior experiments are adjacent — search the belief sets (or
+  `docs/experiments/knowledge-graph.json`) for claims about the mechanism you
+  are targeting before trusting a README-table skim
 - why this is not just a duplicate attempt — neither of a prior *rejected*
   experiment nor of any open PR or branch **in flight right now** (two runs
   shipping the same follow-up is how exp 175 collided)
@@ -390,6 +400,10 @@ exp 229).
 When finished:
 
 - write or update the experiment record. Keep markdown human-readable;
+  when a *load-bearing number* from a prior experiment appears in your
+  reasoning, cite its claim id (e.g. "claim 245.2") rather than restating the
+  figure bare — the CI linter warns on citations of claims that later become
+  superseded, which is how stale numbers get caught instead of quoted forever;
   machine-oriented direction metadata belongs in `signals.json`. For rejected
   experiments, the writeup should explain why the direction looked plausible,
   what was measured, and what would make the area interesting again — a
@@ -400,7 +414,21 @@ When finished:
 - record the run's signal in its own file,
   `experiments/signals/entries/NNN.json` (directions, outcomeClass,
   changedBeliefs, nextSignals) — never the generated `signals.json`, and never
-  a shared file, so two concurrent runs can't collide on it. When the run
+  a shared file, so two concurrent runs can't collide on it. Record each
+  *durable, citable* result as a typed claim too: `claims: [{id: "NNN.x",
+  text, conditions, edges}]`. When your result revises an earlier claim, say
+  so with an edge (`supersedes` / `refutes` / `refines` / `validates` →
+  `"MMM.y"`) instead of prose — claim state is derived from edges, and the
+  generated per-direction belief set (plus
+  `docs/experiments/knowledge-graph.json`) is built from them. If you
+  supersede another *experiment's* headline wholesale, also add
+  `supersededBy` / `amendedBy` to that experiment's `index/NNN.json` row so
+  the README shows the lineage. When the result you are revising predates
+  claims, **mint the old claim on demand**: add it to *that experiment's*
+  entry file, worded from its own `changedBeliefs`, in the same run — then
+  edge to it. Claims are adopted incrementally; the generated belief sets
+  carry a `coverage` count so nobody mistakes a partially-migrated direction
+  for a complete one. When the run
   changes how future agents should read a whole *direction*, also update that
   direction's synthesis in [`signals/base.json`](signals/base.json). For
   moonshots, record the class in the signal source too:

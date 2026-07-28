@@ -13,5 +13,12 @@
     "do not reopen byte-stream hash-loop implementation work without checking both long TEXT and mixed TEXT/BLOB unchanged-fanout rows",
     "future hash variants need a concrete mechanism or production profile showing this path remains dominant; broader measurement alone is no longer the blocker",
     "the direct streaming-suite entry point can be used for focused stream measurements before compiling the full release runner"
+  ],
+  "claims": [
+    {
+      "id": "172.1",
+      "text": "The 8-byte FNV fold scales acceptably to mixed 32KB TEXT+BLOB long payloads (3.446 ms median beside 2.356 ms for 4KB TEXT), and the streaming suite now covers that shape.",
+      "conditions": "M1 Pro · 2026-06 · backfilled 2026-07"
+    }
   ]
 }
