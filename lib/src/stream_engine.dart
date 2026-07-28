@@ -307,13 +307,21 @@ final class StreamEngine {
           };
         }
 
-        // If an invalidation occurred while performing the entry's initial query then the entry
-        // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
+        // The initial result is a valid observation and the stream's contract
+        // is to emit current results immediately, so it is always emitted —
+        // even when a write dirtied this entry mid-flight. Skipping it used to
+        // strand the stream permanently: `lastResultHash` was already set from
+        // these rows, so the catch-up re-query below compared against them,
+        // reported "unchanged", and emitted nothing at all.
+        entry.emit(initialRows);
+
+        // An invalidation that landed while the initial query was in flight
+        // arrived before this entry's dependencies were known, so re-query to
+        // pick up anything the initial result missed. `selectIfChanged`
+        // suppresses the emission if nothing actually changed.
         if (entry.dirty) {
           _requeryQueue.add(entry);
           _flushQueue();
-        } else {
-          entry.emit(initialRows);
         }
       } catch (e, stackTrace) {
         // Propagate error to all subscribers so they don't hang.

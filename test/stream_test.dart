@@ -102,6 +102,55 @@ void main() {
       );
     });
 
+    test(
+      'stream always emits its initial result even when a write lands mid-query',
+      () async {
+        // Regression: a write that dirtied an entry while its initial query was
+        // in flight used to suppress the initial emission in favour of a
+        // catch-up re-query — but `lastResultHash` was already set from those
+        // rows, so `selectIfChanged` reported "unchanged" and the stream
+        // emitted NOTHING, permanently. Writing immediately after opening a
+        // stream is ordinary usage, so the stream must still emit.
+        // Seed enough rows that the stream's initial query is still running
+        // when the writes below dispatch — that is the race window.
+        await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+          for (var i = 0; i < 40000; i++) ['seed_$i', i],
+        ]);
+
+        final seen = <int>[];
+        final sub = db
+            .stream('SELECT id, name, value FROM items')
+            .map((rows) => rows.length)
+            .listen(seen.add);
+        addTearDown(sub.cancel);
+
+        // No await between opening the stream and writing: the writes race the
+        // initial query on purpose.
+        await Future.wait([
+          for (var i = 0; i < 8; i++)
+            db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+              'r_$i',
+              i,
+            ]),
+        ]);
+
+        await Future.doWhile(() async {
+          if (seen.isNotEmpty && seen.last == 40008) return false;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          return true;
+        }).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail(
+            'stream never reached the post-write count; '
+            'emitted: $seen',
+          ),
+        );
+
+        expect(seen, isNotEmpty, reason: 'the initial result must be emitted');
+        expect(seen.last, 40008);
+      },
+    );
+
     tearDown(() async {
       await db.close();
       if (await tempDir.exists()) {
