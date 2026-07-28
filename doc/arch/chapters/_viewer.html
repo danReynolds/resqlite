@@ -1,0 +1,594 @@
+<meta charset="utf-8">
+<title>resqlite · system knowledge</title>
+<style>
+:root {
+  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
+  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
+  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
+  --code-bg: #EEF2EF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
+    --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
+    --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
+    --code-bg: #232C29;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
+  --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
+  --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
+  --code-bg: #232C29;
+}
+:root[data-theme="light"] {
+  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
+  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
+  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
+  --code-bg: #EEF2EF;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font: 15px/1.6 "Avenir Next", "Seravek", system-ui, sans-serif;
+}
+.mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+header {
+  padding: 18px 26px 0; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--ground); z-index: 20;
+}
+.hdr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.eyebrow {
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+}
+h1 { font-size: 20px; margin: 2px 0 0; font-weight: 600; letter-spacing: -.01em; }
+h1 .dim { color: var(--ink-2); font-weight: 400; font-size: 15px; }
+.hdr-left { margin-right: auto; }
+.searchbox { position: relative; }
+.searchbox input {
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; width: 240px;
+}
+.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-results {
+  position: absolute; top: 36px; right: 0; width: 400px; max-height: 330px;
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); z-index: 40; display: none;
+}
+.search-results.open { display: block; }
+.search-hit {
+  display: block; width: 100%; text-align: left;
+  border-bottom: 1px solid var(--line); padding: 8px 12px; font-size: 12.5px;
+}
+.search-hit:hover, .search-hit:focus-visible { background: var(--accent-soft); outline: none; }
+
+.tabs { display: flex; gap: 2px; margin-top: 12px; }
+.tab {
+  padding: 7px 16px 9px; font-size: 13.5px; color: var(--ink-2);
+  border-bottom: 2px solid transparent;
+}
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.asof-row { display: flex; align-items: center; gap: 10px; margin-left: auto; padding-bottom: 8px; font-size: 13px; color: var(--ink-2); }
+.asof-row input[type=date] {
+  font: inherit; font-size: 12.5px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+}
+.asof-row .today-btn { color: var(--accent); font-size: 12.5px; }
+.asof-row .today-btn:hover { text-decoration: underline; }
+.time-note {
+  background: var(--accent-soft); color: var(--ink); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 14px; margin: 14px 0 0; font-size: 13.5px; display: none;
+}
+.time-note.on { display: block; }
+
+main { max-width: 860px; margin: 0 auto; padding: 10px 26px 60px; }
+.coverage-banner { color: var(--ink-2); font-size: 12.5px; margin: 14px 2px 4px; }
+
+.topic { margin-top: 34px; }
+.topic-hd { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.topic-hd h2 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+.topic-hd .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); }
+
+.belief { padding: 16px 2px 14px; border-bottom: 1px solid var(--line); }
+.belief-head { font-size: 15px; font-weight: 600; text-wrap: balance; margin: 0 0 2px; }
+.belief-rest { font-size: 13.5px; color: var(--ink); margin: 2px 0 6px; max-width: 68ch; }
+.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
+.prov .src { color: var(--accent); }
+.chip {
+  display: inline-block; padding: 0 8px 1px; border-radius: 99px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .05em;
+  border: 1px solid; text-transform: uppercase;
+}
+.ch-later { color: var(--stale); border-color: var(--stale); }
+.hist-btn { color: var(--accent); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+.hist-btn:hover { text-decoration: underline; }
+.hist-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.thread { margin: 10px 0 2px 10px; border-left: 2px solid var(--line); padding-left: 16px; display: none; }
+.thread.open { display: block; }
+.rev { margin: 10px 0; }
+.rev .rev-when { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--stale); }
+.rev .rev-when.origin { color: var(--ink-2); }
+.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 64ch; }
+.rev .rel { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--meas); }
+
+.log-day { margin-top: 26px; }
+.log-day h3 { font-size: 13px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.event { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 8px 0; }
+.ev-kind { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .06em; padding-top: 3px; }
+.ev-learned { color: var(--ok); } .ev-revised { color: var(--stale); } .ev-refuted { color: var(--bad); }
+.event .ev-body { font-size: 13.5px; max-width: 66ch; }
+.event .ev-sub { font-size: 12px; color: var(--ink-2); }
+.event .ev-old { color: var(--ink-2); font-style: italic; }
+
+.hint { color: var(--ink-2); font-size: 12.5px; }
+footer { max-width: 860px; margin: 0 auto; padding: 8px 26px 26px; color: var(--ink-2); font-size: 12px; }
+footer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+/* documentation voice */
+.doc-serif { font-family: Charter, Georgia, 'Iowan Old Style', serif; }
+.story h3 {
+  font-size: 15px; font-weight: 600; margin: 30px 0 8px; letter-spacing: -.01em;
+  font-family: "Avenir Next", system-ui, sans-serif;
+}
+.story p {
+  font-family: Charter, Georgia, 'Iowan Old Style', serif;
+  font-size: 15.5px; line-height: 1.72; max-width: 72ch; margin: 0 0 14px;
+}
+.story .lede {
+  font-size: 17px; line-height: 1.65; color: var(--ink);
+  border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 6px;
+}
+.diagram-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 10px 8px; margin: 22px 0; overflow-x: auto;
+}
+.diagram-card figcaption {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-2); text-align: center; padding: 8px 0 6px;
+}
+.ev-inline {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0 5px 1px;
+  vertical-align: 2px; margin: 0 1px; white-space: nowrap;
+}
+.ev-inline:hover { border-color: var(--accent); }
+.ev-inline.ev-stale { color: var(--stale); text-decoration: line-through; }
+.ev-drawer { display: none; margin: 4px 0 16px; }
+.ev-drawer.open { display: block; }
+.ev-drawer .belief { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; background: var(--panel); }
+/* diagram svg text */
+.dg-zone { font: 600 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); letter-spacing: .1em; }
+.dg-flow { font: 500 12px "Avenir Next", system-ui, sans-serif; fill: var(--ink); }
+.dg-cost { font: 500 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); }
+.dg-wall { stroke: var(--stale); stroke-width: 1.6; stroke-dasharray: 6 5; }
+.dg-box { fill: var(--ground); stroke: var(--line); rx: 8; }
+/* positions */
+.comp-summary { font-size: 14px; max-width: 70ch; margin: 12px 0 4px; }
+.sub-hd { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; margin: 18px 0 2px; }
+.position { border-left: 3px solid var(--accent); padding: 2px 0 6px 14px; margin: 14px 0; }
+.position > p { margin: 0 0 6px; font-size: 14px; max-width: 68ch; }
+.ev-chip {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 5px; padding: 0 7px 1px; margin-right: 4px;
+}
+.ev-chip:hover { border-color: var(--accent); }
+.ev-chip.ev-stale { color: var(--stale); text-decoration: line-through; }
+.ev-body-card { display: none; margin: 8px 0 0 6px; }
+.ev-body-card.open { display: block; }
+.ev-body-card .belief { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; }
+.all-beliefs { margin-top: 16px; }
+.all-beliefs summary { cursor: pointer; font-size: 13px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
+.flow { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-2); margin: 2px 0; }
+/* system map */
+.sysmap { margin: 22px 0 8px; }
+.sm-grid { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 22px; align-items: stretch; }
+.sm-col { display: flex; flex-direction: column; gap: 22px; }
+.sm-boundary {
+  border-left: 2px dashed var(--stale); border-right: 2px dashed var(--stale);
+  display: flex; align-items: center; justify-content: center; position: relative;
+}
+.sm-boundary .comp { width: 100%; margin: 0 -14px; }
+.sm-native { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.comp {
+  display: block; width: 100%; text-align: left; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+}
+.comp:hover { border-color: var(--accent); }
+.comp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.comp .c-name { font-weight: 600; font-size: 14px; }
+.comp .c-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.comp .c-stance { font-size: 12.5px; color: var(--ink); margin: 5px 0 6px; }
+.comp .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); }
+.comp .c-meta .fresh { color: var(--accent); }
+.sm-caption { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--stale); margin: 6px 0 0; }
+.back-row { margin: 18px 0 -12px; font-size: 13px; }
+.back-row button { color: var(--accent); }
+.back-row button:hover { text-decoration: underline; }
+@media (max-width: 760px) { .sm-grid { grid-template-columns: 1fr; } .sm-boundary { border: 2px dashed var(--stale); border-radius: 10px; padding: 8px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="hdr-row">
+    <div class="hdr-left">
+      <div class="eyebrow">docs/experiments/knowledge-graph.json · generated snapshot</div>
+      <h1>System knowledge <span class="dim" id="hdr-stats"></span></h1>
+    </div>
+    <div class="searchbox">
+      <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
+      <div class="search-results" id="search-results" role="listbox"></div>
+    </div>
+  </div>
+  <div class="hdr-row">
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tab-map" role="tab" aria-selected="true">System</button>
+      <button class="tab" id="tab-beliefs" role="tab" aria-selected="false">Beliefs</button>
+      <button class="tab" id="tab-log" role="tab" aria-selected="false">Changelog</button>
+    </div>
+    <div class="asof-row">
+      <label for="asof">as of</label>
+      <input type="date" id="asof">
+      <button class="today-btn" id="today-btn">today</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="time-note" id="time-note"></div>
+  <div id="view"></div>
+</main>
+
+<footer>
+  One generated aggregate, two lenses: humans read this page; agents read the same
+  <code>knowledge-graph.json</code>. Beliefs are claims recorded by the experiment that
+  established them; history derives from typed <code>supersedes / refutes / refines</code> edges,
+  so "how we got here" is data, not archaeology.
+</footer>
+
+<script>
+const KG = __KG__;
+
+// ---------- prep ----------
+const expById = {}; for (const e of KG.experiments) expById[e.id] = e;
+const claims = KG.claims.map(c => ({ ...c }));
+const byId = {}; for (const c of claims) byId[c.id] = c;
+const parseDate = s => { if (!s) return null; const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2] || 15); };
+for (const c of claims) { c.birth = parseDate((expById[c.source] || {}).date); c.death = null; c.killers = []; }
+for (const c of claims) for (const e of (c.edges || []))
+  if ((e.type === 'supersedes' || e.type === 'refutes') && byId[e.target]) {
+    const t = byId[e.target];
+    t.death = t.death ? Math.min(t.death, c.birth) : c.birth;
+    t.killers.push(c.id);
+  }
+const fmt = t => t == null ? '' : new Date(t).toISOString().slice(0, 10);
+const fmtNice = t => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const TODAY = Math.max.apply(null, claims.map(c => c.birth || 0)) + 86400000;
+let asOf = TODAY;
+
+const liveAt = (c, t) => c.birth != null && c.birth <= t && (c.death == null || c.death > t);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const firstSentence = s => {
+  const m = s.match(/^.*?[.!?](?=\s|$)/);
+  return m ? m[0] : s;
+};
+const dirName = d => d.replace(/-/g, ' ');
+
+// ---------- system component map (curated; promotable to doc/arch/system-map.json) ----------
+const SYSMAP = __SYSMAP__;
+for (const comp of SYSMAP) {
+  comp.pool = claims.filter(c =>
+    (c.directions || []).some(d => comp.dirs.includes(d)) ||
+    (comp.claims || []).includes(c.id));
+}
+// Narrative chapters: prose with [[claim]] citations woven in. This is the
+// authored layer — the repo home for it is doc/arch/system-map.json.
+const STORIES = __STORIES__;
+
+const DIAGRAMS = {
+  boundary: `<figure class="diagram-card"><svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Four transfer routes across the isolate boundary">
+    <rect x="20" y="34" width="240" height="270" class="dg-box"/>
+    <rect x="640" y="34" width="240" height="270" class="dg-box"/>
+    <text x="140" y="22" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
+    <text x="760" y="22" text-anchor="middle" class="dg-zone">WORKER ISOLATES</text>
+    <line x1="330" y1="10" x2="330" y2="320" class="dg-wall"/>
+    <line x1="570" y1="10" x2="570" y2="320" class="dg-wall"/>
+    <text x="450" y="22" text-anchor="middle" class="dg-zone" fill="var(--stale)">ISOLATE BOUNDARY</text>
+    <defs>
+      <marker id="a-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--ok)"/></marker>
+      <marker id="a-meas" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--meas)"/></marker>
+      <marker id="a-acc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--accent)"/></marker>
+      <marker id="a-st" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--stale)"/></marker>
+    </defs>
+    <text x="450" y="66" text-anchor="middle" class="dg-flow">strings &amp; numbers</text>
+    <line x1="275" y1="78" x2="620" y2="78" stroke="var(--ok)" stroke-width="2.4" marker-end="url(#a-ok)" marker-start="url(#a-ok)" transform="rotate(180 450 78) rotate(180 450 78)"/>
+    <text x="450" y="94" text-anchor="middle" class="dg-cost">shared by reference · ~0 cost either direction</text>
+    <text x="450" y="130" text-anchor="middle" class="dg-flow">result structure (flat values list)</text>
+    <line x1="620" y1="142" x2="278" y2="142" stroke="var(--meas)" stroke-width="2.4" marker-end="url(#a-meas)"/>
+    <text x="450" y="158" text-anchor="middle" class="dg-cost">send() · copied per slot · the real price of a result</text>
+    <text x="450" y="194" text-anchor="middle" class="dg-flow">blobs ≥ 256 KB</text>
+    <line x1="278" y1="206" x2="620" y2="206" stroke="var(--accent)" stroke-width="2.4" marker-end="url(#a-acc)" marker-start="url(#a-acc)"/>
+    <text x="450" y="222" text-anchor="middle" class="dg-cost">TransferableTypedData · one copy → external memory · ownership move</text>
+    <text x="450" y="258" text-anchor="middle" class="dg-flow">results &gt; 32k slots</text>
+    <line x1="620" y1="270" x2="278" y2="270" stroke="var(--stale)" stroke-width="2.4" marker-end="url(#a-st)"/>
+    <text x="450" y="286" text-anchor="middle" class="dg-cost">Isolate.exit · whole-heap handoff · worker dies, pool respawns †</text>
+    <text x="450" y="312" text-anchor="middle" class="dg-cost">† slot-count trigger — bytes lie: strings would count, but they were never going to be copied</text>
+  </svg><figcaption>the four transfer routes, by what they cost</figcaption></figure>`,
+};
+
+function chipify(text, ctx) {
+  let i = 0;
+  return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
+    const stale = byId[id] && byId[id].state !== 'live';
+    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-evd="${ctx}" data-claim="${id}">${id}</button>`;
+  });
+}
+const compById = {}; for (const m of SYSMAP) compById[m.id] = m;
+let currentComp = null;
+
+// ---------- history thread (ancestors via this claim's own edges) ----------
+function ancestorsOf(c, seen) {
+  seen = seen || new Set();
+  const out = [];
+  for (const e of (c.edges || [])) {
+    const t = byId[e.target];
+    if (!t || seen.has(t.id)) continue;
+    seen.add(t.id);
+    out.push({ rel: e.type, claim: t });
+    for (const deeper of ancestorsOf(t, seen)) out.push(deeper);
+  }
+  return out;
+}
+
+// ---------- system map view ----------
+const view = document.getElementById('view');
+function compStats(m) {
+  const live = m.pool.filter(c => liveAt(c, asOf));
+  const last = Math.max.apply(null, m.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
+  return { live, last };
+}
+function compCard(m) {
+  const { live, last } = compStats(m);
+  const fresh = last && (TODAY - last) < 14 * 86400000;
+  return `<button class="comp" data-comp="${m.id}">
+    <div class="c-kicker">${m.kicker}</div>
+    <div class="c-name">${m.name}</div>
+    <div class="c-stance">${esc(m.summary)}</div>
+    <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
+  </button>`;
+}
+function renderMap() {
+  setTab('map'); currentComp = null;
+  view.innerHTML = `<div class="sysmap">
+    <div class="sm-grid">
+      <div class="sm-col">${compCard(compById.api)}</div>
+      <div class="sm-boundary">${compCard(compById.boundary)}</div>
+      <div class="sm-col">${compCard(compById.readers)}${compCard(compById.writer)}${compCard(compById.tx)}</div>
+    </div>
+    <p class="sm-caption">⟵ everything left runs on main · everything right runs on worker isolates ⟶</p>
+    <div class="sm-native sm-col">${compCard(compById.native)}${compCard(compById.meta)}</div>
+  </div>
+  <p class="coverage-banner">Each card shows the component's most recently established stance. Open one for its
+  full position — current beliefs, how each was reached, and what changed over time.</p>`;
+  view.querySelectorAll('.comp').forEach(b =>
+    b.addEventListener('click', () => renderBeliefs(b.dataset.comp)));
+}
+
+// ---------- beliefs view (component-scoped) ----------
+function renderBeliefs(compId) {
+  setTab('beliefs');
+  if (typeof compId === 'string') currentComp = compId;
+  const cov = KG.coverage;
+  let h = '';
+  const comps = currentComp ? [compById[currentComp]] : SYSMAP;
+  if (currentComp) h += `<div class="back-row"><button id="back-map">← System map</button></div>`;
+  h += `<p class="coverage-banner">Claims cover ${cov.entriesWithClaims} of ${cov.totalEntries} experiment entries so far —
+    components may hold further beliefs still recorded only as prose in signals.json. Coverage grows as runs revise old results.</p>`;
+  for (const m of comps) {
+    const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
+    const story = STORIES[m.id];
+    h += `<section class="topic"><div class="topic-hd">
+      <h2>${m.name}</h2>
+      <span class="meta">${m.kicker} · ${pool.length} beliefs</span></div>`;
+    if (story) {
+      h += `<div class="story">`;
+      story.sections.forEach((sec, si) => {
+        if (sec.h) h += `<h3>${esc(sec.h)}</h3>`;
+        sec.ps.forEach((para, pi) => {
+          const ctx = `${m.id}-${si}-${pi}`;
+          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(esc(para), ctx)}</p>
+            <div class="ev-drawer" id="evd-${ctx}"></div>`;
+        });
+        if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
+      });
+      h += `</div>`;
+    }
+    if (pool.length) {
+      h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
+      for (const c of pool) h += beliefCard(c);
+      h += `</details>`;
+    }
+    h += `</section>`;
+  }
+  view.innerHTML = h;
+  const back = document.getElementById('back-map');
+  if (back) back.addEventListener('click', renderMap);
+  wire();
+}
+function beliefCard(c) {
+  const head = firstSentence(c.text);
+  const rest = c.text.slice(head.length).trim();
+  const anc = ancestorsOf(c);
+  const src = expById[c.source] || {};
+  const laterDead = asOf < TODAY && c.death != null;
+  return `<article class="belief" id="b-${c.id}">
+    <p class="belief-head">${esc(head)}</p>
+    ${rest ? `<p class="belief-rest">${esc(rest)}</p>` : ''}
+    <div class="prov">
+      <span class="src">exp ${c.source}</span>
+      <span>${src.date || ''}</span>
+      ${c.conditions ? `<span>${esc(c.conditions)}</span>` : ''}
+      ${laterDead ? `<span class="chip ch-later">later superseded by ${c.killers.join(', ')}</span>` : ''}
+      ${anc.length ? `<button class="hist-btn" data-hist="${c.id}">history · ${anc.length} prior ▸</button>` : ''}
+    </div>
+    ${anc.length ? `<div class="thread" id="th-${c.id}">${threadHtml(anc)}</div>` : ''}
+  </article>`;
+}
+function threadHtml(anc) {
+  return anc.map(a => {
+    const cl = a.claim;
+    const span = cl.death
+      ? `believed ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}`
+      : `since ${fmtNice(cl.birth)} · still live`;
+    const relTxt = a.rel === 'supersedes' ? 'replaced by the above'
+      : a.rel === 'refutes' ? 'refuted by the above'
+      : a.rel === 'refines' ? 'refined by the above' : 'validated by the above';
+    return `<div class="rev">
+      <span class="rev-when ${cl.death ? '' : 'origin'}">${span} · <span class="rel">${relTxt}</span> · exp ${cl.source}</span>
+      <p>${esc(cl.text)}</p>
+    </div>`;
+  }).join('');
+}
+
+// ---------- changelog view ----------
+function renderLog() {
+  setTab('log');
+  const events = [];
+  for (const c of claims) {
+    if (c.birth == null || c.birth > asOf) continue;
+    const sup = (c.edges || []).filter(e => e.type === 'supersedes' && byId[e.target]);
+    const ref = (c.edges || []).filter(e => e.type === 'refutes' && byId[e.target]);
+    const kind = ref.length ? 'refuted' : sup.length ? 'revised' : 'learned';
+    const oldEdge = sup[0] || ref[0];
+    events.push({ t: c.birth, kind, c, old: oldEdge ? byId[oldEdge.target] : null });
+  }
+  events.sort((a, b) => b.t - a.t || b.c.id.localeCompare(a.c.id));
+  let h = '', day = '';
+  for (const ev of events) {
+    const d = fmtNice(ev.t);
+    if (d !== day) { if (day) h += '</div>'; h += `<div class="log-day"><h3>${d}</h3>`; day = d; }
+    h += `<div class="event">
+      <span class="ev-kind ev-${ev.kind}">${ev.kind.toUpperCase()}</span>
+      <div><div class="ev-body">${esc(firstSentence(ev.c.text))}
+        <span class="ev-sub">· exp ${ev.c.source} · ${esc((SYSMAP.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
+        ${ev.old ? `<div class="ev-sub ev-old">was: ${esc(firstSentence(ev.old.text))}</div>` : ''}
+      </div></div>`;
+  }
+  if (day) h += '</div>';
+  view.innerHTML = h || '<p class="hint">Nothing recorded before this date.</p>';
+}
+
+// ---------- tabs / time ----------
+let tab = 'map';
+function setTab(t) {
+  tab = t;
+  for (const id of ['map', 'beliefs', 'log'])
+    document.getElementById('tab-' + id).setAttribute('aria-selected', String(t === id));
+}
+document.getElementById('tab-map').addEventListener('click', renderMap);
+document.getElementById('tab-beliefs').addEventListener('click', () => { currentComp = null; renderBeliefs(); });
+document.getElementById('tab-log').addEventListener('click', renderLog);
+
+const asofInput = document.getElementById('asof');
+const timeNote = document.getElementById('time-note');
+const births = claims.map(c => c.birth).filter(Boolean);
+asofInput.max = fmt(TODAY);
+asofInput.min = fmt(Math.min.apply(null, births));
+asofInput.value = fmt(TODAY);
+function applyTime() {
+  const atToday = asOf >= TODAY;
+  timeNote.classList.toggle('on', !atToday);
+  if (!atToday) {
+    const nowLive = claims.filter(c => liveAt(c, TODAY)).length;
+    const thenLive = claims.filter(c => liveAt(c, asOf)).length;
+    timeNote.innerHTML = `Showing the belief set as of <b>${fmtNice(asOf)}</b> —
+      ${thenLive} beliefs then, ${nowLive} today. Beliefs since revised carry an amber chip.`;
+  }
+  (tab === 'map' ? renderMap : tab === 'beliefs' ? () => renderBeliefs() : renderLog)();
+}
+asofInput.addEventListener('change', () => {
+  const t = parseDate(asofInput.value);
+  if (t) { asOf = t + 86399000; applyTime(); }
+});
+document.getElementById('today-btn').addEventListener('click', () => {
+  asOf = TODAY; asofInput.value = fmt(TODAY); applyTime();
+});
+
+// ---------- wiring ----------
+function wire() {
+  view.querySelectorAll('.ev-inline').forEach(b =>
+    b.addEventListener('click', () => {
+      const drawer = document.getElementById('evd-' + b.dataset.evd);
+      const c = byId[b.dataset.claim];
+      if (!drawer || !c) return;
+      if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
+        drawer.classList.remove('open'); return;
+      }
+      drawer.dataset.showing = c.id;
+      drawer.innerHTML = beliefCard(c);
+      drawer.classList.add('open');
+      wireHist(drawer);
+    }));
+  wireHist(view);
+}
+function wireHist(root) {
+  root.querySelectorAll('.hist-btn').forEach(b =>
+    b.addEventListener('click', () => {
+      const th = root.querySelector('#th-' + CSS.escape(b.dataset.hist)) || document.getElementById('th-' + b.dataset.hist);
+      if (!th) return;
+      const open = th.classList.toggle('open');
+      const n = (b.textContent.match(/\d+/) || ['0'])[0];
+      b.textContent = open ? `history · ${n} prior ▾` : `history · ${n} prior ▸`;
+    }));
+}
+
+// ---------- search ----------
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  searchResults.innerHTML = '';
+  if (q.length < 2) { searchResults.classList.remove('open'); return; }
+  const hits = [];
+  for (const c of claims) {
+    if (c.id.includes(q) || c.text.toLowerCase().includes(q))
+      hits.push({ id: c.id, label: firstSentence(c.text), state: c.state });
+    if (hits.length > 9) break;
+  }
+  for (const hHit of hits) {
+    const b = document.createElement('button');
+    b.className = 'search-hit'; b.setAttribute('role', 'option');
+    b.innerHTML = `<span class="mono">${hHit.id} · ${hHit.state}</span> · ${esc(hHit.label.slice(0, 90))}`;
+    b.addEventListener('click', () => {
+      searchResults.classList.remove('open'); searchInput.value = '';
+      asOf = TODAY; asofInput.value = fmt(TODAY);
+      currentComp = null; renderBeliefs();
+      const target = document.getElementById('b-' + hHit.id);
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        const head = target.querySelector('.belief-head');
+        head.innerHTML = `<mark>${esc(head.textContent)}</mark>`;
+      } else {
+        const killers = (byId[hHit.id] || {}).killers || [];
+        const el2 = killers[0] && document.getElementById('b-' + killers[0]);
+        if (el2) {
+          el2.scrollIntoView({ block: 'center' });
+          const btn = el2.querySelector('.hist-btn'); if (btn) btn.click();
+        }
+      }
+    });
+    searchResults.appendChild(b);
+  }
+  searchResults.classList.toggle('open', hits.length > 0);
+});
+document.addEventListener('click', ev => { if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open'); });
+
+// ---------- boot ----------
+document.getElementById('hdr-stats').textContent =
+  `— ${claims.filter(c => liveAt(c, TODAY)).length} current beliefs across ${SYSMAP.length} system components`;
+renderMap();
+</script>
