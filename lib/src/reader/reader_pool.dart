@@ -133,7 +133,7 @@ final class ReaderPool {
     String sql,
     List<Object?> parameters,
     int lastResultHash,
-    int lastRowCount, [
+    int? lastRowCount, [
     int? traceCorrelationId,
   ]) async {
     final result = await _dispatch(

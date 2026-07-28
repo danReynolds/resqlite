@@ -26,13 +26,13 @@
     },
     {
       "id": "255.3",
-      "text": "Poisoning a stream's comparison baseline must use the row count, not the hash: selectIfChanged requires both to match, and an empty result legitimately hashes to 0, so a hash sentinel of 0 is reachable rather than impossible and would leave empty-result streams silent. A real row count is always >= 0, so -1 can never match.",
+      "text": "Clearing a stream's comparison baseline must clear the row count, not the hash: selectIfChanged requires both to match, and an empty result legitimately hashes to 0, so a hash sentinel of 0 is reachable rather than impossible and would leave empty-result streams silent. The row count is nullable end to end, with null meaning 'no baseline' — which also retired a pre-existing magic -1 in the request type.",
       "conditions": "review finding · guarded by the empty-result regression test · 2026-07"
     }
   ],
   "nextSignals": [
     "Stream emission is now guaranteed at registration; the remaining stream-rerun-dispatch work is throughput (exp 239's parked-read batching, preserved) rather than correctness.",
     "Audit sibling paths for the same shape — any place that takes a comparison baseline from a result it then declines to emit will suppress both the original and its replacement. `selectIfChanged`'s short-circuit is only safe when the baseline came from rows the subscriber actually received.",
-    "Any future 'force this comparison to report a change' needs a value the compared domain cannot produce. Row counts have one (-1); hashes do not, because the empty-result short-circuit makes 0 meaningful. Check the domain before picking a sentinel."
+    "Prefer absence over a magic value when forcing a comparison to report a change: null cannot collide with any real observation, whereas a sentinel must be a value the domain cannot produce — and hashes have no such value here, since the empty-result short-circuit makes 0 meaningful."
   ]
 }

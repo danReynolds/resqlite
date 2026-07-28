@@ -65,9 +65,10 @@ final class SelectIfChangedRequest extends ReadRequest {
   });
   final int lastResultHash;
 
-  /// Previously-emitted row count, or `-1` if unknown. Compared with the
-  /// fresh count alongside the canonical result hash.
-  final int lastRowCount;
+  /// Row count previously emitted to subscribers, or null when there is no
+  /// baseline. Compared with the fresh count alongside the result hash; a null
+  /// baseline can never match, so the result is always treated as changed.
+  final int? lastRowCount;
 }
 
 /// How large a result's *structure* (rows × columns) can grow before handing
@@ -404,7 +405,7 @@ RawQueryResult executeQuery(
   String sql,
   List<Object?> parameters,
   int lastResultHash,
-  int lastRowCount,
+  int? lastRowCount,
 ) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
   final (newHash, newRowCount) = callQueryHash(stmt);
   if (newHash == lastResultHash && newRowCount == lastRowCount) {

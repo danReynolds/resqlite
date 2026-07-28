@@ -73,7 +73,7 @@ is guaranteed to emit, and lets that emission be the stream's first:
 
 ```dart
 if (entry.dirty) {
-  entry.lastRowCount = _neverMatchingRowCount;  // guarantees the re-query emits
+  entry.lastRowCount = null;   // no baseline, so the re-query always emits
   _requeryQueue.add(entry);
   _flushQueue();
 } else {
@@ -87,15 +87,20 @@ those same rows is what let both emissions cancel each other. `_requery`
 propagates errors to subscribers, so the stream always resolves to a value or
 an error — never silence.
 
-**It has to be the row count, not the hash.** `selectIfChanged` reports
-"unchanged" only when the hash *and* the row count both match, so poisoning
-either one suffices — but only the row count has an impossible value. An empty
-result hashes to **0** (`_finishInitialHash` short-circuits on `rowCount == 0`),
-so a hash sentinel of 0 is a legitimate baseline rather than an unreachable one,
-and a stream over a query matching no rows would go silent exactly as before.
-A review pass caught this in the first version of the fix; the empty-result
-regression test in `stream_test.dart` fails 0/3 against the hash-only sentinel
-and passes 4/4 against the row-count one.
+**It has to be the row count, and it is expressed as `null`.**
+`selectIfChanged` reports "unchanged" only when the hash *and* the row count
+both match, so clearing either suffices — but the hash has no unreachable
+value. An empty result hashes to **0** (`_finishInitialHash` short-circuits on
+`rowCount == 0`), so a hash sentinel of 0 is a legitimate baseline rather than
+an impossible one, and a stream over a query matching no rows would go silent
+exactly as before. A review pass caught that in the first version of this fix.
+
+The row count is now nullable end to end — `StreamEntry`, the
+`SelectIfChangedRequest`, and the comparison — with `null` meaning "no baseline
+to compare against". That replaced a magic `-1` that predated this work
+(the request type documented "`-1` if unknown"), so the codebase carries one
+fewer sentinel than before rather than one more. The empty-result regression
+test fails 0/3 against a hash-only sentinel and passes 10/10 against this.
 
 The alternative — emit the known-stale rows immediately, then correct — is
 simpler and also fixes the silence, but exp 256 measured it rendering exactly
