@@ -1,0 +1,24 @@
+{
+  "directions": ["stream-rerun-dispatch"],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "A stream's initial emission was not guaranteed: if a write dirtied the entry while its initial query was in flight, `_createStream` discarded the initial rows unemitted and relied on a catch-up re-query, which then compared against the hash baseline taken from those same discarded rows and reported 'unchanged'. Both emissions suppressed each other and the stream stayed permanently silent. The initial result is always emitted now, with the catch-up re-query following when the entry was dirtied.",
+    "The failure mode of this class of bug is silence, not staleness — the hardest kind for an application to notice, and the reason it survived so long behind an intermittent test failure."
+  ],
+  "claims": [
+    {
+      "id": "255.1",
+      "text": "A stream always emits its initial result, even when a write dirties it mid-query; the catch-up re-query follows and self-suppresses via selectIfChanged when nothing changed. Suppressing the initial emission in favour of the re-query stranded streams permanently silent, because the re-query's baseline came from the very rows it replaced.",
+      "conditions": "M1 Pro · deterministic regression test (40k-row seed) · 2026-07"
+    },
+    {
+      "id": "255.2",
+      "text": "An intermittent test failure reproducing at ~1-in-3 is a bug, not a flake. This one was dismissed three times in one session, partly because the test's own comment asserted the shape could not flake — a false confidence marker actively redirects investigation, and reading the actual failure text ('emitted x Stream closed') would have identified the mechanism immediately.",
+      "conditions": "methodology · 2026-07"
+    }
+  ],
+  "nextSignals": [
+    "Stream emission is now guaranteed at registration; the remaining stream-rerun-dispatch work is throughput (exp 239's parked-read batching, preserved) rather than correctness.",
+    "Audit sibling paths for the same shape — any place that takes a comparison baseline from a result it then declines to emit will suppress both the original and its replacement. `selectIfChanged`'s short-circuit is only safe when the baseline came from rows the subscriber actually received."
+  ]
+}
