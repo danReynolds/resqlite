@@ -2252,6 +2252,20 @@
         "Reopen a larger-size-only MultiExecute route only with a representative production BLOB-size distribution concentrated above 512 KiB and a preregistered crossover sweep that reproduces on more than this host. Start from archive/exp-253 and keep 256 KiB as a load-bearing rejection lane.",
         "If production evidence justifies retesting BatchRequest, use the post-exp-243 alias-preserving wrapper and separate distinct, repeated, and mixed identities. Exp 237's old per-occurrence prototype and all-aliased fixture are not a current-protocol batch gate by themselves."
       ]
+    },
+    "254": {
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected",
+      "changedBeliefs": [
+        "Reading reader TEXT cells with `sqlite3_value_blob` instead of `sqlite3_value_text` is byte-identical (UTF-8 connection; exp 191 explicit-length invariant) but performance-neutral. `value_text`'s NUL-termination does not cost a per-cell malloc on the prepared-statement scan path: `sqlite3VdbeMemGrow` reuses each result `Mem`'s `zMalloc` buffer across rows, reducing it to an amortized memcpy below the focused-harness floor. Same-binary order-flipped A/B (6 passes) on `selectBytes` shows long-TEXT -0.6% / short-TEXT +2.4% against a +1.2% integer control; 2 KB text still ~-0.7%, no length scaling.",
+        "Two-worktree A/B on this codebase can carry a per-worktree binary offset that is NOT drift: the byte-identical integer control moved ~-4.8% in the SAME direction across both order-flipped passes. A single-binary runtime toggle (env-gated, removed before merge) is the reliable isolation for a per-cell C change of this size."
+      ],
+      "nextSignals": [
+        "The reader TEXT payload is already materialized cheaply (Mem buffer reuse), so both the per-cell FFI lookup (exp 205) and the text materialization (this exp) are closed. Do not re-attack `value_text` vs `value_blob` without a workload that defeats result-`Mem` buffer reuse (e.g. single-row-per-statement patterns where the buffer never amortizes) or a ~10x lower per-row step/decode floor.",
+        "`benchmark/experiments/text_value_blob_decode.dart` is the durable focused gate for any future TEXT-decode materialization change; pair it with a single-binary toggle rather than a two-worktree diff to avoid the per-worktree offset."
+      ]
     }
   }
 }
