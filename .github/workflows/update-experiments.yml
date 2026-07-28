@@ -11,6 +11,8 @@ on:
       - 'benchmark/generate_signals.dart'
       - 'benchmark/generate_readme.dart'
       - 'benchmark/generate_knowledge_graph.dart'
+      - 'benchmark/generate_knowledge_page.dart'
+      - 'doc/arch/chapters/**'
       - 'benchmark/results/*.md'
       - 'benchmark/results/*.json'
       - 'benchmark/HARDWARE_RESULTS.md'
@@ -53,6 +55,9 @@ jobs:
 
       - name: Generate knowledge graph JSON
         run: dart run benchmark/generate_knowledge_graph.dart
+
+      - name: Generate knowledge page
+        run: dart run benchmark/generate_knowledge_page.dart
 
       - name: Generate devices JSON
         run: dart run benchmark/generate_devices.dart

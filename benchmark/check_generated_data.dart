@@ -3,6 +3,7 @@ import 'dart:io';
 import 'generate_devices.dart' as generate_devices;
 import 'generate_history.dart' as generate_history;
 import 'generate_knowledge_graph.dart' as generate_knowledge_graph;
+import 'generate_knowledge_page.dart' as generate_knowledge_page;
 import 'generate_readme.dart' as generate_readme;
 import 'generate_signals.dart' as generate_signals;
 
@@ -42,6 +43,8 @@ Future<void> main() async {
     'knowledge-graph.json': () => generate_knowledge_graph.buildKnowledgeGraph(
       experimentsDir: Directory('experiments'),
     ),
+    'knowledge/index.html': () =>
+        generate_knowledge_page.buildKnowledgePage(repoRoot: Directory('.')),
   };
 
   final failures = <String>[];

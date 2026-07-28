@@ -118,6 +118,10 @@ void main() {
 
   final linkRe = RegExp(r'\]\(([^)\s]+)\)');
   final claimRe = RegExp(r'\bclaim[s]?\s+(\d+\.\d+)\b');
+  // Chapters cite claims inline as [[NNN.M]]; unknown ids are errors, and
+  // citations of superseded/refuted claims are the chapter's repair debt.
+  final citeRe = RegExp(r'\[\[(\d+\.\d+)\]\]');
+  final chapterDebt = <String, int>{};
   for (final f in mdFiles) {
     final text = f.readAsStringSync();
     for (final m in linkRe.allMatches(text)) {
@@ -146,6 +150,21 @@ void main() {
         );
       }
     }
+    for (final m in citeRe.allMatches(text)) {
+      final id = m.group(1)!;
+      if (!claimStates.containsKey(id)) {
+        errors.add('${f.path}: citation [[${id}]] names a claim no entry defines.');
+      } else if (supersededOrRefuted.containsKey(id)) {
+        chapterDebt[f.path] = (chapterDebt[f.path] ?? 0) + 1;
+        warnings.add(
+          '${f.path}: [[${id}]] is ${supersededOrRefuted[id]} — this passage '
+          'needs a repair pass.',
+        );
+      }
+    }
+  }
+  for (final e in chapterDebt.entries) {
+    warnings.add('repair debt: ${e.key} has ${e.value} stale citation(s).');
   }
 
   for (final w in warnings) {

@@ -52,7 +52,7 @@ jobs:
       - name: Check PR diff for bot-owned generated files
         run: |
           base="origin/${{ github.base_ref }}"
-          generated="docs/experiments/history.json docs/experiments/knowledge-graph.json docs/benchmarks/devices.json experiments/signals.json experiments/README.md"
+          generated="docs/experiments/history.json docs/experiments/knowledge-graph.json docs/knowledge/index.html docs/benchmarks/devices.json experiments/signals.json experiments/README.md"
           changed=$(git diff --name-only "$base...HEAD" -- $generated || true)
           if [ -n "$changed" ]; then
             echo "::error::Generated aggregates are bot-owned; do not commit them on a branch. Edit the per-experiment sources instead: experiments/index/NNN.json (README row), experiments/signals/entries/NNN.json (signal entry), or experiments/signals/base.json (direction synthesis)."
