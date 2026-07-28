@@ -1,0 +1,7 @@
+{
+  "file": "254-text-value-blob-decode.md",
+  "title": "TEXT decode via sqlite3_value_blob (skip NUL-termination copy)",
+  "impact": "Tested reading reader TEXT cells with `sqlite3_value_blob` instead of `sqlite3_value_text` across all four decode/JSON/stream-hash sites (`write_json_to_buf`, `resqlite_step_row`, `resqlite_step_row_hash`, `resqlite_query_hash`). `value_text` forces `sqlite3VdbeMemNulTerminate` to append a `\\0` that none of these consumers read — they all take an explicit byte length (the exp 191 invariant) — so it looked like a per-cell malloc+copy avoidable via `value_blob`, which returns identical UTF-8 bytes on resqlite's always-UTF-8 connections. A single-binary A/B toggle (needed after a two-worktree comparison showed a ~-4.8% per-worktree offset on the byte-identical integer control) measured 6 order-flipped passes: on the clean `selectBytes` path the ~200 B long-TEXT lane moved -0.6% and short-TEXT +2.4% against a +1.2% integer control, and pushing text to 2 KB (~30 MB copied/query) still moved both paths only ~-0.7% — inside the noise band, no length scaling. `sqlite3VdbeMemGrow` reuses each result `Mem`'s `zMalloc` across the row scan, so `value_text`'s cost is an amortized memcpy below the harness floor, not a per-cell allocation. Rejected (byte-identical, zero-risk, unmeasurable); runtime reverted, focused harness kept. Reopen only if a workload prevents `Mem` buffer reuse or the per-row step/decode floor drops ~10x.",
+  "status": "rejected",
+  "link": ""
+}
