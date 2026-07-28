@@ -1,0 +1,594 @@
+<meta charset="utf-8">
+<title>resqlite · system knowledge</title>
+<style>
+:root {
+  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
+  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
+  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
+  --code-bg: #EEF2EF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
+    --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
+    --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
+    --code-bg: #232C29;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
+  --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
+  --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
+  --code-bg: #232C29;
+}
+:root[data-theme="light"] {
+  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
+  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
+  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
+  --code-bg: #EEF2EF;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font: 15px/1.6 "Avenir Next", "Seravek", system-ui, sans-serif;
+}
+.mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+header {
+  padding: 18px 26px 0; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--ground); z-index: 20;
+}
+.hdr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.eyebrow {
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+}
+h1 { font-size: 20px; margin: 2px 0 0; font-weight: 600; letter-spacing: -.01em; }
+h1 .dim { color: var(--ink-2); font-weight: 400; font-size: 15px; }
+.hdr-left { margin-right: auto; }
+.searchbox { position: relative; }
+.searchbox input {
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; width: 240px;
+}
+.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-results {
+  position: absolute; top: 36px; right: 0; width: 400px; max-height: 330px;
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); z-index: 40; display: none;
+}
+.search-results.open { display: block; }
+.search-hit {
+  display: block; width: 100%; text-align: left;
+  border-bottom: 1px solid var(--line); padding: 8px 12px; font-size: 12.5px;
+}
+.search-hit:hover, .search-hit:focus-visible { background: var(--accent-soft); outline: none; }
+
+.tabs { display: flex; gap: 2px; margin-top: 12px; }
+.tab {
+  padding: 7px 16px 9px; font-size: 13.5px; color: var(--ink-2);
+  border-bottom: 2px solid transparent;
+}
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.asof-row { display: flex; align-items: center; gap: 10px; margin-left: auto; padding-bottom: 8px; font-size: 13px; color: var(--ink-2); }
+.asof-row input[type=date] {
+  font: inherit; font-size: 12.5px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+}
+.asof-row .today-btn { color: var(--accent); font-size: 12.5px; }
+.asof-row .today-btn:hover { text-decoration: underline; }
+.time-note {
+  background: var(--accent-soft); color: var(--ink); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 14px; margin: 14px 0 0; font-size: 13.5px; display: none;
+}
+.time-note.on { display: block; }
+
+main { max-width: 860px; margin: 0 auto; padding: 10px 26px 60px; }
+.coverage-banner { color: var(--ink-2); font-size: 12.5px; margin: 14px 2px 4px; }
+
+.topic { margin-top: 34px; }
+.topic-hd { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.topic-hd h2 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+.topic-hd .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); }
+
+.belief { padding: 16px 2px 14px; border-bottom: 1px solid var(--line); }
+.belief-head { font-size: 15px; font-weight: 600; text-wrap: balance; margin: 0 0 2px; }
+.belief-rest { font-size: 13.5px; color: var(--ink); margin: 2px 0 6px; max-width: 68ch; }
+.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
+.prov .src { color: var(--accent); }
+.chip {
+  display: inline-block; padding: 0 8px 1px; border-radius: 99px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .05em;
+  border: 1px solid; text-transform: uppercase;
+}
+.ch-later { color: var(--stale); border-color: var(--stale); }
+.hist-btn { color: var(--accent); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+.hist-btn:hover { text-decoration: underline; }
+.hist-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.thread { margin: 10px 0 2px 10px; border-left: 2px solid var(--line); padding-left: 16px; display: none; }
+.thread.open { display: block; }
+.rev { margin: 10px 0; }
+.rev .rev-when { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--stale); }
+.rev .rev-when.origin { color: var(--ink-2); }
+.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 64ch; }
+.rev .rel { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--meas); }
+
+.log-day { margin-top: 26px; }
+.log-day h3 { font-size: 13px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.event { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 8px 0; }
+.ev-kind { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .06em; padding-top: 3px; }
+.ev-learned { color: var(--ok); } .ev-revised { color: var(--stale); } .ev-refuted { color: var(--bad); }
+.event .ev-body { font-size: 13.5px; max-width: 66ch; }
+.event .ev-sub { font-size: 12px; color: var(--ink-2); }
+.event .ev-old { color: var(--ink-2); font-style: italic; }
+
+.hint { color: var(--ink-2); font-size: 12.5px; }
+footer { max-width: 860px; margin: 0 auto; padding: 8px 26px 26px; color: var(--ink-2); font-size: 12px; }
+footer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+/* documentation voice */
+.doc-serif { font-family: Charter, Georgia, 'Iowan Old Style', serif; }
+.story h3 {
+  font-size: 15px; font-weight: 600; margin: 30px 0 8px; letter-spacing: -.01em;
+  font-family: "Avenir Next", system-ui, sans-serif;
+}
+.story p {
+  font-family: Charter, Georgia, 'Iowan Old Style', serif;
+  font-size: 15.5px; line-height: 1.72; max-width: 72ch; margin: 0 0 14px;
+}
+.story .lede {
+  font-size: 17px; line-height: 1.65; color: var(--ink);
+  border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 6px;
+}
+.diagram-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 10px 8px; margin: 22px 0; overflow-x: auto;
+}
+.diagram-card figcaption {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-2); text-align: center; padding: 8px 0 6px;
+}
+.ev-inline {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0 5px 1px;
+  vertical-align: 2px; margin: 0 1px; white-space: nowrap;
+}
+.ev-inline:hover { border-color: var(--accent); }
+.ev-inline.ev-stale { color: var(--stale); text-decoration: line-through; }
+.ev-drawer { display: none; margin: 4px 0 16px; }
+.ev-drawer.open { display: block; }
+.ev-drawer .belief { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; background: var(--panel); }
+/* diagram svg text */
+.dg-zone { font: 600 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); letter-spacing: .1em; }
+.dg-flow { font: 500 12px "Avenir Next", system-ui, sans-serif; fill: var(--ink); }
+.dg-cost { font: 500 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); }
+.dg-wall { stroke: var(--stale); stroke-width: 1.6; stroke-dasharray: 6 5; }
+.dg-box { fill: var(--ground); stroke: var(--line); rx: 8; }
+/* positions */
+.comp-summary { font-size: 14px; max-width: 70ch; margin: 12px 0 4px; }
+.sub-hd { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; margin: 18px 0 2px; }
+.position { border-left: 3px solid var(--accent); padding: 2px 0 6px 14px; margin: 14px 0; }
+.position > p { margin: 0 0 6px; font-size: 14px; max-width: 68ch; }
+.ev-chip {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 5px; padding: 0 7px 1px; margin-right: 4px;
+}
+.ev-chip:hover { border-color: var(--accent); }
+.ev-chip.ev-stale { color: var(--stale); text-decoration: line-through; }
+.ev-body-card { display: none; margin: 8px 0 0 6px; }
+.ev-body-card.open { display: block; }
+.ev-body-card .belief { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; }
+.all-beliefs { margin-top: 16px; }
+.all-beliefs summary { cursor: pointer; font-size: 13px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
+.flow { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-2); margin: 2px 0; }
+/* system map */
+.sysmap { margin: 22px 0 8px; }
+.sm-grid { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 22px; align-items: stretch; }
+.sm-col { display: flex; flex-direction: column; gap: 22px; }
+.sm-boundary {
+  border-left: 2px dashed var(--stale); border-right: 2px dashed var(--stale);
+  display: flex; align-items: center; justify-content: center; position: relative;
+}
+.sm-boundary .comp { width: 100%; margin: 0 -14px; }
+.sm-native { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.comp {
+  display: block; width: 100%; text-align: left; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+}
+.comp:hover { border-color: var(--accent); }
+.comp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.comp .c-name { font-weight: 600; font-size: 14px; }
+.comp .c-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.comp .c-stance { font-size: 12.5px; color: var(--ink); margin: 5px 0 6px; }
+.comp .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); }
+.comp .c-meta .fresh { color: var(--accent); }
+.sm-caption { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--stale); margin: 6px 0 0; }
+.back-row { margin: 18px 0 -12px; font-size: 13px; }
+.back-row button { color: var(--accent); }
+.back-row button:hover { text-decoration: underline; }
+@media (max-width: 760px) { .sm-grid { grid-template-columns: 1fr; } .sm-boundary { border: 2px dashed var(--stale); border-radius: 10px; padding: 8px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="hdr-row">
+    <div class="hdr-left">
+      <div class="eyebrow">docs/experiments/knowledge-graph.json · generated snapshot</div>
+      <h1>System knowledge <span class="dim" id="hdr-stats"></span></h1>
+    </div>
+    <div class="searchbox">
+      <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
+      <div class="search-results" id="search-results" role="listbox"></div>
+    </div>
+  </div>
+  <div class="hdr-row">
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tab-map" role="tab" aria-selected="true">System</button>
+      <button class="tab" id="tab-beliefs" role="tab" aria-selected="false">Beliefs</button>
+      <button class="tab" id="tab-log" role="tab" aria-selected="false">Changelog</button>
+    </div>
+    <div class="asof-row">
+      <label for="asof">as of</label>
+      <input type="date" id="asof">
+      <button class="today-btn" id="today-btn">today</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="time-note" id="time-note"></div>
+  <div id="view"></div>
+</main>
+
+<footer>
+  One generated aggregate, two lenses: humans read this page; agents read the same
+  <code>knowledge-graph.json</code>. Beliefs are claims recorded by the experiment that
+  established them; history derives from typed <code>supersedes / refutes / refines</code> edges,
+  so "how we got here" is data, not archaeology.
+</footer>
+
+<script>
+const KG = {"_note":"Generated by benchmark/generate_knowledge_graph.dart from the per-experiment fragments (index/NNN.json + signals/entries/NNN.json). Bot-owned; do not hand-edit or commit on a branch.","directions":["stream-rerun-dispatch","parameter-encoding-and-binding","long-text-stream-hashing","sqlite-version-and-build-config","transaction-control-paths","result-transfer-shape","measurement-system"],"coverage":{"entriesWithClaims":41,"totalEntries":122},"experiments":[{"id":"001","title":"C-native JSON serialization","file":"001-c-native-json-serialization.md","date":"2026-04-06","status":"accepted"},{"id":"002","title":"C binary buffer for maps","file":"002-c-binary-buffer-for-maps.md","date":"2026-04-06","status":"rejected"},{"id":"003","title":"C-level connection + statement cache","file":"003-c-level-connection-and-statement-cache.md","date":"2026-04-06","status":"accepted"},{"id":"004","title":"NOMUTEX with per-query locking","file":"004-nomutex-per-query-locking.md","date":"2026-04-06","status":"accepted"},{"id":"005","title":"Dart binary codec + TransferableTypedData","file":"005-dart-binary-codec-transferable-typed-data.md","date":"2026-04-06","status":"rejected"},{"id":"006","title":"String interning","file":"006-string-interning.md","date":"2026-04-06","status":"rejected"},{"id":"007","title":"C-level connection pool","file":"007-c-level-connection-pool.md","date":"2026-04-06","status":"accepted"},{"id":"008","title":"Flat value list + lazy ResultSet","file":"008-flat-list-lazy-resultset.md","date":"2026-04-06","status":"accepted"},{"id":"008b","title":"Byte-backed lazy maps","file":"008b-byte-backed-lazy-maps.md","date":"2026-04-06","status":"rejected"},{"id":"009","title":"Batch FFI (resqlite_step_row)","file":"009-batch-ffi-step-row.md","date":"2026-04-06","status":"accepted"},{"id":"010","title":"ASCII fast-path string decode","file":"010-ascii-fast-path-string-decode.md","date":"2026-04-06","status":"rejected"},{"id":"011","title":"Persistent reader pool","file":"011-persistent-reader-pool.md","date":"2026-04-07","status":"rejected"},{"id":"012","title":"SendPort vs Isolate.spawn deep dive","file":"012-sendport-vs-spawn-deep-dive.md","date":"2026-04-07","status":"rejected"},{"id":"013","title":"FFI isLeaf annotation","file":"013-ffi-isleaf.md","date":"2026-04-07","status":"accepted"},{"id":"014","title":"BEGIN IMMEDIATE + remove clear_bindings","file":"014-writer-tuning.md","date":"2026-04-07","status":"accepted+rejected"},{"id":"015","title":"Cell buffer union (48 → 16 bytes)","file":"015-cell-buffer-union.md","date":"2026-04-07","status":"accepted"},{"id":"016","title":"SQLite compile flags + prepare_v3","file":"016-sqlite-compile-flags.md","date":"2026-04-07","status":"accepted","directions":["sqlite-version-and-build-config"],"outcomeClass":"accepted"},{"id":"017","title":"Dart_PostCObject for reads","file":"017-dart-postcobject.md","date":"2026-04-07","status":"rejected"},{"id":"018","title":"Multi-row step (64 rows/FFI call)","file":"018-multi-row-step.md","date":"2026-04-07","status":"rejected"},{"id":"019","title":"Hybrid reader pool (SendPort + sacrifice)","file":"019-hybrid-reader-pool.md","date":"2026-04-08","status":"accepted"},{"id":"020","title":"SQLITE_DEFAULT_LOOKASIDE tuning","file":"020-lookaside-allocator.md","date":"2026-04-08","status":"accepted"},{"id":"021","title":"SQLITE_DEFAULT_PCACHE_INITSZ=128","file":"021-pcache-initsz.md","date":"2026-04-08","status":"accepted"},{"id":"022","title":"WAL autocheckpoint tuning","file":"022-wal-autocheckpoint.md","date":"2026-04-08","status":"accepted"},{"id":"023","title":"Fast int64-to-string for JSON","file":"023-fast-itoa.md","date":"2026-04-08","status":"accepted"},{"id":"024","title":"JSON buffer initial size 16KB","file":"024-json-buffer-16k.md","date":"2026-04-08","status":"accepted"},{"id":"025","title":"`PRAGMA optimize`","file":"025-pragma-optimize.md","date":"2026-04-08","status":"rejected"},{"id":"026","title":"`sqlite3_db_status()` probe","file":"026-db-status-probe.md","date":"2026-04-08","status":"rejected"},{"id":"027","title":"Transaction query writer cache","file":"027-transaction-query-writer-cache.md","date":"2026-04-08","status":"rejected"},{"id":"028","title":"Static bind for text/blob params","file":"028-static-bind-params.md","date":"2026-04-08","status":"accepted"},{"id":"029","title":"Periodic PASSIVE checkpointing","file":"029-periodic-passive-checkpointing.md","date":"2026-04-08","status":"accepted"},{"id":"030","title":"Dedicated reader assignment","file":"030-dedicated-reader-assignment.md","date":"2026-04-08","status":"accepted"},{"id":"031","title":"JSON1 bulk shapes","file":"031-json1-bulk-shapes.md","date":"2026-04-08","status":"rejected"},{"id":"032","title":"Row `Map` facade overrides","file":"032-row-map-facade.md","date":"2026-04-09","status":"accepted"},{"id":"033","title":"FNV-1a hash for result change detection","file":"033-fnv1a-hash.md","date":"2026-04-09","status":"accepted"},{"id":"034","title":"Per-worker schema cache","file":"034-schema-cache.md","date":"2026-04-09","status":"accepted"},{"id":"035","title":"Reuse cell buffer across queries","file":"035-cell-buffer-reuse.md","date":"2026-04-09","status":"accepted"},{"id":"036","title":"Compiler hints (Dart + C)","file":"036-compiler-hints.md","date":"2026-04-09","status":"accepted"},{"id":"037","title":"Persistent JSON buffer per reader","file":"037-persistent-json-buffer.md","date":"2026-04-09","status":"accepted"},{"id":"038","title":"Stack allocation for column name arrays","file":"038-stack-alloc-col-names.md","date":"2026-04-09","status":"accepted"},{"id":"039","title":"Byte-size sacrifice threshold","file":"039-byte-size-sacrifice-threshold.md","date":"2026-04-10","status":"accepted"},{"id":"040","title":"Reader slot event-port cleanup","file":"040-reader-slot-event-port-cleanup.md","date":"2026-04-14","status":"accepted"},{"id":"041","title":"Ryu double-to-string for JSON","file":"041-ryu-double-to-string.md","date":"2026-04-15","status":"rejected"},{"id":"042","title":"LTO build flag (`-flto`)","file":"042-lto-build-flag.md","date":"2026-04-15","status":"rejected"},{"id":"043","title":"SWAR escape scanning + lookup table","file":"043-swar-escape-lookup-table.md","date":"2026-04-15","status":"accepted"},{"id":"044","title":"`SQLITE_ENABLE_BATCH_ATOMIC_WRITE`","file":"044-batch-atomic-write.md","date":"2026-04-15","status":"accepted","directions":["sqlite-version-and-build-config"],"outcomeClass":"accepted"},{"id":"045","title":"Microtask invalidation coalescing","file":"045-microtask-invalidation-coalescing.md","date":"2026-04-15","status":"accepted"},{"id":"046","title":"Synchronous StreamController","file":"046-sync-stream-controller.md","date":"2026-04-15","status":"rejected"},{"id":"047","title":"Authorizer opt-out for non-stream queries","file":"047-authorizer-opt-out.md","date":"2026-04-15","status":"rejected"},{"id":"051","title":"Lock-free reader pool with atomics","file":"051-lock-free-reader-pool.md","date":"2026-04-15","status":"rejected"},{"id":"052","title":"Column-level dependency tracking","file":"052-column-level-dependencies.md","date":"2026-04-15","status":"rejected"},{"id":"053","title":"Page size 8192","file":"053-page-size-8192.md","date":"2026-04-15","status":"rejected"},{"id":"054","title":"Profile-Guided Optimization","file":"054-pgo.md","date":"2026-04-15","status":"rejected"},{"id":"055","title":"Columnar typed arrays","file":"055-columnar-typed-arrays.md","date":"2026-04-15","status":"rejected"},{"id":"057","title":"Preupdate hook batching for batch inserts","file":"057-preupdate-batching.md","date":"2026-04-16","status":"rejected"},{"id":"058","title":"Short-string value cache","file":"058-short-string-cache.md","date":"2026-04-16","status":"rejected"},{"id":"059","title":"Row count hint in schema cache","file":"059-row-count-hint.md","date":"2026-04-16","status":"rejected"},{"id":"060","title":"Combined single-row FFI call","file":"060-combined-single-row-ffi.md","date":"2026-04-16","status":"rejected"},{"id":"063","title":"SelectOne fast path API","file":"063-select-one-fast-path.md","date":"2026-04-16","status":"rejected"},{"id":"064","title":"Drop redundant `sqlite3_clear_bindings`","file":"064-drop-clear-bindings.md","date":"2026-04-16","status":"accepted"},{"id":"065","title":"JSON1 re-evaluation (post-041/043)","file":"065-json1-reevaluation.md","date":"2026-04-16","status":"rejected"},{"id":"066","title":"Transparent single-row fast path in `select()`","file":"066-transparent-fast-path.md","date":"2026-04-16","status":"rejected"},{"id":"067","title":"Shrink initial values allocation (256→4)","file":"067-shrink-initial-allocation.md","date":"2026-04-16","status":"rejected"},{"id":"068","title":"DDL schema_version watchdog","file":"068-ddl-schema-watchdog.md","date":"2026-04-16","status":"rejected"},{"id":"069","title":"SQL fingerprint in stmt cache","file":"069-sql-fingerprint.md","date":"2026-04-16","status":"rejected"},{"id":"070","title":"Zero-row-change short-circuit + persistent dirty buffer","file":"070-zero-row-change-shortcircuit.md","date":"2026-04-16","status":"accepted"},{"id":"071","title":"MRU-first stmt cache scan + SQL hash filter","file":"071-stmt-cache-mru-scan.md","date":"2026-04-16","status":"rejected"},{"id":"072","title":"xxhash64 replacing FNV-1a for result change detection","file":"072-xxhash-for-fnv.md","date":"2026-04-16","status":"rejected"},{"id":"073","title":"Single-slot schema-cache fast-path","file":"073-schema-cache-fast-path.md","date":"2026-04-16","status":"rejected"},{"id":"074","title":"Bulk `step_many` batched FFI for read path","file":"074-bulk-step-many.md","date":"2026-04-16","status":"rejected"},{"id":"075","title":"Native-buffered hash for `selectIfChanged`","file":"075-native-hash-selectifchanged.md","date":"2026-04-16","status":"accepted","directions":["long-text-stream-hashing"],"outcomeClass":"accepted"},{"id":"076","title":"Pre-bound statement cache","file":"076-prebound-stmt-cache-analysis.md","date":"2026-04-16","status":"rejected"},{"id":"077","title":"Cheap-check-first sweep (four small wins)","file":"077-cheap-check-first-sweep.md","date":"2026-04-16","status":"accepted"},{"id":"081","title":"Binary row result storage","file":"081-binary-row-result-storage.md","date":"2026-04-20","status":"rejected"},{"id":"082","title":"Message-graph hand-off benchmark","file":"082-message-graph-handoff.md","date":"2026-04-20","status":"rejected","supersededBy":["245"]},{"id":"083","title":"Stream rerun pre-dispatch queue","file":"083-stream-rerun-pre-dispatch-queue.md","date":"2026-04-20","status":"accepted"},{"id":"084","title":"Late dispatch generation stamp","file":"084-late-dispatch-generation-stamp.md","date":"2026-04-20","status":"rejected"},{"id":"085","title":"Reserved reader slot for reruns","file":"085-reserved-reader-slot-for-reruns.md","date":"2026-04-20","status":"rejected"},{"id":"088","title":"`SQLITE_ENABLE_SETLK_TIMEOUT` + `sqlite3_setlk_timeout` on every connection","file":"088-setlk-timeout.md","date":"2026-04-20","status":"rejected","directions":["measurement-system"],"outcomeClass":"rejected_after_noise_check"},{"id":"089","title":"Deeply-immutable `ResultSet` for zero-copy isolate transfer","file":"089-deeply-immutable-resultset.md","date":"2026-04-21","status":"rejected"},{"id":"090","title":"sqlite3mc dependency bump audit","file":"090-sqlite3mc-bump-audit.md","date":"2026-04-21","status":"rejected","directions":["sqlite-version-and-build-config"],"outcomeClass":"watch"},{"id":"092","title":"`wal_checkpoint=NOOP` probe in periodic checkpointer","file":"092-wal-checkpoint-noop.md","date":"2026-04-21","status":"rejected"},{"id":"093","title":"Alias cache entry's read tables instead of copying","file":"093-alias-cache-entry-read-tables.md","date":"2026-04-22","status":"rejected"},{"id":"094","title":"Dirty/read table string reuse","file":"094-dirty-read-string-reuse.md","date":"2026-04-23","status":"rejected"},{"id":"095","title":"Persistent writer result buffer","file":"095-writer-result-buffer.md","date":"2026-04-23","status":"rejected"},{"id":"096","title":"Direct batch parameter encoding","file":"096-direct-batch-param-encoding.md","date":"2026-04-23","status":"rejected"},{"id":"097","title":"One-pass initial stream decode and hash","file":"097-one-pass-initial-stream-hash.md","date":"2026-04-23","status":"accepted"},{"id":"099","title":"8-byte-chunked FNV for byte-stream cells","file":"099-fnv-8byte-bytestream.md","date":"2026-04-25","status":"rejected","directions":["long-text-stream-hashing","measurement-system"],"outcomeClass":"benchmark_gap"},{"id":"100","title":"Bounded stream re-query scheduler","file":"100-bounded-stream-requery-scheduler.md","date":"2026-04-25","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_regression"},{"id":"101","title":"Cached BEGIN/COMMIT/ROLLBACK statements","file":"101-tx-stmt-cache.md","date":"2026-04-25","status":"accepted","directions":["transaction-control-paths"],"outcomeClass":"accepted"},{"id":"102","title":"Cached SAVEPOINT/RELEASE/ROLLBACK TO strings on `_WriterState`","file":"102-savepoint-string-cache.md","date":"2026-04-25","status":"rejected"},{"id":"103","title":"Native nested transaction depth control","file":"103-native-nested-tx-depth-control.md","date":"2026-04-25","status":"rejected","directions":["transaction-control-paths"],"outcomeClass":"rejected_below_current_signal"},{"id":"104","title":"Re-eval of exp 094 (dirty/read string reuse) under A11c","file":"104-094-reeval-under-a11c.md","date":"2026-04-25","status":"rejected"},{"id":"105","title":"Raise reader pool worker cap (4→8)","file":"105-reader-pool-sizing.md","date":"2026-04-25","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_regression"},{"id":"106","title":"Column-level dependency tracking (re-attempt of 052 under A11c)","file":"106-column-level-deps.md","date":"2026-04-25","status":"accepted"},{"id":"108","title":"Persistent selectBytes out-parameter slots","file":"108-selectbytes-out-slots.md","date":"2026-04-26","status":"rejected","directions":["measurement-system"],"outcomeClass":"rejected_below_current_signal"},{"id":"109","title":"Inline-packed parameter buffer","file":"109-inline-param-buffer.md","date":"2026-04-27","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"110","title":"Long-text stream hash benchmark + 8-byte FNV","file":"110-long-text-fnv-8byte.md","date":"2026-04-27","status":"accepted","directions":["long-text-stream-hashing","measurement-system"],"outcomeClass":"accepted"},{"id":"111","title":"Nested-tx benchmark + revisit savepoint string cache","file":"111-nested-tx-benchmark-savepoint-cache.md","date":"2026-04-28","status":"rejected","directions":["transaction-control-paths","measurement-system"],"outcomeClass":"rejected_below_current_signal"},{"id":"112","title":"Fixed-length batch parameter flattening","file":"112-fixed-length-batch-param-flatten.md","date":"2026-04-28","status":"rejected","directions":["parameter-encoding-and-binding","measurement-system"],"outcomeClass":"rejected_below_current_signal"},{"id":"113","title":"Direct batch parameter matrix encoding","file":"113-direct-batch-param-matrix.md","date":"2026-05-01","status":"accepted","directions":["parameter-encoding-and-binding","measurement-system"],"outcomeClass":"accepted"},{"id":"114","title":"FIFO waiter queue for `ReaderPool` dispatch","file":"114-fifo-waiter-queue.md","date":"2026-04-30","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"115","title":"Dispatcher park counters for `ReaderPool`","file":"115-dispatcher-park-counters.md","date":"2026-05-01","status":"accepted","directions":["measurement-system","stream-rerun-dispatch"],"outcomeClass":"accepted_measurement"},{"id":"116","title":"Wide batch insert release coverage","file":"116-wide-batch-release-coverage.md","date":"2026-05-01","status":"accepted","directions":["parameter-encoding-and-binding","measurement-system"],"outcomeClass":"accepted"},{"id":"117","title":"Named parameter support (`Map<String, Object?>`)","file":"117-named-parameters.md","date":"2026-05-01","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"deferred"},{"id":"118","title":"FIFO dispatch waiters with counter gate","file":"118-fifo-dispatch-counter-gate.md","date":"2026-05-01","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted"},{"id":"119","title":"Post-FIFO dispatch pressure audit","file":"119-dispatch-pressure-audit.md","date":"2026-05-01","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"120","title":"Bounded `_flushQueue` admission","file":"120-flush-admit-bound.md","date":"2026-05-02","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted"},{"id":"121","title":"Invalidation traversal cost audit","file":"121-invalidation-traversal-audit.md","date":"2026-05-03","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"122","title":"Concrete reader-pool stream admission","file":"122-concrete-reader-pool-stream-admission.md","date":"2026-05-02","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted"},{"id":"125","title":"Wide ASCII batch parameter encoding","file":"125-wide-ascii-batch-params.md","date":"2026-05-05","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"126","title":"Wide UTF-8 batch parameter packing","file":"126-wide-utf8-batch-packing.md","date":"2026-05-06","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"134","title":"Keyed PK dirty rowid elision","file":"134-keyed-pk-dirty-elision.md","date":"2026-05-09","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_preserved_potential"},{"id":"136","title":"Completion-side reader-handler counter","file":"136-completion-microtask-counter.md","date":"2026-05-14","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"142","title":"Single-row text parameter direct encoding","file":"142-single-row-text-direct-encoding.md","date":"2026-06-08","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_no_signal"},{"id":"143","title":"Tracelite profile insight audit","file":"143-tracelite-profile-insights.md","date":"2026-06-08","status":"accepted","directions":["measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"144","title":"sqlite3mc 2.3.2 → 2.3.5 bump (SQLite 3.51.3 → 3.53.2)","file":"144-sqlite3mc-bump-2-3-5.md","date":"2026-06-08","status":"accepted","directions":["sqlite-version-and-build-config"],"outcomeClass":"accepted"},{"id":"145","title":"Inline stream flush dequeue","file":"145-stream-flush-inline-dequeue.md","date":"2026-06-08","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"146","title":"Lower batch packing threshold","file":"146-lower-batch-pack-threshold.md","date":"2026-06-08","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_no_signal"},{"id":"147","title":"Writer SQLite wall split","file":"147-writer-sqlite-wall-split.md","date":"2026-06-08","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"148","title":"Reader reply batching","file":"148-reader-reply-batching.md","date":"2026-06-08","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"149","title":"Six-parameter batch packing","file":"149-six-param-batch-packing.md","date":"2026-06-08","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"150","title":"Nullable batch parameter packing","file":"150-nullable-batch-packing.md","date":"2026-06-09","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"151","title":"Synchronous writer response resolution","file":"151-sync-writer-response.md","date":"2026-06-09","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"158","title":"Row schema hash index","file":"158-row-schema-hash-index.md","date":"2026-06-09","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"159","title":"Writer request pipelining + persistent reply port","file":"159-writer-pipelining.md","date":"2026-06-09","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted"},{"id":"161","title":"Concurrent standalone writes release coverage","file":"161-concurrent-writes-release-coverage.md","date":"2026-06-11","status":"accepted","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"164","title":"EQP rowid dirty elision","file":"164-eqp-rowid-dirty-elision.md","date":"2026-06-14","status":"rejected","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"rejected_no_stable_signal"},{"id":"167","title":"ResultSet.forEach consumer recheck","file":"167-resultset-foreach-consumer.md","date":"2026-06-12","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_no_stable_signal"},{"id":"169","title":"Tracelite workload-summary insight guard","file":"169-tracelite-workload-insights.md","date":"2026-06-14","status":"accepted","directions":["measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"170","title":"Synchronous uncontended writer mutex fast-path","file":"170-uncontended-mutex-fastpath.md","date":"2026-06-12","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"171","title":"Resolved runtime cache for `Database` hot paths","file":"171-resolved-runtime-cache.md","date":"2026-06-14","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_current_signal"},{"id":"172","title":"Long-payload stream hash coverage","file":"172-long-payload-stream-hash.md","date":"2026-06-15","status":"accepted","directions":["long-text-stream-hashing","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"173","title":"32 KB long-text streaming benchmark + 16-byte FNV fold","file":"173-long-text-32kb-hash.md","date":"2026-06-15","status":"rejected","directions":["long-text-stream-hashing"],"outcomeClass":"rejected_no_signal"},{"id":"174","title":"selectBytes native-view transfer","file":"174-selectbytes-view-transfer.md","date":"2026-06-15","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"175","title":"Large selectBytes release coverage","file":"175-large-selectbytes-coverage.md","date":"2026-06-16","status":"accepted","directions":["result-transfer-shape","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"176","title":"Row.containsKey identity fast path","file":"176-row-containskey-identity-fastpath.md","date":"2026-06-16","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"177","title":"Order-flipped A/B drift discriminator","file":"177-ab-drift-discriminator.md","date":"2026-06-16","status":"accepted","directions":["measurement-system"],"outcomeClass":"accepted"},{"id":"178","title":"Missing-benchmark-run declaration guard","file":"178-missing-run-declaration-guard.md","date":"2026-06-16","status":"accepted","directions":["measurement-system"],"outcomeClass":"accepted"},{"id":"179","title":"Single-row ASCII parameter packing","file":"179-single-row-ascii-param-packing.md","date":"2026-06-16","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_no_signal"},{"id":"180","title":"Cross-call write request batching (group commit)","file":"180-group-commit-request-batching.md","date":"2026-06-17","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted"},{"id":"181","title":"Single-stream long-payload hash","file":"181-single-stream-long-payload-hash.md","date":"2026-06-17","status":"rejected","directions":["long-text-stream-hashing"],"outcomeClass":"rejected_no_signal"},{"id":"182","title":"Skip preupdate dependency tracking when no streams active","file":"182-skip-dep-tracking-no-streams.md","date":"2026-06-17","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_no_stable_signal"},{"id":"183","title":"json_buf retention audit + high-threshold reclaim","file":"183-json-buf-retention-audit.md","date":"2026-06-17","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"184","title":"Writer residual re-split (post-159/180)","file":"184-writer-residual-resplit.md","date":"2026-06-17","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted_measurement"},{"id":"185","title":"JSON buffer reclaim release coverage","file":"185-json-buf-release-coverage.md","date":"2026-06-18","status":"accepted","directions":["result-transfer-shape","measurement-system"],"outcomeClass":"accepted_measurement"},{"id":"186","title":"Single-row large-text bind encoder","file":"186-single-row-large-text-bind-encoder.md","date":"2026-06-18","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"187","title":"Single-row UTF-8 bind encoder","file":"187-single-row-utf8-bind-encoder.md","date":"2026-06-19","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"188","title":"Pre-178 benchmark-run declarations backfill","file":"188-prerun-declarations-backfill.md","date":"2026-06-19","status":"accepted","directions":["measurement-system"],"outcomeClass":"accepted"},{"id":"189","title":"Savepoint name compression","file":"189-savepoint-name-compression.md","date":"2026-06-20","status":"rejected","directions":["transaction-control-paths"],"outcomeClass":"rejected_below_signal"},{"id":"190","title":"selectBytes column-name token pre-encoding","file":"190-selectbytes-col-name-preencode.md","date":"2026-06-20","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"191","title":"Embedded-NUL public API audit","file":"191-embedded-nul-public-api-audit.md","date":"2026-06-21","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted_correctness_guard"},{"id":"192","title":"Two-digit table itoa for selectBytes integer columns","file":"192-two-digit-itoa.md","date":"2026-06-21","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"193","title":"Row.values list-view iterator","file":"193-row-values-list-view.md","date":"2026-06-22","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_regression"},{"id":"194","title":"Integer-valued REAL selectBytes fast path","file":"194-real-integer-fastpath.md","date":"2026-06-23","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"195","title":"Stmt-cache pre-encoded JSON column-name tokens","file":"195-stmt-cache-name-tokens.md","date":"2026-06-23","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"196","title":"selectBytes inter-row framing batch","file":"196-selectbytes-row-framing.md","date":"2026-06-23","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"197","title":"True group commit moonshot","file":"197-true-group-commit-moonshot.md","date":"2026-06-23","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_preserved_potential"},{"id":"198","title":"Direct-to-buffer integer/float JSON formatting","file":"198-direct-buf-int-float-json.md","date":"2026-06-24","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"199","title":"Row-level capacity reservation in write_json_to_buf","file":"199-row-level-buf-ensure.md","date":"2026-06-25","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"200","title":"Stable-Type selectBytes moonshot","file":"200-stable-type-selectbytes-moonshot.md","date":"2026-06-26","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_semantic_mismatch"},{"id":"201","title":"Base64 quote reservation for selectBytes BLOBs","file":"201-base64-quote-reservation.md","date":"2026-06-27","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"202","title":"TEXT string reservation for selectBytes","file":"202-text-json-string-reserve.md","date":"2026-06-28","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"203","title":"Per-cell sqlite3_column_value reuse in write_json_to_buf","file":"203-cell-value-cache.md","date":"2026-06-28","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"204","title":"UTF-8 over-reserve bind sizing","file":"204-utf8-overreserve-bind.md","date":"2026-06-29","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_preserved_potential"},{"id":"205","title":"per-cell `sqlite3_column_value` reuse in `resqlite_step_row`","file":"205-step-row-value-cache.md","date":"2026-06-29","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"206","title":"selectBytes column-count cache","file":"206-selectbytes-col-count-cache.md","date":"2026-06-30","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"207","title":"stmt_cache hot-SQL fast-path bypass","file":"207-stmt-cache-hot-sql-fastpath.md","date":"2026-06-30","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"210","title":"reused BLOB batch workload and object-identity prototype","file":"210-reused-blob-batch-workload.md","date":"2026-07-02","status":"rejected","directions":["parameter-encoding-and-binding","measurement-system"],"outcomeClass":"rejected_preserved_measurement"},{"id":"211","title":"Persistent `queryBytes` out-parameter slots (revisits exp 108)","file":"211-persistent-query-bytes-slots.md","date":"2026-07-02","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"212","title":"Lazy nested-savepoint materialization moonshot","file":"212-lazy-nested-savepoint-moonshot.md","date":"2026-07-03","status":"rejected","directions":["transaction-control-paths"],"outcomeClass":"rejected"},{"id":"213","title":"Transaction body write coalescing moonshot","file":"213-tx-body-write-coalescing.md","date":"2026-07-03","status":"rejected","directions":["transaction-control-paths"],"outcomeClass":"rejected_pattern_not_encouraged"},{"id":"214","title":"Write result direct-read prototype","file":"214-write-result-direct-read.md","date":"2026-07-04","status":"rejected","directions":["stream-rerun-dispatch","measurement-system"],"outcomeClass":"rejected_preserved_measurement"},{"id":"215","title":"Persistent `executeWrite` result-buffer slot (revisits exp 095)","file":"215-persistent-write-result-slot.md","date":"2026-07-04","status":"rejected","directions":["parameter-encoding-and-binding","measurement-system"],"outcomeClass":"rejected_below_signal"},{"id":"216","title":"Base64 loop unroll for selectBytes BLOBs","file":"216-base64-loop-unroll.md","date":"2026-07-05","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"218","title":"8x base64 loop unroll for selectBytes BLOBs","file":"218-base64-8x-unroll.md","date":"2026-07-06","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected"},{"id":"219","title":"Direct JSON control-character escapes","file":"219-json-control-escape.md","date":"2026-07-07","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"220","title":"Reject `fast_i64_to_str` 0..9999 direct-write fast path","file":"220-fast-i64-small-direct.md","date":"2026-07-08","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"222","title":"Reject `malloc` for large one-shot parameter arenas","file":"222-param-arena-malloc.md","date":"2026-07-11","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_below_signal"},{"id":"223","title":"Reject row-0 peel + `[{` fuse in `write_json_to_buf`","file":"223-write-json-row-peel.md","date":"2026-07-11","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"224","title":"Dynamic numeric-row batching moonshot","file":"224-numeric-row-batching-moonshot.md","date":"2026-07-12","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"225","title":"12-bit LUT for `json_write_base64`","file":"225-base64-lut12.md","date":"2026-07-12","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"226","title":"Reject one-pass numeric batch packing","file":"226-one-pass-numeric-batch.md","date":"2026-07-13","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_below_signal"},{"id":"227","title":"Inline 16-byte over-copy for JSON column-name tokens","file":"227-json-token-overcopy.md","date":"2026-07-13","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"228","title":"Restore canonical hashes after stream growth","file":"228-canonical-stream-hash.md","date":"2026-07-14","status":"accepted","directions":["stream-rerun-dispatch"],"outcomeClass":"accepted_correctness_and_performance"},{"id":"229","title":"SIMD (NEON) `json_write_base64` kernel — first SIMD kernel in the codebase","file":"229-simd-base64-neon.md","date":"2026-07-14","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"230","title":"Reject AArch64 NEON JSON safe-prefix scan + copy","file":"230-neon-json-scan-copy.md","date":"2026-07-15","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"231","title":"Reject AArch64 NEON integer→decimal kernel","file":"231-neon-i64-decimal.md","date":"2026-07-15","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal_bar"},{"id":"232","title":"Reject exact quarter-step REAL JSON fast path","file":"232-dyadic-real-fastpath.md","date":"2026-07-16","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_preserved_potential"},{"id":"233","title":"Reject asynchronous WAL checkpoint worker","file":"233-async-checkpoint-worker.md","date":"2026-07-17","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_preserved_potential"},{"id":"234","title":"Zero-copy blob parameter transfer via TransferableTypedData","file":"234-blob-param-transfer.md","date":"2026-07-18","status":"accepted","amendedBy":["243"],"directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"236","title":"Reader blob-cell TransferableTypedData transfer","file":"236-blob-cell-transfer.md","date":"2026-07-21","status":"accepted","amendedBy":["246"],"directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"237","title":"Batch blob parameter transfer via TransferableTypedData","file":"237-batch-blob-param-transfer.md","date":"2026-07-21","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_below_signal"},{"id":"239","title":"Transparent select overflow batching","file":"239-select-overflow-batching.md","date":"2026-07-22","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_preserved_potential"},{"id":"240","title":"Batched i64 encode moonshot","file":"240-batched-i64-encode-moonshot.md","date":"2026-07-22","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"241","title":"Re-evaluating Isolate.exit sacrifice for the flat ResultSet (rejected)","file":"241-sacrifice-reeval.md","date":"2026-07-22","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected"},{"id":"242","title":"TransferableTypedData for the selectBytes result buffer (rejected)","file":"242-selectbytes-ttd.md","date":"2026-07-22","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected"},{"id":"243","title":"Shared-wrapper (table protocol) for aliased blob write params","file":"243-blob-alias-table-protocol.md","date":"2026-07-22","status":"accepted","directions":["parameter-encoding-and-binding"],"outcomeClass":"accepted"},{"id":"244","title":"Pool-burst measurement of sacrifice replacement capacity, and eager respawn (rejected)","file":"244-pool-burst-eager-respawn.md","date":"2026-07-22","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected"},{"id":"245","title":"Prepared-result handoff — intrinsic send vs Isolate.exit (measurement)","file":"245-prepared-result-handoff.md","date":"2026-07-23","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"246","title":"Slot-count sacrifice trigger — fix the string misroute","file":"246-slot-sacrifice-guard.md","date":"2026-07-23","status":"accepted","directions":["result-transfer-shape"],"outcomeClass":"accepted"},{"id":"248","title":"Stable stmt-cache slots — removing the move-to-back struct swap (rejected)","file":"248-stmt-cache-stable-slots.md","date":"2026-07-25","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected_below_signal"},{"id":"249","title":"Invalidation-batched stream rerun dispatch (moonshot, rejected)","file":"249-invalidation-batched-rerun.md","date":"2026-07-26","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_signal"},{"id":"250","title":"Reject reset-aware high-water checkpoint worker","file":"250-async-checkpoint-high-water.md","date":"2026-07-26","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_preserved_potential"},{"id":"252","title":"Reject per-batch dirty-column dependency merge","file":"252-dirty-column-batch-merge.md","date":"2026-07-27","status":"rejected","directions":["stream-rerun-dispatch"],"outcomeClass":"rejected_below_signal"},{"id":"253","title":"Reject identity-conditioned MultiExecute BLOB routing","file":"253-multiexecute-blob-routing.md","date":"2026-07-28","status":"rejected","directions":["parameter-encoding-and-binding"],"outcomeClass":"rejected_below_signal"},{"id":"254","title":"TEXT decode via sqlite3_value_blob (skip NUL-termination copy)","file":"254-text-value-blob-decode.md","date":"2026-07-28","status":"rejected","directions":["result-transfer-shape"],"outcomeClass":"rejected"}],"claims":[{"id":"016.1","source":"016","directions":["sqlite-version-and-build-config"],"text":"The tuned SQLite compile-flag set (with prepare_v3) is accepted; per-call savings are individually too small to measure but stack with isLeaf bindings.","conditions":"2025 · backfilled 2026-07","state":"live"},{"id":"044.1","source":"044","directions":["sqlite-version-and-build-config"],"text":"SQLITE_ENABLE_BATCH_ATOMIC_WRITE is a zero-risk compile flag: it activates via VFS capability detection (Android F2FS) with no effect elsewhere and no API change.","conditions":"2025 · backfilled 2026-07","state":"live"},{"id":"075.1","source":"075","directions":["long-text-stream-hashing"],"text":"Computing the selectIfChanged result hash in C during the step loop is a large win (-39%) on the re-query path with zero measurable regression; hash code consolidates to a single C implementation.","conditions":"2025 · backfilled 2026-07","state":"live"},{"id":"090.1","source":"090","directions":["sqlite-version-and-build-config"],"text":"sqlite3mc version bumps should wait for safer point releases when the newest SQLite release is a fresh .0.","conditions":"policy · 2026-04 · backfilled 2026-07","state":"live"},{"id":"099.1","source":"099","directions":["long-text-stream-hashing","measurement-system"],"text":"Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable.","conditions":"measurement gap · 2026-04 · backfilled 2026-07","state":"live"},{"id":"101.1","source":"101","directions":["transaction-control-paths"],"text":"Top-level transaction control had removable SQLite prepare/finalize work; cached control statements remove it.","conditions":"M1 Pro · 2026-04 · backfilled 2026-07","state":"live"},{"id":"110.1","source":"110","directions":["long-text-stream-hashing","measurement-system"],"text":"The archived 8-byte FNV byte fold is a clear win once the workload carries 4KB TEXT cells; the long-text unchanged-fanout benchmark was the blocker to seeing it.","conditions":"M1 Pro · 4KB TEXT · 2026-04 · backfilled 2026-07","state":"live"},{"id":"111.1","source":"111","directions":["transaction-control-paths","measurement-system"],"text":"Savepoint string-allocation cost is below the decision threshold even at 50 SAVEPOINTs per iteration — per-isolate-round-trip cost dominates nested transaction control.","conditions":"M1 Pro · 2026-04 · backfilled 2026-07","state":"live"},{"id":"120.1","source":"120","directions":["stream-rerun-dispatch"],"text":"Exp 119's 3,590-park signal was upstream over-dispatch from StreamEngine._flushQueue, not reader-pool admission; snapshotting availableWorkerCount once and decrementing per pop drops parking to zero. Future dispatch work needs a different counter.","conditions":"M1 Pro · 2026-05 · backfilled 2026-07","state":"live"},{"id":"125.1","source":"125","directions":["parameter-encoding-and-binding"],"text":"A guarded ASCII fast path removes per-string UTF-8 allocation in wide batch parameter packing without changing the public API or weakening Unicode fallback.","conditions":"M1 Pro · 2026-05 · backfilled 2026-07","state":"live"},{"id":"126.1","source":"126","directions":["parameter-encoding-and-binding"],"text":"Direct UTF-8 payload writing removes the same per-string allocation for non-ASCII batches (focused Unicode 10k x20 -13.5%, emoji -27.8%), with Dart-compatible surrogate handling private to the encoder.","conditions":"M1 Pro · 2026-05 · backfilled 2026-07","state":"live"},{"id":"134.1","source":"134","directions":["stream-rerun-dispatch"],"text":"Row-level dirty precision can remove the keyed-PK miss-path cost (intersection_entries 10000 -> 3; writer-burst wall 25.54 -> 12.45 ms) — rejected as shipped complexity, preserved as potential.","conditions":"M1 Pro · prototype · 2026-05 · backfilled 2026-07","state":"live"},{"id":"136.1","source":"136","directions":["stream-rerun-dispatch","measurement-system"],"text":"On A11c overlap the reader-worker port handler is the largest remaining reachable main-isolate slice (28.57% of burst+drain wall); subscriber-fanout emit is <1% and is not the optimization target.","conditions":"M1 Pro · profile · 2026-05 · backfilled 2026-07","state":"live"},{"id":"143.1","source":"143","directions":["measurement-system"],"text":"Pinned Tracelite profile runs produce decision-useful structured evidence: point queries are median dispatch-bound, merge rounds are work-bound, and allocation/RSS costs hide behind wall time alone.","conditions":"M1 Pro · profile · 2026-06 · backfilled 2026-07","state":"live"},{"id":"144.1","source":"144","directions":["sqlite-version-and-build-config"],"text":"The 3.53.0 default-FP-rounding hazard does not reach resqlite output (REAL values never go through sqlite3_column_text); the vendoring bump waits on a .2 point release per exp 090's policy.","conditions":"2026-06 · backfilled 2026-07","state":"live"},{"id":"147.1","source":"147","directions":["stream-rerun-dispatch","measurement-system"],"text":"SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads (A11c 9.4%, keyed-PK 18.1%); residual writer/request wall is the largest bucket after subtracting SQLite and invalidation.","conditions":"M1 Pro · profile · 2026-06 · backfilled 2026-07","state":"live"},{"id":"169.1","source":"169","directions":["measurement-system"],"text":"The Tracelite workload-summary explanation layer emits the interpretation exp 143 had to recover manually, and validates stable insight IDs so a thin artifact fails loudly instead of looking complete.","conditions":"tooling · 2026-06 · backfilled 2026-07","state":"live"},{"id":"172.1","source":"172","directions":["long-text-stream-hashing","measurement-system"],"text":"The 8-byte FNV fold scales acceptably to mixed 32KB TEXT+BLOB long payloads (3.446 ms median beside 2.356 ms for 4KB TEXT), and the streaming suite now covers that shape.","conditions":"M1 Pro · 2026-06 · backfilled 2026-07","state":"live"},{"id":"173.1","source":"173","directions":["long-text-stream-hashing"],"text":"At 32KB cells on a pool-of-4 fleet the byte-stream fold is no longer the dominant wall component; unrolling beyond the 8-byte FNV body is below noise. Hash-loop unrolling on this shape is closed.","conditions":"M1 Pro · pool-4 · 2026-06 · backfilled 2026-07","state":"live"},{"id":"174.1","source":"174","directions":["result-transfer-shape"],"text":"selectBytes sends a Uint8List view over the reader's native json_buf and never sacrifices; the single send copy is the floor for this path.","conditions":"M1 Pro · AOT · 2026-03","state":"live"},{"id":"177.1","source":"177","directions":["measurement-system"],"text":"Phase-ordered A/B gates confound code deltas with time-correlated drift; cvPct + classifyDriftFlag encode the CV-asymmetry and order-flip sign-reversal signatures so every A/B no longer re-derives them by hand.","conditions":"methodology · 2026-06 · backfilled 2026-07","state":"live"},{"id":"178.1","source":"178","directions":["measurement-system"],"text":"A chartable experiment with no linked benchmark run and no Benchmark Run opt-out silently drops off the chart; the linker now errors, closing the gap that left ~18 experiments unmapped.","conditions":"tooling · 2026-06 · backfilled 2026-07","state":"live"},{"id":"181.1","source":"181","directions":["long-text-stream-hashing"],"text":"Removing reader-pool parallelism (one-reader runtime, 64x64KB payloads) still shows no 16-byte FNV win over the 8-byte fold; the single-stream candidate from exp 173 is consumed.","conditions":"M1 Pro · single reader · 2026-06 · backfilled 2026-07","state":"live"},{"id":"183.1","source":"183","directions":["result-transfer-shape"],"text":"selectBytes' bounded RSS high-water becomes pathological under concurrent large bursts (8 x 8MB pins 32MB for the connection's life); the 1MB-cap + 256KB last-len reclaim makes the policy safe, and readerJsonBufHighWaterBytes makes it observable.","conditions":"M1 Pro · 2026-06 · backfilled 2026-07","state":"live"},{"id":"186.1","source":"186","directions":["parameter-encoding-and-binding"],"text":"The single-row direct-ASCII allocateParams rewrite is materially beneficial once bound text crosses mid-tens-of-KB (-15% at 16KB to -32% at larger sizes); encoder isolation separates the mechanism question from workload materiality.","conditions":"M1 Pro · 2026-06 · backfilled 2026-07","state":"live"},{"id":"187.1","source":"187","directions":["parameter-encoding-and-binding"],"text":"Direct UTF-8 packing for single-row non-ASCII params removes one temp allocation plus one copy per string; CJK rows improve ~31-39% from 16KB through 1MB.","conditions":"M1 Pro · 2026-06 · backfilled 2026-07","state":"live"},{"id":"189.1","source":"189","directions":["transaction-control-paths"],"text":"Savepoint naming compression moves best-case control rows but the representative nested-write fanout does not reproduce across the order flip — rejected on the load-bearing row.","conditions":"M1 Pro · 2026-06 · backfilled 2026-07","state":"live"},{"id":"212.1","source":"212","directions":["transaction-control-paths"],"text":"Lazy nested-savepoint materialization only helps empty nested bodies; fusing SAVEPOINT + first execute regresses the meaningful nested-write shape in both pass orders.","conditions":"M1 Pro · 2026-07 · backfilled 2026-07","state":"live"},{"id":"213.1","source":"213","directions":["transaction-control-paths"],"text":"The per-execute round-trip floor inside db.transaction() is mechanically removable for Future.wait bursts, but the pattern has no idiomatic case in the public API — bulk atomic writes belong on executeBatch. Rejected on pattern, not numbers.","conditions":"M1 Pro · 2026-07 · backfilled 2026-07","state":"live"},{"id":"229.1","source":"229","directions":["result-transfer-shape"],"text":"native/resqlite.c is no longer ISA-agnostic-scalar-only: a NEON vqtbl4q_u8 base64 kernel (~2x on 4KB payloads) ships behind an __aarch64__ gate with the scalar 12-bit-LUT encoder as fallback. Keep SIMD kernels noinline so the small-input scalar path's code gen is untouched.","conditions":"M1 Pro · AOT · 2026-07 · backfilled 2026-07","state":"live"},{"id":"234.1","source":"234","directions":["parameter-encoding-and-binding"],"text":"A mutable Uint8List param is the one write value SendPort.send truly copies; wrapping params >= 256 KB in TransferableTypedData lands that one copy in external memory instead of on the GC heap (~15-20% on 256-512 KB single-row inserts).","conditions":"M1 Pro · AOT · 2026-07","state":"live"},{"id":"236.1","source":"236","directions":["result-transfer-shape"],"text":"Blob result cells >= 256 KB decode straight into TransferableTypedData (native->external, one copy) and cross by ownership move; main-isolate receive boundaries materialize them back to Uint8List views. Blob-heavy reads 3-6x faster; tx.select ~6-7x.","conditions":"M1 Pro · AOT · 2026-07","state":"live"},{"id":"236.2","source":"236","directions":["result-transfer-shape"],"text":"The sacrifice decision weighs estimatedBytes - transferableBytes so TTD-wrapped cells do not force a sacrifice.","conditions":"byte-trigger era · M1 Pro · 2026-07","state":"superseded","by":["246.1"]},{"id":"237.1","source":"237","directions":["parameter-encoding-and-binding"],"text":"Exp 234's blob-transfer win does not extend to executeBatch: wrapping per-set blobs is a reproduced regression. The mechanism is many independent write round-trips parking fresh blobs on the young heap — one batch round-trip does not have it.","conditions":"M1 Pro · AOT · 2026-07 · backfilled 2026-07","state":"live"},{"id":"239.1","source":"239","directions":["stream-rerun-dispatch"],"text":"Batching only already-parked plain selects in pool-sharded envelopes (capped at four) improves 20 point reads ~-26/-33% without a new public API; sharding avoids exp 209's one-worker large-read collapse. Rejected as shipped complexity, preserved as potential.","conditions":"M1 Pro · 2026-07 · backfilled 2026-07","state":"live"},{"id":"241.1","source":"241","directions":["result-transfer-shape"],"text":"Sacrifice is a state-changing treatment (kills a worker, respawns, clears caches): it cannot be A/B'd in place inside one live pool. Send-vs-exit decomposes into distinct estimands — intrinsic transfer, pool capacity, decode — that must be measured separately.","conditions":"methodology · 2026-07","state":"live"},{"id":"242.1","source":"242","directions":["result-transfer-shape"],"text":"A TransferableTypedData wrap helps iff the payload's default SendPort destination is the GC heap; a native-backed view gains nothing — the wrap relocates the one copy and adds machinery.","conditions":"M1 Pro · AOT · 2026-07","edges":[{"type":"validates","target":"174.1"}],"state":"live"},{"id":"243.1","source":"243","directions":["parameter-encoding-and-binding"],"text":"Blob-param wrapping is identity-keyed (one wrapper per unique buffer, referenced at every position, materialized once per envelope), so caller aliasing survives the hop instead of exploding into N external copies (~27x at N=32 under per-occurrence wrapping).","conditions":"M1 Pro · AOT · 2026-07","edges":[{"type":"refines","target":"234.1"}],"state":"live"},{"id":"244.1","source":"244","directions":["result-transfer-shape"],"text":"Sacrifice opens no pool-capacity hole at the production pool size: the no-sacrifice lane had the highest parked queue-wait (~+19%), because send's copy blocks the worker longer than Isolate.exit plus an overlapped respawn. Eager respawn measured inert.","conditions":"M1 Pro · pool-4 · barrier burst · 2026-07","edges":[{"type":"refines","target":"241.1"}],"state":"live"},{"id":"245.1","source":"245","directions":["result-transfer-shape"],"text":"SendPort.send's cost tracks the mutable flat-list slot count, not payload bytes: strings and numbers are shared by reference (a 400 KB string adds ~0 us), while the values array is copied per slot.","conditions":"M1 Pro · AOT · process-isolated barrier · 2026-07","edges":[{"type":"refines","target":"241.1"}],"state":"live"},{"id":"245.2","source":"245","directions":["result-transfer-shape"],"text":"Isolate.exit is zero-copy with a ~47 us fixed premium; its sendability walk also scales with slots, just more gently than send's copy. Intrinsic crossover ~48k slots.","conditions":"M1 Pro · AOT · process-isolated barrier · 2026-07","state":"live"},{"id":"246.1","source":"246","directions":["result-transfer-shape"],"text":"The sacrifice trigger routes on mutable slot count (values.length > 32k, the all-integer equivalent of 256 KB); the byte accounting is deleted. Bytes for mutable payloads, slots for structure. Big-TEXT misroute fixed: 131->91 us, 1.00->0.00 sacrifices/select.","conditions":"M1 Pro · AOT · 2026-07","edges":[{"type":"supersedes","target":"236.2"},{"type":"refines","target":"245.1"}],"state":"live"},{"id":"250.1","source":"250","directions":["stream-rerun-dispatch"],"text":"Exp 233's checkpoint storm was a trigger-policy failure, not inherent to off-writer PASSIVE work: observed-reset/high-water re-arming fixes the storm and first threshold-crossing p50 improves ~53-64%. Rejected for now, mechanism preserved.","conditions":"M1 Pro · 2026-07 · backfilled 2026-07","state":"live"}]};
+
+// ---------- prep ----------
+const expById = {}; for (const e of KG.experiments) expById[e.id] = e;
+const claims = KG.claims.map(c => ({ ...c }));
+const byId = {}; for (const c of claims) byId[c.id] = c;
+const parseDate = s => { if (!s) return null; const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2] || 15); };
+for (const c of claims) { c.birth = parseDate((expById[c.source] || {}).date); c.death = null; c.killers = []; }
+for (const c of claims) for (const e of (c.edges || []))
+  if ((e.type === 'supersedes' || e.type === 'refutes') && byId[e.target]) {
+    const t = byId[e.target];
+    t.death = t.death ? Math.min(t.death, c.birth) : c.birth;
+    t.killers.push(c.id);
+  }
+const fmt = t => t == null ? '' : new Date(t).toISOString().slice(0, 10);
+const fmtNice = t => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const TODAY = Math.max.apply(null, claims.map(c => c.birth || 0)) + 86400000;
+let asOf = TODAY;
+
+const liveAt = (c, t) => c.birth != null && c.birth <= t && (c.death == null || c.death > t);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const firstSentence = s => {
+  const m = s.match(/^.*?[.!?](?=\s|$)/);
+  return m ? m[0] : s;
+};
+const dirName = d => d.replace(/-/g, ' ');
+
+// ---------- system component map (curated; promotable to doc/arch/system-map.json) ----------
+const SYSMAP = [{"id":"boundary","zone":"boundary","kicker":"isolate boundary","name":"Cross-isolate transfer","summary":"Dart isolates share no mutable state, so the boundary between the main isolate and the workers is where resqlite’s performance is won or lost: every query result must travel worker→main, and every write parameter main→writer. Nothing crosses for free — but not everything crosses at the same price, and the entire design rests on knowing which is which.","dirs":["result-transfer-shape"]},{"id":"api","zone":"main","kicker":"main isolate","name":"Public API & streams","summary":"The public surface is deliberately small — select, selectBytes, execute, executeBatch, transaction, stream — and every call is exactly one message to a worker. The stream engine is where most of the machinery lives: each watched query re-runs through selectIfChanged, which compares a C-computed hash of the fresh result against the last emission and skips the decode entirely when nothing changed.","dirs":["stream-rerun-dispatch","long-text-stream-hashing"]},{"id":"readers","zone":"workers","kicker":"worker isolates","name":"Reader pool","summary":"Reads run on up to four persistent worker isolates, each owning its own SQLite read connection against the shared WAL. Dispatch is round-robin with busy tracking; callers park only when every worker is occupied, and a worker that hands off a large result via Isolate.","dirs":[],"claims":["120.1","239.1","244.1","246.1","236.1","183.1"]},{"id":"writer","zone":"workers","kicker":"worker isolate","name":"Writer · binding & batching","summary":"All writes serialize through a single writer isolate that owns the write connection. Concurrent standalone writes coalesce into one envelope per round-trip; executeBatch hands its whole parameter matrix to C in one call; and transactions hold the writer for their full body.","dirs":["parameter-encoding-and-binding"]},{"id":"tx","zone":"workers","kicker":"writer subsystem","name":"Transactions","summary":"Transactions map nesting onto savepoints and hold the writer mutex for the duration of the body. The measured truth of this subsystem is humbling: the per-statement isolate round-trip dominates everything else, and most clever control-path work dissolves against that floor.","dirs":["transaction-control-paths"]},{"id":"native","zone":"native","kicker":"native layer","name":"SQLite · encoders · WAL","summary":"Underneath everything sits a vendored, encryption-capable SQLite (sqlite3mc) with tuned compile flags, a per-connection statement cache, and C-side result encoding — the layer where resqlite is allowed to spend real machine code.","dirs":["sqlite-version-and-build-config"],"claims":["229.1","250.1","110.1","183.1"]},{"id":"meta","zone":"native","kicker":"meta","name":"Measurement & method","summary":"How we know what we know. Every number in this document came through a harness discipline that had to be learned the hard way — and is now enforced in code rather than convention.","dirs":["measurement-system"]}];
+for (const comp of SYSMAP) {
+  comp.pool = claims.filter(c =>
+    (c.directions || []).some(d => comp.dirs.includes(d)) ||
+    (comp.claims || []).includes(c.id));
+}
+// Narrative chapters: prose with [[claim]] citations woven in. This is the
+// authored layer — the repo home for it is doc/arch/system-map.json.
+const STORIES = {"boundary":{"diagram":"boundary","sections":[{"lede":true,"ps":["Dart isolates share no mutable state, so the boundary between the main isolate and the workers is where resqlite’s performance is won or lost: every query result must travel worker→main, and every write parameter main→writer. Nothing crosses for free — but not everything crosses at the same price, and the entire design rests on knowing which is which."]},{"h":"Four ways across","ps":["Strings and numbers are immutable, and the VM shares them across the hop by reference — a 400 KB string adds roughly nothing to a send [[245.1]]. What send() actually copies is structure: the flat values array underneath a result, paid per slot. A Uint8List is the odd one out — mutable, so copied byte-for-byte — which is why blobs get special treatment. And for results whose structure is itself enormous, the worker can hand its entire heap over with Isolate.exit and die: zero copy, a ~47 µs validation premium, and a background respawn [[245.2]]."]},{"h":"The two rules","ps":["Everything above collapses into one governing distinction: bytes for mutable payloads, slots for structure. Blobs of 256 KB or more are wrapped into TransferableTypedData in both directions — the same single copy they would have paid anyway, but landing in external memory the GC never traces, then crossing as an ownership move [[234.1]] [[236.1]]. Wrapping is identity-keyed, so a caller passing the same buffer to five positions still ships one buffer, not five [[243.1]].","Large results sacrifice the worker when their slot count crosses 32k — slot count, not bytes, because bytes lie. The original byte-based trigger misread every big-TEXT result as expensive and killed a reader on every such read, paying a respawn to avoid a copy that sharing had already made free. Re-routing the trigger on slot count fixed the misroute and deleted the byte accounting entirely [[246.1]] [[236.2]]. The pool absorbs the respawns comfortably: measured at production pool size, the no-sacrifice lane actually queued longest, because a send’s copy blocks a worker longer than an exit plus an overlapped respawn [[244.1]]."]},{"h":"What we tried and rejected","ps":["The boundary’s rules are narrow on purpose, and the rejections prove the edges. Wrapping batch blobs regressed — the win only exists across many independent round-trips parking fresh allocations on the heap, which one batch round-trip never does [[237.1]]. Wrapping selectBytes’ native view bought nothing — there is no GC-heap destination to escape [[242.1]]. And the question that settled all of this — is sacrifice worth keeping at all? — could not be answered by A/B-ing a live pool, because sacrifice mutates the pool it runs in; it took splitting the question into isolated estimands to close it [[241.1]]."]}]},"api":{"sections":[{"lede":true,"ps":["The public surface is deliberately small — select, selectBytes, execute, executeBatch, transaction, stream — and every call is exactly one message to a worker. The stream engine is where most of the machinery lives: each watched query re-runs through selectIfChanged, which compares a C-computed hash of the fresh result against the last emission and skips the decode entirely when nothing changed."]},{"h":"Where the time goes","ps":["Hashing moved into C early and stayed there: computing the result hash inside the native step loop was a −39% win with no regression [[075.1]], and the 8-byte FNV fold has survived every attempt to beat it — wider unrolls are below noise at 4 KB, 32 KB, even single-stream 64 KB payloads [[110.1]] [[173.1]] [[181.1]]. Dispatch is settled too: the parked-dispatcher pathology that once looked like pool starvation was over-dispatch upstream in the flush queue, fixed by snapshotting worker availability once per flush [[120.1]]. What remains on the main isolate is the reader-reply port handler — measured at ~28% of burst wall on the heaviest stream workload — not subscriber fan-out, which is under 1% [[136.1]] [[147.1]]."]},{"h":"Held in reserve","ps":["Two proven mechanisms stay deliberately unshipped: row-level dirty precision, which eliminated the keyed-PK miss path in prototype but costs more complexity than current workloads justify [[134.1]], and off-writer checkpointing, whose storm turned out to be a trigger-policy bug rather than a flaw in the idea [[250.1]]. Both are recorded as potential, waiting for the workload that calls for them."]}]},"readers":{"sections":[{"lede":true,"ps":["Reads run on up to four persistent worker isolates, each owning its own SQLite read connection against the shared WAL. Dispatch is round-robin with busy tracking; callers park only when every worker is occupied, and a worker that hands off a large result via Isolate.exit is replaced in the background."]},{"h":"Why the lifecycle is safe","ps":["The pool’s design question was always whether sacrifice starves it. Measured at production size with a barrier burst, the opposite holds: the lane with sacrifice disabled queued longest, because send’s per-slot copy occupies a worker longer than an exit plus an overlapped respawn — and starting the respawn earlier changes nothing, since it is off the parked caller’s critical path [[244.1]]. Admission itself is clean; the historical parking signal was upstream over-dispatch, not pool pressure [[120.1]]. Memory is bounded and observable: each reader’s native JSON buffer reclaims above a high-water cap, exposed through diagnostics [[183.1]].","One real opportunity stays on the shelf: batching parked point-reads into pool-sharded envelopes measured ~25–30% on bursts of twenty, but ships complexity the API does not yet need [[239.1]]."]}]},"writer":{"sections":[{"lede":true,"ps":["All writes serialize through a single writer isolate that owns the write connection. Concurrent standalone writes coalesce into one envelope per round-trip; executeBatch hands its whole parameter matrix to C in one call; and transactions hold the writer for their full body."]},{"h":"Binding without waste","ps":["Parameter encoding writes UTF-8 payloads directly into the native arena with no intermediate Dart allocations — first for wide ASCII batches [[125.1]], then full Unicode with private surrogate handling [[126.1]], then the single-row path in both ASCII and CJK forms, worth 15–40% once bound text reaches tens of kilobytes [[186.1]] [[187.1]]. Large blob parameters take the boundary’s wrap route: one copy into external memory, identity-keyed across a coalesced group so aliased buffers never multiply [[234.1]] [[243.1]]. Batch blobs deliberately do not wrap — measured there, wrapping is a regression, not a win [[237.1]]."]}]},"tx":{"sections":[{"lede":true,"ps":["Transactions map nesting onto savepoints and hold the writer mutex for the duration of the body. The measured truth of this subsystem is humbling: the per-statement isolate round-trip dominates everything else, and most clever control-path work dissolves against that floor."]},{"h":"What the floor permits","ps":["Cached control statements removed real prepare/finalize work [[101.1]], but savepoint string costs sit below the decision threshold even at absurd nesting depths [[111.1]], name compression failed its representative workload [[189.1]], and both lazy savepoint materialization and statement fusion regress the shapes that matter [[212.1]]. Even round-trip coalescing inside a transaction — mechanically sound — was rejected because the pattern it accelerates has no idiomatic home in the API: bulk atomic writes belong on executeBatch [[213.1]]."]}]},"native":{"sections":[{"lede":true,"ps":["Underneath everything sits a vendored, encryption-capable SQLite (sqlite3mc) with tuned compile flags, a per-connection statement cache, and C-side result encoding — the layer where resqlite is allowed to spend real machine code."]},{"h":"Held positions","ps":["Version policy is conservative by evidence, not temperament: track sqlite3mc point releases, never a fresh .0 [[090.1]] — and the one known 3.53 rounding hazard cannot reach our output because REAL values never pass through column_text [[144.1]]. Compile flags and batch-atomic-write support are settled, zero-risk wins [[016.1]] [[044.1]]. The base64 encoder earned NEON SIMD (~2× on payload lanes) behind an architecture gate with the scalar LUT as fallback — kept noinline so the small-blob path’s code generation stays untouched [[229.1]]. Checkpointing remains inline on the writer: the off-writer variant works, but stays parked with its trigger policy documented [[250.1]]."]}]},"meta":{"sections":[{"lede":true,"ps":["How we know what we know. Every number in this document came through a harness discipline that had to be learned the hard way — and is now enforced in code rather than convention."]},{"h":"The discipline","ps":["A/B gates run order-flipped pairs with drift detection built in: CV asymmetry and sign reversal — the two signatures that once had to be re-derived by hand in every writeup — now flag automatically [[177.1]]. Profile runs emit structured, validated evidence with stable insight IDs, so a half-empty artifact fails loudly [[143.1]] [[169.1]]. Every chartable experiment must link its benchmark run or declare why not [[178.1]]. And the deepest lesson: a treatment that mutates its own environment — like sacrifice killing the pool it runs in — cannot be A/B’d in place; it must be split into estimands measured in isolation [[241.1]]."]}]}};
+
+const DIAGRAMS = {
+  boundary: `<figure class="diagram-card"><svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Four transfer routes across the isolate boundary">
+    <rect x="20" y="34" width="240" height="270" class="dg-box"/>
+    <rect x="640" y="34" width="240" height="270" class="dg-box"/>
+    <text x="140" y="22" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
+    <text x="760" y="22" text-anchor="middle" class="dg-zone">WORKER ISOLATES</text>
+    <line x1="330" y1="10" x2="330" y2="320" class="dg-wall"/>
+    <line x1="570" y1="10" x2="570" y2="320" class="dg-wall"/>
+    <text x="450" y="22" text-anchor="middle" class="dg-zone" fill="var(--stale)">ISOLATE BOUNDARY</text>
+    <defs>
+      <marker id="a-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--ok)"/></marker>
+      <marker id="a-meas" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--meas)"/></marker>
+      <marker id="a-acc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--accent)"/></marker>
+      <marker id="a-st" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--stale)"/></marker>
+    </defs>
+    <text x="450" y="66" text-anchor="middle" class="dg-flow">strings &amp; numbers</text>
+    <line x1="275" y1="78" x2="620" y2="78" stroke="var(--ok)" stroke-width="2.4" marker-end="url(#a-ok)" marker-start="url(#a-ok)" transform="rotate(180 450 78) rotate(180 450 78)"/>
+    <text x="450" y="94" text-anchor="middle" class="dg-cost">shared by reference · ~0 cost either direction</text>
+    <text x="450" y="130" text-anchor="middle" class="dg-flow">result structure (flat values list)</text>
+    <line x1="620" y1="142" x2="278" y2="142" stroke="var(--meas)" stroke-width="2.4" marker-end="url(#a-meas)"/>
+    <text x="450" y="158" text-anchor="middle" class="dg-cost">send() · copied per slot · the real price of a result</text>
+    <text x="450" y="194" text-anchor="middle" class="dg-flow">blobs ≥ 256 KB</text>
+    <line x1="278" y1="206" x2="620" y2="206" stroke="var(--accent)" stroke-width="2.4" marker-end="url(#a-acc)" marker-start="url(#a-acc)"/>
+    <text x="450" y="222" text-anchor="middle" class="dg-cost">TransferableTypedData · one copy → external memory · ownership move</text>
+    <text x="450" y="258" text-anchor="middle" class="dg-flow">results &gt; 32k slots</text>
+    <line x1="620" y1="270" x2="278" y2="270" stroke="var(--stale)" stroke-width="2.4" marker-end="url(#a-st)"/>
+    <text x="450" y="286" text-anchor="middle" class="dg-cost">Isolate.exit · whole-heap handoff · worker dies, pool respawns †</text>
+    <text x="450" y="312" text-anchor="middle" class="dg-cost">† slot-count trigger — bytes lie: strings would count, but they were never going to be copied</text>
+  </svg><figcaption>the four transfer routes, by what they cost</figcaption></figure>`,
+};
+
+function chipify(text, ctx) {
+  let i = 0;
+  return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
+    const stale = byId[id] && byId[id].state !== 'live';
+    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-evd="${ctx}" data-claim="${id}">${id}</button>`;
+  });
+}
+const compById = {}; for (const m of SYSMAP) compById[m.id] = m;
+let currentComp = null;
+
+// ---------- history thread (ancestors via this claim's own edges) ----------
+function ancestorsOf(c, seen) {
+  seen = seen || new Set();
+  const out = [];
+  for (const e of (c.edges || [])) {
+    const t = byId[e.target];
+    if (!t || seen.has(t.id)) continue;
+    seen.add(t.id);
+    out.push({ rel: e.type, claim: t });
+    for (const deeper of ancestorsOf(t, seen)) out.push(deeper);
+  }
+  return out;
+}
+
+// ---------- system map view ----------
+const view = document.getElementById('view');
+function compStats(m) {
+  const live = m.pool.filter(c => liveAt(c, asOf));
+  const last = Math.max.apply(null, m.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
+  return { live, last };
+}
+function compCard(m) {
+  const { live, last } = compStats(m);
+  const fresh = last && (TODAY - last) < 14 * 86400000;
+  return `<button class="comp" data-comp="${m.id}">
+    <div class="c-kicker">${m.kicker}</div>
+    <div class="c-name">${m.name}</div>
+    <div class="c-stance">${esc(m.summary)}</div>
+    <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
+  </button>`;
+}
+function renderMap() {
+  setTab('map'); currentComp = null;
+  view.innerHTML = `<div class="sysmap">
+    <div class="sm-grid">
+      <div class="sm-col">${compCard(compById.api)}</div>
+      <div class="sm-boundary">${compCard(compById.boundary)}</div>
+      <div class="sm-col">${compCard(compById.readers)}${compCard(compById.writer)}${compCard(compById.tx)}</div>
+    </div>
+    <p class="sm-caption">⟵ everything left runs on main · everything right runs on worker isolates ⟶</p>
+    <div class="sm-native sm-col">${compCard(compById.native)}${compCard(compById.meta)}</div>
+  </div>
+  <p class="coverage-banner">Each card shows the component's most recently established stance. Open one for its
+  full position — current beliefs, how each was reached, and what changed over time.</p>`;
+  view.querySelectorAll('.comp').forEach(b =>
+    b.addEventListener('click', () => renderBeliefs(b.dataset.comp)));
+}
+
+// ---------- beliefs view (component-scoped) ----------
+function renderBeliefs(compId) {
+  setTab('beliefs');
+  if (typeof compId === 'string') currentComp = compId;
+  const cov = KG.coverage;
+  let h = '';
+  const comps = currentComp ? [compById[currentComp]] : SYSMAP;
+  if (currentComp) h += `<div class="back-row"><button id="back-map">← System map</button></div>`;
+  h += `<p class="coverage-banner">Claims cover ${cov.entriesWithClaims} of ${cov.totalEntries} experiment entries so far —
+    components may hold further beliefs still recorded only as prose in signals.json. Coverage grows as runs revise old results.</p>`;
+  for (const m of comps) {
+    const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
+    const story = STORIES[m.id];
+    h += `<section class="topic"><div class="topic-hd">
+      <h2>${m.name}</h2>
+      <span class="meta">${m.kicker} · ${pool.length} beliefs</span></div>`;
+    if (story) {
+      h += `<div class="story">`;
+      story.sections.forEach((sec, si) => {
+        if (sec.h) h += `<h3>${esc(sec.h)}</h3>`;
+        sec.ps.forEach((para, pi) => {
+          const ctx = `${m.id}-${si}-${pi}`;
+          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(esc(para), ctx)}</p>
+            <div class="ev-drawer" id="evd-${ctx}"></div>`;
+        });
+        if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
+      });
+      h += `</div>`;
+    }
+    if (pool.length) {
+      h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
+      for (const c of pool) h += beliefCard(c);
+      h += `</details>`;
+    }
+    h += `</section>`;
+  }
+  view.innerHTML = h;
+  const back = document.getElementById('back-map');
+  if (back) back.addEventListener('click', renderMap);
+  wire();
+}
+function beliefCard(c) {
+  const head = firstSentence(c.text);
+  const rest = c.text.slice(head.length).trim();
+  const anc = ancestorsOf(c);
+  const src = expById[c.source] || {};
+  const laterDead = asOf < TODAY && c.death != null;
+  return `<article class="belief" id="b-${c.id}">
+    <p class="belief-head">${esc(head)}</p>
+    ${rest ? `<p class="belief-rest">${esc(rest)}</p>` : ''}
+    <div class="prov">
+      <span class="src">exp ${c.source}</span>
+      <span>${src.date || ''}</span>
+      ${c.conditions ? `<span>${esc(c.conditions)}</span>` : ''}
+      ${laterDead ? `<span class="chip ch-later">later superseded by ${c.killers.join(', ')}</span>` : ''}
+      ${anc.length ? `<button class="hist-btn" data-hist="${c.id}">history · ${anc.length} prior ▸</button>` : ''}
+    </div>
+    ${anc.length ? `<div class="thread" id="th-${c.id}">${threadHtml(anc)}</div>` : ''}
+  </article>`;
+}
+function threadHtml(anc) {
+  return anc.map(a => {
+    const cl = a.claim;
+    const span = cl.death
+      ? `believed ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}`
+      : `since ${fmtNice(cl.birth)} · still live`;
+    const relTxt = a.rel === 'supersedes' ? 'replaced by the above'
+      : a.rel === 'refutes' ? 'refuted by the above'
+      : a.rel === 'refines' ? 'refined by the above' : 'validated by the above';
+    return `<div class="rev">
+      <span class="rev-when ${cl.death ? '' : 'origin'}">${span} · <span class="rel">${relTxt}</span> · exp ${cl.source}</span>
+      <p>${esc(cl.text)}</p>
+    </div>`;
+  }).join('');
+}
+
+// ---------- changelog view ----------
+function renderLog() {
+  setTab('log');
+  const events = [];
+  for (const c of claims) {
+    if (c.birth == null || c.birth > asOf) continue;
+    const sup = (c.edges || []).filter(e => e.type === 'supersedes' && byId[e.target]);
+    const ref = (c.edges || []).filter(e => e.type === 'refutes' && byId[e.target]);
+    const kind = ref.length ? 'refuted' : sup.length ? 'revised' : 'learned';
+    const oldEdge = sup[0] || ref[0];
+    events.push({ t: c.birth, kind, c, old: oldEdge ? byId[oldEdge.target] : null });
+  }
+  events.sort((a, b) => b.t - a.t || b.c.id.localeCompare(a.c.id));
+  let h = '', day = '';
+  for (const ev of events) {
+    const d = fmtNice(ev.t);
+    if (d !== day) { if (day) h += '</div>'; h += `<div class="log-day"><h3>${d}</h3>`; day = d; }
+    h += `<div class="event">
+      <span class="ev-kind ev-${ev.kind}">${ev.kind.toUpperCase()}</span>
+      <div><div class="ev-body">${esc(firstSentence(ev.c.text))}
+        <span class="ev-sub">· exp ${ev.c.source} · ${esc((SYSMAP.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
+        ${ev.old ? `<div class="ev-sub ev-old">was: ${esc(firstSentence(ev.old.text))}</div>` : ''}
+      </div></div>`;
+  }
+  if (day) h += '</div>';
+  view.innerHTML = h || '<p class="hint">Nothing recorded before this date.</p>';
+}
+
+// ---------- tabs / time ----------
+let tab = 'map';
+function setTab(t) {
+  tab = t;
+  for (const id of ['map', 'beliefs', 'log'])
+    document.getElementById('tab-' + id).setAttribute('aria-selected', String(t === id));
+}
+document.getElementById('tab-map').addEventListener('click', renderMap);
+document.getElementById('tab-beliefs').addEventListener('click', () => { currentComp = null; renderBeliefs(); });
+document.getElementById('tab-log').addEventListener('click', renderLog);
+
+const asofInput = document.getElementById('asof');
+const timeNote = document.getElementById('time-note');
+const births = claims.map(c => c.birth).filter(Boolean);
+asofInput.max = fmt(TODAY);
+asofInput.min = fmt(Math.min.apply(null, births));
+asofInput.value = fmt(TODAY);
+function applyTime() {
+  const atToday = asOf >= TODAY;
+  timeNote.classList.toggle('on', !atToday);
+  if (!atToday) {
+    const nowLive = claims.filter(c => liveAt(c, TODAY)).length;
+    const thenLive = claims.filter(c => liveAt(c, asOf)).length;
+    timeNote.innerHTML = `Showing the belief set as of <b>${fmtNice(asOf)}</b> —
+      ${thenLive} beliefs then, ${nowLive} today. Beliefs since revised carry an amber chip.`;
+  }
+  (tab === 'map' ? renderMap : tab === 'beliefs' ? () => renderBeliefs() : renderLog)();
+}
+asofInput.addEventListener('change', () => {
+  const t = parseDate(asofInput.value);
+  if (t) { asOf = t + 86399000; applyTime(); }
+});
+document.getElementById('today-btn').addEventListener('click', () => {
+  asOf = TODAY; asofInput.value = fmt(TODAY); applyTime();
+});
+
+// ---------- wiring ----------
+function wire() {
+  view.querySelectorAll('.ev-inline').forEach(b =>
+    b.addEventListener('click', () => {
+      const drawer = document.getElementById('evd-' + b.dataset.evd);
+      const c = byId[b.dataset.claim];
+      if (!drawer || !c) return;
+      if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
+        drawer.classList.remove('open'); return;
+      }
+      drawer.dataset.showing = c.id;
+      drawer.innerHTML = beliefCard(c);
+      drawer.classList.add('open');
+      wireHist(drawer);
+    }));
+  wireHist(view);
+}
+function wireHist(root) {
+  root.querySelectorAll('.hist-btn').forEach(b =>
+    b.addEventListener('click', () => {
+      const th = root.querySelector('#th-' + CSS.escape(b.dataset.hist)) || document.getElementById('th-' + b.dataset.hist);
+      if (!th) return;
+      const open = th.classList.toggle('open');
+      const n = (b.textContent.match(/\d+/) || ['0'])[0];
+      b.textContent = open ? `history · ${n} prior ▾` : `history · ${n} prior ▸`;
+    }));
+}
+
+// ---------- search ----------
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  searchResults.innerHTML = '';
+  if (q.length < 2) { searchResults.classList.remove('open'); return; }
+  const hits = [];
+  for (const c of claims) {
+    if (c.id.includes(q) || c.text.toLowerCase().includes(q))
+      hits.push({ id: c.id, label: firstSentence(c.text), state: c.state });
+    if (hits.length > 9) break;
+  }
+  for (const hHit of hits) {
+    const b = document.createElement('button');
+    b.className = 'search-hit'; b.setAttribute('role', 'option');
+    b.innerHTML = `<span class="mono">${hHit.id} · ${hHit.state}</span> · ${esc(hHit.label.slice(0, 90))}`;
+    b.addEventListener('click', () => {
+      searchResults.classList.remove('open'); searchInput.value = '';
+      asOf = TODAY; asofInput.value = fmt(TODAY);
+      currentComp = null; renderBeliefs();
+      const target = document.getElementById('b-' + hHit.id);
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        const head = target.querySelector('.belief-head');
+        head.innerHTML = `<mark>${esc(head.textContent)}</mark>`;
+      } else {
+        const killers = (byId[hHit.id] || {}).killers || [];
+        const el2 = killers[0] && document.getElementById('b-' + killers[0]);
+        if (el2) {
+          el2.scrollIntoView({ block: 'center' });
+          const btn = el2.querySelector('.hist-btn'); if (btn) btn.click();
+        }
+      }
+    });
+    searchResults.appendChild(b);
+  }
+  searchResults.classList.toggle('open', hits.length > 0);
+});
+document.addEventListener('click', ev => { if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open'); });
+
+// ---------- boot ----------
+document.getElementById('hdr-stats').textContent =
+  `— ${claims.filter(c => liveAt(c, TODAY)).length} current beliefs across ${SYSMAP.length} system components`;
+renderMap();
+</script>
