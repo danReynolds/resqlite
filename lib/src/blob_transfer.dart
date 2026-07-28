@@ -8,12 +8,10 @@
 ///
 /// The whole system, through [blobTransfer]:
 ///
-/// - **main → writer (params):** [BlobTransfer.wrapParams] wraps blobs ≥
-///   [BlobTransfer.paramThreshold]. [BlobTransfer.wrapParamsGroup] wraps only
-///   repeated blob identities in a coalesced envelope; unique buffers already
-///   cross in one graph-copy hop. The writer restores wrappers with
-///   [BlobTransfer.unwrapParams], or one [BlobUnwrapper] spanning a coalesced
-///   envelope.
+/// - **main → writer (params):** [BlobTransfer.wrapParams] /
+///   [BlobTransfer.wrapParamsGroup] wrap blobs ≥ [BlobTransfer.paramThreshold];
+///   the writer restores them with [BlobTransfer.unwrapParams], or one
+///   [BlobUnwrapper] spanning a coalesced envelope.
 /// - **worker → main (result cells):** the decode loop (query_decoder.dart)
 ///   wraps cells ≥ [BlobTransfer.cellThreshold]; main restores them with
 ///   [BlobTransfer.materializeCells] at each receive boundary.
@@ -68,28 +66,24 @@ final class BlobTransfer {
     return _wrapShared(params, _newWrapCache(), threshold);
   }
 
-  /// Routes a coalesced group according to the cost topology of its one
-  /// isolate hop.
-  ///
-  /// Unique large buffers stay on the direct graph-copy path: unlike separate
-  /// [wrapParams] sends, a group pays one copy before any of its writes run, so
-  /// there is no per-send heap churn interleaved with writer SQLite work.
-  /// Repeated identities still use one shared wrapper, preserving the
-  /// alias-table win and avoiding the graph copier's large-buffer slow path.
-  /// Returns [writes] unchanged when no large buffer repeats.
+  /// As [wrapParams], but sharing wrappers across a whole coalesced group so
+  /// a buffer reused between writes still crosses once.
   List<({String sql, List<Object?> params})> wrapParamsGroup(
     List<({String sql, List<Object?> params})> writes,
   ) {
     final threshold = paramThreshold;
-    final repeated = _repeatedLargeBlobs(writes, threshold);
-    if (repeated == null) return writes;
+    var anyLarge = false;
+    for (final w in writes) {
+      if (_hasLargeBlob(w.params, threshold)) {
+        anyLarge = true;
+        break;
+      }
+    }
+    if (!anyLarge) return writes;
     final cache = _newWrapCache(); // shared across the whole envelope
     return [
       for (final w in writes)
-        (
-          sql: w.sql,
-          params: _wrapShared(w.params, cache, threshold, eligible: repeated),
-        ),
+        (sql: w.sql, params: _wrapShared(w.params, cache, threshold)),
     ];
   }
 
@@ -161,42 +155,16 @@ Map<Uint8List, TransferableTypedData> _newWrapCache() =>
       hashCode: identityHashCode,
     );
 
-/// Returns the identities that occur more than once among qualifying blobs,
-/// or null when the group can stay entirely on its one direct graph-copy hop.
-Set<Uint8List>? _repeatedLargeBlobs(
-  List<({String sql, List<Object?> params})> writes,
-  int threshold,
-) {
-  HashSet<Uint8List>? seen;
-  HashSet<Uint8List>? repeated;
-  for (final write in writes) {
-    for (final value in write.params) {
-      if (value is! Uint8List || value.length < threshold) continue;
-      final identities = seen ??= _newBlobIdentitySet();
-      if (!identities.add(value)) {
-        (repeated ??= _newBlobIdentitySet()).add(value);
-      }
-    }
-  }
-  return repeated;
-}
-
-HashSet<Uint8List> _newBlobIdentitySet() =>
-    HashSet<Uint8List>(equals: identical, hashCode: identityHashCode);
-
 /// Wraps each large blob, reusing [cache]'s wrapper for a repeated buffer.
 List<Object?> _wrapShared(
   List<Object?> params,
   Map<Uint8List, TransferableTypedData> cache,
-  int threshold, {
-  Set<Uint8List>? eligible,
-}) {
+  int threshold,
+) {
   List<Object?>? out;
   for (var i = 0; i < params.length; i++) {
     final value = params[i];
-    if (value is Uint8List &&
-        value.length >= threshold &&
-        (eligible == null || eligible.contains(value))) {
+    if (value is Uint8List && value.length >= threshold) {
       out ??= List<Object?>.of(params);
       out[i] = cache[value] ??= TransferableTypedData.fromList([value]);
     }

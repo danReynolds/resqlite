@@ -466,32 +466,33 @@ measurement (a synchronous call's wall vs size proves where a copy runs;
 flat-vs-linear scaling proves view-vs-copy) rather than inferring the
 mechanism from an end-to-end delta.*
 
-## A transport win measured on many round-trips need not survive coalescing — round-trip topology is the load-bearing variable, not payload size
+## Envelope count alone does not define a transfer workload
 
-Exp 234 accepted a ~15–20% win from wrapping ≥ 256 KB blob params in
-`TransferableTypedData` on the single-row write path, and its own signal
-predicted the win would "reproduce the same transfer fraction" on a blob-heavy
-`executeBatch`. Exp 237 tested exactly that and found the opposite: a
-*reproduced regression* (256 KB candidate-slower on 8/8 order-flipped legs,
-+7.6% to +18.1%; no size wins). The reason is that exp 234's win was never
-about payload size in the abstract — it came from the interaction between
-*per-round-trip* heap churn and the writer being safepointed **mid-step**:
-across N single-row INSERTs, each `SendPort.send` parks a blob on the
-young-generation heap, and a scavenge triggered while the writer is
-mid-`sqlite3_step` on the previous blob stalls it, a cost that compounds over N
-round-trips. `executeBatch` carries all N sets across **one** send and runs
-them in **one** writer round-trip inside one transaction, so that interleaving
-is gone — leaving only the wrap's per-blob `fromList`/`materialize` tax with
-nothing to reclaim. Batching is a form of round-trip coalescing (cf. exp 180),
-and coalescing removes precisely the churn the wrap reclaimed.
+Exp 237 validly rejected its per-occurrence `TransferableTypedData` prototype:
+its 30-row `executeBatch` candidate regressed 7.6–18.1% at 256 KB. But the
+fixture reused one `Uint8List` identity in every row while the pre-exp-243
+candidate created 30 independent wrappers. The direct baseline preserved that
+identity and copied the buffer once. The result therefore measured alias
+multiplicity as well as its one-message, one-transaction batch topology. Exp
+243 later fixed precisely that N-wrapper aliasing defect with one shared
+wrapper per identity.
 
-*Reapplies whenever a transport/scheduling win is proposed for a
-coalesced, batched, or pipelined path on the strength of a per-item result.
-The number of isolate round-trips — not the total payload moved — is what
-determines whether a GC/safepoint-interaction win survives. Re-measure on the
-collapsed path; do not extend by payload similarity. (Two adjacent runs on the
-same shared file: exp 235 also touches JOURNAL.md — keep both entries on
-merge.)*
+Exp 253 tested the missing distinct-identity case on the neighboring coalesced
+standalone-write path. An identity census that left unique 256 KB
+`MultiExecuteRequest` buffers direct regressed 10.2% and 7.2% across the order
+flip versus today's envelope-shared wrappers, even though both sides used one
+message. The larger 512 KB endpoint moved the other way, but could not rescue
+the policy after the first admitted size failed. MultiExecute also preserves
+one autocommit and outcome per member; it is not exp 237's one transactional C
+batch. Exp 237's measured rejection stands, but the broader inference that
+coalescing itself removes the wrapper benefit does not.
+
+*Reapplies whenever benchmarking ownership or cross-isolate routing. Record
+total bytes, occurrences, unique object identities, envelope count, wrapper
+dedup semantics, and receiver transaction/execution boundaries. Exercise
+distinct, repeated, and mixed identities explicitly. An end-to-end policy A/B
+can reject an implementation, but do not assign the delta to one mechanism
+without a focused attribution probe.*
 
 ### A batch can preserve aggregate throughput and still destroy independent completion latency
 

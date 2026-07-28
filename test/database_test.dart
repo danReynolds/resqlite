@@ -310,10 +310,9 @@ void main() {
     });
 
     test('coalesced burst reusing one blob object round-trips', () async {
-      // [EXP-243] + [EXP-253] Concurrent standalone writes reusing the same
-      // blob object coalesce into one MultiExecuteRequest; the envelope-wide
-      // identity census keeps the shared buffer on a single wrapper. All
-      // writes must land intact.
+      // [EXP-243] Concurrent standalone writes reusing the same blob object
+      // coalesce into one MultiExecuteRequest; the envelope-wide wrap cache keeps
+      // the shared buffer on a single wrapper. All writes must land intact.
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
       final blob = Uint8List.fromList(
         List.generate(300 * 1024, (i) => (i * 13 + 5) & 0xFF),
@@ -327,35 +326,6 @@ void main() {
       for (final r in rows) {
         expect(r['payload'], equals(blob));
       }
-    });
-
-    test('coalesced shared wrapper survives one statement error', () async {
-      // The first call is sent alone; the remaining two coalesce and share one
-      // wrapper. The failing member materializes it first, then the successful
-      // member must reuse the cached view rather than materializing twice.
-      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)');
-      final blob = Uint8List.fromList(
-        List.generate(300 * 1024, (i) => (i * 19 + 3) & 0xFF),
-      );
-      final outcomes = await Future.wait([
-        db
-            .execute('INSERT INTO t(id, payload) VALUES (1, ?)', [blob])
-            .then<Object>((value) => value, onError: (Object error) => error),
-        db
-            .execute('INSERT INTO missing(payload) VALUES (?)', [blob])
-            .then<Object>((value) => value, onError: (Object error) => error),
-        db
-            .execute('INSERT INTO t(id, payload) VALUES (2, ?)', [blob])
-            .then<Object>((value) => value, onError: (Object error) => error),
-      ]);
-      expect(outcomes[0], isA<WriteResult>());
-      expect(outcomes[1], isA<ResqliteException>());
-      expect(outcomes[2], isA<WriteResult>());
-
-      final rows = await db.select('SELECT id, payload FROM t ORDER BY id');
-      expect(rows.map((row) => row['id']), [1, 2]);
-      expect(rows[0]['payload'], equals(blob));
-      expect(rows[1]['payload'], equals(blob));
     });
 
     test('large blob cells round-trip through select without sacrifice',
@@ -530,10 +500,9 @@ void main() {
     });
 
     test('concurrent large blob writes coalesce and round-trip', () async {
-      // [EXP-234] + [EXP-253] A concurrent standalone-write burst rides the
-      // exp 180 coalescing pump. Distinct large payloads stay on its one direct
-      // graph-copy hop; only repeated identities are wrapped. Every payload
-      // must still land intact.
+      // [EXP-234] A concurrent standalone-write burst rides the exp 180
+      // coalescing pump (MultiExecuteRequest), which wraps and unwraps blob
+      // params like single writes do. Distinct payloads must land intact.
       await db.execute(
         'CREATE TABLE t(id INTEGER PRIMARY KEY, payload BLOB)',
       );

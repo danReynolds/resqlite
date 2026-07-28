@@ -1,0 +1,17 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "One SendPort envelope is not sufficient evidence that unique large BLOBs should stay on the graph-copy path. In public Future.wait write bursts, an identity census plus direct routing for unique 256 KiB MultiExecute buffers regressed 10.2% / 7.2% across order-flipped worktrees at the first production-admitted size, so the current envelope-shared TransferableTypedData route remains. The end-to-end run does not attribute the delta between census overhead and transfer route.",
+    "There may be a larger-payload crossover: distinct 512 KiB buffers were candidate-faster by 10.1% / 4.6%, but the repository drift checker classifies the lane as drift-suspected because one baseline process had a 31.5% sample CV. That endpoint cannot justify moving or splitting the threshold after measurement. A larger-size-only rule needs a predeclared sweep, multi-host reproduction, and a production distribution concentrated above the crossover.",
+    "Exp 237's measured rejection remains valid for its archived prototype and all-aliased executeBatch workload, but its one-message mechanism claim is too broad. Its harness reused one Uint8List across 30 rows while the pre-exp-243 candidate created 30 independent wrappers; the direct baseline preserved identity and copied the buffer once. It does not establish the cost of today's shared-wrapper protocol or distinct per-set identities.",
+    "Alias cardinality and writer execution topology are load-bearing alongside envelope count. Exp 253's MultiExecute members remain independent autocommits with per-member outcomes, while executeBatch is one transactional C batch. Transport policy should not be generalized across those shapes without matching both identity distribution and transaction/execution semantics."
+  ],
+  "nextSignals": [
+    "Keep wrapping every qualifying large BLOB in MultiExecuteRequest through one envelope-shared identity cache. Do not add an identity census to leave unique 256 KiB buffers direct.",
+    "Reopen a larger-size-only MultiExecute route only with a representative production BLOB-size distribution concentrated above 512 KiB and a preregistered crossover sweep that reproduces on more than this host. Start from archive/exp-253 and keep 256 KiB as a load-bearing rejection lane.",
+    "If production evidence justifies retesting BatchRequest, use the post-exp-243 alias-preserving wrapper and separate distinct, repeated, and mixed identities. Exp 237's old per-occurrence prototype and all-aliased fixture are not a current-protocol batch gate by themselves."
+  ]
+}
