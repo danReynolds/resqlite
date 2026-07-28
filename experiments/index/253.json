@@ -1,0 +1,7 @@
+{
+  "file": "253-multiexecute-blob-routing.md",
+  "title": "Reject identity-conditioned MultiExecute BLOB routing",
+  "impact": "A one-message topology was not enough to justify leaving unique large BLOBs on Dart's graph-copy path. An identity census kept repeated buffers on exp 243's shared TransferableTypedData wrapper but sent unique MultiExecute buffers direct. Rejected because that combined policy produced a classifier-reproduced 10.2% / 7.2% regression for distinct 256 KiB writes at the first production-admitted size; 512 KiB was candidate-faster but drift-suspected and cannot move the threshold post hoc. Shared/mixed/control guards also lacked stable signal. Runtime reverted; exact prototype at archive/exp-253. The result qualifies exp 237: its all-aliased fixture paid 30 pre-table wrappers, so its measured rejection stands but does not generalize to distinct identities or every one-envelope execution topology.",
+  "status": "rejected",
+  "link": ""
+}
