@@ -604,6 +604,43 @@ progress is detected, backed off, retried, cancelled, and drained at shutdown;
 if generation matters, carry a generation rather than inferring one from a
 monotonic-looking counter.*
 
+### Judge a candidate's novelty against `origin/main`, not the worktree you start in
+
+[Exp 254](254-text-value-blob-decode.md) began by reading `native/resqlite.c`
+in the scheduled runner's *starting* worktree, which sat on a branch behind
+`origin/main`. The TEXT decode path there still showed the pre-hoist shape, so
+the plan — mirror exp 203's `sqlite3_column_value` hoist onto the decode/hash
+paths — looked novel. It was already shipped as the **accepted**
+[exp 205](205-step-row-value-cache.md); only the stale checkout hid it. Caught
+by checking `git show origin/main:native/resqlite.c` before writing code. This
+is the code-reading analogue of the numbering rule ("pick highest+1 from
+`origin/main`, not the local tree"): a stale worktree makes a done optimization
+look undone.
+
+*Reapplies at the start of every scheduled run. Before believing a hot path is
+un-optimized, confirm it against `origin/main` (`git show origin/main:<file>`),
+not the tree you happen to be checked out on — and read the adjacent accepted
+experiments' index rows, which name what already landed.*
+
+### A two-worktree A/B can carry a per-worktree offset that isn't drift
+
+The order-flipped-pass rule (exp 159/177) catches *time-correlated* drift — a
+regression that lands on whichever phase ran in the slow time block and flips
+when you flip collection order. [Exp 254](254-text-value-blob-decode.md) hit a
+different artifact: comparing a baseline worktree against a candidate worktree,
+the byte-identical integer control lane moved ~-4.8% *the same direction in both
+order-flipped passes*. A same-sign control delta that survives order-flip is not
+drift — it is a systematic per-binary offset (layout/placement between two
+separately built `.so`s) that silently biases every lane. The fix is to A/B a
+**single binary** with a runtime toggle (env-gated, removed before merge) so
+both arms run in one process; the offset cannot exist. Under that isolation
+exp 254's apparent -5% text win collapsed to noise.
+
+*Reapplies to any focused C-level A/B built from two worktrees. Put an
+identical-code control lane in the harness; if it moves same-sign across the
+order-flip, distrust the whole comparison and re-run both arms from one binary
+behind a toggle before believing any lane.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
