@@ -151,6 +151,47 @@ void main() {
       },
     );
 
+    test(
+      'stream over an empty result still emits when a write races it',
+      () async {
+        // An empty result hashes to 0, so 0 is a legitimate baseline rather
+        // than an impossible one. Poisoning the baseline by hash alone would
+        // leave this stream comparing 0 against 0, reporting "unchanged", and
+        // going silent — the exp 255 failure, reachable only when the query
+        // matches nothing. The row-count sentinel is what rules it out.
+        await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+          for (var i = 0; i < 40000; i++) ['seed_$i', i],
+        ]);
+
+        final seen = <int>[];
+        final sub = db
+            .stream("SELECT id FROM items WHERE name = 'no_such_row'")
+            .map((rows) => rows.length)
+            .listen(seen.add);
+        addTearDown(sub.cancel);
+
+        // Races the initial query, and leaves the result set still empty.
+        await Future.wait([
+          for (var i = 0; i < 8; i++)
+            db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+              'other_$i',
+              i,
+            ]),
+        ]);
+
+        await Future.doWhile(() async {
+          if (seen.isNotEmpty) return false;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          return true;
+        }).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail('empty-result stream never emitted'),
+        );
+
+        expect(seen.first, 0, reason: 'an empty result is still a result');
+      },
+    );
+
     tearDown(() async {
       await db.close();
       if (await tempDir.exists()) {

@@ -47,9 +47,16 @@ import 'extensions/set.dart';
 /// deduplication, initial query with dependency tracking, write
 /// invalidation, re-query with result-change detection, and
 /// per-subscriber buffered delivery.
-/// Sentinel comparison baseline that no real result hash equals, so a
-/// catch-up re-query is guaranteed to report a change and emit.
-const int _poisonedHash = 0;
+/// Row count that no real result can have, used to poison a stream's
+/// comparison baseline so its next re-query is guaranteed to report a change.
+///
+/// The row count — not the hash — is what makes this safe. `selectIfChanged`
+/// treats a result as unchanged only when the hash *and* the row count both
+/// match, and a real count is always >= 0, so this value can never match. A
+/// hash sentinel would not work: an empty result hashes to 0 (see
+/// `_finishInitialHash`), so 0 is a legitimate value rather than an impossible
+/// one, and a stream over an empty query would go silent again.
+const int _neverMatchingRowCount = -1;
 
 final class StreamEngine {
   StreamEngine(this._pool);
@@ -316,18 +323,18 @@ final class StreamEngine {
         // comparison baseline so the catch-up re-query is guaranteed to report
         // a change, and let that emission be the stream's first.
         //
-        // Poisoning is what makes this safe. Suppressing the initial emission
-        // while leaving the baseline set to these rows is the exp 255 bug: the
-        // re-query then compares against the very rows it replaced, reports
-        // "unchanged", and the stream goes permanently silent. The sentinel
-        // guarantees an emission, and `_requery` propagates errors to
-        // subscribers, so the stream always resolves to a value or an error.
+        // Poisoning is what makes suppression safe. Suppressing the initial
+        // emission while leaving the baseline set to these rows is the exp 255
+        // bug: the re-query then compares against the very rows it replaced,
+        // reports "unchanged", and the stream goes permanently silent. With the
+        // baseline poisoned the re-query always emits, and `_requery`
+        // propagates errors to subscribers, so a stream always resolves to a
+        // value or an error.
         //
         // Measured (exp 256): this costs ~1 ms of time-to-correct-value and
-        // removes the one stale frame lane A rendered every time.
+        // removes the one stale frame emit-then-correct rendered every time.
         if (entry.dirty) {
-          entry.lastResultHash = _poisonedHash;
-          entry.lastRowCount = -1;
+          entry.lastRowCount = _neverMatchingRowCount;
           _requeryQueue.add(entry);
           _flushQueue();
         } else {

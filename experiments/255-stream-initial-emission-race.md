@@ -73,8 +73,7 @@ is guaranteed to emit, and lets that emission be the stream's first:
 
 ```dart
 if (entry.dirty) {
-  entry.lastResultHash = _poisonedHash;   // guarantees the re-query emits
-  entry.lastRowCount = -1;
+  entry.lastRowCount = _neverMatchingRowCount;  // guarantees the re-query emits
   _requeryQueue.add(entry);
   _flushQueue();
 } else {
@@ -87,6 +86,16 @@ missing: suppressing the initial emission while leaving the baseline set to
 those same rows is what let both emissions cancel each other. `_requery`
 propagates errors to subscribers, so the stream always resolves to a value or
 an error — never silence.
+
+**It has to be the row count, not the hash.** `selectIfChanged` reports
+"unchanged" only when the hash *and* the row count both match, so poisoning
+either one suffices — but only the row count has an impossible value. An empty
+result hashes to **0** (`_finishInitialHash` short-circuits on `rowCount == 0`),
+so a hash sentinel of 0 is a legitimate baseline rather than an unreachable one,
+and a stream over a query matching no rows would go silent exactly as before.
+A review pass caught this in the first version of the fix; the empty-result
+regression test in `stream_test.dart` fails 0/3 against the hash-only sentinel
+and passes 4/4 against the row-count one.
 
 The alternative — emit the known-stale rows immediately, then correct — is
 simpler and also fixes the silence, but exp 256 measured it rendering exactly
