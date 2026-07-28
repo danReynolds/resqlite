@@ -52,8 +52,9 @@ final class MultiExecuteRequest extends WriterRequest {
     List<({String sql, List<Object?> params})> writes,
     super.replyPort,
   )
-    // Wraps on the main isolate like ExecuteRequest/QueryRequest — the
-    // group form shares one wrapper per unique buffer across the envelope.
+    // A coalesced group already crosses in one graph-copy hop, so unique
+    // buffers stay direct. Repeated identities share one wrapper across the
+    // envelope; see BlobTransfer.wrapParamsGroup.
     : writes = blobTransfer.wrapParamsGroup(writes);
   final List<({String sql, List<Object?> params})> writes;
 }
