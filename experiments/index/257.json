@@ -1,0 +1,7 @@
+{
+  "file": "257-native-autocommit-envelope.md",
+  "title": "Native independent-autocommit envelope",
+  "impact": "Moonshot: A private native loop tried to execute homogeneous coalesced writes in one FFI call while preserving every member as an independent autocommit. The public insert gate improved 17.7% in one process order but only 3.6% in reverse, below the predeclared 10% bar, while the integer-only no-op diagnostic regressed 17.7% / 13.9%. Whole-group parameter/result materialization outweighed the removed call boundaries without removing N SQLite commits. Safety review also found reset-time commit-error, dirty-union timing, packed-BLOB memory, and binding-lifetime hazards. Runtime reverted; exact prototype and harness at archive/exp-257.",
+  "status": "rejected",
+  "link": ""
+}

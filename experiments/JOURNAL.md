@@ -641,6 +641,24 @@ identical-code control lane in the harness; if it moves same-sign across the
 order-flip, distrust the whole comparison and re-run both arms from one binary
 behind a toggle before believing any lane.*
 
+### One native envelope can lose by materializing the whole group
+
+[Exp 257](257-native-autocommit-envelope.md) collapsed a homogeneous
+`MultiExecuteRequest` from one Dart/native execute call per member to one
+native interpreter call while retaining every independent SQLite autocommit.
+That sounds like pure call amortization, but the new boundary first flattened
+all parameters and allocated all results. The public insert gate missed its
+reproduced bar, and the integer-only no-op control regressed in both orders
+(claim 257.1): bulk materialization cost more than the calls it removed.
+Variable-width groups also changed peak lifetime from one row to the whole
+burst.
+
+*Reapplies whenever an FFI, IPC, codec, or database loop is collapsed into one
+envelope. Account for the aggregate input/output representation and peak live
+bytes before crediting the removed calls. Compare against the actual scalar
+encoder, which may already have narrow fast paths, and include a no-payload
+lane: if that lane regresses, the envelope machinery itself has failed.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
