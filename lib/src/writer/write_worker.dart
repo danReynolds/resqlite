@@ -314,61 +314,7 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
   // One unwrapper spanning the group: a blob reused across its writes
   // arrives as a single shared, single-use wrapper (see BlobUnwrapper).
   final unwrapper = blobTransfer.unwrapper();
-  final homogeneous = _homogeneousParameterizedGroup(msg.writes);
-  var nextScalarIndex = 0;
-
-  if (homogeneous != null) {
-    final sql = homogeneous.sql;
-    final paramSets = <List<Object?>>[
-      for (final write in msg.writes) unwrapper.unwrap(write.params),
-    ];
-    final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-    final native = executeIndependentAutocommits(
-      state.dbHandle,
-      sql,
-      paramSets,
-    );
-    final writerSqliteUs = _stopSqliteTimer(sqliteSw);
-
-    for (var i = 0; i < native.results.length; i++) {
-      outcomes.add(
-        ExecuteResponse(
-          native.results[i],
-          TableDependencies.none,
-          // The envelope stopwatch covers the whole successful prefix (and
-          // the failing member, when present). Attribute it once so the main
-          // isolate does not multiply native time by the number of outcomes.
-          writerSqliteUs: i == native.results.length - 1 ? writerSqliteUs : 0,
-        ),
-      );
-    }
-    nextScalarIndex = native.results.length;
-    if (native.error != null) {
-      outcomes.add(native.error!);
-      nextScalarIndex++;
-    }
-
-    // The native loop intentionally leaves dirty dependencies accumulated
-    // across its independent autocommits. A coalesced group already returns
-    // as one indivisible response, so one union attached to the last
-    // successful member preserves the final stream invalidation while
-    // avoiding one Dart/native harvest per member.
-    final modifications = getDirtyTableDependencies(state.dbHandle);
-    for (var i = outcomes.length - 1; i >= 0; i--) {
-      final outcome = outcomes[i];
-      if (outcome is ExecuteResponse) {
-        outcomes[i] = ExecuteResponse(
-          outcome.result,
-          modifications,
-          writerSqliteUs: outcome.writerSqliteUs,
-        );
-        break;
-      }
-    }
-  }
-
-  for (var i = nextScalarIndex; i < msg.writes.length; i++) {
-    final write = msg.writes[i];
+  for (final write in msg.writes) {
     try {
       final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
       final result = executeWrite(
@@ -388,20 +334,6 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
     }
   }
   msg.replyPort.send(MultiExecuteResponse(outcomes));
-}
-
-({String sql, int paramCount})? _homogeneousParameterizedGroup(
-  List<({String sql, List<Object?> params})> writes,
-) {
-  if (writes.length < 2) return null;
-  final sql = writes.first.sql;
-  final paramCount = writes.first.params.length;
-  if (paramCount == 0) return null;
-  for (var i = 1; i < writes.length; i++) {
-    final write = writes[i];
-    if (write.sql != sql || write.params.length != paramCount) return null;
-  }
-  return (sql: sql, paramCount: paramCount);
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {

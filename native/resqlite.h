@@ -125,24 +125,6 @@ int resqlite_execute(
     resqlite_write_result* out_result
 );
 
-// Execute one parameterized statement across many parameter sets while
-// preserving independent autocommit semantics. Unlike resqlite_run_batch,
-// this does not open a transaction: each successful set commits before the
-// next one is attempted. The loop stops at the first error so the caller can
-// capture SQLite's error text and resume later sets through the scalar path.
-//
-// Returns SQLITE_OK when every set succeeds, otherwise the first SQLite error.
-// out_completed receives the number of successful sets before that error.
-int resqlite_run_independent_autocommits(
-    resqlite_db* db,
-    const char* sql,
-    const resqlite_param* param_sets,
-    int param_count,
-    int set_count,
-    resqlite_write_result* out_results,
-    int* out_completed
-);
-
 // Execute a batch of parameterized writes: one SQL, many param sets.
 // Runs in a transaction (BEGIN/COMMIT). Uses a single prepared statement.
 // Returns SQLITE_OK on success. Automatically rolls back on error.

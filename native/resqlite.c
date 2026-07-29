@@ -1053,68 +1053,6 @@ int resqlite_execute(
     return rc;
 }
 
-int resqlite_run_independent_autocommits(
-    resqlite_db* db,
-    const char* sql,
-    const resqlite_param* param_sets,
-    int param_count,
-    int set_count,
-    resqlite_write_result* out_results,
-    int* out_completed
-) {
-    if (out_completed) *out_completed = 0;
-    if (!db || !sql || !out_results || !out_completed ||
-        param_count <= 0 || set_count <= 0 ||
-        atomic_load_explicit(&db->closed, memory_order_acquire)) {
-        return SQLITE_MISUSE;
-    }
-
-    sqlite3_mutex_enter(db->writer_mutex);
-
-    int rc;
-    const char* tail = NULL;
-    resqlite_cached_stmt* entry =
-        get_or_prepare_writer(db, sql, (int)strlen(sql), &rc, &tail);
-    if (!entry) {
-        sqlite3_mutex_leave(db->writer_mutex);
-        return rc;
-    }
-    sqlite3_stmt* stmt = entry->stmt;
-
-    for (int i = 0; i < set_count; i++) {
-        sqlite3_reset(stmt);
-        rc = bind_params(
-            stmt,
-            &param_sets[i * param_count],
-            param_count,
-            entry->param_count
-        );
-        if (rc != SQLITE_OK) {
-            sqlite3_reset(stmt);
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-
-        db->writer_active_entry = entry;
-        rc = sqlite3_step(stmt);
-        db->writer_active_entry = NULL;
-
-        out_results[i].affected_rows = sqlite3_changes(db->writer);
-        out_results[i].last_insert_id =
-            sqlite3_last_insert_rowid(db->writer);
-        sqlite3_reset(stmt);
-
-        if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-            sqlite3_mutex_leave(db->writer_mutex);
-            return rc;
-        }
-        *out_completed = i + 1;
-    }
-
-    sqlite3_mutex_leave(db->writer_mutex);
-    return SQLITE_OK;
-}
-
 // Shared batch loop: prepare (or reuse cached) the statement, then bind+step
 // each param set. Assumes the caller holds writer_mutex and that any
 // enclosing transaction control (BEGIN/COMMIT/SAVEPOINT) is managed externally.
