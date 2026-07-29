@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 43,
-    "totalEntries": 124
+    "entriesWithClaims": 45,
+    "totalEntries": 126
   },
   "experiments": [
     {
@@ -1974,6 +1974,28 @@
       "outcomeClass": "rejected"
     },
     {
+      "id": "255",
+      "title": "Stream could emit nothing when a write raced its initial query",
+      "file": "255-stream-initial-emission-race.md",
+      "date": "2026-07-28",
+      "status": "accepted",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "accepted"
+    },
+    {
+      "id": "256",
+      "title": "Stale-then-correct vs suppress-stale initial stream emission",
+      "file": "256-stale-initial-emission-tradeoff.md",
+      "date": "2026-07-28",
+      "status": "accepted",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "accepted"
+    },
+    {
       "id": "257",
       "title": "Native independent-autocommit envelope",
       "file": "257-native-autocommit-envelope.md",
@@ -2468,6 +2490,52 @@
       ],
       "text": "Exp 233's checkpoint storm was a trigger-policy failure, not inherent to off-writer PASSIVE work: observed-reset/high-water re-arming fixes the storm and first threshold-crossing p50 improves ~53-64%. Rejected for now, mechanism preserved.",
       "conditions": "M1 Pro · 2026-07 · backfilled 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "255.1",
+      "source": "255",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "A stream always resolves to an emission or an error, never silence. When a write dirties an entry mid-initial-query the comparison baseline is poisoned so the catch-up re-query is guaranteed to emit, and that emission is the stream's first. Suppressing the initial emission while leaving the baseline set to the rows it replaced is what stranded streams permanently silent.",
+      "conditions": "M1 Pro · deterministic regression test (40k-row seed) · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "256.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "255.2",
+      "source": "255",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "An intermittent test failure reproducing at ~1-in-3 is a bug, not a flake. This one was dismissed three times in one session, partly because the test's own comment asserted the shape could not flake — a false confidence marker actively redirects investigation, and reading the actual failure text ('emitted x Stream closed') would have identified the mechanism immediately.",
+      "conditions": "methodology · 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "255.3",
+      "source": "255",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "Clearing a stream's comparison baseline must clear the row count, not the hash: selectIfChanged requires both to match, and an empty result legitimately hashes to 0, so a hash sentinel of 0 is reachable rather than impossible and would leave empty-result streams silent. The row count is nullable end to end, with null meaning 'no baseline' — which also retired a pre-existing magic -1 in the request type.",
+      "conditions": "review finding · guarded by the empty-result regression test · 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "256.1",
+      "source": "256",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "A stream never emits rows it already knows a write superseded: when the initial query is dirtied mid-flight the comparison baseline is poisoned and only the corrected result is emitted. This costs ~0.4-1.4 ms of time-to-correct-value and removes the stale frame that emit-then-correct rendered on every raced stream; unraced streams are unaffected.",
+      "conditions": "M1 Pro · 1k/20k/60k seed race windows · 12 samples/shape · 2026-07",
       "state": "live"
     },
     {
