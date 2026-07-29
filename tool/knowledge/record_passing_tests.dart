@@ -1,0 +1,46 @@
+// ignore_for_file: avoid_print
+/// Records the names of passing tests so `test:` pins can be proven rather
+/// than merely resolved.
+///
+///   dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
+///
+/// Writes one test name per line to `build/passing-tests.txt`. Without this
+/// file a `test:` pin reports `unknown` — deliberately, because an unavailable
+/// checker must never read as a pass.
+library;
+
+import 'dart:convert';
+import 'dart:io';
+
+Future<void> main() async {
+  final names = <int, String>{};
+  final passing = <String>{};
+
+  await for (final line
+      in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+    Object? decoded;
+    try {
+      decoded = json.decode(line);
+    } on FormatException {
+      continue; // the reporter interleaves non-JSON chatter
+    }
+    if (decoded is! Map) continue;
+    switch (decoded['type']) {
+      case 'testStart':
+        final test = decoded['test'];
+        if (test is Map && test['id'] is int && test['name'] is String) {
+          names[test['id'] as int] = test['name'] as String;
+        }
+      case 'testDone':
+        if (decoded['result'] == 'success' && decoded['hidden'] != true) {
+          final name = names[decoded['testID']];
+          if (name != null) passing.add(name);
+        }
+    }
+  }
+
+  final out = File('build/passing-tests.txt');
+  out.createSync(recursive: true);
+  out.writeAsStringSync('${passing.join('\n')}\n');
+  print('Recorded ${passing.length} passing tests to ${out.path}');
+}

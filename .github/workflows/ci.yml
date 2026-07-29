@@ -120,6 +120,10 @@ jobs:
         run: dart run benchmark/check_experiment_signals.dart
       - name: Verify knowledge links and claim citations
         run: dart run benchmark/check_knowledge_links.dart
+      - name: Record passing tests for knowledge pins
+        run: dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
+      - name: Verify knowledge pins
+        run: dart run tool/knowledge/verify.dart --report
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
 
