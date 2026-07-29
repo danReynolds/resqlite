@@ -7,7 +7,8 @@ import 'package:test/test.dart';
 /// standalone execute() calls are coalesced into one MultiExecuteRequest and
 /// run as independent autocommits on the worker. These tests pin the behavior
 /// that must stay identical to sending each write individually — correct
-/// per-call results, per-statement failure isolation, and stream invalidation.
+/// per-call results, per-statement failure isolation, trigger/FK effects, and
+/// stream invalidation.
 void main() {
   group('write coalescing (exp 180)', () {
     late Directory tempDir;
@@ -114,5 +115,91 @@ void main() {
 
       await reachedEight;
     });
+
+    test(
+      'constraint errors preserve later cascades, triggers, and streams',
+      () async {
+        await db.execute('PRAGMA foreign_keys = ON');
+        await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
+        await db.execute(
+          'CREATE TABLE child('
+          'id INTEGER PRIMARY KEY, '
+          'parent_id INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE)',
+        );
+        await db.execute(
+          'CREATE TABLE delete_audit('
+          'id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL)',
+        );
+        await db.execute(
+          'CREATE TRIGGER block_parent_two BEFORE DELETE ON parent '
+          'WHEN old.id = 2 BEGIN '
+          "SELECT RAISE(ABORT, 'blocked two'); END",
+        );
+        await db.execute(
+          'CREATE TRIGGER block_parent_four BEFORE DELETE ON parent '
+          'WHEN old.id = 4 BEGIN '
+          "SELECT RAISE(ABORT, 'blocked four'); END",
+        );
+        await db.execute(
+          'CREATE TRIGGER audit_parent_delete AFTER DELETE ON parent '
+          'BEGIN INSERT INTO delete_audit(parent_id) VALUES (old.id); END',
+        );
+        for (var id = 1; id <= 5; id++) {
+          await db.execute('INSERT INTO parent(id) VALUES (?)', [id]);
+          await db.execute('INSERT INTO child(id, parent_id) VALUES (?, ?)', [
+            id,
+            id,
+          ]);
+        }
+
+        final childReachedTwo = expectLater(
+          db
+              .stream('SELECT COUNT(*) AS c FROM child')
+              .map((rows) => rows.single['c'] as int),
+          emitsThrough(2),
+        );
+        final auditReachedThree = expectLater(
+          db
+              .stream('SELECT COUNT(*) AS c FROM delete_audit')
+              .map((rows) => rows.single['c'] as int),
+          emitsThrough(3),
+        );
+
+        const deleteSql = 'DELETE FROM parent WHERE id = ?';
+        final outcomes = await Future.wait([
+          for (var id = 1; id <= 5; id++)
+            db
+                .execute(deleteSql, [id])
+                .then<Object>((result) => result, onError: (Object e) => e),
+        ]);
+
+        expect(outcomes[0], isA<WriteResult>());
+        expect(outcomes[2], isA<WriteResult>());
+        expect(outcomes[4], isA<WriteResult>());
+        for (final (index, id, message) in [
+          (1, 2, 'blocked two'),
+          (3, 4, 'blocked four'),
+        ]) {
+          final error = outcomes[index] as ResqliteQueryException;
+          expect(error.message, message);
+          expect(error.sql, deleteSql);
+          expect(error.parameters, [id]);
+          expect(error.sqliteCode, 19); // SQLITE_CONSTRAINT
+        }
+
+        await childReachedTwo;
+        await auditReachedThree;
+        final parents = await db.select('SELECT id FROM parent ORDER BY id');
+        final children = await db.select(
+          'SELECT parent_id FROM child ORDER BY parent_id',
+        );
+        final audit = await db.select(
+          'SELECT parent_id FROM delete_audit ORDER BY parent_id',
+        );
+        expect(parents.map((row) => row['id']), [2, 4]);
+        expect(children.map((row) => row['parent_id']), [2, 4]);
+        expect(audit.map((row) => row['parent_id']), [1, 3, 5]);
+      },
+    );
   });
 }
