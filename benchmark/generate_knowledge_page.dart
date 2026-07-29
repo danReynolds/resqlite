@@ -8,24 +8,25 @@ import 'generate_knowledge_graph.dart' as kg;
 /// the knowledge graph.
 ///
 /// Sources:
-///   doc/arch/chapters/NN-<component>.md  — authored narrative chapters with
-///                                           front-matter and inline
-///                                           `[[NNN.M]]` claim citations
+///   doc/arch/home.md                     — the landing page
+///   doc/arch/chapters/NN-<component>.md  — one page per subsystem, each with
+///                                           front-matter and inline `[[NNN.M]]`
+///                                           claim citations
 ///   doc/arch/chapters/_viewer.html       — the page template
 ///   the knowledge graph                  — built in-memory (same builder the
 ///                                           bot uses for knowledge-graph.json)
 ///
-/// The chapters are the *authored* layer: they never regenerate from claims.
-/// The page injects the live graph beside them, so citation chips always show
-/// each claim's current state — a chapter standing on superseded evidence
-/// renders its citation struck-through even before the prose is repaired, and
-/// `check_knowledge_links.dart` reports the repair debt per chapter.
+/// The prose is the *authored* layer: it never regenerates from claims. The
+/// page injects the live graph beside it, so citation chips always show each
+/// claim's current state — a page standing on superseded evidence renders its
+/// citation struck-through even before the prose is repaired, and
+/// `check_knowledge_links.dart` reports the repair debt per page.
 String buildKnowledgePage({required Directory repoRoot}) {
   final chaptersDir = Directory('${repoRoot.path}/doc/arch/chapters');
   final template = File('${chaptersDir.path}/_viewer.html').readAsStringSync();
+  final diagrams = File('${chaptersDir.path}/_diagrams.js').readAsStringSync();
 
-  final sysmap = <Map<String, Object?>>[];
-  final stories = <String, Object?>{};
+  final pages = <Map<String, Object?>>[];
   final files =
       chaptersDir
           .listSync()
@@ -36,35 +37,132 @@ String buildKnowledgePage({required Directory repoRoot}) {
   if (files.isEmpty) throw StateError('No chapters in ${chaptersDir.path}');
 
   for (final file in files) {
-    final (meta, sections) = _parseChapter(file);
-    final lede = sections.isNotEmpty && sections.first['lede'] == true
-        ? (sections.first['ps'] as List).first as String
-        : '';
-    sysmap.add({
+    final (meta, sections) = _parseDoc(file, requireKeys: const [
+      'component',
+      'title',
+      'kicker',
+      'zone',
+    ]);
+    final first = sections.isNotEmpty && sections.first['lede'] == true
+        ? (sections.first['ps'] as List).first
+        : null;
+    final lede = first is String ? first : '';
+    pages.add({
       'id': meta['component'],
+      'section': meta['section'] ?? 'architecture',
       'zone': meta['zone'],
       'kicker': meta['kicker'],
       'name': meta['title'],
-      'summary': _firstSentences(lede.replaceAll(RegExp(r'\[\[[\d.]+\]\]'), ''), 2),
+      'summary': _firstSentences(
+        lede.replaceAll(RegExp(r'\[\[[\d.]+\]\]'), ''),
+        2,
+      ),
       'dirs': meta['directions'] ?? const [],
-      if (meta['extraClaims'] != null) 'claims': meta['extraClaims'],
-    });
-    stories[meta['component'] as String] = {
+      'feeds': meta['feeds'] ?? const [],
       if (meta['diagram'] != null) 'diagram': meta['diagram'],
+      if (meta['extraClaims'] != null) 'claims': meta['extraClaims'],
       'sections': sections,
-    };
+    });
   }
+
+  final homeFile = File('${repoRoot.path}/doc/arch/home.md');
+  final (homeMeta, homeSections) = _parseDoc(
+    homeFile,
+    requireKeys: const ['title', 'tagline'],
+  );
 
   final graph = kg.buildKnowledgeGraph(
     experimentsDir: Directory('${repoRoot.path}/experiments'),
   );
+  _enrichExperiments(repoRoot, graph);
   return template
+      .replaceFirst('__DIAGRAMS__', diagrams)
       .replaceFirst('__KG__', json.encode(graph))
-      .replaceFirst('__SYSMAP__', json.encode(sysmap))
-      .replaceFirst('__STORIES__', json.encode(stories));
+      .replaceFirst('__PAGES__', json.encode(pages))
+      .replaceFirst(
+        '__HOME__',
+        json.encode({
+          'title': homeMeta['title'],
+          'tagline': homeMeta['tagline'],
+          'sections': homeSections,
+        }),
+      )
+      .replaceFirst('__STATS__', json.encode(_experimentStats(repoRoot)));
 }
 
-(Map<String, Object?>, List<Map<String, Object?>>) _parseChapter(File file) {
+/// Adds what the evidence drawer needs but `knowledge-graph.json` does not
+/// carry: the index's `impact` prose, and the signal entry's class, changed
+/// beliefs and follow-on signals.
+///
+/// Only experiments that actually back a claim are enriched — the drawer never
+/// shows the others, and embedding all 211 would triple the page for nothing.
+/// The long-form writeup (problem / hypothesis / results / reasoning) is *not*
+/// embedded: it already ships as `docs/experiments/history.json` for the
+/// experiments dashboard, and the drawer fetches it on first open.
+///
+/// Enriching here rather than in the graph builder keeps `knowledge-graph.json`
+/// stable — agents and CI consume it, and it should not grow fields that exist
+/// only to render a panel.
+void _enrichExperiments(Directory repoRoot, Map<String, Object?> graph) {
+  final cited = <String>{
+    for (final c in (graph['claims'] as List).cast<Map<String, Object?>>())
+      if (c['source'] != null) c['source'] as String,
+  };
+  final experiments = (graph['experiments'] as List).cast<Map<String, Object?>>();
+  for (final e in experiments) {
+    final id = e['id'] as String?;
+    if (id == null || !cited.contains(id)) continue;
+
+    final index = File('${repoRoot.path}/experiments/index/$id.json');
+    if (index.existsSync()) {
+      final decoded = json.decode(index.readAsStringSync());
+      final entry = decoded is List
+          ? (decoded.whereType<Map>().isEmpty
+                ? const {}
+                : decoded.whereType<Map>().first)
+          : decoded as Map;
+      if (entry['impact'] != null) e['impact'] = entry['impact'];
+    }
+
+    final signal = File('${repoRoot.path}/experiments/signals/entries/$id.json');
+    if (signal.existsSync()) {
+      final s = json.decode(signal.readAsStringSync());
+      if (s is Map) {
+        if (s['experimentClass'] != null) e['class'] = s['experimentClass'];
+        if (s['changedBeliefs'] != null) e['changed'] = s['changedBeliefs'];
+        if (s['nextSignals'] != null) e['next'] = s['nextSignals'];
+      }
+    }
+  }
+}
+
+/// Accepted/rejected counts, read straight from the experiment index. The
+/// rejected count is the headline number on the landing page: a method that
+/// only records what worked is a marketing document, not a record.
+Map<String, Object?> _experimentStats(Directory repoRoot) {
+  final dir = Directory('${repoRoot.path}/experiments/index');
+  var accepted = 0, rejected = 0, total = 0;
+  if (dir.existsSync()) {
+    for (final f in dir.listSync().whereType<File>()) {
+      if (!f.path.endsWith('.json')) continue;
+      final decoded = json.decode(f.readAsStringSync());
+      for (final e in decoded is List ? decoded : [decoded]) {
+        if (e is! Map) continue;
+        total++;
+        if (e['status'] == 'accepted') accepted++;
+        if (e['status'] == 'rejected') rejected++;
+      }
+    }
+  }
+  return {'total': total, 'accepted': accepted, 'rejected': rejected};
+}
+
+/// Parses front-matter plus a small block subset of markdown: `##` headings,
+/// blank-line-separated paragraphs, and fenced code.
+(Map<String, Object?>, List<Map<String, Object?>>) _parseDoc(
+  File file, {
+  required List<String> requireKeys,
+}) {
   final lines = file.readAsStringSync().split('\n');
   if (lines.first.trim() != '---') {
     throw StateError('${file.path}: missing front-matter');
@@ -75,7 +173,7 @@ String buildKnowledgePage({required Directory repoRoot}) {
     final i = line.indexOf(':');
     if (i < 0) continue;
     final key = line.substring(0, i).trim();
-    var value = line.substring(i + 1).trim();
+    final value = line.substring(i + 1).trim();
     if (value.startsWith('[') && value.endsWith(']')) {
       meta[key] = value
           .substring(1, value.length - 1)
@@ -87,13 +185,17 @@ String buildKnowledgePage({required Directory repoRoot}) {
       meta[key] = value;
     }
   }
-  for (final key in ['component', 'title', 'kicker', 'zone']) {
+  for (final key in requireKeys) {
     if (meta[key] == null) throw StateError('${file.path}: missing $key');
   }
 
   final sections = <Map<String, Object?>>[];
-  var current = <String, Object?>{'lede': true, 'ps': <String>[]};
+  var current = <String, Object?>{'lede': true, 'ps': <Object>[]};
   final para = StringBuffer();
+  final code = StringBuffer();
+  var inCode = false;
+  var codeLang = '';
+
   void flushPara() {
     final text = para.toString().trim();
     if (text.isNotEmpty) (current['ps'] as List).add(text);
@@ -102,13 +204,37 @@ String buildKnowledgePage({required Directory repoRoot}) {
 
   void flushSection() {
     flushPara();
-    if ((current['ps'] as List).isNotEmpty) sections.add(current);
+    // A heading with no body still names a slot the viewer fills (the card
+    // grid), so keep sections that carry a heading even when empty.
+    if ((current['ps'] as List).isNotEmpty || current['h'] != null) {
+      sections.add(current);
+    }
   }
 
   for (final line in lines.sublist(end + 1)) {
-    if (line.startsWith('## ')) {
+    if (line.trimLeft().startsWith('```')) {
+      if (inCode) {
+        (current['ps'] as List).add({
+          'code': code.toString().trimRight(),
+          'lang': codeLang,
+        });
+        code.clear();
+        inCode = false;
+      } else {
+        flushPara();
+        codeLang = line.trim().substring(3).trim();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      code.writeln(line);
+    } else if (line.startsWith('## ')) {
       flushSection();
-      current = <String, Object?>{'h': line.substring(3).trim(), 'ps': <String>[]};
+      current = <String, Object?>{
+        'h': line.substring(3).trim(),
+        'ps': <Object>[],
+      };
     } else if (line.trim().isEmpty) {
       flushPara();
     } else {
@@ -117,6 +243,8 @@ String buildKnowledgePage({required Directory repoRoot}) {
     }
   }
   flushSection();
+  // A heading with no body still names a slot the viewer fills (the card grid,
+  // the method panel), so keep empty sections that carry a heading.
   return (meta, sections);
 }
 

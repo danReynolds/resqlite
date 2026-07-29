@@ -1,257 +1,404 @@
+<!doctype html>
 <meta charset="utf-8">
-<title>resqlite · system knowledge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>resqlite · architecture</title>
 <style>
 :root {
-  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
-  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
-  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
-  --code-bg: #EEF2EF;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
-    --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
-    --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
-    --code-bg: #232C29;
-  }
-}
-:root[data-theme="dark"] {
-  --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
-  --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
-  --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
-  --code-bg: #232C29;
-}
-:root[data-theme="light"] {
-  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
-  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
-  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
-  --code-bg: #EEF2EF;
+  /* The site's design system, verbatim from docs/index.html. Kept under the
+     same names so a change there is a find-and-replace here, not a re-derive.
+     The site is dark-only, so this page is too. */
+  --bg: #0b0d1f;
+  --card: #141829;
+  --border: #262b45;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+
+  /* Derived tones this page needs and the site does not name. */
+  --paper: var(--bg);
+  --surface: var(--card);
+  --raised: #1b2038;
+  --ink: var(--text);
+  --ink-2: #aeb8c4;
+  --ink-3: var(--muted);
+  --line: var(--border);
+  --line-2: #343b5c;
+  --accent-2: #a8b1ff;
+  --accent-soft: #58a6ff1f;
+  --ok: var(--green);
+  --warn: #d29922;
+  --bad: #f85149;
+  --meas: #79c0ff;
+  --code-bg: #10142a;
+  /* aliases the diagram SVGs draw against */
+  --ground: var(--bg); --panel: var(--card); --stale: var(--warn);
+  --hdr-h: 60px;
 }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
-  margin: 0; background: var(--ground); color: var(--ink);
-  font: 15px/1.6 "Avenir Next", "Seravek", system-ui, sans-serif;
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-.mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; }
+.mono, code { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: .875em; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: var(--accent); }
 
-header {
-  padding: 18px 26px 0; border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; background: var(--ground); z-index: 20;
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 40; height: var(--hdr-h);
+  display: flex; align-items: center; gap: 18px; padding: 0 22px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--line);
 }
-.hdr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
-.eyebrow {
-  font-family: ui-monospace, Menlo, monospace; font-size: 11px;
-  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
-}
-h1 { font-size: 20px; margin: 2px 0 0; font-weight: 600; letter-spacing: -.01em; }
-h1 .dim { color: var(--ink-2); font-weight: 400; font-size: 15px; }
-.hdr-left { margin-right: auto; }
-.searchbox { position: relative; }
+.brand { display: flex; align-items: baseline; gap: 9px; text-decoration: none; color: inherit; }
+.brand b { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
+.brand span { font-size: 11px; color: var(--ink-3); font-family: 'SF Mono', 'Fira Code', monospace; letter-spacing: .08em; text-transform: uppercase; }
+.sitenav { display: flex; gap: 16px; margin-left: 8px; padding-left: 18px; border-left: 1px solid var(--line); }
+.sitenav a { font-size: 13px; color: var(--ink-2); text-decoration: none; }
+.sitenav a:hover { color: var(--accent); }
+.spacer { margin-left: auto; }
+.searchbox { position: relative; width: min(320px, 34vw); }
 .searchbox input {
-  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
-  border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; width: 240px;
+  width: 100%; padding: 7px 11px; border-radius: 8px; font-size: 13px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
 }
-.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 .search-results {
-  position: absolute; top: 36px; right: 0; width: 400px; max-height: 330px;
-  overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); z-index: 40; display: none;
+  display: none; position: absolute; z-index: 60; top: 108%; left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.5); overflow: hidden; max-height: 60vh; overflow-y: auto;
 }
 .search-results.open { display: block; }
-.search-hit {
-  display: block; width: 100%; text-align: left;
-  border-bottom: 1px solid var(--line); padding: 8px 12px; font-size: 12.5px;
-}
+.search-hit { display: block; width: 100%; text-align: left; padding: 9px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.search-hit:last-child { border-bottom: 0; }
 .search-hit:hover, .search-hit:focus-visible { background: var(--accent-soft); outline: none; }
-
-.tabs { display: flex; gap: 2px; margin-top: 12px; }
-.tab {
-  padding: 7px 16px 9px; font-size: 13.5px; color: var(--ink-2);
-  border-bottom: 2px solid transparent;
-}
-.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.asof-row { display: flex; align-items: center; gap: 10px; margin-left: auto; padding-bottom: 8px; font-size: 13px; color: var(--ink-2); }
+.search-hit .mono { color: var(--accent); }
+.asof-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .asof-row input[type=date] {
-  font: inherit; font-size: 12.5px; color: var(--ink); background: var(--panel);
-  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
+  border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12.5px;
 }
-.asof-row .today-btn { color: var(--accent); font-size: 12.5px; }
-.asof-row .today-btn:hover { text-decoration: underline; }
-.time-note {
-  background: var(--accent-soft); color: var(--ink); border: 1px solid var(--accent);
-  border-radius: 8px; padding: 8px 14px; margin: 14px 0 0; font-size: 13.5px; display: none;
-}
-.time-note.on { display: block; }
+.today-btn { color: var(--accent); font-size: 12px; }
+.today-btn:hover { text-decoration: underline; }
 
-main { max-width: 860px; margin: 0 auto; padding: 10px 26px 60px; }
-.coverage-banner { color: var(--ink-2); font-size: 12.5px; margin: 14px 2px 4px; }
+/* ---------- shell ---------- */
+.shell {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr);
+  gap: 0; max-width: 1180px; margin: 0 auto; align-items: start;
+}
+.sidebar {
+  position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
+  overflow-y: auto; padding: 26px 16px 40px 22px; border-right: 1px solid var(--line);
+}
+.nav-group { margin-bottom: 22px; }
+.nav-title {
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px 10px; font-weight: 500;
+}
+.nav-link {
+  display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left;
+  padding: 6px 10px; border-radius: 7px; font-size: 13.5px; color: var(--ink-2);
+  text-decoration: none; line-height: 1.4;
+}
+.nav-link:hover { background: var(--raised); color: var(--ink); }
+.nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-link .n { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10.5px; color: var(--ink-3); }
+.nav-link.active .n { color: var(--accent); }
+.nav-link .zone { margin-left: auto; font-size: 10px; color: var(--ink-3); font-family: 'SF Mono', 'Fira Code', monospace; }
 
-.topic { margin-top: 34px; }
-.topic-hd { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-.topic-hd h2 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
-.topic-hd .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); }
+/* Section links live under the active page in the left rail, which frees the
+   whole right column for evidence. */
+.nav-secs { margin: 2px 0 6px 0; }
+.nav-secs a {
+  display: block; padding: 4px 10px 4px 30px; font-size: 12.5px; color: var(--ink-3);
+  text-decoration: none; border-left: 2px solid var(--line); margin-left: 12px; line-height: 1.35;
+}
+.nav-secs a:hover { color: var(--ink); }
+.nav-secs a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
 
-.belief { padding: 16px 2px 14px; border-bottom: 1px solid var(--line); }
-.belief-head { font-size: 15px; font-weight: 600; text-wrap: balance; margin: 0 0 2px; }
-.belief-rest { font-size: 13.5px; color: var(--ink); margin: 2px 0 6px; max-width: 68ch; }
-.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
-.prov .src { color: var(--accent); }
-.chip {
-  display: inline-block; padding: 0 8px 1px; border-radius: 99px;
-  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .05em;
-  border: 1px solid; text-transform: uppercase;
-}
-.ch-later { color: var(--stale); border-color: var(--stale); }
-.hist-btn { color: var(--accent); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
-.hist-btn:hover { text-decoration: underline; }
-.hist-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+main { padding: 34px 46px 90px; min-width: 0; }
 
-.thread { margin: 10px 0 2px 10px; border-left: 2px solid var(--line); padding-left: 16px; display: none; }
-.thread.open { display: block; }
-.rev { margin: 10px 0; }
-.rev .rev-when { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--stale); }
-.rev .rev-when.origin { color: var(--ink-2); }
-.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 64ch; }
-.rev .rel { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--meas); }
+/* ---------- evidence drawer ----------
+   Off-canvas until a citation is clicked: evidence is something the reader
+   asks for, and a panel that is always open is furniture rather than an
+   answer. */
+/* Deliberately faint: the drawer is a companion to the prose, not a modal over
+   it — the passage you were reading has to stay legible beside its evidence.
+   The scrim exists to catch a click-away, not to dim the page. */
+.scrim {
+  position: fixed; inset: 0; z-index: 45; background: rgba(4, 6, 16, .45);
+  opacity: 0; pointer-events: none; transition: opacity .26s ease;
+}
+.scrim.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; z-index: 50; top: 0; right: 0; width: min(452px, 94vw); height: 100vh;
+  display: flex; flex-direction: column; background: var(--surface);
+  border-left: 1px solid var(--line); box-shadow: -26px 0 70px rgba(0, 0, 0, .55);
+  transform: translateX(100%); transition: transform .3s cubic-bezier(.32, .72, 0, 1);
+}
+.drawer.open { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .scrim { transition: none; }
+}
+.dr-head {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 16px 18px; border-bottom: 1px solid var(--line);
+}
+.dr-id { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; font-weight: 650; color: var(--accent); }
+.dr-state {
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 9.5px; letter-spacing: .08em;
+  text-transform: uppercase; padding: 1.5px 8px; border-radius: 20px;
+  border: 1px solid currentColor; color: var(--ok);
+}
+.dr-state.s-superseded, .dr-state.s-refined { color: var(--warn); }
+.dr-state.s-refuted { color: var(--bad); }
+.dr-close { margin-left: auto; font-size: 20px; line-height: 1; color: var(--ink-3); padding: 2px 6px; border-radius: 6px; }
+.dr-close:hover { color: var(--ink); background: var(--raised); }
+.dr-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 18px 44px; }
 
-.log-day { margin-top: 26px; }
-.log-day h3 { font-size: 13px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-.event { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 8px 0; }
-.ev-kind { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .06em; padding-top: 3px; }
-.ev-learned { color: var(--ok); } .ev-revised { color: var(--stale); } .ev-refuted { color: var(--bad); }
-.event .ev-body { font-size: 13.5px; max-width: 66ch; }
-.event .ev-sub { font-size: 12px; color: var(--ink-2); }
-.event .ev-old { color: var(--ink-2); font-style: italic; }
+/* Sections rise as the drawer lands — a short stagger that reads as the panel
+   filling in, not as decoration. */
+@keyframes drRise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+.drawer.open .dr-sec { animation: drRise .34s cubic-bezier(.32,.72,0,1) backwards; }
+.drawer.open .dr-sec:nth-child(1) { animation-delay: .04s; }
+.drawer.open .dr-sec:nth-child(2) { animation-delay: .09s; }
+.drawer.open .dr-sec:nth-child(3) { animation-delay: .14s; }
+.drawer.open .dr-sec:nth-child(4) { animation-delay: .19s; }
+.drawer.open .dr-sec:nth-child(5) { animation-delay: .24s; }
+@media (prefers-reduced-motion: reduce) { .drawer.open .dr-sec { animation: none; } }
 
-.hint { color: var(--ink-2); font-size: 12.5px; }
-footer { max-width: 860px; margin: 0 auto; padding: 8px 26px 26px; color: var(--ink-2); font-size: 12px; }
-footer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
-mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
-/* documentation voice */
-.doc-serif { font-family: Charter, Georgia, 'Iowan Old Style', serif; }
-.story h3 {
-  font-size: 15px; font-weight: 600; margin: 30px 0 8px; letter-spacing: -.01em;
-  font-family: "Avenir Next", system-ui, sans-serif;
+.dr-claim { font-size: 15px; line-height: 1.62; margin: 0 0 14px; color: var(--ink); }
+.dr-sec { margin-bottom: 22px; }
+.dr-sec > h4 {
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 9.5px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 500; margin: 0 0 8px;
 }
-.story p {
-  font-family: Charter, Georgia, 'Iowan Old Style', serif;
-  font-size: 15.5px; line-height: 1.72; max-width: 72ch; margin: 0 0 14px;
+.dr-sec p { font-size: 13.5px; line-height: 1.66; color: var(--ink-2); margin: 0 0 10px; }
+.dr-card { border: 1px solid var(--line); border-radius: 11px; padding: 13px 14px; background: var(--paper); }
+.dr-exp-title { font-size: 14px; font-weight: 640; line-height: 1.35; margin-bottom: 7px; letter-spacing: -.01em; }
+.dr-facts { display: flex; flex-wrap: wrap; gap: 4px 8px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; color: var(--ink-3); }
+.dr-tag { border: 1px solid var(--line-2); border-radius: 20px; padding: 1px 8px; }
+.dr-tag.k { color: var(--accent); border-color: currentColor; }
+.dr-tag.cls { color: var(--meas); border-color: currentColor; }
+.dr-tag.ok { color: var(--ok); border-color: currentColor; }
+.dr-tag.no { color: var(--bad); border-color: currentColor; }
+.dr-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; font-family: 'SF Mono', 'Fira Code', monospace; line-height: 1.5; }
+.dr-list { list-style: none; margin: 0; padding: 0; }
+.dr-list li {
+  position: relative; font-size: 13px; line-height: 1.6; color: var(--ink-2);
+  padding: 0 0 0 15px; margin-bottom: 9px;
 }
-.story .lede {
-  font-size: 17px; line-height: 1.65; color: var(--ink);
-  border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 6px;
+ul.dr-list li::before { content: ''; position: absolute; left: 0; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: .55; }
+ol.dr-list { list-style: decimal; padding-left: 19px; }
+ol.dr-list li { padding-left: 3px; }
+ol.dr-list li::marker { color: var(--accent); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
+.dr-quote {
+  margin: 0 0 12px; padding: 3px 0 3px 13px; border-left: 2px solid var(--line-2);
+  color: var(--ink-3); font-style: italic; font-size: 13px; line-height: 1.62;
 }
-.diagram-card {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-  padding: 18px 10px 8px; margin: 22px 0; overflow-x: auto;
+.dr-sec a.ext::after { content: ' ↗'; font-size: .82em; opacity: .7; }
+.dr-prior { border-left: 2px solid var(--line); padding: 1px 0 1px 12px; margin-bottom: 12px; }
+.dr-prior .w { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; color: var(--warn); }
+.dr-prior .w.origin { color: var(--ink-3); }
+.dr-prior p { margin: 4px 0 0; font-size: 12.5px; }
+.dr-cta {
+  display: block; text-align: center; text-decoration: none; font-size: 13px; font-weight: 560;
+  border: 1px solid var(--accent); color: var(--accent); border-radius: 9px; padding: 10px 12px;
+  margin-top: 4px;
 }
-.diagram-card figcaption {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--ink-2); text-align: center; padding: 8px 0 6px;
+.dr-cta:hover { background: var(--accent-soft); }
+.dr-cta.sub { border-color: var(--line-2); color: var(--ink-2); font-weight: 400; margin-top: 8px; }
+.dr-cta.sub:hover { border-color: var(--accent); color: var(--accent); background: none; }
+.dr-loading { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+.dr-sec a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+.dr-sec a:hover { border-bottom-color: currentColor; }
+.dr-sec code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-size: .88em; }
+.dr-sec strong { color: var(--ink); font-weight: 640; }
+/* Result tables are wide by nature; they scroll inside the drawer rather than
+   forcing the panel wider or wrapping into unreadable columns. */
+.dr-tablewrap { overflow-x: auto; margin: 0 0 12px; }
+.dr-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.dr-table th, .dr-table td {
+  border-bottom: 1px solid var(--line); padding: 5px 10px 5px 0;
+  text-align: left; white-space: nowrap;
 }
+.dr-table th { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+.dr-table td { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* ---------- prose ---------- */
+.page-kicker { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+h1.page-title { font-size: 34px; line-height: 1.12; margin: 8px 0 10px; font-weight: 660; letter-spacing: -.028em; text-wrap: balance; }
+.page-meta { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11.5px; color: var(--ink-3); margin-bottom: 26px; }
+.prose { max-width: 74ch; }
+.prose h2 {
+  font-size: 19px; font-weight: 640; letter-spacing: -.015em; margin: 40px 0 12px;
+  scroll-margin-top: calc(var(--hdr-h) + 18px);
+}
+.prose p { margin: 0 0 15px; font-size: 15.5px; line-height: 1.72; color: var(--ink); }
+.prose .lede { font-size: 17.5px; line-height: 1.62; color: var(--ink); }
+.prose code { background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; }
+.prose strong { font-weight: 640; }
+.anchor { opacity: 0; margin-left: 9px; font-size: .72em; font-weight: 400; color: var(--ink-3); text-decoration: none; }
+h2:hover .anchor, .anchor:focus-visible { opacity: 1; }
+.anchor:hover { color: var(--accent); }
+pre.code {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 15px 17px; overflow-x: auto; margin: 0 0 18px; font-size: 12.9px; line-height: 1.62;
+}
+pre.code code { background: none; padding: 0; }
+.tok-c { color: var(--ink-3); font-style: italic; }
+.tok-s { color: var(--ok); }
+.tok-k { color: var(--accent-2); }
+
+/* ---------- home ---------- */
+.hero { max-width: 76ch; margin-bottom: 34px; }
+.hero h1 { font-size: 46px; line-height: 1.04; margin: 0 0 12px; font-weight: 680; letter-spacing: -.04em; }
+.hero .tagline { font-size: 19px; color: var(--ink-2); margin: 0 0 26px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; margin: 6px 0 10px; }
+.card {
+  display: block; width: 100%; text-align: left; padding: 16px 17px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  text-decoration: none; color: inherit; transition: border-color .12s, transform .12s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.card .c-kicker { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); }
+.card .c-name { font-weight: 640; font-size: 15px; margin: 5px 0 6px; letter-spacing: -.012em; }
+.card .c-sum { font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+.card .c-meta { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 10px; }
+.constraints { display: grid; gap: 14px; margin: 4px 0 18px; }
+.constraint { border-left: 3px solid var(--accent); padding: 2px 0 4px 16px; }
+.stats { display: flex; flex-wrap: wrap; gap: 30px; margin: 20px 0 22px; }
+.stat .v { font-size: 30px; font-weight: 660; letter-spacing: -.03em; line-height: 1.1; }
+.stat .v.rej { color: var(--warn); }
+.stat .l { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+
+/* ---------- relations ---------- */
+.rel-band { margin: 34px 0 6px; padding-top: 22px; border-top: 1px solid var(--line); }
+.rel-band h2 { font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; margin: 0 0 12px; }
+.rel-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; }
+.rel-col > div { font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--ink-3); margin-bottom: 7px; letter-spacing: .06em; }
+.rel-link { display: block; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 7px; font-size: 13px; text-decoration: none; color: var(--ink); background: var(--surface); }
+.rel-link:hover { border-color: var(--accent); color: var(--accent); }
+.rel-none { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+.pager { display: flex; justify-content: space-between; gap: 18px; margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--line); }
+.pager a { display: block; max-width: 47%; text-decoration: none; color: var(--accent); font-size: 14px; font-weight: 560; }
+.pager a:hover { text-decoration: underline; }
+.pager .nx { text-align: right; margin-left: auto; }
+.pager .lbl { display: block; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; margin-bottom: 2px; }
+
+/* ---------- diagrams ---------- */
+.diagram-card { margin: 22px 0 26px; padding: 20px 20px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.diagram-card.wide { max-width: none; }
+.diagram-card figcaption { margin-top: 10px; text-align: center; font-size: 11.5px; color: var(--ink-3); font-family: 'SF Mono', 'Fira Code', monospace; }
+.dg-zone { font: 600 10px 'SF Mono', 'Fira Code', monospace; fill: var(--ink-3); letter-spacing: .12em; }
+.dg-flow { font: 600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: var(--ink); }
+.dg-cost { font: 500 10.5px 'SF Mono', 'Fira Code', monospace; fill: var(--ink-2); }
+.dg-wall { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .75; }
+.dg-box { fill: var(--raised); stroke: var(--line-2); rx: 9; }
+
+/* ---------- evidence ---------- */
 .ev-inline {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--accent);
-  border: 1px solid var(--line); border-radius: 4px; padding: 0 5px 1px;
-  vertical-align: 2px; margin: 0 1px; white-space: nowrap;
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10.5px; color: var(--accent);
+  border: 1px solid var(--line-2); border-radius: 5px; padding: 0 4px; margin: 0 2px;
+  vertical-align: 1.5px; background: var(--surface);
 }
-.ev-inline:hover { border-color: var(--accent); }
-.ev-inline.ev-stale { color: var(--stale); text-decoration: line-through; }
-.ev-drawer { display: none; margin: 4px 0 16px; }
-.ev-drawer.open { display: block; }
-.ev-drawer .belief { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; background: var(--panel); }
-/* diagram svg text */
-.dg-zone { font: 600 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); letter-spacing: .1em; }
-.dg-flow { font: 500 12px "Avenir Next", system-ui, sans-serif; fill: var(--ink); }
-.dg-cost { font: 500 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); }
-.dg-wall { stroke: var(--stale); stroke-width: 1.6; stroke-dasharray: 6 5; }
-.dg-box { fill: var(--ground); stroke: var(--line); rx: 8; }
-/* positions */
-.comp-summary { font-size: 14px; max-width: 70ch; margin: 12px 0 4px; }
-.sub-hd { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; margin: 18px 0 2px; }
-.position { border-left: 3px solid var(--accent); padding: 2px 0 6px 14px; margin: 14px 0; }
-.position > p { margin: 0 0 6px; font-size: 14px; max-width: 68ch; }
-.ev-chip {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent);
-  border: 1px solid var(--line); border-radius: 5px; padding: 0 7px 1px; margin-right: 4px;
+.ev-inline:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ev-inline.ev-stale { color: var(--warn); text-decoration: line-through; }
+.ev-inline.cited { border-color: var(--accent); background: var(--accent-soft); }
+.belief { padding: 15px 2px; border-bottom: 1px solid var(--line); }
+.belief-head { font-size: 14.5px; font-weight: 600; margin: 0 0 3px; text-wrap: balance; }
+.belief-rest { font-size: 13.5px; color: var(--ink-2); margin: 2px 0 7px; max-width: 70ch; }
+.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10.5px; color: var(--ink-3); }
+.prov .src { color: var(--accent); }
+.chip { border: 1px solid var(--line-2); border-radius: 20px; padding: 0 8px; font-size: 10px; }
+.ch-later { color: var(--warn); border-color: var(--warn); }
+.hist-btn { color: var(--accent); font-size: 11.5px; font-family: 'SF Mono', 'Fira Code', monospace; }
+.hist-btn:hover { text-decoration: underline; }
+.thread { display: none; margin: 10px 0 2px 8px; border-left: 2px solid var(--line); padding-left: 16px; }
+.thread.open { display: block; }
+.rev { margin: 11px 0; }
+.rev-when { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10.5px; color: var(--warn); }
+.rev-when.origin { color: var(--ink-3); }
+.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 66ch; }
+.rev .rel { color: var(--meas); }
+.roster { margin-top: 30px; }
+.roster summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-family: 'SF Mono', 'Fira Code', monospace; padding: 8px 0; }
+.roster summary:hover { color: var(--accent); }
+
+/* ---------- changelog ---------- */
+.log-day { margin-top: 24px; }
+.log-day h3 { font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--ink-3); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 5px; }
+.event { display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 9px 0; }
+.ev-kind { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; letter-spacing: .07em; padding-top: 3px; }
+.ev-learned { color: var(--ok); } .ev-revised { color: var(--warn); } .ev-refuted { color: var(--bad); }
+.event .ev-body { font-size: 13.5px; max-width: 68ch; }
+.event .ev-sub { font-size: 11.5px; color: var(--ink-3); }
+.event .ev-old { font-style: italic; }
+.time-note { display: none; margin-bottom: 20px; padding: 11px 15px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--line-2); font-size: 13px; }
+.time-note.on { display: block; }
+.hint { color: var(--ink-3); font-size: 13px; }
+mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+.coverage { color: var(--ink-3); font-size: 12.5px; margin: 26px 0 0; }
+
+@media (max-width: 1040px) {
+  .shell { grid-template-columns: 236px minmax(0, 1fr); }
+  main { padding: 30px 32px 80px; }
 }
-.ev-chip:hover { border-color: var(--accent); }
-.ev-chip.ev-stale { color: var(--stale); text-decoration: line-through; }
-.ev-body-card { display: none; margin: 8px 0 0 6px; }
-.ev-body-card.open { display: block; }
-.ev-body-card .belief { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; }
-.all-beliefs { margin-top: 16px; }
-.all-beliefs summary { cursor: pointer; font-size: 13px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
-.flow { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-2); margin: 2px 0; }
-/* system map */
-.sysmap { margin: 22px 0 8px; }
-.sm-grid { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 22px; align-items: stretch; }
-.sm-col { display: flex; flex-direction: column; gap: 22px; }
-.sm-boundary {
-  border-left: 2px dashed var(--stale); border-right: 2px dashed var(--stale);
-  display: flex; align-items: center; justify-content: center; position: relative;
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 20px; }
+  main { padding: 24px 20px 70px; }
+  .hero h1 { font-size: 34px; }
+  .searchbox { width: 46vw; }
 }
-.sm-boundary .comp { width: 100%; margin: 0 -14px; }
-.sm-native { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-.comp {
-  display: block; width: 100%; text-align: left; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
-}
-.comp:hover { border-color: var(--accent); }
-.comp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.comp .c-name { font-weight: 600; font-size: 14px; }
-.comp .c-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
-.comp .c-stance { font-size: 12.5px; color: var(--ink); margin: 5px 0 6px; }
-.comp .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); }
-.comp .c-meta .fresh { color: var(--accent); }
-.sm-caption { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--stale); margin: 6px 0 0; }
-.back-row { margin: 18px 0 -12px; font-size: 13px; }
-.back-row button { color: var(--accent); }
-.back-row button:hover { text-decoration: underline; }
-@media (max-width: 760px) { .sm-grid { grid-template-columns: 1fr; } .sm-boundary { border: 2px dashed var(--stale); border-radius: 10px; padding: 8px; } }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
-<header>
-  <div class="hdr-row">
-    <div class="hdr-left">
-      <div class="eyebrow">docs/experiments/knowledge-graph.json · generated snapshot</div>
-      <h1>System knowledge <span class="dim" id="hdr-stats"></span></h1>
-    </div>
-    <div class="searchbox">
-      <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
-      <div class="search-results" id="search-results" role="listbox"></div>
-    </div>
+<div class="topbar">
+  <a class="brand" href="#/"><b>resqlite</b> <span>architecture</span></a>
+  <nav class="sitenav" aria-label="Site">
+    <a href="../index.html">Home</a>
+    <a href="../experiments/index.html">Experiments</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../api/resqlite/resqlite-library.html">API</a>
+    <a href="../blog/index.html">Blog</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="searchbox">
+    <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
+    <div class="search-results" id="search-results" role="listbox"></div>
   </div>
-  <div class="hdr-row">
-    <div class="tabs" role="tablist">
-      <button class="tab" id="tab-map" role="tab" aria-selected="true">System</button>
-      <button class="tab" id="tab-beliefs" role="tab" aria-selected="false">Beliefs</button>
-      <button class="tab" id="tab-log" role="tab" aria-selected="false">Changelog</button>
-    </div>
-    <div class="asof-row">
-      <label for="asof">as of</label>
-      <input type="date" id="asof">
-      <button class="today-btn" id="today-btn">today</button>
-    </div>
+  <div class="asof-row">
+    <label for="asof">as of</label>
+    <input type="date" id="asof">
+    <button class="today-btn" id="today-btn">today</button>
   </div>
-</header>
+</div>
 
-<main>
-  <div class="time-note" id="time-note"></div>
-  <div id="view"></div>
-</main>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
+  <main id="view"></main>
+</div>
 
-<footer>
-  One generated aggregate, two lenses: humans read this page; agents read the same
-  <code>knowledge-graph.json</code>. Beliefs are claims recorded by the experiment that
-  established them; history derives from typed <code>supersedes / refutes / refines</code> edges,
-  so "how we got here" is data, not archaeology.
-</footer>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-label="Evidence" aria-hidden="true">
+  <div class="dr-head">
+    <span class="dr-id" id="dr-id"></span>
+    <span class="dr-state" id="dr-state"></span>
+    <button class="dr-close" id="dr-close" aria-label="Close evidence">×</button>
+  </div>
+  <div class="dr-body" id="dr-body"></div>
+</aside>
 
 <script>
 const KG = __KG__;
+const PAGES = __PAGES__;
+const HOME = __HOME__;
+const STATS = __STATS__;
 
 // ---------- prep ----------
 const expById = {}; for (const e of KG.experiments) expById[e.id] = e;
@@ -272,65 +419,175 @@ let asOf = TODAY;
 
 const liveAt = (c, t) => c.birth != null && c.birth <= t && (c.death == null || c.death > t);
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// Pages are markdown, so render the inline subset the prose actually uses.
+// Applied *after* escaping — the source is trusted repo content, but escaping
+// first keeps the pipeline safe if that ever stops being true.
+const md = s => esc(s)
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+  .replace(/`([^`]+)`/g, '<code>$1</code>');
 const firstSentence = s => {
   const m = s.match(/^.*?[.!?](?=\s|$)/);
   return m ? m[0] : s;
 };
-const dirName = d => d.replace(/-/g, ' ');
 
-// ---------- system component map (curated; promotable to doc/arch/system-map.json) ----------
-const SYSMAP = __SYSMAP__;
-for (const comp of SYSMAP) {
-  comp.pool = claims.filter(c =>
-    (c.directions || []).some(d => comp.dirs.includes(d)) ||
-    (comp.claims || []).includes(c.id));
+// Each page's claim pool: everything tagged with one of its research
+// directions, plus any claims the page names explicitly.
+for (const p of PAGES) {
+  p.pool = claims.filter(c =>
+    (c.directions || []).some(d => (p.dirs || []).includes(d)) ||
+    (p.claims || []).includes(c.id));
 }
-// Narrative chapters: prose with [[claim]] citations woven in. This is the
-// authored layer — the repo home for it is doc/arch/system-map.json.
-const STORIES = __STORIES__;
+const pageById = {}; for (const p of PAGES) pageById[p.id] = p;
+const ARCH = PAGES.filter(p => p.section === 'architecture');
 
-const DIAGRAMS = {
-  boundary: `<figure class="diagram-card"><svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Four transfer routes across the isolate boundary">
-    <rect x="20" y="34" width="240" height="270" class="dg-box"/>
-    <rect x="640" y="34" width="240" height="270" class="dg-box"/>
-    <text x="140" y="22" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
-    <text x="760" y="22" text-anchor="middle" class="dg-zone">WORKER ISOLATES</text>
-    <line x1="330" y1="10" x2="330" y2="320" class="dg-wall"/>
-    <line x1="570" y1="10" x2="570" y2="320" class="dg-wall"/>
-    <text x="450" y="22" text-anchor="middle" class="dg-zone" fill="var(--stale)">ISOLATE BOUNDARY</text>
-    <defs>
-      <marker id="a-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--ok)"/></marker>
-      <marker id="a-meas" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--meas)"/></marker>
-      <marker id="a-acc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--accent)"/></marker>
-      <marker id="a-st" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--stale)"/></marker>
-    </defs>
-    <text x="450" y="66" text-anchor="middle" class="dg-flow">strings &amp; numbers</text>
-    <line x1="275" y1="78" x2="620" y2="78" stroke="var(--ok)" stroke-width="2.4" marker-end="url(#a-ok)" marker-start="url(#a-ok)" transform="rotate(180 450 78) rotate(180 450 78)"/>
-    <text x="450" y="94" text-anchor="middle" class="dg-cost">shared by reference · ~0 cost either direction</text>
-    <text x="450" y="130" text-anchor="middle" class="dg-flow">result structure (flat values list)</text>
-    <line x1="620" y1="142" x2="278" y2="142" stroke="var(--meas)" stroke-width="2.4" marker-end="url(#a-meas)"/>
-    <text x="450" y="158" text-anchor="middle" class="dg-cost">send() · copied per slot · the real price of a result</text>
-    <text x="450" y="194" text-anchor="middle" class="dg-flow">blobs ≥ 256 KB</text>
-    <line x1="278" y1="206" x2="620" y2="206" stroke="var(--accent)" stroke-width="2.4" marker-end="url(#a-acc)" marker-start="url(#a-acc)"/>
-    <text x="450" y="222" text-anchor="middle" class="dg-cost">TransferableTypedData · one copy → external memory · ownership move</text>
-    <text x="450" y="258" text-anchor="middle" class="dg-flow">results &gt; 32k slots</text>
-    <line x1="620" y1="270" x2="278" y2="270" stroke="var(--stale)" stroke-width="2.4" marker-end="url(#a-st)"/>
-    <text x="450" y="286" text-anchor="middle" class="dg-cost">Isolate.exit · whole-heap handoff · worker dies, pool respawns †</text>
-    <text x="450" y="312" text-anchor="middle" class="dg-cost">† slot-count trigger — bytes lie: strings would count, but they were never going to be copied</text>
-  </svg><figcaption>the four transfer routes, by what they cost</figcaption></figure>`,
-};
+__DIAGRAMS__
 
-function chipify(text, ctx) {
-  let i = 0;
+// ---------- shared rendering ----------
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+// Routes are `#/<page>` and `#/<page>/<section>`. The landing page owns the
+// reserved id `overview` so its sections are addressable too, while bare `#/`
+// still resolves to it.
+const HOME_ID = 'overview';
+const pageRoute = id => '#/' + (id === HOME_ID ? '' : id);
+const secRoute = (pageId, secId) => `#/${pageId}/${secId}`;
+const anchorLink = (pageId, secId) =>
+  `<a class="anchor" href="${secRoute(pageId, secId)}" aria-label="Link to this section">#</a>`;
+
+function chipify(text) {
   return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
     const stale = byId[id] && byId[id].state !== 'live';
-    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-evd="${ctx}" data-claim="${id}">${id}</button>`;
+    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-claim="${id}">${id}</button>`;
   });
 }
-const compById = {}; for (const m of SYSMAP) compById[m.id] = m;
-let currentComp = null;
 
-// ---------- history thread (ancestors via this claim's own edges) ----------
+// Just enough Dart highlighting to make the landing sample readable.
+//
+// One pass over a single alternation, deliberately: successive .replace() calls
+// would re-scan the markup they just emitted, and `class` is both a Dart
+// keyword and the attribute this writes — the second pass would wrap the
+// attribute name and shred the tag. Comments and strings lead the alternation
+// so a `//` inside a literal is not mistaken for a comment.
+function highlight(src) {
+  const re = /(\/\/[^\n]*)|('[^'\n]*')|\b(final|await|async|const|var|void|return|new|class)\b/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src)) !== null) {
+    out += esc(src.slice(last, m.index));
+    out += `<span class="${m[1] ? 'tok-c' : m[2] ? 'tok-s' : 'tok-k'}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(src.slice(last));
+}
+
+/// Renders one parsed section's body. `ctx` namespaces the evidence drawers so
+/// two paragraphs citing the same claim get independent toggles.
+function bodyHtml(sec, ctxBase) {
+  let h = '';
+  sec.ps.forEach((p, pi) => {
+    if (typeof p !== 'string') {
+      h += `<pre class="code"><code>${highlight(p.code)}</code></pre>`;
+      return;
+    }
+    h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(p))}</p>`;
+  });
+  return h;
+}
+
+function sectionsHtml(sections, pageId, slots) {
+  let h = '';
+  sections.forEach((sec, si) => {
+    if (sec.h) {
+      const id = slug(sec.h);
+      h += `<h2 id="${id}">${esc(sec.h)}${anchorLink(pageId, id)}</h2>`;
+    }
+    h += bodyHtml(sec, `${pageId}-${si}`);
+    if (slots && sec.h && slots[sec.h]) h += slots[sec.h]();
+  });
+  return h;
+}
+
+function poolAt(p) { return p.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth); }
+function lastChange(p) {
+  return Math.max.apply(null, p.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
+}
+
+// ---------- home ----------
+function cardsHtml() {
+  return `<div class="cards">${ARCH.map((p, i) => {
+    const live = poolAt(p).length, last = lastChange(p);
+    return `<a class="card" href="${pageRoute(p.id)}">
+      <div class="c-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
+      <div class="c-name">${esc(p.name)}</div>
+      <div class="c-sum">${md(p.summary)}</div>
+      <div class="c-meta">${live} beliefs${last ? ` · updated ${fmtNice(last)}` : ''}</div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+function statsHtml() {
+  const live = claims.filter(c => liveAt(c, TODAY)).length;
+  const stat = (v, l, cls) => `<div class="stat"><div class="v ${cls || ''}">${v}</div><div class="l">${l}</div></div>`;
+  return `<div class="stats">
+    ${stat(STATS.total, 'experiments run and indexed')}
+    ${stat(STATS.rejected, 'rejected — and kept anyway', 'rej')}
+    ${stat(live, 'beliefs currently standing')}
+  </div>
+  <p><a href="#/meta">How measurement works →</a> &nbsp;·&nbsp; <a href="#/changelog">What changed recently →</a></p>`;
+}
+
+function renderHome() {
+  const slots = {
+    'The shape of the system': () => DIAGRAMS.overview,
+    'Explore the architecture': cardsHtml,
+    'How we know any of this': statsHtml,
+  };
+  const [lede, ...rest] = HOME.sections;
+  view.innerHTML = `<div class="hero">
+      <h1>${esc(HOME.title)}</h1>
+      <p class="tagline">${esc(HOME.tagline)}</p>
+    </div>
+    <div class="prose">${bodyHtml(lede, `${HOME_ID}-0`)}${sectionsHtml(rest, HOME_ID, slots)}</div>`;
+  afterRender();
+}
+
+// ---------- an architecture page ----------
+function renderPage(id) {
+  const p = pageById[id];
+  if (!p) return renderHome();
+  const i = ARCH.indexOf(p);
+  const prev = ARCH[i - 1], next = ARCH[i + 1];
+  const pool = poolAt(p), last = lastChange(p);
+  const [lede, ...rest] = p.sections;
+  const fedBy = ARCH.filter(o => (o.feeds || []).includes(p.id));
+  const feeds = (p.feeds || []).map(f => pageById[f]).filter(Boolean);
+
+  const relCol = (label, list, empty) => `<div class="rel-col"><div>${label}</div>${
+    list.length ? list.map(o => `<a class="rel-link" href="${pageRoute(o.id)}">${esc(o.name)}</a>`).join('')
+                : `<p class="rel-none">${empty}</p>`}</div>`;
+
+  view.innerHTML = `<div class="page-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
+    <h1 class="page-title">${esc(p.name)}</h1>
+    <div class="page-meta">${pool.length} beliefs${last ? ` · last changed ${fmtNice(last)}` : ''}</div>
+    <div class="prose">
+      ${bodyHtml(lede, `${p.id}-0`)}
+      ${DIAGRAMS[p.diagram || p.id] || ''}
+      ${sectionsHtml(rest, p.id)}
+    </div>
+    <div class="rel-band"><h2>How this connects</h2><div class="rel-cols">
+      ${relCol('RECEIVES WORK FROM', fedBy, 'Entry point — work starts here.')}
+      ${relCol('HANDS OFF TO', feeds, 'Terminal — the buck stops here.')}
+    </div></div>
+    ${pool.length ? `<details class="roster"><summary>All ${pool.length} current beliefs, with provenance</summary>
+      ${pool.map(beliefCard).join('')}</details>` : ''}
+    <div class="pager">
+      ${prev ? `<a href="${pageRoute(prev.id)}"><span class="lbl">← previous</span>${esc(prev.name)}</a>` : '<span></span>'}
+      ${next ? `<a class="nx" href="${pageRoute(next.id)}"><span class="lbl">next →</span>${esc(next.name)}</a>` : ''}
+    </div>`;
+  afterRender();
+}
+
+// ---------- belief cards ----------
 function ancestorsOf(c, seen) {
   seen = seen || new Set();
   const out = [];
@@ -342,82 +599,6 @@ function ancestorsOf(c, seen) {
     for (const deeper of ancestorsOf(t, seen)) out.push(deeper);
   }
   return out;
-}
-
-// ---------- system map view ----------
-const view = document.getElementById('view');
-function compStats(m) {
-  const live = m.pool.filter(c => liveAt(c, asOf));
-  const last = Math.max.apply(null, m.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
-  return { live, last };
-}
-function compCard(m) {
-  const { live, last } = compStats(m);
-  const fresh = last && (TODAY - last) < 14 * 86400000;
-  return `<button class="comp" data-comp="${m.id}">
-    <div class="c-kicker">${m.kicker}</div>
-    <div class="c-name">${m.name}</div>
-    <div class="c-stance">${esc(m.summary)}</div>
-    <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
-  </button>`;
-}
-function renderMap() {
-  setTab('map'); currentComp = null;
-  view.innerHTML = `<div class="sysmap">
-    <div class="sm-grid">
-      <div class="sm-col">${compCard(compById.api)}</div>
-      <div class="sm-boundary">${compCard(compById.boundary)}</div>
-      <div class="sm-col">${compCard(compById.readers)}${compCard(compById.writer)}${compCard(compById.tx)}</div>
-    </div>
-    <p class="sm-caption">⟵ everything left runs on main · everything right runs on worker isolates ⟶</p>
-    <div class="sm-native sm-col">${compCard(compById.native)}${compCard(compById.meta)}</div>
-  </div>
-  <p class="coverage-banner">Each card shows the component's most recently established stance. Open one for its
-  full position — current beliefs, how each was reached, and what changed over time.</p>`;
-  view.querySelectorAll('.comp').forEach(b =>
-    b.addEventListener('click', () => renderBeliefs(b.dataset.comp)));
-}
-
-// ---------- beliefs view (component-scoped) ----------
-function renderBeliefs(compId) {
-  setTab('beliefs');
-  if (typeof compId === 'string') currentComp = compId;
-  const cov = KG.coverage;
-  let h = '';
-  const comps = currentComp ? [compById[currentComp]] : SYSMAP;
-  if (currentComp) h += `<div class="back-row"><button id="back-map">← System map</button></div>`;
-  h += `<p class="coverage-banner">Claims cover ${cov.entriesWithClaims} of ${cov.totalEntries} experiment entries so far —
-    components may hold further beliefs still recorded only as prose in signals.json. Coverage grows as runs revise old results.</p>`;
-  for (const m of comps) {
-    const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
-    const story = STORIES[m.id];
-    h += `<section class="topic"><div class="topic-hd">
-      <h2>${m.name}</h2>
-      <span class="meta">${m.kicker} · ${pool.length} beliefs</span></div>`;
-    if (story) {
-      h += `<div class="story">`;
-      story.sections.forEach((sec, si) => {
-        if (sec.h) h += `<h3>${esc(sec.h)}</h3>`;
-        sec.ps.forEach((para, pi) => {
-          const ctx = `${m.id}-${si}-${pi}`;
-          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(esc(para), ctx)}</p>
-            <div class="ev-drawer" id="evd-${ctx}"></div>`;
-        });
-        if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
-      });
-      h += `</div>`;
-    }
-    if (pool.length) {
-      h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
-      for (const c of pool) h += beliefCard(c);
-      h += `</details>`;
-    }
-    h += `</section>`;
-  }
-  view.innerHTML = h;
-  const back = document.getElementById('back-map');
-  if (back) back.addEventListener('click', renderMap);
-  wire();
 }
 function beliefCard(c) {
   const head = firstSentence(c.text);
@@ -454,9 +635,8 @@ function threadHtml(anc) {
   }).join('');
 }
 
-// ---------- changelog view ----------
+// ---------- changelog ----------
 function renderLog() {
-  setTab('log');
   const events = [];
   for (const c of claims) {
     if (c.birth == null || c.birth > asOf) continue;
@@ -467,48 +647,417 @@ function renderLog() {
     events.push({ t: c.birth, kind, c, old: oldEdge ? byId[oldEdge.target] : null });
   }
   events.sort((a, b) => b.t - a.t || b.c.id.localeCompare(a.c.id));
-  let h = '', day = '';
+  let h = `<div class="page-kicker">reference</div>
+    <h1 class="page-title">Changelog</h1>
+    <div class="page-meta">${events.length} recorded changes of belief</div>`;
+  let day = '';
   for (const ev of events) {
     const d = fmtNice(ev.t);
     if (d !== day) { if (day) h += '</div>'; h += `<div class="log-day"><h3>${d}</h3>`; day = d; }
     h += `<div class="event">
       <span class="ev-kind ev-${ev.kind}">${ev.kind.toUpperCase()}</span>
       <div><div class="ev-body">${esc(firstSentence(ev.c.text))}
-        <span class="ev-sub">· exp ${ev.c.source} · ${esc((SYSMAP.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
+        <span class="ev-sub">· exp ${ev.c.source} · ${esc((PAGES.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
         ${ev.old ? `<div class="ev-sub ev-old">was: ${esc(firstSentence(ev.old.text))}</div>` : ''}
       </div></div>`;
   }
   if (day) h += '</div>';
-  view.innerHTML = h || '<p class="hint">Nothing recorded before this date.</p>';
+  view.innerHTML = h + (events.length ? '' : '<p class="hint">Nothing recorded before this date.</p>');
+  afterRender();
 }
 
-// ---------- tabs / time ----------
-let tab = 'map';
-function setTab(t) {
-  tab = t;
-  for (const id of ['map', 'beliefs', 'log'])
-    document.getElementById('tab-' + id).setAttribute('aria-selected', String(t === id));
-}
-document.getElementById('tab-map').addEventListener('click', renderMap);
-document.getElementById('tab-beliefs').addEventListener('click', () => { currentComp = null; renderBeliefs(); });
-document.getElementById('tab-log').addEventListener('click', renderLog);
+// ---------- shell: nav, references, routing ----------
+const view = document.getElementById('view');
+const sidebarEl = document.getElementById('sidebar');
+const drawerEl = document.getElementById('drawer');
+const scrimEl = document.getElementById('scrim');
+const drBody = document.getElementById('dr-body');
+const drIdEl = document.getElementById('dr-id');
+const drStateEl = document.getElementById('dr-state');
+const drCloseEl = document.getElementById('dr-close');
+let route = '/';
 
+function renderNav() {
+  const here = route.slice(1) || HOME_ID;
+  const secs = [...view.querySelectorAll('.prose h2[id]')];
+  const secList = secs.length < 2 ? '' : `<div class="nav-secs">${
+    secs.map(h => `<a href="${secRoute(here, h.id)}" data-sec="${h.id}">${esc(h.firstChild.textContent)}</a>`).join('')}</div>`;
+  const link = (id, label, extra) => {
+    const active = id === here;
+    return `<a class="nav-link ${active ? 'active' : ''}" href="${pageRoute(id)}">${label}${extra || ''}</a>` +
+      (active ? secList : '');
+  };
+  sidebarEl.innerHTML = `
+    <div class="nav-group">
+      <div class="nav-title">Start</div>
+      ${link(HOME_ID, 'Overview')}
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">Architecture</div>
+      ${ARCH.map((p, i) => link(p.id,
+        `<span class="n">${String(i + 1).padStart(2, '0')}</span>${esc(p.name)}`,
+        `<span class="zone">${esc(p.zone)}</span>`)).join('')}
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">Reference</div>
+      ${link('changelog', 'Changelog')}
+    </div>`;
+}
+
+// ---------- evidence drawer ----------
+//
+// The long-form writeups already ship as `experiments/history.json` for the
+// experiments dashboard. Fetching that on first open — rather than embedding
+// 211 writeups — keeps this page small and means the drawer shows whatever the
+// dashboard shows, with no second copy to drift.
+
+let historyById = null;
+let historyState = 'idle';
+async function loadHistory() {
+  if (historyState === 'done' || historyState === 'failed') return historyById;
+  if (historyState === 'loading') return null;
+  historyState = 'loading';
+  try {
+    const res = await fetch('../experiments/history.json', { cache: 'no-store' });
+    const data = await res.json();
+    historyById = {};
+    for (const e of data.experiments || []) historyById[e.id] = e;
+    historyState = 'done';
+  } catch {
+    historyState = 'failed';
+  }
+  return historyById;
+}
+
+/// Block-level markdown for the drawer.
+///
+/// Experiment writeups carry emphasis, links, inline code and result tables.
+/// Escaping them wholesale turned the richest evidence on the page into a wall
+/// of literal asterisks and pipes, so this renders the block subset they
+/// actually use. Cross-references between writeups (`[exp 241](241-….md)`) are
+/// rewritten to the experiments dashboard — inside the site, where the reader
+/// already is, rather than out to a raw file.
+function mdInline(s) {
+  return esc(String(s))
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, href) => {
+      const local = href.match(/^(\d{3})[a-z0-9-]*\.md/i);
+      const url = local ? `../experiments/index.html?exp=${local[1]}` : href;
+      if (/^\s*javascript:/i.test(url)) return text;
+      const external = /^https?:/i.test(url);
+      return `<a href="${url}"${external ? ' target="_blank" rel="noopener" class="ext"' : ''}>${text}</a>`;
+    })
+    // Lazy, and `[\s\S]` rather than `[^*]`: bold routinely wraps nested
+    // emphasis ("**mildly *favorable* at pool-4**"), which an exclusion class
+    // cannot cross — it left the markers as literal asterisks.
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*<])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // history.json truncates long fields, which can cut a bold span in half and
+    // strand its opening marker. Nothing downstream can pair it, so drop it
+    // rather than show the reader raw asterisks.
+    .replace(/\*\*/g, '');
+}
+function mdTable(lines) {
+  const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(s => s.trim());
+  const rows = lines.filter(l => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l));
+  if (!rows.length) return '';
+  const head = cells(rows[0]);
+  return `<div class="dr-tablewrap"><table class="dr-table">
+    <thead><tr>${head.map(c => `<th>${mdInline(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.slice(1).map(r =>
+      `<tr>${cells(r).map(c => `<td>${mdInline(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+// `[-*+] ` requires the trailing space, so a line opening with `**bold**` is
+// not mistaken for a bullet.
+const RE_BULLET = /^\s*[-*+]\s+/;
+const RE_ORDERED = /^\s*\d+[.)]\s+/;
+const RE_QUOTE = /^\s*>\s?/;
+
+/// Walks a block line by line rather than classifying it as a whole: writeups
+/// mix a lead-in sentence with the list that follows it, and treating that as
+/// one paragraph ran the items together into unreadable prose.
+function mdLines(lines) {
+  let html = '', para = [], list = null, listTag = 'ul', quote = [];
+  const flushPara = () => {
+    if (para.length) { html += `<p>${mdInline(para.join(' '))}</p>`; para = []; }
+  };
+  const flushList = () => {
+    if (list) {
+      html += `<${listTag} class="dr-list">${
+        list.map(i => `<li>${mdInline(i)}</li>`).join('')}</${listTag}>`;
+      list = null;
+    }
+  };
+  const flushQuote = () => {
+    if (quote.length) {
+      html += `<blockquote class="dr-quote">${mdInline(quote.join(' '))}</blockquote>`;
+      quote = [];
+    }
+  };
+
+  for (const line of lines) {
+    if (RE_QUOTE.test(line)) {
+      flushPara(); flushList();
+      quote.push(line.replace(RE_QUOTE, ''));
+      continue;
+    }
+    const bullet = RE_BULLET.test(line), ordered = RE_ORDERED.test(line);
+    if (bullet || ordered) {
+      flushPara(); flushQuote();
+      const tag = bullet ? 'ul' : 'ol';
+      if (list && listTag !== tag) flushList();
+      listTag = tag;
+      list = list || [];
+      list.push(line.replace(bullet ? RE_BULLET : RE_ORDERED, ''));
+      continue;
+    }
+    // An indented line under a list item continues it rather than starting a
+    // paragraph — writeups wrap long items across lines.
+    if (list) { list[list.length - 1] += ' ' + line.trim(); continue; }
+    flushQuote();
+    para.push(line.trim());
+  }
+  flushPara(); flushList(); flushQuote();
+  return html;
+}
+
+function mdBlocks(src) {
+  return String(src).split(/\n{2,}/).map(raw => {
+    const lines = raw.split('\n').filter(l => l.trim());
+    if (!lines.length) return '';
+    if (lines.every(l => l.trim().startsWith('|'))) return mdTable(lines);
+    return mdLines(lines);
+  }).join('');
+}
+
+function lineageHtml(anc) {
+  return anc.map(a => {
+    const cl = a.claim;
+    const when = cl.death
+      ? `held ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}`
+      : `since ${fmtNice(cl.birth)} · still live`;
+    const rel = a.rel === 'supersedes' ? 'replaced' : a.rel === 'refutes' ? 'refuted'
+      : a.rel === 'refines' ? 'refined' : 'validated';
+    return `<div class="dr-prior">
+      <span class="w ${cl.death ? '' : 'origin'}">${rel} · ${when} · exp ${cl.source}</span>
+      <p>${esc(cl.text)}</p></div>`;
+  }).join('');
+}
+
+function bullets(value) {
+  const items = Array.isArray(value) ? value : [value];
+  return `<ul class="dr-list">${items.map(t => `<li>${mdInline(t)}</li>`).join('')}</ul>`;
+}
+
+function drawerHtml(c, detail) {
+  const src = expById[c.source] || {};
+  const anc = ancestorsOf(c);
+  const accepted = src.status === 'accepted';
+  const expUrl = `../experiments/index.html?exp=${encodeURIComponent(c.source)}`;
+
+  let h = `<div class="dr-sec"><p class="dr-claim">${esc(c.text)}</p>
+    ${c.conditions ? `<div class="dr-sub">Measured under ${esc(c.conditions)}</div>` : ''}</div>
+
+    <div class="dr-sec"><h4>The experiment behind it</h4>
+      <div class="dr-card">
+        <div class="dr-exp-title">${esc(src.title || 'Experiment ' + c.source)}</div>
+        <div class="dr-facts">
+          <span class="dr-tag k">exp ${c.source}</span>
+          ${src.date ? `<span class="dr-tag">${src.date}</span>` : ''}
+          ${src.class ? `<span class="dr-tag cls">${esc(src.class)}</span>` : ''}
+          ${src.status ? `<span class="dr-tag ${accepted ? 'ok' : 'no'}">${esc(src.status)}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  if (detail) {
+    const part = (label, text) =>
+      text && String(text).trim() ? `<h4>${label}</h4>${mdBlocks(text)}` : '';
+    // `summary` is inconsistent across the corpus — a headline for some
+    // experiments, the whole rationale for others — so it only appears when
+    // there is no structured problem statement to show instead.
+    let body = part('The problem', detail.problem) || part('In brief', detail.summary);
+    body += part('Hypothesis', detail.hypothesis) + part('Approach', detail.approach) +
+      part('Results', detail.results) +
+      part(accepted ? 'Why it was accepted' : 'Why it was rejected', detail.reasoning);
+    if (body) h += `<div class="dr-sec">${body}</div>`;
+  } else if (historyState === 'loading') {
+    h += `<div class="dr-sec"><p class="dr-loading">Loading the full experiment…</p></div>`;
+  } else if (src.impact) {
+    h += `<div class="dr-sec"><h4>Method and context</h4>${mdBlocks(src.impact)}</div>`;
+  }
+
+  if (src.changed || src.next) {
+    h += `<div class="dr-sec"><h4>Signals</h4>
+      ${src.changed ? `<h4>What it changed</h4>${bullets(src.changed)}` : ''}
+      ${src.next ? `<h4>What it opened up</h4>${bullets(src.next)}` : ''}</div>`;
+  }
+
+  if (anc.length) {
+    h += `<div class="dr-sec"><h4>What this belief replaced</h4>${lineageHtml(anc)}</div>`;
+  }
+
+  h += `<div class="dr-sec">
+    <a class="dr-cta" href="${expUrl}">Open experiment ${c.source} in the dashboard →</a>
+    ${(c.directions || []).length
+      ? `<div class="dr-sub">Research direction · ${esc((c.directions || []).join(', ').replace(/-/g, ' '))}</div>`
+      : ''}
+  </div>`;
+  return h;
+}
+
+let openClaim = null;
+async function openDrawer(id) {
+  const c = byId[id];
+  if (!c) return;
+  openClaim = id;
+  const state = c.state || 'live';
+  drIdEl.textContent = id;
+  drStateEl.textContent = state;
+  drStateEl.className = 'dr-state s-' + state;
+  drBody.innerHTML = drawerHtml(c, (historyById || {})[c.source]);
+  drBody.scrollTop = 0;
+  drawerEl.classList.add('open');
+  drawerEl.setAttribute('aria-hidden', 'false');
+  scrimEl.classList.add('open');
+  view.querySelectorAll('.ev-inline').forEach(b =>
+    b.classList.toggle('cited', b.dataset.claim === id));
+  drCloseEl.focus();
+
+  if (historyState !== 'done' && historyState !== 'failed') {
+    await loadHistory();
+    // The reader may have moved on or closed the drawer while this was in
+    // flight; only repaint if it is still the same claim on screen.
+    if (openClaim === id && drawerEl.classList.contains('open')) {
+      drBody.innerHTML = drawerHtml(c, (historyById || {})[c.source]);
+    }
+  }
+}
+function closeDrawer() {
+  openClaim = null;
+  drawerEl.classList.remove('open');
+  drawerEl.setAttribute('aria-hidden', 'true');
+  scrimEl.classList.remove('open');
+  view.querySelectorAll('.ev-inline.cited').forEach(b => b.classList.remove('cited'));
+}
+
+/// Highlights the heading you are currently reading under. Runs off scroll
+/// rather than IntersectionObserver so the "last heading above the fold" rule
+/// stays explicit — with several headings on screen, that is the one you want.
+function spy() {
+  const heads = [...view.querySelectorAll('.prose h2[id]')];
+  if (heads.length) {
+    const line = headerHeight() + 60;
+    let cur = heads[0].id;
+    for (const h of heads) {
+      if (h.getBoundingClientRect().top > line) break;
+      cur = h.id;
+    }
+    sidebarEl.querySelectorAll('.nav-secs a').forEach(a =>
+      a.classList.toggle('active', a.dataset.sec === cur));
+  }
+}
+function headerHeight() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 60;
+}
+
+function afterRender() {
+  wire();
+  renderNav();
+  closeDrawer();
+  spy();
+}
+
+function wire() {
+  view.querySelectorAll('.ev-inline').forEach(b =>
+    b.addEventListener('click', () => {
+      if (openClaim === b.dataset.claim) closeDrawer();
+      else openDrawer(b.dataset.claim);
+    }));
+  wireHist(view);
+}
+
+drCloseEl.addEventListener('click', closeDrawer);
+scrimEl.addEventListener('click', closeDrawer);
+addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && openClaim) closeDrawer();
+});
+function wireHist(root) {
+  root.querySelectorAll('.hist-btn').forEach(b =>
+    b.addEventListener('click', () => {
+      const th = document.getElementById('th-' + b.dataset.hist);
+      if (!th) return;
+      const open = th.classList.toggle('open');
+      const n = (b.textContent.match(/\d+/) || ['0'])[0];
+      b.textContent = open ? `history · ${n} prior ▾` : `history · ${n} prior ▸`;
+    }));
+}
+
+// `#/`, `#/<page>`, `#/<page>/<section>`. A bare `#section` is a plain in-page
+// anchor and must not be read as a route.
+function currentRoute() {
+  const h = location.hash;
+  return h.startsWith('#/') ? h.slice(2).split('/').filter(Boolean) : null;
+}
+function navigate(keepScroll) {
+  const parts = currentRoute() || [];
+  const pageId = parts[0] === HOME_ID ? '' : (parts[0] || '');
+  const secId = parts[1] || '';
+  const changed = pageId !== route.slice(1);
+  route = '/' + pageId;
+  if (!pageId) renderHome();
+  else if (pageId === 'changelog') renderLog();
+  else renderPage(pageId);
+  if (secId) {
+    const el = document.getElementById(secId);
+    if (el) { el.scrollIntoView({ block: 'start' }); return; }
+  }
+  // Instant, not 'auto': `auto` defers to the page's smooth scroll-behavior,
+  // which turns every page change into a long animated ride to the top.
+  if (changed && !keepScroll) scrollTo({ top: 0, behavior: 'instant' });
+}
+addEventListener('hashchange', () => {
+  if (currentRoute()) navigate();
+  else spy();
+});
+let ticking = false;
+addEventListener('scroll', () => {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => { ticking = false; spy(); });
+}, { passive: true });
+
+// ---------- time machine ----------
 const asofInput = document.getElementById('asof');
-const timeNote = document.getElementById('time-note');
 const births = claims.map(c => c.birth).filter(Boolean);
 asofInput.max = fmt(TODAY);
 asofInput.min = fmt(Math.min.apply(null, births));
 asofInput.value = fmt(TODAY);
 function applyTime() {
   const atToday = asOf >= TODAY;
-  timeNote.classList.toggle('on', !atToday);
+  let note = document.querySelector('.time-note');
+  if (!note) {
+    note = document.createElement('div');
+    note.className = 'time-note';
+    document.querySelector('.shell').before(note);
+  }
+  note.classList.toggle('on', !atToday);
   if (!atToday) {
     const nowLive = claims.filter(c => liveAt(c, TODAY)).length;
     const thenLive = claims.filter(c => liveAt(c, asOf)).length;
-    timeNote.innerHTML = `Showing the belief set as of <b>${fmtNice(asOf)}</b> —
-      ${thenLive} beliefs then, ${nowLive} today. Beliefs since revised carry an amber chip.`;
+    note.innerHTML = `Showing what was believed on <b>${fmtNice(asOf)}</b> —
+      ${thenLive} beliefs then, ${nowLive} today. Anything since revised carries an amber chip.`;
   }
-  (tab === 'map' ? renderMap : tab === 'beliefs' ? () => renderBeliefs() : renderLog)();
+  // Hold the reader's place: moving the date should change what the page says,
+  // not where you are in it. Measured against <main>, which survives the
+  // re-render, because showing or hiding the banner above it shifts the whole
+  // document by the banner's height — restoring a raw scrollY would land the
+  // reader that far off.
+  const docTop = () => view.getBoundingClientRect().top + scrollY;
+  const offset = scrollY - docTop();
+  navigate(true);
+  scrollTo({ top: docTop() + offset, behavior: 'instant' });
 }
 asofInput.addEventListener('change', () => {
   const t = parseDate(asofInput.value);
@@ -517,34 +1066,6 @@ asofInput.addEventListener('change', () => {
 document.getElementById('today-btn').addEventListener('click', () => {
   asOf = TODAY; asofInput.value = fmt(TODAY); applyTime();
 });
-
-// ---------- wiring ----------
-function wire() {
-  view.querySelectorAll('.ev-inline').forEach(b =>
-    b.addEventListener('click', () => {
-      const drawer = document.getElementById('evd-' + b.dataset.evd);
-      const c = byId[b.dataset.claim];
-      if (!drawer || !c) return;
-      if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
-        drawer.classList.remove('open'); return;
-      }
-      drawer.dataset.showing = c.id;
-      drawer.innerHTML = beliefCard(c);
-      drawer.classList.add('open');
-      wireHist(drawer);
-    }));
-  wireHist(view);
-}
-function wireHist(root) {
-  root.querySelectorAll('.hist-btn').forEach(b =>
-    b.addEventListener('click', () => {
-      const th = root.querySelector('#th-' + CSS.escape(b.dataset.hist)) || document.getElementById('th-' + b.dataset.hist);
-      if (!th) return;
-      const open = th.classList.toggle('open');
-      const n = (b.textContent.match(/\d+/) || ['0'])[0];
-      b.textContent = open ? `history · ${n} prior ▾` : `history · ${n} prior ▸`;
-    }));
-}
 
 // ---------- search ----------
 const searchInput = document.getElementById('search');
@@ -559,36 +1080,45 @@ searchInput.addEventListener('input', () => {
       hits.push({ id: c.id, label: firstSentence(c.text), state: c.state });
     if (hits.length > 9) break;
   }
-  for (const hHit of hits) {
+  for (const hit of hits) {
     const b = document.createElement('button');
     b.className = 'search-hit'; b.setAttribute('role', 'option');
-    b.innerHTML = `<span class="mono">${hHit.id} · ${hHit.state}</span> · ${esc(hHit.label.slice(0, 90))}`;
+    b.innerHTML = `<span class="mono">${hit.id} · ${hit.state}</span> · ${esc(hit.label.slice(0, 88))}`;
     b.addEventListener('click', () => {
       searchResults.classList.remove('open'); searchInput.value = '';
       asOf = TODAY; asofInput.value = fmt(TODAY);
-      currentComp = null; renderBeliefs();
-      const target = document.getElementById('b-' + hHit.id);
+      // Jump to the page that owns the claim, then reveal it in the roster.
+      // replaceState rather than assigning location.hash: assigning would fire
+      // hashchange after this handler and re-render the page, discarding the
+      // highlight applied below.
+      const owner = PAGES.find(p => p.pool.some(c => c.id === hit.id))
+        || PAGES.find(p => p.pool.some(c => (byId[hit.id] || {}).killers?.includes(c.id)));
+      history.replaceState(null, '', owner ? pageRoute(owner.id) : '#/changelog');
+      navigate();
+      const target = document.getElementById('b-' + hit.id);
+      const el = target || document.getElementById('b-' + ((byId[hit.id] || {}).killers || [])[0]);
+      if (!el) return;
+      const det = el.closest('details'); if (det) det.open = true;
+      el.scrollIntoView({ block: 'center' });
       if (target) {
-        target.scrollIntoView({ block: 'center' });
         const head = target.querySelector('.belief-head');
         head.innerHTML = `<mark>${esc(head.textContent)}</mark>`;
       } else {
-        const killers = (byId[hHit.id] || {}).killers || [];
-        const el2 = killers[0] && document.getElementById('b-' + killers[0]);
-        if (el2) {
-          el2.scrollIntoView({ block: 'center' });
-          const btn = el2.querySelector('.hist-btn'); if (btn) btn.click();
-        }
+        const btn = el.querySelector('.hist-btn'); if (btn) btn.click();
       }
     });
     searchResults.appendChild(b);
   }
   searchResults.classList.toggle('open', hits.length > 0);
 });
-document.addEventListener('click', ev => { if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open'); });
+document.addEventListener('click', ev => {
+  if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open');
+});
 
 // ---------- boot ----------
-document.getElementById('hdr-stats').textContent =
-  `— ${claims.filter(c => liveAt(c, TODAY)).length} current beliefs across ${SYSMAP.length} system components`;
-renderMap();
+navigate();
+if (!currentRoute() && location.hash) {
+  const landing = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (landing) landing.scrollIntoView({ block: 'start' });
+}
 </script>
