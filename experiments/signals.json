@@ -95,8 +95,8 @@
       "beliefs": {
         "note": "Generated from entries[].claims — record new claims in your own signals/entries/NNN.json; never edit this block.",
         "coverage": {
-          "entriesWithClaims": 6,
-          "entriesInDirection": 31
+          "entriesWithClaims": 7,
+          "entriesInDirection": 32
         },
         "live": [
           {
@@ -134,6 +134,12 @@
             "source": "250",
             "text": "Exp 233's checkpoint storm was a trigger-policy failure, not inherent to off-writer PASSIVE work: observed-reset/high-water re-arming fixes the storm and first threshold-crossing p50 improves ~53-64%. Rejected for now, mechanism preserved.",
             "conditions": "M1 Pro · 2026-07 · backfilled 2026-07"
+          },
+          {
+            "id": "257.1",
+            "source": "257",
+            "text": "A one-call native interpreter that preserves independent autocommits does not clear the writer-burst bar: homogeneous inserts improved 17.7% then only 3.6% across the order flip, while integer-only no-op updates regressed 17.7% and 13.9%.",
+            "conditions": "M1 Pro · Dart 3.12.2 · 256-call bursts · 5120 autocommits/round · 2026-07"
           }
         ]
       }
@@ -2976,6 +2982,30 @@
       "nextSignals": [
         "The reader TEXT payload is already materialized cheaply (Mem buffer reuse), so both the per-cell FFI lookup (exp 205) and the text materialization (this exp) are closed. Do not re-attack `value_text` vs `value_blob` without a workload that defeats result-`Mem` buffer reuse (e.g. single-row-per-statement patterns where the buffer never amortizes) or a ~10x lower per-row step/decode floor.",
         "`benchmark/experiments/text_value_blob_decode.dart` is the durable focused gate for any future TEXT-decode materialization change; pair it with a single-binary toggle rather than a two-worktree diff to avoid the per-worktree offset."
+      ]
+    },
+    "257": {
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "experimentClass": "moonshot",
+      "outcomeClass": "rejected_below_signal_bar",
+      "changedBeliefs": [
+        "Collapsing a homogeneous MultiExecuteRequest's per-member execute loop into one private C call is not enough while every member remains an independent SQLite autocommit. The public 5,120-insert gate improved 17.7% in candidate-first order but only 3.6% in baseline-first order, missing the predeclared 10% reproduced bar.",
+        "The envelope adds a real fixed cost rather than merely failing to beat noise: an integer-only no-op UPDATE burst regressed 17.7% / 13.9% across the order flip. Whole-group allocateBatchParams packing, result-buffer materialization, and suffix repacking after errors can cost more than the scalar path's already-specialized one-row encoder and repeated FFI calls.",
+        "Preserving independent outcomes inside a native loop has hidden correctness and resource constraints. A retry must handle sqlite3_reset commit errors, deliver the dirty-dependency union before affected futures resolve, retain failed-statement side effects, clear SQLITE_STATIC bindings before freeing the arena, make the result ABI explicit, cap aggregate variable-width payloads, and guard main-isolate diagnostic latency while the writer mutex is held."
+      ],
+      "nextSignals": [
+        "Keep exp 180's scalar per-member worker loop. Do not retry a whole-group native parameter/result arena under the current MultiExecuteRequest representation.",
+        "Reopen only if transport already supplies a bounded native-ready arena or another design removes group repacking; require at least 10% on public 100/200-member insert bursts in both process orders, neutral 2/8/32-member bursts, and BLOB peak-RSS plus diagnostics-latency guards.",
+        "Treat true group commit as the separate exp 197 semantic/API frontier. Exp 257 shows that collapsing only Dart/native orchestration while retaining N autocommits does not capture that ceiling."
+      ],
+      "claims": [
+        {
+          "id": "257.1",
+          "text": "A one-call native interpreter that preserves independent autocommits does not clear the writer-burst bar: homogeneous inserts improved 17.7% then only 3.6% across the order flip, while integer-only no-op updates regressed 17.7% and 13.9%.",
+          "conditions": "M1 Pro · Dart 3.12.2 · 256-call bursts · 5120 autocommits/round · 2026-07"
+        }
       ]
     }
   }
