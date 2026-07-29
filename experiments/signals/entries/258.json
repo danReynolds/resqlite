@@ -1,0 +1,41 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "experimentClass": "moonshot",
+  "outcomeClass": "rejected_below_signal",
+  "changedBeliefs": [
+    "Exp 055 assessed per-column typed arrays (Int64List/Float64List) but never implemented them, estimating the throughput win as too small; exp 081 measured only a row-major binary slab. Exp 258 gave the first real AOT measurement of the columnar typed-array mechanism, isolating build (worker), hop (transfer), and consume (main) across a real worker->main SendPort hop with two order-flipped passes.",
+    "Columnar builds 60-90% faster worker-side (no boxing; biggest on REAL, ~10x on 10k x 20 REAL) and its transfer is 73-91% cheaper on a SendPort A/B. But the build win is worker wall (off the main isolate), and the transfer win does not reach production: results large enough for the transfer to matter (>32768 structural slots) already zero-copy via the Isolate.exit sacrifice path, and sub-threshold SendPort results save only tens of microseconds, below the exp 105 round-trip floor.",
+    "On resqlite's primary metric (main-isolate time = hop + consume), columnar is neutral for REAL results (consume -5 to -13%, the box-on-access cost nearly cancels Float64List locality) and shows no reliable memory win (Smi integers live inline in a List<Object?>, so an Int64List column costs more per cell; RSS moved +25% to -30% inconsistently across lanes). This confirms exp 081's main-isolate-access caution generalizes to the columnar shape and completes exp 055's open assessment as a rejection.",
+    "The one real primary-metric signal: integer consume is ~2x faster on the main isolate (Int64List sequential access, no covariant-load barrier, vs pointer-chasing a List<Object?> of Smis), reproduced -48 to -52% on every integer lane in both orders. This is a narrow effect, not evidence for the whole-store rewrite."
+  ],
+  "nextSignals": [
+    "Do not reopen the broad columnar ResultSet rewrite on the transfer or memory arguments. Exp 258 closes both: the Isolate.exit sacrifice path already handles large-result transfer, and Smi-int columns regress memory under Int64List.",
+    "Scoped open candidate: a narrow columnar path for numeric columns targeting the ~2x main-isolate integer-consume speedup, worthwhile only if a workload profile shows integer-heavy, main-isolate-bound reads dominating. It needs its own design pass for how Row dispatches columnar-vs-flat per column without slowing the text path; treat it as out-of-budget until such a workload appears.",
+    "Keep benchmark/experiments/columnar_result_transfer.dart as the mechanism gate for any future columnar attempt: tag lanes by the sacrificeSlotThreshold (32768 slots) so the transfer axis is measured against Isolate.exit, not a naive SendPort baseline."
+  ],
+  "claims": [
+    {
+      "id": "258.1",
+      "text": "Storing numeric result columns as typed arrays (Int64List/Float64List) instead of boxing into a flat List<Object?> makes worker-side result build 60-90% faster (largest on REAL: doubles always box, ~10x on 10k x 20 REAL). This win is worker wall, off the main isolate.",
+      "conditions": "M-series · AOT · worker->main SendPort A/B · two order-flipped passes · 2026-07"
+    },
+    {
+      "id": "258.2",
+      "text": "A columnar container's transfer win (73-91% cheaper hop vs the boxed flat list) does not move production's main-isolate metric: results large enough for transfer to matter (>32768 structural slots) already zero-copy via Isolate.exit, and sub-threshold results save only tens of microseconds, below the select() round-trip floor. The broad columnar rewrite is therefore rejected.",
+      "conditions": "M-series · AOT · worker->main SendPort A/B · 2026-07",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "245.1"
+        }
+      ]
+    },
+    {
+      "id": "258.3",
+      "text": "The one real primary-metric signal from columnar storage is main-isolate integer consume ~2x faster (Int64List sequential access, no covariant-load barrier, vs pointer-chasing a List<Object?> of Smis), reproduced -48 to -52% on every integer lane in both orders. REAL consume is only neutral (box-on-access nearly cancels the locality gain) and columnar never regresses consume, refuting exp 081's box-on-access fear for the columnar (not binary-slab) shape.",
+      "conditions": "M-series · AOT · main-isolate full-scan as Object? · 2026-07"
+    }
+  ]
+}
