@@ -124,6 +124,27 @@ external int resqliteExecute(
     ffi.Pointer<ffi.Uint8>,
     ffi.Int,
     ffi.Int,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Int>,
+  )
+>(symbol: 'resqlite_run_independent_autocommits', isLeaf: true)
+external int resqliteRunIndependentAutocommits(
+  ffi.Pointer<ffi.Void> db,
+  ffi.Pointer<Utf8> sql,
+  ffi.Pointer<ffi.Uint8> paramSets,
+  int paramCount,
+  int setCount,
+  ffi.Pointer<ffi.Uint8> outResults,
+  ffi.Pointer<ffi.Int> outCompleted,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<Utf8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Int,
+    ffi.Int,
   )
 >(symbol: 'resqlite_run_batch', isLeaf: true)
 external int resqliteRunBatch(
@@ -198,6 +219,18 @@ final class WriteResult {
   final int lastInsertId;
 }
 
+/// Result of the native independent-autocommit envelope.
+///
+/// [results] contains the successful prefix. When [error] is non-null, its
+/// failed set is exactly `results.length`; callers can resume later sets
+/// through the scalar path without re-running an already-committed write.
+final class IndependentAutocommitResult {
+  const IndependentAutocommitResult(this.results, this.error);
+
+  final List<WriteResult> results;
+  final ResqliteQueryException? error;
+}
+
 /// Execute a write statement. Returns affected rows + last insert ID.
 ///
 /// Uses nested try/finally so each allocation is protected by the time
@@ -241,6 +274,81 @@ WriteResult executeWrite(
     }
   } finally {
     freeParams(paramsNative, params);
+  }
+}
+
+/// Execute a homogeneous parameterized group in one native call while keeping
+/// every set as its own SQLite autocommit.
+///
+/// Native execution stops at the first error. Capturing the exception here,
+/// before any later SQLite call can replace `sqlite3_errmsg`, lets the worker
+/// resume the remaining sets with [executeWrite] and preserve per-caller
+/// failure isolation.
+IndependentAutocommitResult executeIndependentAutocommits(
+  ffi.Pointer<ffi.Void> dbHandle,
+  String sql,
+  List<List<Object?>> paramSets,
+) {
+  assert(paramSets.isNotEmpty);
+  final paramCount = paramSets.first.length;
+  assert(paramCount > 0);
+
+  final sqlNative = cachedSqlUtf8(sql);
+  final paramsNative = allocateBatchParams(paramSets);
+  try {
+    final resultBuf = calloc<ffi.Uint8>(_writeResultSize * paramSets.length);
+    try {
+      final completedBuf = calloc<ffi.Int>();
+      try {
+        final rc = resqliteRunIndependentAutocommits(
+          dbHandle,
+          sqlNative,
+          paramsNative,
+          paramCount,
+          paramSets.length,
+          resultBuf,
+          completedBuf,
+        );
+        final completed = completedBuf.value;
+        final view = ByteData.sublistView(
+          resultBuf.asTypedList(_writeResultSize * paramSets.length),
+        );
+        final results = <WriteResult>[
+          for (var i = 0; i < completed; i++)
+            WriteResult(
+              view.getInt32(
+                i * _writeResultSize + _writeResultOffAffected,
+                Endian.little,
+              ),
+              view.getInt64(
+                i * _writeResultSize + _writeResultOffLastId,
+                Endian.little,
+              ),
+            ),
+        ];
+        if (rc == 0) {
+          return IndependentAutocommitResult(results, null);
+        }
+        final failedParams = completed < paramSets.length
+            ? paramSets[completed]
+            : const <Object?>[];
+        return IndependentAutocommitResult(
+          results,
+          ResqliteQueryException(
+            _queryErrorMessage(dbHandle, rc, failedParams.length),
+            sql: sql,
+            parameters: failedParams,
+            sqliteCode: rc,
+          ),
+        );
+      } finally {
+        calloc.free(completedBuf);
+      }
+    } finally {
+      calloc.free(resultBuf);
+    }
+  } finally {
+    freeParamBuffer(paramsNative);
   }
 }
 

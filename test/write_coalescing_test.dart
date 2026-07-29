@@ -3,11 +3,12 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 import 'package:test/test.dart';
 
-/// Coverage for exp 180 cross-call request batching: concurrently-issued
-/// standalone execute() calls are coalesced into one MultiExecuteRequest and
-/// run as independent autocommits on the worker. These tests pin the behavior
-/// that must stay identical to sending each write individually — correct
-/// per-call results, per-statement failure isolation, and stream invalidation.
+/// Coverage for exp 180 cross-call request batching and exp 257's native
+/// homogeneous-group interpreter. Concurrently-issued standalone execute()
+/// calls are coalesced into one MultiExecuteRequest and remain independent
+/// autocommits. These tests pin the behavior that must stay identical to
+/// sending each write individually — correct per-call results, per-statement
+/// failure isolation, trigger dependency routing, and mixed-SQL fallback.
 void main() {
   group('write coalescing (exp 180)', () {
     late Directory tempDir;
@@ -113,6 +114,141 @@ void main() {
       ]);
 
       await reachedEight;
+    });
+
+    test('trigger side effects invalidate their watching streams', () async {
+      await db.execute(
+        'CREATE TABLE audit('
+        'id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL)',
+      );
+      await db.execute(
+        'CREATE TRIGGER audit_item_insert AFTER INSERT ON items '
+        'BEGIN INSERT INTO audit(item_id) VALUES (new.id); END',
+      );
+
+      final auditCounts = db
+          .stream('SELECT COUNT(*) AS c FROM audit')
+          .map((rows) => rows.first['c'] as int);
+      final reachedEight = expectLater(auditCounts, emitsThrough(8));
+
+      await Future.wait([
+        for (var i = 0; i < 8; i++)
+          db.execute('INSERT INTO items(name) VALUES (?)', ['trigger_$i']),
+      ]);
+
+      await reachedEight;
+      final rows = await db.select(
+        'SELECT item_id FROM audit ORDER BY item_id',
+      );
+      expect(rows.map((row) => row['item_id']), List.generate(8, (i) => i + 1));
+    });
+
+    test(
+      'errors snapshot before scalar resume with cascades and triggers',
+      () async {
+        await db.execute('PRAGMA foreign_keys = ON');
+        await db.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)');
+        await db.execute(
+          'CREATE TABLE child('
+          'id INTEGER PRIMARY KEY, '
+          'parent_id INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE)',
+        );
+        await db.execute(
+          'CREATE TABLE delete_audit('
+          'id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL)',
+        );
+        await db.execute(
+          'CREATE TRIGGER block_parent_two BEFORE DELETE ON parent '
+          'WHEN old.id = 2 BEGIN '
+          "SELECT RAISE(ABORT, 'blocked two'); END",
+        );
+        await db.execute(
+          'CREATE TRIGGER block_parent_four BEFORE DELETE ON parent '
+          'WHEN old.id = 4 BEGIN '
+          "SELECT RAISE(ABORT, 'blocked four'); END",
+        );
+        await db.execute(
+          'CREATE TRIGGER audit_parent_delete AFTER DELETE ON parent '
+          'BEGIN INSERT INTO delete_audit(parent_id) VALUES (old.id); END',
+        );
+        for (var id = 1; id <= 5; id++) {
+          await db.execute('INSERT INTO parent(id) VALUES (?)', [id]);
+          await db.execute('INSERT INTO child(id, parent_id) VALUES (?, ?)', [
+            id,
+            id,
+          ]);
+        }
+
+        final childReachedTwo = expectLater(
+          db
+              .stream('SELECT COUNT(*) AS c FROM child')
+              .map((rows) => rows.single['c'] as int),
+          emitsThrough(2),
+        );
+        final auditReachedThree = expectLater(
+          db
+              .stream('SELECT COUNT(*) AS c FROM delete_audit')
+              .map((rows) => rows.single['c'] as int),
+          emitsThrough(3),
+        );
+
+        const deleteSql = 'DELETE FROM parent WHERE id = ?';
+        final outcomes = await Future.wait([
+          for (var id = 1; id <= 5; id++)
+            db
+                .execute(deleteSql, [id])
+                .then<Object>((result) => result, onError: (Object e) => e),
+        ]);
+
+        expect(outcomes[0], isA<WriteResult>());
+        expect(outcomes[2], isA<WriteResult>());
+        expect(outcomes[4], isA<WriteResult>());
+        for (final (index, id, message) in [
+          (1, 2, 'blocked two'),
+          (3, 4, 'blocked four'),
+        ]) {
+          final error = outcomes[index] as ResqliteQueryException;
+          expect(error.message, message);
+          expect(error.sql, deleteSql);
+          expect(error.parameters, [id]);
+          expect(error.sqliteCode, 19); // SQLITE_CONSTRAINT
+        }
+
+        await childReachedTwo;
+        await auditReachedThree;
+        final parents = await db.select('SELECT id FROM parent ORDER BY id');
+        final children = await db.select(
+          'SELECT parent_id FROM child ORDER BY parent_id',
+        );
+        final audit = await db.select(
+          'SELECT parent_id FROM delete_audit ORDER BY parent_id',
+        );
+        expect(parents.map((row) => row['id']), [2, 4]);
+        expect(children.map((row) => row['parent_id']), [2, 4]);
+        expect(audit.map((row) => row['parent_id']), [1, 3, 5]);
+      },
+    );
+
+    test('mixed SQL groups retain the scalar fallback behavior', () async {
+      await db.execute(
+        'CREATE TABLE other(id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      );
+
+      final results = await Future.wait([
+        for (var i = 0; i < 32; i++)
+          db.execute(
+            i.isEven
+                ? 'INSERT INTO items(name) VALUES (?)'
+                : 'INSERT INTO other(name) VALUES (?)',
+            ['mixed_$i'],
+          ),
+      ]);
+
+      expect(results, everyElement(isA<WriteResult>()));
+      final itemCount = await db.select('SELECT COUNT(*) AS c FROM items');
+      final otherCount = await db.select('SELECT COUNT(*) AS c FROM other');
+      expect(itemCount.single['c'], 16);
+      expect(otherCount.single['c'], 16);
     });
   });
 }
