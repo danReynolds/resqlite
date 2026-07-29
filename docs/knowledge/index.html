@@ -1,4 +1,6 @@
+<!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>resqlite · system knowledge</title>
 <style>
 :root {
@@ -27,6 +29,9 @@
   --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
   --code-bg: #EEF2EF;
 }
+/* Measured from the sticky header at boot; anchors and the contents rail both
+   offset by it, so a deep link lands below the header rather than under it. */
+:root { --hdr-h: 104px; }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--ground); color: var(--ink);
@@ -85,7 +90,55 @@ h1 .dim { color: var(--ink-2); font-weight: 400; font-size: 15px; }
 }
 .time-note.on { display: block; }
 
-main { max-width: 860px; margin: 0 auto; padding: 10px 26px 60px; }
+main { max-width: 1200px; margin: 0 auto; padding: 10px 26px 60px; }
+/* Book layout: a persistent contents rail beside one continuous read. The rail
+   is the reason long-form works here — 4.7k words of chapters are unnavigable
+   without a spine you can see from anywhere in the scroll. */
+.book { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 44px; align-items: start; }
+.book.solo { display: block; max-width: 860px; margin: 0 auto; }
+.progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); }
+
+.toc {
+  position: sticky; top: var(--hdr-h); max-height: calc(100vh - var(--hdr-h) - 20px);
+  overflow-y: auto; padding: 22px 10px 30px 0; border-right: 1px solid var(--line);
+}
+.toc-hd { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; }
+.toc ol, .toc ul { list-style: none; margin: 0; padding: 0; }
+.toc a {
+  display: block; text-decoration: none; color: var(--ink-2); line-height: 1.35;
+  padding: 4px 8px 4px 10px; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
+}
+.toc a:hover { color: var(--ink); background: var(--accent-soft); }
+.toc-ch > a { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 3px; }
+.toc-ch > a .n { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); margin-right: 7px; }
+.toc-ch.active > a, .toc-ch.active > a .n { color: var(--accent); }
+.toc-ch.active > a { border-left-color: var(--accent); }
+/* Only the chapter you are in expands, so the rail stays scannable at a glance
+   instead of listing all thirty sections at once. */
+.toc-secs { display: none; margin: 2px 0 8px; }
+.toc-ch.active .toc-secs { display: block; }
+.toc-secs a { font-size: 12.5px; padding-left: 27px; }
+.toc-secs a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
+.toc-foot { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.toc-foot button { font-size: 12.5px; color: var(--accent); padding-left: 10px; }
+.toc-foot button:hover { text-decoration: underline; }
+
+.chapter { padding: 4px 0 10px; }
+.chapter + .chapter { margin-top: 44px; padding-top: 40px; border-top: 1px solid var(--line); }
+.ch-head { margin-bottom: 14px; }
+.ch-num { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .16em; color: var(--accent); }
+.ch-head h2 { font-size: 25px; line-height: 1.2; margin: 4px 0 6px; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
+.ch-meta { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
+[id].anchored { scroll-margin-top: calc(var(--hdr-h) + 14px); }
+.anchor { opacity: 0; margin-left: 8px; font-size: .78em; font-weight: 400; color: var(--ink-2); text-decoration: none; }
+h2:hover .anchor, h3:hover .anchor, .anchor:focus-visible { opacity: 1; }
+.anchor:hover { color: var(--accent); }
+.ch-nav { display: flex; justify-content: space-between; gap: 16px; margin-top: 30px; font-size: 13px; }
+.ch-nav button { max-width: 46%; color: var(--accent); text-align: left; }
+.ch-nav button:hover { text-decoration: underline; }
+.ch-nav .nx { text-align: right; margin-left: auto; }
+.ch-nav .lbl { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); }
+.frontis { margin: 4px 0 42px; padding-bottom: 34px; border-bottom: 1px solid var(--line); }
 .coverage-banner { color: var(--ink-2); font-size: 12.5px; margin: 14px 2px 4px; }
 
 .topic { margin-top: 34px; }
@@ -206,10 +259,17 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .comp .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); }
 .comp .c-meta .fresh { color: var(--accent); }
 .sm-caption { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--stale); margin: 6px 0 0; }
-.back-row { margin: 18px 0 -12px; font-size: 13px; }
-.back-row button { color: var(--accent); }
-.back-row button:hover { text-decoration: underline; }
 @media (max-width: 760px) { .sm-grid { grid-template-columns: 1fr; } .sm-boundary { border: 2px dashed var(--stale); border-radius: 10px; padding: 8px; } }
+@media (max-width: 940px) {
+  .book { grid-template-columns: 1fr; gap: 0; }
+  .toc {
+    position: static; max-height: none; overflow: visible; margin-bottom: 22px;
+    padding: 0 0 14px; border-right: 0; border-bottom: 1px solid var(--line);
+  }
+  /* Out-specifies the active-chapter expansion: on a narrow screen the rail is
+     a horizontal band, and per-section links would swamp it. */
+  .toc .toc-ch.active .toc-secs { display: none; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -226,8 +286,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
   </div>
   <div class="hdr-row">
     <div class="tabs" role="tablist">
-      <button class="tab" id="tab-map" role="tab" aria-selected="true">System</button>
-      <button class="tab" id="tab-beliefs" role="tab" aria-selected="false">Beliefs</button>
+      <button class="tab" id="tab-read" role="tab" aria-selected="true">Read</button>
       <button class="tab" id="tab-log" role="tab" aria-selected="false">Changelog</button>
     </div>
     <div class="asof-row">
@@ -236,11 +295,15 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
       <button class="today-btn" id="today-btn">today</button>
     </div>
   </div>
+  <div class="progress" id="progress"></div>
 </header>
 
 <main>
   <div class="time-note" id="time-note"></div>
-  <div id="view"></div>
+  <div class="book" id="book">
+    <nav class="toc" id="toc" aria-label="Contents"></nav>
+    <div id="view"></div>
+  </div>
 </main>
 
 <footer>
@@ -517,7 +580,6 @@ function chipify(text, ctx) {
   });
 }
 const compById = {}; for (const m of SYSMAP) compById[m.id] = m;
-let currentComp = null;
 
 // ---------- history thread (ancestors via this claim's own edges) ----------
 function ancestorsOf(c, seen) {
@@ -533,8 +595,12 @@ function ancestorsOf(c, seen) {
   return out;
 }
 
-// ---------- system map view ----------
+// ---------- the read: one continuous book ----------
 const view = document.getElementById('view');
+const bookEl = document.getElementById('book');
+const tocEl = document.getElementById('toc');
+const progressEl = document.getElementById('progress');
+const headerEl = document.querySelector('header');
 function compStats(m) {
   const live = m.pool.filter(c => liveAt(c, asOf));
   const last = Math.max.apply(null, m.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
@@ -550,9 +616,22 @@ function compCard(m) {
     <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
   </button>`;
 }
-function renderMap() {
-  setTab('map'); currentComp = null;
-  view.innerHTML = `<div class="sysmap">
+// Stable, human-legible anchors: `#boundary--why-the-trigger-counts-slots`.
+// Headings are unique within a chapter, and the component id prefixes them, so
+// slugs collide only if two sections in one chapter share a title.
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const secId = (compId, sec, si) => compId + '--' + (sec.h ? slug(sec.h) : 's' + si);
+const anchorLink = id => `<a class="anchor" href="#${id}" aria-label="Link to this section">#</a>`;
+const titledSections = m =>
+  ((STORIES[m.id] || {}).sections || [])
+    .map((s, si) => ({ h: s.h, id: secId(m.id, s, si) }))
+    .filter(s => s.h);
+
+/// The map opens the book rather than gating it: every card is a jump link into
+/// the chapter below, so the diagram orients without becoming a mode.
+function frontisHtml() {
+  const cov = KG.coverage;
+  return `<div class="frontis"><div class="sysmap">
     <div class="sm-grid">
       <div class="sm-col">${compCard(compById.api)}</div>
       <div class="sm-boundary">${compCard(compById.boundary)}</div>
@@ -561,53 +640,131 @@ function renderMap() {
     <p class="sm-caption">⟵ everything left runs on main · everything right runs on worker isolates ⟶</p>
     <div class="sm-native sm-col">${compCard(compById.native)}${compCard(compById.meta)}</div>
   </div>
-  <p class="coverage-banner">Each card shows the component's most recently established stance. Open one for its
-  full position — current beliefs, how each was reached, and what changed over time.</p>`;
-  view.querySelectorAll('.comp').forEach(b =>
-    b.addEventListener('click', () => renderBeliefs(b.dataset.comp)));
+  <p class="coverage-banner">Every card opens its chapter below. Claims cover ${cov.entriesWithClaims} of
+  ${cov.totalEntries} experiment entries so far — components may hold further beliefs still recorded only as
+  prose in signals.json.</p></div>`;
 }
 
-// ---------- beliefs view (component-scoped) ----------
-function renderBeliefs(compId) {
-  setTab('beliefs');
-  if (typeof compId === 'string') currentComp = compId;
-  const cov = KG.coverage;
-  let h = '';
-  const comps = currentComp ? [compById[currentComp]] : SYSMAP;
-  if (currentComp) h += `<div class="back-row"><button id="back-map">← System map</button></div>`;
-  h += `<p class="coverage-banner">Claims cover ${cov.entriesWithClaims} of ${cov.totalEntries} experiment entries so far —
-    components may hold further beliefs still recorded only as prose in signals.json. Coverage grows as runs revise old results.</p>`;
-  for (const m of comps) {
-    const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
-    const story = STORIES[m.id];
-    h += `<section class="topic"><div class="topic-hd">
-      <h2>${m.name}</h2>
-      <span class="meta">${m.kicker} · ${pool.length} beliefs</span></div>`;
-    if (story) {
-      h += `<div class="story">`;
-      story.sections.forEach((sec, si) => {
-        if (sec.h) h += `<h3>${esc(sec.h)}</h3>`;
-        sec.ps.forEach((para, pi) => {
-          const ctx = `${m.id}-${si}-${pi}`;
-          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(para), ctx)}</p>
-            <div class="ev-drawer" id="evd-${ctx}"></div>`;
-        });
-        if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
+function chapterHtml(m, i) {
+  const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
+  const { last } = compStats(m);
+  const story = STORIES[m.id];
+  const prev = SYSMAP[i - 1], next = SYSMAP[i + 1];
+  let h = `<article class="chapter anchored" id="${m.id}">
+    <div class="ch-head">
+      <div class="ch-num">${String(i + 1).padStart(2, '0')} · ${m.kicker}</div>
+      <h2>${esc(m.name)}${anchorLink(m.id)}</h2>
+      <div class="ch-meta">${pool.length} beliefs${last ? ` · last changed ${fmtNice(last)}` : ''}</div>
+    </div>`;
+  if (story) {
+    h += `<div class="story">`;
+    story.sections.forEach((sec, si) => {
+      if (sec.h) {
+        const sid = secId(m.id, sec, si);
+        h += `<h3 class="anchored" id="${sid}">${esc(sec.h)}${anchorLink(sid)}</h3>`;
+      }
+      sec.ps.forEach((para, pi) => {
+        const ctx = `${m.id}-${si}-${pi}`;
+        h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(para), ctx)}</p>
+          <div class="ev-drawer" id="evd-${ctx}"></div>`;
       });
-      h += `</div>`;
-    }
-    if (pool.length) {
-      h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
-      for (const c of pool) h += beliefCard(c);
-      h += `</details>`;
-    }
-    h += `</section>`;
+      if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
+    });
+    h += `</div>`;
   }
-  view.innerHTML = h;
-  const back = document.getElementById('back-map');
-  if (back) back.addEventListener('click', renderMap);
-  wire();
+  if (pool.length) {
+    h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
+    for (const c of pool) h += beliefCard(c);
+    h += `</details>`;
+  }
+  h += `<nav class="ch-nav">
+    ${prev ? `<button data-go="${prev.id}"><span class="lbl">← previous</span>${esc(prev.name)}</button>` : '<span></span>'}
+    ${next ? `<button class="nx" data-go="${next.id}"><span class="lbl">next →</span>${esc(next.name)}</button>` : ''}
+  </nav></article>`;
+  return h;
 }
+
+function renderBook() {
+  setTab('read');
+  bookEl.classList.remove('solo');
+  tocEl.hidden = false;
+  view.innerHTML = frontisHtml() + SYSMAP.map(chapterHtml).join('');
+  view.querySelectorAll('.comp').forEach(b =>
+    b.addEventListener('click', () => goTo(b.dataset.comp)));
+  view.querySelectorAll('[data-go]').forEach(b =>
+    b.addEventListener('click', () => goTo(b.dataset.go)));
+  view.querySelectorAll('.anchor').forEach(a =>
+    a.addEventListener('click', ev => { ev.preventDefault(); goTo(a.getAttribute('href').slice(1)); }));
+  renderTOC();
+  wire();
+  spy();
+}
+
+function renderTOC() {
+  let h = `<div class="toc-hd">Contents</div><ol>`;
+  SYSMAP.forEach((m, i) => {
+    h += `<li class="toc-ch" data-ch="${m.id}">
+      <a href="#${m.id}"><span class="n">${String(i + 1).padStart(2, '0')}</span>${esc(m.name)}</a>
+      <ul class="toc-secs">${titledSections(m).map(s =>
+        `<li><a href="#${s.id}" data-sec="${s.id}">${esc(s.h)}</a></li>`).join('')}</ul></li>`;
+  });
+  tocEl.innerHTML = h + `</ol><div class="toc-foot"><button id="to-log">Changelog →</button></div>`;
+  tocEl.querySelectorAll('a[href^="#"]').forEach(a =>
+    a.addEventListener('click', ev => { ev.preventDefault(); goTo(a.getAttribute('href').slice(1)); }));
+  document.getElementById('to-log').addEventListener('click', renderLog);
+}
+
+function goTo(id) {
+  if (tab !== 'read') renderBook();
+  const el = document.getElementById(id);
+  if (!el) return;
+  history.replaceState(null, '', '#' + id);
+  const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+}
+
+// ---------- scroll position: rail highlight, hash, progress ----------
+let lastCh = null;
+function spy() {
+  if (tab !== 'read') return;
+  const line = headerHeight() + 40;
+  let curCh = null, curSec = null;
+  for (const el of view.querySelectorAll('.chapter, .story h3')) {
+    if (el.getBoundingClientRect().top > line) break;
+    if (el.classList.contains('chapter')) { curCh = el.id; curSec = null; } else curSec = el.id;
+  }
+  tocEl.querySelectorAll('.toc-ch').forEach(li => li.classList.toggle('active', li.dataset.ch === curCh));
+  tocEl.querySelectorAll('.toc-secs a').forEach(a => a.classList.toggle('active', a.dataset.sec === curSec));
+  if (curCh && curCh !== lastCh) {
+    lastCh = curCh;
+    const link = tocEl.querySelector(`.toc-ch[data-ch="${curCh}"] > a`);
+    if (link) link.scrollIntoView({ block: 'nearest' });
+  }
+  // replaceState, not push: the URL should describe where you are without
+  // turning every scroll tick into a history entry.
+  const want = '#' + (curSec || curCh || '');
+  if (curCh && location.hash !== want) history.replaceState(null, '', want);
+}
+function progress() {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  progressEl.style.width = (max > 0 ? Math.min(100, (scrollY / max) * 100) : 0) + '%';
+}
+function headerHeight() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 104;
+}
+// Watch the header itself rather than the window: it also grows when the rows
+// wrap or a late-loading font reflows them, and a stale value pushes the
+// contents rail and every anchor landing off by the difference.
+function measureHeader() {
+  document.documentElement.style.setProperty('--hdr-h', headerEl.offsetHeight + 'px');
+}
+new ResizeObserver(() => { measureHeader(); progress(); }).observe(headerEl);
+let ticking = false;
+addEventListener('scroll', () => {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => { ticking = false; progress(); spy(); });
+}, { passive: true });
 function beliefCard(c) {
   const head = firstSentence(c.text);
   const rest = c.text.slice(head.length).trim();
@@ -646,6 +803,8 @@ function threadHtml(anc) {
 // ---------- changelog view ----------
 function renderLog() {
   setTab('log');
+  bookEl.classList.add('solo');
+  tocEl.hidden = true;
   const events = [];
   for (const c of claims) {
     if (c.birth == null || c.birth > asOf) continue;
@@ -672,14 +831,13 @@ function renderLog() {
 }
 
 // ---------- tabs / time ----------
-let tab = 'map';
+let tab = 'read';
 function setTab(t) {
   tab = t;
-  for (const id of ['map', 'beliefs', 'log'])
+  for (const id of ['read', 'log'])
     document.getElementById('tab-' + id).setAttribute('aria-selected', String(t === id));
 }
-document.getElementById('tab-map').addEventListener('click', renderMap);
-document.getElementById('tab-beliefs').addEventListener('click', () => { currentComp = null; renderBeliefs(); });
+document.getElementById('tab-read').addEventListener('click', () => { renderBook(); scrollTo({ top: 0 }); });
 document.getElementById('tab-log').addEventListener('click', renderLog);
 
 const asofInput = document.getElementById('asof');
@@ -697,7 +855,11 @@ function applyTime() {
     timeNote.innerHTML = `Showing the belief set as of <b>${fmtNice(asOf)}</b> —
       ${thenLive} beliefs then, ${nowLive} today. Beliefs since revised carry an amber chip.`;
   }
-  (tab === 'map' ? renderMap : tab === 'beliefs' ? () => renderBeliefs() : renderLog)();
+  // Re-rendering replaces the whole document body, so hold the reader's place —
+  // moving the date should change what the page says, not where you are in it.
+  const y = scrollY;
+  (tab === 'log' ? renderLog : renderBook)();
+  scrollTo({ top: y });
 }
 asofInput.addEventListener('change', () => {
   const t = parseDate(asofInput.value);
@@ -755,9 +917,13 @@ searchInput.addEventListener('input', () => {
     b.addEventListener('click', () => {
       searchResults.classList.remove('open'); searchInput.value = '';
       asOf = TODAY; asofInput.value = fmt(TODAY);
-      currentComp = null; renderBeliefs();
+      renderBook();
+      // Belief cards live inside each chapter's collapsed roster, so a hit is
+      // in the DOM but invisible until its <details> is opened.
+      const reveal = el => { const d = el.closest('details'); if (d) d.open = true; };
       const target = document.getElementById('b-' + hHit.id);
       if (target) {
+        reveal(target);
         target.scrollIntoView({ block: 'center' });
         const head = target.querySelector('.belief-head');
         head.innerHTML = `<mark>${esc(head.textContent)}</mark>`;
@@ -765,6 +931,7 @@ searchInput.addEventListener('input', () => {
         const killers = (byId[hHit.id] || {}).killers || [];
         const el2 = killers[0] && document.getElementById('b-' + killers[0]);
         if (el2) {
+          reveal(el2);
           el2.scrollIntoView({ block: 'center' });
           const btn = el2.querySelector('.hist-btn'); if (btn) btn.click();
         }
@@ -779,5 +946,14 @@ document.addEventListener('click', ev => { if (!ev.target.closest('.searchbox'))
 // ---------- boot ----------
 document.getElementById('hdr-stats').textContent =
   `— ${claims.filter(c => liveAt(c, TODAY)).length} current beliefs across ${SYSMAP.length} system components`;
-renderMap();
+renderBook();
+measureHeader();
+// Honour a deep link on load, so a shared `#boundary--...` URL opens on the
+// passage it names rather than at the top of the book.
+if (location.hash) {
+  const landing = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (landing) landing.scrollIntoView({ block: 'start' });
+}
+progress();
+spy();
 </script>
