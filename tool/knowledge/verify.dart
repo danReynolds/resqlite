@@ -29,6 +29,11 @@ const _testResults = 'build/passing-tests.txt';
 Future<void> main(List<String> args) async {
   final fix = args.contains('--fix');
   final report = args.contains('--report') || fix;
+  // `unknown` means a resolver could not reach its source of truth. Locally
+  // that is routine — the test-results file is a CI artifact — so it warns. In
+  // CI it must fail: a checker that cannot check has stopped guarding anything,
+  // and a green build would advertise coverage that is not there.
+  final strict = args.contains('--strict');
   final root = Directory.current;
 
   final resolvers = <String, PinResolver>{
@@ -89,9 +94,13 @@ Future<void> main(List<String> args) async {
         failures++;
       case PinStatus.unknown:
         print(
-          '::warning file=${r.pin.site.file},line=${r.pin.site.line}::'
-          '${r.pin.raw} — ${r.detail}',
+          '::${strict ? 'error' : 'warning'} file=${r.pin.site.file},'
+          'line=${r.pin.site.line}::${r.pin.raw} — ${r.detail}'
+          '${strict ? '. Its dataset is missing, so this pin is checking '
+              'nothing. Produce the dataset (see tool/knowledge/README.md) '
+              'or drop the pin.' : ''}',
         );
+        if (strict) failures++;
       case PinStatus.current:
         break;
     }

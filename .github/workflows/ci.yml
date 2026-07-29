@@ -121,9 +121,14 @@ jobs:
       - name: Verify knowledge links and claim citations
         run: dart run benchmark/check_knowledge_links.dart
       - name: Record passing tests for knowledge pins
-        run: dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
+        # pipefail matters here: without it the pipeline reports the recorder's
+        # status and a failed `dart test` passes silently, leaving a thin
+        # results file that quietly downgrades every `test:` pin to unknown.
+        run: set -o pipefail && dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
       - name: Verify knowledge pins
-        run: dart run tool/knowledge/verify.dart --report
+        # --strict promotes `unknown` to an error: in CI every dataset is
+        # supposed to be present, so a pin that cannot be checked is a failure.
+        run: dart run tool/knowledge/verify.dart --report --strict
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
 

@@ -193,9 +193,15 @@ String contentHash(String s) {
   var h = 0xcbf29ce484222325;
   for (final unit in s.codeUnits) {
     h ^= unit;
-    h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
+    h = h * 0x100000001b3; // wraps at 64 bits, which is the intent
   }
-  return h.toRadixString(36).padLeft(4, '0').substring(0, 4);
+  // Fold to 63 bits before rendering. Dart ints are signed, so roughly half of
+  // all digests are negative and render with a leading '-' — which reads as
+  // damage inline and spends one of the four characters this returns on a sign.
+  return (h & 0x7FFFFFFFFFFFFFFF)
+      .toRadixString(36)
+      .padLeft(4, '0')
+      .substring(0, 4);
 }
 
 /// Strips comments and collapses whitespace so cosmetic edits — reflowing,

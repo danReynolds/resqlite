@@ -43,4 +43,16 @@ Future<void> main() async {
   out.createSync(recursive: true);
   out.writeAsStringSync('${passing.join('\n')}\n');
   print('Recorded ${passing.length} passing tests to ${out.path}');
+
+  // An empty record is the dangerous outcome, not a harmless one: it means the
+  // test run died before reporting, and every `test:` pin would silently fall
+  // back to `unknown`. Fail here so the cause is visible at its source rather
+  // than as a wave of warnings two steps later.
+  if (passing.isEmpty) {
+    stderr.writeln(
+      '::error::No passing tests were recorded. The test run produced no '
+      'successful results, so `test:` pins have nothing to verify against.',
+    );
+    exitCode = 1;
+  }
 }

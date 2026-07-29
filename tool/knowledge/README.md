@@ -41,10 +41,27 @@ code can still be wrong. Prefer the strongest pin a statement admits.
 ## Usage
 
 ```bash
-dart run tool/knowledge/verify.dart            # check (CI)
+dart run tool/knowledge/verify.dart            # check
 dart run tool/knowledge/verify.dart --report   # + groundedness per chapter
+dart run tool/knowledge/verify.dart --strict   # unknown counts as failure (CI)
 dart run tool/knowledge/verify.dart --fix      # re-pin drifted expectations
 ```
+
+`--strict` is the difference between a checker and the appearance of one. Without
+it `unknown` warns, which is right locally — `test:` pins read a results file
+that only CI produces. In CI every dataset is present by construction, so a pin
+that cannot be checked means the pipeline that feeds it broke, and the build must
+fail rather than report coverage it no longer has.
+
+Three layers defend that, because the failure is silent by nature:
+
+1. `record_passing_tests.dart` exits non-zero when it records zero tests.
+2. CI runs the test pipeline under `set -o pipefail`, so a failed `dart test`
+   fails the step instead of being masked by the recorder's exit code.
+3. `--strict` turns any remaining `unknown` into an error.
+
+`test/knowledge_pins_test.dart` covers all of it, including the case where a
+dataset is absent — that test asserts `unknown`, never `current`.
 
 `--fix` is what keeps this maintainable. When a constant or metric legitimately
 moves, it rewrites the expectations and leaves a diff to review — *"this number
