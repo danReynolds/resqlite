@@ -2,9 +2,16 @@
 /// Records the names of passing tests so `test:` pins can be proven rather
 /// than merely resolved.
 ///
-///   dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
+///   dart test --file-reporter=json:build/test-results.json
+///   dart run tool/knowledge/record_passing_tests.dart build/test-results.json
 ///
-/// Writes one test name per line to `build/passing-tests.txt`. Without this
+/// Prefer the file form. Piping `--reporter=json` also works, but it replaces
+/// the human-readable test output in CI logs, and the pipeline then masks
+/// `dart test`'s exit code unless the caller remembers `pipefail`. A file
+/// reporter avoids both: the test step fails on its own when tests fail, and
+/// the log still reads normally.
+///
+/// Writes one test name per line to `build/passing-tests.txt`. Without that
 /// file a `test:` pin reports `unknown` — deliberately, because an unavailable
 /// checker must never read as a pass.
 library;
@@ -12,12 +19,23 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   final names = <int, String>{};
   final passing = <String>{};
 
-  await for (final line
-      in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+  final source = args.isNotEmpty
+      ? File(args.first).openRead().transform(utf8.decoder).transform(
+          const LineSplitter(),
+        )
+      : stdin.transform(utf8.decoder).transform(const LineSplitter());
+
+  if (args.isNotEmpty && !File(args.first).existsSync()) {
+    stderr.writeln('::error::No test report at ${args.first}');
+    exitCode = 1;
+    return;
+  }
+
+  await for (final line in source) {
     Object? decoded;
     try {
       decoded = json.decode(line);

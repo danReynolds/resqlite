@@ -215,24 +215,13 @@ class CodeResolver implements PinResolver {
   }
 
   /// Brace-matched body starting at the symbol's declaration.
-  String? _extractBody(String source, String symbol) {
-    final decl = RegExp(
+  String? _extractBody(String source, String symbol) => braceBlockAfter(
+    source,
+    RegExp(
       r'(?:^|\s)' + RegExp.escape(symbol) + r'\s*(?:<[^>]*>)?\s*\(',
       multiLine: true,
-    ).firstMatch(source);
-    if (decl == null) return null;
-    final open = source.indexOf('{', decl.end);
-    if (open < 0) return null;
-    var depth = 0;
-    for (var i = open; i < source.length; i++) {
-      if (source[i] == '{') depth++;
-      if (source[i] == '}') {
-        depth--;
-        if (depth == 0) return source.substring(open, i + 1);
-      }
-    }
-    return null;
-  }
+    ),
+  );
 
   /// Normalizes simple arithmetic so prose can pin the meaningful number
   /// (`32768`) rather than the source spelling (`32 * 1024`).
@@ -267,12 +256,24 @@ class CodeResolver implements PinResolver {
 /// `[[test:test/stream_test.dart#always emits its initial result]]` — the named
 /// test exists and is in the passing set.
 ///
+/// `[[test:test/stream_test.dart#always emits its initial result@a3f2]]` — and
+/// its body still asserts what it asserted when the passage was written.
+///
 /// The strongest binding available: a green pinned test does not merely guard a
 /// statement, it *proves* it on every CI run. Unchanged code can still be
 /// wrong; a passing assertion cannot be, for the property it asserts.
 ///
-/// Existence is checked statically. Whether it *passed* is read from a results
-/// file produced by the test run, so this resolver never shells out.
+/// That last clause is the catch, and it is why the hash form exists. A test
+/// name is a label, not evidence. Keep the name and gut the body to
+/// `expect(1, 1)` and a name-only pin still reports `current` — at the highest
+/// strength in the system, for a guarantee nothing now guards. Pinning the body
+/// closes that: a rewritten assertion reads as `drifted`, which asks a human
+/// whether the documented guarantee survived. A hash cannot tell a strengthened
+/// assertion from a gutted one, so drift here is a prompt to re-read, never a
+/// verdict — the same contract as `code:` body hashes.
+///
+/// Existence and shape are checked statically. Whether it *passed* is read from
+/// a results file produced by the test run, so this resolver never shells out.
 class TestResolver implements PinResolver {
   TestResolver(this.root, this.resultsFile);
 
@@ -310,6 +311,39 @@ class TestResolver implements PinResolver {
         'its guard',
       );
     }
+
+    // Body check before the pass check, so a rewritten assertion is caught on a
+    // developer's machine too — the results file is a CI artifact, and waiting
+    // for CI to notice a gutted test is waiting too long.
+    if (pin.expected != null) {
+      // Anchor on a *quoted string containing* the name, matching the substring
+      // semantics of the existence check above — pins routinely cite a readable
+      // fragment of a longer test name. Requiring the quotes keeps a passing
+      // mention of the same words in a comment from anchoring the walk.
+      final body = braceBlockAfter(
+        source,
+        RegExp('[\'"][^\'"]*${RegExp.escape(name)}[^\'"]*[\'"]'),
+      );
+      if (body == null) {
+        return PinResult(
+          pin,
+          PinStatus.broken,
+          'found the name "$name" but not a body to hash — is it still a test?',
+        );
+      }
+      final actual = contentHash(normalizeSource(body));
+      if (actual != pin.expected) {
+        return PinResult(
+          pin,
+          PinStatus.drifted,
+          'the body of "$name" changed (@$actual, prose pins '
+          '@${pin.expected}) — confirm it still asserts the documented '
+          'guarantee, then re-pin',
+          actual: actual,
+        );
+      }
+    }
+
     if (_passed == null && resultsFile.existsSync()) {
       _passed = resultsFile.readAsLinesSync().map((l) => l.trim()).toSet();
     }

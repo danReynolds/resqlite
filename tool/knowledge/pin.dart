@@ -204,6 +204,30 @@ String contentHash(String s) {
       .substring(0, 4);
 }
 
+/// The brace-balanced `{ … }` block following the first match of [anchor].
+///
+/// Shared by every resolver that needs "the body of this thing" — a function
+/// declaration, or the closure a test case is written inside. A brace walk
+/// rather than a parse, deliberately: it has to work for whatever language a
+/// project points the pin system at, and the result is only ever fed to a
+/// change detector.
+String? braceBlockAfter(String source, Pattern anchor) {
+  final matches = anchor.allMatches(source);
+  if (matches.isEmpty) return null;
+  final open = source.indexOf('{', matches.first.end);
+  if (open < 0) return null;
+  var depth = 0;
+  for (var i = open; i < source.length; i++) {
+    if (source[i] == '{') {
+      depth++;
+    } else if (source[i] == '}') {
+      depth--;
+      if (depth == 0) return source.substring(open, i + 1);
+    }
+  }
+  return null;
+}
+
 /// Strips comments and collapses whitespace so cosmetic edits — reflowing,
 /// renaming a comment, adding a blank line — do not read as semantic drift.
 ///

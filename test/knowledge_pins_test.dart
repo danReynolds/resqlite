@@ -320,6 +320,61 @@ void main() {
       expect(r.status, PinStatus.unknown);
       expect(r.status, isNot(PinStatus.current));
     });
+
+    // A test name is a label, not evidence. Without a body binding, the whole
+    // assertion can be replaced and the pin still resolves — at the highest
+    // strength in the system, for a guarantee nothing guards any more.
+    group('body binding', () {
+      const real = "test('always emits', () {\n  expect(rows, isNotEmpty);\n});";
+      const gutted = "test('always emits', () {\n  expect(1, 1);\n});";
+
+      Future<PinResult> check(Directory root, String hash) =>
+          TestResolver(root, results(['always emits']))
+              .resolve(onePin('[[test:test/stream_test.dart#always emits@$hash]]'));
+
+      /// The body hash the resolver currently computes for [body].
+      Future<String> hashOf(String body) async {
+        final r = await check(repoWithTest(body), '0000');
+        return r.status == PinStatus.current
+            ? '0000'
+            : RegExp(r'@(\w{4})').firstMatch(r.detail)!.group(1)!;
+      }
+
+      test('an unchanged body is current', () async {
+        final h = await hashOf(real);
+        expect((await check(repoWithTest(real), h)).status, PinStatus.current);
+      });
+
+      test('a gutted assertion drifts even though the name still passes',
+          () async {
+        final h = await hashOf(real);
+        final r = await check(repoWithTest(gutted), h);
+        expect(r.status, PinStatus.drifted,
+            reason: 'expect(1, 1) asserts nothing but keeps the name');
+        expect(r.detail, contains('still asserts'));
+      });
+
+      test('a comment-only edit does not drift', () async {
+        final h = await hashOf(real);
+        const recommented =
+            "test('always emits', () {\n  // why this matters\n  expect(rows, isNotEmpty);\n});";
+        expect((await check(repoWithTest(recommented), h)).status,
+            PinStatus.current);
+      });
+
+      test('a name with no surrounding body is broken', () async {
+        final root = repoWithTest("const label = 'always emits';");
+        final r = await check(root, 'abcd');
+        expect(r.status, PinStatus.broken);
+      });
+
+      test('a name-only pin still resolves, for back-compatibility', () async {
+        final root = repoWithTest(real);
+        final r = await TestResolver(root, results(['always emits']))
+            .resolve(onePin(pin));
+        expect(r.status, PinStatus.current);
+      });
+    });
   });
 
   group('BenchResolver', () {

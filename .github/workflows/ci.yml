@@ -82,7 +82,19 @@ jobs:
       - name: Analyze
         run: dart analyze --fatal-infos
       - name: Run tests
-        run: dart test --timeout 60s
+        # --file-reporter records machine-readable results alongside the normal
+        # human output, so knowledge pins can be proven against a real test run
+        # without turning the log into a JSON stream. A failing suite fails this
+        # step directly, rather than being masked inside a pipeline.
+        run: dart test --timeout 60s --file-reporter=json:build/test-results.json
+      - name: Record passing tests for knowledge pins
+        run: dart run tool/knowledge/record_passing_tests.dart build/test-results.json
+      - name: Verify knowledge pins
+        # Lives in this job because it is the one with the test results and the
+        # drift codegen. --strict promotes `unknown` to an error, so a pin whose
+        # dataset never arrived fails rather than reporting coverage it does not
+        # have.
+        run: dart run tool/knowledge/verify.dart --report --strict
       - name: Verify trace_sqlite native hook mode
         run: dart run tool/trace_sqlite_smoke.dart
 
@@ -120,15 +132,6 @@ jobs:
         run: dart run benchmark/check_experiment_signals.dart
       - name: Verify knowledge links and claim citations
         run: dart run benchmark/check_knowledge_links.dart
-      - name: Record passing tests for knowledge pins
-        # pipefail matters here: without it the pipeline reports the recorder's
-        # status and a failed `dart test` passes silently, leaving a thin
-        # results file that quietly downgrades every `test:` pin to unknown.
-        run: set -o pipefail && dart test --reporter=json | dart run tool/knowledge/record_passing_tests.dart
-      - name: Verify knowledge pins
-        # --strict promotes `unknown` to an error: in CI every dataset is
-        # supposed to be present, so a pin that cannot be checked is a failure.
-        run: dart run tool/knowledge/verify.dart --report --strict
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
 

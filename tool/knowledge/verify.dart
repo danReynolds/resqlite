@@ -155,6 +155,24 @@ void _printGroundedness(
     '\ntest = a passing assertion proves it · bench = the number is current · '
     'code = the mechanism is unchanged · claim = the belief stands',
   );
+
+  // A `test:` pin without a body hash binds a label, not an assertion: the test
+  // could be rewritten to assert something else and still resolve. Since `test`
+  // is the highest-strength namespace, leaving that unsaid would overstate the
+  // corpus — so name the count rather than quietly averaging it in.
+  final unbound = byDoc.values
+      .expand((rs) => rs)
+      .where((r) => r.pin.namespace == 'test' && r.pin.expected == null)
+      .toList();
+  if (unbound.isNotEmpty) {
+    print(
+      '\n${unbound.length} test pin(s) bind a name but not a body, so a '
+      'rewritten assertion would still pass. Add a body hash to close that:',
+    );
+    for (final r in unbound) {
+      print('  ${r.pin.site.file}:${r.pin.site.line}  ${r.pin.raw}');
+    }
+  }
 }
 
 Future<void> _applyFixes(
