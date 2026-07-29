@@ -307,9 +307,23 @@ final class StreamEngine {
           };
         }
 
-        // If an invalidation occurred while performing the entry's initial query then the entry
-        // needs to be re-queried since its dependencies were not known at the time and this result could be stale.
+        // A write landed while this initial query was in flight, so these rows
+        // are already known to be superseded. Don't paint them: poison the
+        // comparison baseline so the catch-up re-query is guaranteed to report
+        // a change, and let that emission be the stream's first.
+        //
+        // Clearing the baseline is what makes suppression safe. Suppressing
+        // the initial emission while leaving the baseline set to these rows is
+        // the exp 255 bug: the re-query then compares against the very rows it
+        // replaced, reports "unchanged", and the stream goes permanently
+        // silent. With no baseline there is nothing to match, so the re-query
+        // always emits — and `_requery` propagates errors to subscribers, so a
+        // stream always resolves to a value or an error.
+        //
+        // Measured (exp 256): this costs ~1 ms of time-to-correct-value and
+        // removes the one stale frame emit-then-correct rendered every time.
         if (entry.dirty) {
+          entry.lastRowCount = null;
           _requeryQueue.add(entry);
           _flushQueue();
         } else {
@@ -468,7 +482,11 @@ final class StreamEntry {
   /// ([EXP-077](../../experiments/077-cheap-check-first-sweep.md)). -1 means
   /// "no baseline yet" — the initial query hasn't returned. Compared with the
   /// fresh count as an additional equality guard alongside the result hash.
-  int lastRowCount = -1;
+  /// Row count of the last result emitted to subscribers, or null when there
+  /// is no baseline to compare against — a fresh entry, or one whose initial
+  /// result was withheld because a write superseded it. A null baseline
+  /// guarantees the next re-query reports a change and emits.
+  int? lastRowCount;
 
   /// Whether the stream is dirty and needs to be requeried.
   bool dirty = false;

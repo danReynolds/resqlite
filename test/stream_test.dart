@@ -102,6 +102,96 @@ void main() {
       );
     });
 
+    test(
+      'stream always emits its initial result even when a write lands mid-query',
+      () async {
+        // Regression: a write that dirtied an entry while its initial query was
+        // in flight used to suppress the initial emission in favour of a
+        // catch-up re-query — but `lastResultHash` was already set from those
+        // rows, so `selectIfChanged` reported "unchanged" and the stream
+        // emitted NOTHING, permanently. Writing immediately after opening a
+        // stream is ordinary usage, so the stream must still emit.
+        // Seed enough rows that the stream's initial query is still running
+        // when the writes below dispatch — that is the race window.
+        await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+          for (var i = 0; i < 40000; i++) ['seed_$i', i],
+        ]);
+
+        final seen = <int>[];
+        final sub = db
+            .stream('SELECT id, name, value FROM items')
+            .map((rows) => rows.length)
+            .listen(seen.add);
+        addTearDown(sub.cancel);
+
+        // No await between opening the stream and writing: the writes race the
+        // initial query on purpose.
+        await Future.wait([
+          for (var i = 0; i < 8; i++)
+            db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+              'r_$i',
+              i,
+            ]),
+        ]);
+
+        await Future.doWhile(() async {
+          if (seen.isNotEmpty && seen.last == 40008) return false;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          return true;
+        }).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail(
+            'stream never reached the post-write count; '
+            'emitted: $seen',
+          ),
+        );
+
+        expect(seen, isNotEmpty, reason: 'the initial result must be emitted');
+        expect(seen.last, 40008);
+      },
+    );
+
+    test(
+      'stream over an empty result still emits when a write races it',
+      () async {
+        // An empty result hashes to 0, so 0 is a legitimate baseline rather
+        // than an impossible one. Poisoning the baseline by hash alone would
+        // leave this stream comparing 0 against 0, reporting "unchanged", and
+        // going silent — the exp 255 failure, reachable only when the query
+        // matches nothing. The row-count sentinel is what rules it out.
+        await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+          for (var i = 0; i < 40000; i++) ['seed_$i', i],
+        ]);
+
+        final seen = <int>[];
+        final sub = db
+            .stream("SELECT id FROM items WHERE name = 'no_such_row'")
+            .map((rows) => rows.length)
+            .listen(seen.add);
+        addTearDown(sub.cancel);
+
+        // Races the initial query, and leaves the result set still empty.
+        await Future.wait([
+          for (var i = 0; i < 8; i++)
+            db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+              'other_$i',
+              i,
+            ]),
+        ]);
+
+        await Future.doWhile(() async {
+          if (seen.isNotEmpty) return false;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          return true;
+        }).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail('empty-result stream never emitted'),
+        );
+
+        expect(seen.first, 0, reason: 'an empty result is still a result');
+      },
+    );
+
     tearDown(() async {
       await db.close();
       if (await tempDir.exists()) {

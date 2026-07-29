@@ -1,0 +1,19 @@
+{
+  "directions": ["stream-rerun-dispatch"],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "When a write races a stream's initial query, the stream suppresses the known-stale initial rows and emits only the corrected result. Measured cost is ~1.4 ms at 20k rows and ~0.4 ms at 60k on time-to-correct-value, because the catch-up re-query is already in flight in either design; the benefit is removing the one stale frame that emit-then-correct rendered on every raced stream.",
+    "Time-to-first-emission is the wrong metric for a reactive stream when the first emission is known to be superseded. The metric that matters is time-to-correct-value — when the subscriber can trust what it sees — and on that clock the two designs are within about a millisecond."
+  ],
+  "claims": [
+    {
+      "id": "256.1",
+      "text": "A stream never emits rows it already knows a write superseded: when the initial query is dirtied mid-flight the comparison baseline is poisoned and only the corrected result is emitted. This costs ~0.4-1.4 ms of time-to-correct-value and removes the stale frame that emit-then-correct rendered on every raced stream; unraced streams are unaffected.",
+      "conditions": "M1 Pro · 1k/20k/60k seed race windows · 12 samples/shape · 2026-07"
+    }
+  ],
+  "nextSignals": [
+    "Stream emission semantics are settled: always resolves (exp 255), never stale (exp 256). Remaining stream-rerun-dispatch work is throughput — exp 239's parked-read batching, preserved but unshipped — not correctness.",
+    "A skeleton-UI workload that prefers stale rows to no rows would want the opposite policy. That is an opt-in public-API question (an emission-policy parameter on `stream()`), not a default to flip; it needs a real consumer asking before it is worth the surface area."
+  ]
+}

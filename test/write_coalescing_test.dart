@@ -103,9 +103,11 @@ void main() {
           .stream('SELECT COUNT(*) AS c FROM items')
           .map((rows) => rows.first['c'] as int);
 
-      // emitsThrough waits for the post-burst count, tolerating the initial 0
-      // and any intermediate emissions — no fixed-delay sleeps, so it can't
-      // flake under load.
+      // emitsThrough tolerates the initial count and any intermediate
+      // emissions. This shape is also a live guard on the initial-emission
+      // race: these writes dispatch while the stream's initial query is in
+      // flight, and a regression there strands the stream with no emissions
+      // at all (see stream_test's 'emits its initial result' case).
       final reachedEight = expectLater(counts, emitsThrough(8));
 
       await Future.wait([
