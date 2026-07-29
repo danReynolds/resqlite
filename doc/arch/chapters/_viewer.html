@@ -186,7 +186,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .flow { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-2); margin: 2px 0; }
 /* system map */
 .sysmap { margin: 22px 0 8px; }
-.sm-grid { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 22px; align-items: stretch; }
+.sm-grid { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 20px; align-items: start; }
 .sm-col { display: flex; flex-direction: column; gap: 22px; }
 .sm-boundary {
   border-left: 2px dashed var(--stale); border-right: 2px dashed var(--stale);
@@ -272,6 +272,13 @@ let asOf = TODAY;
 
 const liveAt = (c, t) => c.birth != null && c.birth <= t && (c.death == null || c.death > t);
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// Chapters are markdown, so render the inline subset the prose actually uses.
+// Applied *after* escaping — the source is trusted repo content, but escaping
+// first keeps the pipeline safe if that ever stops being true.
+const md = s => esc(s)
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+  .replace(/`([^`]+)`/g, '<code>$1</code>');
 const firstSentence = s => {
   const m = s.match(/^.*?[.!?](?=\s|$)/);
   return m ? m[0] : s;
@@ -539,7 +546,7 @@ function compCard(m) {
   return `<button class="comp" data-comp="${m.id}">
     <div class="c-kicker">${m.kicker}</div>
     <div class="c-name">${m.name}</div>
-    <div class="c-stance">${esc(m.summary)}</div>
+    <div class="c-stance">${md(m.summary)}</div>
     <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
   </button>`;
 }
@@ -582,7 +589,7 @@ function renderBeliefs(compId) {
         if (sec.h) h += `<h3>${esc(sec.h)}</h3>`;
         sec.ps.forEach((para, pi) => {
           const ctx = `${m.id}-${si}-${pi}`;
-          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(esc(para), ctx)}</p>
+          h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(para), ctx)}</p>
             <div class="ev-drawer" id="evd-${ctx}"></div>`;
         });
         if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
