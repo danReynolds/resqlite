@@ -63,6 +63,9 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: baseline; gap: 9px; text-decoration: none; color: inherit; }
 .brand b { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
 .brand span { font-size: 11px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.sitenav { display: flex; gap: 16px; margin-left: 8px; padding-left: 18px; border-left: 1px solid var(--line); }
+.sitenav a { font-size: 13px; color: var(--ink-2); text-decoration: none; }
+.sitenav a:hover { color: var(--accent); }
 .spacer { margin-left: auto; }
 .searchbox { position: relative; width: min(320px, 34vw); }
 .searchbox input {
@@ -90,8 +93,8 @@ a { color: var(--accent); }
 
 /* ---------- shell ---------- */
 .shell {
-  display: grid; grid-template-columns: 250px minmax(0, 1fr) 348px;
-  gap: 0; max-width: 1560px; margin: 0 auto; align-items: start;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr);
+  gap: 0; max-width: 1180px; margin: 0 auto; align-items: start;
 }
 .sidebar {
   position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
@@ -125,60 +128,112 @@ a { color: var(--accent); }
 
 main { padding: 34px 46px 90px; min-width: 0; }
 
-/* ---------- references panel ---------- */
-.refs {
-  position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
-  display: flex; flex-direction: column;
-  border-left: 1px solid var(--line); background: var(--paper);
+/* ---------- evidence drawer ----------
+   Off-canvas until a citation is clicked: evidence is something the reader
+   asks for, and a panel that is always open is furniture rather than an
+   answer. */
+/* Deliberately faint: the drawer is a companion to the prose, not a modal over
+   it — the passage you were reading has to stay legible beside its evidence.
+   The scrim exists to catch a click-away, not to dim the page. */
+.scrim {
+  position: fixed; inset: 0; z-index: 45; background: rgba(15, 15, 20, .12);
+  opacity: 0; pointer-events: none; transition: opacity .26s ease;
 }
-.refs-hd { padding: 22px 20px 12px; border-bottom: 1px solid var(--line); }
-.refs-hd .t { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3); }
-.refs-hd .s { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
-.refs-body { flex: 1; overflow-y: auto; padding: 14px 16px 40px; scroll-behavior: smooth; }
-.refs-empty { font-size: 12.5px; color: var(--ink-3); font-style: italic; padding: 8px 4px; }
-
-.ref {
-  border: 1px solid var(--line); border-radius: 11px; background: var(--surface);
-  padding: 13px 14px; margin-bottom: 10px; scroll-margin-top: 12px;
-  transition: border-color .15s, box-shadow .15s, opacity .15s;
+.scrim.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; z-index: 50; top: 0; right: 0; width: min(452px, 94vw); height: 100vh;
+  display: flex; flex-direction: column; background: var(--surface);
+  border-left: 1px solid var(--line); box-shadow: -24px 0 60px rgba(0, 0, 0, .16);
+  transform: translateX(100%); transition: transform .3s cubic-bezier(.32, .72, 0, 1);
 }
-.ref.dim { opacity: .58; }
-.ref.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); opacity: 1; }
-@keyframes refflash { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 3px var(--accent-soft); } }
-.ref.flash { animation: refflash .5s ease-out; }
-.ref-top { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-.ref-id { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; font-weight: 600; color: var(--accent); }
-.ref-state {
-  margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px;
-  letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 20px;
+.drawer.open { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .scrim { transition: none; }
+}
+.dr-head {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 16px 18px; border-bottom: 1px solid var(--line);
+}
+.dr-id { font-family: ui-monospace, Menlo, monospace; font-size: 13px; font-weight: 650; color: var(--accent); }
+.dr-state {
+  font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .08em;
+  text-transform: uppercase; padding: 1.5px 8px; border-radius: 20px;
   border: 1px solid currentColor; color: var(--ok);
 }
-.ref-state.s-superseded, .ref-state.s-refined { color: var(--warn); }
-.ref-state.s-refuted { color: var(--bad); }
-.ref-text { font-size: 13px; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
-.ref.dim .ref-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.ref-src { border-top: 1px solid var(--line); padding-top: 9px; }
-.ref-exp { font-size: 12.5px; font-weight: 600; line-height: 1.4; margin-bottom: 3px; }
-.ref-facts { display: flex; flex-wrap: wrap; gap: 3px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-3); }
-.ref-facts .k { color: var(--accent); }
-.ref-facts .cls { color: var(--meas); }
-.ref-more { margin-top: 9px; }
-.ref-more summary { cursor: pointer; font-size: 11.5px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; list-style: none; }
-.ref-more summary::-webkit-details-marker { display: none; }
-.ref-more summary::before { content: '▸ '; color: var(--ink-3); }
-.ref-more[open] summary::before { content: '▾ '; }
-.ref-more summary:hover { color: var(--accent); }
-.ref-more .body { font-size: 12px; line-height: 1.6; color: var(--ink-2); padding: 8px 2px 2px; max-height: 260px; overflow-y: auto; }
-.ref-prior { border-left: 2px solid var(--line); padding: 2px 0 2px 11px; margin: 8px 0; }
-.ref-prior .w { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--warn); }
-.ref-prior .w.origin { color: var(--ink-3); }
-.ref-prior p { margin: 3px 0 0; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
-.ref-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.ref-links a {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; text-decoration: none;
-  border: 1px solid var(--line-2); border-radius: 7px; padding: 3px 9px; color: var(--ink-2);
+.dr-state.s-superseded, .dr-state.s-refined { color: var(--warn); }
+.dr-state.s-refuted { color: var(--bad); }
+.dr-close { margin-left: auto; font-size: 20px; line-height: 1; color: var(--ink-3); padding: 2px 6px; border-radius: 6px; }
+.dr-close:hover { color: var(--ink); background: var(--raised); }
+.dr-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 18px 44px; }
+
+/* Sections rise as the drawer lands — a short stagger that reads as the panel
+   filling in, not as decoration. */
+@keyframes drRise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+.drawer.open .dr-sec { animation: drRise .34s cubic-bezier(.32,.72,0,1) backwards; }
+.drawer.open .dr-sec:nth-child(1) { animation-delay: .04s; }
+.drawer.open .dr-sec:nth-child(2) { animation-delay: .09s; }
+.drawer.open .dr-sec:nth-child(3) { animation-delay: .14s; }
+.drawer.open .dr-sec:nth-child(4) { animation-delay: .19s; }
+.drawer.open .dr-sec:nth-child(5) { animation-delay: .24s; }
+@media (prefers-reduced-motion: reduce) { .drawer.open .dr-sec { animation: none; } }
+
+.dr-claim { font-size: 15px; line-height: 1.62; margin: 0 0 14px; color: var(--ink); }
+.dr-sec { margin-bottom: 22px; }
+.dr-sec > h4 {
+  font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 500; margin: 0 0 8px;
 }
-.ref-links a:hover { border-color: var(--accent); color: var(--accent); }
+.dr-sec p { font-size: 13.5px; line-height: 1.66; color: var(--ink-2); margin: 0 0 10px; }
+.dr-card { border: 1px solid var(--line); border-radius: 11px; padding: 13px 14px; background: var(--paper); }
+.dr-exp-title { font-size: 14px; font-weight: 640; line-height: 1.35; margin-bottom: 7px; letter-spacing: -.01em; }
+.dr-facts { display: flex; flex-wrap: wrap; gap: 4px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-3); }
+.dr-tag { border: 1px solid var(--line-2); border-radius: 20px; padding: 1px 8px; }
+.dr-tag.k { color: var(--accent); border-color: currentColor; }
+.dr-tag.cls { color: var(--meas); border-color: currentColor; }
+.dr-tag.ok { color: var(--ok); border-color: currentColor; }
+.dr-tag.no { color: var(--bad); border-color: currentColor; }
+.dr-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; font-family: ui-monospace, Menlo, monospace; line-height: 1.5; }
+.dr-list { list-style: none; margin: 0; padding: 0; }
+.dr-list li {
+  position: relative; font-size: 13px; line-height: 1.6; color: var(--ink-2);
+  padding: 0 0 0 15px; margin-bottom: 9px;
+}
+ul.dr-list li::before { content: ''; position: absolute; left: 0; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: .55; }
+ol.dr-list { list-style: decimal; padding-left: 19px; }
+ol.dr-list li { padding-left: 3px; }
+ol.dr-list li::marker { color: var(--accent); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.dr-quote {
+  margin: 0 0 12px; padding: 3px 0 3px 13px; border-left: 2px solid var(--line-2);
+  color: var(--ink-3); font-style: italic; font-size: 13px; line-height: 1.62;
+}
+.dr-sec a.ext::after { content: ' ↗'; font-size: .82em; opacity: .7; }
+.dr-prior { border-left: 2px solid var(--line); padding: 1px 0 1px 12px; margin-bottom: 12px; }
+.dr-prior .w { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--warn); }
+.dr-prior .w.origin { color: var(--ink-3); }
+.dr-prior p { margin: 4px 0 0; font-size: 12.5px; }
+.dr-cta {
+  display: block; text-align: center; text-decoration: none; font-size: 13px; font-weight: 560;
+  border: 1px solid var(--accent); color: var(--accent); border-radius: 9px; padding: 10px 12px;
+  margin-top: 4px;
+}
+.dr-cta:hover { background: var(--accent-soft); }
+.dr-cta.sub { border-color: var(--line-2); color: var(--ink-2); font-weight: 400; margin-top: 8px; }
+.dr-cta.sub:hover { border-color: var(--accent); color: var(--accent); background: none; }
+.dr-loading { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+.dr-sec a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+.dr-sec a:hover { border-bottom-color: currentColor; }
+.dr-sec code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-size: .88em; }
+.dr-sec strong { color: var(--ink); font-weight: 640; }
+/* Result tables are wide by nature; they scroll inside the drawer rather than
+   forcing the panel wider or wrapping into unreadable columns. */
+.dr-tablewrap { overflow-x: auto; margin: 0 0 12px; }
+.dr-table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.dr-table th, .dr-table td {
+  border-bottom: 1px solid var(--line); padding: 5px 10px 5px 0;
+  text-align: left; white-space: nowrap;
+}
+.dr-table th { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+.dr-table td { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* ---------- prose ---------- */
 .page-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
@@ -260,9 +315,6 @@ pre.code code { background: none; padding: 0; }
 .ev-inline:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ev-inline.ev-stale { color: var(--warn); text-decoration: line-through; }
 .ev-inline.cited { border-color: var(--accent); background: var(--accent-soft); }
-.ev-drawer { display: none; margin: 2px 0 18px; }
-.ev-drawer.open { display: block; }
-.ev-drawer .belief { border: 1px solid var(--line-2); border-radius: 10px; padding: 13px 16px; background: var(--surface); }
 .belief { padding: 15px 2px; border-bottom: 1px solid var(--line); }
 .belief-head { font-size: 14.5px; font-weight: 600; margin: 0 0 3px; text-wrap: balance; }
 .belief-rest { font-size: 13.5px; color: var(--ink-2); margin: 2px 0 7px; max-width: 70ch; }
@@ -298,9 +350,8 @@ pre.code code { background: none; padding: 0; }
 mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
 .coverage { color: var(--ink-3); font-size: 12.5px; margin: 26px 0 0; }
 
-@media (max-width: 1240px) {
+@media (max-width: 1040px) {
   .shell { grid-template-columns: 236px minmax(0, 1fr); }
-  .refs { display: none; }
   main { padding: 30px 32px 80px; }
 }
 @media (max-width: 860px) {
@@ -314,6 +365,13 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 
 <div class="topbar">
   <a class="brand" href="#/"><b>resqlite</b> <span>architecture</span></a>
+  <nav class="sitenav" aria-label="Site">
+    <a href="../index.html">Home</a>
+    <a href="../experiments/index.html">Experiments</a>
+    <a href="../benchmarks/index.html">Benchmarks</a>
+    <a href="../api/resqlite/resqlite-library.html">API</a>
+    <a href="../blog/index.html">Blog</a>
+  </nav>
   <div class="spacer"></div>
   <div class="searchbox">
     <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
@@ -329,14 +387,17 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 <div class="shell">
   <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
   <main id="view"></main>
-  <aside class="refs" id="refs" aria-label="References">
-    <div class="refs-hd">
-      <div class="t">References</div>
-      <div class="s" id="refs-sub">Evidence behind what you're reading</div>
-    </div>
-    <div class="refs-body" id="refs-body"></div>
-  </aside>
 </div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-label="Evidence" aria-hidden="true">
+  <div class="dr-head">
+    <span class="dr-id" id="dr-id"></span>
+    <span class="dr-state" id="dr-state"></span>
+    <button class="dr-close" id="dr-close" aria-label="Close evidence">×</button>
+  </div>
+  <div class="dr-body" id="dr-body"></div>
+</aside>
 
 <script>
 const KG = __KG__;
@@ -399,10 +460,10 @@ const secRoute = (pageId, secId) => `#/${pageId}/${secId}`;
 const anchorLink = (pageId, secId) =>
   `<a class="anchor" href="${secRoute(pageId, secId)}" aria-label="Link to this section">#</a>`;
 
-function chipify(text, ctx) {
+function chipify(text) {
   return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
     const stale = byId[id] && byId[id].state !== 'live';
-    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-evd="${ctx}" data-claim="${id}">${id}</button>`;
+    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-claim="${id}">${id}</button>`;
   });
 }
 
@@ -433,9 +494,7 @@ function bodyHtml(sec, ctxBase) {
       h += `<pre class="code"><code>${highlight(p.code)}</code></pre>`;
       return;
     }
-    const ctx = `${ctxBase}-${pi}`;
-    h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(p), ctx)}</p>
-      <div class="ev-drawer" id="evd-${ctx}"></div>`;
+    h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(p))}</p>`;
   });
   return h;
 }
@@ -615,8 +674,12 @@ function renderLog() {
 // ---------- shell: nav, references, routing ----------
 const view = document.getElementById('view');
 const sidebarEl = document.getElementById('sidebar');
-const refsBody = document.getElementById('refs-body');
-const refsSub = document.getElementById('refs-sub');
+const drawerEl = document.getElementById('drawer');
+const scrimEl = document.getElementById('scrim');
+const drBody = document.getElementById('dr-body');
+const drIdEl = document.getElementById('dr-id');
+const drStateEl = document.getElementById('dr-state');
+const drCloseEl = document.getElementById('dr-close');
 let route = '/';
 
 function renderNav() {
@@ -646,105 +709,242 @@ function renderNav() {
     </div>`;
 }
 
-// ---------- references panel ----------
+// ---------- evidence drawer ----------
 //
-// Each paragraph knows which claims it cites, so the panel can show the union
-// for whatever is on screen: evidence follows reading position instead of
-// waiting to be asked for. Clicking a chip pins one card until the next scroll.
+// The long-form writeups already ship as `experiments/history.json` for the
+// experiments dashboard. Fetching that on first open — rather than embedding
+// 211 writeups — keeps this page small and means the drawer shows whatever the
+// dashboard shows, with no second copy to drift.
 
-let refIndex = [];     // [{ el: <p>, ids: [claimId] }] in document order
-let shownKey = '';     // ids currently rendered, so scrolling does not re-render
-let pinned = null;     // chip-clicked claim, cleared on the next scroll
-
-function buildRefIndex() {
-  refIndex = [];
-  for (const p of view.querySelectorAll('.prose p')) {
-    const ids = [...p.querySelectorAll('.ev-inline')].map(b => b.dataset.claim);
-    if (ids.length) refIndex.push({ el: p, ids: [...new Set(ids)] });
+let historyById = null;
+let historyState = 'idle';
+async function loadHistory() {
+  if (historyState === 'done' || historyState === 'failed') return historyById;
+  if (historyState === 'loading') return null;
+  historyState = 'loading';
+  try {
+    const res = await fetch('../experiments/history.json', { cache: 'no-store' });
+    const data = await res.json();
+    historyById = {};
+    for (const e of data.experiments || []) historyById[e.id] = e;
+    historyState = 'done';
+  } catch {
+    historyState = 'failed';
   }
+  return historyById;
 }
 
-function refCard(id, focused) {
-  const c = byId[id];
-  if (!c) return '';
+/// Block-level markdown for the drawer.
+///
+/// Experiment writeups carry emphasis, links, inline code and result tables.
+/// Escaping them wholesale turned the richest evidence on the page into a wall
+/// of literal asterisks and pipes, so this renders the block subset they
+/// actually use. Cross-references between writeups (`[exp 241](241-….md)`) are
+/// rewritten to the experiments dashboard — inside the site, where the reader
+/// already is, rather than out to a raw file.
+function mdInline(s) {
+  return esc(String(s))
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, href) => {
+      const local = href.match(/^(\d{3})[a-z0-9-]*\.md/i);
+      const url = local ? `../experiments/index.html?exp=${local[1]}` : href;
+      if (/^\s*javascript:/i.test(url)) return text;
+      const external = /^https?:/i.test(url);
+      return `<a href="${url}"${external ? ' target="_blank" rel="noopener" class="ext"' : ''}>${text}</a>`;
+    })
+    // Lazy, and `[\s\S]` rather than `[^*]`: bold routinely wraps nested
+    // emphasis ("**mildly *favorable* at pool-4**"), which an exclusion class
+    // cannot cross — it left the markers as literal asterisks.
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*<])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // history.json truncates long fields, which can cut a bold span in half and
+    // strand its opening marker. Nothing downstream can pair it, so drop it
+    // rather than show the reader raw asterisks.
+    .replace(/\*\*/g, '');
+}
+function mdTable(lines) {
+  const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(s => s.trim());
+  const rows = lines.filter(l => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l));
+  if (!rows.length) return '';
+  const head = cells(rows[0]);
+  return `<div class="dr-tablewrap"><table class="dr-table">
+    <thead><tr>${head.map(c => `<th>${mdInline(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.slice(1).map(r =>
+      `<tr>${cells(r).map(c => `<td>${mdInline(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+// `[-*+] ` requires the trailing space, so a line opening with `**bold**` is
+// not mistaken for a bullet.
+const RE_BULLET = /^\s*[-*+]\s+/;
+const RE_ORDERED = /^\s*\d+[.)]\s+/;
+const RE_QUOTE = /^\s*>\s?/;
+
+/// Walks a block line by line rather than classifying it as a whole: writeups
+/// mix a lead-in sentence with the list that follows it, and treating that as
+/// one paragraph ran the items together into unreadable prose.
+function mdLines(lines) {
+  let html = '', para = [], list = null, listTag = 'ul', quote = [];
+  const flushPara = () => {
+    if (para.length) { html += `<p>${mdInline(para.join(' '))}</p>`; para = []; }
+  };
+  const flushList = () => {
+    if (list) {
+      html += `<${listTag} class="dr-list">${
+        list.map(i => `<li>${mdInline(i)}</li>`).join('')}</${listTag}>`;
+      list = null;
+    }
+  };
+  const flushQuote = () => {
+    if (quote.length) {
+      html += `<blockquote class="dr-quote">${mdInline(quote.join(' '))}</blockquote>`;
+      quote = [];
+    }
+  };
+
+  for (const line of lines) {
+    if (RE_QUOTE.test(line)) {
+      flushPara(); flushList();
+      quote.push(line.replace(RE_QUOTE, ''));
+      continue;
+    }
+    const bullet = RE_BULLET.test(line), ordered = RE_ORDERED.test(line);
+    if (bullet || ordered) {
+      flushPara(); flushQuote();
+      const tag = bullet ? 'ul' : 'ol';
+      if (list && listTag !== tag) flushList();
+      listTag = tag;
+      list = list || [];
+      list.push(line.replace(bullet ? RE_BULLET : RE_ORDERED, ''));
+      continue;
+    }
+    // An indented line under a list item continues it rather than starting a
+    // paragraph — writeups wrap long items across lines.
+    if (list) { list[list.length - 1] += ' ' + line.trim(); continue; }
+    flushQuote();
+    para.push(line.trim());
+  }
+  flushPara(); flushList(); flushQuote();
+  return html;
+}
+
+function mdBlocks(src) {
+  return String(src).split(/\n{2,}/).map(raw => {
+    const lines = raw.split('\n').filter(l => l.trim());
+    if (!lines.length) return '';
+    if (lines.every(l => l.trim().startsWith('|'))) return mdTable(lines);
+    return mdLines(lines);
+  }).join('');
+}
+
+function lineageHtml(anc) {
+  return anc.map(a => {
+    const cl = a.claim;
+    const when = cl.death
+      ? `held ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}`
+      : `since ${fmtNice(cl.birth)} · still live`;
+    const rel = a.rel === 'supersedes' ? 'replaced' : a.rel === 'refutes' ? 'refuted'
+      : a.rel === 'refines' ? 'refined' : 'validated';
+    return `<div class="dr-prior">
+      <span class="w ${cl.death ? '' : 'origin'}">${rel} · ${when} · exp ${cl.source}</span>
+      <p>${esc(cl.text)}</p></div>`;
+  }).join('');
+}
+
+function bullets(value) {
+  const items = Array.isArray(value) ? value : [value];
+  return `<ul class="dr-list">${items.map(t => `<li>${mdInline(t)}</li>`).join('')}</ul>`;
+}
+
+function drawerHtml(c, detail) {
   const src = expById[c.source] || {};
   const anc = ancestorsOf(c);
-  const state = c.state || 'live';
-  const links = [];
-  if (src.writeupUrl) links.push(`<a href="${src.writeupUrl}" target="_blank" rel="noopener">Writeup ↗</a>`);
-  if (src.signalUrl) links.push(`<a href="${src.signalUrl}" target="_blank" rel="noopener">Signal entry ↗</a>`);
-  if (src.link) links.push(`<a href="${esc(src.link)}" target="_blank" rel="noopener">Change ↗</a>`);
-  return `<article class="ref ${focused ? 'focus' : 'dim'}" data-id="${id}">
-    <div class="ref-top">
-      <span class="ref-id">${id}</span>
-      <span class="ref-state s-${state}">${state}</span>
-    </div>
-    <p class="ref-text">${esc(c.text)}</p>
-    <div class="ref-src">
-      <div class="ref-exp">${esc(src.title || 'Experiment ' + c.source)}</div>
-      <div class="ref-facts">
-        <span class="k">exp ${c.source}</span>
-        ${src.date ? `<span>${src.date}</span>` : ''}
-        ${src.class ? `<span class="cls">${esc(src.class)}</span>` : ''}
-        ${src.status ? `<span>${esc(src.status)}</span>` : ''}
+  const accepted = src.status === 'accepted';
+  const expUrl = `../experiments/index.html?exp=${encodeURIComponent(c.source)}`;
+
+  let h = `<div class="dr-sec"><p class="dr-claim">${esc(c.text)}</p>
+    ${c.conditions ? `<div class="dr-sub">Measured under ${esc(c.conditions)}</div>` : ''}</div>
+
+    <div class="dr-sec"><h4>The experiment behind it</h4>
+      <div class="dr-card">
+        <div class="dr-exp-title">${esc(src.title || 'Experiment ' + c.source)}</div>
+        <div class="dr-facts">
+          <span class="dr-tag k">exp ${c.source}</span>
+          ${src.date ? `<span class="dr-tag">${src.date}</span>` : ''}
+          ${src.class ? `<span class="dr-tag cls">${esc(src.class)}</span>` : ''}
+          ${src.status ? `<span class="dr-tag ${accepted ? 'ok' : 'no'}">${esc(src.status)}</span>` : ''}
+        </div>
       </div>
-      ${c.conditions ? `<div class="ref-facts" style="margin-top:4px"><span>${esc(c.conditions)}</span></div>` : ''}
-    </div>
-    ${focused && src.impact ? `<details class="ref-more"><summary>Method and context</summary>
-      <div class="body">${md(src.impact)}</div></details>` : ''}
-    ${focused && anc.length ? `<details class="ref-more"><summary>${anc.length} earlier belief${anc.length > 1 ? 's' : ''} behind this</summary>
-      <div class="body">${anc.map(a => {
-        const cl = a.claim;
-        const when = cl.death ? `held ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}` : `since ${fmtNice(cl.birth)} · still live`;
-        const rel = a.rel === 'supersedes' ? 'replaced' : a.rel === 'refutes' ? 'refuted'
-          : a.rel === 'refines' ? 'refined' : 'validated';
-        return `<div class="ref-prior"><span class="w ${cl.death ? '' : 'origin'}">${rel} · ${when} · exp ${cl.source}</span>
-          <p>${esc(cl.text)}</p></div>`;
-      }).join('')}</div></details>` : ''}
-    ${focused && links.length ? `<div class="ref-links">${links.join('')}</div>` : ''}
-  </article>`;
+    </div>`;
+
+  if (detail) {
+    const part = (label, text) =>
+      text && String(text).trim() ? `<h4>${label}</h4>${mdBlocks(text)}` : '';
+    // `summary` is inconsistent across the corpus — a headline for some
+    // experiments, the whole rationale for others — so it only appears when
+    // there is no structured problem statement to show instead.
+    let body = part('The problem', detail.problem) || part('In brief', detail.summary);
+    body += part('Hypothesis', detail.hypothesis) + part('Approach', detail.approach) +
+      part('Results', detail.results) +
+      part(accepted ? 'Why it was accepted' : 'Why it was rejected', detail.reasoning);
+    if (body) h += `<div class="dr-sec">${body}</div>`;
+  } else if (historyState === 'loading') {
+    h += `<div class="dr-sec"><p class="dr-loading">Loading the full experiment…</p></div>`;
+  } else if (src.impact) {
+    h += `<div class="dr-sec"><h4>Method and context</h4>${mdBlocks(src.impact)}</div>`;
+  }
+
+  if (src.changed || src.next) {
+    h += `<div class="dr-sec"><h4>Signals</h4>
+      ${src.changed ? `<h4>What it changed</h4>${bullets(src.changed)}` : ''}
+      ${src.next ? `<h4>What it opened up</h4>${bullets(src.next)}` : ''}</div>`;
+  }
+
+  if (anc.length) {
+    h += `<div class="dr-sec"><h4>What this belief replaced</h4>${lineageHtml(anc)}</div>`;
+  }
+
+  h += `<div class="dr-sec">
+    <a class="dr-cta" href="${expUrl}">Open experiment ${c.source} in the dashboard →</a>
+    ${(c.directions || []).length
+      ? `<div class="dr-sub">Research direction · ${esc((c.directions || []).join(', ').replace(/-/g, ' '))}</div>`
+      : ''}
+  </div>`;
+  return h;
 }
 
-function updateRefs(force) {
-  if (!refsBody) return;
-  if (!refIndex.length) {
-    if (shownKey !== 'none') {
-      shownKey = 'none';
-      refsSub.textContent = 'Evidence behind what you\'re reading';
-      refsBody.innerHTML = `<p class="refs-empty">No cited claims on this page.</p>`;
-    }
-    return;
-  }
-  const top = headerHeight();
-  const line = top + 140;
-  const visible = refIndex.filter(r => {
-    const b = r.el.getBoundingClientRect();
-    return b.bottom > top + 8 && b.top < innerHeight - 8;
-  });
-  const inView = visible.length ? visible : [refIndex[0]];
-
-  // Focus follows the paragraph nearest the reading line, unless a chip pinned one.
-  let focus = pinned;
-  if (!focus) {
-    let best = Infinity;
-    for (const r of inView) {
-      const d = Math.abs(r.el.getBoundingClientRect().top - line);
-      if (d < best) { best = d; focus = r.ids[0]; }
-    }
-  }
-  const ids = [...new Set(inView.flatMap(r => r.ids))];
-  if (pinned && !ids.includes(pinned)) ids.unshift(pinned);
-
-  const key = ids.join(',') + '|' + focus;
-  if (key === shownKey && !force) return;
-  shownKey = key;
-
-  refsSub.textContent = ids.length === 1
-    ? '1 claim supports this passage'
-    : `${ids.length} claims support this passage`;
-  refsBody.innerHTML = ids.map(id => refCard(id, id === focus)).join('');
+let openClaim = null;
+async function openDrawer(id) {
+  const c = byId[id];
+  if (!c) return;
+  openClaim = id;
+  const state = c.state || 'live';
+  drIdEl.textContent = id;
+  drStateEl.textContent = state;
+  drStateEl.className = 'dr-state s-' + state;
+  drBody.innerHTML = drawerHtml(c, (historyById || {})[c.source]);
+  drBody.scrollTop = 0;
+  drawerEl.classList.add('open');
+  drawerEl.setAttribute('aria-hidden', 'false');
+  scrimEl.classList.add('open');
   view.querySelectorAll('.ev-inline').forEach(b =>
-    b.classList.toggle('cited', b.dataset.claim === focus));
+    b.classList.toggle('cited', b.dataset.claim === id));
+  drCloseEl.focus();
+
+  if (historyState !== 'done' && historyState !== 'failed') {
+    await loadHistory();
+    // The reader may have moved on or closed the drawer while this was in
+    // flight; only repaint if it is still the same claim on screen.
+    if (openClaim === id && drawerEl.classList.contains('open')) {
+      drBody.innerHTML = drawerHtml(c, (historyById || {})[c.source]);
+    }
+  }
+}
+function closeDrawer() {
+  openClaim = null;
+  drawerEl.classList.remove('open');
+  drawerEl.setAttribute('aria-hidden', 'true');
+  scrimEl.classList.remove('open');
+  view.querySelectorAll('.ev-inline.cited').forEach(b => b.classList.remove('cited'));
 }
 
 /// Highlights the heading you are currently reading under. Runs off scroll
@@ -762,7 +962,6 @@ function spy() {
     sidebarEl.querySelectorAll('.nav-secs a').forEach(a =>
       a.classList.toggle('active', a.dataset.sec === cur));
   }
-  updateRefs();
 }
 function headerHeight() {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 60;
@@ -771,46 +970,24 @@ function headerHeight() {
 function afterRender() {
   wire();
   renderNav();
-  buildRefIndex();
-  pinned = null;
-  shownKey = '';
-  updateRefs(true);
+  closeDrawer();
   spy();
 }
 
-/// Clicking a citation pins it in the references panel — the panel is the
-/// destination, so the chip does not need to duplicate the evidence inline.
-/// Below the panel's breakpoint there is nowhere to send the reader, so the
-/// original in-place drawer stays as the fallback.
 function wire() {
   view.querySelectorAll('.ev-inline').forEach(b =>
     b.addEventListener('click', () => {
-      const c = byId[b.dataset.claim];
-      if (!c) return;
-      const panelVisible = refsBody && refsBody.offsetParent !== null;
-      if (!panelVisible) {
-        const drawer = document.getElementById('evd-' + b.dataset.evd);
-        if (!drawer) return;
-        if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
-          drawer.classList.remove('open'); return;
-        }
-        drawer.dataset.showing = c.id;
-        drawer.innerHTML = beliefCard(c);
-        drawer.classList.add('open');
-        wireHist(drawer);
-        return;
-      }
-      pinned = c.id;
-      updateRefs(true);
-      const card = refsBody.querySelector(`.ref[data-id="${c.id}"]`);
-      if (card) {
-        card.scrollIntoView({ block: 'nearest' });
-        card.classList.add('flash');
-        setTimeout(() => card.classList.remove('flash'), 500);
-      }
+      if (openClaim === b.dataset.claim) closeDrawer();
+      else openDrawer(b.dataset.claim);
     }));
   wireHist(view);
 }
+
+drCloseEl.addEventListener('click', closeDrawer);
+scrimEl.addEventListener('click', closeDrawer);
+addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && openClaim) closeDrawer();
+});
 function wireHist(root) {
   root.querySelectorAll('.hist-btn').forEach(b =>
     b.addEventListener('click', () => {
@@ -853,13 +1030,7 @@ let ticking = false;
 addEventListener('scroll', () => {
   if (ticking) return;
   ticking = true;
-  requestAnimationFrame(() => {
-    ticking = false;
-    // Scrolling hands focus back to reading position — a pinned citation is a
-    // momentary answer to a click, not a mode the reader has to dismiss.
-    pinned = null;
-    spy();
-  });
+  requestAnimationFrame(() => { ticking = false; spy(); });
 }, { passive: true });
 
 // ---------- time machine ----------

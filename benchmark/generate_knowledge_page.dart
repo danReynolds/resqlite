@@ -90,37 +90,49 @@ String buildKnowledgePage({required Directory repoRoot}) {
       .replaceFirst('__STATS__', json.encode(_experimentStats(repoRoot)));
 }
 
-const _repo = 'https://github.com/danReynolds/resqlite/blob/main';
-
-/// Adds the fields the references panel needs but `knowledge-graph.json` does
-/// not carry: the index's `impact` prose (what the experiment actually did and
-/// why), the signal entry's `experimentClass`, and source links.
+/// Adds what the evidence drawer needs but `knowledge-graph.json` does not
+/// carry: the index's `impact` prose, and the signal entry's class, changed
+/// beliefs and follow-on signals.
+///
+/// Only experiments that actually back a claim are enriched — the drawer never
+/// shows the others, and embedding all 211 would triple the page for nothing.
+/// The long-form writeup (problem / hypothesis / results / reasoning) is *not*
+/// embedded: it already ships as `docs/experiments/history.json` for the
+/// experiments dashboard, and the drawer fetches it on first open.
 ///
 /// Enriching here rather than in the graph builder keeps `knowledge-graph.json`
 /// stable — agents and CI consume it, and it should not grow fields that exist
 /// only to render a panel.
 void _enrichExperiments(Directory repoRoot, Map<String, Object?> graph) {
+  final cited = <String>{
+    for (final c in (graph['claims'] as List).cast<Map<String, Object?>>())
+      if (c['source'] != null) c['source'] as String,
+  };
   final experiments = (graph['experiments'] as List).cast<Map<String, Object?>>();
   for (final e in experiments) {
-    final id = e['id'];
+    final id = e['id'] as String?;
+    if (id == null || !cited.contains(id)) continue;
+
     final index = File('${repoRoot.path}/experiments/index/$id.json');
     if (index.existsSync()) {
       final decoded = json.decode(index.readAsStringSync());
       final entry = decoded is List
-          ? decoded.whereType<Map>().firstWhere((_) => true, orElse: () => {})
+          ? (decoded.whereType<Map>().isEmpty
+                ? const {}
+                : decoded.whereType<Map>().first)
           : decoded as Map;
       if (entry['impact'] != null) e['impact'] = entry['impact'];
-      if (entry['link'] != null) e['link'] = entry['link'];
     }
+
     final signal = File('${repoRoot.path}/experiments/signals/entries/$id.json');
     if (signal.existsSync()) {
       final s = json.decode(signal.readAsStringSync());
-      if (s is Map && s['experimentClass'] != null) {
-        e['class'] = s['experimentClass'];
+      if (s is Map) {
+        if (s['experimentClass'] != null) e['class'] = s['experimentClass'];
+        if (s['changedBeliefs'] != null) e['changed'] = s['changedBeliefs'];
+        if (s['nextSignals'] != null) e['next'] = s['nextSignals'];
       }
-      if (signal.existsSync()) e['signalUrl'] = '$_repo/experiments/signals/entries/$id.json';
     }
-    if (e['file'] != null) e['writeupUrl'] = '$_repo/experiments/${e['file']}';
   }
 }
 
