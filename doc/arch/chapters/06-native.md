@@ -6,6 +6,8 @@ zone: native
 diagram: native
 directions: [sqlite-version-and-build-config]
 extraClaims: [229.1, 250.1, 110.1, 183.1, 016.1, 044.1]
+feeds: []
+section: architecture
 ---
 
 Underneath every isolate sits `native/resqlite.c` and a vendored SQLite — specifically sqlite3mc, which adds encryption — compiled through Dart's native assets build hooks. The division of labour is the library's first principle: **C owns the state, Dart owns the orchestration.** Connections, prepared-statement caches, mutexes, and hooks live in C structs that outlive any particular Dart isolate, which is exactly why a sacrificed reader is cheap to replace.

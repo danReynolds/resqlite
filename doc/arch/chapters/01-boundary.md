@@ -5,6 +5,8 @@ kicker: isolate boundary
 zone: boundary
 diagram: boundary
 directions: [result-transfer-shape]
+feeds: [readers, writer]
+section: architecture
 ---
 
 Dart isolates share no mutable state. That is the language's data-race-free guarantee, and it is also resqlite's central design constraint: every query result must travel from a worker isolate to main, and every write parameter from main to the writer. Nothing crosses for free — but the costs differ by orders of magnitude depending on *what* is crossing, and the entire read and write path is shaped around knowing which is which.

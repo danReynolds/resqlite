@@ -5,6 +5,8 @@ kicker: meta
 zone: native
 diagram: meta
 directions: [measurement-system]
+feeds: []
+section: architecture
 ---
 
 Every number in this documentation came through a measurement discipline that had to be learned by getting it wrong first. This chapter is about how resqlite knows what it knows — and it is part of the architecture, because a performance library whose measurements cannot be trusted is a library whose design decisions cannot be trusted either.

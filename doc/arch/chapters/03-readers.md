@@ -6,6 +6,8 @@ zone: workers
 diagram: readers
 directions: []
 extraClaims: [120.1, 239.1, 244.1, 246.1, 236.1, 183.1, 174.1]
+feeds: [native]
+section: architecture
 ---
 
 Reads run on a pool of two to four persistent worker isolates, each bound to its own read-only SQLite connection against the shared WAL. The pool exists to avoid a cost that is invisible until you look for it: spawning an isolate per query costs about 0.08 ms, which on small reads is most of the query. Keeping workers alive amortizes that to zero, and keeping the *C* state alive — connections, prepared-statement caches — means even a worker's death does not throw away the expensive parts.

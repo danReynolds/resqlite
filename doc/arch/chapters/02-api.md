@@ -5,6 +5,8 @@ kicker: main isolate
 zone: main
 diagram: api
 directions: [stream-rerun-dispatch, long-text-stream-hashing]
+feeds: [boundary]
+section: architecture
 ---
 
 resqlite's public surface is deliberately small — `select`, `selectBytes`, `execute`, `executeBatch`, `transaction`, `stream` — and every call is exactly one message to a worker isolate. The design principle behind the whole library is visible in that sentence: the main isolate is a Flutter app's render thread with a 16 ms frame budget, so the API's job is to hand work away and get out of the way.

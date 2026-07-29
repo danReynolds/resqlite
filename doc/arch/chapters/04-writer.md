@@ -5,6 +5,8 @@ kicker: worker isolate
 zone: workers
 diagram: writer
 directions: [parameter-encoding-and-binding]
+feeds: [tx, native]
+section: architecture
 ---
 
 SQLite permits one writer at a time. Rather than fight that with locking schemes, resqlite embraces it: every write in the process routes through a single persistent writer isolate that owns the write connection, processes messages sequentially, and holds transaction state across them. Serialization is not a bottleneck imposed on the design — it is the design, and the optimization work happens *inside* the serial path rather than trying to escape it.

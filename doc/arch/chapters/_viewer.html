@@ -1,320 +1,287 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>resqlite · system knowledge</title>
+<title>resqlite · architecture</title>
 <style>
 :root {
-  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
-  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
-  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
-  --code-bg: #EEF2EF;
+  --paper: #FBFBFA; --surface: #FFFFFF; --raised: #F3F3F1;
+  --ink: #1A1A1E; --ink-2: #55555F; --ink-3: #8B8B96;
+  --line: #E6E6E3; --line-2: #D6D6D2;
+  --accent: #4F46E5; --accent-2: #7C3AED; --accent-soft: #4F46E514;
+  --ok: #157F3D; --warn: #A15C07; --bad: #BE123C; --meas: #0369A1;
+  --code-bg: #F4F4F7;
+  /* aliases the diagram SVGs draw against */
+  --ground: var(--paper); --panel: var(--surface); --stale: var(--warn);
+  --hdr-h: 60px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
-    --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
-    --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
-    --code-bg: #232C29;
+    --paper: #0F0F13; --surface: #17171C; --raised: #1E1E25;
+    --ink: #F2F2F5; --ink-2: #A0A0AC; --ink-3: #6E6E7A;
+    --line: #26262E; --line-2: #34343E;
+    --accent: #A5B4FC; --accent-2: #C4B5FD; --accent-soft: #A5B4FC1C;
+    --ok: #4ADE80; --warn: #FBBF24; --bad: #FB7185; --meas: #7DD3FC;
+    --code-bg: #1C1C24;
   }
 }
 :root[data-theme="dark"] {
-  --ground: #151B19; --panel: #1D2422; --ink: #E3EAE5; --ink-2: #93A099;
-  --line: #2E3833; --accent: #3FBFA9; --accent-soft: #3FBFA922;
-  --ok: #5CBF7A; --bad: #E07A5F; --meas: #92A3D8; --stale: #D4B054;
-  --code-bg: #232C29;
+  --paper: #0F0F13; --surface: #17171C; --raised: #1E1E25;
+  --ink: #F2F2F5; --ink-2: #A0A0AC; --ink-3: #6E6E7A;
+  --line: #26262E; --line-2: #34343E;
+  --accent: #A5B4FC; --accent-2: #C4B5FD; --accent-soft: #A5B4FC1C;
+  --ok: #4ADE80; --warn: #FBBF24; --bad: #FB7185; --meas: #7DD3FC;
+  --code-bg: #1C1C24;
 }
 :root[data-theme="light"] {
-  --ground: #F7F9F6; --panel: #FFFFFF; --ink: #1B2320; --ink-2: #5A6660;
-  --line: #DCE3DE; --accent: #0E7C6B; --accent-soft: #0E7C6B18;
-  --ok: #2E7D46; --bad: #B4462F; --meas: #5B6B9E; --stale: #A8842D;
-  --code-bg: #EEF2EF;
+  --paper: #FBFBFA; --surface: #FFFFFF; --raised: #F3F3F1;
+  --ink: #1A1A1E; --ink-2: #55555F; --ink-3: #8B8B96;
+  --line: #E6E6E3; --line-2: #D6D6D2;
+  --accent: #4F46E5; --accent-2: #7C3AED; --accent-soft: #4F46E514;
+  --ok: #157F3D; --warn: #A15C07; --bad: #BE123C; --meas: #0369A1;
+  --code-bg: #F4F4F7;
 }
-/* Measured from the sticky header at boot; anchors and the contents rail both
-   offset by it, so a deep link lands below the header rather than under it. */
-:root { --hdr-h: 104px; }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
-  margin: 0; background: var(--ground); color: var(--ink);
-  font: 15px/1.6 "Avenir Next", "Seravek", system-ui, sans-serif;
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-.mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; }
+.mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .875em; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: var(--accent); }
 
-header {
-  padding: 18px 26px 0; border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; background: var(--ground); z-index: 20;
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 40; height: var(--hdr-h);
+  display: flex; align-items: center; gap: 18px; padding: 0 22px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--line);
 }
-.hdr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
-.eyebrow {
-  font-family: ui-monospace, Menlo, monospace; font-size: 11px;
-  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
-}
-h1 { font-size: 20px; margin: 2px 0 0; font-weight: 600; letter-spacing: -.01em; }
-h1 .dim { color: var(--ink-2); font-weight: 400; font-size: 15px; }
-.hdr-left { margin-right: auto; }
-.searchbox { position: relative; }
+.brand { display: flex; align-items: baseline; gap: 9px; text-decoration: none; color: inherit; }
+.brand b { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
+.brand span { font-size: 11px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.spacer { margin-left: auto; }
+.searchbox { position: relative; width: min(320px, 34vw); }
 .searchbox input {
-  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
-  border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; width: 240px;
+  width: 100%; padding: 7px 11px; border-radius: 8px; font-size: 13px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
 }
-.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.searchbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 .search-results {
-  position: absolute; top: 36px; right: 0; width: 400px; max-height: 330px;
-  overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); z-index: 40; display: none;
+  display: none; position: absolute; z-index: 60; top: 108%; left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.14); overflow: hidden; max-height: 60vh; overflow-y: auto;
 }
 .search-results.open { display: block; }
-.search-hit {
-  display: block; width: 100%; text-align: left;
-  border-bottom: 1px solid var(--line); padding: 8px 12px; font-size: 12.5px;
-}
+.search-hit { display: block; width: 100%; text-align: left; padding: 9px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.search-hit:last-child { border-bottom: 0; }
 .search-hit:hover, .search-hit:focus-visible { background: var(--accent-soft); outline: none; }
-
-.tabs { display: flex; gap: 2px; margin-top: 12px; }
-.tab {
-  padding: 7px 16px 9px; font-size: 13.5px; color: var(--ink-2);
-  border-bottom: 2px solid transparent;
-}
-.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.asof-row { display: flex; align-items: center; gap: 10px; margin-left: auto; padding-bottom: 8px; font-size: 13px; color: var(--ink-2); }
+.search-hit .mono { color: var(--accent); }
+.asof-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .asof-row input[type=date] {
-  font: inherit; font-size: 12.5px; color: var(--ink); background: var(--panel);
-  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
+  border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12.5px;
 }
-.asof-row .today-btn { color: var(--accent); font-size: 12.5px; }
-.asof-row .today-btn:hover { text-decoration: underline; }
-.time-note {
-  background: var(--accent-soft); color: var(--ink); border: 1px solid var(--accent);
-  border-radius: 8px; padding: 8px 14px; margin: 14px 0 0; font-size: 13.5px; display: none;
-}
-.time-note.on { display: block; }
+.today-btn { color: var(--accent); font-size: 12px; }
+.today-btn:hover { text-decoration: underline; }
 
-main { max-width: 1200px; margin: 0 auto; padding: 10px 26px 60px; }
-/* Book layout: a persistent contents rail beside one continuous read. The rail
-   is the reason long-form works here — 4.7k words of chapters are unnavigable
-   without a spine you can see from anywhere in the scroll. */
-.book { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 44px; align-items: start; }
-.book.solo { display: block; max-width: 860px; margin: 0 auto; }
-.progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); }
-
-.toc {
-  position: sticky; top: var(--hdr-h); max-height: calc(100vh - var(--hdr-h) - 20px);
-  overflow-y: auto; padding: 22px 10px 30px 0; border-right: 1px solid var(--line);
+/* ---------- shell ---------- */
+.shell {
+  display: grid; grid-template-columns: 252px minmax(0, 1fr) 208px;
+  gap: 0; max-width: 1440px; margin: 0 auto; align-items: start;
 }
-.toc-hd { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; }
-.toc ol, .toc ul { list-style: none; margin: 0; padding: 0; }
-.toc a {
-  display: block; text-decoration: none; color: var(--ink-2); line-height: 1.35;
-  padding: 4px 8px 4px 10px; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
+.sidebar {
+  position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
+  overflow-y: auto; padding: 26px 16px 40px 22px; border-right: 1px solid var(--line);
 }
-.toc a:hover { color: var(--ink); background: var(--accent-soft); }
-.toc-ch > a { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 3px; }
-.toc-ch > a .n { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); margin-right: 7px; }
-.toc-ch.active > a, .toc-ch.active > a .n { color: var(--accent); }
-.toc-ch.active > a { border-left-color: var(--accent); }
-/* Only the chapter you are in expands, so the rail stays scannable at a glance
-   instead of listing all thirty sections at once. */
-.toc-secs { display: none; margin: 2px 0 8px; }
-.toc-ch.active .toc-secs { display: block; }
-.toc-secs a { font-size: 12.5px; padding-left: 27px; }
-.toc-secs a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
-.toc-foot { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
-.toc-foot button { font-size: 12.5px; color: var(--accent); padding-left: 10px; }
-.toc-foot button:hover { text-decoration: underline; }
+.nav-group { margin-bottom: 22px; }
+.nav-title {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px 10px; font-weight: 500;
+}
+.nav-link {
+  display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left;
+  padding: 6px 10px; border-radius: 7px; font-size: 13.5px; color: var(--ink-2);
+  text-decoration: none; line-height: 1.4;
+}
+.nav-link:hover { background: var(--raised); color: var(--ink); }
+.nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-link .n { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); }
+.nav-link.active .n { color: var(--accent); }
+.nav-link .zone { margin-left: auto; font-size: 10px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; }
 
-.chapter { padding: 4px 0 10px; }
-.chapter + .chapter { margin-top: 44px; padding-top: 40px; border-top: 1px solid var(--line); }
-.ch-head { margin-bottom: 14px; }
-.ch-num { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .16em; color: var(--accent); }
-.ch-head h2 { font-size: 25px; line-height: 1.2; margin: 4px 0 6px; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
-.ch-meta { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
-[id].anchored { scroll-margin-top: calc(var(--hdr-h) + 14px); }
-.anchor { opacity: 0; margin-left: 8px; font-size: .78em; font-weight: 400; color: var(--ink-2); text-decoration: none; }
-h2:hover .anchor, h3:hover .anchor, .anchor:focus-visible { opacity: 1; }
+main { padding: 34px 46px 90px; min-width: 0; }
+.onpage {
+  position: sticky; top: var(--hdr-h); max-height: calc(100vh - var(--hdr-h));
+  overflow-y: auto; padding: 34px 22px 40px 10px; font-size: 12.5px;
+}
+.onpage-title { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px; }
+.onpage a {
+  display: block; padding: 4px 10px; color: var(--ink-2); text-decoration: none;
+  border-left: 2px solid var(--line); line-height: 1.35;
+}
+.onpage a:hover { color: var(--ink); }
+.onpage a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+
+/* ---------- prose ---------- */
+.page-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+h1.page-title { font-size: 34px; line-height: 1.12; margin: 8px 0 10px; font-weight: 660; letter-spacing: -.028em; text-wrap: balance; }
+.page-meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-3); margin-bottom: 26px; }
+.prose { max-width: 74ch; }
+.prose h2 {
+  font-size: 19px; font-weight: 640; letter-spacing: -.015em; margin: 40px 0 12px;
+  scroll-margin-top: calc(var(--hdr-h) + 18px);
+}
+.prose p { margin: 0 0 15px; font-size: 15.5px; line-height: 1.72; color: var(--ink); }
+.prose .lede { font-size: 17.5px; line-height: 1.62; color: var(--ink); }
+.prose code { background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; }
+.prose strong { font-weight: 640; }
+.anchor { opacity: 0; margin-left: 9px; font-size: .72em; font-weight: 400; color: var(--ink-3); text-decoration: none; }
+h2:hover .anchor, .anchor:focus-visible { opacity: 1; }
 .anchor:hover { color: var(--accent); }
-.ch-nav { display: flex; justify-content: space-between; gap: 16px; margin-top: 30px; font-size: 13px; }
-.ch-nav button { max-width: 46%; color: var(--accent); text-align: left; }
-.ch-nav button:hover { text-decoration: underline; }
-.ch-nav .nx { text-align: right; margin-left: auto; }
-.ch-nav .lbl { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); }
-.frontis { margin: 4px 0 42px; padding-bottom: 34px; border-bottom: 1px solid var(--line); }
-.coverage-banner { color: var(--ink-2); font-size: 12.5px; margin: 14px 2px 4px; }
+pre.code {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 15px 17px; overflow-x: auto; margin: 0 0 18px; font-size: 12.9px; line-height: 1.62;
+}
+pre.code code { background: none; padding: 0; }
+.tok-c { color: var(--ink-3); font-style: italic; }
+.tok-s { color: var(--ok); }
+.tok-k { color: var(--accent-2); }
 
-.topic { margin-top: 34px; }
-.topic-hd { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-.topic-hd h2 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
-.topic-hd .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); }
+/* ---------- home ---------- */
+.hero { max-width: 76ch; margin-bottom: 34px; }
+.hero h1 { font-size: 46px; line-height: 1.04; margin: 0 0 12px; font-weight: 680; letter-spacing: -.04em; }
+.hero .tagline { font-size: 19px; color: var(--ink-2); margin: 0 0 26px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; margin: 6px 0 10px; }
+.card {
+  display: block; width: 100%; text-align: left; padding: 16px 17px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  text-decoration: none; color: inherit; transition: border-color .12s, transform .12s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.card .c-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); }
+.card .c-name { font-weight: 640; font-size: 15px; margin: 5px 0 6px; letter-spacing: -.012em; }
+.card .c-sum { font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+.card .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 10px; }
+.constraints { display: grid; gap: 14px; margin: 4px 0 18px; }
+.constraint { border-left: 3px solid var(--accent); padding: 2px 0 4px 16px; }
+.stats { display: flex; flex-wrap: wrap; gap: 30px; margin: 20px 0 22px; }
+.stat .v { font-size: 30px; font-weight: 660; letter-spacing: -.03em; line-height: 1.1; }
+.stat .v.rej { color: var(--warn); }
+.stat .l { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
 
-.belief { padding: 16px 2px 14px; border-bottom: 1px solid var(--line); }
-.belief-head { font-size: 15px; font-weight: 600; text-wrap: balance; margin: 0 0 2px; }
-.belief-rest { font-size: 13.5px; color: var(--ink); margin: 2px 0 6px; max-width: 68ch; }
-.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--ink-2); }
-.prov .src { color: var(--accent); }
-.chip {
-  display: inline-block; padding: 0 8px 1px; border-radius: 99px;
-  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .05em;
-  border: 1px solid; text-transform: uppercase;
-}
-.ch-later { color: var(--stale); border-color: var(--stale); }
-.hist-btn { color: var(--accent); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
-.hist-btn:hover { text-decoration: underline; }
-.hist-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+/* ---------- relations ---------- */
+.rel-band { margin: 34px 0 6px; padding-top: 22px; border-top: 1px solid var(--line); }
+.rel-band h2 { font-size: 13px; font-family: ui-monospace, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; margin: 0 0 12px; }
+.rel-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; }
+.rel-col > div { font-size: 11px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-3); margin-bottom: 7px; letter-spacing: .06em; }
+.rel-link { display: block; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 7px; font-size: 13px; text-decoration: none; color: var(--ink); background: var(--surface); }
+.rel-link:hover { border-color: var(--accent); color: var(--accent); }
+.rel-none { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+.pager { display: flex; justify-content: space-between; gap: 18px; margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--line); }
+.pager a { display: block; max-width: 47%; text-decoration: none; color: var(--accent); font-size: 14px; font-weight: 560; }
+.pager a:hover { text-decoration: underline; }
+.pager .nx { text-align: right; margin-left: auto; }
+.pager .lbl { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; margin-bottom: 2px; }
 
-.thread { margin: 10px 0 2px 10px; border-left: 2px solid var(--line); padding-left: 16px; display: none; }
-.thread.open { display: block; }
-.rev { margin: 10px 0; }
-.rev .rev-when { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--stale); }
-.rev .rev-when.origin { color: var(--ink-2); }
-.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 64ch; }
-.rev .rel { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--meas); }
-
-.log-day { margin-top: 26px; }
-.log-day h3 { font-size: 13px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-.event { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 8px 0; }
-.ev-kind { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .06em; padding-top: 3px; }
-.ev-learned { color: var(--ok); } .ev-revised { color: var(--stale); } .ev-refuted { color: var(--bad); }
-.event .ev-body { font-size: 13.5px; max-width: 66ch; }
-.event .ev-sub { font-size: 12px; color: var(--ink-2); }
-.event .ev-old { color: var(--ink-2); font-style: italic; }
-
-.hint { color: var(--ink-2); font-size: 12.5px; }
-footer { max-width: 860px; margin: 0 auto; padding: 8px 26px 26px; color: var(--ink-2); font-size: 12px; }
-footer code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
-mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
-/* documentation voice */
-.doc-serif { font-family: Charter, Georgia, 'Iowan Old Style', serif; }
-.story h3 {
-  font-size: 15px; font-weight: 600; margin: 30px 0 8px; letter-spacing: -.01em;
-  font-family: "Avenir Next", system-ui, sans-serif;
-}
-.story p {
-  font-family: Charter, Georgia, 'Iowan Old Style', serif;
-  font-size: 15.5px; line-height: 1.72; max-width: 72ch; margin: 0 0 14px;
-}
-.story .lede {
-  font-size: 17px; line-height: 1.65; color: var(--ink);
-  border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 6px;
-}
-.diagram-card {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-  padding: 18px 10px 8px; margin: 22px 0; overflow-x: auto;
-}
-.diagram-card figcaption {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--ink-2); text-align: center; padding: 8px 0 6px;
-}
-.ev-inline {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--accent);
-  border: 1px solid var(--line); border-radius: 4px; padding: 0 5px 1px;
-  vertical-align: 2px; margin: 0 1px; white-space: nowrap;
-}
-.ev-inline:hover { border-color: var(--accent); }
-.ev-inline.ev-stale { color: var(--stale); text-decoration: line-through; }
-.ev-drawer { display: none; margin: 4px 0 16px; }
-.ev-drawer.open { display: block; }
-.ev-drawer .belief { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; background: var(--panel); }
-/* diagram svg text */
-.dg-zone { font: 600 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); letter-spacing: .1em; }
-.dg-flow { font: 500 12px "Avenir Next", system-ui, sans-serif; fill: var(--ink); }
+/* ---------- diagrams ---------- */
+.diagram-card { margin: 22px 0 26px; padding: 20px 20px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.diagram-card.wide { max-width: none; }
+.diagram-card figcaption { margin-top: 10px; text-align: center; font-size: 11.5px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; }
+.dg-zone { font: 600 10px ui-monospace, Menlo, monospace; fill: var(--ink-3); letter-spacing: .12em; }
+.dg-flow { font: 600 13px ui-sans-serif, system-ui, sans-serif; fill: var(--ink); }
 .dg-cost { font: 500 10.5px ui-monospace, Menlo, monospace; fill: var(--ink-2); }
-.dg-wall { stroke: var(--stale); stroke-width: 1.6; stroke-dasharray: 6 5; }
-.dg-box { fill: var(--ground); stroke: var(--line); rx: 8; }
-/* positions */
-.comp-summary { font-size: 14px; max-width: 70ch; margin: 12px 0 4px; }
-.sub-hd { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; margin: 18px 0 2px; }
-.position { border-left: 3px solid var(--accent); padding: 2px 0 6px 14px; margin: 14px 0; }
-.position > p { margin: 0 0 6px; font-size: 14px; max-width: 68ch; }
-.ev-chip {
+.dg-wall { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .75; }
+.dg-box { fill: var(--raised); stroke: var(--line-2); rx: 9; }
+
+/* ---------- evidence ---------- */
+.ev-inline {
   font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent);
-  border: 1px solid var(--line); border-radius: 5px; padding: 0 7px 1px; margin-right: 4px;
+  border: 1px solid var(--line-2); border-radius: 5px; padding: 0 4px; margin: 0 2px;
+  vertical-align: 1.5px; background: var(--surface);
 }
-.ev-chip:hover { border-color: var(--accent); }
-.ev-chip.ev-stale { color: var(--stale); text-decoration: line-through; }
-.ev-body-card { display: none; margin: 8px 0 0 6px; }
-.ev-body-card.open { display: block; }
-.ev-body-card .belief { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; }
-.all-beliefs { margin-top: 16px; }
-.all-beliefs summary { cursor: pointer; font-size: 13px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
-.flow { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-2); margin: 2px 0; }
-/* system map */
-.sysmap { margin: 22px 0 8px; }
-.sm-grid { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 20px; align-items: start; }
-.sm-col { display: flex; flex-direction: column; gap: 22px; }
-.sm-boundary {
-  border-left: 2px dashed var(--stale); border-right: 2px dashed var(--stale);
-  display: flex; align-items: center; justify-content: center; position: relative;
+.ev-inline:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ev-inline.ev-stale { color: var(--warn); text-decoration: line-through; }
+.ev-drawer { display: none; margin: 2px 0 18px; }
+.ev-drawer.open { display: block; }
+.ev-drawer .belief { border: 1px solid var(--line-2); border-radius: 10px; padding: 13px 16px; background: var(--surface); }
+.belief { padding: 15px 2px; border-bottom: 1px solid var(--line); }
+.belief-head { font-size: 14.5px; font-weight: 600; margin: 0 0 3px; text-wrap: balance; }
+.belief-rest { font-size: 13.5px; color: var(--ink-2); margin: 2px 0 7px; max-width: 70ch; }
+.prov { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); }
+.prov .src { color: var(--accent); }
+.chip { border: 1px solid var(--line-2); border-radius: 20px; padding: 0 8px; font-size: 10px; }
+.ch-later { color: var(--warn); border-color: var(--warn); }
+.hist-btn { color: var(--accent); font-size: 11.5px; font-family: ui-monospace, Menlo, monospace; }
+.hist-btn:hover { text-decoration: underline; }
+.thread { display: none; margin: 10px 0 2px 8px; border-left: 2px solid var(--line); padding-left: 16px; }
+.thread.open { display: block; }
+.rev { margin: 11px 0; }
+.rev-when { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--warn); }
+.rev-when.origin { color: var(--ink-3); }
+.rev p { margin: 3px 0 2px; font-size: 13px; color: var(--ink-2); max-width: 66ch; }
+.rev .rel { color: var(--meas); }
+.roster { margin-top: 30px; }
+.roster summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; padding: 8px 0; }
+.roster summary:hover { color: var(--accent); }
+
+/* ---------- changelog ---------- */
+.log-day { margin-top: 24px; }
+.log-day h3 { font-size: 12px; font-family: ui-monospace, Menlo, monospace; color: var(--ink-3); font-weight: 500; margin: 0 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 5px; }
+.event { display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 9px 0; }
+.ev-kind { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .07em; padding-top: 3px; }
+.ev-learned { color: var(--ok); } .ev-revised { color: var(--warn); } .ev-refuted { color: var(--bad); }
+.event .ev-body { font-size: 13.5px; max-width: 68ch; }
+.event .ev-sub { font-size: 11.5px; color: var(--ink-3); }
+.event .ev-old { font-style: italic; }
+.time-note { display: none; margin-bottom: 20px; padding: 11px 15px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--line-2); font-size: 13px; }
+.time-note.on { display: block; }
+.hint { color: var(--ink-3); font-size: 13px; }
+mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+.coverage { color: var(--ink-3); font-size: 12.5px; margin: 26px 0 0; }
+
+@media (max-width: 1180px) {
+  .shell { grid-template-columns: 236px minmax(0, 1fr); }
+  .onpage { display: none; }
+  main { padding: 30px 32px 80px; }
 }
-.sm-boundary .comp { width: 100%; margin: 0 -14px; }
-.sm-native { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-.comp {
-  display: block; width: 100%; text-align: left; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 20px; }
+  main { padding: 24px 20px 70px; }
+  .hero h1 { font-size: 34px; }
+  .searchbox { width: 46vw; }
 }
-.comp:hover { border-color: var(--accent); }
-.comp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.comp .c-name { font-weight: 600; font-size: 14px; }
-.comp .c-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
-.comp .c-stance { font-size: 12.5px; color: var(--ink); margin: 5px 0 6px; }
-.comp .c-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--ink-2); }
-.comp .c-meta .fresh { color: var(--accent); }
-.sm-caption { text-align: center; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--stale); margin: 6px 0 0; }
-@media (max-width: 760px) { .sm-grid { grid-template-columns: 1fr; } .sm-boundary { border: 2px dashed var(--stale); border-radius: 10px; padding: 8px; } }
-@media (max-width: 940px) {
-  .book { grid-template-columns: 1fr; gap: 0; }
-  .toc {
-    position: static; max-height: none; overflow: visible; margin-bottom: 22px;
-    padding: 0 0 14px; border-right: 0; border-bottom: 1px solid var(--line);
-  }
-  /* Out-specifies the active-chapter expansion: on a narrow screen the rail is
-     a horizontal band, and per-section links would swamp it. */
-  .toc .toc-ch.active .toc-secs { display: none; }
-}
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
-<header>
-  <div class="hdr-row">
-    <div class="hdr-left">
-      <div class="eyebrow">docs/experiments/knowledge-graph.json · generated snapshot</div>
-      <h1>System knowledge <span class="dim" id="hdr-stats"></span></h1>
-    </div>
-    <div class="searchbox">
-      <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
-      <div class="search-results" id="search-results" role="listbox"></div>
-    </div>
+<div class="topbar">
+  <a class="brand" href="#/"><b>resqlite</b> <span>architecture</span></a>
+  <div class="spacer"></div>
+  <div class="searchbox">
+    <input id="search" type="search" placeholder="Search beliefs…" aria-label="Search beliefs and experiments">
+    <div class="search-results" id="search-results" role="listbox"></div>
   </div>
-  <div class="hdr-row">
-    <div class="tabs" role="tablist">
-      <button class="tab" id="tab-read" role="tab" aria-selected="true">Read</button>
-      <button class="tab" id="tab-log" role="tab" aria-selected="false">Changelog</button>
-    </div>
-    <div class="asof-row">
-      <label for="asof">as of</label>
-      <input type="date" id="asof">
-      <button class="today-btn" id="today-btn">today</button>
-    </div>
+  <div class="asof-row">
+    <label for="asof">as of</label>
+    <input type="date" id="asof">
+    <button class="today-btn" id="today-btn">today</button>
   </div>
-  <div class="progress" id="progress"></div>
-</header>
+</div>
 
-<main>
-  <div class="time-note" id="time-note"></div>
-  <div class="book" id="book">
-    <nav class="toc" id="toc" aria-label="Contents"></nav>
-    <div id="view"></div>
-  </div>
-</main>
-
-<footer>
-  One generated aggregate, two lenses: humans read this page; agents read the same
-  <code>knowledge-graph.json</code>. Beliefs are claims recorded by the experiment that
-  established them; history derives from typed <code>supersedes / refutes / refines</code> edges,
-  so "how we got here" is data, not archaeology.
-</footer>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
+  <main id="view"></main>
+  <aside class="onpage" id="onpage" aria-label="On this page"></aside>
+</div>
 
 <script>
 const KG = __KG__;
+const PAGES = __PAGES__;
+const HOME = __HOME__;
+const STATS = __STATS__;
 
 // ---------- prep ----------
 const expById = {}; for (const e of KG.experiments) expById[e.id] = e;
@@ -335,7 +302,7 @@ let asOf = TODAY;
 
 const liveAt = (c, t) => c.birth != null && c.birth <= t && (c.death == null || c.death > t);
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-// Chapters are markdown, so render the inline subset the prose actually uses.
+// Pages are markdown, so render the inline subset the prose actually uses.
 // Applied *after* escaping — the source is trusted repo content, but escaping
 // first keeps the pipeline safe if that ever stops being true.
 const md = s => esc(s)
@@ -346,242 +313,158 @@ const firstSentence = s => {
   const m = s.match(/^.*?[.!?](?=\s|$)/);
   return m ? m[0] : s;
 };
-const dirName = d => d.replace(/-/g, ' ');
 
-// ---------- system component map (curated; promotable to doc/arch/system-map.json) ----------
-const SYSMAP = __SYSMAP__;
-for (const comp of SYSMAP) {
-  comp.pool = claims.filter(c =>
-    (c.directions || []).some(d => comp.dirs.includes(d)) ||
-    (comp.claims || []).includes(c.id));
+// Each page's claim pool: everything tagged with one of its research
+// directions, plus any claims the page names explicitly.
+for (const p of PAGES) {
+  p.pool = claims.filter(c =>
+    (c.directions || []).some(d => (p.dirs || []).includes(d)) ||
+    (p.claims || []).includes(c.id));
 }
-// Narrative chapters: prose with [[claim]] citations woven in. This is the
-// authored layer — the repo home for it is doc/arch/system-map.json.
-const STORIES = __STORIES__;
+const pageById = {}; for (const p of PAGES) pageById[p.id] = p;
+const ARCH = PAGES.filter(p => p.section === 'architecture');
 
-const DG_DEFS = `<defs>
-  <marker id="ah-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--ok)"/></marker>
-  <marker id="ah-meas" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--meas)"/></marker>
-  <marker id="ah-acc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--accent)"/></marker>
-  <marker id="ah-st" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--stale)"/></marker>
-  <marker id="ah-ink" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L7,4 L0,7 Z" fill="var(--ink-2)"/></marker>
-</defs>`;
-const DIAGRAMS = {
-  boundary: `<figure class="diagram-card"><svg viewBox="0 0 900 336" width="100%" role="img" aria-label="Four transfer routes across the isolate boundary, by cost">
-    ${DG_DEFS}
-    <rect x="18" y="40" width="250" height="272" class="dg-box"/>
-    <rect x="632" y="40" width="250" height="272" class="dg-box"/>
-    <text x="143" y="28" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
-    <text x="757" y="28" text-anchor="middle" class="dg-zone">WORKER ISOLATES</text>
-    <line x1="330" y1="16" x2="330" y2="326" class="dg-wall"/><line x1="570" y1="16" x2="570" y2="326" class="dg-wall"/>
-    <text x="450" y="28" text-anchor="middle" class="dg-zone" fill="var(--stale)">BOUNDARY</text>
-    <text x="450" y="72" text-anchor="middle" class="dg-flow">strings &amp; numbers</text>
-    <line x1="285" y1="84" x2="615" y2="84" stroke="var(--ok)" stroke-width="2.4" marker-end="url(#ah-ok)" marker-start="url(#ah-ok)"/>
-    <text x="450" y="100" text-anchor="middle" class="dg-cost">shared by pointer · free at any size</text>
-    <text x="450" y="136" text-anchor="middle" class="dg-flow">result structure — the flat values list</text>
-    <line x1="615" y1="148" x2="288" y2="148" stroke="var(--meas)" stroke-width="2.4" marker-end="url(#ah-meas)"/>
-    <text x="450" y="164" text-anchor="middle" class="dg-cost">send() · deep-copied per slot · the real price of a result</text>
-    <text x="450" y="200" text-anchor="middle" class="dg-flow">blobs ≥ 256 KB &nbsp;·&nbsp; both directions</text>
-    <line x1="288" y1="212" x2="615" y2="212" stroke="var(--accent)" stroke-width="2.4" marker-end="url(#ah-acc)" marker-start="url(#ah-acc)"/>
-    <text x="450" y="228" text-anchor="middle" class="dg-cost">TransferableTypedData · one copy → external memory · then ownership move</text>
-    <text x="450" y="264" text-anchor="middle" class="dg-flow">results &gt; 32k slots</text>
-    <line x1="615" y1="276" x2="288" y2="276" stroke="var(--stale)" stroke-width="2.4" marker-end="url(#ah-st)"/>
-    <text x="450" y="292" text-anchor="middle" class="dg-cost">Isolate.exit · whole heap, no copy · worker dies, pool respawns</text>
-    <text x="450" y="320" text-anchor="middle" class="dg-cost">slots, not bytes — a 400 KB string is 1 slot and was never going to be copied</text>
-  </svg><figcaption>the four routes across, ordered by what they cost</figcaption></figure>`,
+__DIAGRAMS__
 
-  api: `<figure class="diagram-card"><svg viewBox="0 0 900 300" width="100%" role="img" aria-label="Public API request paths from the main isolate">
-    ${DG_DEFS}
-    <rect x="18" y="34" width="200" height="240" class="dg-box"/>
-    <text x="118" y="24" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
-    <text x="118" y="62" text-anchor="middle" class="dg-flow">Database</text>
-    <text x="118" y="92" text-anchor="middle" class="dg-cost">select · selectBytes</text>
-    <text x="118" y="112" text-anchor="middle" class="dg-cost">execute · executeBatch</text>
-    <text x="118" y="132" text-anchor="middle" class="dg-cost">transaction · stream</text>
-    <rect x="42" y="164" width="152" height="86" rx="7" fill="none" stroke="var(--meas)" stroke-dasharray="4 3"/>
-    <text x="118" y="184" text-anchor="middle" class="dg-flow">StreamEngine</text>
-    <text x="118" y="204" text-anchor="middle" class="dg-cost">table → entry index</text>
-    <text x="118" y="222" text-anchor="middle" class="dg-cost">requery queue</text>
-    <text x="118" y="240" text-anchor="middle" class="dg-cost">per-subscriber ctrls</text>
-    <line x1="222" y1="96" x2="392" y2="80" stroke="var(--ok)" stroke-width="2" marker-end="url(#ah-ok)"/>
-    <text x="306" y="74" text-anchor="middle" class="dg-cost">reads</text>
-    <line x1="222" y1="118" x2="392" y2="168" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah-acc)"/>
-    <text x="300" y="150" text-anchor="middle" class="dg-cost">writes</text>
-    <rect x="396" y="52" width="180" height="58" class="dg-box"/>
-    <text x="486" y="76" text-anchor="middle" class="dg-flow">Reader pool</text>
-    <text x="486" y="96" text-anchor="middle" class="dg-cost">2–4 workers</text>
-    <rect x="396" y="140" width="180" height="58" class="dg-box"/>
-    <text x="486" y="164" text-anchor="middle" class="dg-flow">Writer isolate</text>
-    <text x="486" y="184" text-anchor="middle" class="dg-cost">serial, owns tx state</text>
-    <rect x="640" y="86" width="230" height="112" class="dg-box"/>
-    <text x="755" y="76" text-anchor="middle" class="dg-zone">C CONNECTION POOL</text>
-    <text x="755" y="112" text-anchor="middle" class="dg-cost">1 writer + N readers</text>
-    <text x="755" y="132" text-anchor="middle" class="dg-cost">statement caches</text>
-    <text x="755" y="152" text-anchor="middle" class="dg-cost">authorizer hook → deps read</text>
-    <text x="755" y="172" text-anchor="middle" class="dg-cost">preupdate hook → tables dirtied</text>
-    <line x1="580" y1="81" x2="636" y2="110" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah-ink)"/>
-    <line x1="580" y1="169" x2="636" y2="150" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah-ink)"/>
-    <path d="M 486 198 C 486 250, 200 262, 130 254" fill="none" stroke="var(--stale)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-st)"/>
-    <text x="330" y="272" text-anchor="middle" class="dg-cost">dirty tables ride back on the write response — no separate channel</text>
-  </svg><figcaption>one message per call; invalidation piggybacks on write replies</figcaption></figure>`,
-
-  readers: `<figure class="diagram-card"><svg viewBox="0 0 900 292" width="100%" role="img" aria-label="Reader pool dispatch and sacrifice lifecycle">
-    ${DG_DEFS}
-    <text x="96" y="40" text-anchor="middle" class="dg-zone">DISPATCH</text>
-    <rect x="24" y="56" width="146" height="72" class="dg-box"/>
-    <text x="97" y="82" text-anchor="middle" class="dg-flow">round-robin</text>
-    <text x="97" y="102" text-anchor="middle" class="dg-cost">+ busy tracking</text>
-    <text x="97" y="118" text-anchor="middle" class="dg-cost">FIFO park when full</text>
-    <text x="420" y="40" text-anchor="middle" class="dg-zone">FOUR PERSISTENT WORKERS</text>
-    <rect x="212" y="56" width="98" height="52" class="dg-box"/><text x="261" y="86" text-anchor="middle" class="dg-cost">worker 0</text>
-    <rect x="320" y="56" width="98" height="52" class="dg-box"/><text x="369" y="86" text-anchor="middle" class="dg-cost">worker 1</text>
-    <rect x="428" y="56" width="98" height="52" class="dg-box"/><text x="477" y="86" text-anchor="middle" class="dg-cost">worker 2</text>
-    <rect x="536" y="56" width="98" height="52" class="dg-box" stroke="var(--stale)"/><text x="585" y="80" text-anchor="middle" class="dg-cost" fill="var(--stale)">worker 3</text>
-    <text x="585" y="98" text-anchor="middle" class="dg-cost" fill="var(--stale)">sacrificed</text>
-    <line x1="174" y1="82" x2="208" y2="82" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah-ink)"/>
-    <rect x="676" y="46" width="200" height="72" class="dg-box"/>
-    <text x="776" y="40" text-anchor="middle" class="dg-zone">C READER CONNECTIONS</text>
-    <text x="776" y="74" text-anchor="middle" class="dg-cost">one per worker · NOMUTEX</text>
-    <text x="776" y="94" text-anchor="middle" class="dg-cost">statement cache survives</text>
-    <text x="776" y="110" text-anchor="middle" class="dg-cost">the worker's death</text>
-    <line x1="638" y1="82" x2="672" y2="82" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah-ink)"/>
-    <text x="450" y="164" text-anchor="middle" class="dg-zone">RESULT LEAVES BY ONE OF TWO ROUTES</text>
-    <line x1="250" y1="196" x2="640" y2="196" stroke="var(--meas)" stroke-width="2.2" marker-end="url(#ah-meas)" marker-start="url(#ah-meas)"/>
-    <text x="445" y="190" text-anchor="middle" class="dg-flow">≤ 32k slots → SendPort.send</text>
-    <text x="445" y="212" text-anchor="middle" class="dg-cost">worker survives · pays a per-slot copy before its next request</text>
-    <line x1="250" y1="252" x2="640" y2="252" stroke="var(--stale)" stroke-width="2.2" marker-end="url(#ah-st)"/>
-    <text x="445" y="246" text-anchor="middle" class="dg-flow">&gt; 32k slots → Isolate.exit</text>
-    <text x="445" y="268" text-anchor="middle" class="dg-cost">zero copy · worker dies · replacement spawns in background, slot returns on handshake</text>
-    <text x="445" y="286" text-anchor="middle" class="dg-cost">payload and exit share one port, so FIFO ordering makes the handoff race-free</text>
-  </svg><figcaption>dispatch, the two return routes, and what survives a sacrifice</figcaption></figure>`,
-
-  writer: `<figure class="diagram-card"><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Writer isolate serial pipeline">
-    ${DG_DEFS}
-    <text x="120" y="34" text-anchor="middle" class="dg-zone">MAIN ISOLATE</text>
-    <rect x="24" y="48" width="192" height="128" class="dg-box"/>
-    <text x="120" y="72" text-anchor="middle" class="dg-cost">execute × N concurrent</text>
-    <rect x="44" y="86" width="152" height="34" rx="6" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
-    <text x="120" y="107" text-anchor="middle" class="dg-flow">coalescing pump</text>
-    <text x="120" y="140" text-anchor="middle" class="dg-cost">one envelope</text>
-    <text x="120" y="158" text-anchor="middle" class="dg-cost">per round trip</text>
-    <line x1="220" y1="112" x2="300" y2="112" stroke="var(--accent)" stroke-width="2.2" marker-end="url(#ah-acc)"/>
-    <text x="260" y="104" text-anchor="middle" class="dg-cost">params wrapped</text>
-    <text x="260" y="130" text-anchor="middle" class="dg-cost">by identity</text>
-    <line x1="300" y1="26" x2="300" y2="254" class="dg-wall"/>
-    <text x="600" y="34" text-anchor="middle" class="dg-zone">WRITER ISOLATE — SERIAL</text>
-    <rect x="320" y="48" width="250" height="128" class="dg-box"/>
-    <text x="445" y="74" text-anchor="middle" class="dg-flow">message loop</text>
-    <text x="445" y="96" text-anchor="middle" class="dg-cost">Execute · Query · Batch</text>
-    <text x="445" y="114" text-anchor="middle" class="dg-cost">Begin · Commit · Rollback</text>
-    <text x="445" y="140" text-anchor="middle" class="dg-cost">unwrap blobs (once per</text>
-    <text x="445" y="156" text-anchor="middle" class="dg-cost">unique buffer) → bind</text>
-    <rect x="600" y="48" width="272" height="128" class="dg-box"/>
-    <text x="736" y="74" text-anchor="middle" class="dg-flow">C write connection</text>
-    <text x="736" y="98" text-anchor="middle" class="dg-cost">executeBatch: whole matrix</text>
-    <text x="736" y="114" text-anchor="middle" class="dg-cost">loops inside C, one crossing</text>
-    <text x="736" y="140" text-anchor="middle" class="dg-cost">preupdate hook accumulates</text>
-    <text x="736" y="156" text-anchor="middle" class="dg-cost">dirty tables</text>
-    <line x1="574" y1="112" x2="596" y2="112" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah-ink)"/>
-    <path d="M 736 180 C 736 232, 300 244, 130 232" fill="none" stroke="var(--stale)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-st)"/>
-    <text x="430" y="252" text-anchor="middle" class="dg-cost">WriteResult + dirty tables return together — stream invalidation costs no extra message</text>
-  </svg><figcaption>concurrent writes in, one serial pipeline, invalidation on the way back</figcaption></figure>`,
-
-  tx: `<figure class="diagram-card"><svg viewBox="0 0 900 258" width="100%" role="img" aria-label="Transaction round trips between main isolate and writer">
-    ${DG_DEFS}
-    <text x="150" y="30" text-anchor="middle" class="dg-zone">MAIN ISOLATE — CALLBACK RUNS HERE</text>
-    <text x="700" y="30" text-anchor="middle" class="dg-zone">WRITER ISOLATE</text>
-    <line x1="300" y1="40" x2="300" y2="242" class="dg-wall"/>
-    <line x1="150" y1="44" x2="150" y2="238" stroke="var(--line)" stroke-width="1.5"/>
-    <line x1="700" y1="44" x2="700" y2="238" stroke="var(--line)" stroke-width="1.5"/>
-    <text x="150" y="62" text-anchor="middle" class="dg-cost">db.transaction((tx) async {</text>
-    <line x1="158" y1="88" x2="692" y2="88" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#ah-acc)"/>
-    <text x="425" y="82" text-anchor="middle" class="dg-cost">BEGIN</text>
-    <line x1="158" y1="120" x2="692" y2="120" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#ah-acc)"/>
-    <text x="425" y="114" text-anchor="middle" class="dg-cost">tx.execute — one round trip</text>
-    <line x1="692" y1="140" x2="158" y2="140" stroke="var(--ink-2)" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ah-ink)"/>
-    <line x1="158" y1="168" x2="692" y2="168" stroke="var(--meas)" stroke-width="1.8" marker-end="url(#ah-meas)"/>
-    <text x="425" y="162" text-anchor="middle" class="dg-cost">tx.select — on the WRITER connection (sees uncommitted rows)</text>
-    <line x1="692" y1="188" x2="158" y2="188" stroke="var(--ink-2)" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ah-ink)"/>
-    <line x1="158" y1="216" x2="692" y2="216" stroke="var(--ok)" stroke-width="1.8" marker-end="url(#ah-ok)"/>
-    <text x="425" y="210" text-anchor="middle" class="dg-cost">COMMIT → accumulated dirty tables released to streams</text>
-    <text x="150" y="238" text-anchor="middle" class="dg-cost">})</text>
-    <text x="450" y="252" text-anchor="middle" class="dg-cost" fill="var(--stale)">each statement is one round trip — that floor dominates every control-path optimization</text>
-  </svg><figcaption>the callback stays on main; the round-trip floor is the subsystem's ceiling</figcaption></figure>`,
-
-  native: `<figure class="diagram-card"><svg viewBox="0 0 900 262" width="100%" role="img" aria-label="Native C layer structure">
-    ${DG_DEFS}
-    <text x="450" y="28" text-anchor="middle" class="dg-zone">native/resqlite.c — STATE THAT OUTLIVES EVERY DART ISOLATE</text>
-    <rect x="24" y="44" width="250" height="118" class="dg-box"/>
-    <text x="149" y="68" text-anchor="middle" class="dg-flow">connection pool</text>
-    <text x="149" y="90" text-anchor="middle" class="dg-cost">1 writer + N readers</text>
-    <text x="149" y="108" text-anchor="middle" class="dg-cost">per-connection stmt cache</text>
-    <text x="149" y="126" text-anchor="middle" class="dg-cost">NOMUTEX → one lock</text>
-    <text x="149" y="144" text-anchor="middle" class="dg-cost">per query, not per call</text>
-    <rect x="292" y="44" width="250" height="118" class="dg-box"/>
-    <text x="417" y="68" text-anchor="middle" class="dg-flow">batched decode</text>
-    <text x="417" y="90" text-anchor="middle" class="dg-cost">resqlite_step_row fills a</text>
-    <text x="417" y="108" text-anchor="middle" class="dg-cost">whole row of cells at once</text>
-    <text x="417" y="126" text-anchor="middle" class="dg-cost">one FFI crossing per row,</text>
-    <text x="417" y="144" text-anchor="middle" class="dg-cost">not one per column</text>
-    <rect x="560" y="44" width="316" height="118" class="dg-box"/>
-    <text x="718" y="68" text-anchor="middle" class="dg-flow">encoders — where SIMD lives</text>
-    <text x="718" y="90" text-anchor="middle" class="dg-cost">base64: NEON vqtbl4q_u8 (~2×), noinline,</text>
-    <text x="718" y="106" text-anchor="middle" class="dg-cost">scalar 12-bit LUT fallback off ARM64</text>
-    <text x="718" y="128" text-anchor="middle" class="dg-cost">integers: scalar itoa — per-cell SIMD has</text>
-    <text x="718" y="144" text-anchor="middle" class="dg-cost">no batching to amortize its setup</text>
-    <rect x="24" y="182" width="410" height="62" class="dg-box" stroke="var(--meas)"/>
-    <text x="229" y="204" text-anchor="middle" class="dg-flow">hooks — reactivity without parsing SQL</text>
-    <text x="229" y="224" text-anchor="middle" class="dg-cost">authorizer on readers → tables/columns read</text>
-    <text x="229" y="240" text-anchor="middle" class="dg-cost">preupdate on writer → tables actually changed</text>
-    <rect x="466" y="182" width="410" height="62" class="dg-box" stroke="var(--stale)"/>
-    <text x="671" y="204" text-anchor="middle" class="dg-flow">WAL &amp; buffers</text>
-    <text x="671" y="224" text-anchor="middle" class="dg-cost">checkpoint inline on writer (off-writer proven, parked)</text>
-    <text x="671" y="240" text-anchor="middle" class="dg-cost">per-reader json_buf reclaims above 1 MB, high-water reported</text>
-  </svg><figcaption>C owns the durable state; Dart isolates are replaceable workers over it</figcaption></figure>`,
-
-  meta: `<figure class="diagram-card"><svg viewBox="0 0 900 244" width="100%" role="img" aria-label="How evidence becomes documentation and how it is invalidated">
-    ${DG_DEFS}
-    <rect x="24" y="56" width="184" height="76" class="dg-box"/>
-    <text x="116" y="46" text-anchor="middle" class="dg-zone">EXPERIMENT</text>
-    <text x="116" y="84" text-anchor="middle" class="dg-cost">order-flipped A/B</text>
-    <text x="116" y="102" text-anchor="middle" class="dg-cost">drift flags · control lanes</text>
-    <text x="116" y="120" text-anchor="middle" class="dg-cost">writeup + benchmark run</text>
-    <line x1="212" y1="94" x2="256" y2="94" stroke="var(--ok)" stroke-width="2" marker-end="url(#ah-ok)"/>
-    <rect x="260" y="56" width="184" height="76" class="dg-box"/>
-    <text x="352" y="46" text-anchor="middle" class="dg-zone">CLAIM</text>
-    <text x="352" y="84" text-anchor="middle" class="dg-cost">addressable id · dated</text>
-    <text x="352" y="102" text-anchor="middle" class="dg-cost">conditions · typed edges</text>
-    <text x="352" y="120" text-anchor="middle" class="dg-cost">state derived, never stored</text>
-    <line x1="448" y1="94" x2="492" y2="94" stroke="var(--ok)" stroke-width="2" marker-end="url(#ah-ok)"/>
-    <rect x="496" y="56" width="184" height="76" class="dg-box"/>
-    <text x="588" y="46" text-anchor="middle" class="dg-zone">CHAPTER</text>
-    <text x="588" y="84" text-anchor="middle" class="dg-cost">authored narrative</text>
-    <text x="588" y="102" text-anchor="middle" class="dg-cost">[[claim]] citations inline</text>
-    <text x="588" y="120" text-anchor="middle" class="dg-cost">never regenerated</text>
-    <line x1="684" y1="94" x2="728" y2="94" stroke="var(--ok)" stroke-width="2" marker-end="url(#ah-ok)"/>
-    <rect x="732" y="56" width="144" height="76" class="dg-box"/>
-    <text x="804" y="46" text-anchor="middle" class="dg-zone">READERS</text>
-    <text x="804" y="86" text-anchor="middle" class="dg-cost">humans: this page</text>
-    <text x="804" y="106" text-anchor="middle" class="dg-cost">agents: the JSON</text>
-    <text x="804" y="124" text-anchor="middle" class="dg-cost">same graph, two lenses</text>
-    <path d="M 352 140 C 352 196, 500 200, 586 186" fill="none" stroke="var(--stale)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah-st)"/>
-    <text x="352" y="164" text-anchor="middle" class="dg-flow" fill="var(--stale)">a later claim supersedes</text>
-    <text x="612" y="192" text-anchor="start" class="dg-cost" fill="var(--stale)">→ citation renders struck-through immediately</text>
-    <text x="612" y="210" text-anchor="start" class="dg-cost" fill="var(--stale)">→ CI reports repair debt on that chapter</text>
-    <text x="450" y="234" text-anchor="middle" class="dg-cost">documentation auto-INVALIDATES; it never auto-updates — prose stays authored</text>
-  </svg><figcaption>evidence becomes narrative; supersession makes the narrative flag itself</figcaption></figure>`,
-};
+// ---------- shared rendering ----------
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const anchorLink = id => `<a class="anchor" href="#${id}" aria-label="Link to this section">#</a>`;
 
 function chipify(text, ctx) {
-  let i = 0;
   return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
     const stale = byId[id] && byId[id].state !== 'live';
     return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-evd="${ctx}" data-claim="${id}">${id}</button>`;
   });
 }
-const compById = {}; for (const m of SYSMAP) compById[m.id] = m;
 
-// ---------- history thread (ancestors via this claim's own edges) ----------
+// Just enough Dart highlighting to make the landing sample readable.
+//
+// One pass over a single alternation, deliberately: successive .replace() calls
+// would re-scan the markup they just emitted, and `class` is both a Dart
+// keyword and the attribute this writes — the second pass would wrap the
+// attribute name and shred the tag. Comments and strings lead the alternation
+// so a `//` inside a literal is not mistaken for a comment.
+function highlight(src) {
+  const re = /(\/\/[^\n]*)|('[^'\n]*')|\b(final|await|async|const|var|void|return|new|class)\b/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src)) !== null) {
+    out += esc(src.slice(last, m.index));
+    out += `<span class="${m[1] ? 'tok-c' : m[2] ? 'tok-s' : 'tok-k'}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(src.slice(last));
+}
+
+/// Renders one parsed section's body. `ctx` namespaces the evidence drawers so
+/// two paragraphs citing the same claim get independent toggles.
+function bodyHtml(sec, ctxBase) {
+  let h = '';
+  sec.ps.forEach((p, pi) => {
+    if (typeof p !== 'string') {
+      h += `<pre class="code"><code>${highlight(p.code)}</code></pre>`;
+      return;
+    }
+    const ctx = `${ctxBase}-${pi}`;
+    h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(p), ctx)}</p>
+      <div class="ev-drawer" id="evd-${ctx}"></div>`;
+  });
+  return h;
+}
+
+function sectionsHtml(sections, ctxBase, slots) {
+  let h = '';
+  sections.forEach((sec, si) => {
+    if (sec.h) {
+      const id = slug(sec.h);
+      h += `<h2 id="${id}">${esc(sec.h)}${anchorLink(id)}</h2>`;
+    }
+    h += bodyHtml(sec, `${ctxBase}-${si}`);
+    if (slots && sec.h && slots[sec.h]) h += slots[sec.h]();
+  });
+  return h;
+}
+
+function poolAt(p) { return p.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth); }
+function lastChange(p) {
+  return Math.max.apply(null, p.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
+}
+
+// ---------- home ----------
+function cardsHtml() {
+  return `<div class="cards">${ARCH.map((p, i) => {
+    const live = poolAt(p).length, last = lastChange(p);
+    return `<a class="card" href="#/${p.id}">
+      <div class="c-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
+      <div class="c-name">${esc(p.name)}</div>
+      <div class="c-sum">${md(p.summary)}</div>
+      <div class="c-meta">${live} beliefs${last ? ` · updated ${fmtNice(last)}` : ''}</div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+function statsHtml() {
+  const live = claims.filter(c => liveAt(c, TODAY)).length;
+  const stat = (v, l, cls) => `<div class="stat"><div class="v ${cls || ''}">${v}</div><div class="l">${l}</div></div>`;
+  return `<div class="stats">
+    ${stat(STATS.total, 'experiments run and indexed')}
+    ${stat(STATS.rejected, 'rejected — and kept anyway', 'rej')}
+    ${stat(live, 'beliefs currently standing')}
+  </div>
+  <p><a href="#/meta">How measurement works →</a> &nbsp;·&nbsp; <a href="#/changelog">What changed recently →</a></p>`;
+}
+
+function renderHome() {
+  const slots = {
+    'The shape of the system': () => DIAGRAMS.overview,
+    'Explore the architecture': cardsHtml,
+    'How we know any of this': statsHtml,
+  };
+  const [lede, ...rest] = HOME.sections;
+  view.innerHTML = `<div class="hero">
+      <h1>${esc(HOME.title)}</h1>
+      <p class="tagline">${esc(HOME.tagline)}</p>
+    </div>
+    <div class="prose">${bodyHtml(lede, 'home-0')}${sectionsHtml(rest, 'home', slots)}</div>`;
+  afterRender();
+}
+
+// ---------- an architecture page ----------
+function renderPage(id) {
+  const p = pageById[id];
+  if (!p) return renderHome();
+  const i = ARCH.indexOf(p);
+  const prev = ARCH[i - 1], next = ARCH[i + 1];
+  const pool = poolAt(p), last = lastChange(p);
+  const [lede, ...rest] = p.sections;
+  const fedBy = ARCH.filter(o => (o.feeds || []).includes(p.id));
+  const feeds = (p.feeds || []).map(f => pageById[f]).filter(Boolean);
+
+  const relCol = (label, list, empty) => `<div class="rel-col"><div>${label}</div>${
+    list.length ? list.map(o => `<a class="rel-link" href="#/${o.id}">${esc(o.name)}</a>`).join('')
+                : `<p class="rel-none">${empty}</p>`}</div>`;
+
+  view.innerHTML = `<div class="page-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
+    <h1 class="page-title">${esc(p.name)}</h1>
+    <div class="page-meta">${pool.length} beliefs${last ? ` · last changed ${fmtNice(last)}` : ''}</div>
+    <div class="prose">
+      ${bodyHtml(lede, `${p.id}-0`)}
+      ${DIAGRAMS[p.diagram || p.id] || ''}
+      ${sectionsHtml(rest, p.id)}
+    </div>
+    <div class="rel-band"><h2>How this connects</h2><div class="rel-cols">
+      ${relCol('RECEIVES WORK FROM', fedBy, 'Entry point — work starts here.')}
+      ${relCol('HANDS OFF TO', feeds, 'Terminal — the buck stops here.')}
+    </div></div>
+    ${pool.length ? `<details class="roster"><summary>All ${pool.length} current beliefs, with provenance</summary>
+      ${pool.map(beliefCard).join('')}</details>` : ''}
+    <div class="pager">
+      ${prev ? `<a href="#/${prev.id}"><span class="lbl">← previous</span>${esc(prev.name)}</a>` : '<span></span>'}
+      ${next ? `<a class="nx" href="#/${next.id}"><span class="lbl">next →</span>${esc(next.name)}</a>` : ''}
+    </div>`;
+  afterRender();
+}
+
+// ---------- belief cards ----------
 function ancestorsOf(c, seen) {
   seen = seen || new Set();
   const out = [];
@@ -594,177 +477,6 @@ function ancestorsOf(c, seen) {
   }
   return out;
 }
-
-// ---------- the read: one continuous book ----------
-const view = document.getElementById('view');
-const bookEl = document.getElementById('book');
-const tocEl = document.getElementById('toc');
-const progressEl = document.getElementById('progress');
-const headerEl = document.querySelector('header');
-function compStats(m) {
-  const live = m.pool.filter(c => liveAt(c, asOf));
-  const last = Math.max.apply(null, m.pool.map(c => Math.max(c.birth || 0, c.death || 0)).concat([0]));
-  return { live, last };
-}
-function compCard(m) {
-  const { live, last } = compStats(m);
-  const fresh = last && (TODAY - last) < 14 * 86400000;
-  return `<button class="comp" data-comp="${m.id}">
-    <div class="c-kicker">${m.kicker}</div>
-    <div class="c-name">${m.name}</div>
-    <div class="c-stance">${md(m.summary)}</div>
-    <div class="c-meta">${live.length} beliefs${last ? ` · <span class="${fresh ? 'fresh' : ''}">last changed ${fmtNice(last)}</span>` : ''}</div>
-  </button>`;
-}
-// Stable, human-legible anchors: `#boundary--why-the-trigger-counts-slots`.
-// Headings are unique within a chapter, and the component id prefixes them, so
-// slugs collide only if two sections in one chapter share a title.
-const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-const secId = (compId, sec, si) => compId + '--' + (sec.h ? slug(sec.h) : 's' + si);
-const anchorLink = id => `<a class="anchor" href="#${id}" aria-label="Link to this section">#</a>`;
-const titledSections = m =>
-  ((STORIES[m.id] || {}).sections || [])
-    .map((s, si) => ({ h: s.h, id: secId(m.id, s, si) }))
-    .filter(s => s.h);
-
-/// The map opens the book rather than gating it: every card is a jump link into
-/// the chapter below, so the diagram orients without becoming a mode.
-function frontisHtml() {
-  const cov = KG.coverage;
-  return `<div class="frontis"><div class="sysmap">
-    <div class="sm-grid">
-      <div class="sm-col">${compCard(compById.api)}</div>
-      <div class="sm-boundary">${compCard(compById.boundary)}</div>
-      <div class="sm-col">${compCard(compById.readers)}${compCard(compById.writer)}${compCard(compById.tx)}</div>
-    </div>
-    <p class="sm-caption">⟵ everything left runs on main · everything right runs on worker isolates ⟶</p>
-    <div class="sm-native sm-col">${compCard(compById.native)}${compCard(compById.meta)}</div>
-  </div>
-  <p class="coverage-banner">Every card opens its chapter below. Claims cover ${cov.entriesWithClaims} of
-  ${cov.totalEntries} experiment entries so far — components may hold further beliefs still recorded only as
-  prose in signals.json.</p></div>`;
-}
-
-function chapterHtml(m, i) {
-  const pool = m.pool.filter(c => liveAt(c, asOf)).sort((a, b) => b.birth - a.birth);
-  const { last } = compStats(m);
-  const story = STORIES[m.id];
-  const prev = SYSMAP[i - 1], next = SYSMAP[i + 1];
-  let h = `<article class="chapter anchored" id="${m.id}">
-    <div class="ch-head">
-      <div class="ch-num">${String(i + 1).padStart(2, '0')} · ${m.kicker}</div>
-      <h2>${esc(m.name)}${anchorLink(m.id)}</h2>
-      <div class="ch-meta">${pool.length} beliefs${last ? ` · last changed ${fmtNice(last)}` : ''}</div>
-    </div>`;
-  if (story) {
-    h += `<div class="story">`;
-    story.sections.forEach((sec, si) => {
-      if (sec.h) {
-        const sid = secId(m.id, sec, si);
-        h += `<h3 class="anchored" id="${sid}">${esc(sec.h)}${anchorLink(sid)}</h3>`;
-      }
-      sec.ps.forEach((para, pi) => {
-        const ctx = `${m.id}-${si}-${pi}`;
-        h += `<p class="${sec.lede ? 'lede' : ''}">${chipify(md(para), ctx)}</p>
-          <div class="ev-drawer" id="evd-${ctx}"></div>`;
-      });
-      if (si === 0 && DIAGRAMS[m.diagram || m.id]) h += DIAGRAMS[m.diagram || m.id];
-    });
-    h += `</div>`;
-  }
-  if (pool.length) {
-    h += `<details class="all-beliefs"><summary>All ${pool.length} current beliefs</summary>`;
-    for (const c of pool) h += beliefCard(c);
-    h += `</details>`;
-  }
-  h += `<nav class="ch-nav">
-    ${prev ? `<button data-go="${prev.id}"><span class="lbl">← previous</span>${esc(prev.name)}</button>` : '<span></span>'}
-    ${next ? `<button class="nx" data-go="${next.id}"><span class="lbl">next →</span>${esc(next.name)}</button>` : ''}
-  </nav></article>`;
-  return h;
-}
-
-function renderBook() {
-  setTab('read');
-  bookEl.classList.remove('solo');
-  tocEl.hidden = false;
-  view.innerHTML = frontisHtml() + SYSMAP.map(chapterHtml).join('');
-  view.querySelectorAll('.comp').forEach(b =>
-    b.addEventListener('click', () => goTo(b.dataset.comp)));
-  view.querySelectorAll('[data-go]').forEach(b =>
-    b.addEventListener('click', () => goTo(b.dataset.go)));
-  view.querySelectorAll('.anchor').forEach(a =>
-    a.addEventListener('click', ev => { ev.preventDefault(); goTo(a.getAttribute('href').slice(1)); }));
-  renderTOC();
-  wire();
-  spy();
-}
-
-function renderTOC() {
-  let h = `<div class="toc-hd">Contents</div><ol>`;
-  SYSMAP.forEach((m, i) => {
-    h += `<li class="toc-ch" data-ch="${m.id}">
-      <a href="#${m.id}"><span class="n">${String(i + 1).padStart(2, '0')}</span>${esc(m.name)}</a>
-      <ul class="toc-secs">${titledSections(m).map(s =>
-        `<li><a href="#${s.id}" data-sec="${s.id}">${esc(s.h)}</a></li>`).join('')}</ul></li>`;
-  });
-  tocEl.innerHTML = h + `</ol><div class="toc-foot"><button id="to-log">Changelog →</button></div>`;
-  tocEl.querySelectorAll('a[href^="#"]').forEach(a =>
-    a.addEventListener('click', ev => { ev.preventDefault(); goTo(a.getAttribute('href').slice(1)); }));
-  document.getElementById('to-log').addEventListener('click', renderLog);
-}
-
-function goTo(id) {
-  if (tab !== 'read') renderBook();
-  const el = document.getElementById(id);
-  if (!el) return;
-  history.replaceState(null, '', '#' + id);
-  const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-  el.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
-}
-
-// ---------- scroll position: rail highlight, hash, progress ----------
-let lastCh = null;
-function spy() {
-  if (tab !== 'read') return;
-  const line = headerHeight() + 40;
-  let curCh = null, curSec = null;
-  for (const el of view.querySelectorAll('.chapter, .story h3')) {
-    if (el.getBoundingClientRect().top > line) break;
-    if (el.classList.contains('chapter')) { curCh = el.id; curSec = null; } else curSec = el.id;
-  }
-  tocEl.querySelectorAll('.toc-ch').forEach(li => li.classList.toggle('active', li.dataset.ch === curCh));
-  tocEl.querySelectorAll('.toc-secs a').forEach(a => a.classList.toggle('active', a.dataset.sec === curSec));
-  if (curCh && curCh !== lastCh) {
-    lastCh = curCh;
-    const link = tocEl.querySelector(`.toc-ch[data-ch="${curCh}"] > a`);
-    if (link) link.scrollIntoView({ block: 'nearest' });
-  }
-  // replaceState, not push: the URL should describe where you are without
-  // turning every scroll tick into a history entry.
-  const want = '#' + (curSec || curCh || '');
-  if (curCh && location.hash !== want) history.replaceState(null, '', want);
-}
-function progress() {
-  const max = document.documentElement.scrollHeight - innerHeight;
-  progressEl.style.width = (max > 0 ? Math.min(100, (scrollY / max) * 100) : 0) + '%';
-}
-function headerHeight() {
-  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 104;
-}
-// Watch the header itself rather than the window: it also grows when the rows
-// wrap or a late-loading font reflows them, and a stale value pushes the
-// contents rail and every anchor landing off by the difference.
-function measureHeader() {
-  document.documentElement.style.setProperty('--hdr-h', headerEl.offsetHeight + 'px');
-}
-new ResizeObserver(() => { measureHeader(); progress(); }).observe(headerEl);
-let ticking = false;
-addEventListener('scroll', () => {
-  if (ticking) return;
-  ticking = true;
-  requestAnimationFrame(() => { ticking = false; progress(); spy(); });
-}, { passive: true });
 function beliefCard(c) {
   const head = firstSentence(c.text);
   const rest = c.text.slice(head.length).trim();
@@ -800,11 +512,8 @@ function threadHtml(anc) {
   }).join('');
 }
 
-// ---------- changelog view ----------
+// ---------- changelog ----------
 function renderLog() {
-  setTab('log');
-  bookEl.classList.add('solo');
-  tocEl.hidden = true;
   const events = [];
   for (const c of claims) {
     if (c.birth == null || c.birth > asOf) continue;
@@ -815,61 +524,85 @@ function renderLog() {
     events.push({ t: c.birth, kind, c, old: oldEdge ? byId[oldEdge.target] : null });
   }
   events.sort((a, b) => b.t - a.t || b.c.id.localeCompare(a.c.id));
-  let h = '', day = '';
+  let h = `<div class="page-kicker">reference</div>
+    <h1 class="page-title">Changelog</h1>
+    <div class="page-meta">${events.length} recorded changes of belief</div>`;
+  let day = '';
   for (const ev of events) {
     const d = fmtNice(ev.t);
     if (d !== day) { if (day) h += '</div>'; h += `<div class="log-day"><h3>${d}</h3>`; day = d; }
     h += `<div class="event">
       <span class="ev-kind ev-${ev.kind}">${ev.kind.toUpperCase()}</span>
       <div><div class="ev-body">${esc(firstSentence(ev.c.text))}
-        <span class="ev-sub">· exp ${ev.c.source} · ${esc((SYSMAP.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
+        <span class="ev-sub">· exp ${ev.c.source} · ${esc((PAGES.find(m => m.pool.includes(ev.c)) || {}).name || '')}</span></div>
         ${ev.old ? `<div class="ev-sub ev-old">was: ${esc(firstSentence(ev.old.text))}</div>` : ''}
       </div></div>`;
   }
   if (day) h += '</div>';
-  view.innerHTML = h || '<p class="hint">Nothing recorded before this date.</p>';
+  view.innerHTML = h + (events.length ? '' : '<p class="hint">Nothing recorded before this date.</p>');
+  afterRender();
 }
 
-// ---------- tabs / time ----------
-let tab = 'read';
-function setTab(t) {
-  tab = t;
-  for (const id of ['read', 'log'])
-    document.getElementById('tab-' + id).setAttribute('aria-selected', String(t === id));
-}
-document.getElementById('tab-read').addEventListener('click', () => { renderBook(); scrollTo({ top: 0 }); });
-document.getElementById('tab-log').addEventListener('click', renderLog);
+// ---------- shell: nav, on-this-page, routing ----------
+const view = document.getElementById('view');
+const sidebarEl = document.getElementById('sidebar');
+const onpageEl = document.getElementById('onpage');
+let route = '/';
 
-const asofInput = document.getElementById('asof');
-const timeNote = document.getElementById('time-note');
-const births = claims.map(c => c.birth).filter(Boolean);
-asofInput.max = fmt(TODAY);
-asofInput.min = fmt(Math.min.apply(null, births));
-asofInput.value = fmt(TODAY);
-function applyTime() {
-  const atToday = asOf >= TODAY;
-  timeNote.classList.toggle('on', !atToday);
-  if (!atToday) {
-    const nowLive = claims.filter(c => liveAt(c, TODAY)).length;
-    const thenLive = claims.filter(c => liveAt(c, asOf)).length;
-    timeNote.innerHTML = `Showing the belief set as of <b>${fmtNice(asOf)}</b> —
-      ${thenLive} beliefs then, ${nowLive} today. Beliefs since revised carry an amber chip.`;
+function renderNav() {
+  const link = (href, label, extra) =>
+    `<a class="nav-link ${route === href.slice(1) ? 'active' : ''}" href="${href}">${label}${extra || ''}</a>`;
+  sidebarEl.innerHTML = `
+    <div class="nav-group">
+      <div class="nav-title">Start</div>
+      ${link('#/', 'Overview')}
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">Architecture</div>
+      ${ARCH.map((p, i) => link('#/' + p.id,
+        `<span class="n">${String(i + 1).padStart(2, '0')}</span>${esc(p.name)}`,
+        `<span class="zone">${esc(p.zone)}</span>`)).join('')}
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">Reference</div>
+      ${link('#/changelog', 'Changelog')}
+    </div>`;
+}
+
+function renderOnPage() {
+  const heads = [...view.querySelectorAll('.prose h2[id]')];
+  if (heads.length < 2) { onpageEl.innerHTML = ''; return; }
+  onpageEl.innerHTML = `<div class="onpage-title">On this page</div>` +
+    heads.map(h => `<a href="#${h.id}" data-sec="${h.id}">${esc(h.firstChild.textContent)}</a>`).join('');
+}
+
+/// Highlights the heading you are currently reading under. Runs off scroll
+/// rather than IntersectionObserver so the "last heading above the fold" rule
+/// stays explicit — with several headings on screen, that is the one you want.
+function spy() {
+  const heads = [...view.querySelectorAll('.prose h2[id]')];
+  if (!heads.length) return;
+  const line = headerHeight() + 60;
+  let cur = heads[0].id;
+  for (const h of heads) {
+    if (h.getBoundingClientRect().top > line) break;
+    cur = h.id;
   }
-  // Re-rendering replaces the whole document body, so hold the reader's place —
-  // moving the date should change what the page says, not where you are in it.
-  const y = scrollY;
-  (tab === 'log' ? renderLog : renderBook)();
-  scrollTo({ top: y });
+  onpageEl.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.sec === cur));
 }
-asofInput.addEventListener('change', () => {
-  const t = parseDate(asofInput.value);
-  if (t) { asOf = t + 86399000; applyTime(); }
-});
-document.getElementById('today-btn').addEventListener('click', () => {
-  asOf = TODAY; asofInput.value = fmt(TODAY); applyTime();
-});
+function headerHeight() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 60;
+}
 
-// ---------- wiring ----------
+function afterRender() {
+  wire();
+  renderNav();
+  renderOnPage();
+  spy();
+}
+
+/// Evidence chips expand the cited claim in place, directly under the sentence
+/// that leans on it — provenance where the argument is, not in a footnote.
 function wire() {
   view.querySelectorAll('.ev-inline').forEach(b =>
     b.addEventListener('click', () => {
@@ -889,13 +622,75 @@ function wire() {
 function wireHist(root) {
   root.querySelectorAll('.hist-btn').forEach(b =>
     b.addEventListener('click', () => {
-      const th = root.querySelector('#th-' + CSS.escape(b.dataset.hist)) || document.getElementById('th-' + b.dataset.hist);
+      const th = document.getElementById('th-' + b.dataset.hist);
       if (!th) return;
       const open = th.classList.toggle('open');
       const n = (b.textContent.match(/\d+/) || ['0'])[0];
       b.textContent = open ? `history · ${n} prior ▾` : `history · ${n} prior ▸`;
     }));
 }
+
+// Routes are `#/`, `#/<page>` and `#/changelog`; a bare `#section` is an
+// in-page anchor and must not be mistaken for a route.
+function currentRoute() {
+  const h = location.hash;
+  if (!h.startsWith('#/')) return null;
+  return h.slice(1);
+}
+function navigate(keepScroll) {
+  const r = currentRoute() || '/';
+  const changed = r !== route;
+  route = r;
+  if (r === '/') renderHome();
+  else if (r === '/changelog') renderLog();
+  else renderPage(r.slice(1));
+  if (changed && !keepScroll) scrollTo({ top: 0, behavior: 'auto' });
+}
+addEventListener('hashchange', () => {
+  if (currentRoute()) navigate();
+  else spy();
+});
+let ticking = false;
+addEventListener('scroll', () => {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => { ticking = false; spy(); });
+}, { passive: true });
+
+// ---------- time machine ----------
+const asofInput = document.getElementById('asof');
+const births = claims.map(c => c.birth).filter(Boolean);
+asofInput.max = fmt(TODAY);
+asofInput.min = fmt(Math.min.apply(null, births));
+asofInput.value = fmt(TODAY);
+function applyTime() {
+  const atToday = asOf >= TODAY;
+  let note = document.querySelector('.time-note');
+  if (!note) {
+    note = document.createElement('div');
+    note.className = 'time-note';
+    document.querySelector('.shell').before(note);
+  }
+  note.classList.toggle('on', !atToday);
+  if (!atToday) {
+    const nowLive = claims.filter(c => liveAt(c, TODAY)).length;
+    const thenLive = claims.filter(c => liveAt(c, asOf)).length;
+    note.innerHTML = `Showing what was believed on <b>${fmtNice(asOf)}</b> —
+      ${thenLive} beliefs then, ${nowLive} today. Anything since revised carries an amber chip.`;
+  }
+  // Re-render replaces the body, so hold the reader's place: moving the date
+  // should change what the page says, not where you are in it.
+  const y = scrollY;
+  navigate(true);
+  scrollTo({ top: y });
+}
+asofInput.addEventListener('change', () => {
+  const t = parseDate(asofInput.value);
+  if (t) { asOf = t + 86399000; applyTime(); }
+});
+document.getElementById('today-btn').addEventListener('click', () => {
+  asOf = TODAY; asofInput.value = fmt(TODAY); applyTime();
+});
 
 // ---------- search ----------
 const searchInput = document.getElementById('search');
@@ -910,50 +705,42 @@ searchInput.addEventListener('input', () => {
       hits.push({ id: c.id, label: firstSentence(c.text), state: c.state });
     if (hits.length > 9) break;
   }
-  for (const hHit of hits) {
+  for (const hit of hits) {
     const b = document.createElement('button');
     b.className = 'search-hit'; b.setAttribute('role', 'option');
-    b.innerHTML = `<span class="mono">${hHit.id} · ${hHit.state}</span> · ${esc(hHit.label.slice(0, 90))}`;
+    b.innerHTML = `<span class="mono">${hit.id} · ${hit.state}</span> · ${esc(hit.label.slice(0, 88))}`;
     b.addEventListener('click', () => {
       searchResults.classList.remove('open'); searchInput.value = '';
       asOf = TODAY; asofInput.value = fmt(TODAY);
-      renderBook();
-      // Belief cards live inside each chapter's collapsed roster, so a hit is
-      // in the DOM but invisible until its <details> is opened.
-      const reveal = el => { const d = el.closest('details'); if (d) d.open = true; };
-      const target = document.getElementById('b-' + hHit.id);
+      // Jump to the page that owns the claim, then reveal it in the roster.
+      const owner = PAGES.find(p => p.pool.some(c => c.id === hit.id))
+        || PAGES.find(p => p.pool.some(c => (byId[hit.id] || {}).killers?.includes(c.id)));
+      location.hash = owner ? '#/' + owner.id : '#/changelog';
+      navigate();
+      const target = document.getElementById('b-' + hit.id);
+      const el = target || document.getElementById('b-' + ((byId[hit.id] || {}).killers || [])[0]);
+      if (!el) return;
+      const det = el.closest('details'); if (det) det.open = true;
+      el.scrollIntoView({ block: 'center' });
       if (target) {
-        reveal(target);
-        target.scrollIntoView({ block: 'center' });
         const head = target.querySelector('.belief-head');
         head.innerHTML = `<mark>${esc(head.textContent)}</mark>`;
       } else {
-        const killers = (byId[hHit.id] || {}).killers || [];
-        const el2 = killers[0] && document.getElementById('b-' + killers[0]);
-        if (el2) {
-          reveal(el2);
-          el2.scrollIntoView({ block: 'center' });
-          const btn = el2.querySelector('.hist-btn'); if (btn) btn.click();
-        }
+        const btn = el.querySelector('.hist-btn'); if (btn) btn.click();
       }
     });
     searchResults.appendChild(b);
   }
   searchResults.classList.toggle('open', hits.length > 0);
 });
-document.addEventListener('click', ev => { if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open'); });
+document.addEventListener('click', ev => {
+  if (!ev.target.closest('.searchbox')) searchResults.classList.remove('open');
+});
 
 // ---------- boot ----------
-document.getElementById('hdr-stats').textContent =
-  `— ${claims.filter(c => liveAt(c, TODAY)).length} current beliefs across ${SYSMAP.length} system components`;
-renderBook();
-measureHeader();
-// Honour a deep link on load, so a shared `#boundary--...` URL opens on the
-// passage it names rather than at the top of the book.
-if (location.hash) {
+navigate();
+if (!currentRoute() && location.hash) {
   const landing = document.getElementById(decodeURIComponent(location.hash.slice(1)));
   if (landing) landing.scrollIntoView({ block: 'start' });
 }
-progress();
-spy();
 </script>
