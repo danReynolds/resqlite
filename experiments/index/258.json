@@ -1,0 +1,7 @@
+{
+  "file": "258-columnar-result-store.md",
+  "title": "Columnar typed-array result store",
+  "impact": "Moonshot: challenged the assumption that the `select()` backing store must be a boxed row-major `List<Object?>`. A focused AOT A/B (`columnar_result_transfer.dart`, two order-flipped passes) gave the first real measurement of the per-column typed-array mechanism exp 055 only estimated and exp 081 tested only as a row-major binary slab. Columnar builds 60-90% faster worker-side (no double-boxing) and its transfer is 73-91% cheaper — but the large results where transfer wins most already zero-copy via the `Isolate.exit` sacrifice path (>32768 slots), and the sub-threshold `SendPort` lanes save only tens of microseconds, below the round-trip floor. `REAL` consume is neutral; memory is a wash-to-regression (Smi ints live inline, so `Int64List` costs more). The one real primary-metric signal was a ~2x main-isolate integer-consume speedup from `Int64List` locality. Rejected the whole-store rewrite; recorded a scoped narrow-columnar-integer-consume candidate. Harness + receipt kept; no lib/native change.",
+  "status": "rejected",
+  "link": ""
+}

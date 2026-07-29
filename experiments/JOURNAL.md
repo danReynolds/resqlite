@@ -659,6 +659,32 @@ bytes before crediting the removed calls. Compare against the actual scalar
 encoder, which may already have narrow fast paths, and include a no-payload
 lane: if that lane regresses, the envelope machinery itself has failed.*
 
+### A cross-isolate transfer A/B must model the sacrifice path, or it over-credits the candidate
+
+[Exp 258](258-columnar-result-store.md) measured a columnar typed-array result
+store and found its transfer 73–91% cheaper than the boxed flat `List<Object?>`
+on a `SendPort` A/B — a headline that evaporated on contact with production.
+Reads large enough for transfer cost to matter (> `sacrificeSlotThreshold`,
+32 K structural slots) never take `SendPort` at all: they zero-copy via
+`Isolate.exit` (the sacrifice path), so the candidate's `memcpy` competes with
+*free*, not with a boxed deep-copy. Where `SendPort` genuinely runs — results
+under the threshold — the absolute saving was tens of microseconds, below the
+`select()` round-trip floor. A naive A/B that sends every size over `SendPort`
+credits the candidate on exactly the large results production already transfers
+for nothing. The fix is to tag lanes by the slot threshold and compare the
+`(exit)` lanes against a zero-copy baseline, not a `SendPort` one. Two smaller
+traps rode along: Dart `Smi` integers live *inline* in a `List<Object?>` (tagged,
+no heap box), so a typed `Int64List` column costs *more* memory, not less — the
+"unbox saves memory" intuition only holds for doubles; and moving decode work
+off the boxed list shifts it between isolates, so always separate worker-wall
+build cost from the main-isolate `hop + consume` that resqlite's contract keys on.
+
+*Reapplies to any result-transfer or IPC-shape experiment. Before crediting a
+transfer win, ask which production path each result size actually takes — if the
+large ones already zero-copy, the win only lives in the small-result regime,
+where the round-trip floor usually swallows it. Model the sacrifice/`Isolate.exit`
+threshold in the harness itself.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
