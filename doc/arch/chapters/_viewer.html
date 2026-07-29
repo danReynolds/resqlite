@@ -90,8 +90,8 @@ a { color: var(--accent); }
 
 /* ---------- shell ---------- */
 .shell {
-  display: grid; grid-template-columns: 252px minmax(0, 1fr) 208px;
-  gap: 0; max-width: 1440px; margin: 0 auto; align-items: start;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 348px;
+  gap: 0; max-width: 1560px; margin: 0 auto; align-items: start;
 }
 .sidebar {
   position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
@@ -113,18 +113,72 @@ a { color: var(--accent); }
 .nav-link.active .n { color: var(--accent); }
 .nav-link .zone { margin-left: auto; font-size: 10px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; }
 
+/* Section links live under the active page in the left rail, which frees the
+   whole right column for evidence. */
+.nav-secs { margin: 2px 0 6px 0; }
+.nav-secs a {
+  display: block; padding: 4px 10px 4px 30px; font-size: 12.5px; color: var(--ink-3);
+  text-decoration: none; border-left: 2px solid var(--line); margin-left: 12px; line-height: 1.35;
+}
+.nav-secs a:hover { color: var(--ink); }
+.nav-secs a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+
 main { padding: 34px 46px 90px; min-width: 0; }
-.onpage {
-  position: sticky; top: var(--hdr-h); max-height: calc(100vh - var(--hdr-h));
-  overflow-y: auto; padding: 34px 22px 40px 10px; font-size: 12.5px;
+
+/* ---------- references panel ---------- */
+.refs {
+  position: sticky; top: var(--hdr-h); height: calc(100vh - var(--hdr-h));
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--line); background: var(--paper);
 }
-.onpage-title { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px; }
-.onpage a {
-  display: block; padding: 4px 10px; color: var(--ink-2); text-decoration: none;
-  border-left: 2px solid var(--line); line-height: 1.35;
+.refs-hd { padding: 22px 20px 12px; border-bottom: 1px solid var(--line); }
+.refs-hd .t { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3); }
+.refs-hd .s { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.refs-body { flex: 1; overflow-y: auto; padding: 14px 16px 40px; scroll-behavior: smooth; }
+.refs-empty { font-size: 12.5px; color: var(--ink-3); font-style: italic; padding: 8px 4px; }
+
+.ref {
+  border: 1px solid var(--line); border-radius: 11px; background: var(--surface);
+  padding: 13px 14px; margin-bottom: 10px; scroll-margin-top: 12px;
+  transition: border-color .15s, box-shadow .15s, opacity .15s;
 }
-.onpage a:hover { color: var(--ink); }
-.onpage a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+.ref.dim { opacity: .58; }
+.ref.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); opacity: 1; }
+@keyframes refflash { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 3px var(--accent-soft); } }
+.ref.flash { animation: refflash .5s ease-out; }
+.ref-top { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.ref-id { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.ref-state {
+  margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px;
+  letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 20px;
+  border: 1px solid currentColor; color: var(--ok);
+}
+.ref-state.s-superseded, .ref-state.s-refined { color: var(--warn); }
+.ref-state.s-refuted { color: var(--bad); }
+.ref-text { font-size: 13px; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
+.ref.dim .ref-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ref-src { border-top: 1px solid var(--line); padding-top: 9px; }
+.ref-exp { font-size: 12.5px; font-weight: 600; line-height: 1.4; margin-bottom: 3px; }
+.ref-facts { display: flex; flex-wrap: wrap; gap: 3px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--ink-3); }
+.ref-facts .k { color: var(--accent); }
+.ref-facts .cls { color: var(--meas); }
+.ref-more { margin-top: 9px; }
+.ref-more summary { cursor: pointer; font-size: 11.5px; color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; list-style: none; }
+.ref-more summary::-webkit-details-marker { display: none; }
+.ref-more summary::before { content: '▸ '; color: var(--ink-3); }
+.ref-more[open] summary::before { content: '▾ '; }
+.ref-more summary:hover { color: var(--accent); }
+.ref-more .body { font-size: 12px; line-height: 1.6; color: var(--ink-2); padding: 8px 2px 2px; max-height: 260px; overflow-y: auto; }
+.ref-prior { border-left: 2px solid var(--line); padding: 2px 0 2px 11px; margin: 8px 0; }
+.ref-prior .w { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--warn); }
+.ref-prior .w.origin { color: var(--ink-3); }
+.ref-prior p { margin: 3px 0 0; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+.ref-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ref-links a {
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; text-decoration: none;
+  border: 1px solid var(--line-2); border-radius: 7px; padding: 3px 9px; color: var(--ink-2);
+}
+.ref-links a:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- prose ---------- */
 .page-kicker { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
@@ -205,6 +259,7 @@ pre.code code { background: none; padding: 0; }
 }
 .ev-inline:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ev-inline.ev-stale { color: var(--warn); text-decoration: line-through; }
+.ev-inline.cited { border-color: var(--accent); background: var(--accent-soft); }
 .ev-drawer { display: none; margin: 2px 0 18px; }
 .ev-drawer.open { display: block; }
 .ev-drawer .belief { border: 1px solid var(--line-2); border-radius: 10px; padding: 13px 16px; background: var(--surface); }
@@ -243,9 +298,9 @@ pre.code code { background: none; padding: 0; }
 mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
 .coverage { color: var(--ink-3); font-size: 12.5px; margin: 26px 0 0; }
 
-@media (max-width: 1180px) {
+@media (max-width: 1240px) {
   .shell { grid-template-columns: 236px minmax(0, 1fr); }
-  .onpage { display: none; }
+  .refs { display: none; }
   main { padding: 30px 32px 80px; }
 }
 @media (max-width: 860px) {
@@ -274,7 +329,13 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 <div class="shell">
   <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
   <main id="view"></main>
-  <aside class="onpage" id="onpage" aria-label="On this page"></aside>
+  <aside class="refs" id="refs" aria-label="References">
+    <div class="refs-hd">
+      <div class="t">References</div>
+      <div class="s" id="refs-sub">Evidence behind what you're reading</div>
+    </div>
+    <div class="refs-body" id="refs-body"></div>
+  </aside>
 </div>
 
 <script>
@@ -328,7 +389,15 @@ __DIAGRAMS__
 
 // ---------- shared rendering ----------
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-const anchorLink = id => `<a class="anchor" href="#${id}" aria-label="Link to this section">#</a>`;
+
+// Routes are `#/<page>` and `#/<page>/<section>`. The landing page owns the
+// reserved id `overview` so its sections are addressable too, while bare `#/`
+// still resolves to it.
+const HOME_ID = 'overview';
+const pageRoute = id => '#/' + (id === HOME_ID ? '' : id);
+const secRoute = (pageId, secId) => `#/${pageId}/${secId}`;
+const anchorLink = (pageId, secId) =>
+  `<a class="anchor" href="${secRoute(pageId, secId)}" aria-label="Link to this section">#</a>`;
 
 function chipify(text, ctx) {
   return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
@@ -371,14 +440,14 @@ function bodyHtml(sec, ctxBase) {
   return h;
 }
 
-function sectionsHtml(sections, ctxBase, slots) {
+function sectionsHtml(sections, pageId, slots) {
   let h = '';
   sections.forEach((sec, si) => {
     if (sec.h) {
       const id = slug(sec.h);
-      h += `<h2 id="${id}">${esc(sec.h)}${anchorLink(id)}</h2>`;
+      h += `<h2 id="${id}">${esc(sec.h)}${anchorLink(pageId, id)}</h2>`;
     }
-    h += bodyHtml(sec, `${ctxBase}-${si}`);
+    h += bodyHtml(sec, `${pageId}-${si}`);
     if (slots && sec.h && slots[sec.h]) h += slots[sec.h]();
   });
   return h;
@@ -393,7 +462,7 @@ function lastChange(p) {
 function cardsHtml() {
   return `<div class="cards">${ARCH.map((p, i) => {
     const live = poolAt(p).length, last = lastChange(p);
-    return `<a class="card" href="#/${p.id}">
+    return `<a class="card" href="${pageRoute(p.id)}">
       <div class="c-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
       <div class="c-name">${esc(p.name)}</div>
       <div class="c-sum">${md(p.summary)}</div>
@@ -424,7 +493,7 @@ function renderHome() {
       <h1>${esc(HOME.title)}</h1>
       <p class="tagline">${esc(HOME.tagline)}</p>
     </div>
-    <div class="prose">${bodyHtml(lede, 'home-0')}${sectionsHtml(rest, 'home', slots)}</div>`;
+    <div class="prose">${bodyHtml(lede, `${HOME_ID}-0`)}${sectionsHtml(rest, HOME_ID, slots)}</div>`;
   afterRender();
 }
 
@@ -440,7 +509,7 @@ function renderPage(id) {
   const feeds = (p.feeds || []).map(f => pageById[f]).filter(Boolean);
 
   const relCol = (label, list, empty) => `<div class="rel-col"><div>${label}</div>${
-    list.length ? list.map(o => `<a class="rel-link" href="#/${o.id}">${esc(o.name)}</a>`).join('')
+    list.length ? list.map(o => `<a class="rel-link" href="${pageRoute(o.id)}">${esc(o.name)}</a>`).join('')
                 : `<p class="rel-none">${empty}</p>`}</div>`;
 
   view.innerHTML = `<div class="page-kicker">${String(i + 1).padStart(2, '0')} · ${esc(p.kicker)}</div>
@@ -458,8 +527,8 @@ function renderPage(id) {
     ${pool.length ? `<details class="roster"><summary>All ${pool.length} current beliefs, with provenance</summary>
       ${pool.map(beliefCard).join('')}</details>` : ''}
     <div class="pager">
-      ${prev ? `<a href="#/${prev.id}"><span class="lbl">← previous</span>${esc(prev.name)}</a>` : '<span></span>'}
-      ${next ? `<a class="nx" href="#/${next.id}"><span class="lbl">next →</span>${esc(next.name)}</a>` : ''}
+      ${prev ? `<a href="${pageRoute(prev.id)}"><span class="lbl">← previous</span>${esc(prev.name)}</a>` : '<span></span>'}
+      ${next ? `<a class="nx" href="${pageRoute(next.id)}"><span class="lbl">next →</span>${esc(next.name)}</a>` : ''}
     </div>`;
   afterRender();
 }
@@ -543,37 +612,139 @@ function renderLog() {
   afterRender();
 }
 
-// ---------- shell: nav, on-this-page, routing ----------
+// ---------- shell: nav, references, routing ----------
 const view = document.getElementById('view');
 const sidebarEl = document.getElementById('sidebar');
-const onpageEl = document.getElementById('onpage');
+const refsBody = document.getElementById('refs-body');
+const refsSub = document.getElementById('refs-sub');
 let route = '/';
 
 function renderNav() {
-  const link = (href, label, extra) =>
-    `<a class="nav-link ${route === href.slice(1) ? 'active' : ''}" href="${href}">${label}${extra || ''}</a>`;
+  const here = route.slice(1) || HOME_ID;
+  const secs = [...view.querySelectorAll('.prose h2[id]')];
+  const secList = secs.length < 2 ? '' : `<div class="nav-secs">${
+    secs.map(h => `<a href="${secRoute(here, h.id)}" data-sec="${h.id}">${esc(h.firstChild.textContent)}</a>`).join('')}</div>`;
+  const link = (id, label, extra) => {
+    const active = id === here;
+    return `<a class="nav-link ${active ? 'active' : ''}" href="${pageRoute(id)}">${label}${extra || ''}</a>` +
+      (active ? secList : '');
+  };
   sidebarEl.innerHTML = `
     <div class="nav-group">
       <div class="nav-title">Start</div>
-      ${link('#/', 'Overview')}
+      ${link(HOME_ID, 'Overview')}
     </div>
     <div class="nav-group">
       <div class="nav-title">Architecture</div>
-      ${ARCH.map((p, i) => link('#/' + p.id,
+      ${ARCH.map((p, i) => link(p.id,
         `<span class="n">${String(i + 1).padStart(2, '0')}</span>${esc(p.name)}`,
         `<span class="zone">${esc(p.zone)}</span>`)).join('')}
     </div>
     <div class="nav-group">
       <div class="nav-title">Reference</div>
-      ${link('#/changelog', 'Changelog')}
+      ${link('changelog', 'Changelog')}
     </div>`;
 }
 
-function renderOnPage() {
-  const heads = [...view.querySelectorAll('.prose h2[id]')];
-  if (heads.length < 2) { onpageEl.innerHTML = ''; return; }
-  onpageEl.innerHTML = `<div class="onpage-title">On this page</div>` +
-    heads.map(h => `<a href="#${h.id}" data-sec="${h.id}">${esc(h.firstChild.textContent)}</a>`).join('');
+// ---------- references panel ----------
+//
+// Each paragraph knows which claims it cites, so the panel can show the union
+// for whatever is on screen: evidence follows reading position instead of
+// waiting to be asked for. Clicking a chip pins one card until the next scroll.
+
+let refIndex = [];     // [{ el: <p>, ids: [claimId] }] in document order
+let shownKey = '';     // ids currently rendered, so scrolling does not re-render
+let pinned = null;     // chip-clicked claim, cleared on the next scroll
+
+function buildRefIndex() {
+  refIndex = [];
+  for (const p of view.querySelectorAll('.prose p')) {
+    const ids = [...p.querySelectorAll('.ev-inline')].map(b => b.dataset.claim);
+    if (ids.length) refIndex.push({ el: p, ids: [...new Set(ids)] });
+  }
+}
+
+function refCard(id, focused) {
+  const c = byId[id];
+  if (!c) return '';
+  const src = expById[c.source] || {};
+  const anc = ancestorsOf(c);
+  const state = c.state || 'live';
+  const links = [];
+  if (src.writeupUrl) links.push(`<a href="${src.writeupUrl}" target="_blank" rel="noopener">Writeup ↗</a>`);
+  if (src.signalUrl) links.push(`<a href="${src.signalUrl}" target="_blank" rel="noopener">Signal entry ↗</a>`);
+  if (src.link) links.push(`<a href="${esc(src.link)}" target="_blank" rel="noopener">Change ↗</a>`);
+  return `<article class="ref ${focused ? 'focus' : 'dim'}" data-id="${id}">
+    <div class="ref-top">
+      <span class="ref-id">${id}</span>
+      <span class="ref-state s-${state}">${state}</span>
+    </div>
+    <p class="ref-text">${esc(c.text)}</p>
+    <div class="ref-src">
+      <div class="ref-exp">${esc(src.title || 'Experiment ' + c.source)}</div>
+      <div class="ref-facts">
+        <span class="k">exp ${c.source}</span>
+        ${src.date ? `<span>${src.date}</span>` : ''}
+        ${src.class ? `<span class="cls">${esc(src.class)}</span>` : ''}
+        ${src.status ? `<span>${esc(src.status)}</span>` : ''}
+      </div>
+      ${c.conditions ? `<div class="ref-facts" style="margin-top:4px"><span>${esc(c.conditions)}</span></div>` : ''}
+    </div>
+    ${focused && src.impact ? `<details class="ref-more"><summary>Method and context</summary>
+      <div class="body">${md(src.impact)}</div></details>` : ''}
+    ${focused && anc.length ? `<details class="ref-more"><summary>${anc.length} earlier belief${anc.length > 1 ? 's' : ''} behind this</summary>
+      <div class="body">${anc.map(a => {
+        const cl = a.claim;
+        const when = cl.death ? `held ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}` : `since ${fmtNice(cl.birth)} · still live`;
+        const rel = a.rel === 'supersedes' ? 'replaced' : a.rel === 'refutes' ? 'refuted'
+          : a.rel === 'refines' ? 'refined' : 'validated';
+        return `<div class="ref-prior"><span class="w ${cl.death ? '' : 'origin'}">${rel} · ${when} · exp ${cl.source}</span>
+          <p>${esc(cl.text)}</p></div>`;
+      }).join('')}</div></details>` : ''}
+    ${focused && links.length ? `<div class="ref-links">${links.join('')}</div>` : ''}
+  </article>`;
+}
+
+function updateRefs(force) {
+  if (!refsBody) return;
+  if (!refIndex.length) {
+    if (shownKey !== 'none') {
+      shownKey = 'none';
+      refsSub.textContent = 'Evidence behind what you\'re reading';
+      refsBody.innerHTML = `<p class="refs-empty">No cited claims on this page.</p>`;
+    }
+    return;
+  }
+  const top = headerHeight();
+  const line = top + 140;
+  const visible = refIndex.filter(r => {
+    const b = r.el.getBoundingClientRect();
+    return b.bottom > top + 8 && b.top < innerHeight - 8;
+  });
+  const inView = visible.length ? visible : [refIndex[0]];
+
+  // Focus follows the paragraph nearest the reading line, unless a chip pinned one.
+  let focus = pinned;
+  if (!focus) {
+    let best = Infinity;
+    for (const r of inView) {
+      const d = Math.abs(r.el.getBoundingClientRect().top - line);
+      if (d < best) { best = d; focus = r.ids[0]; }
+    }
+  }
+  const ids = [...new Set(inView.flatMap(r => r.ids))];
+  if (pinned && !ids.includes(pinned)) ids.unshift(pinned);
+
+  const key = ids.join(',') + '|' + focus;
+  if (key === shownKey && !force) return;
+  shownKey = key;
+
+  refsSub.textContent = ids.length === 1
+    ? '1 claim supports this passage'
+    : `${ids.length} claims support this passage`;
+  refsBody.innerHTML = ids.map(id => refCard(id, id === focus)).join('');
+  view.querySelectorAll('.ev-inline').forEach(b =>
+    b.classList.toggle('cited', b.dataset.claim === focus));
 }
 
 /// Highlights the heading you are currently reading under. Runs off scroll
@@ -581,14 +752,17 @@ function renderOnPage() {
 /// stays explicit — with several headings on screen, that is the one you want.
 function spy() {
   const heads = [...view.querySelectorAll('.prose h2[id]')];
-  if (!heads.length) return;
-  const line = headerHeight() + 60;
-  let cur = heads[0].id;
-  for (const h of heads) {
-    if (h.getBoundingClientRect().top > line) break;
-    cur = h.id;
+  if (heads.length) {
+    const line = headerHeight() + 60;
+    let cur = heads[0].id;
+    for (const h of heads) {
+      if (h.getBoundingClientRect().top > line) break;
+      cur = h.id;
+    }
+    sidebarEl.querySelectorAll('.nav-secs a').forEach(a =>
+      a.classList.toggle('active', a.dataset.sec === cur));
   }
-  onpageEl.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.sec === cur));
+  updateRefs();
 }
 function headerHeight() {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr-h')) || 60;
@@ -597,25 +771,43 @@ function headerHeight() {
 function afterRender() {
   wire();
   renderNav();
-  renderOnPage();
+  buildRefIndex();
+  pinned = null;
+  shownKey = '';
+  updateRefs(true);
   spy();
 }
 
-/// Evidence chips expand the cited claim in place, directly under the sentence
-/// that leans on it — provenance where the argument is, not in a footnote.
+/// Clicking a citation pins it in the references panel — the panel is the
+/// destination, so the chip does not need to duplicate the evidence inline.
+/// Below the panel's breakpoint there is nowhere to send the reader, so the
+/// original in-place drawer stays as the fallback.
 function wire() {
   view.querySelectorAll('.ev-inline').forEach(b =>
     b.addEventListener('click', () => {
-      const drawer = document.getElementById('evd-' + b.dataset.evd);
       const c = byId[b.dataset.claim];
-      if (!drawer || !c) return;
-      if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
-        drawer.classList.remove('open'); return;
+      if (!c) return;
+      const panelVisible = refsBody && refsBody.offsetParent !== null;
+      if (!panelVisible) {
+        const drawer = document.getElementById('evd-' + b.dataset.evd);
+        if (!drawer) return;
+        if (drawer.dataset.showing === c.id && drawer.classList.contains('open')) {
+          drawer.classList.remove('open'); return;
+        }
+        drawer.dataset.showing = c.id;
+        drawer.innerHTML = beliefCard(c);
+        drawer.classList.add('open');
+        wireHist(drawer);
+        return;
       }
-      drawer.dataset.showing = c.id;
-      drawer.innerHTML = beliefCard(c);
-      drawer.classList.add('open');
-      wireHist(drawer);
+      pinned = c.id;
+      updateRefs(true);
+      const card = refsBody.querySelector(`.ref[data-id="${c.id}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'nearest' });
+        card.classList.add('flash');
+        setTimeout(() => card.classList.remove('flash'), 500);
+      }
     }));
   wireHist(view);
 }
@@ -630,21 +822,28 @@ function wireHist(root) {
     }));
 }
 
-// Routes are `#/`, `#/<page>` and `#/changelog`; a bare `#section` is an
-// in-page anchor and must not be mistaken for a route.
+// `#/`, `#/<page>`, `#/<page>/<section>`. A bare `#section` is a plain in-page
+// anchor and must not be read as a route.
 function currentRoute() {
   const h = location.hash;
-  if (!h.startsWith('#/')) return null;
-  return h.slice(1);
+  return h.startsWith('#/') ? h.slice(2).split('/').filter(Boolean) : null;
 }
 function navigate(keepScroll) {
-  const r = currentRoute() || '/';
-  const changed = r !== route;
-  route = r;
-  if (r === '/') renderHome();
-  else if (r === '/changelog') renderLog();
-  else renderPage(r.slice(1));
-  if (changed && !keepScroll) scrollTo({ top: 0, behavior: 'auto' });
+  const parts = currentRoute() || [];
+  const pageId = parts[0] === HOME_ID ? '' : (parts[0] || '');
+  const secId = parts[1] || '';
+  const changed = pageId !== route.slice(1);
+  route = '/' + pageId;
+  if (!pageId) renderHome();
+  else if (pageId === 'changelog') renderLog();
+  else renderPage(pageId);
+  if (secId) {
+    const el = document.getElementById(secId);
+    if (el) { el.scrollIntoView({ block: 'start' }); return; }
+  }
+  // Instant, not 'auto': `auto` defers to the page's smooth scroll-behavior,
+  // which turns every page change into a long animated ride to the top.
+  if (changed && !keepScroll) scrollTo({ top: 0, behavior: 'instant' });
 }
 addEventListener('hashchange', () => {
   if (currentRoute()) navigate();
@@ -654,7 +853,13 @@ let ticking = false;
 addEventListener('scroll', () => {
   if (ticking) return;
   ticking = true;
-  requestAnimationFrame(() => { ticking = false; spy(); });
+  requestAnimationFrame(() => {
+    ticking = false;
+    // Scrolling hands focus back to reading position — a pinned citation is a
+    // momentary answer to a click, not a mode the reader has to dismiss.
+    pinned = null;
+    spy();
+  });
 }, { passive: true });
 
 // ---------- time machine ----------
@@ -678,11 +883,15 @@ function applyTime() {
     note.innerHTML = `Showing what was believed on <b>${fmtNice(asOf)}</b> —
       ${thenLive} beliefs then, ${nowLive} today. Anything since revised carries an amber chip.`;
   }
-  // Re-render replaces the body, so hold the reader's place: moving the date
-  // should change what the page says, not where you are in it.
-  const y = scrollY;
+  // Hold the reader's place: moving the date should change what the page says,
+  // not where you are in it. Measured against <main>, which survives the
+  // re-render, because showing or hiding the banner above it shifts the whole
+  // document by the banner's height — restoring a raw scrollY would land the
+  // reader that far off.
+  const docTop = () => view.getBoundingClientRect().top + scrollY;
+  const offset = scrollY - docTop();
   navigate(true);
-  scrollTo({ top: y });
+  scrollTo({ top: docTop() + offset, behavior: 'instant' });
 }
 asofInput.addEventListener('change', () => {
   const t = parseDate(asofInput.value);
@@ -713,9 +922,12 @@ searchInput.addEventListener('input', () => {
       searchResults.classList.remove('open'); searchInput.value = '';
       asOf = TODAY; asofInput.value = fmt(TODAY);
       // Jump to the page that owns the claim, then reveal it in the roster.
+      // replaceState rather than assigning location.hash: assigning would fire
+      // hashchange after this handler and re-render the page, discarding the
+      // highlight applied below.
       const owner = PAGES.find(p => p.pool.some(c => c.id === hit.id))
         || PAGES.find(p => p.pool.some(c => (byId[hit.id] || {}).killers?.includes(c.id)));
-      location.hash = owner ? '#/' + owner.id : '#/changelog';
+      history.replaceState(null, '', owner ? pageRoute(owner.id) : '#/changelog');
       navigate();
       const target = document.getElementById('b-' + hit.id);
       const el = target || document.getElementById('b-' + ((byId[hit.id] || {}).killers || [])[0]);

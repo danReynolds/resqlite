@@ -74,6 +74,7 @@ String buildKnowledgePage({required Directory repoRoot}) {
   final graph = kg.buildKnowledgeGraph(
     experimentsDir: Directory('${repoRoot.path}/experiments'),
   );
+  _enrichExperiments(repoRoot, graph);
   return template
       .replaceFirst('__DIAGRAMS__', diagrams)
       .replaceFirst('__KG__', json.encode(graph))
@@ -87,6 +88,40 @@ String buildKnowledgePage({required Directory repoRoot}) {
         }),
       )
       .replaceFirst('__STATS__', json.encode(_experimentStats(repoRoot)));
+}
+
+const _repo = 'https://github.com/danReynolds/resqlite/blob/main';
+
+/// Adds the fields the references panel needs but `knowledge-graph.json` does
+/// not carry: the index's `impact` prose (what the experiment actually did and
+/// why), the signal entry's `experimentClass`, and source links.
+///
+/// Enriching here rather than in the graph builder keeps `knowledge-graph.json`
+/// stable — agents and CI consume it, and it should not grow fields that exist
+/// only to render a panel.
+void _enrichExperiments(Directory repoRoot, Map<String, Object?> graph) {
+  final experiments = (graph['experiments'] as List).cast<Map<String, Object?>>();
+  for (final e in experiments) {
+    final id = e['id'];
+    final index = File('${repoRoot.path}/experiments/index/$id.json');
+    if (index.existsSync()) {
+      final decoded = json.decode(index.readAsStringSync());
+      final entry = decoded is List
+          ? decoded.whereType<Map>().firstWhere((_) => true, orElse: () => {})
+          : decoded as Map;
+      if (entry['impact'] != null) e['impact'] = entry['impact'];
+      if (entry['link'] != null) e['link'] = entry['link'];
+    }
+    final signal = File('${repoRoot.path}/experiments/signals/entries/$id.json');
+    if (signal.existsSync()) {
+      final s = json.decode(signal.readAsStringSync());
+      if (s is Map && s['experimentClass'] != null) {
+        e['class'] = s['experimentClass'];
+      }
+      if (signal.existsSync()) e['signalUrl'] = '$_repo/experiments/signals/entries/$id.json';
+    }
+    if (e['file'] != null) e['writeupUrl'] = '$_repo/experiments/${e['file']}';
+  }
 }
 
 /// Accepted/rejected counts, read straight from the experiment index. The
