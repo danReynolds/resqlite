@@ -24,3 +24,4 @@ benchmark/drift/*.g.dart
 # instead. Enforced by the `guard-raw-profile-json` job in ci.yml.
 benchmark/profile/results/*.json
 benchmark/profile/results/tracelite/
+build/

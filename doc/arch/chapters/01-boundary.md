@@ -33,11 +33,11 @@ So a result's transfer cost tracks the size of its *mutable structure*, not the 
 
 ## Why the trigger counts slots, not bytes
 
-For most of resqlite's life the sacrifice decision keyed on estimated bytes: results over 256 KB handed off the heap. For all-integer results that heuristic is accurate — eight bytes per cell means bytes and slots are proportional — and it went unchallenged because the common case looked right.
+For most of resqlite's life the sacrifice decision keyed on estimated bytes: results over 256 KB handed off the heap, discounting any cells already wrapped for transfer [[was:236.2]]. For all-integer results that heuristic is accurate — eight bytes per cell means bytes and slots are proportional — and it went unchallenged because the common case looked right.
 
 It was wrong for exactly the case where it mattered most. A result of four rows holding a 100 KB text column is 400 KB by weight and four slots by structure. Those strings were going to be *shared* on send, costing nothing. The byte trigger read the result as expensive, killed the reader isolate, and paid a respawn to avoid a copy that was never going to happen — on every such read.
 
-Re-routing the trigger onto mutable slot count fixed the misroute and deleted the byte accounting entirely: that shape stopped sacrificing and got 31% faster, while every numeric and structural shape kept byte-for-byte identical routing [[246.1]]. The threshold sits at 32k slots — deliberately below the ~48k intrinsic crossover, because at the real pool the send's copy also blocks the worker from accepting its next request, which pulls the practical crossover earlier [[236.2]].
+Re-routing the trigger onto mutable slot count fixed the misroute and deleted the byte accounting entirely: that shape stopped sacrificing and got 31% faster, while every numeric and structural shape kept byte-for-byte identical routing [[246.1]]. The threshold sits at 32k slots ([[code:sacrificeSlotThreshold=32768]]) — deliberately below the ~48k intrinsic crossover [[245.2]], because at the real pool the send's copy also blocks the worker from accepting its next request, which pulls the practical crossover earlier [[244.1]].
 
 ## Why sacrifice survives at all
 
@@ -49,6 +49,6 @@ The boundary's rules are narrow on purpose, and the rejections define their edge
 
 Wrapping blobs in the *batch* path regressed. The wrap's benefit comes from many independent round-trips each parking a fresh allocation on the heap while the writer is mid-step; one batch round-trip has no such pattern to relieve [[237.1]].
 
-Wrapping `selectBytes`' result bought nothing. Its bytes are already a view over a native buffer — there is no GC-heap destination to escape, so the wrap relocated one copy and added machinery [[242.1]].
+Wrapping `selectBytes`' result bought nothing ([[bench:Select → JSON Bytes / Large payload (~650KB) / resqlite selectBytes() ~ 0.323 +-20%]]). Its bytes are already a view over a native buffer — there is no GC-heap destination to escape, so the wrap relocated one copy and added machinery [[242.1]].
 
 And the question underneath all of these — is sacrifice worth keeping? — resisted answering for a long time because the obvious experiment is invalid. Alternating send and sacrifice inside one live pool measures a treatment that mutates the pool it runs in: each sacrifice clears caches and respawns workers, changing the conditions for the next sample. The answer only came from splitting the question into independent estimands and measuring each in isolation [[241.1]]. That methodological lesson generalized well beyond this subsystem.
