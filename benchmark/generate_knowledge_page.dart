@@ -37,12 +37,11 @@ String buildKnowledgePage({required Directory repoRoot}) {
   if (files.isEmpty) throw StateError('No chapters in ${chaptersDir.path}');
 
   for (final file in files) {
-    final (meta, sections) = _parseDoc(file, requireKeys: const [
-      'component',
-      'title',
-      'kicker',
-      'zone',
-    ]);
+    final (meta, sections) = _parseDoc(
+      file,
+      repoRoot: repoRoot,
+      requireKeys: const ['component', 'title', 'kicker', 'zone'],
+    );
     final first = sections.isNotEmpty && sections.first['lede'] == true
         ? (sections.first['ps'] as List).first
         : null;
@@ -68,6 +67,7 @@ String buildKnowledgePage({required Directory repoRoot}) {
   final homeFile = File('${repoRoot.path}/doc/arch/home.md');
   final (homeMeta, homeSections) = _parseDoc(
     homeFile,
+    repoRoot: repoRoot,
     requireKeys: const ['title', 'tagline'],
   );
 
@@ -108,7 +108,8 @@ void _enrichExperiments(Directory repoRoot, Map<String, Object?> graph) {
     for (final c in (graph['claims'] as List).cast<Map<String, Object?>>())
       if (c['source'] != null) c['source'] as String,
   };
-  final experiments = (graph['experiments'] as List).cast<Map<String, Object?>>();
+  final experiments = (graph['experiments'] as List)
+      .cast<Map<String, Object?>>();
   for (final e in experiments) {
     final id = e['id'] as String?;
     if (id == null || !cited.contains(id)) continue;
@@ -124,7 +125,9 @@ void _enrichExperiments(Directory repoRoot, Map<String, Object?> graph) {
       if (entry['impact'] != null) e['impact'] = entry['impact'];
     }
 
-    final signal = File('${repoRoot.path}/experiments/signals/entries/$id.json');
+    final signal = File(
+      '${repoRoot.path}/experiments/signals/entries/$id.json',
+    );
     if (signal.existsSync()) {
       final s = json.decode(signal.readAsStringSync());
       if (s is Map) {
@@ -162,6 +165,7 @@ Map<String, Object?> _experimentStats(Directory repoRoot) {
 (Map<String, Object?>, List<Map<String, Object?>>) _parseDoc(
   File file, {
   required List<String> requireKeys,
+  required Directory repoRoot,
 }) {
   final lines = file.readAsStringSync().split('\n');
   if (lines.first.trim() != '---') {
@@ -218,7 +222,7 @@ Map<String, Object?> _experimentStats(Directory repoRoot) {
         (current['ps'] as List).add({
           'code': switch (codeRef) {
             (final path, final region) => _docRegion(
-              File('${file.parent.parent.parent.path}/$path'),
+              File('${repoRoot.path}/$path'),
               region,
             ),
             null => code.toString().trimRight(),
@@ -275,8 +279,12 @@ String _docRegion(File file, String region) {
   if (!file.existsSync()) {
     throw StateError('Code sample references a missing file: ${file.path}');
   }
-  final open = RegExp(r'^\s*//\s*#docregion\s+' + RegExp.escape(region) + r'\s*$');
-  final close = RegExp(r'^\s*//\s*#enddocregion\s+' + RegExp.escape(region) + r'\s*$');
+  final open = RegExp(
+    r'^\s*//\s*#docregion\s+' + RegExp.escape(region) + r'\s*$',
+  );
+  final close = RegExp(
+    r'^\s*//\s*#enddocregion\s+' + RegExp.escape(region) + r'\s*$',
+  );
   final out = <String>[];
   var inside = false;
   for (final line in file.readAsStringSync().split('\n')) {
@@ -334,7 +342,9 @@ Future<void> main(List<String> args) async {
     return;
   }
   if (checkOnly) {
-    print('Knowledge page builds (${page.length} bytes); all code samples resolve.');
+    print(
+      'Knowledge page builds (${page.length} bytes); all code samples resolve.',
+    );
     return;
   }
   final out = File('docs/knowledge/index.html');

@@ -93,7 +93,20 @@ extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
 
-typedef Claim = ({String id, String source, String text, List<String> restsOn});
+/// A claim as it existed in one revision.
+///
+/// [retires] and [restsOn] are both captured when the entry is parsed, from
+/// that revision's bytes. Re-reading either from disk would mix the working
+/// tree into the "before" snapshot, and the two states would then agree by
+/// construction — silently hiding exactly the retirement this tool exists to
+/// report.
+typedef Claim = ({
+  String id,
+  String source,
+  String text,
+  List<String> restsOn,
+  List<({String type, String target})> retires,
+});
 
 void main(List<String> args) {
   final base = args.isEmpty
@@ -106,8 +119,8 @@ void main(List<String> args) {
 
   final before = _claimsAt(base);
   final after = _claimsHere();
-  final beforeState = _states(before);
-  final afterState = _states(after);
+  final beforeState = deriveStates(before);
+  final afterState = deriveStates(after);
 
   final born = after.keys.where((id) => !before.containsKey(id)).toList()
     ..sort();
@@ -205,7 +218,12 @@ void main(List<String> args) {
 }
 
 bool _revExists(String rev) =>
-    Process.runSync('git', ['rev-parse', '--verify', '--quiet', rev]).exitCode ==
+    Process.runSync('git', [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      rev,
+    ]).exitCode ==
     0;
 
 String _oneLine(String s) {
@@ -219,7 +237,7 @@ Map<String, Claim> _claimsHere() {
   final out = <String, Claim>{};
   for (final f in dir.listSync().whereType<File>()) {
     if (!f.path.endsWith('.json')) continue;
-    _collect(f.readAsStringSync(), _expIdOf(f.path), out);
+    collectClaims(f.readAsStringSync(), _expIdOf(f.path), out);
   }
   return out;
 }
@@ -237,27 +255,33 @@ Map<String, Claim> _claimsAt(String rev) {
     if (!path.endsWith('.json')) continue;
     final show = Process.runSync('git', ['show', '$rev:$path']);
     if (show.exitCode != 0) continue;
-    _collect(show.stdout as String, _expIdOf(path), out);
+    collectClaims(show.stdout as String, _expIdOf(path), out);
   }
   return out;
 }
 
-String _expIdOf(String path) =>
-    path.split('/').last.replaceAll('.json', '');
+String _expIdOf(String path) => path.split('/').last.replaceAll('.json', '');
 
-void _collect(String source, String expId, Map<String, Claim> into) {
+void collectClaims(String source, String expId, Map<String, Claim> into) {
   final note = json.decode(source);
   if (note is! Map) return;
   for (final c in (note['claims'] as List? ?? const [])) {
     if (c is! Map || c['id'] is! String) continue;
+    final edges = (c['edges'] as List? ?? const []).whereType<Map>().where(
+      (e) => e['target'] is String,
+    );
     into[c['id'] as String] = (
       id: c['id'] as String,
       source: expId,
       text: (c['text'] ?? '').toString(),
       restsOn: [
-        for (final e in (c['edges'] as List? ?? const []))
-          if (e is Map && e['type'] == 'dependsOn' && e['target'] is String)
-            e['target'] as String,
+        for (final e in edges)
+          if (e['type'] == 'dependsOn') e['target'] as String,
+      ],
+      retires: [
+        for (final e in edges)
+          if (e['type'] == 'supersedes' || e['type'] == 'refutes')
+            (type: e['type'] as String, target: e['target'] as String),
       ],
     );
   }
@@ -265,12 +289,11 @@ void _collect(String source, String expId, Map<String, Claim> into) {
 
 /// Same derivation the graph builder and the pin resolver run: retired first,
 /// then the transitive loss of justification.
-Map<String, String> _states(Map<String, Claim> claims) {
+Map<String, String> deriveStates(Map<String, Claim> claims) {
   final dead = <String, String>{};
-  for (final entry in claims.entries) {
-    final raw = entry.value;
-    for (final target in _edgesOf(raw)) {
-      dead[target.$2] = target.$1 == 'refutes' ? 'refuted' : 'superseded';
+  for (final c in claims.values) {
+    for (final e in c.retires) {
+      dead[e.target] = e.type == 'refutes' ? 'refuted' : 'superseded';
     }
   }
   final unsupported = <String>{};
@@ -278,7 +301,9 @@ Map<String, String> _states(Map<String, Claim> claims) {
     changed = false;
     for (final c in claims.values) {
       if (dead.containsKey(c.id) || unsupported.contains(c.id)) continue;
-      if (c.restsOn.any((t) => dead.containsKey(t) || unsupported.contains(t))) {
+      if (c.restsOn.any(
+        (t) => dead.containsKey(t) || unsupported.contains(t),
+      )) {
         unsupported.add(c.id);
         changed = true;
       }
@@ -290,29 +315,9 @@ Map<String, String> _states(Map<String, Claim> claims) {
   };
 }
 
-/// Raw (type, target) pairs for the retiring edge types, re-read from disk
-/// because [Claim] only keeps `dependsOn`.
-List<(String, String)> _edgesOf(Claim c) {
-  final f = File('$_entriesDir/${c.source}.json');
-  if (!f.existsSync()) return const [];
-  final note = json.decode(f.readAsStringSync());
-  if (note is! Map) return const [];
-  for (final raw in (note['claims'] as List? ?? const [])) {
-    if (raw is! Map || raw['id'] != c.id) continue;
-    return [
-      for (final e in (raw['edges'] as List? ?? const []))
-        if (e is Map &&
-            (e['type'] == 'supersedes' || e['type'] == 'refutes') &&
-            e['target'] is String)
-          (e['type'] as String, e['target'] as String),
-    ];
-  }
-  return const [];
-}
-
 List<String> _killersOf(String id, Map<String, Claim> claims) => [
   for (final c in claims.values)
-    if (_edgesOf(c).any((e) => e.$2 == id)) c.id,
+    if (c.retires.any((e) => e.target == id)) c.id,
 ];
 
 /// Every documented passage citing one of [ids], as (file, line, claim).
