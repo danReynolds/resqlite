@@ -150,6 +150,10 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Links must point at the PR's head, not at `HEAD` — which on a
+          # pull_request run is an ephemeral merge commit whose blob URLs 404.
+          IMPACT_BLOB_BASE: >-
+            ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --depth=1 origin "${{ github.base_ref }}"
           dart run tool/knowledge/impact.dart FETCH_HEAD > /tmp/impact.md
