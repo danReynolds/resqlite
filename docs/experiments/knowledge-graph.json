@@ -2476,11 +2476,14 @@
           "target": "236.2"
         },
         {
-          "type": "refines",
+          "type": "dependsOn",
           "target": "245.1"
         }
       ],
-      "state": "live"
+      "state": "live",
+      "restsOn": [
+        "245.1"
+      ]
     },
     {
       "id": "250.1",

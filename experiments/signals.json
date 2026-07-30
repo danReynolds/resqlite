@@ -2915,7 +2915,7 @@
               "target": "236.2"
             },
             {
-              "type": "refines",
+              "type": "dependsOn",
               "target": "245.1"
             }
           ]
