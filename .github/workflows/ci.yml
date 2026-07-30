@@ -119,6 +119,9 @@ jobs:
   benchmark-generated-data:
     name: Benchmark generated data freshness
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: dart-lang/setup-dart@v1
@@ -139,6 +142,27 @@ jobs:
         run: dart run benchmark/generate_knowledge_page.dart --check
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
+      - name: Report belief impact
+        # What beliefs a change moved is not readable from a diff. This posts
+        # the affected set beside the author's own `changedBeliefs` prose, and
+        # stays silent when nothing moved — a report that appears on every PR
+        # stops being read by the third one.
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          dart run tool/knowledge/impact.dart FETCH_HEAD > /tmp/impact.md
+          cat /tmp/impact.md >> "$GITHUB_STEP_SUMMARY"
+          if grep -q 'No recorded beliefs changed' /tmp/impact.md; then
+            echo "No belief changes; not commenting."
+            exit 0
+          fi
+          pr='${{ github.event.pull_request.number }}'
+          # Edit the existing comment so a rebase-heavy PR gets one running
+          # summary rather than a thread of superseded ones.
+          gh pr comment "$pr" --edit-last --body-file /tmp/impact.md \
+            || gh pr comment "$pr" --body-file /tmp/impact.md
 
   tracelite-smoke:
     name: Tracelite smoke
