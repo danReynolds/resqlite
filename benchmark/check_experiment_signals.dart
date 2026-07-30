@@ -646,6 +646,11 @@ const Set<String> _claimEdgeTypes = {
   'refutes',
   'refines',
   'validates',
+  // `dependsOn` is the only edge that points at a claim's *foundation* rather
+  // than at something it replaced. It exists so a belief losing its
+  // justification is visible: the others describe how beliefs succeeded each
+  // other, which says nothing about what would collapse if one were refuted.
+  'dependsOn',
 };
 
 class _Claim {
