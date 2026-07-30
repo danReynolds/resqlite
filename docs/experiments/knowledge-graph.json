@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 45,
-    "totalEntries": 126
+    "entriesWithClaims": 46,
+    "totalEntries": 127
   },
   "experiments": [
     {
@@ -1795,6 +1795,17 @@
       "outcomeClass": "accepted"
     },
     {
+      "id": "235",
+      "title": "Resume SWAR escape scan after each dirty chunk in `json_write_string`",
+      "file": "235-json-escape-swar-resume.md",
+      "date": "2026-07-21",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted"
+    },
+    {
       "id": "236",
       "title": "Reader blob-cell TransferableTypedData transfer",
       "file": "236-blob-cell-transfer.md",
@@ -2333,6 +2344,26 @@
       ],
       "text": "A mutable Uint8List param is the one write value SendPort.send truly copies; wrapping params >= 256 KB in TransferableTypedData lands that one copy in external memory instead of on the GC heap (~15-20% on 256-512 KB single-row inserts).",
       "conditions": "M1 Pro · AOT · 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "235.1",
+      "source": "235",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "json_write_string's SWAR escape scan re-enters the 8-byte fast skip after each dirty chunk instead of abandoning it on the first escapable byte, so a sparse escape downgrades only the chunk containing it rather than the whole tail. Realistic multi-line TEXT encodes 23% faster (256B, newline every ~80B) and the one-early-escape extreme 45%; the escape-free path is byte-identical and measures parity. Cost is +6.0% on pathological dense-escape 256B (~1/3 escapable bytes), one extra SWAR probe per all-dirty chunk.",
+      "conditions": "Apple Silicon · AOT · focused order-flipped A/B (5 BASE / 4 CAND medians) · 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "235.2",
+      "source": "235",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A fast-scan's abandon-on-first-miss structure is invisible to all-safe and all-dirty test shapes and only costs on the sparse-miss middle, which is the common real distribution. The pre-235 harness held dense-escape and late-escape lanes and neither exercised it; the regression pocket appeared only once sparse-newline and sparse-early lanes existed.",
+      "conditions": "harness-design finding · generalises beyond the TEXT escaper",
       "state": "live"
     },
     {
