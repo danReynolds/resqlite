@@ -195,6 +195,7 @@ Map<String, Object?> _experimentStats(Directory repoRoot) {
   final code = StringBuffer();
   var inCode = false;
   var codeLang = '';
+  (String, String)? codeRef;
 
   void flushPara() {
     final text = para.toString().trim();
@@ -215,14 +216,26 @@ Map<String, Object?> _experimentStats(Directory repoRoot) {
     if (line.trimLeft().startsWith('```')) {
       if (inCode) {
         (current['ps'] as List).add({
-          'code': code.toString().trimRight(),
+          'code': switch (codeRef) {
+            (final path, final region) => _docRegion(
+              File('${file.parent.parent.parent.path}/$path'),
+              region,
+            ),
+            null => code.toString().trimRight(),
+          },
           'lang': codeLang,
         });
         code.clear();
+        codeRef = null;
         inCode = false;
       } else {
         flushPara();
-        codeLang = line.trim().substring(3).trim();
+        // ```dart file=test/samples/x_test.dart#region  — transcluded, so the
+        // markdown holds a reference and the rendered page holds the code.
+        final info = line.trim().substring(3).trim();
+        final ref = RegExp(r'file=(\S+?)#(\S+)').firstMatch(info);
+        codeLang = info.split(RegExp(r'\s+')).first;
+        codeRef = ref == null ? null : (ref.group(1)!, ref.group(2)!);
         inCode = true;
       }
       continue;
@@ -248,6 +261,52 @@ Map<String, Object?> _experimentStats(Directory repoRoot) {
   return (meta, sections);
 }
 
+/// Pulls a `#docregion` out of a source file.
+///
+/// This is the strongest binding the docs have. A hash pin detects that a code
+/// sample drifted; transclusion makes drifting impossible, because the sample
+/// and the tested source are the same text. Use it wherever documented code can
+/// actually be run, and fall back to hashes only where it cannot.
+///
+/// A region may open and close more than once — the fragments concatenate, so a
+/// sample can skip over test scaffolding (fixture setup, assertions) without
+/// showing it to a reader. Same convention dart.dev uses.
+String _docRegion(File file, String region) {
+  if (!file.existsSync()) {
+    throw StateError('Code sample references a missing file: ${file.path}');
+  }
+  final open = RegExp(r'^\s*//\s*#docregion\s+' + RegExp.escape(region) + r'\s*$');
+  final close = RegExp(r'^\s*//\s*#enddocregion\s+' + RegExp.escape(region) + r'\s*$');
+  final out = <String>[];
+  var inside = false;
+  for (final line in file.readAsStringSync().split('\n')) {
+    if (open.hasMatch(line)) {
+      inside = true;
+      continue;
+    }
+    if (close.hasMatch(line)) {
+      inside = false;
+      continue;
+    }
+    if (inside) out.add(line);
+  }
+  if (out.isEmpty) {
+    throw StateError(
+      'No #docregion "$region" in ${file.path} — the sample it backs would '
+      'render empty.',
+    );
+  }
+  // Regions are nested inside a test body, so strip the shared indent.
+  final indents = out
+      .where((l) => l.trim().isNotEmpty)
+      .map((l) => l.length - l.trimLeft().length);
+  final strip = indents.isEmpty ? 0 : indents.reduce((a, b) => a < b ? a : b);
+  return out
+      .map((l) => l.length >= strip ? l.substring(strip) : l)
+      .join('\n')
+      .trim();
+}
+
 String _firstSentences(String s, int n) {
   final re = RegExp(r'[^.!?]*[.!?]');
   final out = StringBuffer();
@@ -260,8 +319,24 @@ String _firstSentences(String s, int n) {
   return result.isEmpty ? s : result;
 }
 
-Future<void> main() async {
-  final page = buildKnowledgePage(repoRoot: Directory('.'));
+Future<void> main(List<String> args) async {
+  // `--check` builds the page without writing it, so CI can prove every
+  // transcluded code sample still resolves on a PR. The page itself is a
+  // bot-owned aggregate that branches must not commit, so validating it and
+  // writing it have to be separable.
+  final checkOnly = args.contains('--check');
+  final String page;
+  try {
+    page = buildKnowledgePage(repoRoot: Directory('.'));
+  } on StateError catch (e) {
+    print('::error::${e.message}');
+    exitCode = 1;
+    return;
+  }
+  if (checkOnly) {
+    print('Knowledge page builds (${page.length} bytes); all code samples resolve.');
+    return;
+  }
   final out = File('docs/knowledge/index.html');
   out.createSync(recursive: true);
   out.writeAsStringSync(page);

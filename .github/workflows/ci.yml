@@ -132,6 +132,11 @@ jobs:
         run: dart run benchmark/check_experiment_signals.dart
       - name: Verify knowledge links and claim citations
         run: dart run benchmark/check_knowledge_links.dart
+      - name: Verify documented code samples still resolve
+        # Samples are transcluded from tested source rather than copied, so a
+        # renamed region or a deleted sample file breaks the page build. --check
+        # validates without writing the bot-owned output.
+        run: dart run benchmark/generate_knowledge_page.dart --check
       - name: Verify experiments reach a terminal disposition
         run: dart run benchmark/check_experiment_dispositions.dart
 
