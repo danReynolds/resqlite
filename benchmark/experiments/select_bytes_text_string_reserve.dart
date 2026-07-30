@@ -46,6 +46,26 @@ String _textValue(String mode, int row, int col, int bytes) {
     case 'control':
       final seed = 'r$row\x01c$col\x02\x03/';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
+    case 'sparseNewline':
+      // Realistic multi-line text: a long safe body with a newline roughly
+      // every 80 bytes (word-wrapped prose, log lines, chat messages). In the
+      // pre-235 scanner the first newline drops the whole tail onto the
+      // byte-by-byte path; the resume-SWAR scanner keeps skipping between them.
+      final seed = 'row_${row}_col_${col}_';
+      final chars = (seed * ((bytes ~/ seed.length) + 1))
+          .substring(0, bytes)
+          .split('');
+      for (var p = 80; p < bytes; p += 80) {
+        chars[p] = '\n';
+      }
+      return chars.join();
+    case 'sparseEarly':
+      // One escape near the start, then a long safe tail — the worst case for
+      // the pre-235 scanner, which scans the entire remaining tail one byte at
+      // a time after the early hit.
+      final seed = 'row_${row}_col_${col}_';
+      final tail = (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes - 4);
+      return 'abc"$tail';
     case 'cjk':
       final seed = '日本語$row-$col';
       return (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes);
@@ -224,6 +244,42 @@ Future<void> main() async {
     textBytes: 24,
     mode: 'control',
     iters: 10,
+  );
+  // Sparse-escape lanes (exp 235). The load-bearing acceptance row is the
+  // 256B sparse-newline lane: realistic multi-line text where the pre-235
+  // scanner abandons SWAR after the first newline. The 1KiB and sparse-early
+  // lanes confirm the mechanism at the far end.
+  await _lane(
+    label: '10k rows x 8 sparse-newline text (256B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'sparseNewline',
+    iters: 3,
+  );
+  await _lane(
+    label: '2k rows x 4 sparse-newline text (1KiB)',
+    rows: 2000,
+    textCols: 4,
+    textBytes: 1024,
+    mode: 'sparseNewline',
+    iters: 8,
+  );
+  await _lane(
+    label: '10k rows x 8 sparse-early text (256B)',
+    rows: 10000,
+    textCols: 8,
+    textBytes: 256,
+    mode: 'sparseEarly',
+    iters: 3,
+  );
+  await _lane(
+    label: '2k rows x 4 sparse-early text (1KiB)',
+    rows: 2000,
+    textCols: 4,
+    textBytes: 1024,
+    mode: 'sparseEarly',
+    iters: 8,
   );
   await _lane(
     label: '10k rows x 8 mixed (4 text + 2 int + 2 real)',

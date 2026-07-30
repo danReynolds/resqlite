@@ -1,0 +1,7 @@
+{
+  "file": "235-json-escape-swar-resume.md",
+  "title": "Resume SWAR escape scan after each dirty chunk in `json_write_string`",
+  "impact": "Restructures the `selectBytes` TEXT-cell JSON escaper so its SWAR 8-byte fast-skip resumes after each dirty chunk instead of breaking to byte-by-byte permanently on the first escapable byte. A single early escape in an otherwise-safe value no longer forces the whole tail onto the slow path. Two order-flipped focused rounds reproduce -23.4% on the load-bearing 256B sparse-newline lane (realistic multi-line text), -31% to -44% on sparse-newline/sparse-early 1KiB and 256B lanes, with the escape-free common path provably unchanged (parity). The only cost is +6.0% on pathological dense-escape 256B text (~1/3 escapable bytes) from one extra SWAR probe per all-dirty chunk. Pure portable C — no API, platform, or allocation change; output byte-identical (dart:convert oracle).",
+  "status": "accepted",
+  "link": ""
+}

@@ -685,6 +685,31 @@ large ones already zero-copy, the win only lives in the small-result regime,
 where the round-trip floor usually swallows it. Model the sacrifice/`Isolate.exit`
 threshold in the harness itself.*
 
+### A fast-scan that abandons itself on the first miss penalises sparse-miss inputs across the whole tail
+
+[Exp 235](235-json-escape-swar-resume.md) found that `json_write_string`'s SWAR
+escape scan skipped 8 safe bytes at a time but `break`d to a byte-by-byte loop
+on the *first* escapable byte and never resumed. A single newline near the start
+of a 256-byte TEXT value therefore dragged almost the whole value through the
+one-byte path. Re-entering the SWAR skip after each dirty chunk won −23% on
+realistic multi-line text (−44% on the one-early-escape extreme) with the
+escape-free common path byte-identical, at a bounded +6% on pathological
+dense-escape text (one extra SWAR probe per all-dirty chunk).
+
+The trap is that the abandon-on-first-miss structure is invisible on the two
+obvious test shapes — all-safe (never misses) and all-dirty (misses
+immediately) — and only bites the *sparse-miss* middle, which is the common
+real distribution. Guard lanes with an escape at the very end (`lateEscape`)
+also hide it, because the fast scan has already covered the whole value.
+
+*Reapplies to any SWAR/SIMD/table fast-scan over variable-length input
+(escape scans, delimiter/whitespace skips, validation walks). Check what happens
+after the first miss: if the scan drops to a slow path for the entire remainder,
+add a sparse-miss lane (one miss early, long clean tail) and resume the fast
+path after the miss region. Keep the resume cheap — re-enter the original tight
+inner loop and downgrade only the missing chunk, so the all-safe and all-dirty
+cases stay at parity.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
