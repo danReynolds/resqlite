@@ -132,6 +132,112 @@ void main() {
       expect((await check(dir, '[[246.1]]')).status, PinStatus.current);
     });
 
+    // The other edge types describe how beliefs *succeeded* each other, which
+    // says nothing about what collapses when one is refuted. Without
+    // `dependsOn`, killing a foundational finding leaves every design decision
+    // resting on it reporting `live`, and the prose that cites them green.
+    group('dependsOn', () {
+      test('a claim resting on a live finding is unaffected', () async {
+        final dir = entries([
+          {'id': '245.1', 'text': 'send cost tracks slots'},
+          {
+            'id': '246.1',
+            'text': 'route on slot count',
+            'edges': [
+              {'type': 'dependsOn', 'target': '245.1'},
+            ],
+          },
+        ]);
+        expect((await check(dir, '[[246.1]]')).status, PinStatus.current);
+      });
+
+      test('refuting the foundation makes the dependent unsupported', () async {
+        final dir = entries([
+          {'id': '245.1', 'text': 'send cost tracks slots'},
+          {
+            'id': '245.3',
+            'text': 'actually it tracks bytes',
+            'edges': [
+              {'type': 'refutes', 'target': '245.1'},
+            ],
+          },
+          {
+            'id': '246.1',
+            'text': 'route on slot count',
+            'edges': [
+              {'type': 'dependsOn', 'target': '245.1'},
+            ],
+          },
+        ]);
+        final r = await check(dir, '[[246.1]]');
+        expect(r.status, PinStatus.broken);
+        expect(r.detail, contains('rests on 245.1'));
+        expect(
+          r.detail,
+          contains('may still be true'),
+          reason: 'lost justification is not the same as shown false',
+        );
+      });
+
+      test('invalidation is transitive', () async {
+        final dir = entries([
+          {'id': '245.1', 'text': 'foundation'},
+          {
+            'id': '245.3',
+            'text': 'refutation',
+            'edges': [
+              {'type': 'refutes', 'target': '245.1'},
+            ],
+          },
+          {
+            'id': '246.1',
+            'text': 'rests on the foundation',
+            'edges': [
+              {'type': 'dependsOn', 'target': '245.1'},
+            ],
+          },
+          {
+            'id': '247.1',
+            'text': 'rests on 246.1 in turn',
+            'edges': [
+              {'type': 'dependsOn', 'target': '246.1'},
+            ],
+          },
+        ]);
+        expect((await check(dir, '[[247.1]]')).status, PinStatus.broken);
+      });
+
+      // Supersession is the louder verdict: the claim was replaced outright,
+      // so reporting it as merely unjustified would understate the problem.
+      test('being superseded outranks being unsupported', () async {
+        final dir = entries([
+          {'id': '245.1', 'text': 'foundation'},
+          {
+            'id': '245.3',
+            'text': 'refutation',
+            'edges': [
+              {'type': 'refutes', 'target': '245.1'},
+            ],
+          },
+          {
+            'id': '246.1',
+            'text': 'rests on it and was itself replaced',
+            'edges': [
+              {'type': 'dependsOn', 'target': '245.1'},
+            ],
+          },
+          {
+            'id': '248.1',
+            'text': 'the replacement',
+            'edges': [
+              {'type': 'supersedes', 'target': '246.1'},
+            ],
+          },
+        ]);
+        expect((await check(dir, '[[246.1]]')).detail, contains('superseded'));
+      });
+    });
+
     test('citing a superseded claim is broken, and says how to fix it', () async {
       final dir = entries([
         {'id': '236.2', 'text': 'bytes'},

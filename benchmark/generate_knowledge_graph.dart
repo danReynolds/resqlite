@@ -65,6 +65,8 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
   final claims = <Map<String, Object?>>[];
   final supersededBy = <String, List<String>>{};
   final refutedBy = <String, List<String>>{};
+  /// claim id -> the claims its rationale rests on.
+  final restsOn = <String, List<String>>{};
   final entriesDir = Directory('${experimentsDir.path}/signals/entries');
   final entryFiles =
       entriesDir.listSync().whereType<File>().where(
@@ -95,10 +97,35 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
           (supersededBy[target] ??= []).add(c['id'] as String);
         } else if (edge['type'] == 'refutes') {
           (refutedBy[target] ??= []).add(c['id'] as String);
+        } else if (edge['type'] == 'dependsOn') {
+          (restsOn[c['id'] as String] ??= []).add(target);
         }
       }
     }
   }
+  // A claim whose foundation died has lost its justification without being
+  // shown false — 32k may still be the right threshold, just no longer for the
+  // recorded reason. That is a distinct state from `superseded`, and collapsing
+  // the two would either cry wolf or say nothing. Propagated to a fixpoint, so
+  // a belief resting on a belief resting on a refuted one is also flagged.
+  final dead = {...refutedBy.keys, ...supersededBy.keys};
+  final unsupportedBy = <String, List<String>>{};
+  for (var changed = true; changed;) {
+    changed = false;
+    for (final entry in restsOn.entries) {
+      if (dead.contains(entry.key) || unsupportedBy.containsKey(entry.key)) {
+        continue;
+      }
+      final lost = entry.value
+          .where((t) => dead.contains(t) || unsupportedBy.containsKey(t))
+          .toList();
+      if (lost.isNotEmpty) {
+        unsupportedBy[entry.key] = lost;
+        changed = true;
+      }
+    }
+  }
+
   for (final c in claims) {
     final id = c['id'] as String;
     if (refutedBy.containsKey(id)) {
@@ -107,9 +134,13 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
     } else if (supersededBy.containsKey(id)) {
       c['state'] = 'superseded';
       c['by'] = supersededBy[id];
+    } else if (unsupportedBy.containsKey(id)) {
+      c['state'] = 'unsupported';
+      c['by'] = unsupportedBy[id];
     } else {
       c['state'] = 'live';
     }
+    if (restsOn[id] != null) c['restsOn'] = restsOn[id];
   }
 
   final expIds = experiments.keys.toList()..sort(_compareIds);

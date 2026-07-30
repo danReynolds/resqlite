@@ -155,7 +155,7 @@ main { padding: 34px 46px 90px; min-width: 0; }
   text-transform: uppercase; padding: 1.5px 8px; border-radius: 20px;
   border: 1px solid currentColor; color: var(--ok);
 }
-.dr-state.s-superseded, .dr-state.s-refined { color: var(--warn); }
+.dr-state.s-superseded, .dr-state.s-refined, .dr-state.s-unsupported { color: var(--warn); }
 .dr-state.s-refuted { color: var(--bad); }
 .dr-close { margin-left: auto; font-size: 20px; line-height: 1; color: var(--ink-3); padding: 2px 6px; border-radius: 6px; }
 .dr-close:hover { color: var(--ink); background: var(--raised); }
@@ -309,6 +309,8 @@ pre.code code { background: none; padding: 0; }
 }
 .ev-inline:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ev-inline.ev-stale { color: var(--warn); text-decoration: line-through; }
+/* Lost its justification, not its truth — flagged, but not crossed out. */
+.ev-inline.ev-unsupported { color: var(--warn); border-color: var(--warn); border-style: dashed; }
 .ev-inline.cited { border-color: var(--accent); background: var(--accent-soft); }
 .belief { padding: 15px 2px; border-bottom: 1px solid var(--line); }
 .belief-head { font-size: 14.5px; font-weight: 600; margin: 0 0 3px; text-wrap: balance; }
@@ -457,8 +459,13 @@ const anchorLink = (pageId, secId) =>
 
 function chipify(text) {
   return text.replace(/\[\[(\d+\.\d+)\]\]/g, (_, id) => {
-    const stale = byId[id] && byId[id].state !== 'live';
-    return `<button class="ev-inline ${stale ? 'ev-stale' : ''}" data-claim="${id}">${id}</button>`;
+    // Struck-through means retracted. An unsupported claim was not retracted —
+    // the finding it rested on was — so it gets its own mark rather than
+    // borrowing one that would misstate it.
+    const state = (byId[id] || {}).state;
+    const cls = state === 'unsupported' ? 'ev-unsupported'
+      : state && state !== 'live' ? 'ev-stale' : '';
+    return `<button class="ev-inline ${cls}" data-claim="${id}">${id}</button>`;
   });
 }
 
@@ -627,7 +634,8 @@ function threadHtml(anc) {
       : `since ${fmtNice(cl.birth)} · still live`;
     const relTxt = a.rel === 'supersedes' ? 'replaced by the above'
       : a.rel === 'refutes' ? 'refuted by the above'
-      : a.rel === 'refines' ? 'refined by the above' : 'validated by the above';
+      : a.rel === 'refines' ? 'refined by the above'
+      : a.rel === 'dependsOn' ? 'the finding the above rests on' : 'validated by the above';
     return `<div class="rev">
       <span class="rev-when ${cl.death ? '' : 'origin'}">${span} · <span class="rel">${relTxt}</span> · exp ${cl.source}</span>
       <p>${esc(cl.text)}</p>
@@ -838,7 +846,7 @@ function lineageHtml(anc) {
       ? `held ${fmtNice(cl.birth)} → ${fmtNice(cl.death)}`
       : `since ${fmtNice(cl.birth)} · still live`;
     const rel = a.rel === 'supersedes' ? 'replaced' : a.rel === 'refutes' ? 'refuted'
-      : a.rel === 'refines' ? 'refined' : 'validated';
+      : a.rel === 'refines' ? 'refined' : a.rel === 'dependsOn' ? 'rests on' : 'validated';
     return `<div class="dr-prior">
       <span class="w ${cl.death ? '' : 'origin'}">${rel} · ${when} · exp ${cl.source}</span>
       <p>${esc(cl.text)}</p></div>`;

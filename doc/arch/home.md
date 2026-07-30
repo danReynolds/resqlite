@@ -10,18 +10,7 @@ You write plain SQL. There is no ORM, no query builder, and no code generation.
 
 ## What using it looks like
 
-```dart
-final db = await Database.open('app.db');
-
-// Reads and writes stay off the UI thread.
-final users = await db.select('SELECT * FROM users WHERE active = ?', [1]);
-await db.execute('INSERT INTO users(name) VALUES (?)', ['Ada']);
-
-// Reactive queries. Dependencies are detected from the SQL itself —
-// JOINs, subqueries, views and CTEs all work, with no table lists to maintain.
-db.stream('SELECT * FROM users WHERE active = ?', [1]).listen((users) {
-  setState(() => this.users = users);
-});
+```dart file=test/samples/home_quickstart_test.dart#quickstart
 ```
 
 That is close to the entire public surface: `select`, `selectBytes`, `execute`, `executeBatch`, `stream`, and `transaction`. Everything in the pages that follow exists to make those six calls cheap.

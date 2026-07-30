@@ -433,6 +433,26 @@ When finished:
   direction's synthesis in [`signals/base.json`](signals/base.json). For
   moonshots, record the class in the signal source too:
   `experimentClass: "moonshot"`.
+- when a claim's rationale *rests on* an earlier finding — the earlier result is
+  the reason this one holds, not merely a related one — record that with a
+  `dependsOn` edge. It is the only edge that points at a foundation rather than
+  at something replaced, and it is what makes a belief visibly lose its
+  justification when the finding under it is later refuted. Without it, a design
+  decision keeps reporting `live` after its evidence is gone.
+- **write `changedBeliefs` against the computed impact, not from memory.** Run:
+
+  ```sh
+  dart run tool/knowledge/impact.dart origin/main
+  ```
+
+  It lists what the run learned, what it retired, which claims lost their
+  justification transitively, and every documented passage now standing on
+  something that moved. Read the affected passages, then write
+  `changedBeliefs` as prose a person can follow: what we believed, what we
+  believe now, and what a reader of those passages should do about it. Name any
+  claim you knocked over and any chapter that needs a rewrite. The tool reports
+  *what* moved; `changedBeliefs` is the only place that says what it *means*,
+  and it is what gets posted on the PR beside the affected set.
 - add to [`JOURNAL.md`](JOURNAL.md) only when the run surfaced a *transferable*
   lesson — something a future runner could reapply to a different direction or
   could waste time relearning. Per-direction state goes in `signals.json`, not

@@ -36,6 +36,7 @@ class ClaimResolver implements PinResolver {
     if (_claims != null) return;
     final byId = <String, ({String text, String? state, List<String> by})>{};
     final supersededBy = <String, List<String>>{};
+    final restsOn = <String, List<String>>{};
     if (entriesDir.existsSync()) {
       for (final f in entriesDir.listSync().whereType<File>()) {
         if (!f.path.endsWith('.json')) continue;
@@ -49,23 +50,52 @@ class ClaimResolver implements PinResolver {
             by: const [],
           );
           for (final e in (c['edges'] as List? ?? const [])) {
-            if (e is Map &&
-                e['target'] is String &&
-                (e['type'] == 'supersedes' || e['type'] == 'refutes')) {
+            if (e is! Map || e['target'] is! String) continue;
+            if (e['type'] == 'supersedes' || e['type'] == 'refutes') {
               (supersededBy[e['target'] as String] ??= []).add(
                 c['id'] as String,
               );
+            } else if (e['type'] == 'dependsOn') {
+              (restsOn[c['id'] as String] ??= []).add(e['target'] as String);
             }
           }
         }
       }
     }
+
+    // Same fixpoint the graph builder runs: a claim whose foundation died is
+    // unsupported, and so is anything resting on it in turn.
+    final unsupportedBy = <String, List<String>>{};
+    for (var changed = true; changed;) {
+      changed = false;
+      for (final entry in restsOn.entries) {
+        if (supersededBy.containsKey(entry.key) ||
+            unsupportedBy.containsKey(entry.key)) {
+          continue;
+        }
+        final lost = entry.value
+            .where(
+              (t) =>
+                  supersededBy.containsKey(t) || unsupportedBy.containsKey(t),
+            )
+            .toList();
+        if (lost.isNotEmpty) {
+          unsupportedBy[entry.key] = lost;
+          changed = true;
+        }
+      }
+    }
+
     _claims = {
       for (final e in byId.entries)
         e.key: (
           text: e.value.text,
-          state: supersededBy.containsKey(e.key) ? 'superseded' : 'live',
-          by: supersededBy[e.key] ?? const [],
+          state: supersededBy.containsKey(e.key)
+              ? 'superseded'
+              : unsupportedBy.containsKey(e.key)
+              ? 'unsupported'
+              : 'live',
+          by: supersededBy[e.key] ?? unsupportedBy[e.key] ?? const [],
         ),
     };
   }
@@ -100,6 +130,22 @@ class ClaimResolver implements PinResolver {
         pin,
         PinStatus.broken,
         'claim ${pin.target} is still live, so [[was:]] misdescribes it',
+      );
+    }
+
+    // The belief was not replaced — the finding it rested on was. It may well
+    // still hold, but not for the reason this passage gives, so the passage
+    // needs a human. Failing rather than warning is deliberate: supersession is
+    // rare, and a warning nobody is forced to read is how a documented
+    // rationale quietly outlives its evidence.
+    if (claim.state == 'unsupported') {
+      return PinResult(
+        pin,
+        PinStatus.broken,
+        'claim ${pin.target} rests on ${claim.by.join(', ')}, which has since '
+        'been superseded — it may still be true, but no longer for the recorded '
+        'reason. Re-justify it, rewrite this passage, or drop the dependsOn '
+        'edge if it was never load-bearing',
       );
     }
     if (historical) {

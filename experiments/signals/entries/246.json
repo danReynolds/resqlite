@@ -10,21 +10,21 @@
   ],
   "nextSignals": [
     "The byte machinery is GONE, not deprecated: the byte threshold, the trigger toggle, `RawQueryResult.estimatedBytes`, the decoder's per-cell `byteEstimate`, and exp 236's `transferableBytes` subtraction were all deleted in the same change that landed slot routing, since none had a remaining reader. There is no soak-window rollback to remove later and no second notion of result size to keep in sync. Note the surviving distinction, which is deliberate: `blobCellTransferThreshold` (exp 236) is still correctly a BYTE threshold, because a `Uint8List` really is copied byte-for-byte, whereas the sacrifice decision is about result STRUCTURE. The rule going forward is: bytes for mutable payloads, slots for structure.",
-    "The send-vs-sacrifice DIRECTION is now closed end to end: mechanism understood (exp 245), pool behavior understood (exp 244), and the one real defect (byte trigger misrouting strings) fixed (exp 246). Do not reopen with more transfer A/Bs. The only remaining tuning knob is the exact slot threshold on non-M1 hardware — 32k is machine-measured; a production profile showing a different result-shape distribution or a different pool size could justify re-tuning `sacrificeSlotThreshold` (a compile-time define).",
-    "PRIORITY for this direction, and the honest framing of what is left: TRANSFER IS ONLY ~6-12% OF A LARGE SELECT. Exp 246 measured a 200k-slot select end-to-end at ~6,100 us; exp 245 measured the intrinsic transfer of that same shape at ~391 us (exit) / 736 us (send). So the whole send-vs-sacrifice arc optimized a small slice, and the other ~90% — SQLite stepping plus building the Dart object graph — has never been decomposed. Before any further result-transfer work, measure stepping vs decode separately (the exp 245 prepared-result barrier method extends to this directly). If decode dominates, the real lever is not transferring the object graph better but not BUILDING it — i.e. native/columnar encoding for large results, which `selectBytes` already demonstrates. Note the counter-evidence on record: a prior message-graph benchmark found the current ResultSet beats a binary row facade end-to-end once field access is counted, so that direction is access-pattern-specific, not a general successor to `select()`."
+    "The send-vs-sacrifice DIRECTION is now closed end to end: mechanism understood (exp 245), pool behavior understood (exp 244), and the one real defect (byte trigger misrouting strings) fixed (exp 246). Do not reopen with more transfer A/Bs. The only remaining tuning knob is the exact slot threshold on non-M1 hardware \u2014 32k is machine-measured; a production profile showing a different result-shape distribution or a different pool size could justify re-tuning `sacrificeSlotThreshold` (a compile-time define).",
+    "PRIORITY for this direction, and the honest framing of what is left: TRANSFER IS ONLY ~6-12% OF A LARGE SELECT. Exp 246 measured a 200k-slot select end-to-end at ~6,100 us; exp 245 measured the intrinsic transfer of that same shape at ~391 us (exit) / 736 us (send). So the whole send-vs-sacrifice arc optimized a small slice, and the other ~90% \u2014 SQLite stepping plus building the Dart object graph \u2014 has never been decomposed. Before any further result-transfer work, measure stepping vs decode separately (the exp 245 prepared-result barrier method extends to this directly). If decode dominates, the real lever is not transferring the object graph better but not BUILDING it \u2014 i.e. native/columnar encoding for large results, which `selectBytes` already demonstrates. Note the counter-evidence on record: a prior message-graph benchmark found the current ResultSet beats a binary row facade end-to-end once field access is counted, so that direction is access-pattern-specific, not a general successor to `select()`."
   ],
   "claims": [
     {
       "id": "246.1",
       "text": "The sacrifice trigger routes on mutable slot count (values.length > 32k, the all-integer equivalent of 256 KB); the byte accounting is deleted. Bytes for mutable payloads, slots for structure. Big-TEXT misroute fixed: 131->91 us, 1.00->0.00 sacrifices/select.",
-      "conditions": "M1 Pro · AOT · 2026-07",
+      "conditions": "M1 Pro \u00b7 AOT \u00b7 2026-07",
       "edges": [
         {
           "type": "supersedes",
           "target": "236.2"
         },
         {
-          "type": "refines",
+          "type": "dependsOn",
           "target": "245.1"
         }
       ]

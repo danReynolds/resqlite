@@ -137,7 +137,17 @@ Run this mental (or literal) checklist:
       the old claim in *that* experiment's entry from its own
       `changedBeliefs` wording, then edge to it. Wholesale supersessions also
       get `supersededBy` / `amendedBy` on the old experiment's
-      `index/NNN.json` row.
+      `index/NNN.json` row. Where a claim's rationale *rests on* an earlier
+      finding, add `dependsOn` — it is what makes that claim visibly lose its
+      justification if the finding under it is later refuted.
+- [ ] Did you run `dart run tool/knowledge/impact.dart origin/main` and write
+      `changedBeliefs` against what it reported? It lists what was retired,
+      what lost its justification transitively, and every documented passage
+      now standing on something that moved. Read those passages, then write
+      `changedBeliefs` as prose a person can follow — what we believed, what we
+      believe now, what to do about the affected chapters. The tool says what
+      moved; this is the only place that says what it means, and it is posted
+      on the PR beside the affected set.
 - [ ] Did `check_knowledge_links.dart` pass? Dead links and citations of
       undefined claims are CI errors; before choosing the experiment, the
       direction's generated `beliefs` block (live + coverage) is the fastest
