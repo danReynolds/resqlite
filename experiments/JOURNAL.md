@@ -710,6 +710,22 @@ path after the miss region. Keep the resume cheap — re-enter the original tigh
 inner loop and downgrade only the missing chunk, so the all-safe and all-dirty
 cases stay at parity.*
 
+### A large residual bucket is not an optimization target until it is decomposed
+
+[Exp 251](251-step-vs-decode.md) started from a persuasive subtraction:
+result handoff was only 6-12% of a large `select()`, leaving roughly 90% in
+"SQLite stepping plus Dart object-graph build." But measuring those terms
+directly showed no general dominant remainder. Depending on row shape, stepping
+and native cell fill consumed 37-60% of worker wall while Dart value
+materialization consumed 40-63%. The residual was large because it combined two
+different costs, not because either one was automatically the next bottleneck.
+
+*Reapplies whenever profiling names a large remainder after subtracting known
+costs. A remainder is an accounting bucket, not a mechanism: split it on the
+real path and representative shapes before designing against it. Otherwise a
+large aggregate ceiling can over-credit a rewrite whose eligible sub-cost is
+smaller, shape-dependent, or on the wrong thread/isolate.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
