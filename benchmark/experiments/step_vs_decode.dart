@@ -76,6 +76,12 @@ int _stepOnly(int handleAddr, String sql) {
       rows++;
       rc = resqliteStepRow(stmt, colCount, buf);
     }
+    if (rc != sqliteDone) {
+      throw StateError(
+        'sqlite3_step failed with code $rc: '
+        '${resqliteErrmsg(db).toDartString()}',
+      );
+    }
     return rows;
   } finally {
     freeParams(paramsNative, const []);
