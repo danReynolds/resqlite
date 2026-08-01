@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 46,
-    "totalEntries": 127
+    "entriesWithClaims": 47,
+    "totalEntries": 128
   },
   "experiments": [
     {
@@ -1952,6 +1952,18 @@
       "outcomeClass": "rejected_preserved_potential"
     },
     {
+      "id": "251",
+      "title": "SQLite step vs Dart decode (measurement)",
+      "file": "251-step-vs-decode.md",
+      "date": "2026-08-01",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "outcomeClass": "accepted_measurement_premise_refuted"
+    },
+    {
       "id": "252",
       "title": "Reject per-batch dirty-column dependency merge",
       "file": "252-dirty-column-batch-merge.md",
@@ -2525,6 +2537,47 @@
       "text": "Exp 233's checkpoint storm was a trigger-policy failure, not inherent to off-writer PASSIVE work: observed-reset/high-water re-arming fixes the storm and first threshold-crossing p50 improves ~53-64%. Rejected for now, mechanism preserved.",
       "conditions": "M1 Pro · 2026-07 · backfilled 2026-07",
       "state": "live"
+    },
+    {
+      "id": "251.1",
+      "source": "251",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Across five AOT process runs, a direct-handle step-only reference found no universal dominant worker-path bucket: estimated decode/result construction was 49%, 63%, 40%, and 51% of full query/decode wall for 10k x 20 INTEGER, 10k mixed, 5k x 4 INTEGER, and 5k TEXT shapes. The full worker-path proxy was typically 91%, 92%, 84%, and 94% of separately measured main-observed Database.select() latency.",
+      "conditions": "Apple M-series · arm64 macOS · Dart 3.12.2 · AOT CLI native-asset bundle · five fresh processes · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "258.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "251.2",
+      "source": "251",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "The post-transfer large-read residual is shape-dependent rather than a single Dart-decode bottleneck, so it does not justify a broad ResultSet storage rewrite; a future candidate must first establish a workload-specific eligible phase against public select() wall.",
+      "conditions": "INTEGER, mixed INTEGER/TEXT, and long-TEXT result shapes · AOT · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "251.1"
+        },
+        {
+          "type": "validates",
+          "target": "258.2"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "251.1"
+      ]
     },
     {
       "id": "255.1",
