@@ -66,10 +66,30 @@ void main() {
     // (~650KB)"). A non-greedy target match split on the *first* tilde and
     // silently mangled both the metric name and the expected value.
     test('a target containing ~ splits on the last tilde', () {
-      final pin = onePin('[[bench:Select / Large payload (~650KB) ~ 0.32 +-15%]]');
+      final pin = onePin(
+        '[[bench:Select / Large payload (~650KB) ~ 0.32 +-15%]]',
+      );
       expect(pin.target, 'Select / Large payload (~650KB)');
       expect(pin.expected, '0.32');
       expect(pin.tolerance, closeTo(0.15, 1e-9));
+    });
+
+    // Regression: metric names also carry brackets ("resqlite select() [main]").
+    // Stopping the target at the first `]` truncated the pin into something
+    // that never resolved, so the number silently went unchecked.
+    test('a target containing [brackets] survives parsing', () {
+      final pin = onePin(
+        '[[bench:Select / 1000 rows / resqlite select() [main] ~ 0.051 +-30%]]',
+      );
+      expect(pin.namespace, 'bench');
+      expect(pin.target, 'Select / 1000 rows / resqlite select() [main]');
+      expect(pin.expected, '0.051');
+      expect(pin.tolerance, closeTo(0.30, 1e-9));
+    });
+
+    test('two pins on one line stay separate', () {
+      final pins = parsePins('doc.md', 'a [[245.1]] and b [[246.1]] end');
+      expect(pins.map((p) => p.target), ['245.1', '246.1']);
     });
 
     test('the site records the line the pin was found on', () {
@@ -116,14 +136,17 @@ void main() {
     /// Writes one signal entry holding [claims].
     Directory entries(List<Map<String, Object?>> claims) {
       final dir = Directory('${tmp.path}/entries')..createSync();
-      File('${dir.path}/001.json').writeAsStringSync(json.encode({
-        'claims': claims,
-      }));
+      File(
+        '${dir.path}/001.json',
+      ).writeAsStringSync(json.encode({'claims': claims}));
       return dir;
     }
 
-    Future<PinResult> check(Directory dir, String text, {String ns = 'claim'}) =>
-        ClaimResolver(dir, namespace: ns).resolve(onePin(text));
+    Future<PinResult> check(
+      Directory dir,
+      String text, {
+      String ns = 'claim',
+    }) => ClaimResolver(dir, namespace: ns).resolve(onePin(text));
 
     test('a live claim is current', () async {
       final dir = entries([
@@ -238,22 +261,25 @@ void main() {
       });
     });
 
-    test('citing a superseded claim is broken, and says how to fix it', () async {
-      final dir = entries([
-        {'id': '236.2', 'text': 'bytes'},
-        {
-          'id': '246.1',
-          'text': 'slots',
-          'edges': [
-            {'type': 'supersedes', 'target': '236.2'},
-          ],
-        },
-      ]);
-      final r = await check(dir, '[[236.2]]');
-      expect(r.status, PinStatus.broken);
-      expect(r.detail, contains('superseded by 246.1'));
-      expect(r.detail, contains('[[was:236.2]]'));
-    });
+    test(
+      'citing a superseded claim is broken, and says how to fix it',
+      () async {
+        final dir = entries([
+          {'id': '236.2', 'text': 'bytes'},
+          {
+            'id': '246.1',
+            'text': 'slots',
+            'edges': [
+              {'type': 'supersedes', 'target': '236.2'},
+            ],
+          },
+        ]);
+        final r = await check(dir, '[[236.2]]');
+        expect(r.status, PinStatus.broken);
+        expect(r.detail, contains('superseded by 246.1'));
+        expect(r.detail, contains('[[was:236.2]]'));
+      },
+    );
 
     test('a was: citation of a superseded claim is current', () async {
       final dir = entries([
@@ -311,19 +337,25 @@ void main() {
       expect(r.status, PinStatus.current);
     });
 
-    test('arithmetic is evaluated so prose can pin the meaningful number',
-        () async {
-      final root = repoWith('const threshold = 32 * 1024;');
-      expect((await check(root, '[[code:threshold=32768]]')).status,
-          PinStatus.current);
-    });
+    test(
+      'arithmetic is evaluated so prose can pin the meaningful number',
+      () async {
+        final root = repoWith('const threshold = 32 * 1024;');
+        expect(
+          (await check(root, '[[code:threshold=32768]]')).status,
+          PinStatus.current,
+        );
+      },
+    );
 
     test('int.fromEnvironment defaults are read through', () async {
       final root = repoWith(
         "const threshold = int.fromEnvironment('X', defaultValue: 32 * 1024);",
       );
-      expect((await check(root, '[[code:threshold=32768]]')).status,
-          PinStatus.current);
+      expect(
+        (await check(root, '[[code:threshold=32768]]')).status,
+        PinStatus.current,
+      );
     });
 
     test('a changed constant drifts and reports the new value', () async {
@@ -337,16 +369,20 @@ void main() {
 
     test('a constant that no longer exists is broken', () async {
       final root = repoWith('const other = 1;');
-      expect((await check(root, '[[code:threshold=32768]]')).status,
-          PinStatus.broken);
+      expect(
+        (await check(root, '[[code:threshold=32768]]')).status,
+        PinStatus.broken,
+      );
     });
 
     test('an unchanged symbol body is current', () async {
       final root = repoWith('int f(int a) {\n  return a + 1;\n}');
       final probe = await check(root, '[[code:lib/src/thing.dart#f]]');
       final hash = RegExp(r'@(\w{4})').firstMatch(probe.detail)!.group(1);
-      expect((await check(root, '[[code:lib/src/thing.dart#f@$hash]]')).status,
-          PinStatus.current);
+      expect(
+        (await check(root, '[[code:lib/src/thing.dart#f@$hash]]')).status,
+        PinStatus.current,
+      );
     });
 
     test('an edited symbol body drifts', () async {
@@ -360,16 +396,22 @@ void main() {
       final probe = await check(root, '[[code:lib/src/thing.dart#f]]');
       final hash = RegExp(r'@(\w{4})').firstMatch(probe.detail)!.group(1);
       root = repoWith('int f(int a) {\n  // a new remark\n  return a + 1;\n}');
-      expect((await check(root, '[[code:lib/src/thing.dart#f@$hash]]')).status,
-          PinStatus.current);
+      expect(
+        (await check(root, '[[code:lib/src/thing.dart#f@$hash]]')).status,
+        PinStatus.current,
+      );
     });
 
     test('a missing file or symbol is broken', () async {
       final root = repoWith('int f() {\n  return 0;\n}');
-      expect((await check(root, '[[code:lib/src/gone.dart#f@0000]]')).status,
-          PinStatus.broken);
-      expect((await check(root, '[[code:lib/src/thing.dart#nope@0000]]')).status,
-          PinStatus.broken);
+      expect(
+        (await check(root, '[[code:lib/src/gone.dart#f@0000]]')).status,
+        PinStatus.broken,
+      );
+      expect(
+        (await check(root, '[[code:lib/src/thing.dart#nope@0000]]')).status,
+        PinStatus.broken,
+      );
     });
   });
 
@@ -391,15 +433,19 @@ void main() {
 
     test('an existing, passing test is current', () async {
       final root = repoWithTest("test('always emits', () {});");
-      final r = await TestResolver(root, results(['always emits']))
-          .resolve(onePin(pin));
+      final r = await TestResolver(
+        root,
+        results(['always emits']),
+      ).resolve(onePin(pin));
       expect(r.status, PinStatus.current);
     });
 
     test('a documented guarantee whose test was deleted is broken', () async {
       final root = repoWithTest("test('something else', () {});");
-      final r = await TestResolver(root, results(['something else']))
-          .resolve(onePin(pin));
+      final r = await TestResolver(
+        root,
+        results(['something else']),
+      ).resolve(onePin(pin));
       expect(r.status, PinStatus.broken);
       expect(r.detail, contains('lost'));
     });
@@ -409,20 +455,27 @@ void main() {
       expect(r.status, PinStatus.broken);
     });
 
-    test('a test that exists but is not in the passing set is broken', () async {
-      final root = repoWithTest("test('always emits', () {});");
-      final r = await TestResolver(root, results(['unrelated']))
-          .resolve(onePin(pin));
-      expect(r.status, PinStatus.broken);
-    });
+    test(
+      'a test that exists but is not in the passing set is broken',
+      () async {
+        final root = repoWithTest("test('always emits', () {});");
+        final r = await TestResolver(
+          root,
+          results(['unrelated']),
+        ).resolve(onePin(pin));
+        expect(r.status, PinStatus.broken);
+      },
+    );
 
     // The load-bearing case: when the results file is absent the resolver must
     // NOT report current. CI turns this into a failure so a broken test run
     // cannot quietly retire every test pin.
     test('no results file yields unknown, never current', () async {
       final root = repoWithTest("test('always emits', () {});");
-      final r = await TestResolver(root, File('${tmp.path}/absent.txt'))
-          .resolve(onePin(pin));
+      final r = await TestResolver(
+        root,
+        File('${tmp.path}/absent.txt'),
+      ).resolve(onePin(pin));
       expect(r.status, PinStatus.unknown);
       expect(r.status, isNot(PinStatus.current));
     });
@@ -431,12 +484,14 @@ void main() {
     // assertion can be replaced and the pin still resolves — at the highest
     // strength in the system, for a guarantee nothing guards any more.
     group('body binding', () {
-      const real = "test('always emits', () {\n  expect(rows, isNotEmpty);\n});";
+      const real =
+          "test('always emits', () {\n  expect(rows, isNotEmpty);\n});";
       const gutted = "test('always emits', () {\n  expect(1, 1);\n});";
 
-      Future<PinResult> check(Directory root, String hash) =>
-          TestResolver(root, results(['always emits']))
-              .resolve(onePin('[[test:test/stream_test.dart#always emits@$hash]]'));
+      Future<PinResult> check(Directory root, String hash) => TestResolver(
+        root,
+        results(['always emits']),
+      ).resolve(onePin('[[test:test/stream_test.dart#always emits@$hash]]'));
 
       /// The body hash the resolver currently computes for [body].
       Future<String> hashOf(String body) async {
@@ -451,21 +506,28 @@ void main() {
         expect((await check(repoWithTest(real), h)).status, PinStatus.current);
       });
 
-      test('a gutted assertion drifts even though the name still passes',
-          () async {
-        final h = await hashOf(real);
-        final r = await check(repoWithTest(gutted), h);
-        expect(r.status, PinStatus.drifted,
-            reason: 'expect(1, 1) asserts nothing but keeps the name');
-        expect(r.detail, contains('still asserts'));
-      });
+      test(
+        'a gutted assertion drifts even though the name still passes',
+        () async {
+          final h = await hashOf(real);
+          final r = await check(repoWithTest(gutted), h);
+          expect(
+            r.status,
+            PinStatus.drifted,
+            reason: 'expect(1, 1) asserts nothing but keeps the name',
+          );
+          expect(r.detail, contains('still asserts'));
+        },
+      );
 
       test('a comment-only edit does not drift', () async {
         final h = await hashOf(real);
         const recommented =
             "test('always emits', () {\n  // why this matters\n  expect(rows, isNotEmpty);\n});";
-        expect((await check(repoWithTest(recommented), h)).status,
-            PinStatus.current);
+        expect(
+          (await check(repoWithTest(recommented), h)).status,
+          PinStatus.current,
+        );
       });
 
       test('a name with no surrounding body is broken', () async {
@@ -476,8 +538,10 @@ void main() {
 
       test('a name-only pin still resolves, for back-compatibility', () async {
         final root = repoWithTest(real);
-        final r = await TestResolver(root, results(['always emits']))
-            .resolve(onePin(pin));
+        final r = await TestResolver(
+          root,
+          results(['always emits']),
+        ).resolve(onePin(pin));
         expect(r.status, PinStatus.current);
       });
     });
@@ -490,49 +554,81 @@ void main() {
       return f;
     }
 
-    Map<String, Object?> run(double value, {bool dirty = false, bool noisy = false}) => {
-          'date': '2026-07-01',
-          'gitDirty': dirty,
-          'noisy': noisy,
-          'metrics': {'Large read': value},
-        };
+    // Mirrors the real shape of docs/experiments/history.json: `gitDirty` lives
+    // under `environment`, not at the top level. The earlier fixture put it at
+    // the top level, which matched the resolver's bug rather than the data —
+    // so the test passed while every dirty run was silently being accepted.
+    Map<String, Object?> run(
+      double value, {
+      bool dirty = false,
+      bool noisy = false,
+      String date = '2026-07-01',
+    }) => {
+      'date': date,
+      'environment': {'gitDirty': dirty},
+      'noisy': noisy,
+      'metrics': {'Large read': value},
+    };
 
     Future<PinResult> check(File h, String text) =>
         BenchResolver(h).resolve(onePin(text));
 
     test('a number inside the tolerance band is current', () async {
-      final r = await check(history([run(0.34)]), '[[bench:Large read ~ 0.32 +-15%]]');
+      final r = await check(
+        history([run(0.34)]),
+        '[[bench:Large read ~ 0.32 +-15%]]',
+      );
       expect(r.status, PinStatus.current);
     });
 
     test('a number outside the band drifts and quantifies the gap', () async {
-      final r = await check(history([run(0.90)]), '[[bench:Large read ~ 0.32 +-15%]]');
+      final r = await check(
+        history([run(0.90)]),
+        '[[bench:Large read ~ 0.32 +-15%]]',
+      );
       expect(r.status, PinStatus.drifted);
       expect(r.actual, '0.9');
       expect(r.detail, contains('%'));
     });
 
     test('an untracked metric is broken', () async {
-      final r = await check(history([run(0.32)]), '[[bench:No Such Metric ~ 1 +-10%]]');
+      final r = await check(
+        history([run(0.32)]),
+        '[[bench:No Such Metric ~ 1 +-10%]]',
+      );
       expect(r.status, PinStatus.broken);
     });
 
     // Dirty and noisy runs are hidden from the charts, so pinning against them
     // would compare prose to a number the project already distrusts.
-    test('dirty and noisy runs are skipped in favour of the last clean one',
-        () async {
-      final h = history([
-        run(0.32),
-        run(9.99, dirty: true),
-        run(8.88, noisy: true),
-      ]);
-      final r = await check(h, '[[bench:Large read ~ 0.32 +-15%]]');
-      expect(r.status, PinStatus.current);
+    test(
+      'dirty and noisy runs are skipped in favour of the last clean one',
+      () async {
+        final h = history([
+          run(0.32),
+          run(9.99, dirty: true),
+          run(8.88, noisy: true),
+        ]);
+        final r = await check(h, '[[bench:Large read ~ 0.32 +-15%]]');
+        expect(r.status, PinStatus.current);
+      },
+    );
+
+    // A bench pin reads the newest clean run, so it keeps passing while
+    // nothing new is measured at all. The age is reported so "verified" is
+    // never mistaken for "recently measured".
+    test('the backing run date and age are reported', () async {
+      final resolver = BenchResolver(history([run(0.32, date: '2020-01-01')]));
+      await resolver.resolve(onePin('[[bench:Large read ~ 0.32 +-15%]]'));
+      expect(resolver.runDate, '2020-01-01');
+      expect(resolver.runAgeDays, greaterThan(1000));
     });
 
     test('no history at all yields unknown, never current', () async {
-      final r = await check(File('${tmp.path}/absent.json'),
-          '[[bench:Large read ~ 0.32 +-15%]]');
+      final r = await check(
+        File('${tmp.path}/absent.json'),
+        '[[bench:Large read ~ 0.32 +-15%]]',
+      );
       expect(r.status, PinStatus.unknown);
     });
   });
