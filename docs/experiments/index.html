@@ -387,6 +387,7 @@
 <div class="main-layout">
   <!-- LEFT: Charts with tab selector -->
   <div class="left-col">
+    <div id="dataFreshness"></div>
     <div class="chart-tabs">
       <button class="chart-tab" data-panel="panelTimeline">Timeline</button>
       <button class="chart-tab active" data-panel="panelReads">Reads</button>
@@ -607,6 +608,7 @@ async function init() {
   activatePanel(activePanelId, false);
   buildCharts();
   buildTimeline();
+  renderDataFreshness();
   renderExpList();
   updateHeaderText();
   attachListListeners();
@@ -678,6 +680,28 @@ function mainRepresentativeRuns() {
 }
 
 const DAY = 86400000;
+
+/// Freshness of the underlying data, shown above every chart.
+///
+/// The timeline explains itself, but the default tab is Reads, and a reader
+/// there had no way to know the newest measurement was weeks and dozens of
+/// experiments old. Staleness is a property of the data, not of one view.
+function renderDataFreshness() {
+  const el = document.getElementById('dataFreshness');
+  if (!el || !DATA) return;
+  const clean = mainRepresentativeRuns();
+  const last = clean.length ? clean[clean.length - 1].r : null;
+  if (!last) { el.innerHTML = ''; return; }
+  const ageDays = Math.round((Date.now() - Date.parse(last.date + 'T00:00:00Z')) / DAY);
+  const newerExps = DATA.experiments.filter(e => (e.date || '') > last.date).length;
+  const stale = ageDays > 30;
+  el.innerHTML =
+    '<div style="font-size:0.74rem;color:var(--muted);padding:0.5rem 0 0.25rem;line-height:1.5">' +
+    'Newest measurement of <code>main</code>: <b>' + last.date + '</b> — ' + ageDays + ' days ago' +
+    (newerExps > 0 ? ', with <b>' + newerExps + '</b> experiments merged since and not measured' : '') +
+    (stale ? ' <b style="color:var(--accent)">(stale)</b>' : '') + '.' +
+    '</div>';
+}
 
 function buildTimeline() {
   const canvas = document.getElementById('chartTimeline');
