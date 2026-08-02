@@ -419,6 +419,15 @@ class BenchResolver implements PinResolver {
   Map<String, double>? _latest;
   String? _runLabel;
 
+  /// Date of the run these numbers come from, and how old it is.
+  ///
+  /// A `bench:` pin reads the newest clean run, so it keeps passing happily
+  /// while nothing is measured at all — the number stops being checked without
+  /// ever failing. Surfacing the age is what turns "quietly unverified" back
+  /// into something a reader can see.
+  String? runDate;
+  int? runAgeDays;
+
   @override
   String get namespace => 'bench';
 
@@ -434,8 +443,13 @@ class BenchResolver implements PinResolver {
     final runs = (data['runs'] as List?) ?? const [];
     for (final run in runs.reversed) {
       if (run is! Map) continue;
-      // Skip runs the charts already treat as untrustworthy.
-      if (run['gitDirty'] == true || run['noisy'] == true) continue;
+      // Skip runs the charts already treat as untrustworthy. `gitDirty` lives
+      // under `environment`, not at the top level — reading it from the wrong
+      // place silently accepted every dirty run, which is the opposite of what
+      // this filter is for.
+      final env = run['environment'];
+      final dirty = env is Map && env['gitDirty'] == true;
+      if (dirty || run['noisy'] == true) continue;
       final metrics = run['metrics'];
       if (metrics is Map && metrics.isNotEmpty) {
         _latest = {
@@ -443,6 +457,11 @@ class BenchResolver implements PinResolver {
             e.key.toString(): (e.value as num).toDouble(),
         };
         _runLabel = '${run['date']} ${run['label'] ?? ''}'.trim();
+        runDate = run['date']?.toString();
+        final parsed = DateTime.tryParse(runDate ?? '');
+        if (parsed != null) {
+          runAgeDays = DateTime.now().toUtc().difference(parsed).inDays;
+        }
         return;
       }
     }

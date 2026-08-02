@@ -134,7 +134,11 @@ abstract class PinResolver {
 ///
 /// The bare form exists because claim citations came first and read well
 /// inline; it is sugar for the `claim` namespace, not a fifth kind of pin.
-final _pinPattern = RegExp(r'\[\[(?:([a-z]+):)?([^\]]+)\]\]');
+/// Non-greedy to the first `]]` rather than to the first `]`: benchmark metric
+/// names contain brackets (`resqlite select() [main]`), and stopping at a lone
+/// `]` silently truncated the pin into something that never resolved. Same
+/// class of collision as `~` inside metric names.
+final _pinPattern = RegExp(r'\[\[(?:([a-z]+):)?(.+?)\]\]');
 
 List<Pin> parsePins(String path, String content) {
   final pins = <Pin>[];

@@ -24,9 +24,9 @@ Future<void> main(List<String> args) async {
   final passing = <String>{};
 
   final source = args.isNotEmpty
-      ? File(args.first).openRead().transform(utf8.decoder).transform(
-          const LineSplitter(),
-        )
+      ? File(
+          args.first,
+        ).openRead().transform(utf8.decoder).transform(const LineSplitter())
       : stdin.transform(utf8.decoder).transform(const LineSplitter());
 
   if (args.isNotEmpty && !File(args.first).existsSync()) {

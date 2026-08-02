@@ -387,7 +387,9 @@
 <div class="main-layout">
   <!-- LEFT: Charts with tab selector -->
   <div class="left-col">
+    <div id="dataFreshness"></div>
     <div class="chart-tabs">
+      <button class="chart-tab" data-panel="panelTimeline">Timeline</button>
       <button class="chart-tab active" data-panel="panelReads">Reads</button>
       <button class="chart-tab" data-panel="panelWrites">Writes</button>
       <button class="chart-tab" data-panel="panelTransactions">Transactions</button>
@@ -397,9 +399,23 @@
       <button class="chart-tab" data-panel="panelThroughput">Throughput</button>
     </div>
 
+    <div class="chart-panel" id="panelTimeline">
+      <h2>Performance over time <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
+      <div class="desc">
+        Every other tab plots one point per <em>experiment</em>, in experiment order. This one plots
+        <em>calendar time</em>, and only runs that measure <code>main</code> — headline runs and the
+        <code>baseline-for-*</code> arm of each A/B. A candidate arm measures a branch, so it is not history.
+        Gaps are drawn as gaps: an unmeasured month should look like one.
+      </div>
+      <div class="chart-improvements" id="timelineNote"></div>
+      <div class="chart-canvas-wrap"><canvas id="chartTimeline"></canvas></div>
+    </div>
     <div class="chart-panel active" id="panelReads">
       <h2>Read Performance <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
-      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms)</div>
+      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms).
+        One point per experiment, in experiment order — <b>not</b> a time axis; see the Timeline tab for that.
+        Hollow points are matched to a run by date heuristic rather than measured for that experiment.
+        Breaks in a line are runs dropped as noisy or built from a dirty tree.</div>
       <div class="chart-improvements" id="improvReads"></div>
       <div class="chart-canvas-wrap"><canvas id="chartReads"></canvas></div>
     </div>
@@ -474,6 +490,7 @@ let currentFilter = 'accepted'; // 'all' | 'accepted' | 'rejected'
 let activePanelId = 'panelReads';
 
 const PANEL_TO_TAB = {
+  panelTimeline: 'timeline',
   panelReads: 'reads',
   panelWrites: 'writes',
   panelTransactions: 'transactions',
@@ -590,6 +607,8 @@ async function init() {
   });
   activatePanel(activePanelId, false);
   buildCharts();
+  buildTimeline();
+  renderDataFreshness();
   renderExpList();
   updateHeaderText();
   attachListListeners();
@@ -640,6 +659,175 @@ function updateHeaderText() {
 let chartExpOrder = []; // experiments in chart order (for click lookup)
 let chartRunIndices = []; // which run index each chart point uses
 
+/// Runs that measure `main` at a moment in time.
+///
+/// The per-experiment charts plot each experiment's own run, which for a
+/// candidate arm is a *branch* — code that may never have merged, and for a
+/// rejected experiment definitely did not. That is the right answer to "what
+/// did this experiment measure" and the wrong answer to "how has main moved",
+/// so the timeline takes only headline runs and the `baseline-for-*` arms,
+/// which are main at that moment.
+function mainRepresentativeRuns() {
+  return DATA.runs
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => {
+      const dirty = r.environment && r.environment.gitDirty;
+      if (r.noisy || dirty) return false;              // already distrusted
+      // `expNNN-headline-refresh` is a headline run despite the exp prefix;
+      // only a *candidate arm* is branch-only.
+      return !/^exp\d/.test(r.id) || /baseline|headline/.test(r.id);
+    });
+}
+
+const DAY = 86400000;
+
+/// Freshness of the underlying data, shown above every chart.
+///
+/// The timeline explains itself, but the default tab is Reads, and a reader
+/// there had no way to know the newest measurement was weeks and dozens of
+/// experiments old. Staleness is a property of the data, not of one view.
+function renderDataFreshness() {
+  const el = document.getElementById('dataFreshness');
+  if (!el || !DATA) return;
+  const clean = mainRepresentativeRuns();
+  const last = clean.length ? clean[clean.length - 1].r : null;
+  if (!last) { el.innerHTML = ''; return; }
+  const ageDays = Math.round((Date.now() - Date.parse(last.date + 'T00:00:00Z')) / DAY);
+  const newerExps = DATA.experiments.filter(e => (e.date || '') > last.date).length;
+  const stale = ageDays > 30;
+  el.innerHTML =
+    '<div style="font-size:0.74rem;color:var(--muted);padding:0.5rem 0 0.25rem;line-height:1.5">' +
+    'Newest measurement of <code>main</code>: <b>' + last.date + '</b> — ' + ageDays + ' days ago' +
+    (newerExps > 0 ? ', with <b>' + newerExps + '</b> experiments merged since and not measured' : '') +
+    (stale ? ' <b style="color:var(--accent)">(stale)</b>' : '') + '.' +
+    '</div>';
+}
+
+function buildTimeline() {
+  const canvas = document.getElementById('chartTimeline');
+  if (!canvas || !DATA) return;
+  if (chartInstances.chartTimeline) {
+    chartInstances.chartTimeline.destroy();
+    delete chartInstances.chartTimeline;
+  }
+
+  const picked = mainRepresentativeRuns().filter(({ r }) => r.date);
+  const metricKeys = (CHART_GROUPS.chartReads || []).slice(0, 3);
+  const datasets = metricKeys.map((key, ki) => ({
+    label: displayNameForMetric(key),
+    data: picked
+      .filter(({ r }) => r.metrics[key] != null)
+      .map(({ r }) => ({ x: Date.parse(r.date + 'T00:00:00Z') / DAY, y: r.metrics[key] })),
+    borderColor: COLORS[ki],
+    backgroundColor: COLORS[ki] + '33',
+    // No interpolation across absences: a straight line over an unmeasured
+    // month is indistinguishable from a measured decline, which is exactly
+    // how a sparse series gets read as a trend.
+    spanGaps: false,
+    tension: 0.15,
+    pointRadius: 3.5,
+    pointHoverRadius: 7,
+  }));
+
+  // A runtime bump moves every library at once, so it is a discontinuity in
+  // the series rather than a data point in it.
+  const sdkChanges = [];
+  let prevSdk = null;
+  for (const { r } of picked) {
+    const sdk = r.environment && r.environment.dartVersion;
+    if (sdk && prevSdk && sdk !== prevSdk) {
+      sdkChanges.push({ x: Date.parse(r.date + 'T00:00:00Z') / DAY, label: 'Dart ' + sdk });
+    }
+    if (sdk) prevSdk = sdk;
+  }
+
+  const sdkRules = {
+    id: 'sdkRules',
+    afterDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(139,148,158,0.55)';
+      ctx.fillStyle = 'rgba(139,148,158,0.9)';
+      ctx.font = '10px system-ui';
+      for (const c of sdkChanges) {
+        const x = scales.x.getPixelForValue(c.x);
+        if (x < chartArea.left || x > chartArea.right) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        ctx.fillText(c.label, x + 3, chartArea.top + 10);
+      }
+      ctx.restore();
+    },
+  };
+
+  chartInstances.chartTimeline = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    plugins: [sdkRules],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: {
+            callback: v => new Date(v * DAY).toISOString().slice(0, 10),
+            maxRotation: 0,
+            autoSkipPadding: 24,
+            color: '#8b949e',
+          },
+          grid: { color: 'rgba(139,148,158,0.12)' },
+        },
+        y: {
+          title: { display: true, text: 'ms', color: '#8b949e' },
+          ticks: { color: '#8b949e' },
+          grid: { color: 'rgba(139,148,158,0.12)' },
+        },
+      },
+      plugins: {
+        legend: { labels: { color: '#e6edf3', usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            title: items => new Date(items[0].parsed.x * DAY).toISOString().slice(0, 10),
+          },
+        },
+      },
+    },
+  });
+
+  renderTimelineNote(picked);
+}
+
+/// States how thin the series is, because a chart cannot say it itself.
+function renderTimelineNote(picked) {
+  const el = document.getElementById('timelineNote');
+  if (!el) return;
+  const last = picked.length ? picked[picked.length - 1].r : null;
+  const ageDays = last
+    ? Math.round((Date.now() - Date.parse(last.date + 'T00:00:00Z')) / DAY)
+    : null;
+  const accepted = DATA.experiments.filter(e => e.status === 'accepted');
+  const withRun = accepted.filter(
+    e => e.benchmarkRun && e.benchmarkRun.source && e.benchmarkRun.source !== 'none'
+  ).length;
+  const stale = ageDays != null && ageDays > 30;
+  el.innerHTML =
+    '<div style="font-size:0.78rem;color:var(--muted);line-height:1.6">' +
+    picked.length + ' of ' + DATA.runs.length + ' runs measure <code>main</code> and are clean enough to plot. ' +
+    (last
+      ? 'Last measured <b>' + last.date + '</b>' +
+        (ageDays != null
+          ? ' (' + ageDays + ' days ago' + (stale ? ' — <b style="color:var(--accent)">stale</b>' : '') + ')'
+          : '') + '. '
+      : '') +
+    withRun + ' of ' + accepted.length + ' accepted experiments have a benchmark run at all.' +
+    '</div>';
+}
+
 function buildCharts() {
   const runs = DATA.runs;
   const exps = filteredExperiments();
@@ -688,9 +876,21 @@ function buildCharts() {
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,
+        // Half the plotted points are matched to a run by a same-day or
+        // nearby-date heuristic rather than being that experiment's own
+        // measurement. The side panel said so in prose; the chart did not, so
+        // an approximation read exactly like a measurement. Heuristic points
+        // are drawn hollow.
         pointRadius: 4,
         pointHoverRadius: 7,
-        spanGaps: true,
+        pointBackgroundColor: chartExpOrder.map(e =>
+          findRunSourceForExp(e) === 'exact' ? COLORS[ki] : 'transparent'),
+        pointBorderColor: COLORS[ki],
+        pointBorderWidth: chartExpOrder.map(e =>
+          findRunSourceForExp(e) === 'exact' ? 1 : 2),
+        // Do not draw through a dropped run: a straight segment across a
+        // noisy or dirty measurement is indistinguishable from a measured one.
+        spanGaps: false,
         yAxisID: isQps ? 'yQps' : 'y',
       };
     });

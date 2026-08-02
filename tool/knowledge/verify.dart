@@ -97,8 +97,8 @@ Future<void> main(List<String> args) async {
           '::${strict ? 'error' : 'warning'} file=${r.pin.site.file},'
           'line=${r.pin.site.line}::${r.pin.raw} — ${r.detail}'
           '${strict ? '. Its dataset is missing, so this pin is checking '
-              'nothing. Produce the dataset (see tool/knowledge/README.md) '
-              'or drop the pin.' : ''}',
+                    'nothing. Produce the dataset (see tool/knowledge/README.md) '
+                    'or drop the pin.' : ''}',
         );
         if (strict) failures++;
       case PinStatus.current:
@@ -155,6 +155,20 @@ void _printGroundedness(
     '\ntest = a passing assertion proves it · bench = the number is current · '
     'code = the mechanism is unchanged · claim = the belief stands',
   );
+
+  // Every `bench:` number is only as current as the newest clean run behind it,
+  // and that run can be arbitrarily old while the pins all pass. Say which run
+  // they came from and how old it is, so "verified" is never mistaken for
+  // "recently measured".
+  final bench = resolvers['bench'];
+  if (bench is BenchResolver && bench.runDate != null) {
+    final age = bench.runAgeDays;
+    print(
+      '\nbenchmark numbers come from the run of ${bench.runDate}'
+      '${age == null ? '' : ' ($age days ago)'}'
+      '${age != null && age > 30 ? ' — stale; nothing since has been measured' : ''}',
+    );
+  }
 
   // A `test:` pin without a body hash binds a label, not an assertion: the test
   // could be rewritten to assert something else and still resolve. Since `test`

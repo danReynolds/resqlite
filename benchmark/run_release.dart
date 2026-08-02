@@ -213,6 +213,28 @@ Future<void> main(List<String> args) async {
   print('Results saved to: ${resultsFile.path}');
   print('Structured artifact saved to: ${jsonFile.path}');
 
+  // Close the loop at the moment the run is produced.
+  //
+  // A dirty or single-sample run is dropped from the trend charts, and it used
+  // to vanish silently — so the person who produced it never learned it did not
+  // count. Of the last thirty runs, twenty-two were dirty and thirteen
+  // single-sample, leaving five usable; the rule was already written down and
+  // being followed by nobody, which is what an unenforced rule looks like.
+  final excluded = <String>[
+    if (environment['gitDirty'] == true)
+      'the tree is dirty (commit or stash, then re-run)',
+    if (options.repeatCount < 2)
+      'it is single-sample (--repeat=1); use --repeat=5 for an authoritative number',
+  ];
+  if (excluded.isNotEmpty) {
+    print('');
+    print('!! This run will NOT appear on the trend charts, because:');
+    for (final reason in excluded) {
+      print('   - $reason');
+    }
+    print('   It is still saved, and still usable as one arm of an A/B.');
+  }
+
   if (options.hardwareSummary) {
     _printHardwareSummary(currentAggregates, options.label);
   }

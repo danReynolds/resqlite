@@ -10,7 +10,7 @@ feeds: [native]
 section: architecture
 ---
 
-Reads run on a pool of two to four persistent worker isolates, each bound to its own read-only SQLite connection against the shared WAL. The pool exists to avoid a cost that is invisible until you look for it: spawning an isolate per query costs about 0.08 ms, which on small reads is most of the query. Keeping workers alive amortizes that to zero, and keeping the *C* state alive — connections, prepared-statement caches — means even a worker's death does not throw away the expensive parts.
+Reads run on a pool of two to four persistent worker isolates, each bound to its own read-only SQLite connection against the shared WAL. The whole arrangement exists to keep a 1,000-row read at [[bench:Select → Maps / 1000 rows / resqlite select() ~ 0.319 +-20%]] ms of wall time while charging the main isolate only [[bench:Select → Maps / 1000 rows / resqlite select() [main] ~ 0.051 +-30%]] ms of it — the number that actually competes with a frame. The pool exists to avoid a cost that is invisible until you look for it: spawning an isolate per query costs about 0.08 ms, which on small reads is most of the query. Keeping workers alive amortizes that to zero, and keeping the *C* state alive — connections, prepared-statement caches — means even a worker's death does not throw away the expensive parts.
 
 Pool size is measured, not guessed: throughput plateaus at four workers, and going wider actively regresses stream-heavy workloads because each completed re-query queues another microtask ahead of pending writes.
 
