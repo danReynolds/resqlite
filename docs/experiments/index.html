@@ -411,7 +411,10 @@
     </div>
     <div class="chart-panel active" id="panelReads">
       <h2>Read Performance <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
-      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms)</div>
+      <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms).
+        One point per experiment, in experiment order — <b>not</b> a time axis; see the Timeline tab for that.
+        Hollow points are matched to a run by date heuristic rather than measured for that experiment.
+        Breaks in a line are runs dropped as noisy or built from a dirty tree.</div>
       <div class="chart-improvements" id="improvReads"></div>
       <div class="chart-canvas-wrap"><canvas id="chartReads"></canvas></div>
     </div>
@@ -849,9 +852,21 @@ function buildCharts() {
         borderColor: COLORS[ki],
         backgroundColor: COLORS[ki] + '33',
         tension: 0.3,
+        // Half the plotted points are matched to a run by a same-day or
+        // nearby-date heuristic rather than being that experiment's own
+        // measurement. The side panel said so in prose; the chart did not, so
+        // an approximation read exactly like a measurement. Heuristic points
+        // are drawn hollow.
         pointRadius: 4,
         pointHoverRadius: 7,
-        spanGaps: true,
+        pointBackgroundColor: chartExpOrder.map(e =>
+          findRunSourceForExp(e) === 'exact' ? COLORS[ki] : 'transparent'),
+        pointBorderColor: COLORS[ki],
+        pointBorderWidth: chartExpOrder.map(e =>
+          findRunSourceForExp(e) === 'exact' ? 1 : 2),
+        // Do not draw through a dropped run: a straight segment across a
+        // noisy or dirty measurement is indistinguishable from a measured one.
+        spanGaps: false,
         yAxisID: isQps ? 'yQps' : 'y',
       };
     });
