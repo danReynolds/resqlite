@@ -33,8 +33,39 @@ Future<Map<String, Object?>> collectBenchmarkEnvironment({
     if (gitSha != null) 'gitSha': gitSha,
     if (gitBranch != null) 'gitBranch': gitBranch,
     if (gitDirty != null) 'gitDirty': gitDirty,
+    if (_peerVersions() case final peers? when peers.isNotEmpty)
+      'peerVersions': peers,
     ...extra,
   };
+}
+
+/// Versions of the libraries this run measures resqlite *against*.
+///
+/// Every headline number is a comparison, and `pubspec.lock` is not committed,
+/// so the peers float: two runs weeks apart can be measured against different
+/// sqlite_async or drift builds without anything recording it. That makes a
+/// peer regression indistinguishable from a resqlite win, and it is why a run
+/// has to carry what it was compared to, not just how it was built.
+Map<String, String>? _peerVersions() {
+  const peers = {'sqlite3', 'sqlite_async', 'drift', 'sqlite3_flutter_libs'};
+  final lock = File('pubspec.lock');
+  if (!lock.existsSync()) return null;
+  final out = <String, String>{};
+  String? current;
+  for (final line in lock.readAsLinesSync()) {
+    final pkg = RegExp(r'^  ([a-z0-9_]+):$').firstMatch(line);
+    if (pkg != null) {
+      current = pkg.group(1);
+      continue;
+    }
+    if (current == null || !peers.contains(current)) continue;
+    final version = RegExp(r'^    version: "(.+)"$').firstMatch(line);
+    if (version != null) {
+      out[current] = version.group(1)!;
+      current = null;
+    }
+  }
+  return out;
 }
 
 String _detectRuntimeFlavor() {
