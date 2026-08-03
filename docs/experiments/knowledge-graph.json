@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 47,
-    "totalEntries": 128
+    "entriesWithClaims": 48,
+    "totalEntries": 129
   },
   "experiments": [
     {
@@ -2039,6 +2039,17 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected_below_signal"
+    },
+    {
+      "id": "259",
+      "title": "Native TEXT ASCII classification for the row decoder",
+      "file": "259-native-ascii-text-flag.md",
+      "date": "2026-08-03",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted"
     }
   ],
   "claims": [
@@ -2669,6 +2680,46 @@
       ],
       "text": "The one real primary-metric signal from columnar storage is main-isolate integer consume ~2x faster (Int64List sequential access, no covariant-load barrier, vs pointer-chasing a List<Object?> of Smis), reproduced -48 to -52% on every integer lane in both orders. REAL consume is only neutral (box-on-access nearly cancels the locality gain) and columnar never regresses consume, refuting exp 081's box-on-access fear for the columnar (not binary-slab) shape.",
       "conditions": "M-series · AOT · main-isolate full-scan as Object? · 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "259.1",
+      "source": "259",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Classifying a TEXT cell as pure ASCII in resqlite_step_row (branch-free SWAR, memcpy-based unaligned loads) instead of in fastDecodeText removes one ExternalTypedData allocation and one bounds-checked Dart scan per cell, worth a reproduced -12.3% / -10.4% on 10k x 8 short-ASCII select(), -14.3% / -10.7% at 40 B, -22.2% / -19.4% at 400 B, and -24.4% / -19.2% on the repo's canonical 6-column mixed row (id INTEGER + 4 TEXT + REAL, from benchmark/shared/seeder.dart). The mixed lane's p50 is its signal; its p90 is noisy across passes and is not a tail regression.",
+      "conditions": "M1 Pro · AOT CLI bundle · cross-worktree A/B · two order-flipped passes · 31 samples/lane · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "259.2",
+      "source": "259",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The isolated per-cell mechanism is 6-15 ns, or 12-49% of fastDecodeText's wall depending on payload width (6-14 B: -12% / -34%; 20-40 B: -36% / -39%; 200 B: -49% / -48%). At 80k TEXT cells per lane that is 0.5-1.2 ms, matching the end-to-end deltas in order of magnitude.",
+      "conditions": "M1 Pro · AOT microbenchmark over malloc'd 8-aligned ASCII payloads · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "259.3",
+      "source": "259",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "An accumulate-then-test SWAR scan that always walks the whole value is not a regression for non-ASCII TEXT. Ordinary CJK text measured -2.4% / -1.7%, and the shape built to expose the trade — a 400 B value with its one multibyte character at byte 0, so the native scan walks the whole payload to learn what the old Dart scan settled in its first word — measured +1.1% / -1.0%. That lane runs ~4.9 ms against ~0.7 ms for the same payload in ASCII: utf8.decode over the value dwarfs a SWAR pass over it, so the 'wasted' scan is an order of magnitude cheaper than the decode it precedes.",
+      "conditions": "M1 Pro · AOT · 10k x 8 CJK TEXT (~36 B/cell) and 2k x 4 400 B early-nonascii · two order-flipped passes · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "259.4",
+      "source": "259",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A cross-worktree focused A/B carrying a lane whose code is byte-identical in both arms reads the per-binary layout offset directly. Exp 259's INTEGER-only control moved +0.2% / -2.9% — opposite signs, inside the 3% effect floor — which is what licenses trusting the text lanes without falling back to exp 254's single-binary runtime toggle.",
+      "conditions": "methodology · 2026-08",
       "state": "live"
     }
   ]
