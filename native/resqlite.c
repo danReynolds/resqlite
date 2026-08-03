@@ -2012,6 +2012,41 @@ int resqlite_query_bytes(
 // Batch row reader
 // ---------------------------------------------------------------------------
 
+// Classify a TEXT payload as pure ASCII (every byte < 0x80).
+//
+// The Dart decoder needs this to pick `String.fromCharCodes` (a plain Latin-1
+// widen) over `utf8.decode`; it used to derive it itself, which cost an extra
+// `ExternalTypedData` view plus a bounds-checked per-word or per-byte loop for
+// every TEXT cell. Here the bytes are already in cache from the value fetch and
+// the scan is branch-free SWAR, so the classification is close to free.
+//
+// The accumulate-then-test shape deliberately scans the whole value instead of
+// stopping at the first high byte: it keeps one branch for the common all-ASCII
+// case, and the extra bytes a non-ASCII value walks cost far less here than the
+// `utf8.decode` pass that follows anyway. Loads are `memcpy`-based because
+// SQLite gives no alignment guarantee for TEXT payloads.
+RESQLITE_HOT static int text_is_ascii(const unsigned char* p, int len) {
+    uint64_t acc = 0;
+    int i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t word;
+        memcpy(&word, p + i, 8);
+        acc |= word;
+    }
+    for (; i < len; i++) {
+        acc |= (uint64_t)p[i];
+    }
+    return (acc & 0x8080808080808080ULL) == 0;
+}
+
+// Test-only differential entry point for the classifier above. Mirrors the
+// `resqlite_test_i64_to_str` pattern: the decoder picks a Latin-1 widen over
+// `utf8.decode` on this answer, so a wrong `1` is silent mojibake rather than a
+// crash and needs a direct byte-level gate.
+int resqlite_test_text_is_ascii(const unsigned char* p, int len) {
+    return text_is_ascii(p, len);
+}
+
 RESQLITE_HOT int resqlite_step_row(
     sqlite3_stmt* stmt,
     int col_count,
@@ -2036,14 +2071,18 @@ RESQLITE_HOT int resqlite_step_row(
             case SQLITE_FLOAT:
                 cells[i].d = sqlite3_value_double(val);
                 break;
-            case SQLITE_TEXT:
+            case SQLITE_TEXT: {
                 // value_text must precede value_bytes for the same reason
                 // column_text must precede column_bytes: calling bytes first can
                 // trigger an implicit type conversion that invalidates the
                 // pointer.
-                cells[i].p = sqlite3_value_text(val);
-                cells[i].len = sqlite3_value_bytes(val);
+                const unsigned char* text = sqlite3_value_text(val);
+                int len = sqlite3_value_bytes(val);
+                cells[i].p = text;
+                cells[i].len = len;
+                if (text_is_ascii(text, len)) cells[i].type = RESQLITE_TEXT_ASCII;
                 break;
+            }
             case SQLITE_BLOB:
                 cells[i].p = sqlite3_value_blob(val);
                 cells[i].len = sqlite3_value_bytes(val);
@@ -2221,6 +2260,9 @@ RESQLITE_HOT int resqlite_step_row_hash(
                 int len = sqlite3_value_bytes(val);
                 cells[i].p = p;
                 cells[i].len = len;
+                // [EXP-259] Same ASCII classification as resqlite_step_row, so
+                // the initial stream decode takes the same Dart-side fast path.
+                if (text_is_ascii(p, len)) cells[i].type = RESQLITE_TEXT_ASCII;
                 h = fnv_combine_u64(h, (uint64_t)len);
                 h = fnv_combine_bytes(h, p, len);
                 break;

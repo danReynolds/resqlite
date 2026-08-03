@@ -344,8 +344,17 @@ void resqlite_free(void* ptr);
 // Batch row reader — one FFI call per row instead of ~16
 // ---------------------------------------------------------------------------
 
+// Cell type code for a TEXT value whose bytes are all < 0x80, reported instead
+// of SQLITE_TEXT. SQLite's own codes occupy 1..5 (INTEGER/FLOAT/TEXT/BLOB/NULL),
+// so 6 is the first free value and keeps the Dart-side switch dense.
+// [EXP-259]: the decoder needs this classification to choose
+// `String.fromCharCodes` over `utf8.decode`, and the step loop can produce it
+// far more cheaply than Dart can.
+#define RESQLITE_TEXT_ASCII 6
+
 typedef struct {
     int type;           // 4 bytes — SQLITE_INTEGER / FLOAT / TEXT / BLOB / NULL
+                        //           or RESQLITE_TEXT_ASCII
     int len;            // 4 bytes — byte length for TEXT and BLOB
     union {
         long long i;    // 8 bytes — integer value
