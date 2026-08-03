@@ -28,6 +28,7 @@ confirmation per `JOURNAL.md`). Values are microseconds.
 | `text8-mid` | 10k x 8 ASCII TEXT, 40 B/cell | confirmation |
 | `text4-long` | 2k x 4 ASCII TEXT, 400 B/cell | confirmation — scan-length scaling |
 | `text8-cjk` | 10k x 8 CJK TEXT, ~36 B/cell | guard — non-ASCII still pays `utf8.decode`, and the native scan no longer bails at the first high byte |
+| `text4-long-early-nonascii` | 2k x 4, 400 B, one `é` at byte 0 | guard — the worst case for accumulate-then-test: the native scan walks ~400 bytes where the Dart scan it replaced bailed at the first word |
 | `mixed6` | 10k x 6 mixed (4 TEXT + REAL) | default product row shape |
 | `int8` | 10k x 8 INTEGER | control — no TEXT, so both arms run byte-identical code |
 
@@ -48,6 +49,14 @@ confirmation per `JOURNAL.md`). Values are microseconds.
 | int8 | 1 | 2772 | 2777 | +0.2% | 2884 | 2843 | -1.4% |
 | int8 | 2 | 2756 | 2675 | -2.9% | 2846 | 2805 | -1.4% |
 
+`text4-long-early-nonascii` was added after the first pair and collected on its
+own, same protocol (10 warmup, 31 samples, order-flipped, fresh process per arm):
+
+| lane | pass | baseline p50 | candidate p50 | Δ p50 | baseline p90 | candidate p90 | Δ p90 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| text4-long-early-nonascii | 1 | 4861 | 4915 | +1.1% | 5585 | 5388 | -3.5% |
+| text4-long-early-nonascii | 2 | 4975 | 4926 | -1.0% | 5555 | 5415 | -2.5% |
+
 ## Drift classification
 
 `dart run benchmark/ab_drift_check.dart --input=<pairs>.json --markdown` over the
@@ -61,6 +70,7 @@ per-run values above:
 | text8-cjk | inconclusive / neutral | -2.4% | -1.7% | 6.8% |
 | mixed6 | REPRODUCED (real effect) | -7.8% | -7.8% | 18.7% |
 | int8 | inconclusive / neutral | +0.2% | -2.9% | 2.1% |
+| text4-long-early-nonascii | inconclusive / neutral | +1.1% | -1.0% | 5.4% |
 
 The `int8` control is the load-bearing one: it contains no TEXT, so both binaries
 run identical code there. It moves +0.2% then -2.9% — opposite signs, both inside
@@ -68,6 +78,14 @@ the 3% effect floor — which is what rules out the systematic per-worktree bina
 offset exp 254 hit. `text4-long`'s 50% CV comes from its much shorter absolute
 lane time (~0.7 ms), where a single scheduling outlier dominates the spread; its
 p50 and p90 both move the same direction in both passes.
+
+`text4-long-early-nonascii` is the direct test of the accumulate-then-test choice:
+a 400 B value whose only multibyte character sits at byte 0, so the native scan
+walks the whole payload to learn what the old Dart scan settled in its first
+word. It lands +1.1% / -1.0% — opposite signs, both inside the floor. The lane's
+absolute time (~4.9 ms vs ~0.7 ms for the all-ASCII 400 B lane) is why: `utf8.decode`
+over 3.2 MB dwarfs a 3.2 MB SWAR pass, so the extra scan is invisible even in the
+shape built to expose it.
 
 ## Mechanism probe (scratch, not committed)
 

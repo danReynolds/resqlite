@@ -83,6 +83,12 @@ final _lanes = <_Lane>[
   _Lane('text8-mid', 8, 10000, (r, c) => _ascii(40, r, c)),
   _Lane('text4-long', 4, 2000, (r, c) => _ascii(400, r, c)),
   _Lane('text8-cjk', 8, 10000, (r, c) => _cjk(12, r, c)),
+  // GUARD, worst case for accumulate-then-test: a long value whose only
+  // multibyte character sits at byte 0. The native scan walks all ~400 bytes
+  // before answering, where the Dart scan it replaced bailed at the first word
+  // and went straight to utf8.decode. If scanning to the end ever costs more
+  // than it saves, it shows here or nowhere.
+  _Lane('text4-long-early-nonascii', 4, 2000, (r, c) => 'é${_ascii(398, r, c)}'),
   _Lane(
     'mixed6',
     6,

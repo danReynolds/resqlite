@@ -90,8 +90,10 @@ payloads — which is also why the Dart side had an alignment guard it could not
 drop. The scan deliberately runs to the end rather than stopping at the first
 high byte: that keeps a single branch on the common all-ASCII path, and a
 non-ASCII value is about to be walked again by `utf8.decode` anyway, at roughly
-ten times the per-byte cost. The `text8-cjk` lane exists to hold that trade
-honest.
+ten times the per-byte cost. Two guard lanes hold that trade honest:
+`text8-cjk` for ordinary non-ASCII text, and `text4-long-early-nonascii` — a
+400 B value whose only multibyte character sits at byte 0 — for the shape that
+maximises the gap between scanning to the end and bailing at the first word.
 
 Both `resqlite_step_row` and `resqlite_step_row_hash` call it and overwrite
 `cells[i].type` with `RESQLITE_TEXT_ASCII` when it answers yes.
@@ -136,6 +138,7 @@ Full table in the results file; p50 deltas:
 | `text4-long` (2k x 4, 400 B ASCII) | -22.2% | -19.4% | REPRODUCED |
 | `mixed6` (10k x 6 default shape) | -7.8% | -7.8% | REPRODUCED |
 | `text8-cjk` (guard) | -2.4% | -1.7% | neutral |
+| `text4-long-early-nonascii` (guard) | +1.1% | -1.0% | neutral |
 | `int8` (control) | +0.2% | -2.9% | neutral |
 
 Verdicts are `benchmark/ab_drift_check.dart`'s.
@@ -147,13 +150,21 @@ so it scales with how much text a read carries, not with row count alone; the
 400 B lane gains most because the Dart scan it replaces was walking 50 words per
 cell.
 
-The two neutral lanes are what make the win believable. `int8` has no TEXT, so
+The three neutral lanes are what make the win believable. `int8` has no TEXT, so
 both binaries execute identical code there — it moves +0.2% then -2.9%, opposite
 signs and inside the 3% floor, which rules out the systematic per-worktree binary
-offset that invalidated exp 254's first comparison. And `text8-cjk` confirms the
-full-scan trade costs nothing measurable: non-ASCII reads land at -2.4% / -1.7%,
-if anything slightly better than before, because the C scan it gained is cheaper
-than the partial Dart scan it lost.
+offset that invalidated exp 254's first comparison.
+
+The other two say the full-scan trade costs nothing measurable. Ordinary
+non-ASCII text (`text8-cjk`) lands at -2.4% / -1.7%, if anything slightly better
+than before, because the C scan it gained is cheaper than the partial Dart scan
+it lost. And the shape built to expose the trade —
+`text4-long-early-nonascii`, 400 B with the one multibyte character at byte 0, so
+the native scan walks the whole payload to learn what the old Dart scan settled
+in its first word — is +1.1% / -1.0%. The absolute times explain why: that lane
+runs ~4.9 ms against ~0.7 ms for the same 400 B payload in ASCII, because
+`utf8.decode` over 3.2 MB dwarfs a 3.2 MB SWAR pass. The scan you "waste" is an
+order of magnitude cheaper than the decode it precedes.
 
 A standalone microbenchmark of the mechanism alone puts the per-cell saving at
 6-15 ns, or 12-49% of `fastDecodeText`'s wall depending on payload width — which

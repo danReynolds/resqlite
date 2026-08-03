@@ -763,7 +763,9 @@ on the first miss penalises sparse-miss inputs. [Exp 259](259-native-ascii-text-
 is the complementary case and lands on the opposite structure: its ASCII classifier
 ORs every 8-byte word into an accumulator and tests once at the end, so a non-ASCII
 value is walked to completion even though the answer was settled at byte 3. That
-looks wasteful and measured neutral (CJK guard -2.4% / -1.7%) for two reasons —
+looks wasteful and measured neutral — CJK guard -2.4% / -1.7%, and the shape
+built to expose the trade (400 B whose one multibyte character sits at byte 0)
++1.1% / -1.0% — for two reasons:
 it buys a single branch instead of one per word on the all-ASCII common path, and
 the value that fails the test is immediately handed to `utf8.decode`, which
 re-reads all of it regardless at roughly ten times the per-byte cost.
