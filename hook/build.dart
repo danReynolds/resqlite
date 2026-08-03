@@ -361,6 +361,9 @@ const _exportedSymbols = [
   'resqlite_test_i64_array_scalar',
   'resqlite_test_i64_array_pipe2',
   'resqlite_test_i64_array_neon',
+  // Test-support: exp 259 TEXT ASCII classifier
+  // (test/native_encoder_diff_test.dart).
+  'resqlite_test_text_is_ascii',
 ];
 
 bool _isEnabled(Object? value) {

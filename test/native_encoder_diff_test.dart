@@ -84,6 +84,29 @@ external int resqliteTestI64ArrayPipe2(
 external int resqliteTestI64ArrayNeon(
     ffi.Pointer<ffi.Int64> vals, int n, ffi.Pointer<ffi.Uint8> out);
 
+// Test-support entry defined in native/resqlite.c (exp 259). Returns 1 when
+// every byte of `p[0..len)` is below 0x80. The row decoder turns a `1` into a
+// Latin-1 `String.fromCharCodes` widen instead of `utf8.decode`, so a wrong
+// answer is silent mojibake rather than a crash.
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Uint8>, ffi.Int)>(
+  symbol: 'resqlite_test_text_is_ascii',
+  isLeaf: true,
+)
+external int resqliteTestTextIsAscii(ffi.Pointer<ffi.Uint8> p, int len);
+
+/// Runs `bytes` through the native TEXT ASCII classifier.
+bool _nativeIsAscii(List<int> bytes) {
+  final p = malloc<ffi.Uint8>(bytes.isEmpty ? 1 : bytes.length);
+  try {
+    for (var i = 0; i < bytes.length; i++) {
+      p[i] = bytes[i];
+    }
+    return resqliteTestTextIsAscii(p, bytes.length) != 0;
+  } finally {
+    malloc.free(p);
+  }
+}
+
 /// Formats `vals` via one of the three exp 240 native array encoders and
 /// returns the emitted comma-separated string.
 String _nativeI64Array(
@@ -239,6 +262,68 @@ void main() {
         final lo = rng.nextInt(1 << 32);
         check((hi << 32) | lo); // may be negative — Dart int is 64-bit signed
         check(rng.nextInt(100000000)); // dense sub-9-digit coverage too
+      }
+    });
+  });
+
+  group('exp 259 TEXT ASCII classifier differential', () {
+    void check(List<int> bytes, {String? reason}) {
+      expect(
+        _nativeIsAscii(bytes),
+        bytes.every((b) => b < 0x80),
+        reason: reason ?? 'classifier diverged on $bytes',
+      );
+    }
+
+    test('high byte at every position of every length up to 40', () {
+      // The scan consumes 8 bytes per SWAR word and finishes the remainder one
+      // byte at a time, so both the word body and the tail must see a high bit
+      // wherever it sits.
+      for (var len = 0; len <= 40; len++) {
+        check(List<int>.filled(len, 0x41));
+        for (var pos = 0; pos < len; pos++) {
+          final bytes = List<int>.filled(len, 0x41);
+          bytes[pos] = 0x80;
+          check(bytes, reason: 'len=$len, high byte at $pos');
+          bytes[pos] = 0xFF;
+          check(bytes, reason: 'len=$len, 0xFF at $pos');
+        }
+      }
+    });
+
+    test('0x7F stays ASCII and 0x80 does not, at word boundaries', () {
+      for (final len in const [7, 8, 9, 15, 16, 17, 23, 24, 25]) {
+        check(List<int>.filled(len, 0x7F), reason: 'all 0x7F len=$len');
+        final last = List<int>.filled(len, 0x41)..[len - 1] = 0x80;
+        check(last, reason: 'trailing 0x80 len=$len');
+      }
+    });
+
+    test('real UTF-8 payloads', () {
+      for (final s in <String>[
+        '',
+        'ascii_only_1234',
+        'a' * 300,
+        'café',
+        '項目_東京',
+        'emoji 🎉🚀',
+        'mostly ascii with one é at the very end',
+      ]) {
+        check(utf8.encode(s), reason: 'string "$s"');
+      }
+    });
+
+    test('dense random fuzz', () {
+      final rng = Random(0x259A);
+      for (var i = 0; i < 20000; i++) {
+        final len = rng.nextInt(64);
+        final bytes = List<int>.generate(
+          len,
+          // Mostly ASCII so the sparse-high-byte case dominates, which is the
+          // shape a single accented character inside a long value produces.
+          (_) => rng.nextInt(100) == 0 ? 0x80 + rng.nextInt(0x80) : rng.nextInt(0x80),
+        );
+        check(bytes);
       }
     });
   });

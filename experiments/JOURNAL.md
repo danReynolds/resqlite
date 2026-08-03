@@ -726,6 +726,55 @@ real path and representative shapes before designing against it. Otherwise a
 large aggregate ceiling can over-credit a rewrite whose eligible sub-cost is
 smaller, shape-dependent, or on the wrong thread/isolate.*
 
+### Ask which side of a boundary already holds the inputs
+
+Most of this program's rejected candidates tried to make an expensive step
+cheaper, or to move it somewhere with better locality — and lost, because the
+work still had to happen. [Exp 259](259-native-ascii-text-flag.md) won a
+reproduced 10-24% on text-bearing `select()` by asking a different question: the
+Dart decoder was *classifying* every TEXT cell as ASCII-or-not before it could
+build the `String`, at the cost of an extra `ExternalTypedData` view plus a
+bounds-checked scan (byte-by-byte under 16 bytes). `resqlite_step_row` had the
+same pointer and length one frame earlier, with the bytes already in cache, where
+the answer is a branch-free SWAR pass. Nothing got faster; a question moved to the
+side that could already answer it for free.
+
+The tell is a *classification* — a predicate, a length, a type discriminator, a
+"does this need the slow path?" — computed by a consumer over data a producer just
+touched. That is different from moving the work itself, which is what exps 081,
+251 and 258 kept finding does not pay.
+
+Two riders. The predicate's answer needs somewhere to go: exp 259 spent an unused
+cell type code (SQLite's are 1-5, so 6 was free), which cost nothing; if it had
+needed a wider struct or a second array, the accounting changes. And a producer-side
+predicate is a new correctness surface — a wrong `true` here is silent mojibake,
+not a crash — so it wants a direct byte-level differential test, not just the
+end-to-end round trip.
+
+*Reapplies wherever a decode, encode, or transfer consumer computes something
+about bytes another layer just walked: escape scans, length/width probes, type
+or affinity discrimination, "is this the common case" guards. Check whether the
+producer can hand the answer over instead of the consumer re-deriving it.*
+
+### A full scan can beat an early-exit scan when the miss path re-reads anyway
+
+[Exp 235](235-json-escape-swar-resume.md) established that abandoning a fast scan
+on the first miss penalises sparse-miss inputs. [Exp 259](259-native-ascii-text-flag.md)
+is the complementary case and lands on the opposite structure: its ASCII classifier
+ORs every 8-byte word into an accumulator and tests once at the end, so a non-ASCII
+value is walked to completion even though the answer was settled at byte 3. That
+looks wasteful and measured neutral — CJK guard -2.4% / -1.7%, and the shape
+built to expose the trade (400 B whose one multibyte character sits at byte 0)
++1.1% / -1.0% — for two reasons:
+it buys a single branch instead of one per word on the all-ASCII common path, and
+the value that fails the test is immediately handed to `utf8.decode`, which
+re-reads all of it regardless at roughly ten times the per-byte cost.
+
+*Reapplies to any predicate scan. Early exit only pays when the miss path is
+cheaper than the scan you saved. If the miss leads into a second, more expensive
+pass over the same bytes, prefer the branch-free accumulate-and-test shape and put
+a miss-heavy guard lane in the harness to prove it.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

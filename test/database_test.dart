@@ -223,6 +223,33 @@ void main() {
       expect(rows[2]['name'], 'مرحبا');
     });
 
+    test('select decodes text with a high byte at any offset', () async {
+      // [EXP-259] The native step loop classifies a TEXT cell as ASCII (Latin-1
+      // widen) or not (utf8.decode) with an 8-bytes-at-a-time scan. A value
+      // whose only multibyte character sits in the word body, in the sub-8-byte
+      // tail, or right at a word boundary must still round-trip, and a run of
+      // pure-ASCII rows must not drag a neighbouring multibyte row onto the
+      // wrong path.
+      await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
+      final bodies = <String>[];
+      for (var len = 0; len <= 20; len++) {
+        bodies.add('a' * len);
+        for (var pos = 0; pos < len; pos++) {
+          bodies.add('${'a' * pos}é${'a' * (len - pos - 1)}');
+          bodies.add('${'a' * pos}🎉${'a' * (len - pos - 1)}');
+        }
+      }
+      for (final body in bodies) {
+        await db.execute('INSERT INTO t(body) VALUES (?)', [body]);
+      }
+
+      final rows = await db.select('SELECT body FROM t ORDER BY id');
+      expect(rows.length, bodies.length);
+      for (var i = 0; i < bodies.length; i++) {
+        expect(rows[i]['body'], bodies[i], reason: 'row $i');
+      }
+    });
+
     test('execute preserves multibyte and embedded-NUL text', () async {
       await db.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT)');
       const body = '項目_東京\u0000emoji_🎉🚀';

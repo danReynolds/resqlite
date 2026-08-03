@@ -103,6 +103,12 @@ const int sqliteFloat = 2;
 const int sqliteText = 3;
 const int sqliteBlob = 4;
 
+/// Cell type the native step loop reports for a TEXT value whose bytes are all
+/// below 0x80 (`RESQLITE_TEXT_ASCII` in `resqlite.h`). Such a value decodes
+/// with a plain [String.fromCharCodes] widen; plain [sqliteText] means the
+/// native scan found a multi-byte sequence and the cell needs [utf8.decode].
+const int sqliteTextAscii = 6;
+
 const int _fnvOffsetBasis = 0x4bf29ce484222325;
 const int _fnvMask = 0x7FFFFFFFFFFFFFFF;
 const int _fnvPrime = 0x100000001B3;
@@ -308,17 +314,25 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           values[writeIdx++] = cellsI64[i64Base + valI64];
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-        case sqliteText:
-          final textAddr = cellsI64[i64Base + valI64];
+        case sqliteTextAscii:
           final textLen = cellsI32[i32Base + lenI32];
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
-            values[writeIdx++] = fastDecodeText(
-              ffi.Pointer<ffi.Uint8>.fromAddress(textAddr),
-              textLen,
+            values[writeIdx++] = String.fromCharCodes(
+              ffi.Pointer<ffi.Uint8>.fromAddress(
+                cellsI64[i64Base + valI64],
+              ).asTypedList(textLen),
             );
           }
+        case sqliteText:
+          // Reported only when the native scan found a byte >= 0x80, so this
+          // arm goes straight to UTF-8. Empty text always classifies as ASCII.
+          values[writeIdx++] = utf8.decode(
+            ffi.Pointer<ffi.Uint8>.fromAddress(
+              cellsI64[i64Base + valI64],
+            ).asTypedList(cellsI32[i32Base + lenI32]),
+          );
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
@@ -388,17 +402,25 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
           values[writeIdx++] = cellsI64[i64Base + valI64];
         case sqliteFloat:
           values[writeIdx++] = cellsF64[i64Base + valI64];
-        case sqliteText:
-          final textAddr = cellsI64[i64Base + valI64];
+        case sqliteTextAscii:
           final textLen = cellsI32[i32Base + lenI32];
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
-            values[writeIdx++] = fastDecodeText(
-              ffi.Pointer<ffi.Uint8>.fromAddress(textAddr),
-              textLen,
+            values[writeIdx++] = String.fromCharCodes(
+              ffi.Pointer<ffi.Uint8>.fromAddress(
+                cellsI64[i64Base + valI64],
+              ).asTypedList(textLen),
             );
           }
+        case sqliteText:
+          // Reported only when the native scan found a byte >= 0x80, so this
+          // arm goes straight to UTF-8. Empty text always classifies as ASCII.
+          values[writeIdx++] = utf8.decode(
+            ffi.Pointer<ffi.Uint8>.fromAddress(
+              cellsI64[i64Base + valI64],
+            ).asTypedList(cellsI32[i32Base + lenI32]),
+          );
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
