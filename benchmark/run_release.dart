@@ -78,6 +78,17 @@ Future<void> main(List<String> args) async {
   }
   print('');
 
+  // Filenames are fixed up front so each completed repeat can be persisted
+  // into them as it lands.
+  final runTimestamp = DateTime.now()
+      .toIso8601String()
+      .replaceAll(':', '-')
+      .split('.')
+      .first;
+  final safeRunLabel = _sanitizeResultFilenameLabel(options.label);
+  final resultsFile = File('${resultsDir.path}/$runTimestamp-$safeRunLabel.md');
+  final jsonFile = File('${resultsDir.path}/$runTimestamp-$safeRunLabel.json');
+
   for (var i = 0; i < options.repeatCount; i++) {
     if (options.repeatCount > 1) {
       print('--- Repeat ${i + 1}/${options.repeatCount} ---');
@@ -85,6 +96,28 @@ Future<void> main(List<String> args) async {
     final markdown = await _runSuiteOnce(includeSlow: options.includeSlow);
     runMarkdowns.add(markdown);
     runMetrics.add(extractResqliteMedians(markdown));
+
+    // Persist what has completed, every repeat.
+    //
+    // The suite runs four libraries in one process, so a segfault anywhere —
+    // including in a peer's native code, which is where the current one lives —
+    // takes the whole run down and used to destroy every repeat already
+    // measured. A run that got through four of five repeats produced nothing at
+    // all, which is a large part of why the trend charts are so sparse. Writing
+    // after each repeat means a crash costs the repeat in flight, not the run.
+    resultsDir.createSync(recursive: true);
+    jsonFile.writeAsStringSync(
+      const JsonEncoder.withIndent('  ').convert(
+        buildReleaseRunArtifact(
+          label: options.label,
+          repeatCount: runMarkdowns.length,
+          markdown: markdown,
+          aggregates: aggregateRunMetrics(runMetrics),
+          environment: environment,
+          generatedAt: DateTime.now().toIso8601String(),
+        ),
+      ),
+    );
   }
 
   final representativeMarkdown = runMarkdowns.last;
@@ -185,14 +218,6 @@ Future<void> main(List<String> args) async {
     markdown.writeln();
   }
 
-  final timestamp = DateTime.now()
-      .toIso8601String()
-      .replaceAll(':', '-')
-      .split('.')
-      .first;
-  final safeLabel = _sanitizeResultFilenameLabel(options.label);
-  final resultsFile = File('${resultsDir.path}/$timestamp-$safeLabel.md');
-  final jsonFile = File('${resultsDir.path}/$timestamp-$safeLabel.json');
   await resultsFile.writeAsString(markdown.toString());
   final artifact = buildReleaseRunArtifact(
     label: options.label,
