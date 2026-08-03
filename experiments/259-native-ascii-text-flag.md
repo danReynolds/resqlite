@@ -136,19 +136,25 @@ Full table in the results file; p50 deltas:
 | `text8-short` (10k x 8, 10 B ASCII) | -12.3% | -10.4% | REPRODUCED |
 | `text8-mid` (10k x 8, 40 B ASCII) | -14.3% | -10.7% | REPRODUCED |
 | `text4-long` (2k x 4, 400 B ASCII) | -22.2% | -19.4% | REPRODUCED |
-| `mixed6` (10k x 6 default shape) | -7.8% | -7.8% | REPRODUCED |
+| `mixed6` (canonical 6-col mixed row) | -24.4% | -19.2% | REPRODUCED |
 | `text8-cjk` (guard) | -2.4% | -1.7% | neutral |
 | `text4-long-early-nonascii` (guard) | +1.1% | -1.0% | neutral |
 | `int8` (control) | +0.2% | -2.9% | neutral |
 
 Verdicts are `benchmark/ab_drift_check.dart`'s.
 
-Reading them: a text-bearing `select()` gets **10-22% faster end to end**, and
-the default six-column product row — two thirds of which is not text at all —
-still improves a reproduced 7.8% in both orderings. The saving is per TEXT cell,
-so it scales with how much text a read carries, not with row count alone; the
-400 B lane gains most because the Dart scan it replaces was walking 50 words per
-cell.
+Reading them: a text-bearing `select()` gets **10-24% faster end to end**. The
+saving is per TEXT cell, so it scales with how much text a read carries rather
+than with row count alone — the 400 B lane gains most because the Dart scan it
+replaces was walking ~50 words per cell, and `mixed6` gains as much as it does
+because the canonical row's `description` column is ~85 bytes on its own.
+
+`mixed6` is the one that matters for "does this reach real usage": it is the
+repo's standard product row (`id` INTEGER, four TEXT, one REAL), copied verbatim
+from `benchmark/shared/seeder.dart`, and it improves a reproduced 19-24%. Its p50
+is the lane's signal; its p90 is noisy (candidate 4197 in one pass, 5933 in the
+other against a stable ~4400 baseline) and should not be read as a tail
+regression.
 
 The three neutral lanes are what make the win believable. `int8` has no TEXT, so
 both binaries execute identical code there — it moves +0.2% then -2.9%, opposite
@@ -174,9 +180,9 @@ end-to-end deltas.
 ## Outcome
 
 **Accepted.** A byte-identical-output change that moves one per-cell
-classification from Dart to the C step loop, worth 10-22% on text-bearing
-`select()` reads and 7.8% on the default row shape, with an untouched stream
-hash and no public API change.
+classification from Dart to the C step loop, worth 10-24% on text-bearing
+`select()` reads — including 19-24% on the repo's canonical mixed product row —
+with an untouched stream hash and no public API change.
 
 The direction this leaves open: the same argument applies to any per-cell
 question the decoder currently asks in Dart while C holds the answer one frame

@@ -731,7 +731,7 @@ smaller, shape-dependent, or on the wrong thread/isolate.*
 Most of this program's rejected candidates tried to make an expensive step
 cheaper, or to move it somewhere with better locality — and lost, because the
 work still had to happen. [Exp 259](259-native-ascii-text-flag.md) won a
-reproduced 10-22% on text-bearing `select()` by asking a different question: the
+reproduced 10-24% on text-bearing `select()` by asking a different question: the
 Dart decoder was *classifying* every TEXT cell as ASCII-or-not before it could
 build the `String`, at the cost of an extra `ExternalTypedData` view plus a
 bounds-checked scan (byte-by-byte under 16 bytes). `resqlite_step_row` had the

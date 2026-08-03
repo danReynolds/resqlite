@@ -29,7 +29,7 @@ confirmation per `JOURNAL.md`). Values are microseconds.
 | `text4-long` | 2k x 4 ASCII TEXT, 400 B/cell | confirmation — scan-length scaling |
 | `text8-cjk` | 10k x 8 CJK TEXT, ~36 B/cell | guard — non-ASCII still pays `utf8.decode`, and the native scan no longer bails at the first high byte |
 | `text4-long-early-nonascii` | 2k x 4, 400 B, one `é` at byte 0 | guard — the worst case for accumulate-then-test: the native scan walks ~400 bytes where the Dart scan it replaced bailed at the first word |
-| `mixed6` | 10k x 6 mixed (4 TEXT + REAL) | default product row shape |
+| `mixed6` | 10k x the repo's canonical 6-column mixed row (`id` INTEGER + 4 TEXT + REAL, verbatim from `benchmark/shared/seeder.dart`) | default product row shape |
 | `int8` | 10k x 8 INTEGER | control — no TEXT, so both arms run byte-identical code |
 
 ## Results
@@ -44,18 +44,23 @@ confirmation per `JOURNAL.md`). Values are microseconds.
 | text4-long | 2 | 818 | 659 | -19.4% | 1735 | 1506 | -13.2% |
 | text8-cjk | 1 | 12491 | 12193 | -2.4% | 13598 | 12764 | -6.1% |
 | text8-cjk | 2 | 12326 | 12117 | -1.7% | 13285 | 12455 | -6.2% |
-| mixed6 | 1 | 3927 | 3620 | -7.8% | 5020 | 4163 | -17.1% |
-| mixed6 | 2 | 3865 | 3562 | -7.8% | 5418 | 4497 | -17.0% |
 | int8 | 1 | 2772 | 2777 | +0.2% | 2884 | 2843 | -1.4% |
 | int8 | 2 | 2756 | 2675 | -2.9% | 2846 | 2805 | -1.4% |
 
-`text4-long-early-nonascii` was added after the first pair and collected on its
-own, same protocol (10 warmup, 31 samples, order-flipped, fresh process per arm):
+Two lanes were collected separately, on the same protocol (10 warmup, 31 samples,
+order-flipped, fresh process per arm). `text4-long-early-nonascii` was added after
+the first pair. `mixed6` was **re-collected**: its first version approximated the
+mixed shape with 6 generated TEXT/REAL columns plus an implicit `id` (7 selected
+columns, 5 of them TEXT), which is not the repo's canonical row; review caught it,
+and the lane now uses `benchmark/shared/seeder.dart`'s schema verbatim. Only these
+numbers are current for `mixed6`.
 
 | lane | pass | baseline p50 | candidate p50 | Δ p50 | baseline p90 | candidate p90 | Δ p90 |
 |---|---|---:|---:|---:|---:|---:|---:|
 | text4-long-early-nonascii | 1 | 4861 | 4915 | +1.1% | 5585 | 5388 | -3.5% |
 | text4-long-early-nonascii | 2 | 4975 | 4926 | -1.0% | 5555 | 5415 | -2.5% |
+| mixed6 (canonical schema) | 1 | 3743 | 2830 | -24.4% | 4399 | 4197 | -4.6% |
+| mixed6 (canonical schema) | 2 | 3612 | 2919 | -19.2% | 4400 | 5933 | +34.8% |
 
 ## Drift classification
 
@@ -68,7 +73,7 @@ per-run values above:
 | text8-mid | REPRODUCED (real effect) | -14.3% | -10.7% | 8.8% |
 | text4-long | REPRODUCED (real effect) | -22.2% | -19.4% | 50.0% |
 | text8-cjk | inconclusive / neutral | -2.4% | -1.7% | 6.8% |
-| mixed6 | REPRODUCED (real effect) | -7.8% | -7.8% | 18.7% |
+| mixed6 (canonical schema) | REPRODUCED (real effect) | -24.4% | -19.2% | 17.9% |
 | int8 | inconclusive / neutral | +0.2% | -2.9% | 2.1% |
 | text4-long-early-nonascii | inconclusive / neutral | +1.1% | -1.0% | 5.4% |
 
@@ -86,6 +91,12 @@ word. It lands +1.1% / -1.0% — opposite signs, both inside the floor. The lane
 absolute time (~4.9 ms vs ~0.7 ms for the all-ASCII 400 B lane) is why: `utf8.decode`
 over 3.2 MB dwarfs a 3.2 MB SWAR pass, so the extra scan is invisible even in the
 shape built to expose it.
+
+`mixed6`'s p50 reproduces strongly (-24.4% / -19.2%), but its p90 does not: the
+candidate arm read 4197 in one pass and 5933 in the other against a stable ~4400
+baseline. That is tail noise on a lane whose p50 spread is much tighter, not a
+tail regression — treat the p50 as the lane's signal and do not read the p90
+column here.
 
 ## Mechanism probe (scratch, not committed)
 

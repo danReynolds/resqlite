@@ -40,22 +40,69 @@ const _defaultWarmup = 10;
 const _defaultSamples = 31;
 
 final class _Lane {
+  /// A lane whose table is `id INTEGER PRIMARY KEY` plus [columns] generated
+  /// columns all of one affinity — the synthetic width/payload sweeps.
   const _Lane(
     this.label,
     this.columns,
     this.rows,
     this.cell, {
     this.type = 'TEXT',
-  });
+  }) : createSql = null,
+       insertSql = null,
+       row = null;
+
+  /// A lane that declares its own schema verbatim, so it can reproduce a
+  /// canonical shape rather than approximate one.
+  const _Lane.explicit(
+    this.label,
+    this.rows, {
+    required String this.createSql,
+    required String this.insertSql,
+    required List<Object?> Function(int row) this.row,
+  }) : columns = 0,
+       type = '',
+       cell = null;
 
   final String label;
   final int columns;
   final int rows;
   final String type;
 
-  /// Cell value for column [col] of row [row].
-  final Object? Function(int row, int col) cell;
+  /// Cell value for column [col] of row [row]. Null on explicit lanes.
+  final Object? Function(int row, int col)? cell;
+
+  final String? createSql;
+  final String? insertSql;
+  final List<Object?> Function(int row)? row;
 }
+
+// The repo's canonical mixed row: 6 columns total (`id INTEGER PRIMARY KEY`,
+// 4 TEXT, 1 REAL). Copied verbatim from `benchmark/shared/seeder.dart`, which
+// is the source of truth — the neighbouring `select_rows_step_row_ffi.dart`
+// keeps its own copy the same way, rather than importing the seeder and
+// dragging the peer-library imports into a focused harness.
+const _standardCreate = '''
+  CREATE TABLE items(
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    value REAL NOT NULL,
+    category TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+''';
+const _standardInsert =
+    'INSERT INTO items(name, description, value, category, created_at) '
+    'VALUES (?, ?, ?, ?, ?)';
+List<Object?> _standardRow(int i) => [
+  'Item $i',
+  'This is a description for item number $i with some padding text to '
+      'simulate real data',
+  i * 1.5,
+  'category_${i % 10}',
+  '2026-04-0${(i % 9) + 1}T12:00:00Z',
+];
 
 String _ascii(int len, int row, int col) {
   final seed = 'r${row}c$col';
@@ -89,17 +136,12 @@ final _lanes = <_Lane>[
   // and went straight to utf8.decode. If scanning to the end ever costs more
   // than it saves, it shows here or nowhere.
   _Lane('text4-long-early-nonascii', 4, 2000, (r, c) => 'é${_ascii(398, r, c)}'),
-  _Lane(
+  _Lane.explicit(
     'mixed6',
-    6,
     10000,
-    (r, c) => switch (c) {
-      2 => r * 1.5,
-      3 => 'cat_${r % 10}',
-      4 => '2026-08-01T12:00:00Z',
-      _ => _ascii(16, r, c),
-    },
-    type: '',
+    createSql: _standardCreate,
+    insertSql: _standardInsert,
+    row: _standardRow,
   ),
   _Lane('int8', 8, 10000, (r, c) => r * 31 + c, type: 'INTEGER'),
 ];
@@ -136,30 +178,32 @@ Future<void> _runLane(
   final temp = await Directory.systemTemp.createTemp('bench_text_decode_');
   try {
     final db = await resqlite.Database.open('${temp.path}/test.db');
-    // Column affinity is per-lane; the mixed lane declares its own types so the
-    // REAL column really arrives as SQLITE_FLOAT.
-    final cols = [
-      for (var c = 0; c < lane.columns; c++)
-        'c$c ${lane.type.isNotEmpty
-            ? lane.type
-            : switch (c) {
-                2 => 'REAL',
-                _ => 'TEXT',
-              }}',
-    ];
-    await db.execute('CREATE TABLE items(id INTEGER PRIMARY KEY, '
-        '${cols.join(', ')})');
 
-    final placeholders = List.filled(lane.columns, '?').join(', ');
-    final insertSql =
-        'INSERT INTO items(${[for (var c = 0; c < lane.columns; c++) 'c$c'].join(', ')}) '
-        'VALUES ($placeholders)';
+    final String createSql;
+    final String insertSql;
+    final List<Object?> Function(int row) row;
+    if (lane.createSql != null) {
+      createSql = lane.createSql!;
+      insertSql = lane.insertSql!;
+      row = lane.row!;
+    } else {
+      final cols = [
+        for (var c = 0; c < lane.columns; c++) 'c$c ${lane.type}',
+      ];
+      createSql =
+          'CREATE TABLE items(id INTEGER PRIMARY KEY, ${cols.join(', ')})';
+      final names = [for (var c = 0; c < lane.columns; c++) 'c$c'].join(', ');
+      final placeholders = List.filled(lane.columns, '?').join(', ');
+      insertSql = 'INSERT INTO items($names) VALUES ($placeholders)';
+      row = (r) => [for (var c = 0; c < lane.columns; c++) lane.cell!(r, c)];
+    }
+    await db.execute(createSql);
+
     const chunk = 500;
     for (var start = 0; start < lane.rows; start += chunk) {
       final end = start + chunk < lane.rows ? start + chunk : lane.rows;
       await db.executeBatch(insertSql, [
-        for (var r = start; r < end; r++)
-          [for (var c = 0; c < lane.columns; c++) lane.cell(r, c)],
+        for (var r = start; r < end; r++) row(r),
       ]);
     }
 
