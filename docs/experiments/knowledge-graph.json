@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 51,
-    "totalEntries": 132
+    "entriesWithClaims": 52,
+    "totalEntries": 133
   },
   "experiments": [
     {
@@ -2069,6 +2069,18 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "261",
+      "title": "A memory guard for focused experiments, and four months of trend",
+      "file": "261-focused-memory-guard.md",
+      "date": "2026-08-04",
+      "status": "accepted",
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted_measurement"
     }
   ],
   "claims": [
@@ -2821,6 +2833,75 @@
       ],
       "text": "Pre-sizing from a converged row hint lowers total bytes allocated per query by 14-61% (the doubling sequence's intermediate arrays stop existing) but does NOT uniformly lower peak buffer capacity. Doubling's overshoot is 1x-2x depending on where the result falls relative to a power-of-two boundary; a converged hint's is always 1.25x. Peak capacity is 23.7% smaller for a result that overshoots a boundary (all three primary lanes) and 22-25% LARGER for one that lands just under it (mixed6-1k, and 2048 rows x 6 columns). Arithmetic on the allocation path only — no RSS or heap sampling was taken, so a workload sensitive to peak rather than churn needs its own measurement.",
       "conditions": "derived from the growth path, not measured · 2026-08",
+      "state": "superseded",
+      "by": [
+        "261.2"
+      ]
+    },
+    {
+      "id": "261.1",
+      "source": "261",
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "text": "A focused-harness memory guard must gate on `ProcessInfo.maxRss` with one process per lane, not on a sampled `currentRss` peak. The two disagreed by 76 percentage points about the same change (sampled peak +75%, `maxRss` -1.7%) on a lane whose results cross `sacrificeSlotThreshold`, because sacrificed isolates return pages and make `currentRss` a retention signal rather than a high-water. Repeatability across five isolated runs per arm is <=0.6 MB, mechanically inert lanes read identical across arms, and sampling moves wall time 1.3-2.4%, inside the 3% floor.",
+      "conditions": "M1 Pro · AOT CLI bundle · one process per lane · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "261.2",
+      "source": "261",
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "text": "Exp 260 lowers peak RSS rather than raising it: `maxRss` falls -2.1% on 10k x 20 INTEGER, -11.5% on the canonical 6-column product row at 10k rows, and -28.0% on 5k x 4 INTEGER, with the point-read control flat at -0.3%. This supersedes the arithmetic in claim 260.4, which predicted peak capacity could rise 22-25% for results landing just under a doubling boundary.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane, 21 samples · 2026-08",
+      "edges": [
+        {
+          "type": "supersedes",
+          "target": "260.4"
+        },
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "261.1"
+      ]
+    },
+    {
+      "id": "261.3",
+      "source": "261",
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "text": "Peak read-path memory was flat within ~1 MB from v0.3.0 (2026-05-03) to exp 259 (2026-08-03) across eight checkpoints and roughly forty merged experiments, including the whole transfer-shape arc, while wall time on the same runs fell 25-40%. The only movement in the window is exps 259 and 260, both downward. No memory regression has accumulated.",
+      "conditions": "M1 Pro · AOT · harness source held constant, rebuilt per checkpoint · maxRss, one process per lane · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "261.1"
+      ]
+    },
+    {
+      "id": "261.4",
+      "source": "261",
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
+      "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08",
       "state": "live"
     }
   ]

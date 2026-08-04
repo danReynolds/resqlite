@@ -577,8 +577,8 @@
       "beliefs": {
         "note": "Generated from entries[].claims — record new claims in your own signals/entries/NNN.json; never edit this block.",
         "coverage": {
-          "entriesWithClaims": 16,
-          "entriesInDirection": 51
+          "entriesWithClaims": 17,
+          "entriesInDirection": 52
         },
         "live": [
           {
@@ -732,10 +732,28 @@
             "conditions": "M1 Pro · AOT · focused A/B, both hint placements against one baseline · 2026-08"
           },
           {
-            "id": "260.4",
-            "source": "260",
-            "text": "Pre-sizing from a converged row hint lowers total bytes allocated per query by 14-61% (the doubling sequence's intermediate arrays stop existing) but does NOT uniformly lower peak buffer capacity. Doubling's overshoot is 1x-2x depending on where the result falls relative to a power-of-two boundary; a converged hint's is always 1.25x. Peak capacity is 23.7% smaller for a result that overshoots a boundary (all three primary lanes) and 22-25% LARGER for one that lands just under it (mixed6-1k, and 2048 rows x 6 columns). Arithmetic on the allocation path only — no RSS or heap sampling was taken, so a workload sensitive to peak rather than churn needs its own measurement.",
-            "conditions": "derived from the growth path, not measured · 2026-08"
+            "id": "261.1",
+            "source": "261",
+            "text": "A focused-harness memory guard must gate on `ProcessInfo.maxRss` with one process per lane, not on a sampled `currentRss` peak. The two disagreed by 76 percentage points about the same change (sampled peak +75%, `maxRss` -1.7%) on a lane whose results cross `sacrificeSlotThreshold`, because sacrificed isolates return pages and make `currentRss` a retention signal rather than a high-water. Repeatability across five isolated runs per arm is <=0.6 MB, mechanically inert lanes read identical across arms, and sampling moves wall time 1.3-2.4%, inside the 3% floor.",
+            "conditions": "M1 Pro · AOT CLI bundle · one process per lane · 2026-08"
+          },
+          {
+            "id": "261.2",
+            "source": "261",
+            "text": "Exp 260 lowers peak RSS rather than raising it: `maxRss` falls -2.1% on 10k x 20 INTEGER, -11.5% on the canonical 6-column product row at 10k rows, and -28.0% on 5k x 4 INTEGER, with the point-read control flat at -0.3%. This supersedes the arithmetic in claim 260.4, which predicted peak capacity could rise 22-25% for results landing just under a doubling boundary.",
+            "conditions": "M1 Pro · AOT · maxRss, one process per lane, 21 samples · 2026-08"
+          },
+          {
+            "id": "261.3",
+            "source": "261",
+            "text": "Peak read-path memory was flat within ~1 MB from v0.3.0 (2026-05-03) to exp 259 (2026-08-03) across eight checkpoints and roughly forty merged experiments, including the whole transfer-shape arc, while wall time on the same runs fell 25-40%. The only movement in the window is exps 259 and 260, both downward. No memory regression has accumulated.",
+            "conditions": "M1 Pro · AOT · harness source held constant, rebuilt per checkpoint · maxRss, one process per lane · 2026-08"
+          },
+          {
+            "id": "261.4",
+            "source": "261",
+            "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
+            "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08"
           }
         ],
         "superseded": [
@@ -746,6 +764,15 @@
             "conditions": "byte-trigger era · M1 Pro · 2026-07",
             "by": [
               "246.1"
+            ]
+          },
+          {
+            "id": "260.4",
+            "source": "260",
+            "text": "Pre-sizing from a converged row hint lowers total bytes allocated per query by 14-61% (the doubling sequence's intermediate arrays stop existing) but does NOT uniformly lower peak buffer capacity. Doubling's overshoot is 1x-2x depending on where the result falls relative to a power-of-two boundary; a converged hint's is always 1.25x. Peak capacity is 23.7% smaller for a result that overshoots a boundary (all three primary lanes) and 22-25% LARGER for one that lands just under it (mixed6-1k, and 2048 rows x 6 columns). Arithmetic on the allocation path only — no RSS or heap sampling was taken, so a workload sensitive to peak rather than churn needs its own measurement.",
+            "conditions": "derived from the growth path, not measured · 2026-08",
+            "by": [
+              "261.2"
             ]
           }
         ],
@@ -770,14 +797,14 @@
         "profiling",
         "methodology"
       ],
-      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment when it unlocks a named implementation or rejection decision, but scheduled runners should first look for an instrument-and-implement path. Exp 119/121/136/147 are the recent stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target (10–15% of overlap wall, intersection ~3–6%), exp 136 added the completion-side reader-handler counter plus drain-aware audit snapshots and found 28.57% of A11c overlap total wall in the reader worker port handler chain at ~18 us per call, and exp 147 added the writer SQLite wall split and found SQLite-facing writer calls are not the active stream-fanout bottleneck on A11c overlap or keyed-PK. Exp 143 confirmed the pinned Tracelite profile path is useful because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run; exp 169 consumes its interpretation gap by validating that `tracelite explain` emits workload-summary insight IDs for dispatch floors, work-bound operations, tail spread, RSS, allocation, and WAL signal before the profile wrapper completes. Exp 161 closes the matching release-suite gap for the writer side by promoting exp 159's concurrent-burst shape into `benchmark/suites/writes.dart` as a paired Single Inserts (sequential) / Concurrent Single Inserts (concurrent) row pair; the resqlite concurrent median (~1.1 ms) is now ~60% below the sequential median (~2.9 ms) on a public lane, and future writer-scheduling experiments can claim release-suite wins without depending on the focused `writer_pipelining.dart` script. Exp 177 mechanizes the JOURNAL's order-flipped drift check: `cvPct` + `classifyDriftFlag` in `benchmark/shared/stats.dart` and a `benchmark/ab_drift_check.dart` CLI classify a phase-ordered A/B regression flag as reproduced / drift-suspected / inconclusive from two order-flipped passes of per-run values, reproducing the manual verdicts on the recorded exp 159 (CV asymmetry) and exp 167 (sign reversal) flags. It is methodology tooling (exp 161 / 169 class), not a wall-time change, so future A/B runners can cite a deterministic verdict instead of re-deriving the CV-asymmetry rule each time. Exp 178 closes a silent pipeline gap on the experiment->chart linker itself: `generate_history.dart` already failed the build when an Accepted experiment linked a baseline-shaped run while a candidate existed (`_assertAcceptedExperimentsLinkToCandidates`), but it tolerated the more common case — a chartable experiment with NO linked run and NO `**Benchmark Run:**` opt-out, which silently drops off the chart when a runner forgets the result file or mismatches its date. A structural tally on main showed only ~5 of 23 null-run accepted/in-review experiments declared the opt-out. Exp 178 adds `_assertNewExperimentsLinkOrDeclareRun` (over a pure `findUndeclaredMissingRunExperiments` detector) that fails the build for accepted/in-review experiments numbered >= 178 with a null run and no opt-out declaration; pre-178 experiments are grandfathered via a cutoff constant (same pattern as `experimentEntriesRequiredFrom`). No runtime code, history.json unchanged. Exp 214 adds `benchmark/experiments/write_result_direct_read.dart`, a focused µs/call public writer harness for scalar writer-result handling. Its first use rejected direct pointer reads of `resqlite_write_result` because the order-flipped A/B did not reproduce a stable win; keep the harness as a guardrail, not as an invitation to stack writer-result micro-optimizations.",
+      "currentRead": "Several plausible optimizations failed because the benchmark did not stress the target path or because run noise hid small effects. Measurement work can be the highest-signal experiment when it unlocks a named implementation or rejection decision, but scheduled runners should first look for an instrument-and-implement path. Exp 119/121/136/147 are the recent stream-dispatch examples: exp 119 located surviving dispatch pressure in stream admission, exp 121 ruled out invalidation traversal as a wall-time target (10–15% of overlap wall, intersection ~3–6%), exp 136 added the completion-side reader-handler counter plus drain-aware audit snapshots and found 28.57% of A11c overlap total wall in the reader worker port handler chain at ~18 us per call, and exp 147 added the writer SQLite wall split and found SQLite-facing writer calls are not the active stream-fanout bottleneck on A11c overlap or keyed-PK. Exp 143 confirmed the pinned Tracelite profile path is useful because it captures dispatch floors, floor-subtracted work, memory diagnostics, allocation counters, source provenance, and graph data in one run; exp 169 consumes its interpretation gap by validating that `tracelite explain` emits workload-summary insight IDs for dispatch floors, work-bound operations, tail spread, RSS, allocation, and WAL signal before the profile wrapper completes. Exp 161 closes the matching release-suite gap for the writer side by promoting exp 159's concurrent-burst shape into `benchmark/suites/writes.dart` as a paired Single Inserts (sequential) / Concurrent Single Inserts (concurrent) row pair; the resqlite concurrent median (~1.1 ms) is now ~60% below the sequential median (~2.9 ms) on a public lane, and future writer-scheduling experiments can claim release-suite wins without depending on the focused `writer_pipelining.dart` script. Exp 177 mechanizes the JOURNAL's order-flipped drift check: `cvPct` + `classifyDriftFlag` in `benchmark/shared/stats.dart` and a `benchmark/ab_drift_check.dart` CLI classify a phase-ordered A/B regression flag as reproduced / drift-suspected / inconclusive from two order-flipped passes of per-run values, reproducing the manual verdicts on the recorded exp 159 (CV asymmetry) and exp 167 (sign reversal) flags. It is methodology tooling (exp 161 / 169 class), not a wall-time change, so future A/B runners can cite a deterministic verdict instead of re-deriving the CV-asymmetry rule each time. Exp 178 closes a silent pipeline gap on the experiment->chart linker itself: `generate_history.dart` already failed the build when an Accepted experiment linked a baseline-shaped run while a candidate existed (`_assertAcceptedExperimentsLinkToCandidates`), but it tolerated the more common case — a chartable experiment with NO linked run and NO `**Benchmark Run:**` opt-out, which silently drops off the chart when a runner forgets the result file or mismatches its date. A structural tally on main showed only ~5 of 23 null-run accepted/in-review experiments declared the opt-out. Exp 178 adds `_assertNewExperimentsLinkOrDeclareRun` (over a pure `findUndeclaredMissingRunExperiments` detector) that fails the build for accepted/in-review experiments numbered >= 178 with a null run and no opt-out declaration; pre-178 experiments are grandfathered via a cutoff constant (same pattern as `experimentEntriesRequiredFrom`). No runtime code, history.json unchanged. Exp 214 adds `benchmark/experiments/write_result_direct_read.dart`, a focused µs/call public writer harness for scalar writer-result handling. Its first use rejected direct pointer reads of `resqlite_write_result` because the order-flipped A/B did not reproduce a stable win; keep the harness as a guardrail, not as an invitation to stack writer-result micro-optimizations. Exp 261 adds the memory half of the focused-harness toolkit (benchmark/shared/memory_probe.dart). The instrument is fixed by a constraint rather than chosen: an AOT binary exposes no VM service, so heap and allocation profiles are unavailable in the only mode exp 193 permits for decode-path results, and ProcessInfo is all there is. Gate on maxRss with one process per lane — a sampled currentRss peak reported +75% about the same change maxRss reported as -1.7%, because retention on this codebase is dominated by sacrificed reader isolates returning their pages rather than by the change under test. Its sensitivity is now known and is low: peak read-path memory held within ~1 MB from v0.3.0 to exp 259 across ~40 merged experiments while wall time fell 25-40%, so this guard catches a doubling, not a 5% drift.",
       "keyPriors": [
         "136",
-        "143",
         "147",
         "169",
         "177",
-        "178"
+        "178",
+        "261"
       ],
       "archive": [
         "055",
@@ -803,8 +830,9 @@
       ],
       "openCandidates": [
         {
-          "idea": "memory profiling harness with per-benchmark RSS acceptance criteria",
-          "addedDate": "2026-05-02"
+          "idea": "per-benchmark RSS acceptance criteria in the release suite — the focused-harness half of this shipped as exp 261 (benchmark/shared/memory_probe.dart, gate on maxRss with one process per lane); what remains is making the release Memory suite fail on a regression rather than merely report one",
+          "addedDate": "2026-05-02",
+          "blockedOn": "the release Memory suite is stage [15/16], where the sqlite_async peer segfaults, and #282 persists per completed repeat while the crash lands inside repeat 1 — so the suite currently produces no artifact at all. Persisting each scenario as it completes is the prerequisite; see exp 261 nextSignals."
         }
       ],
       "blockedOnMeasurement": [],
@@ -812,8 +840,8 @@
       "beliefs": {
         "note": "Generated from entries[].claims — record new claims in your own signals/entries/NNN.json; never edit this block.",
         "coverage": {
-          "entriesWithClaims": 11,
-          "entriesInDirection": 28
+          "entriesWithClaims": 12,
+          "entriesInDirection": 29
         },
         "live": [
           {
@@ -887,6 +915,30 @@
             "source": "251",
             "text": "The post-transfer large-read residual is shape-dependent rather than a single Dart-decode bottleneck, so it does not justify a broad ResultSet storage rewrite; a future candidate must first establish a workload-specific eligible phase against public select() wall.",
             "conditions": "INTEGER, mixed INTEGER/TEXT, and long-TEXT result shapes · AOT · 2026-08"
+          },
+          {
+            "id": "261.1",
+            "source": "261",
+            "text": "A focused-harness memory guard must gate on `ProcessInfo.maxRss` with one process per lane, not on a sampled `currentRss` peak. The two disagreed by 76 percentage points about the same change (sampled peak +75%, `maxRss` -1.7%) on a lane whose results cross `sacrificeSlotThreshold`, because sacrificed isolates return pages and make `currentRss` a retention signal rather than a high-water. Repeatability across five isolated runs per arm is <=0.6 MB, mechanically inert lanes read identical across arms, and sampling moves wall time 1.3-2.4%, inside the 3% floor.",
+            "conditions": "M1 Pro · AOT CLI bundle · one process per lane · 2026-08"
+          },
+          {
+            "id": "261.2",
+            "source": "261",
+            "text": "Exp 260 lowers peak RSS rather than raising it: `maxRss` falls -2.1% on 10k x 20 INTEGER, -11.5% on the canonical 6-column product row at 10k rows, and -28.0% on 5k x 4 INTEGER, with the point-read control flat at -0.3%. This supersedes the arithmetic in claim 260.4, which predicted peak capacity could rise 22-25% for results landing just under a doubling boundary.",
+            "conditions": "M1 Pro · AOT · maxRss, one process per lane, 21 samples · 2026-08"
+          },
+          {
+            "id": "261.3",
+            "source": "261",
+            "text": "Peak read-path memory was flat within ~1 MB from v0.3.0 (2026-05-03) to exp 259 (2026-08-03) across eight checkpoints and roughly forty merged experiments, including the whole transfer-shape arc, while wall time on the same runs fell 25-40%. The only movement in the window is exps 259 and 260, both downward. No memory regression has accumulated.",
+            "conditions": "M1 Pro · AOT · harness source held constant, rebuilt per checkpoint · maxRss, one process per lane · 2026-08"
+          },
+          {
+            "id": "261.4",
+            "source": "261",
+            "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
+            "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08"
           }
         ]
       }
@@ -3457,6 +3509,64 @@
         "The remaining Dart-side per-cell work in `decodeQuery` is now genuinely the loads, the switch and the stores: ~500 us for 200k INTEGER cells, or ~2.5 ns/cell. Exp 251's decomposition should be read through claim 260.2 before anything else is designed against its `Dart result construction` figure — most of that number was growth, and it is gone.",
         "The same question applies to every other buffer that grows by doubling on a hot path: `selectBytes`'s native `json_buf` already persists and grows geometrically, and the writer's parameter arena is sized per call. Neither has been measured for growth-copy cost the way the row buffer now has.",
         "Anything a worker learns and wants to keep has to live on the main isolate or be re-derivable, because the sacrifice path destroys reader isolates on exactly the largest results. The schema cache itself has this shape — it is rebuilt from `sqlite3_column_name` after every sacrifice — and has never been measured."
+      ]
+    },
+    "261": {
+      "directions": [
+        "measurement-system",
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted_measurement",
+      "changedBeliefs": [
+        "Focused AOT harnesses can carry a memory reading, and the instrument is fixed by a hard constraint rather than chosen: an AOT binary exposes no VM service (`Service.getInfo()` returns null, `--enable-vm-service` is rejected as an unrecognized flag), so heap statistics and allocation profiles are unavailable in the only mode exp 193 permits for decode-path results. `ProcessInfo` is the whole instrument, and a `currentRss` read costs ~700 ns so it must stay outside the stopwatch.",
+        "`maxRss` and a sampled `currentRss` peak can give opposite verdicts on the same change, by 76 percentage points. Pre- vs post-exp-260 on a lane crossing `sacrificeSlotThreshold`: sampled `currentRss` peak 36.6 -> 64.0 MB (+75%), `maxRss` 65.9 -> 64.8 MB (-1.7%). `maxRss` is the true high-water and is what a guard should gate on; the `currentRss` curve is a retention signal, and retention moves when reader isolates are sacrificed and return their pages. Within one isolate the VM keeps pages after GC, so a candidate freeing its own garbage reads as no change.",
+        "Exp 260's memory claim was refuted by measurement in the favourable direction. Its arithmetic predicted peak capacity could rise 22-25% for a result landing just under a doubling boundary; measured peak RSS falls on every lane (-2.1% at 200k slots, -11.5% on the canonical product row, -28.0% on the sub-threshold integer lane). The arithmetic was correct about the buffer and wrong about the read: the buffer is a small part of what a read holds, and the doubling sequence's retained intermediate arrays are a larger one.",
+        "Peak read-path memory has been flat for three months. Eight checkpoints from v0.3.0 (2026-05-03) through exp 259 (2026-08-03) hold every lane within ~1 MB, across roughly forty merged experiments including the entire transfer-shape arc (174, 234, 236, 243, 244, 245, 246), while wall time on the same runs fell 25-40%. There is no memory regression to find, and that is now established rather than assumed.",
+        "The guard's sensitivity is bounded by that same flatness: four months of experiments moving wall time 25-40% moved peak RSS under 1%. It is a tripwire for a doubling, not an instrument for a 5% drift. It is further diluted by setup — `mixed6-10k` sits at 89.5 MB before the measured reads begin and the reads add ~18 MB — so a lane meant to gate memory should seed as little as it can."
+      ],
+      "claims": [
+        {
+          "id": "261.1",
+          "text": "A focused-harness memory guard must gate on `ProcessInfo.maxRss` with one process per lane, not on a sampled `currentRss` peak. The two disagreed by 76 percentage points about the same change (sampled peak +75%, `maxRss` -1.7%) on a lane whose results cross `sacrificeSlotThreshold`, because sacrificed isolates return pages and make `currentRss` a retention signal rather than a high-water. Repeatability across five isolated runs per arm is <=0.6 MB, mechanically inert lanes read identical across arms, and sampling moves wall time 1.3-2.4%, inside the 3% floor.",
+          "conditions": "M1 Pro · AOT CLI bundle · one process per lane · 2026-08"
+        },
+        {
+          "id": "261.2",
+          "text": "Exp 260 lowers peak RSS rather than raising it: `maxRss` falls -2.1% on 10k x 20 INTEGER, -11.5% on the canonical 6-column product row at 10k rows, and -28.0% on 5k x 4 INTEGER, with the point-read control flat at -0.3%. This supersedes the arithmetic in claim 260.4, which predicted peak capacity could rise 22-25% for results landing just under a doubling boundary.",
+          "conditions": "M1 Pro · AOT · maxRss, one process per lane, 21 samples · 2026-08",
+          "edges": [
+            {
+              "type": "supersedes",
+              "target": "260.4"
+            },
+            {
+              "type": "dependsOn",
+              "target": "261.1"
+            }
+          ]
+        },
+        {
+          "id": "261.3",
+          "text": "Peak read-path memory was flat within ~1 MB from v0.3.0 (2026-05-03) to exp 259 (2026-08-03) across eight checkpoints and roughly forty merged experiments, including the whole transfer-shape arc, while wall time on the same runs fell 25-40%. The only movement in the window is exps 259 and 260, both downward. No memory regression has accumulated.",
+          "conditions": "M1 Pro · AOT · harness source held constant, rebuilt per checkpoint · maxRss, one process per lane · 2026-08",
+          "edges": [
+            {
+              "type": "dependsOn",
+              "target": "261.1"
+            }
+          ]
+        },
+        {
+          "id": "261.4",
+          "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
+          "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08"
+        }
+      ],
+      "nextSignals": [
+        "`benchmark/shared/memory_probe.dart` is the memory lane for any focused harness. Start it after seeding and warmup, sample outside the stopwatch, run with `--lane=` so `maxRss` is per-lane clean, and read `lane_isolated` before comparing two runs' `max_rss_mb`.",
+        "Do not gate on `rss_growth_mb` or `rss_peak_mb`. They are retention signals and can report a large regression on a change that leaves the high-water untouched — claim 261.1 is the counterexample that established this.",
+        "The release-suite Memory stage is `[15/16]`, the exact stage where the sqlite_async peer segfaults, and #282's per-repeat artifact writing does not help because the crash lands inside repeat 1. Persisting each scenario as it completes, rather than each repeat, would preserve the fourteen scenarios that currently die with it — that is the reason trend data is thin, and it gates the `per-benchmark RSS acceptance criteria` candidate that has been open since 2026-05-02.",
+        "The next memory question worth a run is claim 261.4's ~60x payload-to-peak ratio on `select()`, decomposed rather than assumed. That needs allocation counters at specific sites, not process RSS, because the guard cannot resolve anything below a doubling."
       ]
     }
   }
