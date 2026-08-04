@@ -1,0 +1,11 @@
+{
+  "directions": ["result-transfer-shape"],
+  "outcomeClass": "rejected_regression",
+  "claims": [
+    {
+      "id": "067.1",
+      "text": "`decodeQuery`'s initial `List<Object?>.filled(colCount * 256, null)` must not be shrunk. Cutting it to `colCount * 4` regressed every many-small-query workload (Stream Churn +44%, Batched Write Inside Transaction +40%), because the VM's null-fill fast path makes one large pre-sized allocation cheaper per slot than a small one that then has to grow.",
+      "conditions": "release suite, 0 wins / 4 regressions / 59 neutral · 2026-04 · backfilled 2026-08"
+    }
+  ]
+}

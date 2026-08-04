@@ -13,6 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
+import '../query_decoder.dart' show RowSizeMemory, initialResultRows;
 import '../blob_transfer.dart' show blobTransfer;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
@@ -40,6 +41,30 @@ final class ReaderPool {
   int _next = 0;
   bool _closed = false;
 
+  /// How many SQL strings the pool remembers a result size for. Matches the
+  /// per-worker schema cache and the C statement cache.
+  static const int _rowHintMax = 32;
+
+  /// How large a result each SQL produces — the size hint a worker uses to
+  /// allocate its result buffer in one shot instead of doubling into it
+  /// ([EXP-260](../../../experiments/260-result-list-presize.md)).
+  ///
+  /// This lives on the main isolate rather than in the worker's own schema
+  /// cache because a result larger than `sacrificeSlotThreshold` ends the
+  /// isolate that produced it. A worker-local hint would therefore be discarded
+  /// exactly when the result was big enough for the hint to matter, and would
+  /// in any case only describe the fraction of executions that landed on that
+  /// one worker.
+  ///
+  /// Only statements that have returned more rows than the decoder's initial
+  /// buffer holds ever get an entry: anything smaller cannot reach the growth
+  /// path a hint steers, so recording it would cost a point read an allocation
+  /// and a map write to describe a result the hint can never improve.
+  ///
+  /// FIFO eviction via [LinkedHashMap] insertion order.
+  final Map<String, RowSizeMemory> _rowHints =
+      LinkedHashMap<String, RowSizeMemory>();
+
   /// FIFO waiters parked by _dispatch while no worker is available.
   ///
   /// Each worker-free event wakes one waiter instead of completing a
@@ -60,6 +85,21 @@ final class ReaderPool {
     return pool;
   }
 
+  /// Fold a completed result's row count back into [memory], the entry
+  /// [_dispatch] read for this request, creating one only if the result was
+  /// large enough for a hint to matter.
+  void _record(String sql, RowSizeMemory? memory, int rowCount) {
+    if (memory != null) {
+      memory.record(rowCount);
+      return;
+    }
+    if (rowCount <= initialResultRows) return;
+    _rowHints[sql] = RowSizeMemory()..record(rowCount);
+    if (_rowHints.length > _rowHintMax) {
+      _rowHints.remove(_rowHints.keys.first);
+    }
+  }
+
   /// Wake up any callers waiting for an available worker.
   void _notifyAvailable() {
     if (_dispatchWaiters.isNotEmpty) {
@@ -73,10 +113,13 @@ final class ReaderPool {
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) async {
+    final memory = _rowHints[sql];
     final result = await _dispatch(
       SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
+      memory,
     );
     final rows = result as List<Map<String, Object?>>;
+    _record(sql, memory, rows.length);
     blobTransfer.materializeCells(rows);
     return rows;
   }
@@ -96,15 +139,18 @@ final class ReaderPool {
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) async {
+    final memory = _rowHints[sql];
     final result = await _dispatch(
       SelectWithDepsRequest(
         sql,
         parameters,
         traceCorrelationId: traceCorrelationId,
       ),
+      memory,
     );
     final typed =
         result as (List<Map<String, Object?>>, TableDependencies, int, int);
+    _record(sql, memory, typed.$4);
     blobTransfer.materializeCells(typed.$1);
     return typed;
   }
@@ -136,6 +182,7 @@ final class ReaderPool {
     int? lastRowCount, [
     int? traceCorrelationId,
   ]) async {
+    final memory = _rowHints[sql];
     final result = await _dispatch(
       SelectIfChangedRequest(
         sql,
@@ -144,14 +191,23 @@ final class ReaderPool {
         lastRowCount,
         traceCorrelationId: traceCorrelationId,
       ),
+      memory,
     );
     final typed = result as (List<Map<String, Object?>>?, int, int);
+    _record(sql, memory, typed.$3);
     final rows = typed.$1;
     if (rows != null) blobTransfer.materializeCells(rows);
     return typed;
   }
 
-  Future<Object?> _dispatch(ReadRequest request) async {
+  /// [memory] is this SQL's result-size entry, read by the caller so the small
+  /// query that will never consult a hint pays one map lookup rather than two.
+  /// `selectBytes` passes none: it serializes in C and never builds a Dart
+  /// result buffer.
+  Future<Object?> _dispatch(
+    ReadRequest request, [
+    RowSizeMemory? memory,
+  ]) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever waiting for a worker
@@ -159,6 +215,8 @@ final class ReaderPool {
     if (_closed) {
       throw ResqliteConnectionException('Reader pool is closed.');
     }
+
+    request.rowHint = memory?.hint ?? 0;
 
     final count = _workers.length;
     var hasPreviouslyParked = false;
