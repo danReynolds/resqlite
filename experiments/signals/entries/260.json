@@ -1,5 +1,7 @@
 {
-  "directions": ["result-transfer-shape"],
+  "directions": [
+    "result-transfer-shape"
+  ],
   "outcomeClass": "accepted",
   "changedBeliefs": [
     "Growing `decodeQuery`'s `List<Object?>` is not amortised-free, and it is the single largest Dart-side cost of a large read. A standalone AOT reproduction of the decode loop over a fixed cell buffer measures 2318 us for the doubling path against 865 us pre-sized on 10k x 20 INTEGER, with loads + switch + stores together under 500 us. That lands within 8% of exp 251's 2524 us of `Dart result construction` on the same shape, so the bucket exp 251 refused to design against is mostly buffer growth rather than cell decoding. Growth costs what it costs because a `List<Object?>` grow copies every live element with a store barrier into a freshly faulted array; a 200k-slot result copies ~322k slots through ~5 MB of transient garbage.",
@@ -14,20 +16,36 @@
       "text": "Sizing `decodeQuery`'s result buffer from a main-isolate memory of what the same SQL returned before — applied at the first growth, never to the initial allocation — is worth a reproduced -25.1% / -24.8% on 10k x 20 INTEGER, -32.2% / -33.7% on 5k x 4 INTEGER, and -33.6% / -32.3% on the repo's canonical 6-column product row at 10k rows (3.5 ms -> 2.3 ms), measured end to end through the public `select()`. Both controls (200-row and point reads, which never reach the growth path) move opposite signs inside the 3% floor, and both mispredict guards are neutral.",
       "conditions": "M1 Pro · AOT CLI bundle · cross-worktree A/B · two order-flipped passes · 31 samples/lane · 2026-08",
       "edges": [
-        { "type": "refutes", "target": "059.1" },
-        { "type": "dependsOn", "target": "067.1" }
+        {
+          "type": "refutes",
+          "target": "059.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "067.1"
+        }
       ]
     },
     {
       "id": "260.2",
       "text": "Buffer growth, not cell decoding, is most of the Dart-side cost of a large read. Reproducing the decode loop over a fixed cell buffer at 10k x 20 INTEGER: doubling from the 256-row initial allocation 2318 us, pre-sized 865 us, loads + switch with no list store 331 us, and `List.filled(200000, null)` alone 405 us. Exp 251's 2524 us for the same shape's `Dart result construction` is therefore a growth measurement more than a decode one.",
       "conditions": "M1 Pro · AOT standalone microbenchmark · 40 reps · 2026-08",
-      "edges": [{ "type": "refines", "target": "251.1" }]
+      "edges": [
+        {
+          "type": "refines",
+          "target": "251.1"
+        }
+      ]
     },
     {
       "id": "260.3",
       "text": "A worker-local cache cannot hold anything learned from a large result. `Isolate.exit` on a result over `sacrificeSlotThreshold` ends the worker, so a size hint kept in the per-worker schema cache won 30-35% on sub-threshold reads and ~1% on the 200k-slot lane; the same hint carried on the request from the main isolate won -25% there.",
       "conditions": "M1 Pro · AOT · focused A/B, both hint placements against one baseline · 2026-08"
+    },
+    {
+      "id": "260.4",
+      "text": "Pre-sizing from a converged row hint lowers total bytes allocated per query by 14-61% (the doubling sequence's intermediate arrays stop existing) but does NOT uniformly lower peak buffer capacity. Doubling's overshoot is 1x-2x depending on where the result falls relative to a power-of-two boundary; a converged hint's is always 1.25x. Peak capacity is 23.7% smaller for a result that overshoots a boundary (all three primary lanes) and 22-25% LARGER for one that lands just under it (mixed6-1k, and 2048 rows x 6 columns). Arithmetic on the allocation path only — no RSS or heap sampling was taken, so a workload sensitive to peak rather than churn needs its own measurement.",
+      "conditions": "derived from the growth path, not measured · 2026-08"
     }
   ],
   "nextSignals": [

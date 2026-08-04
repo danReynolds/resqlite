@@ -190,10 +190,33 @@ alternation with an 8,000-row one, where the hint *is* consulted: the min-of-two
 rule settles it at 375 rows, below what doubling gives, so the lane falls back to
 baseline behaviour on its own.
 
-Memory: peak buffer capacity goes **down**, not up. Doubling overshoots by up to
-2× (a 60,000-slot result ends up in a 98,304-slot array); a converged hint
-overshoots by the 25% headroom. The transient garbage from the intermediate
-arrays — ~5 MB per 200k-slot query — goes away entirely.
+Memory was not measured — no RSS or heap sampling was taken, and the numbers
+below are arithmetic on the allocation path, not a result. What the arithmetic
+says is worth stating precisely, because the two halves do not point the same
+way:
+
+| shape | peak capacity | total allocated |
+|---|---:|---:|
+| `int20-10k` | −23.7% | −60.8% |
+| `int4-5k` | −23.7% | −59.7% |
+| `mixed6-10k` | −23.7% | −60.8% |
+| `mixed6-1k` | **+22.1%** | −16.0% |
+| 2048 rows × 6 columns | **+25.0%** | −26.7% |
+
+**Total bytes allocated fall everywhere**, by 14-61%, because the intermediate
+arrays a doubling sequence leaves behind stop existing — a 200k-slot query
+allocates ~250k slots instead of ~650k. That is the half this change actually
+controls, and it is why the transient garbage claim holds.
+
+**Peak capacity is not a guaranteed improvement.** Doubling's overshoot is
+whatever the result's size happens to be relative to a power-of-two boundary,
+between 1× and 2×; a converged hint's is always 1.25×. So a result that
+overshoots a boundary — all three primary lanes — ends up in a buffer 23.7%
+smaller, but one that lands *just under* a boundary ends up 22-25% larger.
+`mixed6-1k` is exactly that case, in this harness. The live footprint of one
+in-flight result can therefore be up to a quarter larger than before, and a
+workload that cares about peak rather than churn should be measured rather than
+inferred from this.
 
 ## Outcome
 
