@@ -192,6 +192,79 @@ Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
   throw ResqliteQueryException(message, sql: sql, sqliteCode: rc);
 }
 
+/// What one SQL string's result size has looked like over its last two
+/// executions ([EXP-260](../../experiments/260-result-list-presize.md)).
+///
+/// [hint] is the *smaller* of those two row counts plus headroom, and stays 0
+/// until two executions have been observed. Sizing from a single observation is
+/// what makes a size hint dangerous: a statement whose row count swings with
+/// its parameters (`SELECT ... LIMIT ?`) would allocate for the large result
+/// and throw almost all of it away on the small one, and that wasted zero-fill
+/// costs more than the doubling it avoided. Taking the minimum lets a volatile
+/// statement settle at the small end — no win, but no tax either — while a
+/// stable one converges on its true size after one extra execution.
+final class RowSizeMemory {
+  /// Rows the most recent execution returned, or -1 before the first.
+  int previous = -1;
+
+  /// Rows to size the next execution's buffer for, or 0 for "no opinion".
+  int hint = 0;
+
+  void record(int rowCount) {
+    if (previous < 0) {
+      previous = rowCount;
+      return;
+    }
+    hint = nextRowHint(rowCount < previous ? rowCount : previous);
+    previous = rowCount;
+  }
+}
+
+/// Per-worker schema cache entry: the column names for a SQL string, plus what
+/// that SQL's results have measured on this isolate.
+final class CachedSchema {
+  CachedSchema(this.schema);
+
+  final RowSchema schema;
+
+  /// Fallback size hint for callers that bring none of their own. The reader
+  /// pool supplies a hint that survives worker sacrifice; the writer isolate,
+  /// which is long-lived and never sacrificed, has only this.
+  final RowSizeMemory size = RowSizeMemory();
+}
+
+/// Rows the initial result buffer is sized for, before anything is known about
+/// the result. [EXP-067](../../experiments/067-shrink-initial-allocation.md)
+/// measured that shrinking this regresses every small-query workload — the VM's
+/// zero-fill fast path makes one large null-filled list cheaper per slot than a
+/// small one — so it stays where it is and a size hint only affects growth.
+const int initialResultRows = 256;
+
+/// Slots to grow a [colCount]-column result buffer to, from [current] slots,
+/// when the SQL is expected to return [rowHint] rows (0 = no expectation).
+///
+/// A hint is deliberately applied here rather than to the initial allocation.
+/// By the time the buffer overflows, the result has already proven it is larger
+/// than [initialResultRows], so acting on the hint cannot make a small result
+/// allocate a large buffer — a query that returns fewer rows than the initial
+/// allocation holds never reaches this code and is byte-identical to a build
+/// with no hint at all. That matters because the hint is keyed by SQL, and a
+/// statement whose row count swings with its parameters (`SELECT ... LIMIT ?`)
+/// would otherwise pay a large zero-fill on every small execution — a cost that
+/// measured well above the doubling it was meant to avoid.
+@pragma('vm:prefer-inline')
+int grownSlots(int colCount, int current, int rowHint) {
+  final doubled = current * 2;
+  final hinted = colCount * rowHint;
+  return hinted > doubled ? hinted : doubled;
+}
+
+/// Row hint to carry into the next execution of a SQL that just returned
+/// [rowCount] rows. The 25% headroom absorbs a result that grows slightly
+/// between executions without paying a doubling.
+@pragma('vm:prefer-inline')
+int nextRowHint(int rowCount) => rowCount + (rowCount >> 2);
+
 /// Per-worker schema cache with LRU eviction. Column names for the same SQL
 /// are always identical, so we cache RowSchema keyed by SQL string to avoid
 /// N FFI calls + N String allocations per query on cache hit.
@@ -200,28 +273,31 @@ Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
 /// to bound memory for apps with dynamic SQL. On eviction, the oldest entry
 /// is removed (FIFO via insertion order of [LinkedHashMap]).
 const int _schemaCacheMax = 32;
-final Map<String, RowSchema> schemaCache = LinkedHashMap<String, RowSchema>();
+final Map<String, CachedSchema> schemaCache =
+    LinkedHashMap<String, CachedSchema>();
 
-RowSchema _schemaFor(ffi.Pointer<ffi.Void> stmt, String sql, int colCount) {
-  var schema = schemaCache.remove(sql);
-  if (schema != null) {
+CachedSchema _schemaFor(ffi.Pointer<ffi.Void> stmt, String sql, int colCount) {
+  var entry = schemaCache.remove(sql);
+  if (entry != null) {
     // LRU promotion: re-insert so this entry moves to the end (most recent).
-    schemaCache[sql] = schema;
-    return schema;
+    schemaCache[sql] = entry;
+    return entry;
   }
 
-  schema = RowSchema(
-    List<String>.generate(colCount, (i) {
-      final namePtr = sqlite3ColumnName(stmt, i);
-      final nameLen = cStrlen(namePtr.cast());
-      return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
-    }, growable: false),
+  entry = CachedSchema(
+    RowSchema(
+      List<String>.generate(colCount, (i) {
+        final namePtr = sqlite3ColumnName(stmt, i);
+        final nameLen = cStrlen(namePtr.cast());
+        return fastDecodeText(namePtr.cast<ffi.Uint8>(), nameLen);
+      }, growable: false),
+    ),
   );
-  schemaCache[sql] = schema;
+  schemaCache[sql] = entry;
   if (schemaCache.length > _schemaCacheMax) {
     schemaCache.remove(schemaCache.keys.first);
   }
-  return schema;
+  return entry;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,13 +363,23 @@ final class RawQueryResult {
 /// The statement must already be acquired and bound (via
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
-RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
+RawQueryResult decodeQuery(
+  ffi.Pointer<ffi.Void> stmt,
+  String sql, {
+  int rowHint = 0,
+}) {
   final colCount = sqlite3ColumnCount(stmt);
-  final schema = _schemaFor(stmt, sql, colCount);
+  final entry = _schemaFor(stmt, sql, colCount);
+  final schema = entry.schema;
 
   final buf = ensureCellBuffer(colCount);
 
-  final values = List<Object?>.filled(colCount * 256, null, growable: true);
+  final hint = rowHint == 0 ? entry.size.hint : rowHint;
+  final values = List<Object?>.filled(
+    colCount * initialResultRows,
+    null,
+    growable: true,
+  );
   var writeIdx = 0;
   var rowCount = 0;
   var hasWrappedCells = false;
@@ -302,7 +388,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   while (rc == sqliteRow) {
     rowCount++;
     if (writeIdx + colCount > values.length) {
-      values.length = values.length * 2;
+      values.length = grownSlots(colCount, values.length, hint);
     }
     for (var i = 0; i < colCount; i++) {
       final i32Base = i * cellI32s;
@@ -358,6 +444,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   }
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
+  entry.size.record(rowCount);
   values.length = writeIdx;
   return RawQueryResult(
     values,
@@ -373,14 +460,21 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
 /// decoding entirely.
 (RawQueryResult, int) decodeQueryWithInitialHash(
   ffi.Pointer<ffi.Void> stmt,
-  String sql,
-) {
+  String sql, {
+  int rowHint = 0,
+}) {
   final colCount = sqlite3ColumnCount(stmt);
-  final schema = _schemaFor(stmt, sql, colCount);
+  final entry = _schemaFor(stmt, sql, colCount);
+  final schema = entry.schema;
 
   final buf = ensureCellBuffer(colCount);
 
-  final values = List<Object?>.filled(colCount * 256, null, growable: true);
+  final hint = rowHint == 0 ? entry.size.hint : rowHint;
+  final values = List<Object?>.filled(
+    colCount * initialResultRows,
+    null,
+    growable: true,
+  );
   var writeIdx = 0;
   var rowCount = 0;
   var hasWrappedCells = false;
@@ -390,7 +484,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   while (rc == sqliteRow) {
     rowCount++;
     if (writeIdx + colCount > values.length) {
-      values.length = values.length * 2;
+      values.length = grownSlots(colCount, values.length, hint);
     }
     for (var i = 0; i < colCount; i++) {
       final i32Base = i * cellI32s;
@@ -446,6 +540,7 @@ RawQueryResult decodeQuery(ffi.Pointer<ffi.Void> stmt, String sql) {
   }
   if (rc != sqliteDone) _throwStepException(stmt, sql, rc);
 
+  entry.size.record(rowCount);
   values.length = writeIdx;
   final raw = RawQueryResult(
     values,

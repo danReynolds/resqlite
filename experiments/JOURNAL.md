@@ -775,6 +775,77 @@ cheaper than the scan you saved. If the miss leads into a second, more expensive
 pass over the same bytes, prefer the branch-free accumulate-and-test shape and put
 a miss-heavy guard lane in the harness to prove it.*
 
+### Amortised O(1) is not free when the elements are pointers
+
+`decodeQuery` grew its result buffer with `values.length = values.length * 2`, the
+textbook amortised-append, and [exp 059](059-row-count-hint.md) had already ruled
+that "list growth is already cheap." [Exp 260](260-result-list-presize.md) measured
+it: on a 200,000-slot result the doubling path costs 2318 µs against 865 µs
+pre-sized, while the loads, the `switch` and the stores it exists to serve total
+under 500 µs. Growing a `List<Object?>` is not a `memcpy` — it copies every live
+element individually with a store barrier into a freshly allocated array the process
+has never faulted in, and the doubling sequence moves about 1.6× the final result
+through ~5 MB of immediate garbage. Exp 059's arithmetic ("only ~3-4 growths") counted
+the wrong thing: the cost is slots copied, not growths taken.
+
+The trap is that the amortised-O(1) framing is *correct* and still tells you nothing
+about whether the constant matters. It hid a cost that turned out to be most of what
+[exp 251](251-step-vs-decode.md) had already measured and labelled "Dart result
+construction" — a bucket a later runner would have attacked as decode work.
+
+*Reapplies to any geometrically-grown buffer on a hot path whose elements are
+pointers or boxed values. Before accepting "amortised, therefore negligible", compute
+the bytes moved, not the number of resizes, and check whether the copy is a barriered
+element-wise walk or a raw block move. Typed-data buffers are usually fine; `List<T>`
+of heap objects usually is not.*
+
+### A worker that can be sacrificed cannot be trusted to remember anything
+
+[Exp 260](260-result-list-presize.md)'s first implementation put its per-SQL size hint
+in the per-worker schema cache, the obvious home — and won 30-35% on mid-sized reads
+and ~1% on the largest ones, exactly backwards. Results over `sacrificeSlotThreshold`
+return through `Isolate.exit`, which **ends the reader isolate**, so a hint learned
+from a large result dies with the isolate that learned it and every large read is
+decoded by a worker that has never seen the SQL. Sub-threshold, the same cache is
+still only a quarter-view, because it describes the executions that happened to land
+on one of four pool workers. Moving the memory to `ReaderPool` and stamping it on the
+request took the 200k-slot lane from ~1% to −25%.
+
+[Exp 258](258-columnar-result-store.md) already showed the sacrifice path silently
+*over*-crediting a transfer candidate. This is the mirror: it silently steals a
+worker-side optimisation's win, and it does so on precisely the results big enough to
+care about. The pool's own schema cache has the same shape and is rebuilt from
+`sqlite3_column_name` after every sacrifice.
+
+*Reapplies to any caching, learning, adaptive, or amortising state a reader worker
+accumulates. Ask what destroys the isolate and how correlated that is with the state
+being valuable — if the two coincide, the state belongs on the main isolate or on the
+request, not in the worker.*
+
+### Put an adaptive hint where a wrong answer costs nothing
+
+A size, capacity, or strategy hint learned from history will eventually be wrong, so
+the design question is not "how accurate can we make it" but "where can it be wrong
+for free". [Exp 260](260-result-list-presize.md) first applied its row-count hint to
+`decodeQuery`'s initial allocation — the placement [exp 059](059-row-count-hint.md)
+had used — and a `SELECT ... LIMIT ?` alternating between 8,000 and 50 rows made the
+50-row execution **2.8× slower** (68 µs → 198 µs): zero-filling 60,000 slots it would
+never touch cost far more than the doubling the hint removed. Moving the hint to the
+*growth* step fixed it structurally rather than statistically. By the time a buffer
+overflows, the result has already proven it is large; a small result never reaches the
+code at all and runs byte-identical instructions to a build with no hint compiled in.
+
+Note what this is *not*: a floor, a clamp, or a smoothing rule. Those make a bad hint
+smaller. Relocating the decision to a point the bad case cannot reach makes it
+impossible — and it gives the harness a control lane that is inert by construction
+(the [exp 248](248-stmt-cache-stable-slots.md) pattern) for free.
+
+*Reapplies whenever a heuristic predicts a size, a capacity, a strategy, or a fast
+path. Write down what the prediction costs when it is wrong, then look for a place
+later in the flow where the wrong case has already been excluded by something the code
+has since learned. Prefer that placement over any amount of tuning on the prediction
+itself.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

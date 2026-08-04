@@ -32,6 +32,17 @@ sealed class ReadRequest {
   final String sql;
   final List<Object?> parameters;
   final int? traceCorrelationId;
+
+  /// Rows this SQL last returned (plus headroom), or 0 when the pool has never
+  /// seen it. Stamped by [ReaderPool._dispatch] immediately before the send;
+  /// the worker sizes its result buffer from it
+  /// ([EXP-260](../../../experiments/260-result-list-presize.md)).
+  ///
+  /// The hint has to be carried on the request rather than kept in the worker's
+  /// own schema cache: a result over [sacrificeSlotThreshold] slots ends the
+  /// isolate that produced it, so exactly the results with the most growth to
+  /// avoid would always be decoded by a worker that had never seen the SQL.
+  int rowHint = 0;
 }
 
 /// Standard row query — returns a [ResultSet].
@@ -145,7 +156,13 @@ void readerEntrypoint(List<Object> args) {
 
       switch (request) {
         case SelectRequest(:final sql, :final parameters):
-          final raw = executeQuery(dbHandleAddr, readerId, sql, parameters);
+          final raw = executeQuery(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+            request.rowHint,
+          );
           sacrifice = _shouldSacrifice(raw);
           result = _toRows(raw);
 
@@ -157,8 +174,18 @@ void readerEntrypoint(List<Object> args) {
           // [EXP-106](../../../experiments/106-column-level-deps.md)
           // piggybacks table dependencies on the same call so the stream
           // engine can perform writer-side dispatch elision.
-          final (raw, dependencies, initialHash, initialRowCount) =
-              executeQueryWithDeps(dbHandleAddr, readerId, sql, parameters);
+          final (
+            raw,
+            dependencies,
+            initialHash,
+            initialRowCount,
+          ) = executeQueryWithDeps(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+            request.rowHint,
+          );
           sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
@@ -188,6 +215,7 @@ void readerEntrypoint(List<Object> args) {
             parameters,
             lastResultHash,
             lastRowCount,
+            request.rowHint,
           );
           sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
@@ -332,13 +360,14 @@ RawQueryResult executeQuery(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
-) => _withAcquiredStmt(
+  List<Object?> parameters, [
+  int rowHint = 0,
+]) => _withAcquiredStmt(
   handleAddr,
   readerId,
   sql,
   parameters,
-  (_, stmt) => decodeQuery(stmt, sql),
+  (_, stmt) => decodeQuery(stmt, sql, rowHint: rowHint),
 );
 
 /// Execute a query returning JSON bytes as a view over the reader
@@ -375,9 +404,13 @@ RawQueryResult executeQuery(
   int handleAddr,
   int readerId,
   String sql,
-  List<Object?> parameters,
-) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (dbHandle, stmt) {
-  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql);
+  List<Object?> parameters, [
+  int rowHint = 0,
+]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (
+  dbHandle,
+  stmt,
+) {
+  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql, rowHint: rowHint);
   // Collect dependency metadata from the reader's most recent cached stmt entry.
   return (
     raw,
@@ -405,11 +438,12 @@ RawQueryResult executeQuery(
   String sql,
   List<Object?> parameters,
   int lastResultHash,
-  int? lastRowCount,
-) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+  int? lastRowCount, [
+  int rowHint = 0,
+]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
   final (newHash, newRowCount) = callQueryHash(stmt);
   if (newHash == lastResultHash && newRowCount == lastRowCount) {
     return (newHash, newRowCount, null);
   }
-  return (newHash, newRowCount, decodeQuery(stmt, sql));
+  return (newHash, newRowCount, decodeQuery(stmt, sql, rowHint: rowHint));
 });

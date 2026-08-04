@@ -1,0 +1,11 @@
+{
+  "directions": ["result-transfer-shape"],
+  "outcomeClass": "rejected_below_signal",
+  "claims": [
+    {
+      "id": "059.1",
+      "text": "Remembering a SQL's last row count and pre-sizing `decodeQuery`'s result buffer from it is not worth the two-field cache entry: list growth is already cheap (only ~3-4 doublings even for a 10k-row read) and the measurable improvement sits below the release-suite noise floor.",
+      "conditions": "release suite, 3 repeats vs baseline, 2 wins / 0 regressions / 61 neutral · 2026-04 · backfilled 2026-08"
+    }
+  ]
+}
