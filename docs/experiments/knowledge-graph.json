@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 48,
-    "totalEntries": 129
+    "entriesWithClaims": 51,
+    "totalEntries": 132
   },
   "experiments": [
     {
@@ -412,7 +412,11 @@
       "title": "Row count hint in schema cache",
       "file": "059-row-count-hint.md",
       "date": "2026-04-16",
-      "status": "rejected"
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_below_signal"
     },
     {
       "id": "060",
@@ -454,7 +458,11 @@
       "title": "Shrink initial values allocation (256→4)",
       "file": "067-shrink-initial-allocation.md",
       "date": "2026-04-16",
-      "status": "rejected"
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected_regression"
     },
     {
       "id": "068",
@@ -2050,6 +2058,17 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "260",
+      "title": "Size the result buffer from what the SQL returned last time",
+      "file": "260-result-list-presize.md",
+      "date": "2026-08-04",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted"
     }
   ],
   "claims": [
@@ -2071,6 +2090,29 @@
       ],
       "text": "SQLITE_ENABLE_BATCH_ATOMIC_WRITE is a zero-risk compile flag: it activates via VFS capability detection (Android F2FS) with no effect elsewhere and no API change.",
       "conditions": "2025 · backfilled 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "059.1",
+      "source": "059",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Remembering a SQL's last row count and pre-sizing `decodeQuery`'s result buffer from it is not worth the two-field cache entry: list growth is already cheap (only ~3-4 doublings even for a 10k-row read) and the measurable improvement sits below the release-suite noise floor.",
+      "conditions": "release suite, 3 repeats vs baseline, 2 wins / 0 regressions / 61 neutral · 2026-04 · backfilled 2026-08",
+      "state": "refuted",
+      "by": [
+        "260.1"
+      ]
+    },
+    {
+      "id": "067.1",
+      "source": "067",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "`decodeQuery`'s initial `List<Object?>.filled(colCount * 256, null)` must not be shrunk. Cutting it to `colCount * 4` regressed every many-small-query workload (Stream Churn +44%, Batched Write Inside Transaction +40%), because the VM's null-fill fast path makes one large pre-sized allocation cheaper per slot than a small one that then has to grow.",
+      "conditions": "release suite, 0 wins / 4 regressions / 59 neutral · 2026-04 · backfilled 2026-08",
       "state": "live"
     },
     {
@@ -2720,6 +2762,55 @@
       ],
       "text": "A cross-worktree focused A/B carrying a lane whose code is byte-identical in both arms reads the per-binary layout offset directly. Exp 259's INTEGER-only control moved +0.2% / -2.9% — opposite signs, inside the 3% effect floor — which is what licenses trusting the text lanes without falling back to exp 254's single-binary runtime toggle.",
       "conditions": "methodology · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "260.1",
+      "source": "260",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Sizing `decodeQuery`'s result buffer from a main-isolate memory of what the same SQL returned before — applied at the first growth, never to the initial allocation — is worth a reproduced -25.1% / -24.8% on 10k x 20 INTEGER, -32.2% / -33.7% on 5k x 4 INTEGER, and -33.6% / -32.3% on the repo's canonical 6-column product row at 10k rows (3.5 ms -> 2.3 ms), measured end to end through the public `select()`. Both controls (200-row and point reads, which never reach the growth path) move opposite signs inside the 3% floor, and both mispredict guards are neutral.",
+      "conditions": "M1 Pro · AOT CLI bundle · cross-worktree A/B · two order-flipped passes · 31 samples/lane · 2026-08",
+      "edges": [
+        {
+          "type": "refutes",
+          "target": "059.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "067.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "067.1"
+      ]
+    },
+    {
+      "id": "260.2",
+      "source": "260",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Buffer growth, not cell decoding, is most of the Dart-side cost of a large read. Reproducing the decode loop over a fixed cell buffer at 10k x 20 INTEGER: doubling from the 256-row initial allocation 2318 us, pre-sized 865 us, loads + switch with no list store 331 us, and `List.filled(200000, null)` alone 405 us. Exp 251's 2524 us for the same shape's `Dart result construction` is therefore a growth measurement more than a decode one.",
+      "conditions": "M1 Pro · AOT standalone microbenchmark · 40 reps · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "251.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "260.3",
+      "source": "260",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A worker-local cache cannot hold anything learned from a large result. `Isolate.exit` on a result over `sacrificeSlotThreshold` ends the worker, so a size hint kept in the per-worker schema cache won 30-35% on sub-threshold reads and ~1% on the 200k-slot lane; the same hint carried on the request from the main isolate won -25% there.",
+      "conditions": "M1 Pro · AOT · focused A/B, both hint placements against one baseline · 2026-08",
       "state": "live"
     }
   ]
