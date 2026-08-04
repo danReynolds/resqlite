@@ -846,6 +846,51 @@ later in the flow where the wrong case has already been excluded by something th
 has since learned. Prefer that placement over any amount of tuning on the prediction
 itself.*
 
+### Pick the memory number before you read it, because they disagree
+
+[Exp 261](261-focused-memory-guard.md) added a memory lane to the focused
+harnesses and immediately hit a fork: on a lane whose results cross
+`sacrificeSlotThreshold`, a sampled `ProcessInfo.currentRss` peak reported
+**+75%** for the same change that `ProcessInfo.maxRss` reported as **−1.7%**.
+Both readings are correct. `maxRss` is the process high-water. A sampled
+`currentRss` curve is a *retention* signal — how much is resident at the instants
+you looked — and on this codebase retention is dominated by something unrelated
+to the change under test: sacrificed reader isolates dying and handing their
+pages back. Within one isolate the VM keeps pages after GC, so a candidate that
+frees more of its own garbage reads as "no change"; a whole isolate exiting does
+return memory, which is why a sacrificing lane's `currentRss` falls and a
+non-sacrificing one's does not.
+
+Had exp 261 gated on the intuitive number, it would have opened a regression
+investigation into [exp 260](260-result-list-presize.md), which the high-water
+shows *lowered* peak memory on every lane.
+
+*Reapplies to any memory, cache-occupancy, handle-count or pool-depth guard.
+Before comparing two arms, write down which of "peak", "resident now" and
+"allocated total" you are reading and what else in the system moves it. Prefer
+the high-water for a regression gate, and require one process per lane, since a
+process-lifetime high-water is meaningless when several lanes share a process.*
+
+### A guard's own flatness tells you what it can never catch
+
+Exp 261 swept eight checkpoints from v0.3.0 to today and found peak read-path
+memory flat within ~1 MB for three months, across roughly forty merged
+experiments, while wall time on the same runs fell 25-40%. The reassuring reading
+is "no regression accumulated". The useful reading is the second one: an
+instrument that four months of real change could not move by 1% cannot resolve a
+5% drift either. It is a tripwire for a doubling.
+
+The dilution is worth measuring too. `mixed6-10k` sits at 89.5 MB before its
+measured reads begin and the reads add ~18 MB, so gating that lane on peak RSS
+mostly gates its seeding — which is identical in both arms.
+
+*Reapplies whenever a guard comes back clean. A flat result is evidence about the
+instrument as well as the code: check what the guard did during a period when the
+system demonstrably changed, and state the smallest effect it could have caught.
+A guard whose sensitivity is unknown is not yet a guard. If setup dominates the
+measured quantity, say what fraction, or the number reads as more protective than
+it is.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

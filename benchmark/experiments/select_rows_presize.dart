@@ -55,6 +55,8 @@ import 'dart:io';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 
+import '../shared/memory_probe.dart';
+
 const _defaultWarmup = 10;
 const _defaultSamples = 31;
 
@@ -231,12 +233,17 @@ final _lanes = <_Lane>[
 Future<void> main(List<String> args) async {
   var warmup = _defaultWarmup;
   var samples = _defaultSamples;
+  var memory = true;
   String? only;
   for (final arg in args) {
     if (arg.startsWith('--warmup=')) {
       warmup = int.parse(arg.substring('--warmup='.length));
     } else if (arg.startsWith('--samples=')) {
       samples = int.parse(arg.substring('--samples='.length));
+    } else if (arg == '--no-memory') {
+      // Control: the same binary with RSS sampling off, to show the sampling
+      // itself does not move the wall numbers it sits beside.
+      memory = false;
     } else if (arg.startsWith('--lane=')) {
       only = arg.substring('--lane='.length);
     } else {
@@ -248,7 +255,13 @@ Future<void> main(List<String> args) async {
   print('warmup=$warmup samples=$samples');
   for (final lane in _lanes) {
     if (only != null && lane.label != only) continue;
-    await _runLane(lane, warmup: warmup, samples: samples);
+    await _runLane(
+      lane,
+      warmup: warmup,
+      samples: samples,
+      laneIsolated: only != null,
+      memory: memory,
+    );
   }
 }
 
@@ -256,6 +269,8 @@ Future<void> _runLane(
   _Lane lane, {
   required int warmup,
   required int samples,
+  required bool laneIsolated,
+  required bool memory,
 }) async {
   final temp = await Directory.systemTemp.createTemp('bench_presize_');
   try {
@@ -293,6 +308,9 @@ Future<void> _runLane(
       await db.select(lane.selectSql, lane.selectParams);
     }
 
+    // Started after seeding and warmup so setup allocation is not attributed
+    // to the measured region.
+    final probe = memory ? MemoryProbe.start() : null;
     final values = <int>[];
     for (var i = 0; i < samples; i++) {
       await _poison(db, lane);
@@ -307,7 +325,10 @@ Future<void> _runLane(
       }
       sw.stop();
       values.add(sw.elapsedMicroseconds);
+      // Outside the stopwatch: a currentRss read costs ~700 ns.
+      probe?.sample();
     }
+    final reading = probe?.finish(laneIsolated: laneIsolated);
     await db.close();
 
     final sorted = [...values]..sort();
@@ -316,6 +337,7 @@ Future<void> _runLane(
       'median_us=${_percentile(sorted, 0.50)} '
       'p10_us=${_percentile(sorted, 0.10)} '
       'p90_us=${_percentile(sorted, 0.90)} '
+      '${reading == null ? '' : '${reading.format()} '}'
       'samples_us=${values.join(',')}',
     );
   } finally {
