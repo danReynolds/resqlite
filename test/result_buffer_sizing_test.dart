@@ -92,7 +92,7 @@ void main() {
       'a statement whose row count swings returns exactly its rows',
       () async {
         await seed(4000);
-        const sql = 'SELECT * FROM items LIMIT ?';
+        const sql = 'SELECT * FROM items ORDER BY id LIMIT ?';
         for (var round = 0; round < 4; round++) {
           for (final limit in [4000, 1, 900, 4000, 50]) {
             final rows = await db.select(sql, [limit]);
@@ -105,7 +105,7 @@ void main() {
     );
 
     test('a result that outgrows its hint still returns every row', () async {
-      const sql = 'SELECT * FROM items';
+      const sql = 'SELECT * FROM items ORDER BY id';
       // Establish a hint well under what the table will hold, then let the
       // result outgrow it repeatedly so the buffer has to fall back to
       // doubling on top of the hinted size.
@@ -125,7 +125,7 @@ void main() {
 
     test('a shrinking result never returns stale rows', () async {
       await seed(5000);
-      const sql = 'SELECT * FROM items';
+      const sql = 'SELECT * FROM items ORDER BY id';
       expect((await db.select(sql)).length, 5000);
       expect((await db.select(sql)).length, 5000);
 
