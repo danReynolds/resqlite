@@ -308,8 +308,11 @@ Future<void> _runLane(
       await db.select(lane.selectSql, lane.selectParams);
     }
 
-    // Started after seeding and warmup so setup allocation is not attributed
-    // to the measured region.
+    // Started after seeding and warmup, which sets the baseline for
+    // `rss_start_mb` / `rss_growth_mb` only. `max_rss_mb` is a process-lifetime
+    // high-water and still includes whatever seeding and warmup peaked at — it
+    // is comparable between arms because both pay the same setup, not because
+    // the setup is excluded.
     final probe = memory ? MemoryProbe.start() : null;
     final values = <int>[];
     for (var i = 0; i < samples; i++) {

@@ -18,7 +18,8 @@ import 'dart:io';
 ///   one to gate on.** On a lane whose results cross `sacrificeSlotThreshold`,
 ///   the two disagreed by 76 percentage points about the same change: sampled
 ///   `currentRss` peaked at 36.6 MB against 64.0 MB, while `maxRss` was 65.9 MB
-///   against 64.8 MB — no change at all. Both readings are honest. `maxRss` is
+///   against 64.8 MB — a 1.7% *fall*, inside the run-to-run band and nothing like
+///   the regression the other reading reports. Both are honest. `maxRss` is
 ///   the true high-water; a sampled `currentRss` curve only says how much is
 ///   resident at the instants you looked, which is a *retention* signal, and
 ///   retention moves when isolates die and hand their pages back. Read

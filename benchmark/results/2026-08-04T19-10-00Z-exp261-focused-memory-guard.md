@@ -4,9 +4,13 @@ Collected 2026-08-04 on arm64 macOS 26.2 (Apple M1 Pro) with Dart 3.12.2.
 
 Instrument: `benchmark/shared/memory_probe.dart`, wired into
 [`benchmark/experiments/select_rows_presize.dart`](../experiments/select_rows_presize.dart).
-Every figure is `maxRss` (`ProcessInfo.maxRss`) with **one process per lane**
-(`--lane=<name>`), since `maxRss` is a process-lifetime high-water and a shared
-process would let each lane inherit the previous lane's watermark.
+Every figure in the **guard and sweep tables** is `maxRss` (`ProcessInfo.maxRss`)
+with **one process per lane** (`--lane=<name>`), since `maxRss` is a
+process-lifetime high-water and a shared process would let each lane inherit the
+previous lane's watermark. The instrument-validation section below is the
+exception and says so: repeatability is reported on the sampled `rss_peak_mb`,
+because the point of that table is to show how stable the *sampled* reading is
+next to the high-water it disagrees with.
 
 ```console
 dart build cli --target=bin/presize_ab.dart --output=<checkpoint>
