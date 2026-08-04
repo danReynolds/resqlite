@@ -4,10 +4,11 @@
 **Status:** Accepted
 **Category:** Performance
 **Direction:** `result-transfer-shape`
-**Benchmark Run:**
-  [`benchmark/results/2026-08-04T11-40-00Z-exp260-result-list-presize.md`](../benchmark/results/2026-08-04T11-40-00Z-exp260-result-list-presize.md);
-  focused A/B harness
-  [`benchmark/experiments/select_rows_presize.dart`](../benchmark/experiments/select_rows_presize.dart)
+**Benchmark Run:** none — focused AOT A/B, no release run (the suite segfaults
+  in the sqlite_async peer, see below); harness
+  [`benchmark/experiments/select_rows_presize.dart`](../benchmark/experiments/select_rows_presize.dart),
+  full tables and mechanism attribution in
+  [`benchmark/results/2026-08-04T13-20-00Z-exp260-result-list-presize.md`](../benchmark/results/2026-08-04T13-20-00Z-exp260-result-list-presize.md)
 
 ## Problem
 
@@ -227,4 +228,12 @@ convergence by one execution.
 - `dart test` — 424 tests pass across the full suite
 - focused A/B, two order-flipped passes, `ab_drift_check.dart` REPRODUCED on
   every primary lane and neutral on every control and guard
-- `dart run benchmark/run_release.dart exp260-result-list-presize --repeat=5`
+- `dart run benchmark/run_release.dart exp260-result-list-presize --repeat=5` —
+  **attempted twice, no artifact.** Both runs segfaulted at the `[15/16] Memory`
+  stage inside `pkg_sqlite3_connection_pool_notify_updates`, in the sqlite_async
+  peer's `libsqlite3_connection_pool.dylib`. That is the pre-existing peer
+  regression [#282](https://github.com/danReynolds/resqlite/pull/282) documents
+  ("exp229's own sha ... crashes today at the same [15/16] Memory stage. Only the
+  peers changed between those runs"); the crash lands inside repeat 1, so #282's
+  per-repeat artifact writing has nothing to persist. Nothing in this diff is
+  linked into that library, and no scenario before it reported an error.
