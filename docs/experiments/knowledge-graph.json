@@ -2812,6 +2812,16 @@
       "text": "A worker-local cache cannot hold anything learned from a large result. `Isolate.exit` on a result over `sacrificeSlotThreshold` ends the worker, so a size hint kept in the per-worker schema cache won 30-35% on sub-threshold reads and ~1% on the 200k-slot lane; the same hint carried on the request from the main isolate won -25% there.",
       "conditions": "M1 Pro · AOT · focused A/B, both hint placements against one baseline · 2026-08",
       "state": "live"
+    },
+    {
+      "id": "260.4",
+      "source": "260",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Pre-sizing from a converged row hint lowers total bytes allocated per query by 14-61% (the doubling sequence's intermediate arrays stop existing) but does NOT uniformly lower peak buffer capacity. Doubling's overshoot is 1x-2x depending on where the result falls relative to a power-of-two boundary; a converged hint's is always 1.25x. Peak capacity is 23.7% smaller for a result that overshoots a boundary (all three primary lanes) and 22-25% LARGER for one that lands just under it (mixed6-1k, and 2048 rows x 6 columns). Arithmetic on the allocation path only — no RSS or heap sampling was taken, so a workload sensitive to peak rather than churn needs its own measurement.",
+      "conditions": "derived from the growth path, not measured · 2026-08",
+      "state": "live"
     }
   ]
 }
