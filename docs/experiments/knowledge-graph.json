@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 53,
-    "totalEntries": 134
+    "entriesWithClaims": 54,
+    "totalEntries": 135
   },
   "experiments": [
     {
@@ -2092,6 +2092,18 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted_measurement"
+    },
+    {
+      "id": "263",
+      "title": "The 60x memory ratio was mostly floor",
+      "file": "263-select-memory-decomposition.md",
+      "date": "2026-08-05",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "outcomeClass": "accepted_measurement"
     }
   ],
   "claims": [
@@ -2913,7 +2925,10 @@
       ],
       "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
       "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08",
-      "state": "live"
+      "state": "superseded",
+      "by": [
+        "263.1"
+      ]
     },
     {
       "id": "262.1",
@@ -2943,6 +2958,52 @@
       "restsOn": [
         "261.1"
       ]
+    },
+    {
+      "id": "263.1",
+      "source": "263",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of cell content on the canonical 6-column product row (UTF-8 TEXT length plus 8 B per numeric; exact for this all-ASCII fixture, not SQLite's on-disk record size) — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
+      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · 2026-08",
+      "edges": [
+        {
+          "type": "supersedes",
+          "target": "261.4"
+        },
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "261.1"
+      ]
+    },
+    {
+      "id": "263.2",
+      "source": "263",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "resqlite's resident floor before any row is read is 20.5 MB, of which 14.0 MB is a bare AOT Dart process; seeding 20,000 rows adds ~12 MB more, and a live 10,000-row result adds 3.6 MB. The result is the smallest term, so a payload-to-peak ratio taken on a read-and-discard workload is a statement about the floor.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "263.3",
+      "source": "263",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "`selectBytes` costs 676 B/row against `select`'s 396 B/row on the same rows. It avoids Dart object allocation, not bytes: JSON repeats every column name per row and quotes and escapes every value. Reach for it to reduce allocation churn, not footprint.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane, single read held live · 2026-08",
+      "state": "live"
     }
   ]
 }
