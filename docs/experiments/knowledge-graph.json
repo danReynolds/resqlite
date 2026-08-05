@@ -2966,8 +2966,8 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of cell content on the canonical 6-column product row (UTF-8 TEXT length plus 8 B per numeric; exact for this all-ASCII fixture, not SQLite's on-disk record size) — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
-      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · 2026-08",
+      "text": "The Dart representation of a `select()` row costs 256 B/row for the canonical product row's five non-key columns — obtained by differencing the 6-column marginal (396 B/row) against the 1-column `id` marginal (140 B/row), since both projections make the same btree leaves resident and the shared term is storage-side rather than representational. That is 1.9x their 134.9 B of cell content, and 0.86x a first-principles accounting of what they must occupy (~296 B). Measured as a single live result, one process per lane, seeding held constant at 20,000 rows.",
+      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · payload averaged over the full seeded range · 2026-08",
       "edges": [
         {
           "type": "supersedes",
@@ -3003,6 +3003,17 @@
       ],
       "text": "`selectBytes` costs 676 B/row against `select`'s 396 B/row on the same rows. It avoids Dart object allocation, not bytes: JSON repeats every column name per row and quotes and escapes every value. Reach for it to reduce allocation churn, not footprint.",
       "conditions": "M1 Pro · AOT · maxRss, one process per lane, single read held live · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "263.4",
+      "source": "263",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A per-row cost of ~140 B/row is shared by every projection of the same table and is not part of the result representation: the 1-column `id` lane pays it as fully as the 6-column `select` lane, because a btree leaf holds the whole row regardless of what is projected. Its mechanism is bounded but not established — it scales with rows read, is indifferent to column count, and resqlite opens connections with mmap_size = 256 MB and cache_size = -8192, so mmap'd file pages becoming resident, WAL pages, and a cold reader page cache are all live candidates. Any future per-row memory figure must difference two projections or it charges this to the wrong layer.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane · mechanism not discriminated · 2026-08",
       "state": "live"
     }
   ]
