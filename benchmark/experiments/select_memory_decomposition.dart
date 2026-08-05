@@ -98,8 +98,19 @@ List<Object?> _standardRow(int i) => [
   '2026-04-0${(i % 9) + 1}T12:00:00Z',
 ];
 
-/// Bytes of actual cell data in one seeded row, so the report can state the
-/// payload the marginal cost is measured against rather than estimating it.
+/// Logical in-memory payload of one seeded row, in bytes: the UTF-8 length of
+/// each TEXT cell plus 8 bytes for each numeric one.
+///
+/// This is the denominator the per-row marginal is reported against, so be
+/// precise about what it is and is not. It is **not** SQLite's on-disk record
+/// size — integers are stored as varints and the row carries a header — and it
+/// is not what a Dart `String` occupies, which is the point of the comparison.
+/// It is the number of bytes of actual cell content the row represents.
+///
+/// `String.length` counts UTF-16 code units, which equals the UTF-8 byte count
+/// only for ASCII. Every cell this fixture generates is ASCII, and
+/// [_assertAsciiFixture] enforces that, so the two coincide here and the figure
+/// is exact for this fixture rather than an approximation of it.
 int _payloadBytes(int i) {
   final row = _standardRow(i);
   var bytes = 8; // id, INTEGER
@@ -107,6 +118,23 @@ int _payloadBytes(int i) {
     bytes += cell is String ? cell.length : 8;
   }
   return bytes;
+}
+
+/// Fails loudly if the fixture ever stops being ASCII, which would silently
+/// turn [_payloadBytes] from an exact count into an undercount.
+void _assertAsciiFixture() {
+  for (var i = 0; i < 100; i++) {
+    for (final cell in _standardRow(i)) {
+      if (cell is! String) continue;
+      for (final unit in cell.codeUnits) {
+        if (unit > 0x7F) {
+          throw StateError(
+            'fixture is no longer ASCII, so _payloadBytes undercounts: $cell',
+          );
+        }
+      }
+    }
+  }
 }
 
 Future<void> main(List<String> args) async {
@@ -133,9 +161,13 @@ Future<void> main(List<String> args) async {
       'the marginal is one result rather than accumulated retention',
     );
   }
+  _assertAsciiFixture();
   final avgPayload =
       List.generate(100, _payloadBytes).reduce((a, b) => a + b) / 100;
-  print('avg_payload_bytes_per_row=${avgPayload.toStringAsFixed(1)}');
+  print(
+    'avg_payload_bytes_per_row=${avgPayload.toStringAsFixed(1)} '
+    '(UTF-8 cell content; not SQLite on-disk size)',
+  );
 
   for (final mode in _Mode.values) {
     for (final rows in mode == _Mode.open ? const [0] : _rowCounts) {

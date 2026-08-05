@@ -2,7 +2,7 @@
   "directions": ["result-transfer-shape", "measurement-system"],
   "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
-    "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Holding seeding constant and varying only the read shows `select()` costs 396 B/row against 137.8 B of payload — 2.9x, and within ~1.4x of the ~280 B/row theoretical minimum for four OneByteStrings, a boxed double, six pointer slots and a Row facade. The ratio divided a peak that is ~90% fixed and setup cost by the payload.",
+    "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Holding seeding constant and varying only the read shows `select()` costs 396 B/row against 137.8 B of cell content (UTF-8 TEXT length plus 8 B per numeric, exact for this all-ASCII fixture and not SQLite's on-disk record size) — 2.9x, and within ~1.4x of the ~280 B/row theoretical minimum for four OneByteStrings, a boxed double, six pointer slots and a Row facade. The ratio divided a peak that is ~90% fixed and setup cost by the payload.",
     "A repeated-read RSS measurement is not a measurement of a result. RSS never falls, so exp 261's 5 warmup + 21 timed reads accumulated up to 26 results of retained garbage and reported 99 MB for a 10k-row lane where one read held live reports 36.1 MB — 2.7x. Both answer real questions; only the second answers `what does a result cost`. Any future memory lane must say which it is measuring.",
     "The floor dominates every small and medium read, and it is mostly not resqlite's row handling. 14.0 MB is a bare AOT Dart process before resqlite exists; open plus a spawned pool is 20.5 MB; seeding 20,000 rows adds ~12 MB more. A live 10,000-row result adds 3.6 MB on top — the smallest term in the stack.",
     "`selectBytes` uses MORE memory per row than `select`: 676 B/row against 396. It removes Dart objects, which is what it has always claimed, but JSON repeats every column name on every row and quotes and escapes every value, so the encoded bytes exceed the object graph they replace. It is the right tool for allocation churn and the wrong one for footprint.",
@@ -11,7 +11,7 @@
   "claims": [
     {
       "id": "263.1",
-      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of payload on the canonical 6-column product row — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
+      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of cell content on the canonical 6-column product row (UTF-8 TEXT length plus 8 B per numeric; exact for this all-ASCII fixture, not SQLite's on-disk record size) — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
       "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · 2026-08",
       "edges": [
         { "type": "supersedes", "target": "261.4" },

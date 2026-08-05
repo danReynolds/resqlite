@@ -45,7 +45,11 @@ Marginal cost per row, over two spans:
 | `bytes` | 676 B/row | 668 B/row |
 | `id` | 140 B/row | 155 B/row |
 
-Average payload in one seeded row: **137.8 bytes**.
+Average cell content in one seeded row: **137.8 bytes** — the UTF-8 length of
+each TEXT cell plus 8 bytes per numeric. Exact for this fixture (every generated
+cell is ASCII, which the harness asserts, so UTF-16 code units and UTF-8 bytes
+coincide), and deliberately not SQLite's on-disk record size, which varint-encodes
+integers and carries a per-row header.
 
 `select`'s 1k→20k span reads lower than 1k→10k because results above
 `sacrificeSlotThreshold` (5,461 rows at 6 columns) return via `Isolate.exit`,

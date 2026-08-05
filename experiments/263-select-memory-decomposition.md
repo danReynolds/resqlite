@@ -61,11 +61,19 @@ question the ratio was posed against.
 
 Single live result, `maxRss`, one process per lane:
 
-| mode | marginal (1k→10k) | vs 137.8 B payload |
+| mode | marginal (1k→10k) | vs payload |
 |---|---:|---:|
 | `select` | 396 B/row | **2.9×** |
 | `bytes` | 676 B/row | 4.9× |
 | `id` | 140 B/row | — |
+
+The denominator is 137.8 B/row of cell content — the UTF-8 length of each TEXT
+cell plus 8 bytes per numeric. It is exact for this fixture (every generated cell
+is ASCII, and the harness asserts it, so code units and UTF-8 bytes coincide),
+but it is deliberately *not* SQLite's on-disk record size, which stores integers
+as varints and carries a per-row header. It is the bytes of actual content the
+row represents, which is the thing a representation overhead should be measured
+against.
 
 And the floor, which is where the 60× actually lived:
 
@@ -82,7 +90,7 @@ a floor of ~32.8 MB, of which 14 MB is the Dart VM before resqlite exists at all
 seeding. Dividing a peak that is ~90% fixed-and-setup cost by the payload is what
 produced 60×.
 
-At 396 B/row against 137.8 B of payload, `select()` carries a **2.9×**
+At 396 B/row against 137.8 B of cell content, `select()` carries a **2.9×**
 representation overhead — and against the ~280 B/row theoretical minimum for this
 row shape it is within about 1.4×. That gap is page granularity and heap slack,
 not a structure worth rewriting.
