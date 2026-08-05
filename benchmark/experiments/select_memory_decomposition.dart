@@ -162,8 +162,24 @@ Future<void> main(List<String> args) async {
     );
   }
   _assertAsciiFixture();
-  final avgPayload =
-      List.generate(100, _payloadBytes).reduce((a, b) => a + b) / 100;
+  // Sampled at a fixed stride *across* the seeded range rather than over a
+  // prefix of it. Both `Item $i` and the description's `$i` grow with the row
+  // index, so a prefix undercounts what a 20,000-row lane reads (137.8 B
+  // against 142.9); a stride captures the digit-width distribution instead.
+  //
+  // Strided rather than exhaustive because this runs before any lane does, and
+  // `_payloadBytes` builds the row to measure it. Materializing all 20,000 rows
+  // would allocate megabytes of transient strings ahead of an RSS measurement
+  // that cannot see them released. 200 samples land within 0.01 B of the exact
+  // mean and allocate ~140 KB.
+  const payloadStride = 100;
+  var payloadTotal = 0;
+  var payloadSamples = 0;
+  for (var i = 0; i < _seedRows; i += payloadStride) {
+    payloadTotal += _payloadBytes(i);
+    payloadSamples++;
+  }
+  final avgPayload = payloadTotal / payloadSamples;
   print(
     'avg_payload_bytes_per_row=${avgPayload.toStringAsFixed(1)} '
     '(UTF-8 cell content; not SQLite on-disk size)',
