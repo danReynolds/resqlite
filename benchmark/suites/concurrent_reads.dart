@@ -24,10 +24,12 @@ Future<String> runConcurrentReadsBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Concurrent Reads (1000 rows per query)');
   markdown.writeln('');
-  markdown.writeln('Multiple parallel `select()` calls via `Future.wait`. '
-      'sqlite3 is excluded (synchronous, no concurrency). Each concurrency '
-      'level runs `N` parallel queries; we report both total wall time and '
-      'effective per-query latency (total / N).');
+  markdown.writeln(
+    'Multiple parallel `select()` calls via `Future.wait`. '
+    'sqlite3 is excluded (synchronous, no concurrency). Each concurrency '
+    'level runs `N` parallel queries; we report both total wall time and '
+    'effective per-query latency (total / N).',
+  );
   markdown.writeln('');
 
   final tempDir = await Directory.systemTemp.createTemp('bench_concurrent_');

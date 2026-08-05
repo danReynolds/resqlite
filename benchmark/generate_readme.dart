@@ -31,7 +31,10 @@ String buildReadme({required Directory experimentsDir}) {
   if (indexDir.existsSync()) {
     for (final file in indexDir.listSync().whereType<File>()) {
       if (!file.path.endsWith('.json')) continue;
-      final id = file.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
+      final id = file.uri.pathSegments.last.replaceFirst(
+        RegExp(r'\.json$'),
+        '',
+      );
       final decoded = json.decode(file.readAsStringSync());
       // A fragment is one row object, or a list of rows for a "split"
       // experiment (e.g. 014 has an accepted finding and a rejected one).
@@ -107,9 +110,8 @@ class _Row {
 
   String render(Map<String, String> fileById) {
     var idCell = '[$id]($file)';
-    String refs(List<String> ids) => ids
-        .map((t) => '[$t](${fileById[t] ?? '$t.md'})')
-        .join(', ');
+    String refs(List<String> ids) =>
+        ids.map((t) => '[$t](${fileById[t] ?? '$t.md'})').join(', ');
     if (supersededBy.isNotEmpty) {
       idCell += '<br><sub>superseded by ${refs(supersededBy)}</sub>';
     }

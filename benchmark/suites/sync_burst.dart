@@ -36,7 +36,8 @@ const WorkloadMeta syncBurstMeta = WorkloadMeta(
   slug: 'sync_burst',
   version: 1,
   title: 'Sync Burst',
-  description: '50K bulk insert via executeBatch in 500-row chunks, '
+  description:
+      '50K bulk insert via executeBatch in 500-row chunks, '
       'then 10 × 100-row INSERT OR REPLACE merges. A COUNT(*) stream '
       'stays active throughout on reactive peers. Models offline-first '
       'sync: a client pulling from a server, applying batched changes, '
@@ -61,8 +62,7 @@ Future<String> runSyncBurstBenchmark() async {
   final mergeByPeer = <String, BenchmarkTiming>{};
   final streamEmissionsByPeer = <String, int>{};
 
-  final tempDir =
-      await Directory.systemTemp.createTemp('bench_sync_burst_');
+  final tempDir = await Directory.systemTemp.createTemp('bench_sync_burst_');
   try {
     final peers = await PeerSet.open(
       tempDir.path,
@@ -71,8 +71,7 @@ Future<String> runSyncBurstBenchmark() async {
     try {
       for (final peer in peers.all) {
         print('  running on ${peer.name}...');
-        final (bulkTiming, mergeTiming, emissions) =
-            await _measure(peer);
+        final (bulkTiming, mergeTiming, emissions) = await _measure(peer);
         bulkByPeer[peer.label] = bulkTiming;
         mergeByPeer[peer.label] = mergeTiming;
         if (peer.hasStreams) {
@@ -92,8 +91,9 @@ Future<String> runSyncBurstBenchmark() async {
   return md.toString();
 }
 
-Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
-    _measure(BenchmarkPeer peer) async {
+Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)> _measure(
+  BenchmarkPeer peer,
+) async {
   final bulk = BenchmarkTiming(peer.label);
   final merge = BenchmarkTiming(peer.label);
   var totalEmissions = 0;
@@ -107,10 +107,12 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
     // insert path is what we're measuring. Schema must match
     // benchmark/drift/sync_burst_db.dart exactly.
     await peer.execute('DROP TABLE IF EXISTS items');
-    await peer.execute('CREATE TABLE IF NOT EXISTS items('
-        'id INTEGER PRIMARY KEY, '
-        'external_id INTEGER UNIQUE, '
-        'payload TEXT NOT NULL)');
+    await peer.execute(
+      'CREATE TABLE IF NOT EXISTS items('
+      'id INTEGER PRIMARY KEY, '
+      'external_id INTEGER UNIQUE, '
+      'payload TEXT NOT NULL)',
+    );
 
     // Start the live-count stream before the writes begin.
     var emitCount = 0;
@@ -122,8 +124,7 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
       );
       sub = stream.listen((_) => emitCount++);
       // Drain initial emission.
-      final initialDeadline =
-          DateTime.now().add(const Duration(seconds: 10));
+      final initialDeadline = DateTime.now().add(const Duration(seconds: 10));
       while (emitCount < 1) {
         if (DateTime.now().isAfter(initialDeadline)) {
           fail('${peer.name}: initial emission never arrived');
@@ -190,8 +191,7 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
     if (sub != null) {
       const quietWindow = Duration(milliseconds: 200);
       var lastCount = emitCount;
-      final quietDeadline =
-          DateTime.now().add(const Duration(seconds: 10));
+      final quietDeadline = DateTime.now().add(const Duration(seconds: 10));
       while (DateTime.now().isBefore(quietDeadline)) {
         await Future<void>.delayed(quietWindow);
         if (emitCount == lastCount) break;
@@ -207,15 +207,16 @@ Future<(BenchmarkTiming bulk, BenchmarkTiming merge, int emissions)>
   return (bulk, merge, totalEmissions ~/ _iterations);
 }
 
-void _writeBulkSection(
-  StringBuffer md,
-  Map<String, BenchmarkTiming> byPeer,
-) {
+void _writeBulkSection(StringBuffer md, Map<String, BenchmarkTiming> byPeer) {
   md
-    ..writeln('### Bulk insert: $_bulkRowCount rows × $_bulkChunkSize-row chunks')
+    ..writeln(
+      '### Bulk insert: $_bulkRowCount rows × $_bulkChunkSize-row chunks',
+    )
     ..writeln()
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) |',
+    )
     ..writeln('|---|---|---|---|---|');
   for (final timing in byPeer.values) {
     md.writeln(
@@ -229,15 +230,14 @@ void _writeBulkSection(
   md.writeln();
 }
 
-void _writeMergeSection(
-  StringBuffer md,
-  Map<String, BenchmarkTiming> byPeer,
-) {
+void _writeMergeSection(StringBuffer md, Map<String, BenchmarkTiming> byPeer) {
   md
     ..writeln('### Merge rounds: $_mergeRounds × $_mergeRowsPerRound rows')
     ..writeln()
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) |',
+    )
     ..writeln('|---|---|---|---|---|');
   for (final timing in byPeer.values) {
     md.writeln(
@@ -251,10 +251,7 @@ void _writeMergeSection(
   md.writeln();
 }
 
-void _writeStreamSection(
-  StringBuffer md,
-  Map<String, int> byPeer,
-) {
+void _writeStreamSection(StringBuffer md, Map<String, int> byPeer) {
   if (byPeer.isEmpty) return;
   md
     ..writeln('### Stream emissions during burst (COUNT(*))')
@@ -266,11 +263,13 @@ void _writeStreamSection(
   }
   md
     ..writeln()
-    ..writeln('Every batch commit invalidates the COUNT(*) stream. '
-        'Fewer emissions under the same write load signals better '
-        'coalescing; more emissions may indicate per-commit re-emit '
-        'without the suppression logic resqlite\'s engine applies '
-        '(exp 031/033/075 + PR #17\'s per-stream re-query coalescing).')
+    ..writeln(
+      'Every batch commit invalidates the COUNT(*) stream. '
+      'Fewer emissions under the same write load signals better '
+      'coalescing; more emissions may indicate per-commit re-emit '
+      'without the suppression logic resqlite\'s engine applies '
+      '(exp 031/033/075 + PR #17\'s per-stream re-query coalescing).',
+    )
     ..writeln();
 }
 

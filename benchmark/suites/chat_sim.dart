@@ -36,7 +36,8 @@ const WorkloadMeta chatSimMeta = WorkloadMeta(
   slug: 'chat_sim',
   version: 1,
   title: 'Chat Sim',
-  description: 'Mixed R/W workload: 500 users, 100 conversations, 10K '
+  description:
+      'Mixed R/W workload: 500 users, 100 conversations, 10K '
       'seed messages (Zipfian distribution). 10K ops: 5% message '
       'inserts, 5% conversation last_msg_at updates, 45% fetch-last-20 '
       'with user JOIN, 45% fetch-user-by-PK. Measures each op type '
@@ -135,27 +136,25 @@ final class _Op {
     required this.conversationId,
     required this.userId,
     required this.sentAt,
-  })  : type = _OpType.insertMessage,
-        readConvId = null;
+  }) : type = _OpType.insertMessage,
+       readConvId = null;
 
-  _Op.updateConversation({
-    required this.conversationId,
-    required this.sentAt,
-  })  : type = _OpType.updateConversation,
-        userId = null,
-        readConvId = null;
+  _Op.updateConversation({required this.conversationId, required this.sentAt})
+    : type = _OpType.updateConversation,
+      userId = null,
+      readConvId = null;
 
   _Op.readMessages({required this.readConvId})
-      : type = _OpType.readMessages,
-        conversationId = null,
-        userId = null,
-        sentAt = null;
+    : type = _OpType.readMessages,
+      conversationId = null,
+      userId = null,
+      sentAt = null;
 
   _Op.readUser({required this.userId})
-      : type = _OpType.readUser,
-        conversationId = null,
-        readConvId = null,
-        sentAt = null;
+    : type = _OpType.readUser,
+      conversationId = null,
+      readConvId = null,
+      sentAt = null;
 
   final _OpType type;
   final int? conversationId;
@@ -184,17 +183,21 @@ List<_Op> _generateOpSequence({
     final roll = prng.nextInt(100);
     if (roll < 5) {
       // 5% insert
-      ops.add(_Op.insertMessage(
-        conversationId: zipf.sample() + 1,
-        userId: prng.nextInt(userCount) + 1,
-        sentAt: clock++,
-      ));
+      ops.add(
+        _Op.insertMessage(
+          conversationId: zipf.sample() + 1,
+          userId: prng.nextInt(userCount) + 1,
+          sentAt: clock++,
+        ),
+      );
     } else if (roll < 10) {
       // 5% update conversation
-      ops.add(_Op.updateConversation(
-        conversationId: zipf.sample() + 1,
-        sentAt: clock++,
-      ));
+      ops.add(
+        _Op.updateConversation(
+          conversationId: zipf.sample() + 1,
+          sentAt: clock++,
+        ),
+      );
     } else if (roll < 55) {
       // 45% read messages
       ops.add(_Op.readMessages(readConvId: zipf.sample() + 1));
@@ -210,8 +213,8 @@ List<_Op> _generateOpSequence({
 /// Precomputes the CDF once so each sample is a single log-n lookup.
 final class _ZipfianSampler {
   _ZipfianSampler(int n, double s, int seed)
-      : _rng = math.Random(seed ^ 0xBADBEEF),
-        _cdf = _buildCdf(n, s);
+    : _rng = math.Random(seed ^ 0xBADBEEF),
+      _cdf = _buildCdf(n, s);
 
   final math.Random _rng;
   final List<double> _cdf;
@@ -256,41 +259,46 @@ Future<void> _seed(BenchmarkPeer peer) async {
   // @DriftDatabase schema at open time; bare CREATE TABLE/INDEX would
   // throw "already exists" on the drift peer. The schema here must
   // match benchmark/drift/chat_sim_db.dart exactly.
-  await peer.execute('CREATE TABLE IF NOT EXISTS users('
-      'id INTEGER PRIMARY KEY, '
-      'name TEXT NOT NULL, '
-      'avatar_url TEXT NOT NULL)');
-  await peer.execute('CREATE TABLE IF NOT EXISTS conversations('
-      'id INTEGER PRIMARY KEY, '
-      'last_msg_at INTEGER NOT NULL)');
-  await peer.execute('CREATE TABLE IF NOT EXISTS messages('
-      'id INTEGER PRIMARY KEY, '
-      'conv_id INTEGER NOT NULL, '
-      'sender_id INTEGER NOT NULL, '
-      'body TEXT NOT NULL, '
-      'sent_at INTEGER NOT NULL)');
+  await peer.execute(
+    'CREATE TABLE IF NOT EXISTS users('
+    'id INTEGER PRIMARY KEY, '
+    'name TEXT NOT NULL, '
+    'avatar_url TEXT NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE TABLE IF NOT EXISTS conversations('
+    'id INTEGER PRIMARY KEY, '
+    'last_msg_at INTEGER NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE TABLE IF NOT EXISTS messages('
+    'id INTEGER PRIMARY KEY, '
+    'conv_id INTEGER NOT NULL, '
+    'sender_id INTEGER NOT NULL, '
+    'body TEXT NOT NULL, '
+    'sent_at INTEGER NOT NULL)',
+  );
   await peer.execute(
     'CREATE INDEX IF NOT EXISTS messages_conv_sent ON messages(conv_id, sent_at)',
   );
 
   // Seed users.
-  await peer.executeBatch(
-    'INSERT INTO users(name, avatar_url) VALUES (?, ?)',
-    [
-      for (var i = 1; i <= _userCount; i++)
-        ['user_$i', 'https://example.com/avatars/$i.png'],
-    ],
-  );
+  await peer.executeBatch('INSERT INTO users(name, avatar_url) VALUES (?, ?)', [
+    for (var i = 1; i <= _userCount; i++)
+      ['user_$i', 'https://example.com/avatars/$i.png'],
+  ]);
 
   // Seed conversations.
-  await peer.executeBatch(
-    'INSERT INTO conversations(last_msg_at) VALUES (?)',
-    [for (var i = 1; i <= _conversationCount; i++) [0]],
-  );
+  await peer.executeBatch('INSERT INTO conversations(last_msg_at) VALUES (?)', [
+    for (var i = 1; i <= _conversationCount; i++) [0],
+  ]);
 
   // Seed messages with Zipfian distribution over conversations.
-  final zipf =
-      _ZipfianSampler(_conversationCount, _zipfExponent, _prngSeed ^ 0xABC);
+  final zipf = _ZipfianSampler(
+    _conversationCount,
+    _zipfExponent,
+    _prngSeed ^ 0xABC,
+  );
   final msgPrng = math.Random(_prngSeed ^ 0xDEF);
   await peer.executeBatch(
     'INSERT INTO messages(conv_id, sender_id, body, sent_at) VALUES (?, ?, ?, ?)',
@@ -321,8 +329,7 @@ Future<Map<_OpType, BenchmarkTiming>> _measure(
   // branch matches for resqlite rows, and `generate_devices.dart`'s
   // library-name detection works for the others.
   final timings = <_OpType, BenchmarkTiming>{
-    for (final t in _OpType.values)
-      t: BenchmarkTiming(peer.label),
+    for (final t in _OpType.values) t: BenchmarkTiming(peer.label),
   };
 
   for (var i = 0; i < ops.length; i++) {
@@ -345,12 +352,7 @@ Future<void> _executeOp(
         await peer.execute(
           'INSERT INTO messages(conv_id, sender_id, body, sent_at) '
           'VALUES (?, ?, ?, ?)',
-          [
-            op.conversationId,
-            op.userId,
-            'body_${op.sentAt}',
-            op.sentAt,
-          ],
+          [op.conversationId, op.userId, 'body_${op.sentAt}', op.sentAt],
         );
       });
 
@@ -363,19 +365,27 @@ Future<void> _executeOp(
       });
 
     case _OpType.readMessages:
-      await _timeRead(peer, record, () => peer.select(
-            'SELECT m.id, m.body, m.sent_at, u.name, u.avatar_url '
-            'FROM messages m JOIN users u ON u.id = m.sender_id '
-            'WHERE m.conv_id = ? '
-            'ORDER BY m.sent_at DESC LIMIT 20',
-            [op.readConvId],
-          ));
+      await _timeRead(
+        peer,
+        record,
+        () => peer.select(
+          'SELECT m.id, m.body, m.sent_at, u.name, u.avatar_url '
+          'FROM messages m JOIN users u ON u.id = m.sender_id '
+          'WHERE m.conv_id = ? '
+          'ORDER BY m.sent_at DESC LIMIT 20',
+          [op.readConvId],
+        ),
+      );
 
     case _OpType.readUser:
-      await _timeRead(peer, record, () => peer.select(
-            'SELECT id, name, avatar_url FROM users WHERE id = ?',
-            [op.userId],
-          ));
+      await _timeRead(
+        peer,
+        record,
+        () => peer.select(
+          'SELECT id, name, avatar_url FROM users WHERE id = ?',
+          [op.userId],
+        ),
+      );
   }
 }
 
@@ -466,8 +476,10 @@ void _writeResults(
     md
       ..writeln('### ${opType.title}')
       ..writeln()
-      ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-          'Main med (ms) | Main p90 (ms) |')
+      ..writeln(
+        '| Library | Wall med (ms) | Wall p90 (ms) | '
+        'Main med (ms) | Main p90 (ms) |',
+      )
       ..writeln('|---|---|---|---|---|');
     for (final entry in perPeerTimings.entries) {
       final timing = entry.value[opType]!;
@@ -483,11 +495,13 @@ void _writeResults(
     md.writeln();
   }
   md
-    ..writeln('**Interpretation.** Each op type is timed independently. '
-        'A library that dominates on one op type (e.g. reads) may lose '
-        'on another (e.g. inserts under commit pressure). For '
-        'Flutter-facing usage, the `Main med` column is the key number: '
-        'it\'s the time spent on the UI thread per op.')
+    ..writeln(
+      '**Interpretation.** Each op type is timed independently. '
+      'A library that dominates on one op type (e.g. reads) may lose '
+      'on another (e.g. inserts under commit pressure). For '
+      'Flutter-facing usage, the `Main med` column is the key number: '
+      'it\'s the time spent on the UI thread per op.',
+    )
     ..writeln();
 }
 

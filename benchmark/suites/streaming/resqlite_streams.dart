@@ -8,7 +8,9 @@ import 'package:resqlite/resqlite.dart';
 /// Streaming benchmarks for resqlite.
 /// Outputs JSON results to stdout for the runner to collect.
 Future<void> main() async {
-  final tempDir = await Directory.systemTemp.createTemp('bench_stream_resqlite_');
+  final tempDir = await Directory.systemTemp.createTemp(
+    'bench_stream_resqlite_',
+  );
   final results = <String, dynamic>{};
 
   try {
@@ -16,10 +18,9 @@ Future<void> main() async {
     await db.execute(
       'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER NOT NULL)',
     );
-    await db.executeBatch(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      [for (var i = 0; i < 100; i++) ['item_$i', i]],
-    );
+    await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+      for (var i = 0; i < 100; i++) ['item_$i', i],
+    ]);
 
     // --- 1. Initial emission latency ---
     {
@@ -67,7 +68,10 @@ Future<void> main() async {
         });
 
         final sw = Stopwatch()..start();
-        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', ['bench_${counter++}', i]);
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'bench_${counter++}',
+          i,
+        ]);
         await reEmit.future.timeout(const Duration(seconds: 2));
         sw.stop();
         timings.add(sw.elapsedMicroseconds);
@@ -101,28 +105,32 @@ Future<void> main() async {
           final stream = db.stream(
             "SELECT COUNT(*) as cnt, '$i' as sid FROM items",
           );
-          subs.add(stream.listen((_) {
-            emitCount++;
-            if (emitCount == 1 && !initialC.isCompleted) {
-              initialC.complete();
-            } else if (emitCount >= 2 && !reEmitC.isCompleted) {
-              reEmitC.complete();
-            }
-          }));
+          subs.add(
+            stream.listen((_) {
+              emitCount++;
+              if (emitCount == 1 && !initialC.isCompleted) {
+                initialC.complete();
+              } else if (emitCount >= 2 && !reEmitC.isCompleted) {
+                reEmitC.complete();
+              }
+            }),
+          );
         }
 
         // Wait for all initial emissions.
-        await Future.wait(initialCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await Future.wait(
+          initialCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
 
         // Time: write → all re-emissions arrive.
         final sw = Stopwatch()..start();
-        await db.execute(
-          'INSERT INTO items(name, value) VALUES (?, ?)',
-          ['fanout_${counter++}', iter],
-        );
-        await Future.wait(reEmitCompleters.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'fanout_${counter++}',
+          iter,
+        ]);
+        await Future.wait(
+          reEmitCompleters.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
         sw.stop();
         timings.add(sw.elapsedMicroseconds);
 

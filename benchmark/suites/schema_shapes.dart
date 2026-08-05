@@ -24,17 +24,16 @@ Future<String> runSchemaShapesBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Schema Shapes (1000 rows)');
   markdown.writeln('');
-  markdown.writeln('Tests performance across different column counts and data types.');
+  markdown.writeln(
+    'Tests performance across different column counts and data types.',
+  );
   markdown.writeln('');
 
   for (final shape in _shapes) {
     final tempDir = await Directory.systemTemp.createTemp('bench_shape_');
     try {
       final timings = await _benchmarkShape(tempDir.path, shape);
-      printComparisonTable(
-        '=== Schema: ${shape.name} ===',
-        timings,
-      );
+      printComparisonTable('=== Schema: ${shape.name} ===', timings);
       markdown.write(markdownTable(shape.name, timings));
     } finally {
       await tempDir.delete(recursive: true);
@@ -70,11 +69,14 @@ final class _Shape {
 final _shapes = <_Shape>[
   _Shape(
     name: 'Narrow (2 cols: id + int)',
-    createSql: 'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
+    createSql:
+        'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)',
     insertSql: 'INSERT INTO t(value) VALUES (?)',
     selectSql: 'SELECT * FROM t',
     rowBuilder: (i) => [i * 7],
-    driftFactory: _driftFactoryFor<NarrowDriftDb>((exec) => NarrowDriftDb(exec)),
+    driftFactory: _driftFactoryFor<NarrowDriftDb>(
+      (exec) => NarrowDriftDb(exec),
+    ),
   ),
   _Shape(
     name: 'Wide (20 cols: mixed types)',
@@ -91,11 +93,25 @@ final _shapes = <_Shape>[
         'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     selectSql: 'SELECT * FROM t',
     rowBuilder: (i) => [
-      i, i + 1, i + 2, i + 3,
-      i * 0.1, i * 0.2, i * 0.3, i * 0.4,
-      'str_$i', 'text_${i % 100}', 'val_${i % 50}', 'data_$i',
-      i * 10, i * 0.5, 'more_$i', i * 100,
-      'field_${i % 20}', i * 1.1, i * 3,
+      i,
+      i + 1,
+      i + 2,
+      i + 3,
+      i * 0.1,
+      i * 0.2,
+      i * 0.3,
+      i * 0.4,
+      'str_$i',
+      'text_${i % 100}',
+      'val_${i % 50}',
+      'data_$i',
+      i * 10,
+      i * 0.5,
+      'more_$i',
+      i * 100,
+      'field_${i % 20}',
+      i * 1.1,
+      i * 3,
     ],
     driftFactory: _driftFactoryFor<WideDriftDb>((exec) => WideDriftDb(exec)),
   ),
@@ -110,7 +126,8 @@ final _shapes = <_Shape>[
       score REAL NOT NULL,
       count INTEGER NOT NULL
     )''',
-    insertSql: 'INSERT INTO t(title, body, summary, notes, score, count) VALUES (?,?,?,?,?,?)',
+    insertSql:
+        'INSERT INTO t(title, body, summary, notes, score, count) VALUES (?,?,?,?,?,?)',
     selectSql: 'SELECT * FROM t',
     rowBuilder: (i) => [
       'Title for item number $i which is fairly long to simulate real content',
@@ -122,7 +139,9 @@ final _shapes = <_Shape>[
       i * 1.5,
       i * 3,
     ],
-    driftFactory: _driftFactoryFor<TextHeavyDriftDb>((exec) => TextHeavyDriftDb(exec)),
+    driftFactory: _driftFactoryFor<TextHeavyDriftDb>(
+      (exec) => TextHeavyDriftDb(exec),
+    ),
   ),
   _Shape(
     name: 'Numeric-heavy (5 numeric cols)',
@@ -138,7 +157,9 @@ final _shapes = <_Shape>[
     insertSql: 'INSERT INTO t(a, b, c, d, e, label) VALUES (?,?,?,?,?,?)',
     selectSql: 'SELECT * FROM t',
     rowBuilder: (i) => [i * 7, i * 13, i * 0.333, i * 1.414, i * 99, 'n$i'],
-    driftFactory: _driftFactoryFor<NumericHeavyDriftDb>((exec) => NumericHeavyDriftDb(exec)),
+    driftFactory: _driftFactoryFor<NumericHeavyDriftDb>(
+      (exec) => NumericHeavyDriftDb(exec),
+    ),
   ),
   _Shape(
     name: 'Nullable (50% NULLs)',
@@ -151,7 +172,8 @@ final _shapes = <_Shape>[
       note TEXT,
       score REAL
     )''',
-    insertSql: 'INSERT INTO t(name, value, tag, count, note, score) VALUES (?,?,?,?,?,?)',
+    insertSql:
+        'INSERT INTO t(name, value, tag, count, note, score) VALUES (?,?,?,?,?,?)',
     selectSql: 'SELECT * FROM t',
     rowBuilder: (i) => [
       i.isEven ? 'name_$i' : null,
@@ -161,7 +183,9 @@ final _shapes = <_Shape>[
       i % 5 == 0 ? 'note for row $i' : null,
       i % 3 != 0 ? i * 0.7 : null,
     ],
-    driftFactory: _driftFactoryFor<NullableDriftDb>((exec) => NullableDriftDb(exec)),
+    driftFactory: _driftFactoryFor<NullableDriftDb>(
+      (exec) => NullableDriftDb(exec),
+    ),
   ),
 ];
 
@@ -174,10 +198,7 @@ DriftDbFactory _driftFactoryFor<T extends drift.GeneratedDatabase>(
 }
 
 Future<List<BenchmarkTiming>> _benchmarkShape(String dir, _Shape shape) async {
-  final peers = await PeerSet.open(
-    dir,
-    driftFactory: shape.driftFactory,
-  );
+  final peers = await PeerSet.open(dir, driftFactory: shape.driftFactory);
   final timings = <BenchmarkTiming>[];
   try {
     // Seed every peer with the shape-specific schema + rows. Drift

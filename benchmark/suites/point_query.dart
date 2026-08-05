@@ -68,9 +68,7 @@ Future<String> runPointQueryBenchmark() async {
   // ---- Multi-library CI+MDE subsection. ----
   markdown.writeln('### QPS + MDE');
   markdown.writeln('');
-  markdown.writeln(
-    '| Library | QPS median | 95% CI | MDE_ci % | MDE_mad % |',
-  );
+  markdown.writeln('| Library | QPS median | 95% CI | MDE_ci % | MDE_mad % |');
   markdown.writeln('|---|---:|---:|---:|---:|');
   for (final entry in libResults.entries) {
     final r = entry.value;
@@ -141,8 +139,7 @@ AdaptiveMeasurementPlan planAdaptivePointQueryMeasurement({
 String summarizeAdaptivePointQueryPlan({
   int sampleCount = kPointQuerySampleCount,
   Duration measurementTime = _pointQueryMeasurementTime,
-}) =>
-    '$sampleCount samples, target ${measurementTime.inMilliseconds} ms total';
+}) => '$sampleCount samples, target ${measurementTime.inMilliseconds} ms total';
 
 final class _MeasurementSample {
   const _MeasurementSample({required this.queryCount, required this.elapsedUs});
@@ -176,8 +173,7 @@ _QpsResult _summarize(List<_MeasurementSample> samples) {
   // is applied downstream in run_release.
   final qpsSamples = [
     for (final sample in samples)
-      if (sample.elapsedUs > 0)
-        sample.queryCount * 1000000 / sample.elapsedUs,
+      if (sample.elapsedUs > 0) sample.queryCount * 1000000 / sample.elapsedUs,
   ];
   if (qpsSamples.isEmpty) {
     return _QpsResult(

@@ -27,8 +27,8 @@ final class WorkloadMeta {
     required this.version,
     required this.title,
     required this.description,
-  })  : assert(version >= 1, 'Workload versions start at 1'),
-        assert(slug.length > 0, 'Slug required');
+  }) : assert(version >= 1, 'Workload versions start at 1'),
+       assert(slug.length > 0, 'Slug required');
 
   /// Snake-case machine identifier. Used in metric keys.
   /// Example: `chat_sim`, `column_disjoint_streams`.

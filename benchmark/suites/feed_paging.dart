@@ -34,7 +34,8 @@ const WorkloadMeta feedPagingMeta = WorkloadMeta(
   slug: 'feed_paging',
   version: 1,
   title: 'Feed Paging',
-  description: '100K posts. Part A: 20 keyset-paged queries of 50 posts '
+  description:
+      '100K posts. Part A: 20 keyset-paged queries of 50 posts '
       'each, all three peers. Part B: one reactive stream on latest-50 '
       'with 100 concurrent like_count writes, resqlite + sqlite_async. '
       'Models an infinite-scroll feed with live updates.',
@@ -232,9 +233,7 @@ Future<_ReactiveReading> _measureReactive(BenchmarkPeer peer) async {
   final timing = BenchmarkTiming(peer.label);
   final emissionsByIter = <int>[];
 
-  for (var iter = 0;
-      iter < _pagingWarmup + _reactiveIterations;
-      iter++) {
+  for (var iter = 0; iter < _pagingWarmup + _reactiveIterations; iter++) {
     final r = await _singleReactiveIteration(peer);
     if (iter >= _pagingWarmup) {
       timing.record(
@@ -263,24 +262,24 @@ final class _ReactiveIterResult {
   final int postBaselineEmissions;
 }
 
-Future<_ReactiveIterResult> _singleReactiveIteration(
-  BenchmarkPeer peer,
-) async {
+Future<_ReactiveIterResult> _singleReactiveIteration(BenchmarkPeer peer) async {
   final prng = math.Random(_prngSeed ^ 0xDEAD);
 
   var emissions = 0;
   var listenerUs = 0;
-  final sub = peer.watch(
-    'SELECT id, author_id, created_at, body, like_count FROM posts '
-    'ORDER BY created_at DESC, id DESC LIMIT ?',
-    params: [_pageSize],
-    readsFrom: const {'posts'},
-  ).listen((_) {
-    final sw = Stopwatch()..start();
-    emissions++;
-    sw.stop();
-    listenerUs += sw.elapsedMicroseconds;
-  });
+  final sub = peer
+      .watch(
+        'SELECT id, author_id, created_at, body, like_count FROM posts '
+        'ORDER BY created_at DESC, id DESC LIMIT ?',
+        params: [_pageSize],
+        readsFrom: const {'posts'},
+      )
+      .listen((_) {
+        final sw = Stopwatch()..start();
+        emissions++;
+        sw.stop();
+        listenerUs += sw.elapsedMicroseconds;
+      });
 
   try {
     // Drain initial emission.
@@ -305,8 +304,7 @@ Future<_ReactiveIterResult> _singleReactiveIteration(
     // Settle.
     var lastEmits = emissions;
     const quietWindow = Duration(milliseconds: 100);
-    final quietDeadline =
-        DateTime.now().add(const Duration(seconds: 20));
+    final quietDeadline = DateTime.now().add(const Duration(seconds: 20));
     while (DateTime.now().isBefore(quietDeadline)) {
       await Future<void>.delayed(quietWindow);
       if (emissions == lastEmits) break;
@@ -328,15 +326,14 @@ Future<_ReactiveIterResult> _singleReactiveIteration(
 // Markdown output
 // ---------------------------------------------------------------------------
 
-void _writePagingSection(
-  StringBuffer md,
-  Map<String, _PagingReading> byPeer,
-) {
+void _writePagingSection(StringBuffer md, Map<String, _PagingReading> byPeer) {
   md
     ..writeln('### Keyset pagination ($_pageCount pages × $_pageSize rows)')
     ..writeln()
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) |',
+    )
     ..writeln('|---|---|---|---|---|');
   for (final reading in byPeer.values) {
     md.writeln(
@@ -349,11 +346,13 @@ void _writePagingSection(
   }
   md
     ..writeln()
-    ..writeln('Keyset pagination walks backwards through the feed via '
-        '`(created_at, id) < (?, ?)` rather than `OFFSET`, which scales '
-        'with position rather than degrading on deep pages. Per-page '
-        'timing is reported; reading the p90 catches occasional slow '
-        'pages that would be invisible in a wall-aggregate.')
+    ..writeln(
+      'Keyset pagination walks backwards through the feed via '
+      '`(created_at, id) < (?, ?)` rather than `OFFSET`, which scales '
+      'with position rather than degrading on deep pages. Per-page '
+      'timing is reported; reading the p90 catches occasional slow '
+      'pages that would be invisible in a wall-aggregate.',
+    )
     ..writeln();
 }
 
@@ -365,8 +364,10 @@ void _writeReactiveSection(
   md
     ..writeln('### Reactive feed with $_likeWrites concurrent writes')
     ..writeln()
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) | Emissions |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) | Emissions |',
+    )
     ..writeln('|---|---|---|---|---|---|');
   for (final reading in byPeer.values) {
     md.writeln(
@@ -380,13 +381,15 @@ void _writeReactiveSection(
   }
   md
     ..writeln()
-    ..writeln('One stream on latest-50. $_likeWrites `like_count` '
-        'writes against random posts — most do not intersect the '
-        'watched page. `Main med` is aggregate listener-callback time '
-        '(UI thread cost, see METHODOLOGY.md § Measurement). '
-        '`Emissions` is post-baseline; a library with hash-based '
-        'unchanged suppression can stay near 0 when the watched page '
-        'does not change.')
+    ..writeln(
+      'One stream on latest-50. $_likeWrites `like_count` '
+      'writes against random posts — most do not intersect the '
+      'watched page. `Main med` is aggregate listener-callback time '
+      '(UI thread cost, see METHODOLOGY.md § Measurement). '
+      '`Emissions` is post-baseline; a library with hash-based '
+      'unchanged suppression can stay near 0 when the watched page '
+      'does not change.',
+    )
     ..writeln();
 }
 

@@ -80,6 +80,8 @@ Future<void> main(List<String> args) async {
 
   // Filenames are fixed up front so each completed repeat can be persisted
   // into them as it lands.
+  MemoryComparison? memoryComparison;
+
   final runTimestamp = DateTime.now()
       .toIso8601String()
       .replaceAll(':', '-')
@@ -93,19 +95,40 @@ Future<void> main(List<String> args) async {
     if (options.repeatCount > 1) {
       print('--- Repeat ${i + 1}/${options.repeatCount} ---');
     }
-    final markdown = await _runSuiteOnce(includeSlow: options.includeSlow);
-    runMarkdowns.add(markdown);
-    runMetrics.add(extractResqliteMedians(markdown));
-
-    // Persist what has completed, every repeat.
+    // Persist what has completed, after every scenario.
     //
     // The suite runs four libraries in one process, so a segfault anywhere —
     // including in a peer's native code, which is where the current one lives —
-    // takes the whole run down and used to destroy every repeat already
-    // measured. A run that got through four of five repeats produced nothing at
-    // all, which is a large part of why the trend charts are so sparse. Writing
-    // after each repeat means a crash costs the repeat in flight, not the run.
-    resultsDir.createSync(recursive: true);
+    // takes the whole run down. Exp 282 made a completed *repeat* survivable,
+    // but the peer crashing today does so at the Memory scenario inside repeat
+    // 1, so a full run still produced nothing at all. Persisting per scenario
+    // means a crash costs the scenario in flight, not the fourteen before it.
+    final markdown = await _runSuiteOnce(
+      includeSlow: options.includeSlow,
+      onScenario: (markdownSoFar, completed) async {
+        resultsDir.createSync(recursive: true);
+        jsonFile.writeAsStringSync(
+          const JsonEncoder.withIndent('  ').convert(
+            buildReleaseRunArtifact(
+              label: options.label,
+              // Repeats that finished before this one. The in-flight repeat
+              // counts only once it completes, so a partial repeat can never
+              // inflate the sample count a trend reads.
+              repeatCount: runMarkdowns.length,
+              markdown: markdownSoFar,
+              aggregates: aggregateRunMetrics(runMetrics),
+              environment: environment,
+              generatedAt: DateTime.now().toIso8601String(),
+              scenariosCompleted: completed,
+              scenarioTotal: scenarioTotal(includeSlow: options.includeSlow),
+            ),
+          ),
+        );
+      },
+    );
+    runMarkdowns.add(markdown);
+    runMetrics.add(extractResqliteMedians(markdown));
+
     jsonFile.writeAsStringSync(
       const JsonEncoder.withIndent('  ').convert(
         buildReleaseRunArtifact(
@@ -115,6 +138,8 @@ Future<void> main(List<String> args) async {
           aggregates: aggregateRunMetrics(runMetrics),
           environment: environment,
           generatedAt: DateTime.now().toIso8601String(),
+          scenariosCompleted: scenarioTotal(includeSlow: options.includeSlow),
+          scenarioTotal: scenarioTotal(includeSlow: options.includeSlow),
         ),
       ),
     );
@@ -182,13 +207,10 @@ Future<void> main(List<String> args) async {
     markdown.writeln(comparison);
     print(comparison);
 
-    final memComparison = generateMemoryComparison(
-      representativeMarkdown,
-      prevContent,
-    );
-    if (memComparison.isNotEmpty) {
-      markdown.writeln(memComparison);
-      print(memComparison);
+    memoryComparison = compareMemory(representativeMarkdown, prevContent);
+    if (memoryComparison.markdown.isNotEmpty) {
+      markdown.writeln(memoryComparison.markdown);
+      print(memoryComparison.markdown);
     }
 
     final streamColComparison = generateStreamingColumnComparison(
@@ -260,13 +282,50 @@ Future<void> main(List<String> args) async {
     print('   It is still saved, and still usable as one arm of an A/B.');
   }
 
+  // Memory acceptance criteria.
+  //
+  // The comparison table has always named regressions and nothing has ever
+  // failed on one, which is what the `per-benchmark RSS acceptance criteria`
+  // candidate open since 2026-05-02 was asking for. The thresholds are already
+  // per-benchmark (bootstrap MDE with a 0.5 MB floor); all that was missing was
+  // making the verdict visible and, on request, fatal.
+  if (memoryComparison != null && memoryComparison.hasRegression) {
+    print('');
+    print(
+      '!! Memory regression: ${memoryComparison.regressions} benchmark'
+      '${memoryComparison.regressions == 1 ? '' : 's'} above threshold',
+    );
+    for (final name in memoryComparison.regressedBenchmarks) {
+      print('   - $name');
+    }
+    print(
+      '   RSS is a lower bound, so a regression here is real even though a '
+      'win of the same size might not be.',
+    );
+  }
+
   if (options.hardwareSummary) {
     _printHardwareSummary(currentAggregates, options.label);
   }
 
-  // Force exit — persistent writer isolate and sqlite_async connections
-  // can keep the event loop alive.
-  exit(0);
+  final memoryGateFailed = shouldFailOnMemory(
+    failOnMemoryRegression: options.failOnMemoryRegression,
+    comparison: memoryComparison,
+  );
+  if (memoryGateFailed) {
+    final count = memoryComparison!.regressions;
+    print('');
+    print(
+      '!! Failing the run: --fail-on-memory-regression was passed and the '
+      'memory comparison found $count regression${count == 1 ? '' : 's'}.',
+    );
+  }
+
+  // Force exit — persistent writer isolate and sqlite_async connections can
+  // keep the event loop alive. The status has to be passed explicitly: setting
+  // the global `exitCode` and then calling `exit(0)` discards it, which is how
+  // the gate above shipped unable to fail anything.
+  exit(memoryGateFailed ? 1 : 0);
 }
 
 void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
@@ -382,73 +441,70 @@ void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
   );
 }
 
-Future<String> _runSuiteOnce({required bool includeSlow}) async {
+/// Run every scenario once, reporting progress after each one completes.
+///
+/// [onScenario] receives the markdown accumulated *so far*, plus how many
+/// scenarios of [scenarioTotal] have finished. [EXP-262]: the suite runs four
+/// libraries in one process, so a segfault anywhere — including in a peer's
+/// native code, which is where the current one lives — ends the process. Exp
+/// 282 made a completed *repeat* survivable, but the peer that crashes today
+/// does so at the Memory scenario inside repeat 1, so nothing was ever
+/// persisted. Reporting per scenario means a crash costs the scenario in
+/// flight, not the fourteen before it.
+Future<String> _runSuiteOnce({
+  required bool includeSlow,
+  required Future<void> Function(String markdownSoFar, int completed)
+  onScenario,
+}) async {
   final markdown = StringBuffer();
+  var completed = 0;
+  final total = scenarioTotal(includeSlow: includeSlow);
 
-  print('[1/15] Select → Maps...');
-  markdown.write(await runSelectMapsBenchmark());
+  Future<void> step(String label, Future<String> Function() run) async {
+    print('[${completed + 1}/$total] $label...');
+    markdown.write(await run());
+    completed++;
+    await onScenario(markdown.toString(), completed);
+  }
 
-  print('[2/15] Select → Bytes...');
-  markdown.write(await runSelectBytesBenchmark());
+  await step('Select → Maps', runSelectMapsBenchmark);
+  await step('Select → Bytes', runSelectBytesBenchmark);
+  await step('Schema Shapes', runSchemaShapesBenchmark);
+  await step('Scaling', runScalingBenchmark);
+  await step('Concurrent Reads', runConcurrentReadsBenchmark);
+  await step('Point Query', runPointQueryBenchmark);
+  await step('Parameterized Queries', runParameterizedBenchmark);
+  await step('Writes', runWritesBenchmark);
+  await step('Streaming', runStreamingBenchmark);
+  await step('Streaming (Column Granularity)', runDisjointColumnsBenchmark);
+  await step('Keyed PK Subscriptions (A11)', runKeyedPkSubscriptionsBenchmark);
+  await step('Chat Sim (A5)', runChatSimBenchmark);
+  await step('Feed Paging (A6)', runFeedPagingBenchmark);
+  await step(
+    'High-Cardinality Stream Fan-out (A11b)',
+    runHighCardinalityFanoutBenchmark,
+  );
+  await step('Memory', runMemoryBenchmark);
+  await step('SQLite Diagnostics', runSqliteDiagnosticsBenchmark);
 
-  print('[3/15] Schema Shapes...');
-  markdown.write(await runSchemaShapesBenchmark());
-
-  print('[4/15] Scaling...');
-  markdown.write(await runScalingBenchmark());
-
-  print('[5/15] Concurrent Reads...');
-  markdown.write(await runConcurrentReadsBenchmark());
-
-  print('[6/15] Point Query...');
-  markdown.write(await runPointQueryBenchmark());
-
-  print('[7/15] Parameterized Queries...');
-  markdown.write(await runParameterizedBenchmark());
-
-  print('[8/15] Writes...');
-  markdown.write(await runWritesBenchmark());
-
-  print('[9/15] Streaming...');
-  markdown.write(await runStreamingBenchmark());
-
-  print('[10/15] Streaming (Column Granularity)...');
-  markdown.write(await runDisjointColumnsBenchmark());
-
-  print('[11/15] Keyed PK Subscriptions (A11)...');
-  markdown.write(await runKeyedPkSubscriptionsBenchmark());
-
-  print('[12/15] Chat Sim (A5)...');
-  markdown.write(await runChatSimBenchmark());
-
-  print('[13/15] Feed Paging (A6)...');
-  markdown.write(await runFeedPagingBenchmark());
-
-  print('[14/15] High-Cardinality Stream Fan-out (A11b)...');
-  markdown.write(await runHighCardinalityFanoutBenchmark());
-
-  print('[15/16] Memory...');
-  markdown.write(await runMemoryBenchmark());
-
-  print('[16/16] SQLite Diagnostics...');
-  markdown.write(await runSqliteDiagnosticsBenchmark());
-
-  // Slow workloads — opt-in via --include-slow because they take
-  // multiple minutes each. Register here so they append to the
-  // standard suite output when enabled.
+  // Slow workloads — opt-in via --include-slow because they take multiple
+  // minutes each. Registered here so they append to the standard suite output.
   if (includeSlow) {
-    print('[slow 1/3] Sync Burst (A7)...');
-    markdown.write(await runSyncBurstBenchmark());
-
-    print('[slow 2/3] Large Working Set (A9)...');
-    markdown.write(await runLargeWorkingSetBenchmark());
-
-    print('[slow 3/3] Many-Streams Writer Throughput (A11c)...');
-    markdown.write(await runManyStreamsWriterThroughputBenchmark());
+    await step('Sync Burst (A7)', runSyncBurstBenchmark);
+    await step('Large Working Set (A9)', runLargeWorkingSetBenchmark);
+    await step(
+      'Many-Streams Writer Throughput (A11c)',
+      runManyStreamsWriterThroughputBenchmark,
+    );
   }
 
   return markdown.toString();
 }
+
+/// How many scenarios a single repeat runs. Kept next to [_runSuiteOnce] so the
+/// progress labels and the persisted `scenarioTotal` cannot drift apart — they
+/// already had, the standard suite printing `[1/15]` through `[16/16]`.
+int scenarioTotal({required bool includeSlow}) => includeSlow ? 19 : 16;
 
 final class _ComparisonBaseline {
   const _ComparisonBaseline._({
@@ -587,6 +643,7 @@ final class _RunAllOptions {
   const _RunAllOptions({
     required this.label,
     required this.repeatCount,
+    required this.failOnMemoryRegression,
     required this.compareToPath,
     required this.autoCompare,
     required this.hardwareSummary,
@@ -595,6 +652,11 @@ final class _RunAllOptions {
 
   final String label;
   final int repeatCount;
+
+  /// Exit non-zero when the memory comparison finds a benchmark above its
+  /// per-benchmark threshold. Off by default so a local run still reports the
+  /// regression without failing; CI opts in.
+  final bool failOnMemoryRegression;
   final String? compareToPath;
   final bool autoCompare;
   final bool hardwareSummary;
@@ -610,13 +672,16 @@ final class _RunAllOptions {
 _RunAllOptions _parseOptions(List<String> args) {
   var label = 'unlabeled';
   var repeatCount = 5;
+  var failOnMemoryRegression = false;
   String? compareToPath;
   var autoCompare = true;
   var hardwareSummary = false;
   var includeSlow = false;
 
   for (final arg in args) {
-    if (arg.startsWith('--repeat=')) {
+    if (arg == '--fail-on-memory-regression') {
+      failOnMemoryRegression = true;
+    } else if (arg.startsWith('--repeat=')) {
       repeatCount = int.parse(arg.substring('--repeat='.length));
     } else if (arg.startsWith('--compare-to=')) {
       compareToPath = arg.substring('--compare-to='.length);
@@ -642,6 +707,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   return _RunAllOptions(
     label: label,
     repeatCount: repeatCount,
+    failOnMemoryRegression: failOnMemoryRegression,
     compareToPath: compareToPath,
     autoCompare: autoCompare,
     hardwareSummary: hardwareSummary,
@@ -657,6 +723,10 @@ void _printUsageAndExit() {
   );
   print('');
   print('  --repeat=N           Run the suite N times (default: 5)');
+  print(
+    '  --fail-on-memory-regression  Exit non-zero if any benchmark exceeds '
+    'its per-benchmark RSS threshold',
+  );
   print(
     '  --compare-to=PATH    Compare against a specific baseline results file',
   );

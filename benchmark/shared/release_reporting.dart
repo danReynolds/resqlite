@@ -89,7 +89,9 @@ String generateReleaseComparison(
     final delta = curr - prev;
     final pct = prev > 0 ? (delta / prev * 100) : 0.0;
     final mdeCiPct = stats.ciMdePct(seed: _releaseBootstrapSeed);
-    final thresholdPct = stats.decisionThresholdPct(seed: _releaseBootstrapSeed);
+    final thresholdPct = stats.decisionThresholdPct(
+      seed: _releaseBootstrapSeed,
+    );
     final thresholdMs = math.max(
       AggregateStats.minimumComparisonThresholdMs,
       math.max(prev, curr) * (thresholdPct / 100),
@@ -156,14 +158,68 @@ String generateReleaseComparison(
   return buf.toString();
 }
 
+/// A memory comparison's rendered table plus the verdict a caller can act on.
+///
+/// [EXP-262](../../experiments/262-release-scenario-persistence.md): the table
+/// has always named regressions; nothing could ever *fail* on one, which is what
+/// the long-open "per-benchmark RSS acceptance criteria" candidate was asking
+/// for. Splitting the counts out of the markdown is what makes a gate possible.
+final class MemoryComparison {
+  const MemoryComparison({
+    required this.markdown,
+    required this.wins,
+    required this.regressions,
+    required this.neutral,
+    required this.regressedBenchmarks,
+  });
+
+  /// Empty when neither run carried a `## Memory` section.
+  final String markdown;
+
+  final int wins;
+  final int regressions;
+  final int neutral;
+
+  /// Benchmark names that regressed beyond their threshold, with the delta, in
+  /// the order they appear in the table.
+  final List<String> regressedBenchmarks;
+
+  bool get hasRegression => regressions > 0;
+
+  /// Neither run carried a `## Memory` section, so there is nothing to render
+  /// and nothing to gate on.
+  const MemoryComparison.empty()
+    : markdown = '',
+      wins = 0,
+      regressions = 0,
+      neutral = 0,
+      regressedBenchmarks = const [];
+}
+
+/// Whether a run should fail because of memory.
+///
+/// Extracted so the decision is testable on its own. It shipped in review
+/// unable to fail anything — the runner set the global `exitCode` and then
+/// called `exit(0)`, which discards it — and the unit tests of [compareMemory]
+/// could not have caught that, because they tested the comparison rather than
+/// what the caller did with it.
+bool shouldFailOnMemory({
+  required bool failOnMemoryRegression,
+  required MemoryComparison? comparison,
+}) => failOnMemoryRegression && comparison != null && comparison.hasRegression;
+
+/// Render-only wrapper kept for callers that just want the table.
 String generateMemoryComparison(
   String currentMarkdown,
   String previousContent,
-) {
+) => compareMemory(currentMarkdown, previousContent).markdown;
+
+MemoryComparison compareMemory(String currentMarkdown, String previousContent) {
   final current = extractMemoryMedians(currentMarkdown);
   final previous = extractMemoryMedians(previousContent);
 
-  if (current.isEmpty && previous.isEmpty) return '';
+  if (current.isEmpty && previous.isEmpty)
+    return const MemoryComparison.empty();
 
   final buf = StringBuffer();
   buf.writeln('## Memory Comparison vs Previous Run');
@@ -172,7 +228,13 @@ String generateMemoryComparison(
   if (current.isEmpty) {
     buf.writeln('Current run has no `## Memory` section.');
     buf.writeln();
-    return buf.toString();
+    return MemoryComparison(
+      markdown: buf.toString(),
+      wins: 0,
+      regressions: 0,
+      neutral: 0,
+      regressedBenchmarks: const [],
+    );
   }
   if (previous.isEmpty) {
     buf.writeln(
@@ -180,7 +242,13 @@ String generateMemoryComparison(
       'Current values recorded for next-run comparison.',
     );
     buf.writeln();
-    return buf.toString();
+    return MemoryComparison(
+      markdown: buf.toString(),
+      wins: 0,
+      regressions: 0,
+      neutral: 0,
+      regressedBenchmarks: const [],
+    );
   }
 
   buf.writeln('| Benchmark | Prev (MB) | Curr (MB) | Delta | MDE | Status |');
@@ -191,6 +259,7 @@ String generateMemoryComparison(
   var wins = 0;
   var regressions = 0;
   var neutral = 0;
+  final regressed = <String>[];
 
   final keys = current.keys.where(previous.containsKey).toList()..sort();
   for (final key in keys) {
@@ -207,6 +276,7 @@ String generateMemoryComparison(
     } else if (delta > threshold) {
       status = '🔴 Regression (+${delta.toStringAsFixed(2)} MB)';
       regressions++;
+      regressed.add('$key (+${delta.toStringAsFixed(2)} MB)');
     } else {
       status = '⚪ Within MDE';
       neutral++;
@@ -236,7 +306,13 @@ String generateMemoryComparison(
   );
   buf.writeln();
 
-  return buf.toString();
+  return MemoryComparison(
+    markdown: buf.toString(),
+    wins: wins,
+    regressions: regressions,
+    neutral: neutral,
+    regressedBenchmarks: regressed,
+  );
 }
 
 String generateStreamingColumnComparison(

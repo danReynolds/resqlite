@@ -92,7 +92,12 @@ const _lanes = <_Lane>[
   _Lane('10k x 20 INTEGER (exit)', 20, _Type.int_),
   _Lane('10k x 8 REAL (exit)', 8, _Type.double_),
   _Lane('10k x 20 REAL (exit)', 20, _Type.double_),
-  _Lane('10k x (16 REAL + 4 TEXT) mixed (exit)', 16, _Type.double_, textCols: 4),
+  _Lane(
+    '10k x (16 REAL + 4 TEXT) mixed (exit)',
+    16,
+    _Type.double_,
+    textCols: 4,
+  ),
 ];
 
 // Raw numeric source: a flat Float64List of totalNumeric cells, plus a text
@@ -241,7 +246,10 @@ void _workerMain(SendPort toMain) {
       return;
     }
     final req = msg as _BuildReq;
-    final s = sources.putIfAbsent(req.laneIndex, () => _Source(_lanes[req.laneIndex]));
+    final s = sources.putIfAbsent(
+      req.laneIndex,
+      () => _Source(_lanes[req.laneIndex]),
+    );
     final container = req.columnar ? _buildColumnar(s) : _buildFlat(s);
     req.reply.send(container);
   });
@@ -341,8 +349,10 @@ Future<void> main(List<String> args) async {
   final worker = await fromMain.first as SendPort;
 
   print('# Exp 258 — columnar result transfer A/B');
-  print('inner=$_inner samples=$_samples sacrificeSlots=$_sacrificeSlots '
-      'order=${flip ? "columnar-first" : "flat-first"}\n');
+  print(
+    'inner=$_inner samples=$_samples sacrificeSlots=$_sacrificeSlots '
+    'order=${flip ? "columnar-first" : "flat-first"}\n',
+  );
 
   final rows = <List<String>>[];
   for (var li = 0; li < _lanes.length; li++) {
@@ -413,11 +423,13 @@ Future<void> main(List<String> args) async {
   for (final r in rows) {
     print('| ${r.join(' | ')} |');
   }
-  print('\nAll times are ms. Δ = columnar vs flat (negative = columnar '
-      'faster). Build is worker-side (off main isolate); Hop is the '
-      'main-observed round trip (build+serialize+receive); Cons is '
-      'main-isolate full-scan. NET = hop+cons is the main-isolate-charged '
-      'decision figure.');
+  print(
+    '\nAll times are ms. Δ = columnar vs flat (negative = columnar '
+    'faster). Build is worker-side (off main isolate); Hop is the '
+    'main-observed round trip (build+serialize+receive); Cons is '
+    'main-isolate full-scan. NET = hop+cons is the main-isolate-charged '
+    'decision figure.',
+  );
 
   // Memory lane (separate, single-shot to avoid cross-contamination).
   print('\n## Memory lane (peak RSS holding $_memHold live result sets)\n');
@@ -428,8 +440,10 @@ Future<void> main(List<String> args) async {
     final flatRss = _memLane(s, false) / (1024 * 1024);
     final colRss = _memLane(s, true) / (1024 * 1024);
     final d = flatRss == 0 ? 0 : (colRss - flatRss) / flatRss * 100;
-    print('| ${lane.label} | ${flatRss.toStringAsFixed(1)} | '
-        '${colRss.toStringAsFixed(1)} | ${d.toStringAsFixed(1)}% |');
+    print(
+      '| ${lane.label} | ${flatRss.toStringAsFixed(1)} | '
+      '${colRss.toStringAsFixed(1)} | ${d.toStringAsFixed(1)}% |',
+    );
   }
   print('\nRSS is process-wide and noisy; read only large, reproduced gaps.');
 

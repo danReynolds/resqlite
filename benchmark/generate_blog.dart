@@ -51,9 +51,9 @@ void main() {
     print('  ${post.slug}.html - ${post.title}');
   }
   for (final entry in _legacyArchitectureRedirects.entries) {
-    File('${outDir.path}/${entry.key}.html').writeAsStringSync(
-      _renderRedirect(entry.value, 'resqlite Architecture'),
-    );
+    File(
+      '${outDir.path}/${entry.key}.html',
+    ).writeAsStringSync(_renderRedirect(entry.value, 'resqlite Architecture'));
     print('  ${entry.key}.html - redirect to ${entry.value}');
   }
 
@@ -69,17 +69,13 @@ void main() {
   print('  stories/index.html - redirect to ../index.html');
 
   for (final experiment in experiments) {
-    File(
-      '${experimentOutDir.path}/${experiment.slug}.html',
-    ).writeAsStringSync(
+    File('${experimentOutDir.path}/${experiment.slug}.html').writeAsStringSync(
       _compactGeneratedHtml(_renderPost(experiment, PostKind.experiment)),
     );
     print('  blog/experiments/${experiment.slug}.html - ${experiment.title}');
   }
 
-  File(
-    '${experimentOutDir.path}/index.html',
-  ).writeAsStringSync(
+  File('${experimentOutDir.path}/index.html').writeAsStringSync(
     _compactGeneratedHtml(_renderExperimentBlogIndex(experiments)),
   );
   print('  blog/experiments/index.html - Experiment posts');
@@ -158,8 +154,9 @@ List<BlogPost> _loadStories(Directory dir) {
         ? meta['slug']!.trim()
         : fallbackSlug;
     final dateText = meta['date']?.trim();
-    final date =
-        dateText == null || dateText.isEmpty ? null : DateTime.parse(dateText);
+    final date = dateText == null || dateText.isEmpty
+        ? null
+        : DateTime.parse(dateText);
 
     stories.add(
       BlogPost(
@@ -354,13 +351,12 @@ String _renderBlogIndex(
 ) {
   final allPosts = [
     ...stories.reversed.map(
-      (post) => _renderBlogHomePostItem(
-        post,
-        href: 'stories/${post.slug}.html',
-      ),
+      (post) =>
+          _renderBlogHomePostItem(post, href: 'stories/${post.slug}.html'),
     ),
     ...posts.map(
-        (post) => _renderBlogHomePostItem(post, href: '${post.slug}.html')),
+      (post) => _renderBlogHomePostItem(post, href: '${post.slug}.html'),
+    ),
   ].join('\n');
   final recentExperiments = experiments.reversed
       .take(3)
@@ -430,8 +426,9 @@ $recentExperiments
 }
 
 String _renderBlogHomePostItem(BlogPost post, {required String href}) {
-  final date =
-      post.date == null ? '' : '<time>${_esc(_longDate(post.date))}</time>';
+  final date = post.date == null
+      ? ''
+      : '<time>${_esc(_longDate(post.date))}</time>';
   return '''
         <a class="post-row" href="$href">
           <span class="post-row-meta">${date.isEmpty ? _esc(post.category) : '$date · ${_esc(post.category)}'}</span>
@@ -441,8 +438,9 @@ String _renderBlogHomePostItem(BlogPost post, {required String href}) {
 }
 
 String _renderSidebarExperiment(BlogPost post) {
-  final date =
-      post.date == null ? '' : '<time>${_esc(_longDate(post.date))}</time>';
+  final date = post.date == null
+      ? ''
+      : '<time>${_esc(_longDate(post.date))}</time>';
   return '''
           <a class="sidebar-item" href="experiments/${post.slug}.html">
             <span>${date.isEmpty ? _esc(post.category) : '$date · ${_esc(post.category)}'}</span>
@@ -573,14 +571,16 @@ String _renderPost(BlogPost post, PostKind kind) {
       ? _renderTableOfContents(post.content)
       : '';
   final nav = switch (kind) {
-    PostKind.story => '''
+    PostKind.story =>
+      '''
   <nav class="top-nav">
     <a href="../index.html">&larr; Blog</a>
     <a href="../../index.html">Home</a>
     <a href="../../benchmarks/index.html">Benchmarks</a>
     <a href="../experiments/index.html">Experiment Posts</a>
   </nav>''',
-    PostKind.experiment => '''
+    PostKind.experiment =>
+      '''
   <nav class="top-nav">
     <a href="index.html">&larr; All Experiments</a>
     <a href="../index.html">Blog</a>
@@ -588,7 +588,8 @@ String _renderPost(BlogPost post, PostKind kind) {
     <a href="../../benchmarks/index.html">Benchmarks</a>
     <a href="../../experiments/index.html">Experiment Dashboard</a>
   </nav>''',
-    PostKind.blog => '''
+    PostKind.blog =>
+      '''
   <nav class="top-nav">
     <a href="index.html">&larr; All Posts</a>
     <a href="../index.html">Home</a>
@@ -599,8 +600,8 @@ String _renderPost(BlogPost post, PostKind kind) {
   final meta = isStory
       ? '    <p class="story-byline">${_esc(_longDate(post.date))}${post.tags.isEmpty ? '' : ' · ${post.tags.map(_esc).join(' · ')}'}</p>\n'
       : isExperiment
-          ? _renderExperimentMeta(post)
-          : '';
+      ? _renderExperimentMeta(post)
+      : '';
   final body = isStory || isExperiment
       ? '$meta$htmlBody'
       : '    $tableOfContents$htmlBody';
@@ -647,9 +648,7 @@ String _compactGeneratedHtml(String html) {
       .join(' ')
       .replaceAll(RegExp(r'>\s+<'), '><');
 
-  return compact.replaceAllMapped(RegExp(r'___RESQLITE_PRE_(\d+)___'), (
-    match,
-  ) {
+  return compact.replaceAllMapped(RegExp(r'___RESQLITE_PRE_(\d+)___'), (match) {
     return protectedBlocks[int.parse(match.group(1)!)];
   });
 }
@@ -791,22 +790,28 @@ String _markdownToHtml(String md, PostKind kind) {
 
     if (trimmed.startsWith('######')) {
       buf.writeln(
-          _renderHeading(6, trimmed.substring(6).trim(), kind, usedHeadingIds));
+        _renderHeading(6, trimmed.substring(6).trim(), kind, usedHeadingIds),
+      );
     } else if (trimmed.startsWith('#####')) {
       buf.writeln(
-          _renderHeading(5, trimmed.substring(5).trim(), kind, usedHeadingIds));
+        _renderHeading(5, trimmed.substring(5).trim(), kind, usedHeadingIds),
+      );
     } else if (trimmed.startsWith('####')) {
       buf.writeln(
-          _renderHeading(4, trimmed.substring(4).trim(), kind, usedHeadingIds));
+        _renderHeading(4, trimmed.substring(4).trim(), kind, usedHeadingIds),
+      );
     } else if (trimmed.startsWith('###')) {
       buf.writeln(
-          _renderHeading(3, trimmed.substring(3).trim(), kind, usedHeadingIds));
+        _renderHeading(3, trimmed.substring(3).trim(), kind, usedHeadingIds),
+      );
     } else if (trimmed.startsWith('##')) {
       buf.writeln(
-          _renderHeading(2, trimmed.substring(2).trim(), kind, usedHeadingIds));
+        _renderHeading(2, trimmed.substring(2).trim(), kind, usedHeadingIds),
+      );
     } else if (trimmed.startsWith('# ')) {
       buf.writeln(
-          _renderHeading(1, trimmed.substring(2).trim(), kind, usedHeadingIds));
+        _renderHeading(1, trimmed.substring(2).trim(), kind, usedHeadingIds),
+      );
     } else if (RegExp(r'^-{3,}$').hasMatch(trimmed)) {
       buf.writeln('<hr>');
     } else if (RegExp(r'^[-*]\s').hasMatch(trimmed)) {
@@ -884,8 +889,9 @@ String _renderTable(List<String> rows, PostKind kind) {
   List<String> parseCells(String row) =>
       row.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
-  final dataRows =
-      rows.where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r)).toList();
+  final dataRows = rows
+      .where((r) => !RegExp(r'^\|[\s\-:|]+\|$').hasMatch(r))
+      .toList();
   if (dataRows.isEmpty) return '';
 
   final headerCells = parseCells(dataRows[0]);
@@ -904,7 +910,8 @@ String _renderTable(List<String> rows, PostKind kind) {
   final colBest = <int, double>{};
   for (final c in numericCols) {
     final header = c < headerCells.length ? headerCells[c].toLowerCase() : '';
-    final higherIsBetter = header.contains('qps') ||
+    final higherIsBetter =
+        header.contains('qps') ||
         header.contains('ops') ||
         header.contains('/sec') ||
         header.contains('throughput');

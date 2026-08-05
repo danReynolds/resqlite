@@ -47,7 +47,8 @@ const WorkloadMeta largeWorkingSetMeta = WorkloadMeta(
   slug: 'large_working_set',
   version: 1,
   title: 'Large Working Set',
-  description: 'Random-point and range-scan latency on a ~1 GB '
+  description:
+      'Random-point and range-scan latency on a ~1 GB '
       'database. Measures behavior at scale, where mmap and page '
       'cache matter. Cold-cache and warm-cache variants reported '
       'separately. Seed is cached across runs. Opt-in via '
@@ -66,13 +67,13 @@ const int _prngSeed = 0xB16B00B5;
 
 /// Production entry — uses the full 1 GB seed scale.
 Future<String> runLargeWorkingSetBenchmark() => _runLargeWorkingSetBenchmark(
-      seedRowCount: _seedRowCount,
-      cacheFilename: 'large_working_set_v1.db',
-      pointQueriesPerRound: _pointQueriesPerRound,
-      rangeScansPerRound: _rangeScansPerRound,
-      warmRounds: _warmRounds,
-      coldRounds: _coldRounds,
-    );
+  seedRowCount: _seedRowCount,
+  cacheFilename: 'large_working_set_v1.db',
+  pointQueriesPerRound: _pointQueriesPerRound,
+  rangeScansPerRound: _rangeScansPerRound,
+  warmRounds: _warmRounds,
+  coldRounds: _coldRounds,
+);
 
 /// Test entry — uses a reduced scale so the DoD unit test can run
 /// in seconds rather than paying the 1 GB seed cost. Exposed only
@@ -110,12 +111,16 @@ Future<String> _runLargeWorkingSetBenchmark({
   final seedFile = File('${cacheDir.path}/$cacheFilename');
 
   if (!seedFile.existsSync()) {
-    print('  seeding ${(seedRowCount / 1000).toStringAsFixed(0)}K '
-        'rows (one-time cost)...');
+    print(
+      '  seeding ${(seedRowCount / 1000).toStringAsFixed(0)}K '
+      'rows (one-time cost)...',
+    );
     await _seedCacheFile(seedFile.path, seedRowCount);
   } else {
-    print('  using cached seed at ${seedFile.path} '
-        '(${(seedFile.lengthSync() / (1 << 20)).toStringAsFixed(0)} MB)');
+    print(
+      '  using cached seed at ${seedFile.path} '
+      '(${(seedFile.lengthSync() / (1 << 20)).toStringAsFixed(0)} MB)',
+    );
   }
 
   final warmByPeer = <String, _Reading>{};
@@ -125,13 +130,13 @@ Future<String> _runLargeWorkingSetBenchmark({
     // Each peer gets its own copy of the seeded DB. We copy rather
     // than open in-place so peers don't stomp each other's WAL / SHM
     // state.
-    final tempDir =
-        await Directory.systemTemp.createTemp('bench_large_${mode.name}_');
+    final tempDir = await Directory.systemTemp.createTemp(
+      'bench_large_${mode.name}_',
+    );
     try {
       final peers = await PeerSet.open(
         tempDir.path,
-        driftFactory:
-            driftFactoryFor((exec) => LargeWorkingSetDriftDb(exec)),
+        driftFactory: driftFactoryFor((exec) => LargeWorkingSetDriftDb(exec)),
       );
       try {
         for (final peer in peers.all) {
@@ -221,8 +226,9 @@ Future<_Reading> _measureRounds(
     for (var i = 0; i < pointQueriesPerRound; i++) {
       final id = prng.nextInt(seedRowCount) + 1;
       final sw = Stopwatch()..start();
-      final rows =
-          await peer.select('SELECT payload FROM items WHERE id = ?', [id]);
+      final rows = await peer.select('SELECT payload FROM items WHERE id = ?', [
+        id,
+      ]);
       for (final row in rows) {
         for (final v in row.values) {
           if (identical(v, v)) continue;
@@ -275,9 +281,11 @@ Future<void> _seedCacheFile(String path, int seedRowCount) async {
   final peer = ResqlitePeer();
   await peer.open(path);
   try {
-    await peer.execute('CREATE TABLE items('
-        'id INTEGER PRIMARY KEY, '
-        'payload TEXT NOT NULL)');
+    await peer.execute(
+      'CREATE TABLE items('
+      'id INTEGER PRIMARY KEY, '
+      'payload TEXT NOT NULL)',
+    );
     // Chunked batch insert so we don't allocate one massive paramSets
     // array (5M rows would blow up heap).
     const chunkSize = 5000;
@@ -287,13 +295,14 @@ Future<void> _seedCacheFile(String path, int seedRowCount) async {
       final n = (offset + chunkSize <= seedRowCount)
           ? chunkSize
           : seedRowCount - offset;
-      await peer.executeBatch(
-        'INSERT INTO items(payload) VALUES (?)',
-        [for (var i = 0; i < n; i++) [payload]],
-      );
+      await peer.executeBatch('INSERT INTO items(payload) VALUES (?)', [
+        for (var i = 0; i < n; i++) [payload],
+      ]);
       if (progressEvery > 0 && offset > 0 && offset % progressEvery == 0) {
-        print('    seeded '
-            '${(offset / seedRowCount * 100).toStringAsFixed(0)}%');
+        print(
+          '    seeded '
+          '${(offset / seedRowCount * 100).toStringAsFixed(0)}%',
+        );
       }
     }
     print('    seeded 100%');
@@ -331,12 +340,16 @@ void _writeSection(
   md
     ..writeln('### $title')
     ..writeln()
-    ..writeln('Random-point ($pointQueriesPerRound/round) and range-scan '
-        '($rangeScansPerRound/round, LIMIT $_rangeScanLimit) against a '
-        '${(seedRowCount / 1000).toStringAsFixed(0)}K-row table.')
+    ..writeln(
+      'Random-point ($pointQueriesPerRound/round) and range-scan '
+      '($rangeScansPerRound/round, LIMIT $_rangeScanLimit) against a '
+      '${(seedRowCount / 1000).toStringAsFixed(0)}K-row table.',
+    )
     ..writeln()
-    ..writeln('| Library | Point p50 (ms) | Point p90 (ms) | '
-        'Range p50 (ms) | Range p90 (ms) |')
+    ..writeln(
+      '| Library | Point p50 (ms) | Point p90 (ms) | '
+      'Range p50 (ms) | Range p90 (ms) |',
+    )
     ..writeln('|---|---|---|---|---|');
   for (final reading in byPeer.values) {
     md.writeln(

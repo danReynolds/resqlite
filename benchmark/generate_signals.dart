@@ -89,8 +89,7 @@ void _injectBeliefs(
     final claims = note['claims'];
     if (claims is! List) continue;
     final dirs = [
-      for (final d in (note['directions'] as List? ?? const []))
-        d.toString(),
+      for (final d in (note['directions'] as List? ?? const [])) d.toString(),
     ];
     for (final c in claims) {
       if (c is Map<String, Object?> && c['id'] is String) {
@@ -171,8 +170,9 @@ void _injectBeliefs(
 }
 
 int _compareClaimIds(String a, String b) {
-  List<int> parts(String s) =>
-      [for (final p in s.split('.')) int.tryParse(p) ?? 0];
+  List<int> parts(String s) => [
+    for (final p in s.split('.')) int.tryParse(p) ?? 0,
+  ];
   final pa = parts(a), pb = parts(b);
   for (var i = 0; i < 2; i++) {
     final c = pa[i].compareTo(pb[i]);
@@ -197,7 +197,9 @@ Future<void> main() async {
     signalsSourceDir: Directory('experiments/signals'),
   );
   const encoder = JsonEncoder.withIndent('  ');
-  File('experiments/signals.json').writeAsStringSync('${encoder.convert(data)}\n');
+  File(
+    'experiments/signals.json',
+  ).writeAsStringSync('${encoder.convert(data)}\n');
   final experiments = data['experiments'] as Map<String, Object?>;
   final directions = data['directions'] as List<Object?>;
   print(

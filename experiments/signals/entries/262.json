@@ -1,0 +1,29 @@
+{
+  "directions": ["measurement-system"],
+  "outcomeClass": "accepted_measurement",
+  "changedBeliefs": [
+    "Crash-resilience has to be granular enough to reach the crash. #282 correctly identified that a segfault destroyed whole runs and correctly chose to persist partial progress, but persisted per completed *repeat* — and the peer crash it was written against fires at the Memory scenario, the fifteenth of sixteen, inside repeat 1. No repeat ever completed, so the fix never engaged. Exps 260 and 261 each ran fourteen scenarios and produced no artifact. Persisting per scenario preserves nine scenarios and 153 metrics against a SIGKILL at scenario 10, where the previous behaviour preserved nothing.",
+    "A partial run is worth keeping as long as it cannot be mistaken for a whole one. `repeatCount` now counts only repeats that finished, so a run killed inside repeat 1 reports 0 rather than 1, and `scenariosCompleted`/`scenarioTotal`/`partial` mark the shortfall — self-exclusion in the same shape as `gitDirty` and `--repeat=1`, which already drop a run from the trend charts.",
+    "The release suite's memory thresholds were never the missing piece. `generateMemoryComparison` has rendered per-benchmark bootstrap-MDE thresholds and a regression marker all along; nothing consumed the verdict. The 2026-05-02 `per-benchmark RSS acceptance criteria` candidate needed the counts split out of the markdown and a caller willing to act on them, not new statistics.",
+    "A gate must not fire on absent data. Neither a missing `## Memory` section nor a missing baseline counts as a regression, because a gate that fails a run for having no data to compare is one people turn off."
+  ],
+  "claims": [
+    {
+      "id": "262.1",
+      "text": "Release-suite crash resilience must persist per scenario, not per repeat. A SIGKILL during scenario 10 of 16 preserves 9 scenarios and 153 resqlite metrics with `repeatCount: 0` and `partial: true`; the same kill produced no artifact before. Against the crash that actually occurs — the sqlite_async peer dying at scenario 15 — this preserves fourteen scenarios including every read, write and streaming lane.",
+      "conditions": "M1 Pro · deliberate SIGKILL, --repeat=1 · 2026-08"
+    },
+    {
+      "id": "262.2",
+      "text": "The release suite can now fail on a memory regression. `compareMemory` returns wins/regressions/neutral plus the regressed benchmark names alongside the existing table, and `--fail-on-memory-regression` exits non-zero. Thresholds are unchanged (per-benchmark bootstrap MDE, 0.5 MB floor) — only the verdict is newly actionable. Opt-in rather than default: a local run reports without failing.",
+      "conditions": "unit-tested behaviour, 10 cases · 2026-08",
+      "edges": [{ "type": "dependsOn", "target": "261.1" }]
+    }
+  ],
+  "nextSignals": [
+    "The `per-benchmark RSS acceptance criteria` candidate open since 2026-05-02 is closed by claim 262.2. What remains is a maintainer decision: whether CI's release job passes `--fail-on-memory-regression`. Nothing else in the repo turns it on.",
+    "The sqlite_async peer segfault at the Memory scenario is unfixed and is not ours (#282 established exp 229's own sha crashes today at the same stage, so only the peers changed). Per-scenario persistence contains the damage; it does not remove it, and the Memory scenario is still the one lane a crashed run cannot report.",
+    "That crash also leaks its temp databases: the segfault skips the `finally` that removes them, and ~1.2 GB had accumulated on the dev machine from two days of crashed runs. A suite that seeds into a directory it clears on startup, rather than relying on unwind, would make this self-limiting.",
+    "`scenarioTotal()` is now the single source for both the progress labels and the persisted total. Add scenarios through the `step()` helper in `_runSuiteOnce` so the two cannot drift again — they already had, the suite printing [1/15] through [14/15] and then [15/16]."
+  ]
+}

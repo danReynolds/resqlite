@@ -14,6 +14,8 @@ Map<String, Object?> buildReleaseRunArtifact({
   String? comparisonBaselineMode,
   Map<String, Object?>? comparisonBaselineCompatibility,
   String? generatedAt,
+  int? scenariosCompleted,
+  int? scenarioTotal,
 }) {
   final metrics = extractResqliteMedians(markdown);
   final memory = extractMemoryMedians(markdown);
@@ -29,6 +31,16 @@ Map<String, Object?> buildReleaseRunArtifact({
     'generatedAt': generatedAt ?? DateTime.now().toIso8601String(),
     'label': label,
     'repeatCount': repeatCount,
+    if (scenariosCompleted != null) 'scenariosCompleted': scenariosCompleted,
+    if (scenarioTotal != null) 'scenarioTotal': scenarioTotal,
+    // A run whose process died mid-repeat is still worth keeping — it is the
+    // only record of the scenarios that did complete — but it must not be read
+    // as a whole run. [EXP-262]: partial runs self-exclude from trends the same
+    // way `gitDirty` and single-sample runs do.
+    if (scenariosCompleted != null &&
+        scenarioTotal != null &&
+        scenariosCompleted < scenarioTotal)
+      'partial': true,
     if (environment != null && environment.isNotEmpty)
       'environment': environment,
     if (comparisonBaselineFile != null)

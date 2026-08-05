@@ -18,10 +18,9 @@ Future<void> main() async {
     await db.execute(
       'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER NOT NULL)',
     );
-    await db.executeBatch(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      [for (var i = 0; i < 100; i++) ['item_$i', i]],
-    );
+    await db.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+      for (var i = 0; i < 100; i++) ['item_$i', i],
+    ]);
 
     // --- 1. Initial emission latency ---
     {
@@ -68,10 +67,10 @@ Future<void> main() async {
         });
 
         final sw = Stopwatch()..start();
-        await db.execute(
-          'INSERT INTO items(name, value) VALUES (?, ?)',
-          ['bench_${counter++}', i],
-        );
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'bench_${counter++}',
+          i,
+        ]);
         await reEmit.future.timeout(const Duration(seconds: 2));
         sw.stop();
         timings.add(sw.elapsedMicroseconds);
@@ -101,13 +100,16 @@ Future<void> main() async {
         streams.add(stream);
         final c = Completer<void>();
         initialCompleters.add(c);
-        subs.add(stream.listen((_) {
-          if (!c.isCompleted) c.complete();
-        }));
+        subs.add(
+          stream.listen((_) {
+            if (!c.isCompleted) c.complete();
+          }),
+        );
       }
 
-      await Future.wait(initialCompleters.map((c) => c.future))
-          .timeout(const Duration(seconds: 5));
+      await Future.wait(
+        initialCompleters.map((c) => c.future),
+      ).timeout(const Duration(seconds: 5));
 
       for (var i = 0; i < iterations; i++) {
         final allUpdated = <Completer<void>>[];
@@ -120,12 +122,13 @@ Future<void> main() async {
         }
 
         final sw = Stopwatch()..start();
-        await db.execute(
-          'INSERT INTO items(name, value) VALUES (?, ?)',
-          ['fanout_${counter++}', 50],
-        );
-        await Future.wait(allUpdated.map((c) => c.future))
-            .timeout(const Duration(seconds: 5));
+        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+          'fanout_${counter++}',
+          50,
+        ]);
+        await Future.wait(
+          allUpdated.map((c) => c.future),
+        ).timeout(const Duration(seconds: 5));
         sw.stop();
         timings.add(sw.elapsedMicroseconds);
       }
@@ -135,7 +138,8 @@ Future<void> main() async {
       }
 
       timings.sort();
-      results['fanout_${streamCount}_streams_us'] = timings[timings.length ~/ 2];
+      results['fanout_${streamCount}_streams_us'] =
+          timings[timings.length ~/ 2];
     }
 
     await db.close();
