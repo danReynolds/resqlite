@@ -91,16 +91,16 @@ class _Sample {
   final int intersectionEntries;
 
   Map<String, Object?> toJson() => {
-        'scenario': scenario,
-        'iter': iter,
-        'i': writeIndex,
-        'writer_us': writerUs,
-        'yield_us': yieldUs,
-        'total_us': totalUs,
-        'invalidate_us': invalidateUs,
-        'intersection_us': intersectionUs,
-        'intersection_entries': intersectionEntries,
-      };
+    'scenario': scenario,
+    'iter': iter,
+    'i': writeIndex,
+    'writer_us': writerUs,
+    'yield_us': yieldUs,
+    'total_us': totalUs,
+    'invalidate_us': invalidateUs,
+    'intersection_us': intersectionUs,
+    'intersection_entries': intersectionEntries,
+  };
 }
 
 Future<void> main(List<String> args) async {
@@ -135,10 +135,12 @@ Future<void> main(List<String> args) async {
   final colNames = [
     for (var i = 0; i < 20; i++) String.fromCharCode('a'.codeUnitAt(0) + i),
   ];
-  final createSql = 'CREATE TABLE wide(id INTEGER PRIMARY KEY, ' +
+  final createSql =
+      'CREATE TABLE wide(id INTEGER PRIMARY KEY, ' +
       colNames.map((c) => '$c TEXT NOT NULL').join(', ') +
       ')';
-  final insertSql = 'INSERT INTO wide(id, ${colNames.join(', ')}) '
+  final insertSql =
+      'INSERT INTO wide(id, ${colNames.join(', ')}) '
       'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
 
   try {
@@ -204,8 +206,11 @@ Future<void> main(List<String> args) async {
       );
     }
 
-    final ts =
-        DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+    final ts = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .split('.')
+        .first;
     final prefix = outPrefix ?? 'benchmark/profile/results/a11c_writer_profile';
     final outDir = Directory(File(prefix).parent.path);
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
@@ -245,8 +250,9 @@ Future<List<_Sample>> _runScenario(
   required String Function(int writeIndex, int iteration) valueFor,
 }) async {
   final samples = <_Sample>[];
-  final traceCorrelationId =
-      TraceliteProfile.isEnabled ? TraceliteProfile.nextCorrelationId() : null;
+  final traceCorrelationId = TraceliteProfile.isEnabled
+      ? TraceliteProfile.nextCorrelationId()
+      : null;
   final traceNameId = traceCorrelationId == null
       ? null
       : TraceliteProfile.internString(scenario);
@@ -276,16 +282,18 @@ Future<List<_Sample>> _runScenario(
         final partWidth = _rowCount ~/ streamCount;
         final partStart = idx * partWidth;
         final partEnd = partStart + partWidth;
-        final sub = db.stream(
-          'SELECT id, a, b FROM wide WHERE id >= ? AND id < ? ORDER BY id',
-          [partStart, partEnd],
-        ).listen((_) {
-          if (!initial.isCompleted) {
-            initial.complete();
-          } else {
-            emitCounts[idx]++;
-          }
-        });
+        final sub = db
+            .stream(
+              'SELECT id, a, b FROM wide WHERE id >= ? AND id < ? ORDER BY id',
+              [partStart, partEnd],
+            )
+            .listen((_) {
+              if (!initial.isCompleted) {
+                initial.complete();
+              } else {
+                emitCounts[idx]++;
+              }
+            });
         subs.add(sub);
       }
 

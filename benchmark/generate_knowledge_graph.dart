@@ -21,9 +21,11 @@ import 'dart:io';
 /// Like every `docs/` aggregate this file is owned by the post-merge
 /// "Update Docs Data" bot; branches never commit it.
 Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
-  final base = json.decode(
-    File('${experimentsDir.path}/signals/base.json').readAsStringSync(),
-  ) as Map<String, Object?>;
+  final base =
+      json.decode(
+            File('${experimentsDir.path}/signals/base.json').readAsStringSync(),
+          )
+          as Map<String, Object?>;
   final directionIds = [
     for (final d in (base['directions'] as List? ?? const []))
       if (d is Map && d['id'] is String) d['id'] as String,
@@ -42,9 +44,7 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
     final rows = (decoded is List ? decoded : [decoded]).cast<Map>();
     if (rows.isEmpty) continue;
     final first = rows.first;
-    final writeup = File(
-      '${experimentsDir.path}/${first['file'] ?? '$id.md'}',
-    );
+    final writeup = File('${experimentsDir.path}/${first['file'] ?? '$id.md'}');
     final date = writeup.existsSync()
         ? dateRe.firstMatch(writeup.readAsStringSync())?.group(1)
         : null;
@@ -65,13 +65,17 @@ Map<String, Object?> buildKnowledgeGraph({required Directory experimentsDir}) {
   final claims = <Map<String, Object?>>[];
   final supersededBy = <String, List<String>>{};
   final refutedBy = <String, List<String>>{};
+
   /// claim id -> the claims its rationale rests on.
   final restsOn = <String, List<String>>{};
   final entriesDir = Directory('${experimentsDir.path}/signals/entries');
   final entryFiles =
-      entriesDir.listSync().whereType<File>().where(
-        (f) => f.path.endsWith('.json'),
-      ).toList()..sort((a, b) => a.path.compareTo(b.path));
+      entriesDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.json'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
   for (final file in entryFiles) {
     final id = file.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
     final note = json.decode(file.readAsStringSync()) as Map<String, Object?>;

@@ -15,7 +15,7 @@
 //
 // See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
 import 'dart:convert';
-import 'dart:io' show Directory, File, Process, exit, exitCode, stderr;
+import 'dart:io' show Directory, File, Process, exit, stderr;
 
 import 'shared/baseline_compatibility.dart';
 import 'shared/benchmark_environment.dart';
@@ -308,15 +308,24 @@ Future<void> main(List<String> args) async {
     _printHardwareSummary(currentAggregates, options.label);
   }
 
-  if (options.failOnMemoryRegression &&
-      memoryComparison != null &&
-      memoryComparison.hasRegression) {
-    exitCode = 1;
+  final memoryGateFailed = shouldFailOnMemory(
+    failOnMemoryRegression: options.failOnMemoryRegression,
+    comparison: memoryComparison,
+  );
+  if (memoryGateFailed) {
+    final count = memoryComparison!.regressions;
+    print('');
+    print(
+      '!! Failing the run: --fail-on-memory-regression was passed and the '
+      'memory comparison found $count regression${count == 1 ? '' : 's'}.',
+    );
   }
 
-  // Force exit — persistent writer isolate and sqlite_async connections
-  // can keep the event loop alive.
-  exit(0);
+  // Force exit — persistent writer isolate and sqlite_async connections can
+  // keep the event loop alive. The status has to be passed explicitly: setting
+  // the global `exitCode` and then calling `exit(0)` discards it, which is how
+  // the gate above shipped unable to fail anything.
+  exit(memoryGateFailed ? 1 : 0);
 }
 
 void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
@@ -482,9 +491,9 @@ Future<String> _runSuiteOnce({
   // minutes each. Registered here so they append to the standard suite output.
   if (includeSlow) {
     await step('Sync Burst (A7)', runSyncBurstBenchmark);
-    await step('Large Working Set (A8)', runLargeWorkingSetBenchmark);
+    await step('Large Working Set (A9)', runLargeWorkingSetBenchmark);
     await step(
-      'Many Streams Writer Throughput (A9)',
+      'Many-Streams Writer Throughput (A11c)',
       runManyStreamsWriterThroughputBenchmark,
     );
   }

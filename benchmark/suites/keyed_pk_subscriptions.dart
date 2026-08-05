@@ -37,7 +37,8 @@ const WorkloadMeta keyedPkMeta = WorkloadMeta(
   slug: 'keyed_pk_subscriptions',
   version: 1,
   title: 'Keyed PK Subscriptions',
-  description: '50 reactive streams each watch one PK. 200 random-PK '
+  description:
+      '50 reactive streams each watch one PK. 200 random-PK '
       'writes across a 10K-row table. The committed PRNG seed produces '
       '3 hits on watched PKs, so both miss-path and hit-path are '
       'exercised each run. With keyed invalidation, a library fires '
@@ -80,8 +81,7 @@ Future<String> runKeyedPkSubscriptionsBenchmark() async {
 
   final readings = <_Reading>[];
 
-  final tempDir =
-      await Directory.systemTemp.createTemp('bench_keyed_pk_');
+  final tempDir = await Directory.systemTemp.createTemp('bench_keyed_pk_');
   try {
     final peers = await PeerSet.open(
       tempDir.path,
@@ -176,6 +176,7 @@ final class _IterationResult {
     required this.observedHits,
   });
   final int wallMicroseconds;
+
   /// Aggregate time spent inside the emission listener callback across
   /// all streams in this iteration. Represents main-isolate CPU work;
   /// differs from wall which includes dispatch + await + drain.
@@ -200,16 +201,18 @@ Future<_IterationResult> _singleIteration(
   final subs = <StreamSubscription<List<Map<String, Object?>>>>[];
   for (var i = 0; i < _streamCount; i++) {
     final idx = i; // Capture for closure.
-    final sub = peer.watch(
-      'SELECT id, body, updated_at FROM items WHERE id = ?',
-      params: [watchedIds[i]],
-      readsFrom: const {'items'},
-    ).listen((_) {
-      final sw = Stopwatch()..start();
-      emitCounts[idx]++;
-      sw.stop();
-      listenerMicroseconds += sw.elapsedMicroseconds;
-    });
+    final sub = peer
+        .watch(
+          'SELECT id, body, updated_at FROM items WHERE id = ?',
+          params: [watchedIds[i]],
+          readsFrom: const {'items'},
+        )
+        .listen((_) {
+          final sw = Stopwatch()..start();
+          emitCounts[idx]++;
+          sw.stop();
+          listenerMicroseconds += sw.elapsedMicroseconds;
+        });
     subs.add(sub);
   }
 
@@ -245,8 +248,7 @@ Future<_IterationResult> _singleIteration(
     // Settle: wait until no more emissions arrive for a quiet window.
     var lastSum = emitCounts.reduce((a, b) => a + b);
     const quietWindow = Duration(milliseconds: 200);
-    final quietDeadline =
-        DateTime.now().add(const Duration(seconds: 60));
+    final quietDeadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(quietDeadline)) {
       await Future<void>.delayed(quietWindow);
       final nowSum = emitCounts.reduce((a, b) => a + b);
@@ -299,8 +301,7 @@ Future<void> _seed(BenchmarkPeer peer) async {
     ')',
   );
   final rows = <List<Object?>>[
-    for (var i = 1; i <= _tableRowCount; i++)
-      ['seed_body_$i', 0],
+    for (var i = 1; i <= _tableRowCount; i++) ['seed_body_$i', 0],
   ];
   await peer.executeBatch(
     'INSERT INTO items(body, updated_at) VALUES (?, ?)',
@@ -314,9 +315,11 @@ Future<void> _seed(BenchmarkPeer peer) async {
 
 void _writeResultTable(StringBuffer md, List<_Reading> readings) {
   md
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) | '
-        'Total emits | Observed hits |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) | '
+      'Total emits | Observed hits |',
+    )
     ..writeln('|---|---|---|---|---|---|---|');
   for (final r in readings) {
     md.writeln(
@@ -331,18 +334,22 @@ void _writeResultTable(StringBuffer md, List<_Reading> readings) {
   }
   md.writeln();
   md
-    ..writeln('**Total emits**: post-baseline emissions summed across all '
-        '$_streamCount streams. **Observed hits**: how many of the '
-        '$_writeCount random writes actually targeted a watched PK. '
-        'Perfect behavior: emissions == hits. Emissions < hits means '
-        'hash suppression elided some writes whose row value did not '
-        'change. Emissions > hits means over-fire.')
+    ..writeln(
+      '**Total emits**: post-baseline emissions summed across all '
+      '$_streamCount streams. **Observed hits**: how many of the '
+      '$_writeCount random writes actually targeted a watched PK. '
+      'Perfect behavior: emissions == hits. Emissions < hits means '
+      'hash suppression elided some writes whose row value did not '
+      'change. Emissions > hits means over-fire.',
+    )
     ..writeln()
-    ..writeln('Wall time is dominated by re-query work. A library with '
-        'keyed-PK invalidation (Track D\'s planned `watchRow()`) can '
-        'avoid re-querying for writes whose PK is unwatched, reducing '
-        'wall time substantially even when emission counts already '
-        'look clean due to hash suppression.')
+    ..writeln(
+      'Wall time is dominated by re-query work. A library with '
+      'keyed-PK invalidation (Track D\'s planned `watchRow()`) can '
+      'avoid re-querying for writes whose PK is unwatched, reducing '
+      'wall time substantially even when emission counts already '
+      'look clean due to hash suppression.',
+    )
     ..writeln();
 }
 

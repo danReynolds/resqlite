@@ -50,8 +50,9 @@ class ProfiledDatabase {
     final opId = traceCorrelationId == null
         ? null
         : TraceliteProfile.internString('execute');
-    final sqlId =
-        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final sqlId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString(sql);
     final tagId = traceCorrelationId == null || tag == null
         ? null
         : TraceliteProfile.internString(tag);
@@ -97,8 +98,9 @@ class ProfiledDatabase {
     final opId = traceCorrelationId == null
         ? null
         : TraceliteProfile.internString('executeBatch');
-    final sqlId =
-        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final sqlId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString(sql);
     final tagId = traceCorrelationId == null || tag == null
         ? null
         : TraceliteProfile.internString(tag);
@@ -152,8 +154,9 @@ class ProfiledDatabase {
     final opId = traceCorrelationId == null
         ? null
         : TraceliteProfile.internString('select');
-    final sqlId =
-        traceCorrelationId == null ? null : TraceliteProfile.internString(sql);
+    final sqlId = traceCorrelationId == null
+        ? null
+        : TraceliteProfile.internString(sql);
     final tagId = traceCorrelationId == null || tag == null
         ? null
         : TraceliteProfile.internString(tag);

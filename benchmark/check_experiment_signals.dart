@@ -41,7 +41,10 @@ Map<String, _ExperimentEntry> _readExperimentIndex(
 ) {
   final indexDir = Directory('$_experimentsDir/index');
   if (!indexDir.existsSync()) {
-    _signalError(errors, 'Missing ${indexDir.path}/ (experiment index fragments).');
+    _signalError(
+      errors,
+      'Missing ${indexDir.path}/ (experiment index fragments).',
+    );
     return const {};
   }
 
@@ -685,7 +688,8 @@ void _collectClaims(
       continue;
     }
     final id = c['id'];
-    if (id is! String || !RegExp('^' + RegExp.escape(expId) + r'\.\d+$').hasMatch(id)) {
+    if (id is! String ||
+        !RegExp('^' + RegExp.escape(expId) + r'\.\d+$').hasMatch(id)) {
       _signalError(errors, '$cpath.id must be "$expId.<n>", got "$id".');
       continue;
     }
@@ -710,10 +714,7 @@ void _collectClaims(
           if (e is! Map<String, Object?> ||
               e['type'] is! String ||
               e['target'] is! String) {
-            _signalError(
-              errors,
-              '$cpath.edges[$j] must be {type, target}.',
-            );
+            _signalError(errors, '$cpath.edges[$j] must be {type, target}.');
             continue;
           }
           final type = e['type'] as String;
@@ -729,9 +730,12 @@ void _collectClaims(
         }
       }
     }
-    final unknown = c.keys.toSet().difference(
-      {'id', 'text', 'conditions', 'edges'},
-    );
+    final unknown = c.keys.toSet().difference({
+      'id',
+      'text',
+      'conditions',
+      'edges',
+    });
     if (unknown.isNotEmpty) {
       _signalError(errors, '$cpath has unknown keys: ${unknown.join(', ')}.');
     }

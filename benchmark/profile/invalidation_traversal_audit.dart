@@ -183,9 +183,7 @@ String _renderMarkdown(List<_AuditRow> rows) {
     '| workload | shape | wall_ms | invalidate_us | invalidate_count | '
     'intersection_us | intersection_entries | parked_total | max_parked | emissions |',
   );
-  buf.writeln(
-    '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|',
-  );
+  buf.writeln('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (final row in rows) {
     buf.writeln(
       '| ${row.workload} | ${row.shape} | ${row.wallMs.toStringAsFixed(2)} | '

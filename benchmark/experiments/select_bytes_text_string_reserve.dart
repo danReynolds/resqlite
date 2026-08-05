@@ -64,7 +64,10 @@ String _textValue(String mode, int row, int col, int bytes) {
       // the pre-235 scanner, which scans the entire remaining tail one byte at
       // a time after the early hit.
       final seed = 'row_${row}_col_${col}_';
-      final tail = (seed * ((bytes ~/ seed.length) + 1)).substring(0, bytes - 4);
+      final tail = (seed * ((bytes ~/ seed.length) + 1)).substring(
+        0,
+        bytes - 4,
+      );
       return 'abc"$tail';
     case 'cjk':
       final seed = '日本語$row-$col';

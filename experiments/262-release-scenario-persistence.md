@@ -93,6 +93,17 @@ delta; a fall is a win and never trips it; a move inside the threshold is
 neutral; and neither a missing `## Memory` section nor a missing baseline can
 fail a run, since a gate that fires on absent data is a gate people disable.
 
+The gate shipped to review **unable to fail anything.** It set the global
+`exitCode` and the runner then called `exit(0)`, which discards it. The unit
+tests could not have caught that: they exercised `compareMemory` thoroughly and
+never asked what the caller did with the verdict, so a comparison that correctly
+reported a regression sat behind an exit path that always reported success. The
+fix passes the status explicitly (`exit(memoryGateFailed ? 1 : 0)`), and the
+decision is now a named `shouldFailOnMemory` with its own tests — which covers
+the predicate, though it is worth being clear that what actually caught this was
+review, not a test, and that an integration test asserting the process exit
+status is the only thing that would have.
+
 ## Outcome
 
 **Accepted.** A crash now costs the scenario in flight rather than everything

@@ -112,9 +112,7 @@ Map<String, Object?> _aggregateRuns(List<Map<String, Object?>> runs) {
       .where((k) => k != 'supported' && k != 'note' && runs.first[k] is num)
       .toList();
 
-  final result = <String, Object?>{
-    'supported': runs.first['supported'],
-  };
+  final result = <String, Object?>{'supported': runs.first['supported']};
 
   for (final key in numericKeys) {
     final values = runs.map((r) => (r[key] as num).toDouble()).toList()..sort();
@@ -245,7 +243,9 @@ Future<Map<String, Object?>> _runColdOpenCase() async {
 }
 
 Future<Map<String, Object?>> _runSingleRowCrudCase() async {
-  final tempDir = await Directory.systemTemp.createTemp('resqlite_single_crud_');
+  final tempDir = await Directory.systemTemp.createTemp(
+    'resqlite_single_crud_',
+  );
   final db = await Database.open('${tempDir.path}/bench.db');
   try {
     await db.execute(_todoSchemaSql);
@@ -506,13 +506,13 @@ Future<Map<String, Object?>> _runReactiveFanoutUniqueCase() {
 Future<Map<String, Object?>> _runReactiveFanoutCase({
   required bool serializeWatcherAttach,
   required Stream<List<Map<String, Object?>>> Function(Database db, int index)
-      streamForWatcher,
+  streamForWatcher,
   required Future<void> Function(Database db, int watcherCount) trigger,
   required Map<String, Object?>? Function(
     List<Map<String, Object?>> rows,
     int index,
   )
-      matchForWatcher,
+  matchForWatcher,
 }) async {
   final tempDir = await Directory.systemTemp.createTemp('resqlite_fanout_');
   final db = await Database.open('${tempDir.path}/bench.db');
@@ -622,7 +622,9 @@ Future<Map<String, Object?>> _runLargeResultReadCase({
 }
 
 Future<Map<String, Object?>> _runRepeatedPointQueryCase() async {
-  final tempDir = await Directory.systemTemp.createTemp('resqlite_point_query_');
+  final tempDir = await Directory.systemTemp.createTemp(
+    'resqlite_point_query_',
+  );
   final db = await Database.open('${tempDir.path}/bench.db');
   try {
     await db.execute(_todoSchemaSql);

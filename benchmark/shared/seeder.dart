@@ -26,12 +26,12 @@ const standardInsertSql =
 const standardSelectSql = 'SELECT * FROM items';
 
 List<Object?> standardRow(int i) => [
-      'Item $i',
-      'This is a description for item number $i with some padding text to simulate real data',
-      i * 1.5,
-      'category_${i % 10}',
-      '2026-04-0${(i % 9) + 1}T12:00:00Z',
-    ];
+  'Item $i',
+  'This is a description for item number $i with some padding text to simulate real data',
+  i * 1.5,
+  'category_${i % 10}',
+  '2026-04-0${(i % 9) + 1}T12:00:00Z',
+];
 
 // ---------------------------------------------------------------------------
 // Seeding functions per library
@@ -76,9 +76,7 @@ Future<void> seedSqliteAsync(
 }) async {
   await db.execute(createSql);
   final builder = rowBuilder ?? standardRow;
-  final paramSets = [
-    for (var i = 0; i < rowCount; i++) builder(i),
-  ];
+  final paramSets = [for (var i = 0; i < rowCount; i++) builder(i)];
   await db.executeBatch(insertSql, paramSets);
 }
 
@@ -111,8 +109,6 @@ Future<void> seedPeer(
       : createSql.replaceFirst('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS');
   await peer.execute(idempotentCreate);
   final builder = rowBuilder ?? standardRow;
-  final paramSets = [
-    for (var i = 0; i < rowCount; i++) builder(i),
-  ];
+  final paramSets = [for (var i = 0; i < rowCount; i++) builder(i)];
   await peer.executeBatch(insertSql, paramSets);
 }

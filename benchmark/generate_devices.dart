@@ -25,7 +25,8 @@ void main() {
     resultsDir: Directory('benchmark/results'),
   );
 
-  final devices = (output['devices'] as List?)?.cast<Map<String, Object?>>() ??
+  final devices =
+      (output['devices'] as List?)?.cast<Map<String, Object?>>() ??
       const <Map<String, Object?>>[];
   if (devices.isEmpty) {
     print('No devices found in HARDWARE_RESULTS.md');

@@ -26,8 +26,10 @@ Future<String> runScalingBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Scaling (10 → 20,000 rows)');
   markdown.writeln('');
-  markdown.writeln('Shows how each library scales with result size. Identifies the crossover '
-      'point where resqlite\'s isolate overhead becomes negligible.');
+  markdown.writeln(
+    'Shows how each library scales with result size. Identifies the crossover '
+    'point where resqlite\'s isolate overhead becomes negligible.',
+  );
   markdown.writeln('');
 
   markdown.writeln('### Maps (select → iterate all fields)');

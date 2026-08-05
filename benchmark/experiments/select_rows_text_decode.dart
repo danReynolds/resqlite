@@ -135,7 +135,12 @@ final _lanes = <_Lane>[
   // before answering, where the Dart scan it replaced bailed at the first word
   // and went straight to utf8.decode. If scanning to the end ever costs more
   // than it saves, it shows here or nowhere.
-  _Lane('text4-long-early-nonascii', 4, 2000, (r, c) => 'é${_ascii(398, r, c)}'),
+  _Lane(
+    'text4-long-early-nonascii',
+    4,
+    2000,
+    (r, c) => 'é${_ascii(398, r, c)}',
+  ),
   _Lane.explicit(
     'mixed6',
     10000,
@@ -187,9 +192,7 @@ Future<void> _runLane(
       insertSql = lane.insertSql!;
       row = lane.row!;
     } else {
-      final cols = [
-        for (var c = 0; c < lane.columns; c++) 'c$c ${lane.type}',
-      ];
+      final cols = [for (var c = 0; c < lane.columns; c++) 'c$c ${lane.type}'];
       createSql =
           'CREATE TABLE items(id INTEGER PRIMARY KEY, ${cols.join(', ')})';
       final names = [for (var c = 0; c < lane.columns; c++) 'c$c'].join(', ');

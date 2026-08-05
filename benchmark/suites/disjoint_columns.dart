@@ -87,26 +87,24 @@ Future<String> runDisjointColumnsBenchmark() async {
     // @DriftDatabase schema at open; bare CREATE TABLE would throw
     // "already exists" on the drift peer. Schema must match
     // benchmark/drift/disjoint_columns_db.dart exactly.
-    final createSql = 'CREATE TABLE IF NOT EXISTS wide(id INTEGER PRIMARY KEY, ' +
+    final createSql =
+        'CREATE TABLE IF NOT EXISTS wide(id INTEGER PRIMARY KEY, ' +
         colNames.map((c) => '$c TEXT NOT NULL').join(', ') +
         ')';
-    final insertSql = 'INSERT INTO wide(id, ${colNames.join(', ')}) '
+    final insertSql =
+        'INSERT INTO wide(id, ${colNames.join(', ')}) '
         'VALUES (?, ${List.filled(colNames.length, '?').join(', ')})';
     const rowCount = 5000;
     const writeCount = 500;
     const streamCount = 10;
     const watchQuery = 'SELECT id, a, b FROM wide WHERE id < 1000 ORDER BY id';
 
-    List<Object?> row(int i) => [
-          i,
-          for (final _ in colNames) 'v$i',
-        ];
+    List<Object?> row(int i) => [i, for (final _ in colNames) 'v$i'];
 
     final peers = await PeerSet.open(
       dir.path,
       require: (p) => p.hasStreams,
-      driftFactory:
-          driftFactoryFor((exec) => DisjointColumnsDriftDb(exec)),
+      driftFactory: driftFactoryFor((exec) => DisjointColumnsDriftDb(exec)),
     );
     final resultsByPeer = <String, (_StreamResult, _StreamResult)>{};
 
@@ -114,10 +112,9 @@ Future<String> runDisjointColumnsBenchmark() async {
       for (final peer in peers.all) {
         print('  running on ${peer.name}...');
         await peer.execute(createSql);
-        await peer.executeBatch(
-          insertSql,
-          [for (var i = 0; i < rowCount; i++) row(i)],
-        );
+        await peer.executeBatch(insertSql, [
+          for (var i = 0; i < rowCount; i++) row(i),
+        ]);
 
         final disjoint = await _measurePeer(
           peer: peer,
@@ -152,11 +149,19 @@ Future<String> runDisjointColumnsBenchmark() async {
     }
 
     // ---- Render ----
-    _writeSubsection(markdown, 'Disjoint column writes (SET c = ?)',
-        resultsByPeer, disjoint: true);
+    _writeSubsection(
+      markdown,
+      'Disjoint column writes (SET c = ?)',
+      resultsByPeer,
+      disjoint: true,
+    );
 
-    _writeSubsection(markdown, 'Overlapping column writes (SET a = ?)',
-        resultsByPeer, disjoint: false);
+    _writeSubsection(
+      markdown,
+      'Overlapping column writes (SET a = ?)',
+      resultsByPeer,
+      disjoint: false,
+    );
 
     print('');
     print('=== Disjoint-column streaming ===');
@@ -181,7 +186,9 @@ void _writeSubsection(
 }) {
   md.writeln('### $title');
   md.writeln('');
-  md.writeln('| Library | Re-emits (total) | Wall drain (ms) | Re-emit ratio |');
+  md.writeln(
+    '| Library | Re-emits (total) | Wall drain (ms) | Re-emit ratio |',
+  );
   md.writeln('|---|---|---|---|');
   for (final entry in byLib.entries) {
     final (dis, over) = entry.value;

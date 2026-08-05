@@ -124,6 +124,53 @@ void main() {
       expect(result.markdown, contains('baseline unavailable'));
     });
 
+    group('shouldFailOnMemory', () {
+      MemoryComparison regressing() => compareMemory(
+        _memorySection({'resqlite select()': 12.0}),
+        _memorySection({'resqlite select()': 4.0}),
+      );
+
+      test('fails only when the flag is passed and a regression exists', () {
+        expect(
+          shouldFailOnMemory(
+            failOnMemoryRegression: true,
+            comparison: regressing(),
+          ),
+          isTrue,
+        );
+      });
+
+      test('a regression without the flag does not fail the run', () {
+        expect(
+          shouldFailOnMemory(
+            failOnMemoryRegression: false,
+            comparison: regressing(),
+          ),
+          isFalse,
+        );
+      });
+
+      test('the flag alone does not fail a clean run', () {
+        expect(
+          shouldFailOnMemory(
+            failOnMemoryRegression: true,
+            comparison: compareMemory(
+              _memorySection({'resqlite select()': 4.0}),
+              _memorySection({'resqlite select()': 4.0}),
+            ),
+          ),
+          isFalse,
+        );
+      });
+
+      test('no comparison at all cannot fail the run', () {
+        expect(
+          shouldFailOnMemory(failOnMemoryRegression: true, comparison: null),
+          isFalse,
+        );
+      });
+    });
+
     test('the render-only wrapper still returns the same table', () {
       const current = 'x';
       expect(

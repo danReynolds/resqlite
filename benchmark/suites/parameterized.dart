@@ -28,9 +28,11 @@ Future<String> runParameterizedBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Parameterized Queries');
   markdown.writeln('');
-  markdown.writeln('Same `SELECT WHERE category = ?` query run $_queryIterations times '
-      'with different parameter values. Table has $_totalRows rows with an '
-      'index on `category` (~500 rows per category).');
+  markdown.writeln(
+    'Same `SELECT WHERE category = ?` query run $_queryIterations times '
+    'with different parameter values. Table has $_totalRows rows with an '
+    'index on `category` (~500 rows per category).',
+  );
   markdown.writeln('');
 
   final tempDir = await Directory.systemTemp.createTemp('bench_param_');
@@ -40,10 +42,9 @@ Future<String> runParameterizedBenchmark() async {
       '=== Parameterized: $_queryIterations queries × ~500 rows each ===',
       timings,
     );
-    markdown.write(markdownTable(
-      '$_queryIterations queries × ~500 rows each',
-      timings,
-    ));
+    markdown.write(
+      markdownTable('$_queryIterations queries × ~500 rows each', timings),
+    );
   } finally {
     await tempDir.delete(recursive: true);
   }
@@ -119,8 +120,7 @@ Future<void> _seedPeer(BenchmarkPeer peer) async {
   await peer.execute(createSql);
   await peer.execute(indexSql);
   await peer.executeBatch(insertSql, [
-    for (var i = 0; i < _totalRows; i++)
-      ['Item $i', i * 1.5, 'cat_${i % 10}'],
+    for (var i = 0; i < _totalRows; i++) ['Item $i', i * 1.5, 'cat_${i % 10}'],
   ]);
 }
 
@@ -137,7 +137,8 @@ void _seedSqlite3(sqlite3.Database db) {
   db.execute('CREATE INDEX idx_category ON items(category)');
   db.execute('BEGIN');
   final stmt = db.prepare(
-      'INSERT INTO items(name, value, category) VALUES (?, ?, ?)');
+    'INSERT INTO items(name, value, category) VALUES (?, ?, ?)',
+  );
   for (var i = 0; i < _totalRows; i++) {
     stmt.execute(['Item $i', i * 1.5, 'cat_${i % 10}']);
   }

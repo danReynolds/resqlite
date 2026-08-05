@@ -196,6 +196,18 @@ final class MemoryComparison {
       regressedBenchmarks = const [];
 }
 
+/// Whether a run should fail because of memory.
+///
+/// Extracted so the decision is testable on its own. It shipped in review
+/// unable to fail anything — the runner set the global `exitCode` and then
+/// called `exit(0)`, which discards it — and the unit tests of [compareMemory]
+/// could not have caught that, because they tested the comparison rather than
+/// what the caller did with it.
+bool shouldFailOnMemory({
+  required bool failOnMemoryRegression,
+  required MemoryComparison? comparison,
+}) => failOnMemoryRegression && comparison != null && comparison.hasRegression;
+
 /// Render-only wrapper kept for callers that just want the table.
 String generateMemoryComparison(
   String currentMarkdown,

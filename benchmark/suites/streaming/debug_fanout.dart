@@ -10,10 +10,10 @@ void main() async {
     'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT, value INTEGER)',
   );
   for (var i = 0; i < 100; i++) {
-    await db.execute(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      ['item_$i', i],
-    );
+    await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+      'item_$i',
+      i,
+    ]);
   }
 
   const N = 10;
@@ -32,22 +32,29 @@ void main() async {
       reCs.add(rc);
       var ec = 0;
 
-      final s = db.stream("SELECT COUNT(*) as cnt, '${iter}_$i' as sid FROM items");
-      subs.add(s.listen((_) {
-        ec++;
-        if (ec == 1 && !ic.isCompleted) ic.complete();
-        else if (ec >= 2 && !rc.isCompleted) rc.complete();
-      }));
+      final s = db.stream(
+        "SELECT COUNT(*) as cnt, '${iter}_$i' as sid FROM items",
+      );
+      subs.add(
+        s.listen((_) {
+          ec++;
+          if (ec == 1 && !ic.isCompleted)
+            ic.complete();
+          else if (ec >= 2 && !rc.isCompleted)
+            rc.complete();
+        }),
+      );
     }
 
-    await Future.wait(initCs.map((c) => c.future))
-        .timeout(const Duration(seconds: 5));
+    await Future.wait(
+      initCs.map((c) => c.future),
+    ).timeout(const Duration(seconds: 5));
     print('  All $N initial emissions received.');
 
-    await db.execute(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      ['trigger_$iter', iter],
-    );
+    await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+      'trigger_$iter',
+      iter,
+    ]);
 
     var passed = 0;
     var failed = 0;
@@ -60,7 +67,9 @@ void main() async {
         print('  Stream $i: TIMED OUT');
       }
     }
-    print('  Result: $passed/$N re-emitted${failed > 0 ? ' ($failed failed)' : ''}');
+    print(
+      '  Result: $passed/$N re-emitted${failed > 0 ? ' ($failed failed)' : ''}',
+    );
 
     for (final s in subs) {
       await s.cancel();

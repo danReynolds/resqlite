@@ -200,8 +200,7 @@ Future<void> _workloadBytesSelect(StringBuffer md) async {
         await seedPeer(peer, _largeRowCount);
       }
       for (final peer in peers.all) {
-        byLib['${peer.label} + jsonEncode'] =
-            await _repeatedMeasure(() async {
+        byLib['${peer.label} + jsonEncode'] = await _repeatedMeasure(() async {
           final r = await peer.select(standardSelectSql);
           final bytes = Uint8List.fromList(utf8.encode(jsonEncode(r)));
           _touchBytes(bytes);
@@ -218,8 +217,7 @@ Future<void> _workloadBytesSelect(StringBuffer md) async {
 }
 
 Future<void> _workloadBatchInsert(StringBuffer md) async {
-  final dir =
-      await Directory.systemTemp.createTemp('bench_mem_batch_insert_');
+  final dir = await Directory.systemTemp.createTemp('bench_mem_batch_insert_');
   final byLib = <String, _MemStats>{};
   try {
     // The RSS measurement opens a fresh DB per iteration so we observe
@@ -232,11 +230,14 @@ Future<void> _workloadBatchInsert(StringBuffer md) async {
     // convention so history-comparison aligns; sqlite3 keeps its
     // "prepared stmt" label because its peer path doesn't go through
     // executeBatch on the BenchmarkPeer interface.
-    Future<_MemStats> measurePeer(String label,
-        Future<void> Function(String path) body) async {
+    Future<_MemStats> measurePeer(
+      String label,
+      Future<void> Function(String path) body,
+    ) async {
       return _repeatedMeasure(() async {
-        final iterDir =
-            await Directory('${dir.path}/${_uid()}').create(recursive: true);
+        final iterDir = await Directory(
+          '${dir.path}/${_uid()}',
+        ).create(recursive: true);
         try {
           await body(iterDir.path);
         } finally {
@@ -294,23 +295,20 @@ Future<void> _workloadBatchInsert(StringBuffer md) async {
         }
       },
     );
-    byLib['drift batch()'] = await measurePeer(
-      'drift batch()',
-      (path) async {
-        final peers = await PeerSet.open(
-          path,
-          driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
-          require: (p) => p.name == 'drift',
-        );
-        try {
-          for (final peer in peers.all) {
-            await seedPeer(peer, _largeRowCount);
-          }
-        } finally {
-          await peers.closeAll();
+    byLib['drift batch()'] = await measurePeer('drift batch()', (path) async {
+      final peers = await PeerSet.open(
+        path,
+        driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),
+        require: (p) => p.name == 'drift',
+      );
+      try {
+        for (final peer in peers.all) {
+          await seedPeer(peer, _largeRowCount);
         }
-      },
-    );
+      } finally {
+        await peers.closeAll();
+      }
+    });
   } finally {
     await dir.delete(recursive: true);
   }
@@ -326,7 +324,9 @@ Future<void> _workloadStreamingFanout(StringBuffer md) async {
     );
     await resqliteDb.executeBatch(
       'INSERT INTO items(name, value) VALUES (?, ?)',
-      [for (var i = 0; i < 100; i++) ['item_$i', i]],
+      [
+        for (var i = 0; i < 100; i++) ['item_$i', i],
+      ],
     );
 
     final asyncDb = sqlite_async.SqliteDatabase(path: '${dir.path}/async.db');
@@ -334,10 +334,9 @@ Future<void> _workloadStreamingFanout(StringBuffer md) async {
     await asyncDb.execute(
       'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER NOT NULL)',
     );
-    await asyncDb.executeBatch(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      [for (var i = 0; i < 100; i++) ['item_$i', i]],
-    );
+    await asyncDb.executeBatch('INSERT INTO items(name, value) VALUES (?, ?)', [
+      for (var i = 0; i < 100; i++) ['item_$i', i],
+    ]);
 
     final byLib = <String, _MemStats>{};
 
@@ -393,10 +392,10 @@ Future<void> _streamingFanoutResqlite(
 
   var counter = 10000;
   for (var i = 0; i < writes; i++) {
-    await db.execute(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      ['mem_$counter', counter],
-    );
+    await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+      'mem_$counter',
+      counter,
+    ]);
     counter++;
   }
 
@@ -426,17 +425,14 @@ Future<void> _streamingFanoutAsync(
     initials.add(initialC);
     subs.add(
       db
-          .watch(
-            'SELECT COUNT(*) as cnt FROM items',
-            throttle: Duration.zero,
-          )
+          .watch('SELECT COUNT(*) as cnt FROM items', throttle: Duration.zero)
           .listen((_) {
-        if (!initialC.isCompleted) {
-          initialC.complete();
-        } else {
-          counters[idx]++;
-        }
-      }),
+            if (!initialC.isCompleted) {
+              initialC.complete();
+            } else {
+              counters[idx]++;
+            }
+          }),
     );
   }
 
@@ -444,10 +440,10 @@ Future<void> _streamingFanoutAsync(
 
   var counter = 10000;
   for (var i = 0; i < writes; i++) {
-    await db.execute(
-      'INSERT INTO items(name, value) VALUES (?, ?)',
-      ['mem_$counter', counter],
-    );
+    await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
+      'mem_$counter',
+      counter,
+    ]);
     counter++;
   }
 

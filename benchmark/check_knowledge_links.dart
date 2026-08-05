@@ -88,9 +88,7 @@ void main() {
           }
           for (final t in targets) {
             if (t is! String || !experimentIds.contains(t)) {
-              errors.add(
-                '${f.path}: $key -> "$t" is not a known experiment.',
-              );
+              errors.add('${f.path}: $key -> "$t" is not a known experiment.');
             }
           }
         }
@@ -102,19 +100,20 @@ void main() {
   // architecture.md is blog-rendered (docs/blog/architecture.html), so its
   // links — like the story sources' — are authored for the published site.
   final skip = {'experiments/README.md', 'doc/arch/architecture.md'};
-  final mdFiles = <File>[
-    ...Directory('experiments').listSync(recursive: true).whereType<File>(),
-    if (Directory('doc').existsSync())
-      ...Directory('doc').listSync(recursive: true).whereType<File>(),
-  ].where(
-    (f) =>
-        f.path.endsWith('.md') &&
-        !skip.contains(f.path) &&
-        // Story sources render into docs/blog/stories/, so their relative
-        // links are authored against the *published* location and cannot be
-        // resolved from the source tree.
-        !f.path.startsWith('doc/stories/'),
-  );
+  final mdFiles =
+      <File>[
+        ...Directory('experiments').listSync(recursive: true).whereType<File>(),
+        if (Directory('doc').existsSync())
+          ...Directory('doc').listSync(recursive: true).whereType<File>(),
+      ].where(
+        (f) =>
+            f.path.endsWith('.md') &&
+            !skip.contains(f.path) &&
+            // Story sources render into docs/blog/stories/, so their relative
+            // links are authored against the *published* location and cannot be
+            // resolved from the source tree.
+            !f.path.startsWith('doc/stories/'),
+      );
 
   final linkRe = RegExp(r'\]\(([^)\s]+)\)');
   final claimRe = RegExp(r'\bclaim[s]?\s+(\d+\.\d+)\b');
@@ -134,8 +133,7 @@ void main() {
       href = href.split('#').first;
       if (href.isEmpty) continue;
       final resolved = File(f.parent.uri.resolve(href).toFilePath());
-      if (!resolved.existsSync() &&
-          !Directory(resolved.path).existsSync()) {
+      if (!resolved.existsSync() && !Directory(resolved.path).existsSync()) {
         errors.add('${f.path}: dead link ($href)');
       }
     }
@@ -153,7 +151,9 @@ void main() {
     for (final m in citeRe.allMatches(text)) {
       final id = m.group(1)!;
       if (!claimStates.containsKey(id)) {
-        errors.add('${f.path}: citation [[${id}]] names a claim no entry defines.');
+        errors.add(
+          '${f.path}: citation [[${id}]] names a claim no entry defines.',
+        );
       } else if (supersededOrRefuted.containsKey(id)) {
         chapterDebt[f.path] = (chapterDebt[f.path] ?? 0) + 1;
         warnings.add(

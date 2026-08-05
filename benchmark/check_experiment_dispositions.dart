@@ -52,7 +52,8 @@ List<String> findStrandedInReview({String root = _experimentsDir}) {
     final files = expDir.listSync().whereType<File>().toList()
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final file in files) {
-      if (!_experimentFilePattern.hasMatch(file.uri.pathSegments.last)) continue;
+      if (!_experimentFilePattern.hasMatch(file.uri.pathSegments.last))
+        continue;
       final match = _statusLinePattern.firstMatch(file.readAsStringSync());
       if (match == null) continue;
       final value = match.group(1)!.trim();
@@ -118,5 +119,7 @@ void main() {
     exitCode = 1;
     return;
   }
-  print('All experiments are in a terminal disposition (no stranded in-review).');
+  print(
+    'All experiments are in a terminal disposition (no stranded in-review).',
+  );
 }

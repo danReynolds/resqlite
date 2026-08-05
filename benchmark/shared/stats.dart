@@ -182,9 +182,7 @@ double cvPct(List<double> samples) {
   final mean = samples.reduce((a, b) => a + b) / samples.length;
   if (mean == 0) return 0;
   final variance =
-      samples
-          .map((v) => (v - mean) * (v - mean))
-          .reduce((a, b) => a + b) /
+      samples.map((v) => (v - mean) * (v - mean)).reduce((a, b) => a + b) /
       samples.length;
   return (math.sqrt(variance) / mean.abs()) * 100;
 }
@@ -256,8 +254,7 @@ final class AbPass {
   /// slower (positive delta), drift would inflate the candidate side; when
   /// faster, the baseline side. This is the phase whose noise the JOURNAL
   /// lesson says to inspect first.
-  double get flaggedSideCvPct =>
-      deltaPct >= 0 ? candidateCvPct : baselineCvPct;
+  double get flaggedSideCvPct => deltaPct >= 0 ? candidateCvPct : baselineCvPct;
 
   double get cleanSideCvPct => deltaPct >= 0 ? baselineCvPct : candidateCvPct;
 }

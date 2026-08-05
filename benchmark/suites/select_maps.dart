@@ -12,7 +12,9 @@ Future<String> runSelectMapsBenchmark() async {
   final markdown = StringBuffer();
   markdown.writeln('## Select → Maps');
   markdown.writeln('');
-  markdown.writeln('Query returns `List<Map<String, Object?>>`, caller iterates every field.');
+  markdown.writeln(
+    'Query returns `List<Map<String, Object?>>`, caller iterates every field.',
+  );
   markdown.writeln('');
 
   for (final rowCount in standardRowCounts) {
@@ -29,10 +31,7 @@ Future<String> runSelectMapsBenchmark() async {
   return markdown.toString();
 }
 
-Future<List<BenchmarkTiming>> _benchmarkAtSize(
-  String dir,
-  int rowCount,
-) async {
+Future<List<BenchmarkTiming>> _benchmarkAtSize(String dir, int rowCount) async {
   final peers = await PeerSet.open(
     dir,
     driftFactory: driftFactoryFor((exec) => MicroItemsDriftDb(exec)),

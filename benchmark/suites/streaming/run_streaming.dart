@@ -8,18 +8,24 @@ Future<void> main() async {
   print('');
   print('=== Streaming Benchmarks ===');
   print('');
-  print('Running each library in a separate process to avoid symbol conflicts.');
+  print(
+    'Running each library in a separate process to avoid symbol conflicts.',
+  );
   print('');
 
   final scriptDir = File(Platform.script.toFilePath()).parent.path;
 
   // Run resqlite benchmark.
   print('Running resqlite streams...');
-  final resqliteResult = await _runBenchmark('$scriptDir/resqlite_streams.dart');
+  final resqliteResult = await _runBenchmark(
+    '$scriptDir/resqlite_streams.dart',
+  );
 
   // Run sqlite_async benchmark.
   print('Running sqlite_async streams...');
-  final asyncResult = await _runBenchmark('$scriptDir/sqlite_async_streams.dart');
+  final asyncResult = await _runBenchmark(
+    '$scriptDir/sqlite_async_streams.dart',
+  );
 
   if (resqliteResult == null || asyncResult == null) {
     print('One or both benchmarks failed. Cannot compare.');
@@ -30,7 +36,9 @@ Future<void> main() async {
   print('');
   print('--- Results ---');
   print('');
-  print('${'Metric'.padRight(35)} ${'resqlite'.padLeft(12)} ${'sqlite_async'.padLeft(14)} ${'winner'.padLeft(10)}');
+  print(
+    '${'Metric'.padRight(35)} ${'resqlite'.padLeft(12)} ${'sqlite_async'.padLeft(14)} ${'winner'.padLeft(10)}',
+  );
   print('-' * 75);
 
   void compare(String label, String key) {
@@ -43,8 +51,12 @@ Future<void> main() async {
     final sqUs = sq as int;
     final asUs = as_ as int;
     if (sqUs < 0 || asUs < 0) {
-      final sqDisplay = sqUs < 0 ? 'unsupported' : '${(sqUs / 1000).toStringAsFixed(2)} ms';
-      final asDisplay = asUs < 0 ? 'unsupported' : '${(asUs / 1000).toStringAsFixed(2)} ms';
+      final sqDisplay = sqUs < 0
+          ? 'unsupported'
+          : '${(sqUs / 1000).toStringAsFixed(2)} ms';
+      final asDisplay = asUs < 0
+          ? 'unsupported'
+          : '${(asUs / 1000).toStringAsFixed(2)} ms';
       print(
         '${label.padRight(35)} '
         '${sqDisplay.padLeft(12)} '
@@ -98,7 +110,8 @@ Future<Map<String, dynamic>?> _runBenchmark(String scriptPath) async {
   }
 
   try {
-    return jsonDecode(stdout.substring(jsonStart, jsonEnd + 1)) as Map<String, dynamic>;
+    return jsonDecode(stdout.substring(jsonStart, jsonEnd + 1))
+        as Map<String, dynamic>;
   } catch (e) {
     print('  Failed to parse JSON: $e');
     return null;

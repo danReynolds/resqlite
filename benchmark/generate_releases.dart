@@ -24,11 +24,12 @@ import 'dart:io';
 void main() {
   final changelog = _parseChangelog(File('CHANGELOG.md').readAsStringSync());
   final experiments = _loadExperiments('docs/experiments/history.json');
-  final bench = jsonDecode(
-    File('benchmark/version_benchmarks.json').readAsStringSync(),
-  ) as Map<String, dynamic>;
+  final bench =
+      jsonDecode(File('benchmark/version_benchmarks.json').readAsStringSync())
+          as Map<String, dynamic>;
 
-  final curated = (bench['metricsCurated'] as List).cast<Map<String, dynamic>>();
+  final curated = (bench['metricsCurated'] as List)
+      .cast<Map<String, dynamic>>();
   final versionRows = (bench['versions'] as List).cast<Map<String, dynamic>>();
   final dateByVersion = <String, String>{
     for (final v in versionRows) v['version'] as String: v['date'] as String,
@@ -36,7 +37,8 @@ void main() {
   final metricsByVersion = <String, Map<String, dynamic>>{
     for (final v in versionRows)
       v['version'] as String:
-          ((v['metrics'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{}),
+          ((v['metrics'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{}),
   };
   final crossDriftByVersion = <String, num>{
     for (final v in versionRows)
@@ -47,7 +49,9 @@ void main() {
   // Versions in descending semver order, as they appear in the changelog.
   final versions = changelog.map((e) => e.version).toList();
   final latestVersion = versions.isEmpty ? null : versions.first;
-  final latestDate = latestVersion == null ? null : dateByVersion[latestVersion];
+  final latestDate = latestVersion == null
+      ? null
+      : dateByVersion[latestVersion];
 
   final releases = <Map<String, dynamic>>[];
   for (var i = 0; i < versions.length; i++) {
@@ -63,12 +67,18 @@ void main() {
       // The latest release uses a strict upper bound: an experiment dated on
       // the release date landed *after* the release was cut (you publish, then
       // keep working that day), so it belongs to "Unreleased", not the release.
-      'experiments': _experimentsInWindow(experiments, prevDate, date,
-          strictUpper: i == 0),
+      'experiments': _experimentsInWindow(
+        experiments,
+        prevDate,
+        date,
+        strictUpper: i == 0,
+      ),
       'deltas': _deltas(
         curated,
         metricsByVersion[version] ?? const {},
-        prevVersion == null ? const {} : (metricsByVersion[prevVersion] ?? const {}),
+        prevVersion == null
+            ? const {}
+            : (metricsByVersion[prevVersion] ?? const {}),
         prevVersion,
         crossDriftByVersion[version] ?? 0,
       ),
@@ -79,8 +89,10 @@ void main() {
   // not yet in a published version. Surface them in an "Unreleased" card.
   final unreleased = latestDate == null
       ? const <Map<String, dynamic>>[]
-      : (experiments.where((e) => (e['date'] as String).compareTo(latestDate) >= 0).toList()
-        ..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String)));
+      : (experiments
+            .where((e) => (e['date'] as String).compareTo(latestDate) >= 0)
+            .toList()
+          ..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String)));
   if (unreleased.isNotEmpty) {
     releases.insert(0, {
       'version': 'Unreleased',
@@ -100,14 +112,20 @@ void main() {
 
   final outFile = File('docs/releases/releases.json');
   outFile.parent.createSync(recursive: true);
-  outFile.writeAsStringSync('${const JsonEncoder.withIndent('  ').convert(out)}\n');
-  print('Wrote ${outFile.path} (${releases.length} releases, '
-      '${experiments.length} experiments mapped by date).');
+  outFile.writeAsStringSync(
+    '${const JsonEncoder.withIndent('  ').convert(out)}\n',
+  );
+  print(
+    'Wrote ${outFile.path} (${releases.length} releases, '
+    '${experiments.length} experiments mapped by date).',
+  );
   for (final r in releases) {
     final exps = (r['experiments'] as List).length;
     final deltas = (r['deltas'] as List).length;
-    print('  ${r['version']}  ${r['date'] ?? '?'}  '
-        '$exps experiments, $deltas benchmark deltas');
+    print(
+      '  ${r['version']}  ${r['date'] ?? '?'}  '
+      '$exps experiments, $deltas benchmark deltas',
+    );
   }
 }
 
@@ -147,26 +165,28 @@ List<_ChangelogEntry> _parseChangelog(String md) {
 }
 
 List<Map<String, dynamic>> _loadExperiments(String path) {
-  final data = jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+  final data =
+      jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
   final raw = (data['experiments'] as List).cast<Map<String, dynamic>>();
   final urls = _experimentUrls();
   return raw
       .where((e) => e['date'] != null)
-      .map((e) => {
-            'id': e['id'],
-            'title': e['title'],
-            'date': e['date'],
-            'status': e['status'],
-            'summary': e['summary'] ?? '',
-            if (urls[e['id']] != null) 'url': urls[e['id']],
-          })
+      .map(
+        (e) => {
+          'id': e['id'],
+          'title': e['title'],
+          'date': e['date'],
+          'status': e['status'],
+          'summary': e['summary'] ?? '',
+          if (urls[e['id']] != null) 'url': urls[e['id']],
+        },
+      )
       .toList();
 }
 
 /// Maps experiment id → GitHub writeup URL by resolving `experiments/NNN-*.md`.
 Map<String, String> _experimentUrls() {
-  const base =
-      'https://github.com/danReynolds/resqlite/blob/main/experiments';
+  const base = 'https://github.com/danReynolds/resqlite/blob/main/experiments';
   final dir = Directory('experiments');
   final out = <String, String>{};
   if (!dir.existsSync()) return out;
@@ -194,8 +214,7 @@ List<Map<String, dynamic>> _experimentsInWindow(
     final cmp = d.compareTo(date);
     final beforeUpper = strictUpper ? cmp < 0 : cmp <= 0;
     return afterPrev && beforeUpper;
-  }).toList()
-    ..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String));
+  }).toList()..sort((a, b) => (b['id'] as String).compareTo(a['id'] as String));
   return inWindow;
 }
 
@@ -245,8 +264,8 @@ List<Map<String, dynamic>> _deltas(
     final confidence = deltaPct.abs() <= effThr
         ? 'noise'
         : noisy
-            ? 'low'
-            : 'high';
+        ? 'low'
+        : 'high';
     out.add({
       'key': key,
       'label': m['label'],

@@ -52,7 +52,8 @@ const WorkloadMeta highCardinalityFanoutMeta = WorkloadMeta(
   slug: 'high_cardinality_fanout',
   version: 1,
   title: 'High-Cardinality Stream Fan-out',
-  description: '100 reactive streams each watching one of 100 owner '
+  description:
+      '100 reactive streams each watching one of 100 owner '
       'partitions of a 10K-item table. 200 random-item writes target '
       'random items. Models Flutter list views with many simultaneous '
       'row watchers (detail screens, reactive timelines). Originally '
@@ -74,13 +75,12 @@ const int _prngSeed = 0xCAFEF0;
 
 /// Benchmark entry — uses production-scale constants (100 streams ×
 /// 200 writes, 1 warmup + 2 measured iterations).
-Future<String> runHighCardinalityFanoutBenchmark() =>
-    _runFanoutBenchmark(
-      streamCount: _streamCount,
-      writeCount: _writeCount,
-      warmup: _warmup,
-      iterations: _iterations,
-    );
+Future<String> runHighCardinalityFanoutBenchmark() => _runFanoutBenchmark(
+  streamCount: _streamCount,
+  writeCount: _writeCount,
+  warmup: _warmup,
+  iterations: _iterations,
+);
 
 /// Test entry — runs at a reduced scale so the DoD unit test can
 /// complete in seconds rather than minutes. Exposed only for tests;
@@ -113,8 +113,7 @@ Future<String> _runFanoutBenchmark({
     final peers = await PeerSet.open(
       tempDir.path,
       require: (p) => p.hasStreams,
-      driftFactory:
-          driftFactoryFor((exec) => HighCardFanoutDriftDb(exec)),
+      driftFactory: driftFactoryFor((exec) => HighCardFanoutDriftDb(exec)),
     );
     try {
       for (final peer in peers.all) {
@@ -186,8 +185,11 @@ Future<_Reading> _measure(
   final emissionsByIter = <int>[];
 
   for (var iter = 0; iter < warmup + iterations; iter++) {
-    final r = await _singleIteration(peer,
-        streamCount: streamCount, writeCount: writeCount);
+    final r = await _singleIteration(
+      peer,
+      streamCount: streamCount,
+      writeCount: writeCount,
+    );
     if (iter >= warmup) {
       timing.record(
         wallMicroseconds: r.totalWallUs,
@@ -240,16 +242,18 @@ Future<_IterResult> _singleIteration(
   for (var i = 0; i < streamCount; i++) {
     final idx = i;
     final ownerId = i + 1;
-    final sub = peer.watch(
-      'SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
-      params: [ownerId],
-      readsFrom: const {'items'},
-    ).listen((_) {
-      final sw = Stopwatch()..start();
-      emitCounts[idx]++;
-      sw.stop();
-      listenerUs += sw.elapsedMicroseconds;
-    });
+    final sub = peer
+        .watch(
+          'SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
+          params: [ownerId],
+          readsFrom: const {'items'},
+        )
+        .listen((_) {
+          final sw = Stopwatch()..start();
+          emitCounts[idx]++;
+          sw.stop();
+          listenerUs += sw.elapsedMicroseconds;
+        });
     subs.add(sub);
   }
 
@@ -268,17 +272,13 @@ Future<_IterResult> _singleIteration(
     final writeSw = Stopwatch()..start();
     for (var w = 0; w < writeCount; w++) {
       final id = prng.nextInt(_itemCount) + 1;
-      await peer.execute(
-        'UPDATE items SET value = ? WHERE id = ?',
-        [w, id],
-      );
+      await peer.execute('UPDATE items SET value = ? WHERE id = ?', [w, id]);
     }
 
     // Settle.
     var lastSum = emitCounts.reduce((a, b) => a + b);
     const quietWindow = Duration(milliseconds: 200);
-    final quietDeadline =
-        DateTime.now().add(const Duration(seconds: 60));
+    final quietDeadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(quietDeadline)) {
       await Future<void>.delayed(quietWindow);
       final nowSum = emitCounts.reduce((a, b) => a + b);
@@ -328,17 +328,11 @@ Future<void> _seed(BenchmarkPeer peer, int streamCount) async {
     'value INTEGER NOT NULL)',
   );
   await peer.execute(
-      'CREATE INDEX IF NOT EXISTS items_owner ON items(owner_id)');
-  await peer.executeBatch(
-    'INSERT INTO items(owner_id, value) VALUES (?, ?)',
-    [
-      for (var i = 0; i < _itemCount; i++)
-        [
-          (i ~/ itemsPerOwner) + 1,
-          0,
-        ],
-    ],
+    'CREATE INDEX IF NOT EXISTS items_owner ON items(owner_id)',
   );
+  await peer.executeBatch('INSERT INTO items(owner_id, value) VALUES (?, ?)', [
+    for (var i = 0; i < _itemCount; i++) [(i ~/ itemsPerOwner) + 1, 0],
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,9 +346,11 @@ void _writeResults(
   required int writeCount,
 }) {
   md
-    ..writeln('| Library | Wall med (ms) | Wall p90 (ms) | '
-        'Main med (ms) | Main p90 (ms) | Init drain (ms) | '
-        'Write burst (ms) | Emissions |')
+    ..writeln(
+      '| Library | Wall med (ms) | Wall p90 (ms) | '
+      'Main med (ms) | Main p90 (ms) | Init drain (ms) | '
+      'Write burst (ms) | Emissions |',
+    )
     ..writeln('|---|---|---|---|---|---|---|---|');
   for (final r in readings) {
     md.writeln(
@@ -370,19 +366,25 @@ void _writeResults(
   }
   md
     ..writeln()
-    ..writeln('**Init drain**: median wall time from subscribing all '
-        '$streamCount streams to the last one producing its initial '
-        'emission. Exposes cold-start cost of the subscriber fleet.')
+    ..writeln(
+      '**Init drain**: median wall time from subscribing all '
+      '$streamCount streams to the last one producing its initial '
+      'emission. Exposes cold-start cost of the subscriber fleet.',
+    )
     ..writeln()
-    ..writeln('**Write burst**: median wall time from first write to '
-        'last emission settled after $writeCount writes. Dominated by '
-        're-query cost × stream count × write count for libraries '
-        'without per-row invalidation; hash suppression (resqlite exp '
-        '031/033) elides emissions but the re-query itself still runs.')
+    ..writeln(
+      '**Write burst**: median wall time from first write to '
+      'last emission settled after $writeCount writes. Dominated by '
+      're-query cost × stream count × write count for libraries '
+      'without per-row invalidation; hash suppression (resqlite exp '
+      '031/033) elides emissions but the re-query itself still runs.',
+    )
     ..writeln()
-    ..writeln('**Wall / Main** columns are end-to-end (init + writes + '
-        'settle). `Main` is aggregate listener-callback time — the UI '
-        'thread cost.')
+    ..writeln(
+      '**Wall / Main** columns are end-to-end (init + writes + '
+      'settle). `Main` is aggregate listener-callback time — the UI '
+      'thread cost.',
+    )
     ..writeln();
 }
 
