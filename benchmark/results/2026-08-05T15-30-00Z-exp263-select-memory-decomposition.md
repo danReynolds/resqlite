@@ -47,12 +47,19 @@ Marginal cost per row, over two spans:
 
 Average cell content in one seeded row: **142.9 bytes** — the UTF-8 length of
 each TEXT cell plus 8 bytes per numeric, averaged over the whole 20,000-row
-seeded range. (An earlier revision reported 137.8 B, averaged over the first 100
-rows; `Item $i` and the description's `$i` both grow with the row index, so a
+seeded range, sampled at a fixed stride. (An earlier revision reported 137.8 B,
+averaged over the first 100 rows; `Item $i` and the description's `$i` both grow with the row index, so a
 prefix undercounts what the lanes actually read.) Exact for this fixture — every
 generated cell is ASCII, which the harness asserts, so UTF-16 code units and
 UTF-8 bytes coincide — and deliberately not SQLite's on-disk record size, which
-varint-encodes integers and carries a per-row header.
+varint-encodes integers and carries a per-row header. Strided rather than
+exhaustive on purpose: the average is computed before any lane runs, and building
+all 20,000 rows to measure them would allocate megabytes of transient strings
+ahead of an RSS measurement that cannot see them released. 200 samples land
+within 0.01 B of the exact mean. The `open` lane reads 20.5-20.6 MB either way,
+so this is a hazard removed rather than a number changed — and the sweep above
+predates the denominator fix entirely, since that figure is an arithmetic
+property of the fixture rather than an input to any measurement.
 
 ## Attributing the marginal
 
