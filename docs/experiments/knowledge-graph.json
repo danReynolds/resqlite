@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 52,
-    "totalEntries": 133
+    "entriesWithClaims": 53,
+    "totalEntries": 134
   },
   "experiments": [
     {
@@ -2081,6 +2081,17 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted_measurement"
+    },
+    {
+      "id": "262",
+      "title": "Persist the release suite per scenario, and let memory fail a run",
+      "file": "262-release-scenario-persistence.md",
+      "date": "2026-08-05",
+      "status": "accepted",
+      "directions": [
+        "measurement-system"
+      ],
+      "outcomeClass": "accepted_measurement"
     }
   ],
   "claims": [
@@ -2903,6 +2914,35 @@
       "text": "`select()` holds far more than its payload: `mixed6-10k` reads a table containing roughly 1.5 MB of data and peaks at 95 MB, and 89.5 MB of the pre-exp-260 figure is resident before the measured reads begin. The ~60x ratio has never been decomposed, and exps 008/032's lazy and facade result shapes were assessed against wall time rather than against this.",
       "conditions": "M1 Pro · AOT · maxRss and post-warmup resident, one process per lane · 2026-08",
       "state": "live"
+    },
+    {
+      "id": "262.1",
+      "source": "262",
+      "directions": [
+        "measurement-system"
+      ],
+      "text": "Release-suite crash resilience must persist per scenario, not per repeat. A SIGKILL during scenario 10 of 16 preserves 9 scenarios and 153 resqlite metrics with `repeatCount: 0` and `partial: true`; the same kill produced no artifact before. Against the crash that actually occurs — the sqlite_async peer dying at scenario 15 — this preserves fourteen scenarios including every read, write and streaming lane.",
+      "conditions": "M1 Pro · deliberate SIGKILL, --repeat=1 · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "262.2",
+      "source": "262",
+      "directions": [
+        "measurement-system"
+      ],
+      "text": "The release suite can now fail on a memory regression. `compareMemory` returns wins/regressions/neutral plus the regressed benchmark names alongside the existing table, and `--fail-on-memory-regression` exits non-zero. Thresholds are unchanged (per-benchmark bootstrap MDE, 0.5 MB floor) — only the verdict is newly actionable. Opt-in rather than default: a local run reports without failing.",
+      "conditions": "unit-tested behaviour, 10 cases · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "261.1"
+      ]
     }
   ]
 }
