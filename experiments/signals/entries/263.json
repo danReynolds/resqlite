@@ -1,8 +1,12 @@
 {
-  "directions": ["result-transfer-shape", "measurement-system"],
+  "directions": [
+    "result-transfer-shape",
+    "measurement-system"
+  ],
   "outcomeClass": "accepted_measurement",
   "changedBeliefs": [
-    "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Holding seeding constant and varying only the read shows `select()` costs 396 B/row against 137.8 B of cell content (UTF-8 TEXT length plus 8 B per numeric, exact for this all-ASCII fixture and not SQLite's on-disk record size) — 2.9x, and within ~1.4x of the ~280 B/row theoretical minimum for four OneByteStrings, a boxed double, six pointer slots and a Row facade. The ratio divided a peak that is ~90% fixed and setup cost by the payload.",
+    "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Two corrections were needed to say what does. First, the raw 396 B/row marginal cannot be divided by the payload: a one-column and a six-column read of the same table make the same btree leaves resident, so the `id` lane's 140 B/row is a per-row storage-side cost independent of representation, and differencing the projections isolates the Dart side at 256 B/row for the five non-key columns. Second, that is 1.9x their 134.9 B of cell content, and BELOW a first-principles accounting of what they must occupy (~296 B: four OneByteStrings at a 24 B header plus rounded data, one boxed double, five values-list slots). The row representation has no headroom.",
+    "The `Row` facade costs nothing in a retained result. It is three fields and a header, but the iterator creates those objects transiently and only the `ResultSet` is held, so a per-row facade charge does not belong in an accounting of what a result occupies.",
     "A repeated-read RSS measurement is not a measurement of a result. RSS never falls, so exp 261's 5 warmup + 21 timed reads accumulated up to 26 results of retained garbage and reported 99 MB for a 10k-row lane where one read held live reports 36.1 MB — 2.7x. Both answer real questions; only the second answers `what does a result cost`. Any future memory lane must say which it is measuring.",
     "The floor dominates every small and medium read, and it is mostly not resqlite's row handling. 14.0 MB is a bare AOT Dart process before resqlite exists; open plus a spawned pool is 20.5 MB; seeding 20,000 rows adds ~12 MB more. A live 10,000-row result adds 3.6 MB on top — the smallest term in the stack.",
     "`selectBytes` uses MORE memory per row than `select`: 676 B/row against 396. It removes Dart objects, which is what it has always claimed, but JSON repeats every column name on every row and quotes and escapes every value, so the encoded bytes exceed the object graph they replace. It is the right tool for allocation churn and the wrong one for footprint.",
@@ -11,11 +15,17 @@
   "claims": [
     {
       "id": "263.1",
-      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of cell content on the canonical 6-column product row (UTF-8 TEXT length plus 8 B per numeric; exact for this all-ASCII fixture, not SQLite's on-disk record size) — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
-      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · 2026-08",
+      "text": "The Dart representation of a `select()` row costs 256 B/row for the canonical product row's five non-key columns — obtained by differencing the 6-column marginal (396 B/row) against the 1-column `id` marginal (140 B/row), since both projections make the same btree leaves resident and the shared term is storage-side rather than representational. That is 1.9x their 134.9 B of cell content, and 0.86x a first-principles accounting of what they must occupy (~296 B). Measured as a single live result, one process per lane, seeding held constant at 20,000 rows.",
+      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · payload averaged over the full seeded range · 2026-08",
       "edges": [
-        { "type": "supersedes", "target": "261.4" },
-        { "type": "dependsOn", "target": "261.1" }
+        {
+          "type": "supersedes",
+          "target": "261.4"
+        },
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
       ]
     },
     {
@@ -27,12 +37,19 @@
       "id": "263.3",
       "text": "`selectBytes` costs 676 B/row against `select`'s 396 B/row on the same rows. It avoids Dart object allocation, not bytes: JSON repeats every column name per row and quotes and escapes every value. Reach for it to reduce allocation churn, not footprint.",
       "conditions": "M1 Pro · AOT · maxRss, one process per lane, single read held live · 2026-08"
+    },
+    {
+      "id": "263.4",
+      "text": "A per-row cost of ~140 B/row is shared by every projection of the same table and is not part of the result representation: the 1-column `id` lane pays it as fully as the 6-column `select` lane, because a btree leaf holds the whole row regardless of what is projected. Its mechanism is bounded but not established — it scales with rows read, is indifferent to column count, and resqlite opens connections with mmap_size = 256 MB and cache_size = -8192, so mmap'd file pages becoming resident, WAL pages, and a cold reader page cache are all live candidates. Any future per-row memory figure must difference two projections or it charges this to the wrong layer.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane · mechanism not discriminated · 2026-08"
     }
   ],
   "nextSignals": [
     "Claim 261.4 is closed by 263.1. Do not reopen a result-shape rewrite on payload-to-peak-ratio grounds — exps 081, 251 and 258 closed storage rewrites on their own evidence, and the one piece of contrary evidence has now been removed rather than strengthened.",
+    "Difference two projections before quoting a per-row memory cost. The raw marginal includes a ~140 B/row storage-side term (claim 263.4) that a one-column read pays as fully as a six-column one; dividing it by the payload charges the storage engine's work to the row representation, which is how this experiment's own first revision overstated the overhead as 2.9x.",
     "State which memory question a lane answers. `benchmark/experiments/select_memory_decomposition.dart` runs both: `--warmup=0 --reads=1` for the cost of one live result, the default for what a repeatedly-reading process retains. They differ by 2.7x on the same lane, so an unlabelled figure is not interpretable.",
     "If footprint ever becomes a target, the isolate pool is the term to attack, not the row representation — 20.5 MB is resident before a row is read. Exp 105 established pool size is throughput-critical, so it is a trade; nothing here says the trade is worth making.",
-    "Keep a memory sweep on one side of `sacrificeSlotThreshold`, or tag lanes by which side they fall on. Crossing it makes the marginal sub-linear because `Isolate.exit` returns the worker's heap, which reads as a representation win and is not one."
+    "Keep a memory sweep on one side of `sacrificeSlotThreshold`, or tag lanes by which side they fall on. Crossing it makes the marginal sub-linear because `Isolate.exit` returns the worker's heap, which reads as a representation win and is not one.",
+    "If the ~140 B/row shared term ever needs pinning down, the discriminating test is cheap: hold row count fixed and widen the row (e.g. triple the description column). If the term tracks row width rather than row count it is the storage engine making scanned bytes resident and the question is closed; if it does not move, something else holds it."
   ]
 }

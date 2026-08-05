@@ -162,8 +162,14 @@ Future<void> main(List<String> args) async {
     );
   }
   _assertAsciiFixture();
-  final avgPayload =
-      List.generate(100, _payloadBytes).reduce((a, b) => a + b) / 100;
+  // Averaged over the whole seeded range, not a prefix of it: `Item $i` and
+  // the description's `$i` both grow with the row index, so a 100-row sample
+  // undercounts what a 20,000-row lane actually reads (137.8 B against 142.9).
+  var payloadTotal = 0;
+  for (var i = 0; i < _seedRows; i++) {
+    payloadTotal += _payloadBytes(i);
+  }
+  final avgPayload = payloadTotal / _seedRows;
   print(
     'avg_payload_bytes_per_row=${avgPayload.toStringAsFixed(1)} '
     '(UTF-8 cell content; not SQLite on-disk size)',
