@@ -1,0 +1,38 @@
+{
+  "directions": ["result-transfer-shape", "measurement-system"],
+  "outcomeClass": "accepted_measurement",
+  "changedBeliefs": [
+    "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Holding seeding constant and varying only the read shows `select()` costs 396 B/row against 137.8 B of cell content (UTF-8 TEXT length plus 8 B per numeric, exact for this all-ASCII fixture and not SQLite's on-disk record size) — 2.9x, and within ~1.4x of the ~280 B/row theoretical minimum for four OneByteStrings, a boxed double, six pointer slots and a Row facade. The ratio divided a peak that is ~90% fixed and setup cost by the payload.",
+    "A repeated-read RSS measurement is not a measurement of a result. RSS never falls, so exp 261's 5 warmup + 21 timed reads accumulated up to 26 results of retained garbage and reported 99 MB for a 10k-row lane where one read held live reports 36.1 MB — 2.7x. Both answer real questions; only the second answers `what does a result cost`. Any future memory lane must say which it is measuring.",
+    "The floor dominates every small and medium read, and it is mostly not resqlite's row handling. 14.0 MB is a bare AOT Dart process before resqlite exists; open plus a spawned pool is 20.5 MB; seeding 20,000 rows adds ~12 MB more. A live 10,000-row result adds 3.6 MB on top — the smallest term in the stack.",
+    "`selectBytes` uses MORE memory per row than `select`: 676 B/row against 396. It removes Dart objects, which is what it has always claimed, but JSON repeats every column name on every row and quotes and escapes every value, so the encoded bytes exceed the object graph they replace. It is the right tool for allocation churn and the wrong one for footprint.",
+    "The sacrifice path distorts a memory sweep the way exp 258 showed it distorts a transfer benchmark. `select`'s marginal reads 396 B/row over 1k-10k and 337 over 1k-20k, because results above sacrificeSlotThreshold return via Isolate.exit and the worker's heap goes with it. A memory comparison spanning that threshold measures transport as much as representation."
+  ],
+  "claims": [
+    {
+      "id": "263.1",
+      "text": "A `select()` result costs 396 B/row (1k->10k span) against 137.8 B of cell content on the canonical 6-column product row (UTF-8 TEXT length plus 8 B per numeric; exact for this all-ASCII fixture, not SQLite's on-disk record size) — a 2.9x representation overhead, within ~1.4x of the theoretical minimum for the row shape. Measured as a single live result with one process per lane, seeding held constant at 20,000 rows so the slope is purely the read.",
+      "conditions": "M1 Pro · AOT CLI bundle · maxRss, one process per lane, single read held live · 2026-08",
+      "edges": [
+        { "type": "supersedes", "target": "261.4" },
+        { "type": "dependsOn", "target": "261.1" }
+      ]
+    },
+    {
+      "id": "263.2",
+      "text": "resqlite's resident floor before any row is read is 20.5 MB, of which 14.0 MB is a bare AOT Dart process; seeding 20,000 rows adds ~12 MB more, and a live 10,000-row result adds 3.6 MB. The result is the smallest term, so a payload-to-peak ratio taken on a read-and-discard workload is a statement about the floor.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane · 2026-08"
+    },
+    {
+      "id": "263.3",
+      "text": "`selectBytes` costs 676 B/row against `select`'s 396 B/row on the same rows. It avoids Dart object allocation, not bytes: JSON repeats every column name per row and quotes and escapes every value. Reach for it to reduce allocation churn, not footprint.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane, single read held live · 2026-08"
+    }
+  ],
+  "nextSignals": [
+    "Claim 261.4 is closed by 263.1. Do not reopen a result-shape rewrite on payload-to-peak-ratio grounds — exps 081, 251 and 258 closed storage rewrites on their own evidence, and the one piece of contrary evidence has now been removed rather than strengthened.",
+    "State which memory question a lane answers. `benchmark/experiments/select_memory_decomposition.dart` runs both: `--warmup=0 --reads=1` for the cost of one live result, the default for what a repeatedly-reading process retains. They differ by 2.7x on the same lane, so an unlabelled figure is not interpretable.",
+    "If footprint ever becomes a target, the isolate pool is the term to attack, not the row representation — 20.5 MB is resident before a row is read. Exp 105 established pool size is throughput-critical, so it is a trade; nothing here says the trade is worth making.",
+    "Keep a memory sweep on one side of `sacrificeSlotThreshold`, or tag lanes by which side they fall on. Crossing it makes the marginal sub-linear because `Isolate.exit` returns the worker's heap, which reads as a representation win and is not one."
+  ]
+}
