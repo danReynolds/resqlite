@@ -124,8 +124,9 @@ job rather than in a maintainer's hands.
 ## Test plan
 
 - `dart analyze --fatal-infos` on `benchmark/` and the new test — clean
-- `test/release_partial_run_test.dart` — 10 tests: partial-run marking,
+- `test/release_partial_run_test.dart` — 14 tests: partial-run marking,
   `repeatCount` not inflating mid-repeat, backward compatibility when the new
-  fields are absent, and the six gate behaviours above
+  fields are absent, the six comparison behaviours above, and four for
+  `shouldFailOnMemory`
 - End-to-end kill test described in Results, artifact inspected and then removed
 - `dart test` — full suite
