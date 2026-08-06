@@ -203,21 +203,32 @@ Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
 /// The two ends of the buffer's life want opposite statistics, and each takes
 /// the one whose mistakes are cheap:
 ///
-///  * [hint] steers *growth*, so it takes the **smaller** of the two row counts
-///    plus headroom. Over-sizing a growth is the expensive mistake there —
-///    zero-filling slots a small result throws away costs more than the
+///  * [hint] steers *growth*, so it takes the **smaller** of the last two row
+///    counts plus headroom. Over-sizing a growth is the expensive mistake there
+///    — zero-filling slots a small result throws away costs more than the
 ///    doubling it avoided — and a result that never overflows the initial
 ///    buffer never reads this field at all.
-///  * [initialRows] sizes the *initial* allocation, so it takes the **larger**
-///    of the two plus headroom, capped at [initialResultRows]. Under-sizing is
-///    the expensive mistake here, because a result that outgrows its first
-///    buffer pays doublings to catch up. The cap is what keeps the field from
-///    reintroducing the failure exp 260 measured: it can only ever make the
-///    initial allocation *smaller* than the fixed default, never larger, so a
-///    statement whose row count swings upward is bounded by today's behaviour.
+///  * [initialRows] sizes the *initial* allocation, so it takes the **largest
+///    row count ever seen** plus headroom, capped at [initialResultRows].
+///    Under-sizing is the expensive mistake here, because a result that outgrows
+///    its first buffer has to double its way up.
+///
+/// A sliding window is the wrong shape for [initialRows], and
+/// [EXP-264](../../experiments/264-initial-alloc-size-memory.md) measured what
+/// that costs: with a window of two, a statement that mostly returns 20 rows and
+/// periodically returns thousands is sized for 20 rows *on exactly the execution
+/// that returns thousands*, because the two observations before it were both
+/// small. The `undershoot-mid` lane put that at +40%, repeated on every large
+/// execution. A high-water mark cannot repeat: the first large result raises it
+/// for good, and every later one is sized from the fixed default. What it gives
+/// up is a statement that was once large and is now permanently small, which
+/// keeps today's allocation forever — no win, but no tax either.
 final class RowSizeMemory {
   /// Rows the most recent execution returned, or -1 before the first.
   int previous = -1;
+
+  /// The most rows any execution of this SQL has returned.
+  int highWater = 0;
 
   /// Rows to size the next execution's buffer growth for, or 0 for "no
   /// opinion".
@@ -229,24 +240,24 @@ final class RowSizeMemory {
   int initialRows = 0;
 
   void record(int rowCount) {
+    if (rowCount > highWater) highWater = rowCount;
     if (previous < 0) {
       previous = rowCount;
       return;
     }
-    final low = rowCount < previous ? rowCount : previous;
-    final high = rowCount < previous ? previous : rowCount;
-    hint = nextRowHint(low);
-    initialRows = initialRowsFor(high);
+    hint = nextRowHint(rowCount < previous ? rowCount : previous);
+    initialRows = initialRowsFor(highWater);
     previous = rowCount;
   }
 }
 
-/// Rows to size an initial result buffer for, given that the largest of this
-/// SQL's last two executions returned [rowCount] rows.
+/// Rows to size an initial result buffer for, given that no execution of this
+/// SQL has ever returned more than [rowCount] rows.
 ///
 /// Clamped into `1 ..= initialResultRows`: at least one row so the decode loop
 /// always has somewhere to write its first cell, and never more than the fixed
-/// default so this can only shrink an allocation.
+/// default so this can only shrink an allocation, never grow one — which is the
+/// direction exp 260 measured as a 2.8x regression.
 @pragma('vm:prefer-inline')
 int initialRowsFor(int rowCount) {
   final hinted = nextRowHint(rowCount);
@@ -309,17 +320,20 @@ int grownSlots(int colCount, int current, int rowHint) {
 /// declines to supply one (`null`) — the writer isolate, which owns every
 /// execution it decodes.
 ///
-/// A reader worker must **not** read its own memory here, and this is the one
-/// thing the first version of exp 264 got wrong. Exp 260 kept its growth hint on
-/// the main isolate because a result over `sacrificeSlotThreshold` ends the
-/// worker that produced it; that argument does not apply to a hint about small
-/// results, so worker-local memory looked safe. But a pool of four workers hands
-/// each one a *sample* of a statement's executions, and a burst of small reads
-/// can leave a worker's last two observations both small even though the
-/// statement regularly returns thousands of rows. That worker then sizes the
-/// next large result from a tiny buffer and doubles its way up. Measured on the
-/// `undershoot-mid` lane: **+40% in all four passes**, against a main-isolate
-/// memory that is neutral there because it sees the interleaving.
+/// A reader worker must **not** read its own memory here. The statistic behind
+/// [RowSizeMemory.initialRows] is a high-water mark, and a high-water mark is
+/// only worth what the observations feeding it are worth. A pool worker sees a
+/// *sample* of a statement's executions, so three of four workers can still
+/// believe a statement is small after the fourth has decoded a large result —
+/// and a worker that decodes a result over `sacrificeSlotThreshold` is
+/// destroyed, taking its high-water with it, so its replacement starts over.
+/// Both failures cost the same doubling chain, repeatedly. The main isolate sees
+/// every execution and outlives every worker, so the mark lives there and rides
+/// the request beside exp 260's growth hint.
+///
+/// The writer isolate is the one caller that may use its own memory: it is
+/// long-lived, is never sacrificed, and executes every read issued inside a
+/// transaction, so its local view *is* the global one.
 @pragma('vm:prefer-inline')
 int initialSlotRows(int callerHint, RowSizeMemory? local) {
   final rows = callerHint > 0 ? callerHint : (local?.initialRows ?? 0);

@@ -305,11 +305,16 @@ final _lanes = <_Lane>[
   //     buffer, so the undershoot is favourable here.
   //   undershoot-mid   3,300 rows. From 25 rows the chain lands on 6,400; from
   //     256 it lands on 4,096. Now the shrunken arm over-allocates by 56% and
-  //     pays eight growths against four. This is exp 264's adverse case, and
-  //     the number to quote as the cost of a mispredict.
+  //     pays eight growths against four. This is exp 264's adverse alignment,
+  //     and it is the lane that forced the sizing rule to be a high-water mark
+  //     rather than a sliding window: under a window of two it cost +40% on
+  //     *every* sample, because the two executions before each timed one were
+  //     both small.
   //
-  // Neither is a repeated cost: one execution at the larger size re-arms the
-  // memory, so a statement pays this once per jump, not per read.
+  // Under the high-water rule both lanes go inert after the first large
+  // execution raises the mark, so their medians read the harness floor. The
+  // one-time cost of that first execution is measured separately, by running
+  // this lane with `--warmup=0 --samples=1` in a fresh process per reading.
   _Lane.explicit(
     'undershoot-jump',
     10000,

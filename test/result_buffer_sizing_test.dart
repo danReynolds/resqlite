@@ -74,8 +74,8 @@ void main() {
 
   // [EXP-264] adds the initial-allocation end of the same memory. Its risk is
   // the mirror image of the growth hint's: sizing the *first* buffer too small
-  // costs doublings, so it takes the larger of the two observations and can
-  // only ever shrink the allocation below the fixed default.
+  // costs doublings, so it takes the largest row count ever seen and can only
+  // ever shrink the allocation below the fixed default.
   group('initialRowsFor', () {
     test('never exceeds the fixed default, however large the result', () {
       for (final rows in [initialResultRows, 300, 10000, 1 << 30]) {
@@ -105,12 +105,27 @@ void main() {
       expect(initialSlotRows(0, memory), lessThan(initialResultRows));
     });
 
-    test('takes the larger of the two, unlike the growth hint', () {
+    test('takes the high-water mark, where the growth hint takes the low', () {
       final memory = RowSizeMemory()
         ..record(1)
         ..record(40);
       expect(memory.hint, nextRowHint(1));
       expect(memory.initialRows, nextRowHint(40));
+    });
+
+    // The failure a sliding window cannot avoid: the two executions before a
+    // large one are both small, so a window of two sizes the large result from
+    // a tiny buffer. A high-water mark is raised once and never falls back.
+    test('one large result disables the shrink for good', () {
+      final memory = RowSizeMemory()
+        ..record(20)
+        ..record(20);
+      expect(initialSlotRows(0, memory), nextRowHint(20));
+      memory.record(8000);
+      for (var i = 0; i < 8; i++) {
+        memory.record(20);
+        expect(initialSlotRows(0, memory), initialResultRows);
+      }
     });
 
     test('a statement that swings keeps the full default allocation', () {
@@ -132,10 +147,11 @@ void main() {
     });
   });
 
-  // A reader worker sees only a sample of a statement's executions, so the
-  // caller's opinion — the pool's, taken on the main isolate where every
-  // execution is visible — must win outright over any local memory. Getting
-  // this backwards cost +40% on the `undershoot-mid` guard lane.
+  // A reader worker sees only a sample of a statement's executions, and is
+  // destroyed outright when it decodes a result over `sacrificeSlotThreshold`,
+  // so its own high-water mark both lags and resets. The pool's — taken on the
+  // main isolate, which sees every execution and outlives every worker — must
+  // therefore win outright over any local memory.
   group('initialSlotRows precedence', () {
     test("the caller's hint wins over a local memory that disagrees", () {
       final localSaysTiny = RowSizeMemory()
