@@ -44,15 +44,13 @@ sealed class ReadRequest {
   /// avoid would always be decoded by a worker that had never seen the SQL.
   int rowHint = 0;
 
-  /// Rows to size the *initial* result buffer for, or 0 when the pool has no
-  /// opinion — in which case the worker falls back to the fixed default
+  /// Rows to size the *initial* result buffer for, or 0 for the fixed default
   /// ([EXP-264](../../../experiments/264-initial-alloc-size-memory.md)).
   ///
-  /// Also stamped by [ReaderPool._dispatch], and for a different reason than
-  /// [rowHint]: this one has to come from the main isolate because only the main
-  /// isolate sees *every* execution of a SQL. A pool worker sees a sample, and a
-  /// burst of small reads can leave a worker believing a statement is small when
-  /// it is not — which sizes the next large result from a tiny buffer.
+  /// Also stamped by [ReaderPool._dispatch]. It must come from the main isolate
+  /// for the same reason [rowHint] does, plus one of its own: a worker observes
+  /// only the executions routed to it, and too low a figure here under-sizes the
+  /// buffer.
   int initialRowHint = 0;
 }
 

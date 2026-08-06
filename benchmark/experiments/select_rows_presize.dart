@@ -1,74 +1,55 @@
 // ignore_for_file: avoid_print
 //
-// Focused A/B harness for [EXP-260]: should `decodeQuery`'s result buffer be
-// sized from the row count the same SQL last returned?
+// Focused A/B harness for the `select()` result buffer: how it is sized at
+// allocation and how it grows ([EXP-260], [EXP-264]).
 //
-// `decodeQuery` allocates `List<Object?>.filled(colCount * 256, ...)` and
-// doubles it whenever a result outgrows it. Doubling copies the whole buffer
-// each time, so a result that overshoots the initial size by 2^k pays roughly
-// one extra full-buffer copy in total — element by element, with a store
-// barrier per slot, into a fresh multi-megabyte array. [EXP-251] put Dart
-// result construction at 39-63% of worker wall on large reads without
-// splitting out how much of it was that growth.
+// `decodeQuery` allocates `List<Object?>.filled(colCount * 256, ...)` and doubles
+// it whenever a result outgrows it. Both ends cost real time. Doubling copies the
+// whole buffer each time, element by element with a store barrier per slot, so a
+// result that overshoots by 2^k pays roughly one extra full-buffer copy. And the
+// fixed 256-row allocation is mostly waste for a small result — a one-row read of
+// a 21-column table zero-fills 5,376 slots to keep 21.
 //
-// The candidate remembers, on the main isolate, how many rows each SQL has
-// been returning, and sends that with the request so the worker's *first*
-// growth jumps straight to the right size instead of doubling its way there.
-// The initial allocation is untouched ([EXP-067] measured that shrinking it
-// regresses small queries), so a result that never overflows it runs exactly
-// the code it runs today.
+// Sizing either end from a per-SQL memory of past row counts is what the lanes
+// below gate. The roles invert between the two ends, so each lane is labelled for
+// both:
 //
-// Lanes:
+//   int20-10k / int4-5k         Integer shapes where the buffer is pure Smi slots
+//     and growth dominates the Dart-side cost. Primary for growth; control for
+//     the initial allocation, which clamps to the same 256 rows in both arms.
+//   mixed6-10k / mixed6-1k      The canonical 6-column product row, overshooting
+//     the initial allocation by 39x and 4x. Same roles.
+//   mixed6-200                  Fits inside the initial buffer, and sizes to 250
+//     rows against 256 — inert for both ends, so it reads the harness floor.
+//     Batched 20x per sample: one 200-row read lands near 50 us, where a 1 us
+//     tick is 2% and cannot resolve a sub-microsecond effect.
+//   point1 / point1-wide20      One row, at 6 and 21 columns. Primary for the
+//     initial allocation, where the waste scales with projection width; control
+//     for growth, which they never reach. Batched 200x per sample.
+//   mixed6-20                   A 20-row page, the shape a paged list view reads.
+//   mispredict-shrink / -mid    A `LIMIT ?` statement whose row count swings
+//     between 8,000 and a small leg. Guards that a swinging statement is neither
+//     over-allocated at the growth step nor sized down at the initial one.
+//   undershoot-jump / -mid      A statement that returns thousands after a burst
+//     of 20-row executions. Guards the initial allocation's failure mode. The two
+//     sit on opposite sides of the doubling chain's landing point (from 25 rows
+//     5,000 lands on 6,400 where 256 lands on 8,192, so the shrunken arm wins;
+//     3,300 lands on 6,400 against 4,096, so it loses), which is what stops the
+//     pair reporting whichever alignment happens to flatter.
+//   hint-thrash-fits / -overflows
+//     The same read behind 20 or 40 never-before-seen SQL strings, which claim
+//     slots in the pool's 32-entry row-size memory. The only lanes exercising
+//     more distinct statements than the pool can remember; every other lane uses
+//     a handful, so a per-SQL memory can stop working and nothing moves. 20 fits
+//     inside the capacity and 40 does not, so the pair separates an eviction
+//     policy problem from a capacity one.
 //
-//   int20-10k / int4-5k — PRIMARY. [EXP-251]'s integer shapes, where the
-//     buffer is pure Smi slots and growth is the dominant Dart-side cost.
-//   mixed6-10k / mixed6-1k — PRIMARY. The repo's canonical 6-column product
-//     row, at a row count that overshoots the initial allocation by 39x and by
-//     4x respectively.
-//   mixed6-200 / point1 — CONTROL *for exp 260*, PRIMARY for exp 264 (see the
-//     second block below). Both return fewer rows than the initial buffer
-//     holds, so neither ever reaches exp 260's growth path and the
-//     decode loop runs byte-identical code in both arms. What they still carry
-//     is the pool's per-request bookkeeping, which is the whole cost a small
-//     query pays for this. Per the JOURNAL lesson from exp 248 these lanes are
-//     the harness's own floor; per exp 254's, a same-sign move across the order
-//     flip means the two binaries carry a layout offset and no lane is
-//     trustworthy. `point1` times 200 executions per sample because a single
-//     point read is a handful of microseconds, where a 1 us stopwatch tick
-//     swamps the effect being measured.
-//   mispredict-shrink / mispredict-mid — GUARDS. The hint's failure mode is
-//     over-allocation: a SQL whose row count swings between executions sizes
-//     its buffer for the larger result and throws the excess away. Both lanes
-//     run the same `LIMIT ?` statement at 8000 rows (untimed) before each timed
-//     sample. `mispredict-shrink` times a 50-row execution behind six 8000-row
-//     ones — small enough never to overflow the initial buffer, so it proves
-//     the hint cannot inflate a small result no matter how saturated it is.
-//     `mispredict-mid` times a 300-row execution in strict alternation — large
-//     enough that the hint *is* consulted, so it tests the rule that picks it.
-//
-// [EXP-264] then took the other end of the same buffer: the *initial*
-// allocation, which exp 260 deliberately left alone. `decodeQuery` sizes it at
-// `colCount * 256` no matter what the statement returns, so a one-row point
-// read allocates and zero-fills 256 rows of slots and throws all but one away.
-// The candidate shrinks that allocation — never grows it — for a statement
-// whose last two executions both fit, reading the same `RowSizeMemory` but the
-// *larger* of the two row counts, clamped at 256 rows. The lane roles invert:
-//
-//   point1 / point1-wide20 / mixed6-20 / mixed6-200 — PRIMARY for exp 264.
-//     Results small enough for the initial allocation to be sized down.
-//     `point1-wide20` carries the widest projection, where the fixed
-//     allocation wastes the most.
-//   int20-10k / int4-5k / mixed6-10k / mixed6-1k — CONTROL for exp 264. All
-//     clamp back to the 256-row default, so their initial allocation is
-//     unchanged and they read the per-binary layout offset directly (exp 254's
-//     lesson).
-//   mispredict-shrink / mispredict-mid — GUARD for exp 264 as well: a statement
-//     whose row count swings between executions must not be sized down at all.
-//   undershoot-jump / undershoot-mid — GUARDS, exp 264's kill lanes. The only
-//     lanes where the initial allocation is sized small and the result then
-//     arrives large. They sit on opposite sides of the doubling chain's landing
-//     point, so the pair brackets the mispredict rather than reporting whichever
-//     alignment happened to be flattering.
+// Two shape constraints worth keeping. Every timed statement stays below
+// `sacrificeSlotThreshold` (32,768 slots) unless the lane is deliberately
+// measuring the sacrifice path, because crossing it respawns a reader worker and
+// swamps everything else. And any lane whose per-read cost is dominated by other
+// allocation — `mixed6-20`'s 80 Strings, say — cannot resolve a fraction of a
+// microsecond, so a small effect there is drift, not a result.
 //
 // Usage:
 //   dart run benchmark/experiments/select_rows_presize.dart \
@@ -226,13 +207,10 @@ final _lanes = <_Lane>[
     createSql: _standardCreate,
     insertSql: _standardInsert,
     row: _standardRow,
-    // A single 200-row read lands around 50 us, where a 1 us stopwatch tick is
-    // already 2% and the lane cannot resolve the fraction of a microsecond
-    // exp 264 moves. Batched for the same reason `point1` is.
+    // See the header: 50 us per read cannot resolve a sub-microsecond effect.
     repeats: 20,
   ),
-  // CONTROL for exp 260, PRIMARY for exp 264: a point read, the shape most
-  // sensitive to per-request overhead.
+  // The shape most sensitive to per-request overhead.
   _Lane.explicit(
     'point1',
     2000,
@@ -244,10 +222,8 @@ final _lanes = <_Lane>[
     expectRows: 1,
     repeats: 200,
   ),
-  // PRIMARY (exp 264): the same point read on a 20-column row. The fixed
-  // initial allocation is `colCount * 256` slots, so what a one-row result
-  // wastes scales with the projection width — this is the widest shape the
-  // harness carries and therefore the largest saving available.
+  // The widest projection the harness carries, so the largest saving available:
+  // a one-row result wastes `colCount * 255` slots.
   _Lane(
     'point1-wide20',
     20,
@@ -258,8 +234,7 @@ final _lanes = <_Lane>[
     expectRows: 1,
     repeats: 200,
   ),
-  // PRIMARY (exp 264): a 20-row page of the canonical row — the shape a paged
-  // list view and most reactive streams actually read.
+  // The shape a paged list view and most reactive streams read.
   _Lane.explicit(
     'mixed6-20',
     2000,
@@ -300,33 +275,11 @@ final _lanes = <_Lane>[
     poisonParams: [8000],
     expectRows: 300,
   ),
-  // GUARDS (exp 264): the mirror image of the two mispredict lanes above, and
-  // the only lanes that can expose a shrunken initial allocation's failure
-  // mode. Eight untimed 20-row executions run before each timed sample, which
-  // is enough to leave every reader worker's local memory sized for 25 rows;
-  // the timed execution then returns thousands and has to double its way up
-  // from there. The pool's growth hint cannot rescue it either — that hint
-  // takes the *smaller* of the statement's last two row counts, so the
-  // alternation pins it at the 20-row leg and every growth is a plain doubling.
-  //
-  // Which way the penalty falls is decided by where each arm's doubling chain
-  // *lands*, and the two lanes are chosen to sit on opposite sides of that:
-  //
-  //   undershoot-jump  5,000 rows. From 25 rows the chain lands on 6,400; from
-  //     256 it lands on 8,192. The shrunken arm ends up with the smaller final
-  //     buffer, so the undershoot is favourable here.
-  //   undershoot-mid   3,300 rows. From 25 rows the chain lands on 6,400; from
-  //     256 it lands on 4,096. Now the shrunken arm over-allocates by 56% and
-  //     pays eight growths against four. This is exp 264's adverse alignment,
-  //     and it is the lane that forced the sizing rule to be a high-water mark
-  //     rather than a sliding window: under a window of two it cost +40% on
-  //     *every* sample, because the two executions before each timed one were
-  //     both small.
-  //
-  // Under the high-water rule both lanes go inert after the first large
-  // execution raises the mark, so their medians read the harness floor. The
-  // one-time cost of that first execution is measured separately, by running
-  // this lane with `--warmup=0 --samples=1` in a fresh process per reading.
+  // Eight untimed 20-row executions before each timed sample leave the pool's
+  // memory sized for 25 rows; the timed execution then returns thousands and has
+  // to double up from there. The pool's growth hint cannot soften it either — it
+  // takes the smaller of the last two row counts, which the alternation pins at
+  // the 20-row leg. See the header for why there are two of these.
   _Lane.explicit(
     'undershoot-jump',
     10000,
@@ -351,37 +304,10 @@ final _lanes = <_Lane>[
     poisonWidth: 8,
     expectRows: 3300,
   ),
-  // CAP THRASH. Both lanes time exp 260's `int4-5k` shape — 5,000 rows x 5
-  // columns, a statement whose *growth* hint is worth a real fraction of its
-  // wall — while a stream of never-before-seen SQL strings competes for the
-  // pool's 32 `_rowHints` slots. Nothing else in the suite does this: every
-  // other lane uses a handful of statements, so a per-SQL memory can stop
-  // working entirely and no lane moves.
-  //
-  // 25,000 slots is deliberately *below* `sacrificeSlotThreshold` (32,768). A
-  // first version used 8,000 x 21 and was unusable — every timed read crossed
-  // the threshold, so it sacrificed and respawned a reader worker, and the same
-  // binary read 10,519 / 10,418 / 5,954 / 4,445 us across four passes. Exp 263's
-  // rule about keeping a memory sweep on one side of the threshold applies to a
-  // wall-time sweep just as much.
-  //
-  // The two widths bracket what an eviction policy can and cannot fix:
-  //
-  //   hint-thrash-fits      20 fresh statements between timed reads — fewer than
-  //     the 32-slot capacity, so the timed statement's *active* set fits.
-  //     Least-recently-used keeps its hint armed; oldest-first ages it out, since
-  //     it is inserted once and never moves.
-  //   hint-thrash-overflows 40 fresh statements between timed reads — more than
-  //     capacity, so the hot set itself does not fit and no policy can keep it.
-  //     Present so nobody later reads LRU as a capacity fix; if this lane ever
-  //     needs to improve, the answer is `_rowHintMax`, not the policy.
-  //
-  // These lanes show the *magnitude* in wall time. The property itself — whether
-  // the hint is still armed — is gated deterministically in
-  // `test/reader_pool_test.dart`, because here it sits under statement-prepare
-  // and reader-scheduling noise. The filler statements also churn the C statement
-  // cache and the worker schema cache, which are capped the same way; that is
-  // realistic and it cancels in an A/B, since both arms pay it identically.
+  // Timed statement is exp 260's int4-5k shape at 25,000 slots, deliberately
+  // below `sacrificeSlotThreshold` so a worker respawn cannot swamp the effect.
+  // The growth hint is worth ~40% of this read, which is what the filler
+  // statements can take away. See the header for what the two widths separate.
   _Lane(
     'hint-thrash-fits',
     4,

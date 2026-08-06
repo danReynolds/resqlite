@@ -417,22 +417,11 @@ void main() {
       await Future.wait(futures);
     });
 
-    // [EXP-264] The pool remembers a result size per SQL string in a 32-entry
-    // map. Exp 260 only ever inserted statements that had returned more rows than
-    // the initial buffer holds, so those slots belonged exclusively to the
-    // large-result statements its growth hint serves. Exp 264 gave the map a
-    // second consumer that only small results reach, putting every point read
-    // into the same slots — which cost a measured +46% on a 5,000-row read once
-    // more than 32 distinct statements were in play, because the large
-    // statement's hint was evicted by point-read churn.
-    //
-    // The property under test is that a statement which has proven large keeps
-    // its hint. Presence is the wrong assertion: an evicted statement is
-    // re-inserted the next time it runs, so a membership check passes under any
-    // policy. What eviction costs is the learned hint, which a recreated entry has
-    // to be taught again over two more executions. Asserting it here keeps it out
-    // from under the statement-prepare and reader-scheduling noise that made the
-    // benchmark lanes need three passes to read.
+    // The pool's 32-entry per-SQL memory is shared by two consumers whose
+    // entries are not worth the same, so eviction prefers small statements. What
+    // matters is that a statement which has proven large keeps its *hint*, not
+    // that it stays present: an evicted statement is re-inserted on its next
+    // execution, so a membership check passes under any policy.
     group('row-size memory eviction', () {
       /// A statement needs two executions before its memory forms an opinion.
       Future<void> arm(ReaderPool pool, String sql) async {
@@ -451,16 +440,13 @@ void main() {
         final pool = await ReaderPool.spawn(db.handle.address, 2);
         addTearDown(pool.close);
 
-        // 400 rows is above the decoder's 256-row initial buffer, so this
-        // statement is one the growth hint exists for.
+        // Above the decoder's 256-row initial buffer, so the growth hint applies.
         const report = 'SELECT * FROM items ORDER BY id';
         await arm(pool, report);
         expect(pool.rowSizeHintFor(report), greaterThan(0));
 
-        // 300 distinct one-off point statements through a 32-slot map — an order
-        // of magnitude more than it holds. Eviction must keep taking the small
-        // ones, so the report's hint survives untouched. Under plain
-        // insertion-order eviction it is gone after the first 32.
+        // 300 distinct one-off point statements through a 32-slot map. Eviction
+        // must keep taking the small ones, so the report's hint survives.
         for (var round = 0; round < 6; round++) {
           await floodWith(pool, 50, 'r$round');
           expect(
@@ -480,8 +466,8 @@ void main() {
 
           const point = 'SELECT * FROM items WHERE id = 7';
           await arm(pool, point);
-          // Exp 264's own consumer still works: a small statement that keeps
-          // running holds a slot, because nothing has evicted it yet.
+          // Preferring small victims must not stop small statements being
+          // remembered while slots are free.
           expect(pool.rowSizeHintFor(point), isNotNull);
         },
       );
@@ -494,10 +480,8 @@ void main() {
         const first = 'SELECT * FROM items ORDER BY id';
         await arm(pool, first);
 
-        // 40 distinct statements that all return more than the initial buffer
-        // holds. Preferring small victims cannot help when there are no small
-        // entries, so this falls back to insertion order — the pre-exp-264
-        // behaviour, and the honest limit of the fix.
+        // No small entries to prefer, so eviction falls back to insertion order.
+        // This is the limit of the preference, not a defect.
         for (var i = 0; i < 40; i++) {
           await pool.select('SELECT * FROM items ORDER BY id -- big$i');
         }

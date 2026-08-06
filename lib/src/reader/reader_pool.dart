@@ -45,45 +45,29 @@ final class ReaderPool {
   /// per-worker schema cache and the C statement cache.
   static const int _rowHintMax = 32;
 
-  /// How large a result each SQL produces — the size hint a worker uses to
-  /// allocate its result buffer in one shot instead of doubling into it
-  /// ([EXP-260](../../../experiments/260-result-list-presize.md)).
+  /// How large a result each SQL produces, sized on the request so a worker can
+  /// allocate its result buffer in one shot
+  /// ([EXP-260](../../../experiments/260-result-list-presize.md),
+  /// [EXP-264](../../../experiments/264-initial-alloc-size-memory.md)).
   ///
-  /// This lives on the main isolate rather than in the worker's own schema
-  /// cache because a result larger than `sacrificeSlotThreshold` ends the
-  /// isolate that produced it. A worker-local hint would therefore be discarded
-  /// exactly when the result was big enough for the hint to matter, and would
-  /// in any case only describe the fraction of executions that landed on that
-  /// one worker.
+  /// Kept here rather than in a worker's own schema cache because only the main
+  /// isolate observes every execution of a SQL, and because a result larger than
+  /// `sacrificeSlotThreshold` ends the isolate that produced it — a worker-local
+  /// record would be discarded exactly when it mattered most.
   ///
-  /// Every statement gets an entry, including one that has only ever returned a
-  /// handful of rows. Exp 260 deliberately skipped those — a small result cannot
-  /// reach the growth path, so remembering it described something the hint could
-  /// never improve. [EXP-264](../../../experiments/264-initial-alloc-size-memory.md)
-  /// gave the same memory a second consumer that *only* small results can reach:
-  /// the initial allocation, which is sized down for a statement that keeps
-  /// returning fewer rows than the fixed default holds.
-  ///
-  /// Eviction prefers statements that have never returned more rows than the
-  /// initial buffer holds; see [_evictionVictim].
+  /// Holds statements of every size: the growth hint serves the large ones, the
+  /// initial-allocation mark the small ones. Eviction is not order-based, since
+  /// the two are not worth the same — see [_evictionVictim].
   final Map<String, RowSizeMemory> _rowHints =
       LinkedHashMap<String, RowSizeMemory>();
 
-  /// Exp 260's growth hint as the pool currently holds it for [sql]: null when
-  /// the pool remembers nothing about the statement, 0 when it has an entry that
-  /// has not yet seen the two executions it takes to form an opinion, and
-  /// otherwise the row count it would stamp on the next request.
+  /// The growth hint held for [sql]: null when nothing is remembered, 0 for an
+  /// entry that has not yet seen the two executions it takes to form an opinion.
   ///
-  /// Exists so a test can assert *retention* directly rather than inferring it
-  /// from wall time. Presence alone is not the property — an evicted statement is
-  /// re-inserted the next time it runs, so a membership check passes under any
-  /// eviction policy. What eviction actually costs is the *armed* state: a
-  /// recreated entry reads 0 here and has to be taught again. Measuring that
-  /// through a benchmark buries it under statement-prepare and reader-respawn
-  /// noise (see the `hint-thrash-*` lanes in
-  /// `benchmark/experiments/select_rows_presize.dart`).
-  ///
-  /// Not exported from `lib/resqlite.dart`; this file is internal.
+  /// For tests asserting retention. Membership is the wrong signal — an evicted
+  /// statement is re-inserted on its next execution, so it passes under any
+  /// eviction policy. Only a non-zero hint distinguishes a retained entry from a
+  /// recreated one.
   int? rowSizeHintFor(String sql) => _rowHints[sql]?.hint;
 
   /// How many SQL strings the pool currently remembers a result size for.
@@ -109,30 +93,22 @@ final class ReaderPool {
     return pool;
   }
 
-  /// Eviction prefers a statement that has only ever returned a small result,
-  /// falling back to insertion order when every entry has proven large.
+  /// Pick an entry to drop: one that has never returned a large result, before
+  /// one that has.
   ///
-  /// This restores an invariant exp 264 broke. Exp 260 only ever inserted a
-  /// statement that had returned more rows than the initial buffer holds, so
-  /// these 32 slots belonged exclusively to the large-result statements its
-  /// growth hint serves and nothing else competed for them. Exp 264 gave the map
-  /// a second consumer that only *small* results reach, which put every point
-  /// read into the same 32 slots — and a report query that runs constantly then
-  /// gets evicted by point-read churn, losing the hint and taking exp 260's win
-  /// with it. Measured on the `hint-thrash-overflows` lane: **+46% on a
-  /// 5,000-row read** against pre-exp-264, systematic enough that the slower
-  /// arm's fastest sample beat the faster arm's slowest.
+  /// Both consumers share these slots but do not value them equally. A small
+  /// statement loses only its initial-allocation mark, worth under a microsecond
+  /// per read; a large one loses the growth hint, worth roughly 40% of its read.
+  /// Small statements are also the overwhelming majority in any application with
+  /// more than [_rowHintMax] distinct queries, so without this preference
+  /// point-read churn evicts precisely the entries that matter. Reordering by
+  /// recency does not help — the slots being shared is the problem, not the order
+  /// they are reclaimed in.
   ///
-  /// Promoting on use (least-recently-used) does *not* fix it — measured at
-  /// no improvement, and it costs the main isolate a map remove-and-reinsert on
-  /// every read. The problem is capacity, not order: once more distinct hot
-  /// statements are in play than the map holds, no ordering keeps the one that
-  /// matters. Preferring small victims gives the large statements back the
-  /// exclusive tenure they had before exp 264, while small statements still use
-  /// whatever slots are left over.
+  /// Falls back to insertion order when every entry has proven large, which is
+  /// the best available when no victim is cheap.
   ///
-  /// The scan is O([_rowHintMax]) and runs only on a miss — once per distinct
-  /// SQL string, never on the per-read path.
+  /// O([_rowHintMax]), and only on a miss that overflows — never per read.
   String _evictionVictim() {
     for (final entry in _rowHints.entries) {
       if (entry.value.highWater <= initialResultRows) return entry.key;

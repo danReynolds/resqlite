@@ -9,10 +9,9 @@
 /// statement whose row count swings between executions must keep returning
 /// exactly its own rows.
 ///
-/// [EXP-264](../experiments/264-initial-alloc-size-memory.md) added the other
-/// end of the same buffer — the initial allocation, sized down for a statement
-/// that keeps returning few rows — so the same "a wrong answer may cost time,
-/// never rows" contract is gated here for both.
+/// [EXP-264](../experiments/264-initial-alloc-size-memory.md) sizes the other end
+/// of the same buffer, the initial allocation, under the same contract: a wrong
+/// answer may cost time, never rows.
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
@@ -72,10 +71,9 @@ void main() {
     });
   });
 
-  // [EXP-264] adds the initial-allocation end of the same memory. Its risk is
-  // the mirror image of the growth hint's: sizing the *first* buffer too small
-  // costs doublings, so it takes the largest row count ever seen and can only
-  // ever shrink the allocation below the fixed default.
+  // The initial allocation's risk is the mirror image of the growth hint's:
+  // sizing the first buffer too small costs doublings. Hence the largest row
+  // count ever seen, and a clamp that only ever shrinks below the default.
   group('initialRowsFor', () {
     test('never exceeds the fixed default, however large the result', () {
       for (final rows in [initialResultRows, 300, 10000, 1 << 30]) {
@@ -113,9 +111,8 @@ void main() {
       expect(memory.initialRows, nextRowHint(40));
     });
 
-    // The failure a sliding window cannot avoid: the two executions before a
-    // large one are both small, so a window of two sizes the large result from
-    // a tiny buffer. A high-water mark is raised once and never falls back.
+    // A sliding window would size a large result from a tiny buffer whenever the
+    // executions before it were small. A high-water mark is raised once.
     test('one large result disables the shrink for good', () {
       final memory = RowSizeMemory()
         ..record(20)
@@ -147,11 +144,8 @@ void main() {
     });
   });
 
-  // A reader worker sees only a sample of a statement's executions, and is
-  // destroyed outright when it decodes a result over `sacrificeSlotThreshold`,
-  // so its own high-water mark both lags and resets. The pool's — taken on the
-  // main isolate, which sees every execution and outlives every worker — must
-  // therefore win outright over any local memory.
+  // A worker's own high-water mark both lags (it sees only its own executions)
+  // and resets (it is destroyed on a large result), so the caller's must win.
   group('initialSlotRows precedence', () {
     test("the caller's hint wins over a local memory that disagrees", () {
       final localSaysTiny = RowSizeMemory()
@@ -169,8 +163,7 @@ void main() {
         ..record(8)
         ..record(8);
       expect(initialSlotRows(0, local), nextRowHint(8));
-      // A reader that is handed no hint and no local memory (the pool's first
-      // execution of a SQL) falls back to the fixed default.
+      // No hint and no local memory falls back to the fixed default.
       expect(initialSlotRows(0, null), initialResultRows);
     });
   });
