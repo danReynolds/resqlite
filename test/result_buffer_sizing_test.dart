@@ -12,7 +12,13 @@ import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/query_decoder.dart'
-    show RowSizeMemory, grownSlots, initialResultRows, nextRowHint;
+    show
+        RowSizeMemory,
+        grownSlots,
+        initialResultRows,
+        initialRowsFor,
+        initialSlotRows,
+        nextRowHint;
 import 'package:test/test.dart';
 
 void main() {
@@ -58,6 +64,66 @@ void main() {
         memory.record(8000);
         expect(memory.hint, nextRowHint(50));
       }
+    });
+  });
+
+  // [EXP-264] adds the initial-allocation end of the same memory. Its risk is
+  // the mirror image of the growth hint's: sizing the *first* buffer too small
+  // costs doublings, so it takes the larger of the two observations and can
+  // only ever shrink the allocation below the fixed default.
+  group('initialRowsFor', () {
+    test('never exceeds the fixed default, however large the result', () {
+      for (final rows in [initialResultRows, 300, 10000, 1 << 30]) {
+        expect(initialRowsFor(rows), initialResultRows);
+      }
+    });
+
+    test('always leaves room for at least one row', () {
+      expect(initialRowsFor(0), 1);
+      expect(initialRowsFor(-1), 1);
+    });
+
+    test('sizes a small result for itself plus headroom', () {
+      expect(initialRowsFor(20), nextRowHint(20));
+      expect(initialRowsFor(20), greaterThan(20));
+      expect(initialRowsFor(20), lessThan(initialResultRows));
+    });
+  });
+
+  group('RowSizeMemory.initialRows', () {
+    test('has no opinion until it has seen two executions', () {
+      final memory = RowSizeMemory();
+      expect(initialSlotRows(memory), initialResultRows);
+      memory.record(1);
+      expect(initialSlotRows(memory), initialResultRows);
+      memory.record(1);
+      expect(initialSlotRows(memory), lessThan(initialResultRows));
+    });
+
+    test('takes the larger of the two, unlike the growth hint', () {
+      final memory = RowSizeMemory()
+        ..record(1)
+        ..record(40);
+      expect(memory.hint, nextRowHint(1));
+      expect(memory.initialRows, nextRowHint(40));
+    });
+
+    test('a statement that swings keeps the full default allocation', () {
+      final memory = RowSizeMemory()..record(8000);
+      for (var i = 0; i < 4; i++) {
+        memory.record(50);
+        expect(initialSlotRows(memory), initialResultRows);
+        memory.record(8000);
+        expect(initialSlotRows(memory), initialResultRows);
+      }
+    });
+
+    test('a stable small statement settles below the default', () {
+      final memory = RowSizeMemory();
+      for (var i = 0; i < 4; i++) {
+        memory.record(1);
+      }
+      expect(initialSlotRows(memory), nextRowHint(1));
     });
   });
 
@@ -121,6 +187,37 @@ void main() {
         expect(rows.length, total);
         expect(rows.last['id'], total);
       }
+    });
+
+    // [EXP-264]: the initial allocation is sized down only after a statement
+    // has twice returned few rows, so the case that has to hold is the jump
+    // back up — a tiny first buffer that then has to hold thousands of rows.
+    test(
+      'a statement that jumps from tiny to large still returns every row',
+      () async {
+        await seed(5000);
+        const sql = 'SELECT * FROM items ORDER BY id LIMIT ?';
+        for (var round = 0; round < 3; round++) {
+          for (var i = 0; i < 6; i++) {
+            expect((await db.select(sql, [1])).length, 1);
+          }
+          final rows = await db.select(sql, [5000]);
+          expect(rows.length, 5000);
+          expect(rows.first['name'], 'item 0');
+          expect(rows.last['name'], 'item 4999');
+        }
+      },
+    );
+
+    test('an empty result decodes and then grows correctly', () async {
+      const sql = 'SELECT * FROM items ORDER BY id';
+      for (var i = 0; i < 6; i++) {
+        expect((await db.select(sql)).length, 0);
+      }
+      await seed(700);
+      final rows = await db.select(sql);
+      expect(rows.length, 700);
+      expect(rows.last['name'], 'item 699');
     });
 
     test('a shrinking result never returns stale rows', () async {

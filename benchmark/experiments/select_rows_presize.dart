@@ -25,8 +25,9 @@
 //   mixed6-10k / mixed6-1k — PRIMARY. The repo's canonical 6-column product
 //     row, at a row count that overshoots the initial allocation by 39x and by
 //     4x respectively.
-//   mixed6-200 / point1 — CONTROL. Both return fewer rows than the initial
-//     buffer holds, so neither ever reaches the changed growth path and the
+//   mixed6-200 / point1 — CONTROL *for exp 260*, PRIMARY for exp 264 (see the
+//     second block below). Both return fewer rows than the initial buffer
+//     holds, so neither ever reaches exp 260's growth path and the
 //     decode loop runs byte-identical code in both arms. What they still carry
 //     is the pool's per-request bookkeeping, which is the whole cost a small
 //     query pays for this. Per the JOURNAL lesson from exp 248 these lanes are
@@ -44,6 +45,27 @@
 //     the hint cannot inflate a small result no matter how saturated it is.
 //     `mispredict-mid` times a 300-row execution in strict alternation — large
 //     enough that the hint *is* consulted, so it tests the rule that picks it.
+//
+// [EXP-264] then took the other end of the same buffer: the *initial*
+// allocation, which exp 260 deliberately left alone. `decodeQuery` sizes it at
+// `colCount * 256` no matter what the statement returns, so a one-row point
+// read allocates and zero-fills 256 rows of slots and throws all but one away.
+// The candidate shrinks that allocation — never grows it — for a statement
+// whose last two executions both fit, reading the same `RowSizeMemory` but the
+// *larger* of the two row counts, clamped at 256 rows. The lane roles invert:
+//
+//   point1 / point1-wide20 / mixed6-20 / mixed6-200 — PRIMARY for exp 264.
+//     Results small enough for the initial allocation to be sized down.
+//     `point1-wide20` carries the widest projection, where the fixed
+//     allocation wastes the most.
+//   int20-10k / int4-5k / mixed6-10k / mixed6-1k — CONTROL for exp 264. All
+//     clamp back to the 256-row default, so their initial allocation is
+//     unchanged and they read the per-binary layout offset directly (exp 254's
+//     lesson).
+//   mispredict-shrink / mispredict-mid — GUARD for exp 264 as well: a statement
+//     whose row count swings between executions must not be sized down at all.
+//   undershoot-jump — GUARD, exp 264's kill lane. The only lane where the
+//     initial allocation is sized small and the result then arrives large.
 //
 // Usage:
 //   dart run benchmark/experiments/select_rows_presize.dart \
@@ -67,16 +89,20 @@ const _defaultPoisonWidth = 1;
 final class _Lane {
   /// A lane whose table is `id INTEGER PRIMARY KEY` plus [columns] generated
   /// columns all of one affinity — the synthetic width/row-count sweeps.
-  const _Lane(this.label, this.columns, this.rows, this.cell)
-    : createSql = null,
-      insertSql = null,
-      row = null,
-      selectSql = 'SELECT * FROM items',
-      selectParams = const [],
-      poisonParams = null,
-      poisonWidth = _defaultPoisonWidth,
-      expectRows = null,
-      repeats = 1;
+  const _Lane(
+    this.label,
+    this.columns,
+    this.rows,
+    this.cell, {
+    this.selectSql = 'SELECT * FROM items',
+    this.selectParams = const [],
+    this.expectRows,
+    this.repeats = 1,
+  }) : createSql = null,
+       insertSql = null,
+       row = null,
+       poisonParams = null,
+       poisonWidth = _defaultPoisonWidth;
 
   /// A lane that declares its own schema verbatim, so it can reproduce a
   /// canonical shape rather than approximate one.
@@ -186,7 +212,8 @@ final _lanes = <_Lane>[
     insertSql: _standardInsert,
     row: _standardRow,
   ),
-  // CONTROL: a point read, the shape most sensitive to per-request overhead.
+  // CONTROL for exp 260, PRIMARY for exp 264: a point read, the shape most
+  // sensitive to per-request overhead.
   _Lane.explicit(
     'point1',
     2000,
@@ -197,6 +224,32 @@ final _lanes = <_Lane>[
     selectParams: [17],
     expectRows: 1,
     repeats: 200,
+  ),
+  // PRIMARY (exp 264): the same point read on a 20-column row. The fixed
+  // initial allocation is `colCount * 256` slots, so what a one-row result
+  // wastes scales with the projection width — this is the widest shape the
+  // harness carries and therefore the largest saving available.
+  _Lane(
+    'point1-wide20',
+    20,
+    2000,
+    (r, c) => r * 31 + c,
+    selectSql: 'SELECT * FROM items WHERE id = ?',
+    selectParams: [17],
+    expectRows: 1,
+    repeats: 200,
+  ),
+  // PRIMARY (exp 264): a 20-row page of the canonical row — the shape a paged
+  // list view and most reactive streams actually read.
+  _Lane.explicit(
+    'mixed6-20',
+    2000,
+    createSql: _standardCreate,
+    insertSql: _standardInsert,
+    row: _standardRow,
+    selectSql: 'SELECT * FROM items LIMIT 20',
+    expectRows: 20,
+    repeats: 50,
   ),
   // GUARD: the hint is left pointing at 10000 rows before every timed 50-row
   // execution of the same statement. 50 rows never overflow the initial buffer,
@@ -227,6 +280,28 @@ final _lanes = <_Lane>[
     selectParams: [300],
     poisonParams: [8000],
     expectRows: 300,
+  ),
+  // GUARD (exp 264): the mirror image of the two lanes above, and the only
+  // lane that can expose a shrunken initial allocation's failure mode. Eight
+  // untimed 20-row executions run before each timed sample, which is enough to
+  // leave every reader worker's local memory sized for 25 rows; the timed
+  // execution then returns 5,000 rows and has to double its way up from there.
+  // The pool's growth hint cannot rescue it either — that hint takes the
+  // *smaller* of the statement's last two row counts, so the alternation pins
+  // it at the 20-row leg. This is the honest worst case for exp 264: the
+  // penalty it measures is what a statement pays the one time it jumps from
+  // consistently tiny to large.
+  _Lane.explicit(
+    'undershoot-jump',
+    10000,
+    createSql: _standardCreate,
+    insertSql: _standardInsert,
+    row: _standardRow,
+    selectSql: 'SELECT * FROM items LIMIT ?',
+    selectParams: [5000],
+    poisonParams: [20],
+    poisonWidth: 8,
+    expectRows: 5000,
   ),
 ];
 

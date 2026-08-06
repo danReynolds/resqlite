@@ -195,29 +195,63 @@ Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
 /// What one SQL string's result size has looked like over its last two
 /// executions ([EXP-260](../../experiments/260-result-list-presize.md)).
 ///
-/// [hint] is the *smaller* of those two row counts plus headroom, and stays 0
-/// until two executions have been observed. Sizing from a single observation is
-/// what makes a size hint dangerous: a statement whose row count swings with
-/// its parameters (`SELECT ... LIMIT ?`) would allocate for the large result
-/// and throw almost all of it away on the small one, and that wasted zero-fill
-/// costs more than the doubling it avoided. Taking the minimum lets a volatile
-/// statement settle at the small end — no win, but no tax either — while a
-/// stable one converges on its true size after one extra execution.
+/// Both figures stay 0 until two executions have been observed, because a
+/// single observation is not enough to size against: a statement whose row
+/// count swings with its parameters (`SELECT ... LIMIT ?`) would be sized from
+/// whichever leg happened to run first.
+///
+/// The two ends of the buffer's life want opposite statistics, and each takes
+/// the one whose mistakes are cheap:
+///
+///  * [hint] steers *growth*, so it takes the **smaller** of the two row counts
+///    plus headroom. Over-sizing a growth is the expensive mistake there —
+///    zero-filling slots a small result throws away costs more than the
+///    doubling it avoided — and a result that never overflows the initial
+///    buffer never reads this field at all.
+///  * [initialRows] sizes the *initial* allocation, so it takes the **larger**
+///    of the two plus headroom, capped at [initialResultRows]. Under-sizing is
+///    the expensive mistake here, because a result that outgrows its first
+///    buffer pays doublings to catch up. The cap is what keeps the field from
+///    reintroducing the failure exp 260 measured: it can only ever make the
+///    initial allocation *smaller* than the fixed default, never larger, so a
+///    statement whose row count swings upward is bounded by today's behaviour.
 final class RowSizeMemory {
   /// Rows the most recent execution returned, or -1 before the first.
   int previous = -1;
 
-  /// Rows to size the next execution's buffer for, or 0 for "no opinion".
+  /// Rows to size the next execution's buffer growth for, or 0 for "no
+  /// opinion".
   int hint = 0;
+
+  /// Rows to size the next execution's *initial* buffer for, or 0 for "no
+  /// opinion" (meaning [initialResultRows]). Never exceeds
+  /// [initialResultRows].
+  int initialRows = 0;
 
   void record(int rowCount) {
     if (previous < 0) {
       previous = rowCount;
       return;
     }
-    hint = nextRowHint(rowCount < previous ? rowCount : previous);
+    final low = rowCount < previous ? rowCount : previous;
+    final high = rowCount < previous ? previous : rowCount;
+    hint = nextRowHint(low);
+    initialRows = initialRowsFor(high);
     previous = rowCount;
   }
+}
+
+/// Rows to size an initial result buffer for, given that the largest of this
+/// SQL's last two executions returned [rowCount] rows.
+///
+/// Clamped into `1 ..= initialResultRows`: at least one row so the decode loop
+/// always has somewhere to write its first cell, and never more than the fixed
+/// default so this can only shrink an allocation.
+@pragma('vm:prefer-inline')
+int initialRowsFor(int rowCount) {
+  final hinted = nextRowHint(rowCount);
+  if (hinted >= initialResultRows) return initialResultRows;
+  return hinted < 1 ? 1 : hinted;
 }
 
 /// Per-worker schema cache entry: the column names for a SQL string, plus what
@@ -233,11 +267,17 @@ final class CachedSchema {
   final RowSizeMemory size = RowSizeMemory();
 }
 
-/// Rows the initial result buffer is sized for, before anything is known about
-/// the result. [EXP-067](../../experiments/067-shrink-initial-allocation.md)
-/// measured that shrinking this regresses every small-query workload — the VM's
-/// zero-fill fast path makes one large null-filled list cheaper per slot than a
-/// small one — so it stays where it is and a size hint only affects growth.
+/// Rows the initial result buffer is sized for while nothing is known about
+/// the result — the first two executions of a SQL string, and every execution
+/// of one whose column names have been evicted from [schemaCache].
+///
+/// [EXP-067](../../experiments/067-shrink-initial-allocation.md) shrank this
+/// constant for *every* query and regressed the small-query workloads, because
+/// a result larger than the new size then had to double its way up from four
+/// rows. [EXP-264](../../experiments/264-initial-alloc-size-memory.md) shrinks
+/// it only for a statement that has twice returned few enough rows to fit,
+/// through [RowSizeMemory.initialRows], and leaves this constant as the
+/// no-knowledge default.
 const int initialResultRows = 256;
 
 /// Slots to grow a [colCount]-column result buffer to, from [current] slots,
@@ -257,6 +297,27 @@ int grownSlots(int colCount, int current, int rowHint) {
   final doubled = current * 2;
   final hinted = colCount * rowHint;
   return hinted > doubled ? hinted : doubled;
+}
+
+/// Rows to size this execution's initial result buffer for.
+///
+/// Reads the *worker-local* [RowSizeMemory] rather than the hint the reader pool
+/// stamps on the request, and the asymmetry is deliberate
+/// ([EXP-264](../../experiments/264-initial-alloc-size-memory.md)). Exp 260 had
+/// to keep its growth hint on the main isolate because a result above
+/// `sacrificeSlotThreshold` returns via `Isolate.exit` and ends the worker that
+/// produced it, discarding anything that worker learned. This hint only ever
+/// describes a result small enough to fit in the initial buffer, and such a
+/// result never triggers a sacrifice — so the worker that measured it is still
+/// alive to use it, and reading it costs the main isolate nothing.
+///
+/// The pool's hint is also structurally unable to help here: it exists only for
+/// statements that have returned more rows than [initialResultRows], and those
+/// clamp straight back to [initialResultRows].
+@pragma('vm:prefer-inline')
+int initialSlotRows(RowSizeMemory size) {
+  final rows = size.initialRows;
+  return rows == 0 ? initialResultRows : rows;
 }
 
 /// Row hint to carry into the next execution of a SQL that just returned
@@ -376,7 +437,7 @@ RawQueryResult decodeQuery(
 
   final hint = rowHint == 0 ? entry.size.hint : rowHint;
   final values = List<Object?>.filled(
-    colCount * initialResultRows,
+    colCount * initialSlotRows(entry.size),
     null,
     growable: true,
   );
@@ -471,7 +532,7 @@ RawQueryResult decodeQuery(
 
   final hint = rowHint == 0 ? entry.size.hint : rowHint;
   final values = List<Object?>.filled(
-    colCount * initialResultRows,
+    colCount * initialSlotRows(entry.size),
     null,
     growable: true,
   );
