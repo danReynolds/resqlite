@@ -1,0 +1,60 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Claim 067.1 said `decodeQuery`'s initial `List<Object?>.filled(colCount * 256, null)` must not be shrunk. That holds for the change exp 067 actually made — an unconditional cut to `colCount * 4`, which forces every result larger than four rows to double its way up — but not for the general statement, and the reasoning underneath it was wrong in an instructive way. Exp 067 attributed its regressions to a VM fast path that makes one large null-filled list cheaper *per slot* than a small one. That is true and it does not support the conclusion: a standalone AOT reproduction of the allocation shape measures 1,536 slots at 0.28 ns/slot against 12 slots at 1.8 ns/slot, so the large allocation is six times cheaper per slot and twenty times more expensive in total. What actually made exp 067 regress was growth, not allocation, and exp 260 has since supplied the thing that lets the shrink avoid growth: a per-SQL memory of how many rows each statement returns. Conditioned on that memory and clamped so it can only ever shrink, the initial allocation is worth a reproduced 7.4% on the canonical 6-column point read and 27.4% on a 21-column one.",
+    "A buffer-size hint that can *under*-predict must be a high-water mark, not a sliding window, and this is the single most transferable thing the run produced. Exp 260's growth hint takes the smaller of a SQL's last two row counts, which is right for growth because over-sizing is the expensive mistake there. Taking the *larger* of the last two by symmetry, for the initial allocation, was measured at +40% in all four order-flipped passes on a statement returning 3,300 rows behind a burst of 20-row executions: a window of two is defeated by any burst longer than two, because the two observations before the large execution are both small, so the large result is sized for 20 rows and doubles its way up — every time, not once. A high-water mark cannot repeat. What it gives up is a statement that was once large and is now permanently small, which keeps today's allocation forever.",
+    "The cost of a mispredict is a one-off +1.6%, and it is bounded by arithmetic rather than by measurement. The doubling chain's landing point depends on where it starts, so an undershoot can be favourable (`undershoot-jump`, 5,000 rows: from 25 rows the chain lands on 6,400, from 256 it lands on 8,192) or adverse (`undershoot-mid`, 3,300 rows: 6,400 against 4,096, four extra growths and 56% over-allocation). The adverse case measured 927.5 -> 942.5 us across 50 fresh processes per arm — about 15 us, inside the p10-p90 spread of either arm. Quoting only the favourable lane would have overstated the result; the pair is what brackets it.",
+    "Exp 260's argument for where a size memory lives generalises further than exp 260 needed it to, but it was not the cause of the +40%. Exp 260 put its hint on the main isolate because `Isolate.exit` on a result over `sacrificeSlotThreshold` ends the worker that produced it (claim 260.3) — an argument about *large* results, which a mark about small ones appears to escape. It does not: a high-water mark is only worth the observations feeding it, a four-worker pool hands each worker a sample, and a worker that does decode a large result is destroyed and its replacement starts over. Sampling bias and worker sacrifice are separate sufficient reasons to keep the mark on the main isolate. Worth recording that this was the run's first diagnosis of the +40% and was wrong: moving the memory to the pool fixed a real defect and left the lane at +40% in all four passes, because a window of length two is defeated by a burst longer than two wherever the window is kept. A correct fix for a real defect is not evidence that it was the defect being measured.",
+    "Peak RSS does not move, and that is the expected reading rather than a null result. Dart releases a truncated growable list's backing store, so the fixed 256-row allocation was never retained by a small result — only allocated, zero-filled and thrown away. Every lane holding one read live is flat within ~1 MB, consistent with claim 261.3. This is a transient-allocation win, in the same category exp 263 put `selectBytes` in when it separated allocation churn from footprint.",
+    "The release suite no longer compiles, for a new reason that is not #282's segfault. `benchmark/suites/writes.dart` and the other drift peer suites pass their generated `*DriftDb` classes where `drift` 2.34.3 expects a `GeneratedDatabase`: four compile errors before any benchmark runs, reproduced on `origin/main` at `c351422` with no experiment changes applied. Exps 260 and 261 were blocked by a crash at scenario 15; this blocks the run at compile time, so exp 262's per-scenario persistence has nothing to persist either. Every experiment is focused-harness-only until the drift scaffolding is regenerated."
+  ],
+  "claims": [
+    {
+      "id": "264.1",
+      "text": "Sizing `decodeQuery`'s *initial* result allocation from a main-isolate high-water mark of the rows a SQL has ever returned, clamped into 1..256 rows so it can only shrink below the fixed default, is worth a reproduced -7.4% on a 1-row 6-column point read and -27.4% on a 1-row 21-column one (four alternating-order lane-isolated AOT passes, 61 samples each; `ab_drift_check.dart` verdict REPRODUCED for both). The win scales with projection width because what a one-row result wastes is `colCount * 255` slots, and is about 0.5 us and 2.2 us of worker time per read respectively. Every lane whose result outgrows the initial buffer is neutral by construction, not by measurement: it clamps to the same 256 rows both arms allocate.",
+      "conditions": "M1 Pro · AOT CLI bundle · lane-isolated, 4 alternating-order passes, 61 samples/lane · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "067.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "260.3"
+        }
+      ]
+    },
+    {
+      "id": "264.2",
+      "text": "A result-buffer size hint whose failure mode is under-prediction must be a high-water mark, not a sliding window. Taking the larger of a SQL's last two row counts — the mirror of exp 260's smaller-of-two — cost +40% in all four order-flipped passes on a statement returning 3,300 rows behind bursts of eight 20-row executions, because the two observations preceding each large execution are both small, so the penalty repeats on every large read instead of once. Under a high-water mark the same lane is neutral (-1.3% mean) and the one-time cost of a statement's first jump from small to large is +1.6% (927.5 -> 942.5 us median over 50 fresh processes per arm), consistent with an arithmetic account of four extra growths, ~15,200 extra slot copies and ~13,800 extra slots zero-filled.",
+      "conditions": "M1 Pro · AOT · `undershoot-mid` lane, 3,300 rows behind 8x20-row poison · first-jump figure from --warmup=0 --samples=1, 50 processes/arm · 2026-08"
+    },
+    {
+      "id": "264.3",
+      "text": "Exp 067's mechanism claim is per-slot true and decision-irrelevant. `List<Object?>.filled(n, null, growable: true)` followed by a write of `k` slots and a truncation to `k` costs 423 ns at n=1536/k=6 against 21.5 ns at n=12/k=6, and 1223 ns at n=5376/k=21 against 46.5 ns at n=42/k=21 — so the large allocation is roughly six times cheaper per slot and twenty times more expensive in total. Any Dart allocation claim of the form 'the VM's fast path makes the larger one cheaper' must be quoted per call, not per slot.",
+      "conditions": "M1 Pro · standalone AOT reproduction of the allocation shape, no FFI or SQLite · 20,000 calls/round, 200 rounds · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "067.1"
+        }
+      ]
+    },
+    {
+      "id": "264.4",
+      "text": "The release suite is blocked at compile time, independently of #282. `benchmark/suites/writes.dart` (and the peer drift suites generally) return generated `*DriftDb` instances from closures typed `GeneratedDatabase`, which `drift` 2.34.3 rejects — four errors, reproduced on `origin/main` at `c351422` with no experiment diff applied. This is upstream of the scenario-15 segfault exps 260/261 hit and upstream of exp 262's per-scenario persistence, so no release artifact of any kind can be produced until the checked-in drift scaffolding is regenerated against the current peer.",
+      "conditions": "macOS 26.2 · Dart 3.12.2 · drift 2.34.3 · verified on origin/main c351422 · 2026-08"
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/select_rows_presize.dart` is now the durable gate for *both* ends of the result buffer, and the lane roles invert between them: exp 260's primaries (`int20-10k`, `int4-5k`, `mixed6-10k`, `mixed6-1k`) are exp 264's controls, and exp 260's controls (`point1`, `mixed6-200`) are exp 264's primaries. Keep `undershoot-mid` — it is the only lane that can reject a sizing rule for the initial allocation, and it did.",
+    "Two order-flipped passes were not enough here, and the tell was specific: `mixed6-20` read -16.5% then -13.3% on the first two passes and +4.2% then -8.5% on the next two. A lane whose per-read cost is dominated by other allocation (80 Strings, in that lane) cannot resolve a sub-microsecond buffer effect, and two passes agreeing is not evidence that it can. When a lane's expected effect is smaller than its CV, collect four passes and report it as drift-suspected rather than as a small win.",
+    "A coarse lane must batch before it is trusted. `mixed6-200` timed one 200-row read per sample at ~50 us, where a 1 us tick is 2%, and read +11.3% / +9.8% — a reproduced, same-signed regression in a lane the candidate provably cannot reach. Batching 20 executions per sample took it to -1.4% / +2.4%. Exp 254's rule (a same-sign move in an inert lane means no lane is trustworthy) is only sound once the inert lane's resolution exceeds the effect being hunted; before that it manufactures the very signal it is meant to detect.",
+    "The remaining per-read cost in `decodeQuery` is now genuinely the loads, the switch, the stores and the String copies — claim 260.2's ~2.5 ns/cell, plus one allocation sized to the result. There is no fixed per-read overhead left in the buffer to remove, so the next thing to attack on the small-read path is the isolate round trip itself, which exps 209 and 239 have both closed on hidden-policy grounds.",
+    "The pool's row-size memory is FIFO-capped at 32 entries (`_rowHintMax`), and an evicted entry now loses a high-water mark as well as a growth hint, so a statement whose entry is evicted pays claim 264.2's first-jump cost again. Nothing measures whether a real application's statement mix thrashes that cap. The discriminating measurement is cheap — count distinct SQL strings per second in a representative trace against 32 — and it bounds the value of every per-SQL memory the decoder holds, not just this one.",
+    "Fix the drift peer scaffolding before designing any experiment whose evidence needs a release run (claim 264.4). Until then the release suite cannot produce an artifact at all, and an experiment that plans on one will discover this after its candidate is already built."
+  ]
+}
