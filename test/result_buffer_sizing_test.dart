@@ -8,11 +8,21 @@
 /// plain doubling would give (a buffer that stops growing loses rows), and a
 /// statement whose row count swings between executions must keep returning
 /// exactly its own rows.
+///
+/// [EXP-264](../experiments/264-initial-alloc-size-memory.md) sizes the other end
+/// of the same buffer, the initial allocation, under the same contract: a wrong
+/// answer may cost time, never rows.
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/query_decoder.dart'
-    show RowSizeMemory, grownSlots, initialResultRows, nextRowHint;
+    show
+        RowSizeMemory,
+        grownSlots,
+        initialResultRows,
+        initialRowsFor,
+        initialSlotRows,
+        nextRowHint;
 import 'package:test/test.dart';
 
 void main() {
@@ -58,6 +68,103 @@ void main() {
         memory.record(8000);
         expect(memory.hint, nextRowHint(50));
       }
+    });
+  });
+
+  // The initial allocation's risk is the mirror image of the growth hint's:
+  // sizing the first buffer too small costs doublings. Hence the largest row
+  // count ever seen, and a clamp that only ever shrinks below the default.
+  group('initialRowsFor', () {
+    test('never exceeds the fixed default, however large the result', () {
+      for (final rows in [initialResultRows, 300, 10000, 1 << 30]) {
+        expect(initialRowsFor(rows), initialResultRows);
+      }
+    });
+
+    test('always leaves room for at least one row', () {
+      expect(initialRowsFor(0), 1);
+      expect(initialRowsFor(-1), 1);
+    });
+
+    test('sizes a small result for itself plus headroom', () {
+      expect(initialRowsFor(20), nextRowHint(20));
+      expect(initialRowsFor(20), greaterThan(20));
+      expect(initialRowsFor(20), lessThan(initialResultRows));
+    });
+  });
+
+  group('RowSizeMemory.initialRows', () {
+    test('has no opinion until it has seen two executions', () {
+      final memory = RowSizeMemory();
+      expect(initialSlotRows(0, memory), initialResultRows);
+      memory.record(1);
+      expect(initialSlotRows(0, memory), initialResultRows);
+      memory.record(1);
+      expect(initialSlotRows(0, memory), lessThan(initialResultRows));
+    });
+
+    test('takes the high-water mark, where the growth hint takes the low', () {
+      final memory = RowSizeMemory()
+        ..record(1)
+        ..record(40);
+      expect(memory.hint, nextRowHint(1));
+      expect(memory.initialRows, nextRowHint(40));
+    });
+
+    // A sliding window would size a large result from a tiny buffer whenever the
+    // executions before it were small. A high-water mark is raised once.
+    test('one large result disables the shrink for good', () {
+      final memory = RowSizeMemory()
+        ..record(20)
+        ..record(20);
+      expect(initialSlotRows(0, memory), nextRowHint(20));
+      memory.record(8000);
+      for (var i = 0; i < 8; i++) {
+        memory.record(20);
+        expect(initialSlotRows(0, memory), initialResultRows);
+      }
+    });
+
+    test('a statement that swings keeps the full default allocation', () {
+      final memory = RowSizeMemory()..record(8000);
+      for (var i = 0; i < 4; i++) {
+        memory.record(50);
+        expect(initialSlotRows(0, memory), initialResultRows);
+        memory.record(8000);
+        expect(initialSlotRows(0, memory), initialResultRows);
+      }
+    });
+
+    test('a stable small statement settles below the default', () {
+      final memory = RowSizeMemory();
+      for (var i = 0; i < 4; i++) {
+        memory.record(1);
+      }
+      expect(initialSlotRows(0, memory), nextRowHint(1));
+    });
+  });
+
+  // A worker's own high-water mark both lags (it sees only its own executions)
+  // and resets (it is destroyed on a large result), so the caller's must win.
+  group('initialSlotRows precedence', () {
+    test("the caller's hint wins over a local memory that disagrees", () {
+      final localSaysTiny = RowSizeMemory()
+        ..record(1)
+        ..record(1);
+      expect(
+        initialSlotRows(initialResultRows, localSaysTiny),
+        initialResultRows,
+      );
+      expect(initialSlotRows(40, localSaysTiny), 40);
+    });
+
+    test('a local memory is consulted only when the caller has no opinion', () {
+      final local = RowSizeMemory()
+        ..record(8)
+        ..record(8);
+      expect(initialSlotRows(0, local), nextRowHint(8));
+      // No hint and no local memory falls back to the fixed default.
+      expect(initialSlotRows(0, null), initialResultRows);
     });
   });
 
@@ -121,6 +228,37 @@ void main() {
         expect(rows.length, total);
         expect(rows.last['id'], total);
       }
+    });
+
+    // [EXP-264]: the initial allocation is sized down only after a statement
+    // has twice returned few rows, so the case that has to hold is the jump
+    // back up — a tiny first buffer that then has to hold thousands of rows.
+    test(
+      'a statement that jumps from tiny to large still returns every row',
+      () async {
+        await seed(5000);
+        const sql = 'SELECT * FROM items ORDER BY id LIMIT ?';
+        for (var round = 0; round < 3; round++) {
+          for (var i = 0; i < 6; i++) {
+            expect((await db.select(sql, [1])).length, 1);
+          }
+          final rows = await db.select(sql, [5000]);
+          expect(rows.length, 5000);
+          expect(rows.first['name'], 'item 0');
+          expect(rows.last['name'], 'item 4999');
+        }
+      },
+    );
+
+    test('an empty result decodes and then grows correctly', () async {
+      const sql = 'SELECT * FROM items ORDER BY id';
+      for (var i = 0; i < 6; i++) {
+        expect((await db.select(sql)).length, 0);
+      }
+      await seed(700);
+      final rows = await db.select(sql);
+      expect(rows.length, 700);
+      expect(rows.last['name'], 'item 699');
     });
 
     test('a shrinking result never returns stale rows', () async {

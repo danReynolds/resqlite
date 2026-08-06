@@ -45,25 +45,33 @@ final class ReaderPool {
   /// per-worker schema cache and the C statement cache.
   static const int _rowHintMax = 32;
 
-  /// How large a result each SQL produces — the size hint a worker uses to
-  /// allocate its result buffer in one shot instead of doubling into it
-  /// ([EXP-260](../../../experiments/260-result-list-presize.md)).
+  /// How large a result each SQL produces, sized on the request so a worker can
+  /// allocate its result buffer in one shot
+  /// ([EXP-260](../../../experiments/260-result-list-presize.md),
+  /// [EXP-264](../../../experiments/264-initial-alloc-size-memory.md)).
   ///
-  /// This lives on the main isolate rather than in the worker's own schema
-  /// cache because a result larger than `sacrificeSlotThreshold` ends the
-  /// isolate that produced it. A worker-local hint would therefore be discarded
-  /// exactly when the result was big enough for the hint to matter, and would
-  /// in any case only describe the fraction of executions that landed on that
-  /// one worker.
+  /// Kept here rather than in a worker's own schema cache because only the main
+  /// isolate observes every execution of a SQL, and because a result larger than
+  /// `sacrificeSlotThreshold` ends the isolate that produced it — a worker-local
+  /// record would be discarded exactly when it mattered most.
   ///
-  /// Only statements that have returned more rows than the decoder's initial
-  /// buffer holds ever get an entry: anything smaller cannot reach the growth
-  /// path a hint steers, so recording it would cost a point read an allocation
-  /// and a map write to describe a result the hint can never improve.
-  ///
-  /// FIFO eviction via [LinkedHashMap] insertion order.
+  /// Holds statements of every size: the growth hint serves the large ones, the
+  /// initial-allocation mark the small ones. Eviction is not order-based, since
+  /// the two are not worth the same — see [_evictionVictim].
   final Map<String, RowSizeMemory> _rowHints =
       LinkedHashMap<String, RowSizeMemory>();
+
+  /// The growth hint held for [sql]: null when nothing is remembered, 0 for an
+  /// entry that has not yet seen the two executions it takes to form an opinion.
+  ///
+  /// For tests asserting retention. Membership is the wrong signal — an evicted
+  /// statement is re-inserted on its next execution, so it passes under any
+  /// eviction policy. Only a non-zero hint distinguishes a retained entry from a
+  /// recreated one.
+  int? rowSizeHintFor(String sql) => _rowHints[sql]?.hint;
+
+  /// How many SQL strings the pool currently remembers a result size for.
+  int get rowSizeMemoryLength => _rowHints.length;
 
   /// FIFO waiters parked by _dispatch while no worker is available.
   ///
@@ -85,18 +93,40 @@ final class ReaderPool {
     return pool;
   }
 
+  /// Pick an entry to drop: one that has never returned a large result, before
+  /// one that has.
+  ///
+  /// Both consumers share these slots but do not value them equally. A small
+  /// statement loses only its initial-allocation mark, worth under a microsecond
+  /// per read; a large one loses the growth hint, worth roughly 40% of its read.
+  /// Small statements are also the overwhelming majority in any application with
+  /// more than [_rowHintMax] distinct queries, so without this preference
+  /// point-read churn evicts precisely the entries that matter. Reordering by
+  /// recency does not help — the slots being shared is the problem, not the order
+  /// they are reclaimed in.
+  ///
+  /// Falls back to insertion order when every entry has proven large, which is
+  /// the best available when no victim is cheap.
+  ///
+  /// O([_rowHintMax]), and only on a miss that overflows — never per read.
+  String _evictionVictim() {
+    for (final entry in _rowHints.entries) {
+      if (entry.value.highWater <= initialResultRows) return entry.key;
+    }
+    return _rowHints.keys.first;
+  }
+
   /// Fold a completed result's row count back into [memory], the entry
-  /// [_dispatch] read for this request, creating one only if the result was
-  /// large enough for a hint to matter.
+  /// [_dispatch] read for this request, creating one when this is the first
+  /// execution of [sql] the pool has seen.
   void _record(String sql, RowSizeMemory? memory, int rowCount) {
     if (memory != null) {
       memory.record(rowCount);
       return;
     }
-    if (rowCount <= initialResultRows) return;
     _rowHints[sql] = RowSizeMemory()..record(rowCount);
     if (_rowHints.length > _rowHintMax) {
-      _rowHints.remove(_rowHints.keys.first);
+      _rowHints.remove(_evictionVictim());
     }
   }
 
@@ -217,6 +247,7 @@ final class ReaderPool {
     }
 
     request.rowHint = memory?.hint ?? 0;
+    request.initialRowHint = memory?.initialRows ?? 0;
 
     final count = _workers.length;
     var hasPreviouslyParked = false;

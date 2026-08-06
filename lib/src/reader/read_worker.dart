@@ -43,6 +43,15 @@ sealed class ReadRequest {
   /// isolate that produced it, so exactly the results with the most growth to
   /// avoid would always be decoded by a worker that had never seen the SQL.
   int rowHint = 0;
+
+  /// Rows to size the *initial* result buffer for, or 0 for the fixed default
+  /// ([EXP-264](../../../experiments/264-initial-alloc-size-memory.md)).
+  ///
+  /// Also stamped by [ReaderPool._dispatch]. It must come from the main isolate
+  /// for the same reason [rowHint] does, plus one of its own: a worker observes
+  /// only the executions routed to it, and too low a figure here under-sizes the
+  /// buffer.
+  int initialRowHint = 0;
 }
 
 /// Standard row query — returns a [ResultSet].
@@ -162,6 +171,7 @@ void readerEntrypoint(List<Object> args) {
             sql,
             parameters,
             request.rowHint,
+            request.initialRowHint,
           );
           sacrifice = _shouldSacrifice(raw);
           result = _toRows(raw);
@@ -185,6 +195,7 @@ void readerEntrypoint(List<Object> args) {
             sql,
             parameters,
             request.rowHint,
+            request.initialRowHint,
           );
           sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
@@ -216,6 +227,7 @@ void readerEntrypoint(List<Object> args) {
             lastResultHash,
             lastRowCount,
             request.rowHint,
+            request.initialRowHint,
           );
           sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
@@ -362,12 +374,14 @@ RawQueryResult executeQuery(
   String sql,
   List<Object?> parameters, [
   int rowHint = 0,
+  int initialRowHint = 0,
 ]) => _withAcquiredStmt(
   handleAddr,
   readerId,
   sql,
   parameters,
-  (_, stmt) => decodeQuery(stmt, sql, rowHint: rowHint),
+  (_, stmt) =>
+      decodeQuery(stmt, sql, rowHint: rowHint, initialRowHint: initialRowHint),
 );
 
 /// Execute a query returning JSON bytes as a view over the reader
@@ -406,11 +420,17 @@ RawQueryResult executeQuery(
   String sql,
   List<Object?> parameters, [
   int rowHint = 0,
+  int initialRowHint = 0,
 ]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (
   dbHandle,
   stmt,
 ) {
-  final (raw, hash) = decodeQueryWithInitialHash(stmt, sql, rowHint: rowHint);
+  final (raw, hash) = decodeQueryWithInitialHash(
+    stmt,
+    sql,
+    rowHint: rowHint,
+    initialRowHint: initialRowHint,
+  );
   // Collect dependency metadata from the reader's most recent cached stmt entry.
   return (
     raw,
@@ -440,10 +460,15 @@ RawQueryResult executeQuery(
   int lastResultHash,
   int? lastRowCount, [
   int rowHint = 0,
+  int initialRowHint = 0,
 ]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
   final (newHash, newRowCount) = callQueryHash(stmt);
   if (newHash == lastResultHash && newRowCount == lastRowCount) {
     return (newHash, newRowCount, null);
   }
-  return (newHash, newRowCount, decodeQuery(stmt, sql, rowHint: rowHint));
+  return (
+    newHash,
+    newRowCount,
+    decodeQuery(stmt, sql, rowHint: rowHint, initialRowHint: initialRowHint),
+  );
 });

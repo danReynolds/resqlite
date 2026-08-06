@@ -891,6 +891,142 @@ A guard whose sensitivity is unknown is not yet a guard. If setup dominates the
 measured quantity, say what fraction, or the number reads as more protective than
 it is.*
 
+### Run drift codegen in a fresh worktree before reading any failure as pre-existing
+
+`benchmark/drift/*.g.dart` is gitignored and produced by `dart run build_runner
+build --delete-conflicting-outputs`, which CI runs before analyze and test. A
+worktree that has only had `dart pub get` is missing them, and the symptom is
+alarming and misleading: `dart analyze` reports ~77 issues and nine
+`benchmark_*_test.dart` files fail to load, all of it in peer drift scaffolding
+that looks like it has drifted out of sync with the pinned `drift` version.
+[Exp 264](264-initial-alloc-size-memory.md) read that as a pre-existing repo
+breakage, checked it reproduced on `origin/main` — it did, for the same reason —
+and wrote it up as a blocker before noticing the CI step that generates them. With
+codegen run, `dart analyze --fatal-infos` is clean and all 450 tests pass.
+
+*Reapplies to every new experiment worktree: run codegen immediately after
+`dart pub get`. More generally, "it reproduces on `origin/main`" only rules out
+your diff; it does not establish that the repo is broken, because a missing
+build step reproduces everywhere. Before reporting infrastructure as broken,
+check what CI does that you did not.*
+
+### Check the host before trusting a focused benchmark
+
+`run_release.dart` stamps `gitDirty` and the experiments chart drops a dirty or
+single-sample run, but a focused AOT harness records nothing about the machine it
+ran on. [Exp 264](264-initial-alloc-size-memory.md) collected an entire
+experiment — four order-flipped passes, twelve lanes — on a host at **0.0% CPU
+idle**, with an unrelated VM at 190% CPU, under 500 MB free on a 460 GB volume,
+and six `run_release.dart` processes from earlier sessions wedged 1-4 days at 0.0%
+CPU. Nothing surfaced it until a late confirmation pass read +50.6% on a lane the
+candidate provably cannot reach.
+
+What survived: the direction and mechanism, because the design was order-flipped,
+the controls held to ±2%, the effect scaled with column count as predicted, and a
+standalone probe with no isolates and no SQLite measured the same magnitudes. What
+did not: the percentages.
+
+*Reapplies before every focused run. `top -l 1 | grep "CPU usage"` and `df -h` cost
+nothing. Treat a same-signed move in a mechanically-inert lane as a host problem
+first and a code-layout offset second — the layout reading is the one exp 254
+established, and it quietly assumes the host is idle. Also reap wedged
+`run_release.dart` processes first: the #282 crash leaves the parent blocked
+forever rather than exiting, they accumulate across sessions, and they sit at 0.0%
+CPU so they never look like contention.*
+
+### Fixing the eviction order is not fixing the capacity
+
+Exp 264 gave the reader pool's 32-entry per-SQL memory a second consumer, so point
+reads began competing for slots that had belonged exclusively to the large-result
+statements exp 260's growth hint serves. A hot report query then lost its hint to
+point-read churn, measured at +40-46% on a 5,000-row read.
+
+The obvious fix — promote on use, so a hot entry is not aged out — measured **no
+improvement at all**, and cost the main isolate a map remove-and-reinsert per read.
+Raising the capacity did fix it, which located the mechanism: once more distinct hot
+statements are in play than the map holds, no ordering keeps the one that matters.
+What shipped was an eviction *preference* (drop an entry that has never returned a
+large result before one that has), which restores the original tenure without
+choosing a new magic number and costs nothing per read.
+
+*Reapplies to any bounded cache that gains a second population of keys. Ask what
+fraction of capacity the new population will occupy before reaching for a smarter
+replacement policy — LRU, LFU and CLOCK all reorder the same too-small set. And
+when a cache serves two consumers with different value densities, priority by value
+beats recency.*
+
+### A per-slot cost is not a per-call cost
+
+[Exp 067](067-shrink-initial-allocation.md) rejected shrinking `decodeQuery`'s
+fixed 256-row initial allocation and explained the rejection with a real VM
+property: `List.filled(n, null)` is cheaper *per slot* when `n` is large.
+[Exp 264](264-initial-alloc-size-memory.md) measured the same shape per call —
+423 ns for 1,536 slots against 21.5 ns for 12 — so the large allocation is about
+six times cheaper per slot and twenty times more expensive per query. The stated
+mechanism was true; the decision it supported was not.
+
+This is the second rejection in this direction closed by a locally-true
+mechanism claim. [Exp 059](059-row-count-hint.md) counted *growths* rather than
+slots copied and concluded list growth was already cheap; exp 260 found the same
+defect there.
+
+*Reapplies whenever a rejection's reasoning is a rate — per slot, per byte, per
+row, per call. Multiply it back out by the count the caller actually pays before
+treating it as a reason. And when a rejection tested an unconditional change,
+what it establishes is that the change is wrong unconditionally; a later
+experiment with per-case knowledge is not repeating it.*
+
+### An inert lane is only a noise gauge once it can resolve the effect
+
+A lane where the candidate is mechanically inert reads the harness floor, so a
+same-signed move across the order flip means no lane is trustworthy (exp 254).
+[Exp 264](264-initial-alloc-size-memory.md) found the precondition that rule
+needs. Its `mixed6-200` control timed one 200-row read per sample at ~50 us,
+where a single stopwatch tick is 2%, and reported +11.3% then +9.8% — a
+reproduced, same-signed regression in a lane the candidate provably could not
+reach. Batching 20 executions per sample took the same lane to -1.4% / +2.4%.
+
+*Reapplies before trusting any control lane. Check that its resolution exceeds
+the effect being hunted; below that threshold a floor gauge manufactures exactly
+the signal it exists to detect. The same run also needed four alternating-order
+passes rather than two, because a lane whose per-read cost was dominated by other
+allocation agreed with itself twice and then reversed.*
+
+### Re-run the guard after the fix, even when the fix is obviously right
+
+[Exp 264](264-initial-alloc-size-memory.md)'s guard lane fired at +40%. The first
+diagnosis was that the size memory was worker-local and a four-worker pool gives
+each worker a biased sample — which is true, is a real defect, and was worth
+fixing on its own. It moved the memory to the main isolate and the lane read
++40% again, in all four passes. The actual cause was the statistic, not its
+location.
+
+*Reapplies whenever a plausible defect is found while chasing a measured one. A
+correct fix for a real problem is not evidence that it was the problem you
+measured; the guard is. If the writeup had shipped after the reasoning instead of
+after the re-run, it would have documented a mechanism the numbers never
+supported — and shipped the +40%.*
+
+### A hint that can under-predict needs a high-water mark, not a window
+
+Exp 260 sized result-buffer *growth* from the smaller of a SQL's last two row
+counts, because over-sizing is the expensive mistake there.
+[Exp 264](264-initial-alloc-size-memory.md) sized the *initial* allocation and
+inherited the window by symmetry, taking the larger of the last two — and
+measured +40% in all four order-flipped passes on a statement returning 3,300
+rows behind bursts of eight 20-row reads. A window of length k is defeated by any
+burst longer than k: every observation before the large execution is small, so
+the penalty recurs instead of amortising. A high-water mark is raised once and
+never falls, which converts a periodic cost into a one-time one (measured at
++1.6%).
+
+*Reapplies to any adaptive sizing, capacity or threshold whose two error
+directions are not symmetric. Identify which direction is the expensive mistake,
+then pick a statistic that cannot be talked out of guarding against it by a run
+of cheap observations. Pair it with the exp 260 lesson above: put the hint where
+a wrong answer costs nothing, and where it cannot, make the wrong answer
+unrepeatable.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
