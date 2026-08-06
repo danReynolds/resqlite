@@ -248,9 +248,51 @@ cleaner signal than a benchmark that needed three passes to read. Note that
 time it runs, so a membership check passes under any policy. What eviction costs is
 the learned hint.
 
-### The host was saturated, and the percentages should be re-measured
+### Re-measured on a quieter host
 
-Every wall-time figure above was collected on a machine at **0.0% CPU idle** —
+Everything above was collected while the machine was saturated (see below), so the
+whole comparison was re-run once it freed up — 52-61% CPU idle, four alternating
+passes, lane-isolated, 61 samples per lane, three arms: `origin/main`, exp 264
+without the eviction fix, and exp 264 as it ships. The controls are tight here
+(±1.7%, against ±4% before), so these are the numbers to quote.
+
+**Exp 264 (final) against `origin/main`:**
+
+| lane | role | pass 1 | pass 2 | pass 3 | pass 4 | mean | verdict |
+|---|---|---:|---:|---:|---:|---:|---|
+| `point1` | primary | -10.3% | -15.2% | -19.9% | -8.5% | -13.5% | **reproduced** |
+| `point1-wide20` | primary | -26.3% | -19.5% | -29.5% | -33.1% | -27.1% | **reproduced** |
+| `int20-10k` | control | -0.5% | +0.4% | +1.3% | -0.2% | +0.3% | neutral |
+| `mixed6-10k` | control | +0.1% | +0.8% | -0.7% | -1.7% | -0.4% | neutral |
+| `hint-thrash-overflows` | guard | -1.3% | +0.9% | -2.6% | +2.2% | -0.2% | neutral |
+
+**Cost of the eviction fix — exp 264 with it against exp 264 without:**
+
+| lane | role | pass 1 | pass 2 | pass 3 | pass 4 | mean | verdict |
+|---|---|---:|---:|---:|---:|---:|---|
+| `point1` | primary | -6.8% | -5.6% | -6.9% | +3.3% | -4.0% | sign-flips |
+| `point1-wide20` | primary | -1.7% | +24.5% | -2.2% | +1.5% | +5.5% | sign-flips |
+| `int20-10k` | control | +0.3% | +0.4% | -0.8% | +0.3% | +0.0% | neutral |
+| `mixed6-10k` | control | -0.5% | +0.0% | +1.5% | -0.6% | +0.1% | neutral |
+| `hint-thrash-overflows` | guard | -30.3% | -28.8% | -30.1% | -28.8% | -29.5% | **reproduced** |
+
+The win holds and the narrow point read is *better* than the saturated run
+suggested — −13.5% against the −7.4% first measured, while the wide lane reproduces
+almost exactly (−27.1% against −27.4%). The earlier figure was the host, not the
+code.
+
+The eviction fix costs nothing on the hot path, which is what the structure
+predicts: `_evictionVictim` is only reachable when the memory overflows its 32
+entries, and a lane running one statement never gets there. Both `point1` lanes
+sign-flip across the order flip and both controls sit at ±0.1%, while the thrash
+guard moves −29.5% in all four passes. And `hint-thrash-overflows` is now level with
+`origin/main` (−0.2%), so exp 260's reach is fully restored rather than merely
+improved: without the fix that same lane runs +41.6% slower than pre-264.
+
+### The host was saturated for the first pass, which is how the figures moved
+
+The twelve-lane table and the guard measurements above were collected on a machine
+at **0.0% CPU idle** —
 `top` reported 57% user / 43% sys with an unrelated Virtualization.framework VM at
 190% CPU, FSEvents at 57%, and other Dart processes at 100% and 44%. The same host
 had under 500 MB free on a 460 GB volume, and six `run_release.dart` processes from
@@ -266,21 +308,24 @@ host is dominated by reader-isolate scheduling latency, and the confirmation pas
 that exposed the problem read +50.6% on `int20-10k`, a lane the candidate cannot
 reach.
 
-This should be re-measured on a quiet host before the result is promoted out of
-soak. It is also a gap in the tooling rather than bad luck: `run_release.dart`
+That is why the three-arm re-measurement above exists, and it is the authoritative
+one wherever the two overlap. The four-pass twelve-lane table is retained because it
+is the only pass covering the guards and the full lane set, and its verdicts —
+which lanes reproduce and which flip — held up.
+
+The episode is a gap in the tooling rather than bad luck: `run_release.dart`
 stamps `gitDirty` and the charts drop untrusted runs, but a focused AOT harness
 records nothing about its host, so there was nothing to notice until an inert lane
 moved by 50%.
 
 ## Decision
 
-**Accepted, with the magnitude held open.** Point reads are faster by a
-reproduced 7-27% and the two properties that make the change safe are structural
-rather than tuned: the clamp means a result larger than 256 rows runs today's
-code, and the high-water mark means a mispredict is one-off rather than periodic.
-The percentages need a re-measurement on an unsaturated host before they are
-quoted as settled — the direction and mechanism are corroborated independently,
-the exact numbers are not.
+**Accepted.** Point reads are a reproduced **13.5% faster on the canonical
+six-column row and 27.1% on a twenty-one-column one**, measured on a quiet host
+across four alternating passes with controls inside ±1.7%. The two properties that
+make the change safe are structural rather than tuned: the clamp means a result
+larger than 256 rows runs today's code, and the high-water mark means a mispredict
+is one-off rather than periodic.
 
 The change also required a fix to the pool's eviction preference, without which it
 silently narrows exp 260's reach by 40-46% on any application with more than 32

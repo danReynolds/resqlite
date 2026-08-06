@@ -114,6 +114,57 @@ all at or better than the figures published in `README.md`, none regressed.
 | `undershoot-mid` | 3 (baseline first) | 762 | 761 | -0.1% | 8.3% | 9.5% |
 | `undershoot-mid` | 4 (candidate first) | 773 | 778 | +0.6% | 10.3% | 9.9% |
 
+## Re-measurement on a quieter host
+
+The timing table above was collected while the host sat at 0.0% CPU idle (see
+*Environment* below). The comparison was re-run once it freed up — 52-61% idle,
+four alternating passes, lane-isolated, 61 samples per lane, three arms:
+
+```console
+pre    = origin/main (c351422)
+fifo   = exp 264 without the eviction fix (f87584d)
+victim = exp 264 as it ships
+```
+
+**Exp 264 (final) against `origin/main`:**
+
+| lane | role | pass 1 | pass 2 | pass 3 | pass 4 | mean | verdict |
+|---|---|---:|---:|---:|---:|---:|---|
+| `point1` | primary | -10.3% | -15.2% | -19.9% | -8.5% | -13.5% | **reproduced** |
+| `point1-wide20` | primary | -26.3% | -19.5% | -29.5% | -33.1% | -27.1% | **reproduced** |
+| `int20-10k` | control | -0.5% | +0.4% | +1.3% | -0.2% | +0.3% | neutral |
+| `mixed6-10k` | control | +0.1% | +0.8% | -0.7% | -1.7% | -0.4% | neutral |
+| `hint-thrash-overflows` | guard | -1.3% | +0.9% | -2.6% | +2.2% | -0.2% | neutral |
+
+**Cost of the eviction fix — exp 264 with it against exp 264 without:**
+
+| lane | role | pass 1 | pass 2 | pass 3 | pass 4 | mean | verdict |
+|---|---|---:|---:|---:|---:|---:|---|
+| `point1` | primary | -6.8% | -5.6% | -6.9% | +3.3% | -4.0% | sign-flips |
+| `point1-wide20` | primary | -1.7% | +24.5% | -2.2% | +1.5% | +5.5% | sign-flips |
+| `int20-10k` | control | +0.3% | +0.4% | -0.8% | +0.3% | +0.0% | neutral |
+| `mixed6-10k` | control | -0.5% | +0.0% | +1.5% | -0.6% | +0.1% | neutral |
+| `hint-thrash-overflows` | guard | -30.3% | -28.8% | -30.1% | -28.8% | -29.5% | **reproduced** |
+
+Controls tighten to ±1.7% here from ±4%, so these supersede the twelve-lane table
+wherever the two overlap. Absolute medians, pass 1 (us): `point1` 1305 / 1255 /
+1170, `point1-wide20` 1722 / 1291 / 1269, `hint-thrash-overflows` 551 / 780 / 544.
+
+## Environment
+
+Every figure in the twelve-lane table was collected on a host at **0.0% CPU idle**:
+`top` reported 57% user / 43% sys, with an unrelated Virtualization.framework VM at
+190% CPU, `fseventsd` at 57%, and other Dart processes at 100% and 44%; load average
+33/39/50 on ten cores; under 500 MB free on a 460 GB volume; and six
+`run_release.dart` processes from earlier sessions resident, wedged 1-4 days at 0.0%
+CPU. It surfaced when a confirmation pass read +50.6% on `int20-10k`, a lane the
+candidate cannot reach.
+
+The re-measurement above ran at 52-61% idle with the VM gone (`fseventsd` and
+`triald_system` still active, so not pristine). Comparing the two passes bounds what
+the saturation cost: six points on the narrow point read (-7.4% → -13.5%), nothing
+on the wide one (-27.4% → -27.1%).
+
 ## Verdicts
 
 `dart run benchmark/ab_drift_check.dart --input=... --markdown`, pooling passes
