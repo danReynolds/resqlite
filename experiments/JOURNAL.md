@@ -910,6 +910,51 @@ your diff; it does not establish that the repo is broken, because a missing
 build step reproduces everywhere. Before reporting infrastructure as broken,
 check what CI does that you did not.*
 
+### Check the host before trusting a focused benchmark
+
+`run_release.dart` stamps `gitDirty` and the experiments chart drops a dirty or
+single-sample run, but a focused AOT harness records nothing about the machine it
+ran on. [Exp 264](264-initial-alloc-size-memory.md) collected an entire
+experiment — four order-flipped passes, twelve lanes — on a host at **0.0% CPU
+idle**, with an unrelated VM at 190% CPU, under 500 MB free on a 460 GB volume,
+and six `run_release.dart` processes from earlier sessions wedged 1-4 days at 0.0%
+CPU. Nothing surfaced it until a late confirmation pass read +50.6% on a lane the
+candidate provably cannot reach.
+
+What survived: the direction and mechanism, because the design was order-flipped,
+the controls held to ±2%, the effect scaled with column count as predicted, and a
+standalone probe with no isolates and no SQLite measured the same magnitudes. What
+did not: the percentages.
+
+*Reapplies before every focused run. `top -l 1 | grep "CPU usage"` and `df -h` cost
+nothing. Treat a same-signed move in a mechanically-inert lane as a host problem
+first and a code-layout offset second — the layout reading is the one exp 254
+established, and it quietly assumes the host is idle. Also reap wedged
+`run_release.dart` processes first: the #282 crash leaves the parent blocked
+forever rather than exiting, they accumulate across sessions, and they sit at 0.0%
+CPU so they never look like contention.*
+
+### Fixing the eviction order is not fixing the capacity
+
+Exp 264 gave the reader pool's 32-entry per-SQL memory a second consumer, so point
+reads began competing for slots that had belonged exclusively to the large-result
+statements exp 260's growth hint serves. A hot report query then lost its hint to
+point-read churn, measured at +40-46% on a 5,000-row read.
+
+The obvious fix — promote on use, so a hot entry is not aged out — measured **no
+improvement at all**, and cost the main isolate a map remove-and-reinsert per read.
+Raising the capacity did fix it, which located the mechanism: once more distinct hot
+statements are in play than the map holds, no ordering keeps the one that matters.
+What shipped was an eviction *preference* (drop an entry that has never returned a
+large result before one that has), which restores the original tenure without
+choosing a new magic number and costs nothing per read.
+
+*Reapplies to any bounded cache that gains a second population of keys. Ask what
+fraction of capacity the new population will occupy before reaching for a smarter
+replacement policy — LRU, LFU and CLOCK all reorder the same too-small set. And
+when a cache serves two consumers with different value densities, priority by value
+beats recency.*
+
 ### A per-slot cost is not a per-call cost
 
 [Exp 067](067-shrink-initial-allocation.md) rejected shrinking `decodeQuery`'s

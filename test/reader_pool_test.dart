@@ -21,13 +21,16 @@ Future<void> _seed(Database db, int count) async {
   await db.executeBatch(
     'INSERT INTO items(name, category, price, quantity, description) '
     'VALUES (?, ?, ?, ?, ?)',
-    List.generate(count, (i) => [
-      'item_$i',
-      'cat_${i % 10}',
-      (i * 1.5),
-      i * 10,
-      'A medium-length description for item number $i to add some text bulk.',
-    ]),
+    List.generate(
+      count,
+      (i) => [
+        'item_$i',
+        'cat_${i % 10}',
+        (i * 1.5),
+        i * 10,
+        'A medium-length description for item number $i to add some text bulk.',
+      ],
+    ),
   );
 }
 
@@ -154,12 +157,14 @@ void main() {
       await _seed(db, 100);
       final futures = List.generate(
         20,
-        (i) =>
-            db.selectBytes('SELECT * FROM items WHERE category = ?', ['cat_$i']),
+        (i) => db.selectBytes('SELECT * FROM items WHERE category = ?', [
+          'cat_$i',
+        ]),
       );
       final results = await Future.wait(futures);
       for (var i = 0; i < 10; i++) {
-        final decoded = jsonDecode(String.fromCharCodes(results[i].bytes)) as List;
+        final decoded =
+            jsonDecode(String.fromCharCodes(results[i].bytes)) as List;
         expect(decoded, hasLength(10), reason: 'cat_$i');
         expect(results[i].rowCount, 10, reason: 'cat_$i');
       }
@@ -169,10 +174,7 @@ void main() {
       await _seed(db, 3000);
       // 8 concurrent queries, each ~321 KB — all trigger sacrifice.
       // Pool must respawn workers between queries.
-      final futures = List.generate(
-        8,
-        (_) => db.select('SELECT * FROM items'),
-      );
+      final futures = List.generate(8, (_) => db.select('SELECT * FROM items'));
       final results = await Future.wait(futures);
       for (final rows in results) {
         expect(rows, hasLength(3000));
@@ -257,12 +259,16 @@ void main() {
       await _seed(db, 100);
 
       // Stream setup uses selectWithDeps internally.
-      final stream = db.stream('SELECT * FROM items WHERE category = ?', ['cat_0']);
+      final stream = db.stream('SELECT * FROM items WHERE category = ?', [
+        'cat_0',
+      ]);
       final first = await stream.first;
       expect(first, hasLength(10));
 
       // Regular selects should still work after selectWithDeps exercised the pool.
-      final rows = await db.select('SELECT * FROM items WHERE category = ?', ['cat_1']);
+      final rows = await db.select('SELECT * FROM items WHERE category = ?', [
+        'cat_1',
+      ]);
       expect(rows, hasLength(10));
     });
 
@@ -282,10 +288,7 @@ void main() {
       final write = db.executeBatch(
         'INSERT INTO items(name, category, price, quantity, description) '
         'VALUES (?, ?, ?, ?, ?)',
-        List.generate(50, (i) => [
-          'new_$i', 'cat_new', 0.0, 0,
-          'new item',
-        ]),
+        List.generate(50, (i) => ['new_$i', 'cat_new', 0.0, 0, 'new item']),
       );
 
       final results = await Future.wait(reads);
@@ -295,8 +298,11 @@ void main() {
       // never a partial state, because WAL provides snapshot isolation.
       for (final rows in results) {
         final count = rows[0]['c'] as int;
-        expect(count == 100 || count == 150, isTrue,
-            reason: 'got count=$count, expected 100 or 150');
+        expect(
+          count == 100 || count == 150,
+          isTrue,
+          reason: 'got count=$count, expected 100 or 150',
+        );
       }
     });
 
@@ -312,7 +318,9 @@ void main() {
 
     test('empty result selectBytes', () async {
       await _seed(db, 10);
-      final result = await db.selectBytes('SELECT * FROM items WHERE id > 9999');
+      final result = await db.selectBytes(
+        'SELECT * FROM items WHERE id > 9999',
+      );
       final decoded = jsonDecode(String.fromCharCodes(result.bytes)) as List;
       expect(decoded, isEmpty);
       expect(result.rowCount, 0);
@@ -335,9 +343,7 @@ void main() {
       await db.executeBatch(
         'INSERT INTO items(name, category, price, quantity, description) '
         'VALUES (?, ?, ?, ?, ?)',
-        List.generate(1000, (i) => [
-          'extra_$i', 'cat_0', 0.0, 0, 'extra row',
-        ]),
+        List.generate(1000, (i) => ['extra_$i', 'cat_0', 0.0, 0, 'extra row']),
       );
       final large = await db.select('SELECT * FROM items');
       expect(large, hasLength(3000));
@@ -347,10 +353,9 @@ void main() {
       await _seed(db, 50);
       // 100 sequential queries — tests that workers are reused efficiently.
       for (var i = 0; i < 100; i++) {
-        final rows = await db.select(
-          'SELECT * FROM items WHERE id = ?',
-          [i % 50 + 1],
-        );
+        final rows = await db.select('SELECT * FROM items WHERE id = ?', [
+          i % 50 + 1,
+        ]);
         expect(rows, hasLength(1), reason: 'query $i');
       }
     });
@@ -410,6 +415,103 @@ void main() {
         }
       }
       await Future.wait(futures);
+    });
+
+    // [EXP-264] The pool remembers a result size per SQL string in a 32-entry
+    // map. Exp 260 only ever inserted statements that had returned more rows than
+    // the initial buffer holds, so those slots belonged exclusively to the
+    // large-result statements its growth hint serves. Exp 264 gave the map a
+    // second consumer that only small results reach, putting every point read
+    // into the same slots — which cost a measured +46% on a 5,000-row read once
+    // more than 32 distinct statements were in play, because the large
+    // statement's hint was evicted by point-read churn.
+    //
+    // The property under test is that a statement which has proven large keeps
+    // its hint. Presence is the wrong assertion: an evicted statement is
+    // re-inserted the next time it runs, so a membership check passes under any
+    // policy. What eviction costs is the learned hint, which a recreated entry has
+    // to be taught again over two more executions. Asserting it here keeps it out
+    // from under the statement-prepare and reader-scheduling noise that made the
+    // benchmark lanes need three passes to read.
+    group('row-size memory eviction', () {
+      /// A statement needs two executions before its memory forms an opinion.
+      Future<void> arm(ReaderPool pool, String sql) async {
+        await pool.select(sql);
+        await pool.select(sql);
+      }
+
+      Future<void> floodWith(ReaderPool pool, int count, String tag) async {
+        for (var i = 0; i < count; i++) {
+          await pool.select('SELECT id FROM items WHERE id = 1 -- ${tag}_$i');
+        }
+      }
+
+      test('a large statement keeps its hint through point-read churn', () async {
+        await _seed(db, 400);
+        final pool = await ReaderPool.spawn(db.handle.address, 2);
+        addTearDown(pool.close);
+
+        // 400 rows is above the decoder's 256-row initial buffer, so this
+        // statement is one the growth hint exists for.
+        const report = 'SELECT * FROM items ORDER BY id';
+        await arm(pool, report);
+        expect(pool.rowSizeHintFor(report), greaterThan(0));
+
+        // 300 distinct one-off point statements through a 32-slot map — an order
+        // of magnitude more than it holds. Eviction must keep taking the small
+        // ones, so the report's hint survives untouched. Under plain
+        // insertion-order eviction it is gone after the first 32.
+        for (var round = 0; round < 6; round++) {
+          await floodWith(pool, 50, 'r$round');
+          expect(
+            pool.rowSizeHintFor(report),
+            greaterThan(0),
+            reason: 'report statement lost its hint in round $round',
+          );
+        }
+      });
+
+      test(
+        'small statements are still remembered in the spare slots',
+        () async {
+          await _seed(db, 400);
+          final pool = await ReaderPool.spawn(db.handle.address, 2);
+          addTearDown(pool.close);
+
+          const point = 'SELECT * FROM items WHERE id = 7';
+          await arm(pool, point);
+          // Exp 264's own consumer still works: a small statement that keeps
+          // running holds a slot, because nothing has evicted it yet.
+          expect(pool.rowSizeHintFor(point), isNotNull);
+        },
+      );
+
+      test('more large statements than slots still evict each other', () async {
+        await _seed(db, 400);
+        final pool = await ReaderPool.spawn(db.handle.address, 2);
+        addTearDown(pool.close);
+
+        const first = 'SELECT * FROM items ORDER BY id';
+        await arm(pool, first);
+
+        // 40 distinct statements that all return more than the initial buffer
+        // holds. Preferring small victims cannot help when there are no small
+        // entries, so this falls back to insertion order — the pre-exp-264
+        // behaviour, and the honest limit of the fix.
+        for (var i = 0; i < 40; i++) {
+          await pool.select('SELECT * FROM items ORDER BY id -- big$i');
+        }
+        expect(pool.rowSizeHintFor(first), isNull);
+      });
+
+      test('the map never grows past its cap', () async {
+        await _seed(db, 10);
+        final pool = await ReaderPool.spawn(db.handle.address, 2);
+        addTearDown(pool.close);
+
+        await floodWith(pool, 200, 'cap');
+        expect(pool.rowSizeMemoryLength, lessThanOrEqualTo(32));
+      });
     });
   });
 }

@@ -13,7 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
-import '../query_decoder.dart' show RowSizeMemory;
+import '../query_decoder.dart' show RowSizeMemory, initialResultRows;
 import '../blob_transfer.dart' show blobTransfer;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
@@ -64,9 +64,30 @@ final class ReaderPool {
   /// the initial allocation, which is sized down for a statement that keeps
   /// returning fewer rows than the fixed default holds.
   ///
-  /// FIFO eviction via [LinkedHashMap] insertion order.
+  /// Eviction prefers statements that have never returned more rows than the
+  /// initial buffer holds; see [_evictionVictim].
   final Map<String, RowSizeMemory> _rowHints =
       LinkedHashMap<String, RowSizeMemory>();
+
+  /// Exp 260's growth hint as the pool currently holds it for [sql]: null when
+  /// the pool remembers nothing about the statement, 0 when it has an entry that
+  /// has not yet seen the two executions it takes to form an opinion, and
+  /// otherwise the row count it would stamp on the next request.
+  ///
+  /// Exists so a test can assert *retention* directly rather than inferring it
+  /// from wall time. Presence alone is not the property — an evicted statement is
+  /// re-inserted the next time it runs, so a membership check passes under any
+  /// eviction policy. What eviction actually costs is the *armed* state: a
+  /// recreated entry reads 0 here and has to be taught again. Measuring that
+  /// through a benchmark buries it under statement-prepare and reader-respawn
+  /// noise (see the `hint-thrash-*` lanes in
+  /// `benchmark/experiments/select_rows_presize.dart`).
+  ///
+  /// Not exported from `lib/resqlite.dart`; this file is internal.
+  int? rowSizeHintFor(String sql) => _rowHints[sql]?.hint;
+
+  /// How many SQL strings the pool currently remembers a result size for.
+  int get rowSizeMemoryLength => _rowHints.length;
 
   /// FIFO waiters parked by _dispatch while no worker is available.
   ///
@@ -88,6 +109,37 @@ final class ReaderPool {
     return pool;
   }
 
+  /// Eviction prefers a statement that has only ever returned a small result,
+  /// falling back to insertion order when every entry has proven large.
+  ///
+  /// This restores an invariant exp 264 broke. Exp 260 only ever inserted a
+  /// statement that had returned more rows than the initial buffer holds, so
+  /// these 32 slots belonged exclusively to the large-result statements its
+  /// growth hint serves and nothing else competed for them. Exp 264 gave the map
+  /// a second consumer that only *small* results reach, which put every point
+  /// read into the same 32 slots — and a report query that runs constantly then
+  /// gets evicted by point-read churn, losing the hint and taking exp 260's win
+  /// with it. Measured on the `hint-thrash-overflows` lane: **+46% on a
+  /// 5,000-row read** against pre-exp-264, systematic enough that the slower
+  /// arm's fastest sample beat the faster arm's slowest.
+  ///
+  /// Promoting on use (least-recently-used) does *not* fix it — measured at
+  /// no improvement, and it costs the main isolate a map remove-and-reinsert on
+  /// every read. The problem is capacity, not order: once more distinct hot
+  /// statements are in play than the map holds, no ordering keeps the one that
+  /// matters. Preferring small victims gives the large statements back the
+  /// exclusive tenure they had before exp 264, while small statements still use
+  /// whatever slots are left over.
+  ///
+  /// The scan is O([_rowHintMax]) and runs only on a miss — once per distinct
+  /// SQL string, never on the per-read path.
+  String _evictionVictim() {
+    for (final entry in _rowHints.entries) {
+      if (entry.value.highWater <= initialResultRows) return entry.key;
+    }
+    return _rowHints.keys.first;
+  }
+
   /// Fold a completed result's row count back into [memory], the entry
   /// [_dispatch] read for this request, creating one when this is the first
   /// execution of [sql] the pool has seen.
@@ -98,7 +150,7 @@ final class ReaderPool {
     }
     _rowHints[sql] = RowSizeMemory()..record(rowCount);
     if (_rowHints.length > _rowHintMax) {
-      _rowHints.remove(_rowHints.keys.first);
+      _rowHints.remove(_evictionVictim());
     }
   }
 

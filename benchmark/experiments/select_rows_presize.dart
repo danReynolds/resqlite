@@ -101,6 +101,7 @@ final class _Lane {
     this.selectParams = const [],
     this.expectRows,
     this.repeats = 1,
+    this.thrashWidth = 0,
   }) : createSql = null,
        insertSql = null,
        row = null,
@@ -122,7 +123,8 @@ final class _Lane {
     this.expectRows,
     this.repeats = 1,
   }) : columns = 0,
-       cell = null;
+       cell = null,
+       thrashWidth = 0;
 
   final String label;
   final int columns;
@@ -159,6 +161,16 @@ final class _Lane {
   /// puts the control lane's resolution on the same footing as the others.
   /// Reported medians are per sample, not per execution.
   final int repeats;
+
+  /// Distinct *SQL strings* executed, untimed, before each timed sample.
+  ///
+  /// Unlike [poisonWidth], which re-executes [selectSql] with different
+  /// parameters, each of these is a fresh SQL string that has never been seen
+  /// before, so it claims a new slot in `ReaderPool._rowHints` (capacity 32).
+  /// This is the only thing in the suite that exercises having more distinct
+  /// statements in play than the pool can remember — the gap that let exp 264
+  /// widen eviction pressure on exp 260's growth hint without any lane noticing.
+  final int thrashWidth;
 }
 
 // The repo's canonical mixed row: 6 columns total (`id INTEGER PRIMARY KEY`,
@@ -339,7 +351,69 @@ final _lanes = <_Lane>[
     poisonWidth: 8,
     expectRows: 3300,
   ),
+  // CAP THRASH. Both lanes time exp 260's `int4-5k` shape — 5,000 rows x 5
+  // columns, a statement whose *growth* hint is worth a real fraction of its
+  // wall — while a stream of never-before-seen SQL strings competes for the
+  // pool's 32 `_rowHints` slots. Nothing else in the suite does this: every
+  // other lane uses a handful of statements, so a per-SQL memory can stop
+  // working entirely and no lane moves.
+  //
+  // 25,000 slots is deliberately *below* `sacrificeSlotThreshold` (32,768). A
+  // first version used 8,000 x 21 and was unusable — every timed read crossed
+  // the threshold, so it sacrificed and respawned a reader worker, and the same
+  // binary read 10,519 / 10,418 / 5,954 / 4,445 us across four passes. Exp 263's
+  // rule about keeping a memory sweep on one side of the threshold applies to a
+  // wall-time sweep just as much.
+  //
+  // The two widths bracket what an eviction policy can and cannot fix:
+  //
+  //   hint-thrash-fits      20 fresh statements between timed reads — fewer than
+  //     the 32-slot capacity, so the timed statement's *active* set fits.
+  //     Least-recently-used keeps its hint armed; oldest-first ages it out, since
+  //     it is inserted once and never moves.
+  //   hint-thrash-overflows 40 fresh statements between timed reads — more than
+  //     capacity, so the hot set itself does not fit and no policy can keep it.
+  //     Present so nobody later reads LRU as a capacity fix; if this lane ever
+  //     needs to improve, the answer is `_rowHintMax`, not the policy.
+  //
+  // These lanes show the *magnitude* in wall time. The property itself — whether
+  // the hint is still armed — is gated deterministically in
+  // `test/reader_pool_test.dart`, because here it sits under statement-prepare
+  // and reader-scheduling noise. The filler statements also churn the C statement
+  // cache and the worker schema cache, which are capped the same way; that is
+  // realistic and it cancels in an A/B, since both arms pay it identically.
+  _Lane(
+    'hint-thrash-fits',
+    4,
+    5000,
+    (r, c) => r * 31 + c,
+    expectRows: 5000,
+    thrashWidth: 20,
+  ),
+  _Lane(
+    'hint-thrash-overflows',
+    4,
+    5000,
+    (r, c) => r * 31 + c,
+    expectRows: 5000,
+    thrashWidth: 40,
+  ),
 ];
+
+/// Monotonic counter making every thrash filler statement a distinct SQL string.
+/// A trailing comment changes the text without changing the plan, so a filler
+/// costs a prepare and a slot and nothing else.
+int _thrashSeq = 0;
+
+/// Execute [width] never-before-seen SQL strings, untimed, so they claim slots
+/// in `ReaderPool._rowHints`.
+Future<void> _thrash(resqlite.Database db, int width) async {
+  for (var i = 0; i < width; i++) {
+    await db.select('SELECT id FROM items WHERE id = ? -- f${_thrashSeq++}', [
+      1,
+    ]);
+  }
+}
 
 Future<void> main(List<String> args) async {
   var warmup = _defaultWarmup;
@@ -416,6 +490,7 @@ Future<void> _runLane(
     final expect = lane.expectRows ?? lane.rows;
     for (var i = 0; i < warmup; i++) {
       await _poison(db, lane);
+      await _thrash(db, lane.thrashWidth);
       await db.select(lane.selectSql, lane.selectParams);
     }
 
@@ -428,6 +503,7 @@ Future<void> _runLane(
     final values = <int>[];
     for (var i = 0; i < samples; i++) {
       await _poison(db, lane);
+      await _thrash(db, lane.thrashWidth);
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
         final result = await db.select(lane.selectSql, lane.selectParams);

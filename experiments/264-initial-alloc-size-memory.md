@@ -202,12 +202,90 @@ that nothing broke: point-query throughput 160,798 qps, 1,000-row `select()` 0.3
 ms, batch insert of 1,000 rows 0.389 ms, stream invalidation latency 0.058 ms —
 all at or better than the figures published in `README.md`, none regressed.
 
+### The change put exp 260's hint at risk, and the fix is capacity, not order
+
+Removing exp 260's `rowCount <= initialResultRows` insert guard is what lets a
+small statement be remembered at all — and it also lets every point read take one
+of the pool's 32 `_rowHints` slots. Exp 260 had those slots to itself: only a
+statement that had returned more rows than the initial buffer holds was ever
+inserted, so nothing competed with the large-result statements its growth hint
+serves. After exp 264 a report query that runs constantly is evicted by point-read
+churn and loses its hint.
+
+Nothing in the suite could see this, because every existing lane uses a handful of
+SQL strings. Two new lanes fix that gap by running never-before-seen statements
+between timed reads:
+
+| lane | pre-264 | exp 264 | + LRU promotion | + small-victim eviction |
+|---|---:|---:|---:|---:|
+| `hint-thrash-overflows` (40 one-offs) | 597 | 826 | 976 | **565** |
+| `hint-thrash-fits` (20 one-offs) | 592 | 579 | 597 | 566 |
+
+The regression is real and systematic — on the overflow lane the slower arm's
+*fastest* sample beat the faster arm's *slowest*, so it is not a tail effect.
+
+**Least-recently-used promotion does not fix it.** That was the first fix
+attempted, on the reasoning that a hot statement should not be aged out; it
+measured no improvement, and it costs the main isolate a map remove-and-reinsert
+on every read. The problem is capacity, not order: once more distinct hot
+statements are in play than the map holds, no ordering keeps the one that matters.
+Raising `_rowHintMax` to 128 does fix it (620 us), which is what identified the
+mechanism.
+
+What shipped instead is an eviction preference: on overflow, drop an entry whose
+`highWater` has never exceeded the initial buffer before dropping one that has.
+That restores exp 260's exclusive tenure without picking a new magic capacity,
+small statements still use whatever slots are left, and the O(32) scan runs only
+on an overflowing miss — never on the per-read path, so it cannot erode the point
+read this experiment exists to speed up. When every entry has proven large it
+falls back to insertion order, which is exactly the pre-264 behaviour.
+
+The property is gated in `test/reader_pool_test.dart`, not in the lane. Whether a
+hint is still armed is a deterministic consequence of the eviction policy, and the
+test fails against insertion-order eviction and passes with the preference — a
+cleaner signal than a benchmark that needed three passes to read. Note that
+*presence* is the wrong assertion: an evicted statement is re-inserted the next
+time it runs, so a membership check passes under any policy. What eviction costs is
+the learned hint.
+
+### The host was saturated, and the percentages should be re-measured
+
+Every wall-time figure above was collected on a machine at **0.0% CPU idle** —
+`top` reported 57% user / 43% sys with an unrelated Virtualization.framework VM at
+190% CPU, FSEvents at 57%, and other Dart processes at 100% and 44%. The same host
+had under 500 MB free on a 460 GB volume, and six `run_release.dart` processes from
+earlier sessions were resident, wedged 1-4 days at 0.0% CPU.
+
+The direction and mechanism survive that: the design is order-flipped over four
+passes, the controls held to ±2%, the two primaries reproduced 4/4 with the
+column-count scaling the mechanism predicts, and a standalone allocation probe with
+no isolates and no SQLite measures the same effect at 423 ns against 21.5 ns per
+call — independent corroboration of both sign and magnitude. The precise
+percentages do not survive it. A per-read microsecond measurement on a saturated
+host is dominated by reader-isolate scheduling latency, and the confirmation pass
+that exposed the problem read +50.6% on `int20-10k`, a lane the candidate cannot
+reach.
+
+This should be re-measured on a quiet host before the result is promoted out of
+soak. It is also a gap in the tooling rather than bad luck: `run_release.dart`
+stamps `gitDirty` and the charts drop untrusted runs, but a focused AOT harness
+records nothing about its host, so there was nothing to notice until an inert lane
+moved by 50%.
+
 ## Decision
 
-**Accepted.** Point reads are 7-27% faster with no reachable regression, and the
-two properties that make it safe are structural rather than tuned: the clamp
-means a result larger than 256 rows runs today's code, and the high-water mark
-means a mispredict is one-off rather than periodic.
+**Accepted, with the magnitude held open.** Point reads are faster by a
+reproduced 7-27% and the two properties that make the change safe are structural
+rather than tuned: the clamp means a result larger than 256 rows runs today's
+code, and the high-water mark means a mispredict is one-off rather than periodic.
+The percentages need a re-measurement on an unsaturated host before they are
+quoted as settled — the direction and mechanism are corroborated independently,
+the exact numbers are not.
+
+The change also required a fix to the pool's eviction preference, without which it
+silently narrows exp 260's reach by 40-46% on any application with more than 32
+distinct hot statements. That fix ships here rather than as a follow-up, because
+this experiment is what creates the need for it.
 
 Exp 067's rejection stands for what it tested — an unconditional shrink is still
 wrong, and its regressed workloads would still regress. What it got wrong was the
