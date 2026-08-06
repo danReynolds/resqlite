@@ -299,24 +299,30 @@ int grownSlots(int colCount, int current, int rowHint) {
   return hinted > doubled ? hinted : doubled;
 }
 
-/// Rows to size this execution's initial result buffer for.
+/// Rows to size this execution's initial result buffer for
+/// ([EXP-264](../../experiments/264-initial-alloc-size-memory.md)).
 ///
-/// Reads the *worker-local* [RowSizeMemory] rather than the hint the reader pool
-/// stamps on the request, and the asymmetry is deliberate
-/// ([EXP-264](../../experiments/264-initial-alloc-size-memory.md)). Exp 260 had
-/// to keep its growth hint on the main isolate because a result above
-/// `sacrificeSlotThreshold` returns via `Isolate.exit` and ends the worker that
-/// produced it, discarding anything that worker learned. This hint only ever
-/// describes a result small enough to fit in the initial buffer, and such a
-/// result never triggers a sacrifice — so the worker that measured it is still
-/// alive to use it, and reading it costs the main isolate nothing.
+/// [callerHint] is the opinion of whoever owns the authoritative record of this
+/// SQL's result sizes, and is what the reader path uses: the pool passes
+/// `RowSizeMemory.initialRows` from the main isolate, or 0 when it has no
+/// opinion yet. [local] is this isolate's own memory, used only when the caller
+/// declines to supply one (`null`) — the writer isolate, which owns every
+/// execution it decodes.
 ///
-/// The pool's hint is also structurally unable to help here: it exists only for
-/// statements that have returned more rows than [initialResultRows], and those
-/// clamp straight back to [initialResultRows].
+/// A reader worker must **not** read its own memory here, and this is the one
+/// thing the first version of exp 264 got wrong. Exp 260 kept its growth hint on
+/// the main isolate because a result over `sacrificeSlotThreshold` ends the
+/// worker that produced it; that argument does not apply to a hint about small
+/// results, so worker-local memory looked safe. But a pool of four workers hands
+/// each one a *sample* of a statement's executions, and a burst of small reads
+/// can leave a worker's last two observations both small even though the
+/// statement regularly returns thousands of rows. That worker then sizes the
+/// next large result from a tiny buffer and doubles its way up. Measured on the
+/// `undershoot-mid` lane: **+40% in all four passes**, against a main-isolate
+/// memory that is neutral there because it sees the interleaving.
 @pragma('vm:prefer-inline')
-int initialSlotRows(RowSizeMemory size) {
-  final rows = size.initialRows;
+int initialSlotRows(int callerHint, RowSizeMemory? local) {
+  final rows = callerHint > 0 ? callerHint : (local?.initialRows ?? 0);
   return rows == 0 ? initialResultRows : rows;
 }
 
@@ -428,6 +434,7 @@ RawQueryResult decodeQuery(
   ffi.Pointer<ffi.Void> stmt,
   String sql, {
   int rowHint = 0,
+  int? initialRowHint,
 }) {
   final colCount = sqlite3ColumnCount(stmt);
   final entry = _schemaFor(stmt, sql, colCount);
@@ -437,7 +444,11 @@ RawQueryResult decodeQuery(
 
   final hint = rowHint == 0 ? entry.size.hint : rowHint;
   final values = List<Object?>.filled(
-    colCount * initialSlotRows(entry.size),
+    colCount *
+        initialSlotRows(
+          initialRowHint ?? 0,
+          initialRowHint == null ? entry.size : null,
+        ),
     null,
     growable: true,
   );
@@ -523,6 +534,7 @@ RawQueryResult decodeQuery(
   ffi.Pointer<ffi.Void> stmt,
   String sql, {
   int rowHint = 0,
+  int? initialRowHint,
 }) {
   final colCount = sqlite3ColumnCount(stmt);
   final entry = _schemaFor(stmt, sql, colCount);
@@ -532,7 +544,11 @@ RawQueryResult decodeQuery(
 
   final hint = rowHint == 0 ? entry.size.hint : rowHint;
   final values = List<Object?>.filled(
-    colCount * initialSlotRows(entry.size),
+    colCount *
+        initialSlotRows(
+          initialRowHint ?? 0,
+          initialRowHint == null ? entry.size : null,
+        ),
     null,
     growable: true,
   );

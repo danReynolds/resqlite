@@ -13,7 +13,7 @@ import '../dependency_tracking.dart' show TableDependencies;
 import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
-import '../query_decoder.dart' show RowSizeMemory, initialResultRows;
+import '../query_decoder.dart' show RowSizeMemory;
 import '../blob_transfer.dart' show blobTransfer;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
@@ -56,10 +56,13 @@ final class ReaderPool {
   /// in any case only describe the fraction of executions that landed on that
   /// one worker.
   ///
-  /// Only statements that have returned more rows than the decoder's initial
-  /// buffer holds ever get an entry: anything smaller cannot reach the growth
-  /// path a hint steers, so recording it would cost a point read an allocation
-  /// and a map write to describe a result the hint can never improve.
+  /// Every statement gets an entry, including one that has only ever returned a
+  /// handful of rows. Exp 260 deliberately skipped those — a small result cannot
+  /// reach the growth path, so remembering it described something the hint could
+  /// never improve. [EXP-264](../../../experiments/264-initial-alloc-size-memory.md)
+  /// gave the same memory a second consumer that *only* small results can reach:
+  /// the initial allocation, which is sized down for a statement that keeps
+  /// returning fewer rows than the fixed default holds.
   ///
   /// FIFO eviction via [LinkedHashMap] insertion order.
   final Map<String, RowSizeMemory> _rowHints =
@@ -86,14 +89,13 @@ final class ReaderPool {
   }
 
   /// Fold a completed result's row count back into [memory], the entry
-  /// [_dispatch] read for this request, creating one only if the result was
-  /// large enough for a hint to matter.
+  /// [_dispatch] read for this request, creating one when this is the first
+  /// execution of [sql] the pool has seen.
   void _record(String sql, RowSizeMemory? memory, int rowCount) {
     if (memory != null) {
       memory.record(rowCount);
       return;
     }
-    if (rowCount <= initialResultRows) return;
     _rowHints[sql] = RowSizeMemory()..record(rowCount);
     if (_rowHints.length > _rowHintMax) {
       _rowHints.remove(_rowHints.keys.first);
@@ -217,6 +219,7 @@ final class ReaderPool {
     }
 
     request.rowHint = memory?.hint ?? 0;
+    request.initialRowHint = memory?.initialRows ?? 0;
 
     final count = _workers.length;
     var hasPreviouslyParked = false;

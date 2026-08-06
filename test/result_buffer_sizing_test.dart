@@ -8,6 +8,11 @@
 /// plain doubling would give (a buffer that stops growing loses rows), and a
 /// statement whose row count swings between executions must keep returning
 /// exactly its own rows.
+///
+/// [EXP-264](../experiments/264-initial-alloc-size-memory.md) added the other
+/// end of the same buffer — the initial allocation, sized down for a statement
+/// that keeps returning few rows — so the same "a wrong answer may cost time,
+/// never rows" contract is gated here for both.
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart';
@@ -93,11 +98,11 @@ void main() {
   group('RowSizeMemory.initialRows', () {
     test('has no opinion until it has seen two executions', () {
       final memory = RowSizeMemory();
-      expect(initialSlotRows(memory), initialResultRows);
+      expect(initialSlotRows(0, memory), initialResultRows);
       memory.record(1);
-      expect(initialSlotRows(memory), initialResultRows);
+      expect(initialSlotRows(0, memory), initialResultRows);
       memory.record(1);
-      expect(initialSlotRows(memory), lessThan(initialResultRows));
+      expect(initialSlotRows(0, memory), lessThan(initialResultRows));
     });
 
     test('takes the larger of the two, unlike the growth hint', () {
@@ -112,9 +117,9 @@ void main() {
       final memory = RowSizeMemory()..record(8000);
       for (var i = 0; i < 4; i++) {
         memory.record(50);
-        expect(initialSlotRows(memory), initialResultRows);
+        expect(initialSlotRows(0, memory), initialResultRows);
         memory.record(8000);
-        expect(initialSlotRows(memory), initialResultRows);
+        expect(initialSlotRows(0, memory), initialResultRows);
       }
     });
 
@@ -123,7 +128,34 @@ void main() {
       for (var i = 0; i < 4; i++) {
         memory.record(1);
       }
-      expect(initialSlotRows(memory), nextRowHint(1));
+      expect(initialSlotRows(0, memory), nextRowHint(1));
+    });
+  });
+
+  // A reader worker sees only a sample of a statement's executions, so the
+  // caller's opinion — the pool's, taken on the main isolate where every
+  // execution is visible — must win outright over any local memory. Getting
+  // this backwards cost +40% on the `undershoot-mid` guard lane.
+  group('initialSlotRows precedence', () {
+    test("the caller's hint wins over a local memory that disagrees", () {
+      final localSaysTiny = RowSizeMemory()
+        ..record(1)
+        ..record(1);
+      expect(
+        initialSlotRows(initialResultRows, localSaysTiny),
+        initialResultRows,
+      );
+      expect(initialSlotRows(40, localSaysTiny), 40);
+    });
+
+    test('a local memory is consulted only when the caller has no opinion', () {
+      final local = RowSizeMemory()
+        ..record(8)
+        ..record(8);
+      expect(initialSlotRows(0, local), nextRowHint(8));
+      // A reader that is handed no hint and no local memory (the pool's first
+      // execution of a SQL) falls back to the fixed default.
+      expect(initialSlotRows(0, null), initialResultRows);
     });
   });
 

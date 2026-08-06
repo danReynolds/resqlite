@@ -64,8 +64,11 @@
 //     lesson).
 //   mispredict-shrink / mispredict-mid — GUARD for exp 264 as well: a statement
 //     whose row count swings between executions must not be sized down at all.
-//   undershoot-jump — GUARD, exp 264's kill lane. The only lane where the
-//     initial allocation is sized small and the result then arrives large.
+//   undershoot-jump / undershoot-mid — GUARDS, exp 264's kill lanes. The only
+//     lanes where the initial allocation is sized small and the result then
+//     arrives large. They sit on opposite sides of the doubling chain's landing
+//     point, so the pair brackets the mispredict rather than reporting whichever
+//     alignment happened to be flattering.
 //
 // Usage:
 //   dart run benchmark/experiments/select_rows_presize.dart \
@@ -211,6 +214,10 @@ final _lanes = <_Lane>[
     createSql: _standardCreate,
     insertSql: _standardInsert,
     row: _standardRow,
+    // A single 200-row read lands around 50 us, where a 1 us stopwatch tick is
+    // already 2% and the lane cannot resolve the fraction of a microsecond
+    // exp 264 moves. Batched for the same reason `point1` is.
+    repeats: 20,
   ),
   // CONTROL for exp 260, PRIMARY for exp 264: a point read, the shape most
   // sensitive to per-request overhead.
@@ -281,16 +288,28 @@ final _lanes = <_Lane>[
     poisonParams: [8000],
     expectRows: 300,
   ),
-  // GUARD (exp 264): the mirror image of the two lanes above, and the only
-  // lane that can expose a shrunken initial allocation's failure mode. Eight
-  // untimed 20-row executions run before each timed sample, which is enough to
-  // leave every reader worker's local memory sized for 25 rows; the timed
-  // execution then returns 5,000 rows and has to double its way up from there.
-  // The pool's growth hint cannot rescue it either — that hint takes the
-  // *smaller* of the statement's last two row counts, so the alternation pins
-  // it at the 20-row leg. This is the honest worst case for exp 264: the
-  // penalty it measures is what a statement pays the one time it jumps from
-  // consistently tiny to large.
+  // GUARDS (exp 264): the mirror image of the two mispredict lanes above, and
+  // the only lanes that can expose a shrunken initial allocation's failure
+  // mode. Eight untimed 20-row executions run before each timed sample, which
+  // is enough to leave every reader worker's local memory sized for 25 rows;
+  // the timed execution then returns thousands and has to double its way up
+  // from there. The pool's growth hint cannot rescue it either — that hint
+  // takes the *smaller* of the statement's last two row counts, so the
+  // alternation pins it at the 20-row leg and every growth is a plain doubling.
+  //
+  // Which way the penalty falls is decided by where each arm's doubling chain
+  // *lands*, and the two lanes are chosen to sit on opposite sides of that:
+  //
+  //   undershoot-jump  5,000 rows. From 25 rows the chain lands on 6,400; from
+  //     256 it lands on 8,192. The shrunken arm ends up with the smaller final
+  //     buffer, so the undershoot is favourable here.
+  //   undershoot-mid   3,300 rows. From 25 rows the chain lands on 6,400; from
+  //     256 it lands on 4,096. Now the shrunken arm over-allocates by 56% and
+  //     pays eight growths against four. This is exp 264's adverse case, and
+  //     the number to quote as the cost of a mispredict.
+  //
+  // Neither is a repeated cost: one execution at the larger size re-arms the
+  // memory, so a statement pays this once per jump, not per read.
   _Lane.explicit(
     'undershoot-jump',
     10000,
@@ -302,6 +321,18 @@ final _lanes = <_Lane>[
     poisonParams: [20],
     poisonWidth: 8,
     expectRows: 5000,
+  ),
+  _Lane.explicit(
+    'undershoot-mid',
+    10000,
+    createSql: _standardCreate,
+    insertSql: _standardInsert,
+    row: _standardRow,
+    selectSql: 'SELECT * FROM items LIMIT ?',
+    selectParams: [3300],
+    poisonParams: [20],
+    poisonWidth: 8,
+    expectRows: 3300,
   ),
 ];
 
