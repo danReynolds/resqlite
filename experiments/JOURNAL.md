@@ -891,6 +891,25 @@ A guard whose sensitivity is unknown is not yet a guard. If setup dominates the
 measured quantity, say what fraction, or the number reads as more protective than
 it is.*
 
+### Run drift codegen in a fresh worktree before reading any failure as pre-existing
+
+`benchmark/drift/*.g.dart` is gitignored and produced by `dart run build_runner
+build --delete-conflicting-outputs`, which CI runs before analyze and test. A
+worktree that has only had `dart pub get` is missing them, and the symptom is
+alarming and misleading: `dart analyze` reports ~77 issues and nine
+`benchmark_*_test.dart` files fail to load, all of it in peer drift scaffolding
+that looks like it has drifted out of sync with the pinned `drift` version.
+[Exp 264](264-initial-alloc-size-memory.md) read that as a pre-existing repo
+breakage, checked it reproduced on `origin/main` — it did, for the same reason —
+and wrote it up as a blocker before noticing the CI step that generates them. With
+codegen run, `dart analyze --fatal-infos` is clean and all 450 tests pass.
+
+*Reapplies to every new experiment worktree: run codegen immediately after
+`dart pub get`. More generally, "it reproduces on `origin/main`" only rules out
+your diff; it does not establish that the repo is broken, because a missing
+build step reproduces everywhere. Before reporting infrastructure as broken,
+check what CI does that you did not.*
+
 ### A per-slot cost is not a per-call cost
 
 [Exp 067](067-shrink-initial-allocation.md) rejected shrinking `decodeQuery`'s

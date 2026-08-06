@@ -26,16 +26,26 @@ small effect from drift. Values are microseconds; `point1` and `point1-wide20`
 time 200 executions per sample and `mixed6-200` times 20, so their medians are per
 sample, not per execution.
 
-**No release-suite run accompanies this experiment, and this time it is not the
-#282 segfault.** `dart run benchmark/run_release.dart` now fails to *compile*:
-`benchmark/suites/writes.dart` and the other drift peer suites pass their
-generated `*DriftDb` classes where `drift` 2.34.3 expects a `GeneratedDatabase`,
-which is four compile errors before any benchmark runs. Verified present on
-`origin/main` at `c351422` with no experiment changes applied
-(`dart analyze benchmark/suites/writes.dart` → 4 errors), so it is a peer-version
-drift in the checked-in generated drift databases, independent of exp 264 and of
-the #282 crash. It blocks the release suite for every experiment until the drift
-scaffolding is regenerated.
+**A release-suite run reaches scenario 14 of 16 and then dies in the peer.** The
+suite runs cleanly through Select→Maps, Select→Bytes, Schema Shapes, Scaling,
+Concurrent Reads, Point Query, Parameterized, Writes, both Streaming groups, and
+the four app-shaped workloads, then aborts inside the sqlite_async peer at
+`[15/16] Memory` — the pre-existing #282 crash that also stopped exps 260 and 261,
+and which additionally wedges the parent process rather than exiting. Nothing in
+this experiment's diff is linked into that library.
+
+Exp 262's per-scenario persistence did its job: the killed run still wrote an
+artifact with 14 scenarios and 169 metrics, correctly self-marked
+`partial: true`, `scenariosCompleted: 14`, `repeatCount: 0`. It is the first time
+that mechanism has actually preserved anything, since exps 260 and 261 were killed
+inside repeat 1 before it existed.
+
+It is **not committed**, and it is not evidence for this experiment. `repeatCount:
+0` is the repo's own marker for a single-sample run, which the trend charts drop
+by design, and there is no paired baseline. What it is good for is a sanity check
+that nothing broke: point-query throughput 160,798 qps, 1,000-row `select()` 0.349
+ms, batch insert of 1,000 rows 0.389 ms, stream invalidation latency 0.058 ms —
+all at or better than the figures published in `README.md`, none regressed.
 
 ## Lanes
 

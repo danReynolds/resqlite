@@ -9,10 +9,7 @@
   at 61 samples per lane per pass; receipt in
   [`benchmark/results/2026-08-06T11-40-00Z-exp264-initial-alloc-size-memory.md`](../benchmark/results/2026-08-06T11-40-00Z-exp264-initial-alloc-size-memory.md).
   No release-suite lane resolves a sub-microsecond per-read allocation, so the
-  focused harness is the durable gate — and the release suite could not have run
-  regardless: it no longer compiles against `drift` 2.34.3 on `main` (claim
-  264.4), which is a new blocker upstream of the #282 segfault that stopped exps
-  260 and 261.
+  focused harness is the durable gate.
 
 ## Problem
 
@@ -184,6 +181,27 @@ reads are live together. `undershoot-mid` is up 2.3-2.9 MB in two of four passes
 which is the one-time mispredict chain showing up in a process-lifetime
 high-water.
 
+**A release-suite run reaches scenario 14 of 16 and then dies in the peer.** The
+suite runs cleanly through Select→Maps, Select→Bytes, Schema Shapes, Scaling,
+Concurrent Reads, Point Query, Parameterized, Writes, both Streaming groups, and
+the four app-shaped workloads, then aborts inside the sqlite_async peer at
+`[15/16] Memory` — the pre-existing #282 crash that also stopped exps 260 and 261,
+and which additionally wedges the parent process rather than exiting. Nothing in
+this experiment's diff is linked into that library.
+
+Exp 262's per-scenario persistence did its job: the killed run still wrote an
+artifact with 14 scenarios and 169 metrics, correctly self-marked
+`partial: true`, `scenariosCompleted: 14`, `repeatCount: 0`. It is the first time
+that mechanism has actually preserved anything, since exps 260 and 261 were killed
+inside repeat 1 before it existed.
+
+It is **not committed**, and it is not evidence for this experiment. `repeatCount:
+0` is the repo's own marker for a single-sample run, which the trend charts drop
+by design, and there is no paired baseline. What it is good for is a sanity check
+that nothing broke: point-query throughput 160,798 qps, 1,000-row `select()` 0.349
+ms, batch insert of 1,000 rows 0.389 ms, stream invalidation latency 0.058 ms —
+all at or better than the figures published in `README.md`, none regressed.
+
 ## Decision
 
 **Accepted.** Point reads are 7-27% faster with no reachable regression, and the
@@ -204,12 +222,11 @@ SQL strings per second in a representative app trace against `_rowHintMax`.
 
 ## Test plan
 
-- [x] `dart analyze lib/ test/ benchmark/` — 77 issues, byte-for-byte the count
-      on `origin/main`; all of them the `benchmark/drift/` peer scaffolding
-- [x] `dart test -j2 -x drift` — 426 passing / 9 failing, against 414 / 9 on
-      `origin/main` (the +12 are this experiment's; the 9 failures are the
-      `benchmark_*_test.dart` files that load the drift peer suites, and are the
-      same compile failure as claim 264.4)
+- [x] `dart run build_runner build --delete-conflicting-outputs` — required in a
+      fresh worktree; `benchmark/drift/*.g.dart` is gitignored and CI generates it
+      before analyze and test
+- [x] `dart analyze --fatal-infos` — no issues
+- [x] `dart test --timeout 60s` — 450 tests, all passing
 - [x] `dart test test/result_buffer_sizing_test.dart` — 21 tests, including the
       high-water rule, the caller-over-local precedence, a statement that jumps
       from tiny to large, and an empty result that then grows
@@ -219,4 +236,9 @@ SQL strings per second in a representative app trace against `_rowHintMax`.
 - [x] `dart run benchmark/finalize_experiment.dart` — green
 - [x] `dart run benchmark/check_knowledge_links.dart` — clean (79 claims);
       `check_experiment_dispositions.dart` — no stranded in-review
-- [ ] release suite — **cannot run**, see claim 264.4
+- [x] CI green on PR #289. The first run aborted (SIGABRT) inside the sqlite_async
+      peer's `ConnectionLease.notifyUpdates` while
+      `benchmark_keyed_pk_subscriptions_test.dart` was running; re-running the
+      identical commit passed, and six local repetitions of the same three peer
+      workload tests passed. This is the #282 peer-instability family surfacing in
+      the test job rather than the benchmark run.
