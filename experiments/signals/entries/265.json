@@ -1,0 +1,74 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "The `select() round-trip floor` has been the terminal argument in this direction for months and was never a measurement. Claim 258.2 rejected a columnar result store partly because its sub-threshold transfer saving was `below the round-trip floor`; exp 264 put a point read at `5-8 us, most of which is the isolate round trip`; exps 209 and 239 both went after the floor by amortising a hop across several queries. It is now priced: on the canonical 6-column point read the hop is 6.3 us of an 8.4 us read, and removing it leaves 2.1 us. So the floor was real, it was most of a small read, and it is not a floor — it is a routing decision. Everything previously rejected as `below the round-trip floor` was measured against a denominator four times larger than the work it was competing with.",
+    "The cost of the hop is not only its own latency but the queue in front of it, and no transfer-shaped analysis in this direction could see that. Exps 244/245/246 measured intrinsic transfer with a prepared-result barrier and pool capacity with a burst, both correctly, and both hold the *request* constant. A point read issued while four 1,000-row reads occupy every worker waits 533-1169 us today against 37-52 us for one that never enters the queue — a 19x difference that is entirely admission and not transfer. When the next runner asks what a scheduling change is worth, the lane has to contend for the pool; a lane that has the pool to itself measures the smaller half of the answer.",
+    "Losing the pool's parallelism does not cost a caller anything at these sizes, which was the result most likely to kill the experiment and did not. Eight distinct point reads issued together run four-wide across four workers today and strictly one after another when the caller runs them itself, and serial is 70% faster, reproduced in both pairs of both collections. Four workers cannot make up a per-request overhead larger than the request. This bounds the pool's value precisely: it is worth having for results large enough that decode dominates dispatch, and it is a tax below that.",
+    "Exp 264's high-water mark turned out to be a routing signal, not just a buffer-sizing one, which is worth noticing because it was not built for this. Exp 239's rejection said read routing could reopen with `a reliable private cost signal`; exps 260 and 264 then built exactly that, per SQL, on the main isolate, for allocation. Any future policy that needs to know what a statement costs before running it can read `RowSizeMemory.highWater` — and inherits its two rules for free (two observations before an opinion, high-water rather than a window, per claim 264.2).",
+    "The main isolate can hold a reader connection, and the arithmetic for how much of it to use is now on the record. An inline point read occupies the calling isolate for ~2 us and the cap bounds an admitted read at ~16 us, against a 16 ms frame. What this does not settle is the positioning question — resqlite's headline is that SQLite runs off the calling isolate, and that is now untrue for statements it has watched twice and never seen return more than 64 rows. The knob (`RESQLITE_INLINE_ROW_MAX=0`) restores the old behaviour exactly, which is the shape a maintainer decision should take."
+  ],
+  "claims": [
+    {
+      "id": "265.1",
+      "text": "Running a `select()` on the calling isolate — same `resqlite_stmt_acquire_on`, same `decodeQuery`, no SendPort and no `Isolate.exit` — when the pool's per-SQL high-water mark says the statement has never returned more than 64 rows, is worth a reproduced -74.8% on the canonical 6-column point read (8.4 -> 2.1 us), -71.0% on a 21-column one, and -35.7% on a 20-row page. Two collections of four alternating-order lane-isolated AOT passes (41 then 51 samples/lane), `ab_drift_check` REPRODUCED on every primary pair in the second collection. Unlike claim 264.1 the win is flat in projection width, because what it removes is per-request rather than per-slot. Both control lanes return more rows than the cap admits, run byte-identical code in both arms, and read +0.1% and +3.2%.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · lane-isolated, 4 alternating-order passes x 2 collections · host at 0-39% CPU idle · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "258.2"
+        },
+        {
+          "type": "dependsOn",
+          "target": "264.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "260.3"
+        }
+      ]
+    },
+    {
+      "id": "265.2",
+      "text": "A read that never enters the dispatch queue is ~19x faster than one that does when the pool is busy. One point read issued while four outstanding 1,000-row reads occupy all four workers measures 533-1169 us across four passes against 37-52 us inline (-94.9% mean, REPRODUCED in both pairs). The hop's cost to a caller is its latency plus the queue depth in front of it, and every prior measurement of transfer cost in this direction held the request population constant and therefore measured only the first term.",
+      "conditions": "M1 Pro · AOT · `point-under-load` lane, 4 background 1,000-row reads, 10 timed point reads/sample · 2026-08"
+    },
+    {
+      "id": "265.3",
+      "text": "Serialising concurrent point reads on one isolate beats spreading them across the four-worker pool. Eight distinct point reads issued together via `Future.wait` measure -70.3% inline (REPRODUCED, both pairs, 10 groups per sample). The pool's parallelism cannot recover a per-request overhead larger than the request itself, which bounds where the pool is worth having: above the size at which decode dominates dispatch, and not below it.",
+      "conditions": "M1 Pro · AOT · `concurrent8` lane, 8 distinct 1-row statements x 10 groups/sample · 2026-08"
+    },
+    {
+      "id": "265.4",
+      "text": "The mispredict is +24.7% on one execution, once per statement. A statement armed by two one-row executions and then returning 400 rows starts decoding inline, throws past row 64, resets and re-runs on a worker: 129 us against 163 us, REPRODUCED in both pairs. It cannot recur, because the high-water mark rises with the large result and the statement is never admitted again — the same property claim 264.2 established for buffer sizing, reused. The reset is not optional: a statement abandoned mid-iteration holds its connection's read transaction open, and every later read on that connection is then served from the pre-abort snapshot, which `test/inline_select_test.dart` gates by writing a row after the abort and requiring the inline read to see it.",
+      "conditions": "M1 Pro · AOT · `cap-abort` lane, fresh SQL string per sample · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "264.2"
+        }
+      ]
+    },
+    {
+      "id": "265.5",
+      "text": "A reader connection reserved for the calling isolate costs +0.1 to +1.7 MB of peak RSS, with two of nine lanes reading slightly down — at or below what exp 261's guard resolves (claim 261.2: a tripwire for a doubling, not an instrument for 5% drift). Expected, since a connection's page cache is demand-filled and the inline connection reads pages the workers have already made resident. The connection cannot be shared with an idle worker: the reply that frees a worker slot is sent before the worker's `finally` releases its connection, so `isAvailable` on the main isolate does not imply idle in C, and the connections are `SQLITE_OPEN_NOMUTEX`.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane, 9 lanes · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.2"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "Stream reruns are the same mechanism and are deliberately not in this experiment. `selectIfChanged` on an unchanged result is a C hash pass with no Dart decode at all — the cheapest thing the pool carries, so the largest relative hop — and exp 136 put the reader worker port handler at 28.6% of A11c overlap wall. The gate is `benchmark/experiments/stream_rerun_latency.dart`, not this harness, and exp 249's rule applies: A/B stream-dispatch changes across worktrees, never with an in-process toggle.",
+    "`inlineRowMax` counts rows, and 64 rows of six integers is an order of magnitude cheaper to decode than 64 rows of 400-byte TEXT. Exp 246 already settled which unit to reach for when routing on result size (slots for structure, bytes for mutable payloads); a slot-aware cap would make the main-isolate budget uniform instead of shape-dependent. The number to beat is ~16 us, the measured worst admitted case.",
+    "`benchmark/experiments/select_inline_dispatch.dart` is the durable gate for read routing. Keep `mixed6-1k` and `int20-10k` — both return more rows than any plausible cap, so they run identical code in both arms and read a cross-worktree binary offset directly (the exp 254 trap) — and keep `cap-abort` on a fresh SQL string per sample, since a high-water mark makes the mispredict once-per-statement and any other construction leaves the lane inert after its first sample. `point-under-load` and `concurrent8` are the two lanes that measure admission rather than transfer; a routing experiment without them is measuring half the effect.",
+    "Exp 264 left the pool's 32-entry `_rowHintMax` unmeasured against a real application's statement churn, and it now gates a third consumer: an evicted entry loses inline eligibility as well as both buffer hints, so a statement that would run in 2 us runs in 8 us until it is re-learned. The discriminating measurement is unchanged and still cheap — distinct SQL strings per second in a representative trace, against 32.",
+    "Both collections were taken on a host at 0-39% CPU idle with load average near 37, none of it this run's doing (an unrelated Codex renderer at 101%, a Claude helper at 30%, syspolicyd at 77%). The order-flipped design and the two mechanically-inert controls carried it — the controls read +0.1% and +3.2% mean, against primaries of -35% to -95% — but this is the second consecutive experiment collected on a saturated machine, after claim 264.6. Exp 264's proposed fix stands and nobody has built it: sample idle CPU at lane start and print it beside the medians, so a reader can see the host's state without taking the runner's word for it."
+  ]
+}

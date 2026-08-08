@@ -184,6 +184,19 @@ int _finishInitialHash(int hash, int rowCount) {
   return ((hash ^ rowCount) * _fnvPrime) & _fnvMask;
 }
 
+/// Raised by [decodeQuery] when a decode running under an `inlineRowCap`
+/// produced more rows than the cap allows.
+///
+/// Only the main-isolate inline read path passes a cap, and its only handler
+/// resets the statement and re-runs the query on a worker
+/// ([EXP-265](../../experiments/265-inline-main-isolate-select.md)). It is not
+/// a [ResqliteException] because it never reaches a caller: a query whose row
+/// count outran what the pool remembered about it is not an error, it is a
+/// routing decision that has to be taken back.
+final class InlineRowCapExceeded implements Exception {
+  const InlineRowCapExceeded();
+}
+
 Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
   final db = sqlite3DbHandle(stmt);
   final message = db == ffi.nullptr
@@ -422,11 +435,19 @@ final class RawQueryResult {
 /// The statement must already be acquired and bound (via
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
+/// [inlineRowCap] is 0 on every isolate-worker call and non-zero only when the
+/// main isolate is running the query itself
+/// ([EXP-265](../../experiments/265-inline-main-isolate-select.md)). It bounds
+/// how long that decode is allowed to hold the isolate: past the cap the decode
+/// throws [InlineRowCapExceeded] and the caller re-runs on a worker. It also
+/// suppresses [TransferableTypedData] blob wrapping, which exists to keep a
+/// large payload off the sender's heap for a hop this result does not take.
 RawQueryResult decodeQuery(
   ffi.Pointer<ffi.Void> stmt,
   String sql, {
   int rowHint = 0,
   int? initialRowHint,
+  int inlineRowCap = 0,
 }) {
   final colCount = sqlite3ColumnCount(stmt);
   final entry = _schemaFor(stmt, sql, colCount);
@@ -451,6 +472,9 @@ RawQueryResult decodeQuery(
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
     rowCount++;
+    if (inlineRowCap != 0 && rowCount > inlineRowCap) {
+      throw const InlineRowCapExceeded();
+    }
     if (writeIdx + colCount > values.length) {
       values.length = grownSlots(colCount, values.length, hint);
     }
@@ -488,7 +512,8 @@ RawQueryResult decodeQuery(
           final blobLen = cellsI32[i32Base + lenI32];
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
-          } else if (blobLen >= BlobTransfer.cellThreshold) {
+          } else if (inlineRowCap == 0 &&
+              blobLen >= BlobTransfer.cellThreshold) {
             hasWrappedCells = true;
             // Copies native -> external instead of native -> heap; see
             // [BlobTransfer.cellThreshold].

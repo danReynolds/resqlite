@@ -105,6 +105,20 @@ const int sacrificeSlotThreshold = int.fromEnvironment(
   defaultValue: 32 * 1024,
 );
 
+/// The most rows a `select()` may return before the main isolate stops running
+/// it itself ([EXP-265](../../../experiments/265-inline-main-isolate-select.md)).
+///
+/// This is a budget for how long a read is allowed to hold the isolate that
+/// paints frames, not a point where inline execution stops being faster — it
+/// keeps winning well past this. A 64-row decode of a six-column row is a few
+/// microseconds; the reason not to raise it is that the figure bounds the
+/// *mispredict*, which is a statement the pool has only ever seen return few
+/// rows suddenly returning many.
+const int inlineRowMax = int.fromEnvironment(
+  'RESQLITE_INLINE_ROW_MAX',
+  defaultValue: 64,
+);
+
 /// Whether a decoded row result should be sacrificed rather than sent.
 bool _shouldSacrifice(RawQueryResult raw) =>
     raw.values.length > sacrificeSlotThreshold;
@@ -322,6 +336,16 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   int paramCount,
 );
 
+// Only [executeQueryInline] needs this. Every other decode runs its statement
+// to SQLITE_DONE, which releases the implicit read transaction on its own; an
+// abandoned statement would hold that connection's WAL snapshot open until its
+// next acquire, which may never come.
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'sqlite3_reset',
+  isLeaf: true,
+)
+external int _sqlite3Reset(ffi.Pointer<ffi.Void> stmt);
+
 // ---------------------------------------------------------------------------
 // Query execution
 // ---------------------------------------------------------------------------
@@ -383,6 +407,56 @@ RawQueryResult executeQuery(
   (_, stmt) =>
       decodeQuery(stmt, sql, rowHint: rowHint, initialRowHint: initialRowHint),
 );
+
+/// Run a SELECT on [readerId] from the calling isolate and decode it there,
+/// with no isolate hop at either end
+/// ([EXP-265](../../../experiments/265-inline-main-isolate-select.md)).
+///
+/// This is the same execution as [executeQuery]; what differs is who runs it
+/// and what happens when it turns out to be the wrong choice. The caller is the
+/// main isolate, which cannot afford an unbounded decode, so:
+///
+///  * more than [rowCap] rows aborts the decode and returns null, and
+///  * **any** failure returns null rather than throwing.
+///
+/// Null means "run this on a worker instead". A null from a genuine SQL error
+/// costs one duplicate execution and then surfaces the identical exception from
+/// the pool, which is why this path reports none of its own: reader connections
+/// are `SQLITE_OPEN_READONLY`, so re-running a statement that failed here
+/// cannot have done anything the second attempt would repeat.
+///
+/// [readerId] must be a connection no worker isolate can touch. The connections
+/// are `SQLITE_OPEN_NOMUTEX`.
+RawQueryResult? executeQueryInline(
+  int handleAddr,
+  int readerId,
+  String sql,
+  List<Object?> parameters,
+  int rowHint,
+  int initialRowHint,
+  int rowCap,
+) {
+  try {
+    return _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
+      try {
+        return decodeQuery(
+          stmt,
+          sql,
+          rowHint: rowHint,
+          initialRowHint: initialRowHint,
+          inlineRowCap: rowCap,
+        );
+      } catch (_) {
+        // Reached with the statement mid-iteration, holding a read
+        // transaction this isolate has no other reason to come back for.
+        _sqlite3Reset(stmt);
+        rethrow;
+      }
+    });
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Execute a query returning JSON bytes as a view over the reader
 /// connection's persistent `json_buf`, plus the number of rows serialized

@@ -159,7 +159,12 @@ final class Database {
     final handle = await _openNativeDatabase(
       path: path,
       encryptionKey: encryptionKey,
-      readerCount: readerCount,
+      // One connection past the pool. The extra one belongs to the main
+      // isolate, which runs small reads on it directly
+      // ([EXP-265](../../experiments/265-inline-main-isolate-select.md)); it
+      // must not be shared with a worker, since reader connections are opened
+      // `SQLITE_OPEN_NOMUTEX`.
+      readerCount: readerCount + 1,
       extensions: extensions,
     );
 

@@ -1027,6 +1027,41 @@ of cheap observations. Pair it with the exp 260 lesson above: put the hint where
 a wrong answer costs nothing, and where it cannot, make the wrong answer
 unrepeatable.*
 
+### A "floor" that has never been measured is a decision, not a floor
+
+"Below the round-trip floor" closed candidates in this repo for months — exp
+258's sub-threshold columnar transfer, exp 264's remaining point-read cost, the
+premise behind exps 209 and 239 both trying to *amortise* the hop across several
+queries. [Exp 265](265-inline-main-isolate-select.md) priced it: on a
+six-column point read the isolate round trip was 6.3 us of an 8.4 us read, and
+removing it left 2.1 us. The floor was real and it was most of the operation —
+so every candidate rejected against it had been compared to a denominator four
+times larger than the work it was actually competing with.
+
+*Reapplies whenever a rejection cites a fixed cost the experiment did not
+itself measure. Two questions separate a floor from an unexamined assumption:
+how large is it against the thing being optimised, and what makes it fixed? A
+cost that is fixed only because nobody has tried to remove it is a candidate,
+and usually a better one than whatever was being rejected in its name.*
+
+### Measure a scheduling change under contention, or measure half of it
+
+Exps 244, 245 and 246 measured cross-isolate transfer carefully — a prepared-
+result barrier for the intrinsic cost, an 8-request/4-worker burst for pool
+capacity — and every lane held the request population constant.
+[Exp 265](265-inline-main-isolate-select.md) found the other half by accident:
+a point read issued while four large reads occupy the pool costs 533-1169 us
+against 37-52 us for one that skips the queue, a 19x difference that is entirely
+admission and nothing to do with transfer. The same run's guard lane inverted
+the expected trade — eight concurrent point reads are 70% *faster* run serially
+on one isolate than four-wide across the pool, because parallelism cannot
+recover a per-request overhead larger than the request.
+
+*Reapplies to any dispatch, queueing, batching or pool-sizing change. A lane
+that has the resource to itself measures latency; a lane that contends for it
+measures what a caller actually waits for. Run both, and expect them to disagree
+about how large the effect is.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
