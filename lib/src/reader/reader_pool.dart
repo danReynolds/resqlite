@@ -61,8 +61,10 @@ final class ReaderPool {
   ///
   /// Which route a `select()` took is otherwise unobservable — the result is
   /// identical either way, which is the point — so the routing tests have
-  /// nothing else to assert on. Two unconditional increments per inline read,
-  /// against a read costing microseconds.
+  /// nothing else to assert on. Exactly one of the two is incremented per
+  /// inline attempt that reached SQLite, and neither for a statement the pool
+  /// declined to run itself: one field increment against a read costing
+  /// microseconds.
   int inlineSelectTotal = 0;
   int inlineAbortTotal = 0;
 

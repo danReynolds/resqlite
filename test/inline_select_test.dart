@@ -6,12 +6,16 @@
 /// read `ReaderPool.inlineSelectTotal` / `inlineAbortTotal` to assert the route,
 /// and assert the rows separately.
 ///
-/// The pools here are spawned directly rather than taken from the [Database],
-/// which is how `reader_pool_test.dart` reaches pool internals too.
+/// The pool under test is the one [Database.open] built, reached through
+/// `debugReaderPoolOf`. Spawning a second pool over the same handle — which is
+/// how `reader_pool_test.dart` reaches pool internals — would not do here: the
+/// two pools would share reader connections, and this experiment puts the main
+/// isolate on one of them.
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite/src/database.dart' show debugReaderPoolOf;
 import 'package:resqlite/src/reader/read_worker.dart' show inlineRowMax;
 import 'package:resqlite/src/reader/reader_pool.dart';
 import 'package:test/test.dart';
@@ -40,11 +44,10 @@ void main() {
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp('resqlite_inline_test_');
       db = await Database.open('${tempDir.path}/test.db');
-      pool = await ReaderPool.spawn(db.handle.address, 2);
+      pool = await debugReaderPoolOf(db);
     });
 
     tearDown(() async {
-      await pool.close();
       await db.close();
       if (await tempDir.exists()) {
         try {
@@ -63,12 +66,12 @@ void main() {
       await _seed(db, 100);
       const sql = 'SELECT * FROM items WHERE id = ?';
 
-      await pool.select(sql, [3]);
+      await db.select(sql, [3]);
       expect(pool.inlineSelectTotal, 0, reason: 'one observation is not two');
-      await pool.select(sql, [3]);
+      await db.select(sql, [3]);
       expect(pool.inlineSelectTotal, 0);
 
-      await pool.select(sql, [3]);
+      await db.select(sql, [3]);
       expect(pool.inlineSelectTotal, 1);
     });
 
@@ -77,7 +80,7 @@ void main() {
       const sql = 'SELECT * FROM items';
 
       for (var i = 0; i < 5; i++) {
-        expect(await pool.select(sql), hasLength(500));
+        expect(await db.select(sql), hasLength(500));
       }
       expect(pool.inlineSelectTotal, 0);
       expect(pool.inlineAbortTotal, 0);
@@ -90,71 +93,84 @@ void main() {
       // Arm at the cap exactly: eligible, and the decode reaches the last
       // allowed row without tripping.
       for (var i = 0; i < 3; i++) {
-        expect(await pool.select(sql, [inlineRowMax]), hasLength(inlineRowMax));
+        expect(await db.select(sql, [inlineRowMax]), hasLength(inlineRowMax));
       }
       expect(pool.inlineSelectTotal, greaterThan(0));
       expect(pool.inlineAbortTotal, 0);
 
       // One row past it, on the same statement, is handed back.
-      expect(await pool.select(sql, [inlineRowMax + 1]), hasLength(inlineRowMax + 1));
+      expect(
+        await db.select(sql, [inlineRowMax + 1]),
+        hasLength(inlineRowMax + 1),
+      );
       expect(pool.inlineAbortTotal, 1);
     });
 
-    test('a statement that outgrows the cap gives up inline for good', () async {
-      await _seed(db, 500);
-      const sql = 'SELECT * FROM items LIMIT ?';
+    test(
+      'a statement that outgrows the cap gives up inline for good',
+      () async {
+        await _seed(db, 500);
+        const sql = 'SELECT * FROM items LIMIT ?';
 
-      for (var i = 0; i < 3; i++) {
-        await pool.select(sql, [1]);
-      }
-      expect(pool.inlineSelectTotal, greaterThan(0));
+        for (var i = 0; i < 3; i++) {
+          await db.select(sql, [1]);
+        }
+        expect(pool.inlineSelectTotal, greaterThan(0));
 
-      // Every row survives the abort — the fallback re-runs from the start
-      // rather than resuming a half-decoded result.
-      expect(await pool.select(sql, [400]), hasLength(400));
-      expect(pool.inlineAbortTotal, 1);
+        // Every row survives the abort — the fallback re-runs from the start
+        // rather than resuming a half-decoded result.
+        expect(await db.select(sql, [400]), hasLength(400));
+        expect(pool.inlineAbortTotal, 1);
 
-      // The high-water mark now exceeds the cap, so the small leg does not
-      // re-arm it and the abort is paid once per statement, not per swing.
-      final inlineBefore = pool.inlineSelectTotal;
-      for (var i = 0; i < 5; i++) {
-        await pool.select(sql, [1]);
-      }
-      expect(pool.inlineSelectTotal, inlineBefore);
-      expect(pool.inlineAbortTotal, 1);
-    });
+        // The high-water mark now exceeds the cap, so the small leg does not
+        // re-arm it and the abort is paid once per statement, not per swing.
+        final inlineBefore = pool.inlineSelectTotal;
+        for (var i = 0; i < 5; i++) {
+          await db.select(sql, [1]);
+        }
+        expect(pool.inlineSelectTotal, inlineBefore);
+        expect(pool.inlineAbortTotal, 1);
+      },
+    );
 
     // -------------------------------------------------------------------
     // The abandoned statement
     // -------------------------------------------------------------------
 
-    test('an aborted inline read does not pin the connection snapshot', () async {
-      await _seed(db, 500);
-      const swinging = 'SELECT * FROM items LIMIT ?';
-      for (var i = 0; i < 3; i++) {
-        await pool.select(swinging, [1]);
-      }
-      expect(await pool.select(swinging, [400]), hasLength(400));
-      expect(pool.inlineAbortTotal, 1);
+    test(
+      'an aborted inline read does not pin the connection snapshot',
+      () async {
+        await _seed(db, 500);
+        const swinging = 'SELECT * FROM items LIMIT ?';
+        for (var i = 0; i < 3; i++) {
+          await db.select(swinging, [1]);
+        }
+        expect(await db.select(swinging, [400]), hasLength(400));
+        expect(pool.inlineAbortTotal, 1);
 
-      // Written after the abort. A statement abandoned mid-iteration holds its
-      // connection's read transaction open, and every later read on that
-      // connection would then be served from the pre-write snapshot — so the
-      // third execution below, the first to run inline, is the one that fails
-      // if the abort path forgets to reset.
-      await db.execute(
-        'INSERT INTO items(id, name, note, value) VALUES (?, ?, ?, ?)',
-        [90001, 'after', 'written after the abort', 1.0],
-      );
+        // Written after the abort. A statement abandoned mid-iteration holds its
+        // connection's read transaction open, and every later read on that
+        // connection would then be served from the pre-write snapshot — so the
+        // third execution below, the first to run inline, is the one that fails
+        // if the abort path forgets to reset.
+        await db.execute(
+          'INSERT INTO items(id, name, note, value) VALUES (?, ?, ?, ?)',
+          [90001, 'after', 'written after the abort', 1.0],
+        );
 
-      const point = 'SELECT name FROM items WHERE id = 90001';
-      for (var i = 0; i < 3; i++) {
-        final rows = await pool.select(point);
-        expect(rows, hasLength(1), reason: 'execution $i saw a stale snapshot');
-        expect(rows.first['name'], 'after');
-      }
-      expect(pool.inlineSelectTotal, greaterThan(0));
-    });
+        const point = 'SELECT name FROM items WHERE id = 90001';
+        for (var i = 0; i < 3; i++) {
+          final rows = await db.select(point);
+          expect(
+            rows,
+            hasLength(1),
+            reason: 'execution $i saw a stale snapshot',
+          );
+          expect(rows.first['name'], 'after');
+        }
+        expect(pool.inlineSelectTotal, greaterThan(0));
+      },
+    );
 
     // -------------------------------------------------------------------
     // Values decode identically on either route
@@ -175,10 +191,10 @@ void main() {
       );
 
       const sql = 'SELECT * FROM cells WHERE id = 1';
-      final fromWorker = await pool.select(sql);
-      await pool.select(sql);
+      final fromWorker = await db.select(sql);
+      await db.select(sql);
       final beforeInline = pool.inlineSelectTotal;
-      final fromMain = await pool.select(sql);
+      final fromMain = await db.select(sql);
       expect(pool.inlineSelectTotal, beforeInline + 1);
 
       for (final row in [fromWorker.first, fromMain.first]) {
@@ -205,7 +221,7 @@ void main() {
 
       const sql = 'SELECT b FROM big WHERE id = 1';
       for (var i = 0; i < 3; i++) {
-        final rows = await pool.select(sql);
+        final rows = await db.select(sql);
         expect(rows.first['b'], isA<Uint8List>());
         expect(rows.first['b'], blob);
       }
@@ -213,8 +229,6 @@ void main() {
     });
 
     test('the shipped Database.select path returns inline results', () async {
-      // The pools above are spawned by hand; this one is the pool
-      // `Database.open` built, on the reader connection it reserved.
       await _seed(db, 100);
       const sql = 'SELECT id, name FROM items WHERE id = ?';
       for (var i = 0; i < 5; i++) {
@@ -223,6 +237,7 @@ void main() {
         // `id` is 1-based and the generated names are 0-based.
         expect(rows.first['name'], 'item_6');
       }
+      expect(pool.inlineSelectTotal, greaterThan(0));
     });
 
     test('a query error still throws, whatever the pool remembers', () async {
@@ -232,7 +247,7 @@ void main() {
       // the exception.
       for (var i = 0; i < 3; i++) {
         expect(
-          () => pool.select('SELECT * FROM no_such_table'),
+          () => db.select('SELECT * FROM no_such_table'),
           throwsA(isA<ResqliteQueryException>()),
         );
       }

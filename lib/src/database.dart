@@ -159,10 +159,14 @@ final class Database {
     final handle = await _openNativeDatabase(
       path: path,
       encryptionKey: encryptionKey,
-      // One connection past the pool. The extra one belongs to the main
-      // isolate, which runs small reads on it directly
-      // ([EXP-265](../../experiments/265-inline-main-isolate-select.md)); it
-      // must not be shared with a worker, since reader connections are opened
+      // One connection past the pool. The extra one belongs to the calling
+      // isolate, which runs statements it has watched twice and never seen
+      // return more than 64 rows directly on it, rather than sending them to a
+      // worker — so some `select()` calls no longer leave this isolate at all
+      // ([EXP-265](../../experiments/265-inline-main-isolate-select.md); see
+      // `select` for the user-visible statement of that, and
+      // `RESQLITE_INLINE_ROW_MAX=0` to switch it off). The connection must not
+      // be shared with a worker, since reader connections are opened
       // `SQLITE_OPEN_NOMUTEX`.
       readerCount: readerCount + 1,
       extensions: extensions,
@@ -223,8 +227,14 @@ final class Database {
   /// buffer — accessing `row['column']` is a hash lookup, not a map copy.
   /// Use `Map<String, Object?>.from(row)` if you need a mutable copy.
   ///
-  /// Runs on a background worker isolate. The main isolate only receives
-  /// the finished result.
+  /// Runs on a background worker isolate, with one exception: once this
+  /// statement has been seen twice and has never returned more than 64 rows,
+  /// it runs on the calling isolate instead, because at that size the isolate
+  /// round trip costs several times what the query does
+  /// ([EXP-265](../../experiments/265-inline-main-isolate-select.md)). The
+  /// work is bounded — about 2 us for a point read and at most ~16 us — and
+  /// building with `-DRESQLITE_INLINE_ROW_MAX=0` disables it entirely. Results
+  /// are identical either way.
   ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed.
   ///
@@ -622,6 +632,17 @@ final class Database {
     );
   }
 }
+
+/// The [ReaderPool] [db] built for itself, for tests that need to assert on
+/// pool state rather than on query results.
+///
+/// A top-level function rather than a member, because `lib/resqlite.dart`
+/// exports `Database` wholesale and a member would be public API. Prefer this
+/// over spawning a second pool over the same handle in a test: the pools would
+/// share reader connections, which are `SQLITE_OPEN_NOMUTEX`, so two isolates
+/// could step the same one.
+Future<ReaderPool> debugReaderPoolOf(Database db) async =>
+    (await db._runtime).readerPool;
 
 typedef _DatabaseRuntime = ({
   ReaderPool readerPool,
