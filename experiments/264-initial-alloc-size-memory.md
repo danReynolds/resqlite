@@ -365,3 +365,7 @@ SQL strings per second in a representative app trace against `_rowHintMax`.
       identical commit passed, and six local repetitions of the same three peer
       workload tests passed. This is the #282 peer-instability family surfacing in
       the test job rather than the benchmark run.
+- [x] Post-merge CI green at merge SHA `4cef478` in
+      [run 31127102881](https://github.com/danReynolds/resqlite/actions/runs/31127102881),
+      including tests, analysis, encoder differential fuzzing, Tracelite smoke,
+      generated-source validation, and knowledge checks.
