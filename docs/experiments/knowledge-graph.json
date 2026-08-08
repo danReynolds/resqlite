@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 54,
-    "totalEntries": 135
+    "entriesWithClaims": 55,
+    "totalEntries": 136
   },
   "experiments": [
     {
@@ -2104,6 +2104,17 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted_measurement"
+    },
+    {
+      "id": "264",
+      "title": "Size the initial result buffer from the SQL's high-water row count",
+      "file": "264-initial-alloc-size-memory.md",
+      "date": "2026-08-06",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted"
     }
   ],
   "claims": [
@@ -3014,6 +3025,100 @@
       ],
       "text": "A per-row cost of ~140 B/row is shared by every projection of the same table and is not part of the result representation: the 1-column `id` lane pays it as fully as the 6-column `select` lane, because a btree leaf holds the whole row regardless of what is projected. Its mechanism is bounded but not established — it scales with rows read, is indifferent to column count, and resqlite opens connections with mmap_size = 256 MB and cache_size = -8192, so mmap'd file pages becoming resident, WAL pages, and a cold reader page cache are all live candidates. Any future per-row memory figure must difference two projections or it charges this to the wrong layer.",
       "conditions": "M1 Pro · AOT · maxRss, one process per lane · mechanism not discriminated · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "264.1",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Sizing `decodeQuery`'s *initial* result allocation from a main-isolate high-water mark of the rows a SQL has ever returned, clamped into 1..256 rows so it can only shrink below the fixed default, is worth a reproduced -13.5% on a 1-row 6-column point read and -27.1% on a 1-row 21-column one. Four alternating-order lane-isolated AOT passes, 61 samples each, on a host at 52-61% CPU idle with controls inside +/-1.7% (`int20-10k` +0.3%, `mixed6-10k` -0.4%). The win scales with projection width because what a one-row result wastes is `colCount * 255` slots. Every lane whose result outgrows the initial buffer is neutral by construction, not by measurement: it clamps to the same 256 rows both arms allocate.",
+      "conditions": "M1 Pro · AOT CLI bundle · lane-isolated, 4 alternating-order passes, 61 samples/lane · host 52-61% idle · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "067.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "260.3"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "260.3"
+      ]
+    },
+    {
+      "id": "264.2",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A result-buffer size hint whose failure mode is under-prediction must be a high-water mark, not a sliding window. Taking the larger of a SQL's last two row counts — the mirror of exp 260's smaller-of-two — cost +40% in all four order-flipped passes on a statement returning 3,300 rows behind bursts of eight 20-row executions, because the two observations preceding each large execution are both small, so the penalty repeats on every large read instead of once. Under a high-water mark the same lane is neutral (-1.3% mean) and the one-time cost of a statement's first jump from small to large is +1.6% (927.5 -> 942.5 us median over 50 fresh processes per arm), consistent with an arithmetic account of four extra growths, ~15,200 extra slot copies and ~13,800 extra slots zero-filled.",
+      "conditions": "M1 Pro · AOT · `undershoot-mid` lane, 3,300 rows behind 8x20-row poison · first-jump figure from --warmup=0 --samples=1, 50 processes/arm · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "264.3",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Exp 067's mechanism claim is per-slot true and decision-irrelevant. `List<Object?>.filled(n, null, growable: true)` followed by a write of `k` slots and a truncation to `k` costs 423 ns at n=1536/k=6 against 21.5 ns at n=12/k=6, and 1223 ns at n=5376/k=21 against 46.5 ns at n=42/k=21 — so the large allocation is roughly six times cheaper per slot and twenty times more expensive in total. Any Dart allocation claim of the form 'the VM's fast path makes the larger one cheaper' must be quoted per call, not per slot.",
+      "conditions": "M1 Pro · standalone AOT reproduction of the allocation shape, no FFI or SQLite · 20,000 calls/round, 200 rounds · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "067.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "264.4",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The release suite runs, and exp 262's per-scenario persistence now demonstrably preserves a killed run. The suite completes 14 of 16 scenarios — every read, write, streaming and app-shaped lane — and aborts inside the sqlite_async peer at `[15/16] Memory`, the pre-existing #282 crash, additionally wedging the parent rather than exiting. The killed run still wrote an artifact with 169 metrics, correctly self-marked `partial: true`, `scenariosCompleted: 14`, `repeatCount: 0`; exps 260 and 261 were killed inside repeat 1 before that mechanism existed and produced nothing. The artifact is single-sample and unpaired, so it is a no-regression sanity check (point query 160,798 qps, 1,000-row `select()` 0.349 ms, batch insert 1,000 rows 0.389 ms, invalidation 0.058 ms — all at or better than README's published figures) and not evidence for any candidate.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · --repeat=5, killed in repeat 1 at scenario 15 · single-sample, no baseline · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "262.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "264.5",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Exp 264's own change to `ReaderPool._record` put exp 260's growth hint at risk, and the fix is capacity/priority rather than ordering. Removing exp 260's `rowCount <= initialResultRows` insert guard let every point read take one of the 32 `_rowHints` slots, so a statement that has proven large is evicted by point-read churn and loses its hint. Measured on the new `hint-thrash-overflows` lane (5,000 x 5 read behind 40 distinct one-off statements per sample): pre-264 597-631 us against exp-264 826-919 us, a systematic +40-46% in which the slower arm's fastest sample beat the faster arm's slowest. Least-recently-used promotion does NOT fix it (no improvement measured, and it costs the main isolate a map remove-and-reinsert per read); raising `_rowHintMax` to 128 does (620 us), and so does preferring an eviction victim whose `highWater <= initialResultRows` (565 us). The latter shipped, and a four-pass re-measurement on a quiet host confirms both halves: the lane runs -29.5% against the unfixed arm in all four passes and is level with pre-264 (-0.2%), so exp 260's reach is restored rather than merely improved, while the fix is inert on the hot path (both point lanes sign-flip, both controls +/-0.1%) exactly as its structure predicts -- `_evictionVictim` is unreachable until the memory overflows its 32 entries. Unfixed, the same lane is +41.6% against pre-264. Specifically: it restores exp 260's exclusive tenure without a magic capacity, costs nothing per read because the O(32) scan runs only on an overflowing miss, and is gated deterministically in `test/reader_pool_test.dart` rather than through the noisy lane.",
+      "conditions": "M1 Pro · AOT · `hint-thrash-overflows`, 4 alternating-order passes, 61 samples · host 52-61% idle · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "260.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "260.1"
+      ]
+    },
+    {
+      "id": "264.6",
+      "source": "264",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Every wall-time figure in exp 264 was collected on a host at 0.0% CPU idle. `top` reported 57% user / 43% sys / 0% idle, with an unrelated Virtualization.framework VM at 190% CPU, FSEvents at 57%, and other Dart processes at 100% and 44%; load average read 33/39/50 on ten cores. Six `run_release.dart` processes from earlier sessions were also resident, wedged 1-4 days at 0.0% CPU — the #282 peer crash does not merely kill a run, it leaves the parent blocked forever, and they accumulate. The order-flipped design cancels a stationary component and the controls held to +/-2%, and the mechanism is independently corroborated by a standalone allocation probe with no isolates or SQLite (423 ns vs 21.5 ns per call) whose magnitudes match the lane deltas; the *direction and mechanism* are therefore sound. The precise percentages were not, and were re-measured once the host freed up: the narrow point read moved from -7.4% to -13.5% and the wide one from -27.4% to -27.1%, with controls tightening from +/-4% to +/-1.7%. So the saturation cost about six points of accuracy on the smaller effect and none on the larger. The general hazard stands: a per-read microsecond measurement on a saturated host is dominated by reader-isolate scheduling latency. A confirmation pass attempted late in the run read +50.6% on `int20-10k`, a lane the candidate cannot reach, which is how the saturation was discovered. The same host had 352-440 MB free on a 460 GB volume. That is worth recording beside the crash narrative exps 260-262 built on: a disk this full is an independent explanation for a SQLite-backed suite dying at the memory-heavy scenario 15 and for the parent never exiting, and it has never been ruled out. Not asserted here — untested — but it should be checked before the next runner attributes that crash to the peer.",
+      "conditions": "M1 Pro · macOS 26.2 · host at 0.0% idle and ~400 MB free disk throughout · 2026-08",
       "state": "live"
     }
   ]
