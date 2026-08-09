@@ -38,7 +38,27 @@ final class ReaderPool {
   ReaderPool._(this._workers);
 
   final List<_WorkerSlot> _workers;
-  int _next = 0;
+
+  /// Where [_dispatch]'s scan starts: the slot that served the most recent
+  /// read ([EXP-266](../../../experiments/266-sticky-reader-dispatch.md)).
+  ///
+  /// A read that finds this slot free goes back to the isolate that ran the
+  /// previous one; one that finds it busy walks forward exactly as a
+  /// round-robin scan would, so a saturated pool still spreads across every
+  /// worker. Stickiness is therefore free to the concurrent case and only
+  /// changes which idle worker an idle pool picks.
+  ///
+  /// [selectBytes] deliberately opts out and advances this past the slot it
+  /// used, which is the pre-266 round-robin. Its per-connection `json_buf` is
+  /// grown by a large read and only shrunk by a *later, smaller* read on the
+  /// same connection ([EXP-183](../../../experiments/183-json-buf-retention-audit.md)),
+  /// so a burst that grows every reader's buffer needs the rotation to come
+  /// back round and reclaim them. Under stickiness the three workers a burst
+  /// left large would never be visited again, and
+  /// `Diagnostics.readerJsonBufHighWaterBytes` stayed at 6.2 MB against the
+  /// 512 KB the exp 185 release guard allows. The rows path retains nothing
+  /// per connection, so it has no such requirement.
+  int _preferred = 0;
   bool _closed = false;
 
   /// How many SQL strings the pool remembers a result size for. Matches the
@@ -72,6 +92,11 @@ final class ReaderPool {
 
   /// How many SQL strings the pool currently remembers a result size for.
   int get rowSizeMemoryLength => _rowHints.length;
+
+  /// The slot [_dispatch] will try first — the one that served the most recent
+  /// read. For tests asserting stickiness; which worker ran a query is not
+  /// observable from any other surface.
+  int get preferredWorkerIndex => _preferred;
 
   /// FIFO waiters parked by _dispatch while no worker is available.
   ///
@@ -198,6 +223,9 @@ final class ReaderPool {
         parameters,
         traceCorrelationId: traceCorrelationId,
       ),
+      null,
+      // Rotates rather than sticks; see [_preferred].
+      false,
     );
     return result as ({Uint8List bytes, int rowCount});
   }
@@ -237,6 +265,7 @@ final class ReaderPool {
   Future<Object?> _dispatch(
     ReadRequest request, [
     RowSizeMemory? memory,
+    bool sticky = true,
   ]) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
@@ -254,9 +283,10 @@ final class ReaderPool {
 
     while (true) {
       for (var attempt = 0; attempt < count; attempt++) {
-        final slot = _workers[_next % count];
-        _next++;
+        final index = (_preferred + attempt) % count;
+        final slot = _workers[index];
         if (slot.isAvailable) {
+          _preferred = sticky ? index : (index + 1) % count;
           if (kProfileMode && kTraceliteProfileMode) {
             final typeId = TraceliteProfile.internString(
               request.runtimeType.toString(),

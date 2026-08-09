@@ -497,5 +497,69 @@ void main() {
         expect(pool.rowSizeMemoryLength, lessThanOrEqualTo(32));
       });
     });
+
+    // Dispatch prefers the slot that served the previous read
+    // ([EXP-266](../experiments/266-sticky-reader-dispatch.md)), so a
+    // sequential caller keeps one worker's caches warm instead of rotating
+    // through four cold ones. The property that makes that safe is that a busy
+    // preferred slot still falls through, which is what the second test pins.
+    group('dispatch stickiness', () {
+      test('sequential reads stay on one worker', () async {
+        await _seed(db, 200);
+        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        addTearDown(pool.close);
+
+        await pool.select('SELECT * FROM items WHERE id = 1');
+        final first = pool.preferredWorkerIndex;
+        for (var i = 0; i < 8; i++) {
+          await pool.select('SELECT * FROM items WHERE id = 1');
+          expect(
+            pool.preferredWorkerIndex,
+            first,
+            reason: 'read $i left the worker that served the previous one',
+          );
+        }
+      });
+
+      test('concurrent reads still spread across every worker', () async {
+        await _seed(db, 200);
+        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        addTearDown(pool.close);
+
+        // Dispatch's scan runs synchronously, so every one of these has claimed
+        // a slot by the time the last call returns its future. If stickiness
+        // queued them on one worker instead, three slots would still be free.
+        final reads = [
+          for (var i = 0; i < 4; i++)
+            pool.select('SELECT * FROM items WHERE id = ?', [i + 1]),
+        ];
+        expect(pool.availableWorkerCount, 0);
+
+        final results = await Future.wait(reads);
+        for (var i = 0; i < results.length; i++) {
+          expect(results[i], hasLength(1));
+          expect(results[i][0]['id'], i + 1);
+        }
+      });
+
+      // selectBytes opts out: its per-connection `json_buf` is only reclaimed
+      // by a later, smaller read on the same connection, so a burst that grew
+      // every reader's buffer needs the rotation to come back round. Sticking
+      // leaves three of four buffers large forever, which the release guard in
+      // `benchmark/suites/sqlite_diagnostics.dart` catches at 6.2 MB against
+      // its 512 KB budget.
+      test('selectBytes keeps rotating', () async {
+        await _seed(db, 200);
+        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        addTearDown(pool.close);
+
+        final visited = <int>{};
+        for (var i = 0; i < 4; i++) {
+          await pool.selectBytes('SELECT id FROM items WHERE id = 1');
+          visited.add(pool.preferredWorkerIndex);
+        }
+        expect(visited, hasLength(4));
+      });
+    });
   });
 }

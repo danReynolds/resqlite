@@ -1027,6 +1027,48 @@ of cheap observations. Pair it with the exp 260 lesson above: put the hint where
 a wrong answer costs nothing, and where it cannot, make the wrong answer
 unrepeatable.*
 
+### A benchmark built to resolve a rate cannot see a fixed cost
+
+[Exp 266](266-sticky-reader-dispatch.md) found that the reader pool's
+round-robin dispatch made all four reader isolates independently pay the
+prepare, schema build and page warm for the same statement. Preferring the
+worker that served the previous read is worth 33% of a statement's first four
+executions — and 0% of its eight-thousandth. Every lane in the repo, release and
+focused alike, executes one statement from tens to thousands of times per
+sample, because that is what it takes to resolve a per-read effect at microsecond
+scale. That repeat count is also the divisor a once-per-statement cost is
+reported through, so a suite tuned to see rates is *structurally* blind to fixed
+costs, and the blindness gets worse exactly as the measurement gets more precise.
+The instrument is a lane that mints a fresh SQL string per sample — a trailing
+comment leaves the plan identical — and times its first N executions, at two or
+three values of N.
+
+*Reapplies whenever a candidate's saving is paid once per statement, per
+connection, per schema or per worker rather than once per row or per call: cache
+capacity, prepare cost, connection setup, dispatch policy. Ask what the sample's
+repeat count divides away before reading a neutral result, and make the decay
+across two or three values of N part of the acceptance gate — a fixed cost must
+shrink with N, and one that does not is a different mechanism.*
+
+### A routing change can starve a reclaim path that runs on traffic
+
+[Exp 266](266-sticky-reader-dispatch.md) made reader dispatch prefer the worker
+that served the previous read. `benchmark/suites/sqlite_diagnostics.dart`'s
+`JSON buffer reclaim` guard failed immediately: exp 183's `json_buf` shrink only
+fires when a later, *smaller* read lands on the connection that grew it, so a
+burst that inflated all four readers' buffers was reclaimed by the rotation
+bringing the settle reads back round. Sticking meant three of the four were
+never visited again and kept 6.2 MB against a 512 KB budget. The wall-time
+harness could not see it — no lane got slower — and no test of the routing
+change itself would have either.
+
+*Reapplies to any change in which worker, connection, isolate or slot serves a
+request: pooling, affinity, sharding, admission order, or a fast path that skips
+a tier. Before measuring anything, enumerate the per-instance state that is only
+reclaimed when that instance is used again, and run the retention guards first
+rather than last. The general shape is that lazy cleanup is a hidden dependency
+on the very traffic pattern a routing change exists to alter.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

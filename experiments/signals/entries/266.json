@@ -1,0 +1,59 @@
+{
+  "directions": [
+    "result-transfer-shape",
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "`dart run tool/knowledge/impact.dart origin/main` reports no recorded belief retired or transitively unsupported by this run, and that is correct: nothing here contradicts a prior claim. What it adds is a cost class the direction had no vocabulary for. Every read-path claim from exp 251 onward is a *per-read* rate — nanoseconds per cell, microseconds per request, a fraction of transfer versus decode — and each was measured on a lane that executes one statement thousands of times, which is the only way to resolve a rate. A fixed per-(statement, worker) cost is invisible in that regime by construction, and this run measures one at roughly 18 us: the prepare, schema build and page warm each of four reader isolates pays independently for a statement the first one has already run. Read alongside claim 264.1 and claim 260.1, both of which are real and both of which are per-read: they describe the cost of the ten-thousandth execution of a statement, and this describes the cost of its first.",
+    "The reader pool's round-robin was never a load-balancing decision that anyone measured; it was the obvious way to write a scan, and it has been in place since exp 011 built the persistent pool. Exp 030 optimised what a worker does once it is chosen (dedicated reader indices, no C pool mutex) and exp 105 sized the pool, but which idle worker an idle pool picks had never been an experiment. It is worth about a third of a statement's first four executions, so the general belief to carry forward is that a policy nobody has measured is not the same as a policy that has been validated — especially one whose cost is structurally invisible to the suite that would have caught it.",
+    "Peak RSS moves with warm-state duplication, in the direction that makes the mechanism legible from a second angle. `first4-newsql` reads 27.0 -> 26.1 MB and `first8-newsql` 29.6 -> 28.1 MB, while the sacrificing lane holds at 95.9 -> 96.0. Four connections each holding a prepared statement, a cached schema and warmed pages for the same SQL is four copies of state one worker now holds once. Consistent with claim 263's account of where resqlite's footprint actually sits — the pool, not the row representation — and a small argument that pool-wide duplication is a term in that floor."
+  ],
+  "claims": [
+    {
+      "id": "266.1",
+      "text": "Reader-pool dispatch stickiness — starting `ReaderPool._dispatch`'s scan at the slot that served the previous read rather than the next one — is worth a reproduced -32.2% on a statement's first four executions, -21.8% on its first eight and -13.2% on its first thirty-two, decaying to -1.6% by the eight-thousandth. In absolute terms four sequential point reads of a fresh statement fall from 58 us to 39 us, and the saving is dominated by a term paid once per statement rather than by a per-read rate: ~19 us across the first four executions, ~22 us across the first eight, ~30 us across the first thirty-two. The mechanism accounts for the magnitude — round-robin makes all four reader connections prepare the statement, build its schema and warm its pages, so the candidate avoids three cycles of roughly 6-9 us each, and the percentage falls because an increasing execution count is what it is divided by. Twenty-four alternating-order lane-isolated AOT passes in two collections of twelve, 121 samples per lane per arm; all 24 passes faster on `first4-newsql` and `first8-newsql`, 22 of 24 on `first32-newsql`, and all 18 pass-pairs in the shipped-code collection classified REPRODUCED by `ab_drift_check.dart`.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · 4-worker pool · lane-isolated, 24 alternating-order passes, 121 samples/lane · host 71% idle · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "251.1"
+        }
+      ]
+    },
+    {
+      "id": "266.2",
+      "text": "Stickiness costs concurrency nothing, because a busy preferred slot falls through to the next exactly as a round-robin scan did. Over 24 passes, four concurrent reads read +1.3%, eight against a four-worker pool (so dispatch parks on `_dispatchWaiters`) +0.2%, and a 60,000-slot result that crosses `sacrificeSlotThreshold` and ends its worker on every sample -0.4% — each sign-flipping between the two collections (`conc4` is -1.4% in one and +1.5% in the other), which is what marks them neutral rather than small. The property is pinned deterministically rather than through the noisy lanes: `test/reader_pool_test.dart` asserts that four reads issued without awaiting leave `availableWorkerCount` at zero, which fails if stickiness ever queues them on one worker.",
+      "conditions": "M1 Pro · AOT · `conc4` / `conc8` / `mixed6-10k` lanes, 24 alternating-order passes · 2026-08"
+    },
+    {
+      "id": "266.3",
+      "text": "A fixed per-(statement, worker) cost is structurally invisible to resqlite's benchmark suite, and this is a property of the suite rather than of any one lane. Every release scenario and every focused harness lane executes one statement from tens to thousands of times per sample, because that is what it takes to resolve a per-read effect at microsecond scale; a cost paid once per statement per worker is divided by that repeat count before it is ever reported. The discriminating instrument is a lane that mints a fresh SQL string per sample (a trailing comment leaves the plan identical) and times its first N executions. Three such lanes at N = 4, 8 and 32 bracket where the fixed term stops mattering, and the monotonic decay across them is stronger evidence for a warm-up mechanism than any single lane's magnitude.",
+      "conditions": "M1 Pro · AOT · `first{4,8,32}-newsql` lanes in `benchmark/experiments/reader_dispatch_stickiness.dart` · 2026-08"
+    },
+    {
+      "id": "266.4",
+      "text": "Two candidate per-read costs on the reader hop are refuted by direct probe and should not be attempted again without a new mechanism. First, the per-TEXT-cell `Pointer.asTypedList` view allocation in `decodeQuery`: decoding 40,000 24-byte cells through one fresh external view each costs 432 us against 378 us through a persistent window with offsets, so the view is ~1.35 ns/cell, about 1.5% of the 10k x (4 INT + 4 TEXT) read exp 251 measured at 3,587 us — and routing the bytes through a native scratch buffer to earn it would add a copy larger than the saving. Second, the per-query `RowSchema` copy across the isolate hop: an isolate ping-pong carrying a worker-cached schema (names list plus eagerly built HashMap index) against one carrying no schema at all differs by under 1% of a round trip at 6 and 21 columns and at 1, 20 and 1,000 rows — under 40 ns, indistinguishable from noise. Neither is worth an experiment.",
+      "conditions": "M1 Pro · standalone AOT probes, no SQLite · 2026-08"
+    },
+    {
+      "id": "266.5",
+      "text": "A dispatch-policy change can break a reclaim path that is driven by traffic, and `selectBytes` is the case in this codebase. Exp 183's `json_buf` reclaim shrinks a reader connection's serialization buffer when a later, *smaller* read arrives on that same connection; a concurrent burst of large byte reads grows all four readers' buffers, and only the round-robin rotation brings the settling small reads back round to reclaim them. Making every read sticky left the three workers a burst had grown unvisited, and `Diagnostics.readerJsonBufHighWaterBytes` settled at 6.2 MB against the 512 KB the exp 185 release guard allows — a real retention regression that the wall-time harness could not see and the guard caught on its first run. `selectBytes` therefore keeps the pre-266 rotation while `select` sticks. The boundary is structural rather than expedient: the bytes path retains a per-connection buffer whose reclaim is traffic-driven, and the rows path retains nothing per connection. Pinned by a `selectBytes keeps rotating` unit test and by the `bytes-first8-newsql` harness lane, which reads -1.2% (7 of 12 passes faster) as an unchanged path should.",
+      "conditions": "M1 Pro · `benchmark/suites/sqlite_diagnostics.dart` `JSON buffer reclaim` guard · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "183.1"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/reader_dispatch_stickiness.dart` is the durable gate for any future change to *which* worker serves a read, and its `first{4,8,32}-newsql` lanes are reusable well beyond this experiment: they are the only lanes in the repo that can see a fixed per-statement cost at all. Any future candidate whose saving is paid once per statement — statement-cache sizing, schema-cache capacity, connection setup, prepare cost — should be measured there before a steady-state lane is allowed to call it neutral.",
+    "Traffic-driven reclaim paths are now a named hazard for any future dispatch or routing change. `json_buf` is the one that exists today (exp 183's shrink needs a later small read on the *same* connection), and it was invisible to a wall-time harness — the `JSON buffer reclaim` release guard is what caught it. Before changing which worker serves which read again, enumerate the per-connection state that only shrinks when that connection is used, and run `dart test test/benchmark_sqlite_diagnostics_test.dart` early rather than at the end.",
+    "The same stickiness question is open on two paths this experiment deliberately did not touch. Stream re-queries go through `ReaderPool.select` and `selectIfChanged` and therefore already inherit it, but a stream's re-query is issued once per invalidation against a statement that stays hot, so it sits in the steady-state regime where the effect is ~0; whether a *fan-out* of many distinct stream statements behaves like `alternating-sql` (neutral) or like `first8-newsql` (a win) has not been measured and is the natural follow-up in `stream-rerun-dispatch`. `selectBytes` shares the dispatch path unchanged.",
+    "The pool now concentrates warm state on one connection by default, which changes what the per-connection caps mean. Each reader connection has its own 32-entry C statement cache, its own 32-entry Dart `schemaCache`, and `cache_size = -8192` (8 MB) of page cache. Under round-robin an application with many distinct statements thrashed all four caches identically; under stickiness it thrashes one hard and leaves three cold. That is the correct trade for the measured shape and it is untested at the tail — a workload with well over 32 hot statements might now evict where it previously did not. The cheap discriminating lane is `first8-newsql` widened to rotate more distinct statements than a connection can cache.",
+    "The reader pool's `_preferred` cursor is the second piece of main-isolate-held per-read policy, after exp 260/264's `_rowHints`. Both are cheap and both are invisible from any public surface, which is why each needed a test-only accessor (`rowSizeHintFor`, `preferredWorkerIndex`). If a third arrives it is probably worth a single small `ReaderPool` diagnostics view rather than a third bespoke getter.",
+    "Two preflight probes were run and thrown away, and their negative results are recorded as claim 266.4 precisely so the next runner does not rebuild them: the per-cell `asTypedList` view allocation in the TEXT decode arm (~1.35 ns/cell, ~1.5% of a text-heavy read) and the per-query `RowSchema` copy across the hop (under 1% of a round trip). Both looked like obvious waste from reading the code. Neither is."
+  ]
+}
