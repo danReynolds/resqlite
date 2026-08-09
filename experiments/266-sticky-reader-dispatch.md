@@ -187,6 +187,34 @@ one worker's connection holding the union of several hot statements' pages
 measurably beats four connections each holding a subset. `alternating-sql`
 exists to catch that and did not.
 
+### The stream guard that ran after the fact
+
+The focused harness had concurrency, sacrifice and bytes guards but no *stream*
+lane, and `stream-rerun-dispatch` is a direction where dispatch-adjacent changes
+have a history of looking clean and then failing on fan-out (exps 148, 151,
+170). Stream reruns go through `_dispatch` with `sticky = true`, so the
+integrated Tracelite A/B was run post-hoc on that direction's preset against a
+fresh `origin/main` baseline.
+
+No regression; the movement is the other way:
+
+| scenario | baseline | candidate | Δ | p |
+|---|---:|---:|---:|---:|
+| `high-cardinality-fanout` | 411ms | 367ms | −10.7% | 0.10 |
+| `keyed-pk-subscriptions` | 337ms | 268ms | −20.5% | <0.001 |
+| `many-streams-writer-throughput` | 619ms | 572ms | −7.5% | 0.005 |
+
+The harness itself exits `inconclusive` because this preset's expectation is
+`improvement` against a 43.5% primary threshold — it is built to *accept* stream
+wins, and no such win is claimed here. Read as a regression guard, every lane is
+faster or neutral and none is slower. The `warmup_elapsed_ns` guardrails are too
+noisy to classify (CV 57–98%) but all three point down 36–53%, which is the
+mechanism reading itself back: warm-up is where stickiness pays, and a stream
+rerun re-executes the same SQL sequentially, so it lands on a warm worker like
+any other sequential caller. The keyed-PK −20.5% at p≈1e-5 is suggestive of a
+real carry-over benefit but is not claimed as a win — that would need the full
+moonshot-grade pass this guard run was not.
+
 ### One more thing CI caught
 
 The three dispatch tests originally spawned a four-worker `ReaderPool`. That
