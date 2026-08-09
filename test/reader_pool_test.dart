@@ -501,12 +501,23 @@ void main() {
     // Dispatch prefers the slot that served the previous read
     // ([EXP-266](../experiments/266-sticky-reader-dispatch.md)), so a
     // sequential caller keeps one worker's caches warm instead of rotating
-    // through four cold ones. The property that makes that safe is that a busy
+    // through cold ones. The property that makes that safe is that a busy
     // preferred slot still falls through, which is what the second test pins.
+    //
+    // Two workers, not four: `Database.open` sizes its pool as
+    // `clamp(numberOfProcessors - 1, 2, 4)` and C allocates exactly that many
+    // reader connections, so a test pool wider than the host's reader count
+    // hands two isolates the same `SQLITE_OPEN_NOMUTEX` connection. Four passes
+    // on a ten-core dev machine and fails on a two-core CI runner with
+    // SQLITE_BUSY. Two is the floor of that clamp and is what every other pool
+    // test here uses. It still discriminates: one busy slot out of two is the
+    // difference between spreading and serializing.
+    const poolSize = 2;
+
     group('dispatch stickiness', () {
       test('sequential reads stay on one worker', () async {
         await _seed(db, 200);
-        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        final pool = await ReaderPool.spawn(db.handle.address, poolSize);
         addTearDown(pool.close);
 
         await pool.select('SELECT * FROM items WHERE id = 1');
@@ -523,14 +534,14 @@ void main() {
 
       test('concurrent reads still spread across every worker', () async {
         await _seed(db, 200);
-        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        final pool = await ReaderPool.spawn(db.handle.address, poolSize);
         addTearDown(pool.close);
 
         // Dispatch's scan runs synchronously, so every one of these has claimed
         // a slot by the time the last call returns its future. If stickiness
-        // queued them on one worker instead, three slots would still be free.
+        // queued them on one worker instead, a slot would still be free.
         final reads = [
-          for (var i = 0; i < 4; i++)
+          for (var i = 0; i < poolSize; i++)
             pool.select('SELECT * FROM items WHERE id = ?', [i + 1]),
         ];
         expect(pool.availableWorkerCount, 0);
@@ -550,15 +561,15 @@ void main() {
       // its 512 KB budget.
       test('selectBytes keeps rotating', () async {
         await _seed(db, 200);
-        final pool = await ReaderPool.spawn(db.handle.address, 4);
+        final pool = await ReaderPool.spawn(db.handle.address, poolSize);
         addTearDown(pool.close);
 
         final visited = <int>{};
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < poolSize; i++) {
           await pool.selectBytes('SELECT id FROM items WHERE id = 1');
           visited.add(pool.preferredWorkerIndex);
         }
-        expect(visited, hasLength(4));
+        expect(visited, hasLength(poolSize));
       });
     });
   });

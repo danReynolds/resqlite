@@ -187,6 +187,19 @@ one worker's connection holding the union of several hot statements' pages
 measurably beats four connections each holding a subset. `alternating-sql`
 exists to catch that and did not.
 
+### One more thing CI caught
+
+The three dispatch tests originally spawned a four-worker `ReaderPool`. That
+passed on a ten-core dev machine and failed on CI's two-core runner, because
+`Database.open` sizes the pool as `clamp(numberOfProcessors - 1, 2, 4)` and C
+allocates exactly that many reader connections — `resqlite_stmt_acquire_on`
+returns NULL for `reader_id >= db->reader_count`, which surfaces as
+`ResqliteQueryException: not an error` (no SQLite error was ever set) and, on the
+bytes path, `resqlite_query_bytes failed with code 5`. The tests now use two
+workers, the floor of that clamp and what every pre-existing pool test in the
+file already used. Two still discriminates: one busy slot out of two is the
+difference between spreading and serializing.
+
 ## Test plan
 
 - `dart analyze --fatal-infos` on the harness and `lib/` — clean
