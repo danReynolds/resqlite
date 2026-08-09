@@ -39,17 +39,20 @@ final class ReaderPool {
 
   final List<_WorkerSlot> _workers;
 
-  /// Where [_dispatch]'s scan starts: the slot that served the most recent
-  /// read ([EXP-266](../../../experiments/266-sticky-reader-dispatch.md)).
+  /// Where [_dispatch]'s next scan starts
+  /// ([EXP-266](../../../experiments/266-sticky-reader-dispatch.md)).
   ///
-  /// A read that finds this slot free goes back to the isolate that ran the
-  /// previous one; one that finds it busy walks forward exactly as a
-  /// round-robin scan would, so a saturated pool still spreads across every
-  /// worker. Stickiness is therefore free to the concurrent case and only
-  /// changes which idle worker an idle pool picks.
+  /// A sticky dispatch — everything except [selectBytes] — leaves this pointing
+  /// *at* the slot it just used, so the next read goes back to the isolate that
+  /// ran the previous one. A read that finds that slot busy walks forward
+  /// exactly as a round-robin scan would, so a saturated pool still spreads
+  /// across every worker. Stickiness is therefore free to the concurrent case
+  /// and only changes which idle worker an idle pool picks.
   ///
-  /// [selectBytes] deliberately opts out and advances this past the slot it
-  /// used, which is the pre-266 round-robin. Its per-connection `json_buf` is
+  /// [selectBytes] deliberately opts out and leaves this pointing *past* the
+  /// slot it used, which is the pre-266 round-robin. So this field is only "the
+  /// slot that served the most recent read" after a sticky dispatch; in general
+  /// it is just where the scan resumes. Its per-connection `json_buf` is
   /// grown by a large read and only shrunk by a *later, smaller* read on the
   /// same connection ([EXP-183](../../../experiments/183-json-buf-retention-audit.md)),
   /// so a burst that grows every reader's buffer needs the rotation to come
@@ -93,9 +96,10 @@ final class ReaderPool {
   /// How many SQL strings the pool currently remembers a result size for.
   int get rowSizeMemoryLength => _rowHints.length;
 
-  /// The slot [_dispatch] will try first — the one that served the most recent
-  /// read. For tests asserting stickiness; which worker ran a query is not
-  /// observable from any other surface.
+  /// The slot [_dispatch] will try first — after a sticky dispatch, the one
+  /// that served the most recent read; after a [selectBytes], the one *after*
+  /// it. See [_preferred]. For tests asserting both dispatch policies; which
+  /// worker ran a query is not observable from any other surface.
   int get preferredWorkerIndex => _preferred;
 
   /// FIFO waiters parked by _dispatch while no worker is available.
