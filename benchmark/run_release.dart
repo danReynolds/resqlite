@@ -48,7 +48,11 @@ Future<void> main(List<String> args) async {
   await _ensureDriftCodegenFresh();
   final resultsDir = Directory('benchmark/results');
   final environment = await collectBenchmarkEnvironment(
-    extra: {'benchmarkMode': 'release', 'includeSlow': options.includeSlow},
+    extra: {
+      'benchmarkMode': 'release',
+      'includeSlow': options.includeSlow,
+      'skipMemory': options.skipMemory,
+    },
   );
   final baseline = _resolveComparisonBaseline(resultsDir, options, environment);
   final compareFile = baseline.file;
@@ -105,6 +109,7 @@ Future<void> main(List<String> args) async {
     // means a crash costs the scenario in flight, not the fourteen before it.
     final markdown = await _runSuiteOnce(
       includeSlow: options.includeSlow,
+      skipMemory: options.skipMemory,
       onScenario: (markdownSoFar, completed) async {
         resultsDir.createSync(recursive: true);
         jsonFile.writeAsStringSync(
@@ -120,7 +125,10 @@ Future<void> main(List<String> args) async {
               environment: environment,
               generatedAt: DateTime.now().toIso8601String(),
               scenariosCompleted: completed,
-              scenarioTotal: scenarioTotal(includeSlow: options.includeSlow),
+              scenarioTotal: scenarioTotal(
+                includeSlow: options.includeSlow,
+                skipMemory: options.skipMemory,
+              ),
             ),
           ),
         );
@@ -138,8 +146,14 @@ Future<void> main(List<String> args) async {
           aggregates: aggregateRunMetrics(runMetrics),
           environment: environment,
           generatedAt: DateTime.now().toIso8601String(),
-          scenariosCompleted: scenarioTotal(includeSlow: options.includeSlow),
-          scenarioTotal: scenarioTotal(includeSlow: options.includeSlow),
+          scenariosCompleted: scenarioTotal(
+            includeSlow: options.includeSlow,
+            skipMemory: options.skipMemory,
+          ),
+          scenarioTotal: scenarioTotal(
+            includeSlow: options.includeSlow,
+            skipMemory: options.skipMemory,
+          ),
         ),
       ),
     );
@@ -453,12 +467,13 @@ void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
 /// flight, not the fourteen before it.
 Future<String> _runSuiteOnce({
   required bool includeSlow,
+  required bool skipMemory,
   required Future<void> Function(String markdownSoFar, int completed)
   onScenario,
 }) async {
   final markdown = StringBuffer();
   var completed = 0;
-  final total = scenarioTotal(includeSlow: includeSlow);
+  final total = scenarioTotal(includeSlow: includeSlow, skipMemory: skipMemory);
 
   Future<void> step(String label, Future<String> Function() run) async {
     print('[${completed + 1}/$total] $label...');
@@ -484,7 +499,16 @@ Future<String> _runSuiteOnce({
     'High-Cardinality Stream Fan-out (A11b)',
     runHighCardinalityFanoutBenchmark,
   );
-  await step('Memory', runMemoryBenchmark);
+  // The current sqlite_async peer segfaults in its native update-notification
+  // path inside the Memory scenario ([EXP-262]: exp 229's own sha crashes at
+  // the same stage, so the regression is in the peers, not this repo), which
+  // kills the process at scenario 15/16 of repeat 1 — before any repeat
+  // completes and any .md artifact is written. --skip-memory trades the
+  // Memory section, which the memory gate already tolerates missing, for a
+  // run that survives to publish.
+  if (!skipMemory) {
+    await step('Memory', runMemoryBenchmark);
+  }
   await step('SQLite Diagnostics', runSqliteDiagnosticsBenchmark);
 
   // Slow workloads — opt-in via --include-slow because they take multiple
@@ -504,7 +528,8 @@ Future<String> _runSuiteOnce({
 /// How many scenarios a single repeat runs. Kept next to [_runSuiteOnce] so the
 /// progress labels and the persisted `scenarioTotal` cannot drift apart — they
 /// already had, the standard suite printing `[1/15]` through `[16/16]`.
-int scenarioTotal({required bool includeSlow}) => includeSlow ? 19 : 16;
+int scenarioTotal({required bool includeSlow, bool skipMemory = false}) =>
+    (includeSlow ? 19 : 16) - (skipMemory ? 1 : 0);
 
 final class _ComparisonBaseline {
   const _ComparisonBaseline._({
@@ -648,6 +673,7 @@ final class _RunAllOptions {
     required this.autoCompare,
     required this.hardwareSummary,
     required this.includeSlow,
+    required this.skipMemory,
   });
 
   final String label;
@@ -667,6 +693,11 @@ final class _RunAllOptions {
   /// run time. Use `--include-slow` to enable them for a comprehensive
   /// cross-device pass.
   final bool includeSlow;
+
+  /// When true, the Memory scenario is skipped. The current sqlite_async peer
+  /// segfaults inside it ([EXP-262]), which otherwise ends the process at
+  /// scenario 15/16 of repeat 1 — before any artifact can be written.
+  final bool skipMemory;
 }
 
 _RunAllOptions _parseOptions(List<String> args) {
@@ -677,6 +708,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   var autoCompare = true;
   var hardwareSummary = false;
   var includeSlow = false;
+  var skipMemory = false;
 
   for (final arg in args) {
     if (arg == '--fail-on-memory-regression') {
@@ -691,6 +723,8 @@ _RunAllOptions _parseOptions(List<String> args) {
       hardwareSummary = true;
     } else if (arg == '--include-slow') {
       includeSlow = true;
+    } else if (arg == '--skip-memory') {
+      skipMemory = true;
     } else if (arg == '--help' || arg == '-h') {
       _printUsageAndExit();
     } else if (!arg.startsWith('--')) {
@@ -712,6 +746,7 @@ _RunAllOptions _parseOptions(List<String> args) {
     autoCompare: autoCompare,
     hardwareSummary: hardwareSummary,
     includeSlow: includeSlow,
+    skipMemory: skipMemory,
   );
 }
 
@@ -719,7 +754,7 @@ void _printUsageAndExit() {
   print(
     'Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
     '[--compare-to=PATH] [--no-auto-compare] [--hardware-summary] '
-    '[--include-slow]',
+    '[--include-slow] [--skip-memory]',
   );
   print('');
   print('  --repeat=N           Run the suite N times (default: 5)');
@@ -735,6 +770,10 @@ void _printUsageAndExit() {
   );
   print(
     '  --hardware-summary   Print a copy-pasteable row for HARDWARE_RESULTS.md',
+  );
+  print(
+    '  --skip-memory        Skip the Memory scenario (the current '
+    'sqlite_async peer segfaults inside it — see exp 262)',
   );
   print('  --include-slow       Also run multi-minute slow workloads');
   print('                       (sync burst, 1GB working set,');
