@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 55,
-    "totalEntries": 136
+    "entriesWithClaims": 56,
+    "totalEntries": 137
   },
   "experiments": [
     {
@@ -2115,6 +2115,18 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "266",
+      "title": "Send the read back to the worker that ran the last one",
+      "file": "266-sticky-reader-dispatch.md",
+      "date": "2026-08-09",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "accepted"
     }
   ],
   "claims": [
@@ -3119,6 +3131,91 @@
       ],
       "text": "Every wall-time figure in exp 264 was collected on a host at 0.0% CPU idle. `top` reported 57% user / 43% sys / 0% idle, with an unrelated Virtualization.framework VM at 190% CPU, FSEvents at 57%, and other Dart processes at 100% and 44%; load average read 33/39/50 on ten cores. Six `run_release.dart` processes from earlier sessions were also resident, wedged 1-4 days at 0.0% CPU — the #282 peer crash does not merely kill a run, it leaves the parent blocked forever, and they accumulate. The order-flipped design cancels a stationary component and the controls held to +/-2%, and the mechanism is independently corroborated by a standalone allocation probe with no isolates or SQLite (423 ns vs 21.5 ns per call) whose magnitudes match the lane deltas; the *direction and mechanism* are therefore sound. The precise percentages were not, and were re-measured once the host freed up: the narrow point read moved from -7.4% to -13.5% and the wide one from -27.4% to -27.1%, with controls tightening from +/-4% to +/-1.7%. So the saturation cost about six points of accuracy on the smaller effect and none on the larger. The general hazard stands: a per-read microsecond measurement on a saturated host is dominated by reader-isolate scheduling latency. A confirmation pass attempted late in the run read +50.6% on `int20-10k`, a lane the candidate cannot reach, which is how the saturation was discovered. The same host had 352-440 MB free on a 460 GB volume. That is worth recording beside the crash narrative exps 260-262 built on: a disk this full is an independent explanation for a SQLite-backed suite dying at the memory-heavy scenario 15 and for the parent never exiting, and it has never been ruled out. Not asserted here — untested — but it should be checked before the next runner attributes that crash to the peer.",
       "conditions": "M1 Pro · macOS 26.2 · host at 0.0% idle and ~400 MB free disk throughout · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "266.1",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "Reader-pool dispatch stickiness — starting `ReaderPool._dispatch`'s scan at the slot that served the previous read rather than the next one — is worth a reproduced -32.2% on a statement's first four executions, -21.8% on its first eight and -13.2% on its first thirty-two, decaying to -1.6% by the eight-thousandth. In absolute terms four sequential point reads of a fresh statement fall from 58 us to 39 us, and the saving is dominated by a term paid once per statement rather than by a per-read rate: ~19 us across the first four executions, ~22 us across the first eight, ~30 us across the first thirty-two. The mechanism accounts for the magnitude — round-robin makes all four reader connections prepare the statement, build its schema and warm its pages, so the candidate avoids three cycles of roughly 6-9 us each, and the percentage falls because an increasing execution count is what it is divided by. Twenty-four alternating-order lane-isolated AOT passes in two collections of twelve, 121 samples per lane per arm; all 24 passes faster on `first4-newsql` and `first8-newsql`, 22 of 24 on `first32-newsql`, and all 18 pass-pairs in the shipped-code collection classified REPRODUCED by `ab_drift_check.dart`.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · 4-worker pool · lane-isolated, 24 alternating-order passes, 121 samples/lane · host 71% idle · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "251.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "251.1"
+      ]
+    },
+    {
+      "id": "266.2",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "Stickiness costs concurrency nothing, because a busy preferred slot falls through to the next exactly as a round-robin scan did. Over 24 passes, four concurrent reads read +1.3%, eight against a four-worker pool (so dispatch parks on `_dispatchWaiters`) +0.2%, and a 60,000-slot result that crosses `sacrificeSlotThreshold` and ends its worker on every sample -0.4% — each sign-flipping between the two collections (`conc4` is -1.4% in one and +1.5% in the other), which is what marks them neutral rather than small. The property is pinned deterministically rather than through the noisy lanes: `test/reader_pool_test.dart` asserts that four reads issued without awaiting leave `availableWorkerCount` at zero, which fails if stickiness ever queues them on one worker.",
+      "conditions": "M1 Pro · AOT · `conc4` / `conc8` / `mixed6-10k` lanes, 24 alternating-order passes · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "266.3",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "A fixed per-(statement, worker) cost is structurally invisible to resqlite's benchmark suite, and this is a property of the suite rather than of any one lane. Every release scenario and every focused harness lane executes one statement from tens to thousands of times per sample, because that is what it takes to resolve a per-read effect at microsecond scale; a cost paid once per statement per worker is divided by that repeat count before it is ever reported. The discriminating instrument is a lane that mints a fresh SQL string per sample (a trailing comment leaves the plan identical) and times its first N executions. Three such lanes at N = 4, 8 and 32 bracket where the fixed term stops mattering, and the monotonic decay across them is stronger evidence for a warm-up mechanism than any single lane's magnitude.",
+      "conditions": "M1 Pro · AOT · `first{4,8,32}-newsql` lanes in `benchmark/experiments/reader_dispatch_stickiness.dart` · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "266.4",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "Two candidate per-read costs on the reader hop are refuted by direct probe and should not be attempted again without a new mechanism. First, the per-TEXT-cell `Pointer.asTypedList` view allocation in `decodeQuery`: decoding 40,000 24-byte cells through one fresh external view each costs 432 us against 378 us through a persistent window with offsets, so the view is ~1.35 ns/cell, about 1.5% of the 10k x (4 INT + 4 TEXT) read exp 251 measured at 3,587 us — and routing the bytes through a native scratch buffer to earn it would add a copy larger than the saving. Second, the per-query `RowSchema` copy across the isolate hop: an isolate ping-pong carrying a worker-cached schema (names list plus eagerly built HashMap index) against one carrying no schema at all differs by under 1% of a round trip at 6 and 21 columns and at 1, 20 and 1,000 rows — under 40 ns, indistinguishable from noise. Neither is worth an experiment.",
+      "conditions": "M1 Pro · standalone AOT probes, no SQLite · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "266.5",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "A dispatch-policy change can break a reclaim path that is driven by traffic, and `selectBytes` is the case in this codebase. Exp 183's `json_buf` reclaim shrinks a reader connection's serialization buffer when a later, *smaller* read arrives on that same connection; a concurrent burst of large byte reads grows all four readers' buffers, and only the round-robin rotation brings the settling small reads back round to reclaim them. Making every read sticky left the three workers a burst had grown unvisited, and `Diagnostics.readerJsonBufHighWaterBytes` settled at 6.2 MB against the 512 KB the exp 185 release guard allows — a real retention regression that the wall-time harness could not see and the guard caught on its first run. `selectBytes` therefore keeps the pre-266 rotation while `select` sticks. The boundary is structural rather than expedient: the bytes path retains a per-connection buffer whose reclaim is traffic-driven, and the rows path retains nothing per connection. Pinned by a `selectBytes keeps rotating` unit test and by the `bytes-first8-newsql` harness lane, which reads -1.2% (7 of 12 passes faster) as an unchanged path should.",
+      "conditions": "M1 Pro · `benchmark/suites/sqlite_diagnostics.dart` `JSON buffer reclaim` guard · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "183.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "183.1"
+      ]
+    },
+    {
+      "id": "266.6",
+      "source": "266",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "Sticky reader dispatch does not regress stream fan-out: the stream-rerun-dispatch Tracelite preset (high-cardinality-fanout, keyed-pk-subscriptions, many-streams-writer-throughput) measured -10.7%/-20.5%/-7.5% elapsed against origin/main, none slower, with warmup guardrails all pointing down 36-53% (too noisy to classify individually). The keyed-PK -20.5% at p~1e-5 hints stream reruns themselves benefit from landing on a warm worker, but no stream win is claimed from a guard run.",
+      "conditions": "Tracelite A/B, stream-rerun-dispatch direction preset, arm64 macOS; harness verdict 'inconclusive' only because the preset gates on a 43.5% improvement expectation",
+      "edges": [],
       "state": "live"
     }
   ]
