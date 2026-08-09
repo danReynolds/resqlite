@@ -389,8 +389,8 @@
   <div class="left-col">
     <div id="dataFreshness"></div>
     <div class="chart-tabs">
-      <button class="chart-tab" data-panel="panelTimeline">Timeline</button>
-      <button class="chart-tab active" data-panel="panelReads">Reads</button>
+      <button class="chart-tab active" data-panel="panelTimeline">Timeline</button>
+      <button class="chart-tab" data-panel="panelReads">Reads</button>
       <button class="chart-tab" data-panel="panelWrites">Writes</button>
       <button class="chart-tab" data-panel="panelTransactions">Transactions</button>
       <button class="chart-tab" data-panel="panelConcurrency">Concurrency</button>
@@ -399,7 +399,7 @@
       <button class="chart-tab" data-panel="panelThroughput">Throughput</button>
     </div>
 
-    <div class="chart-panel" id="panelTimeline">
+    <div class="chart-panel active" id="panelTimeline">
       <h2>Performance over time <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
       <div class="desc">
         Every other tab plots one point per <em>experiment</em>, in experiment order. This one plots
@@ -410,12 +410,12 @@
       <div class="chart-improvements" id="timelineNote"></div>
       <div class="chart-canvas-wrap"><canvas id="chartTimeline"></canvas></div>
     </div>
-    <div class="chart-panel active" id="panelReads">
+    <div class="chart-panel" id="panelReads">
       <h2>Read Performance <span style="font-size:0.75rem;color:var(--muted);font-weight:400">— lower is better</span></h2>
       <div class="desc">select() maps, selectBytes() JSON, and schema wide — 1K rows, wall time (ms).
         One point per experiment, in experiment order — <b>not</b> a time axis; see the Timeline tab for that.
         Hollow points are matched to a run by date heuristic rather than measured for that experiment.
-        Breaks in a line are runs dropped as noisy or built from a dirty tree.</div>
+        Dashed spans bridge runs dropped as noisy or built from a dirty tree — no point is plotted for them.</div>
       <div class="chart-improvements" id="improvReads"></div>
       <div class="chart-canvas-wrap"><canvas id="chartReads"></canvas></div>
     </div>
@@ -487,7 +487,10 @@ let DATA = null;
 const chartInstances = {};
 let selectedExpId = null;
 let currentFilter = 'accepted'; // 'all' | 'accepted' | 'rejected'
-let activePanelId = 'panelReads';
+// Timeline is the default view: it is the only tab whose x-axis is calendar
+// time and whose series is restricted to clean measurements of `main`, so it
+// answers "how are we trending" without the per-experiment sparsity.
+let activePanelId = 'panelTimeline';
 
 const PANEL_TO_TAB = {
   panelTimeline: 'timeline',
@@ -567,7 +570,7 @@ function loadStateFromUrl() {
 function syncUrlState() {
   const params = new URLSearchParams(window.location.search);
   params.set('filter', currentFilter);
-  params.set('tab', PANEL_TO_TAB[activePanelId] || 'reads');
+  params.set('tab', PANEL_TO_TAB[activePanelId] || 'timeline');
   if (selectedExpId) params.set('exp', selectedExpId);
   else params.delete('exp');
   const query = params.toString();
@@ -888,9 +891,17 @@ function buildCharts() {
         pointBorderColor: COLORS[ki],
         pointBorderWidth: chartExpOrder.map(e =>
           findRunSourceForExp(e) === 'exact' ? 1 : 2),
-        // Do not draw through a dropped run: a straight segment across a
-        // noisy or dirty measurement is indistinguishable from a measured one.
-        spanGaps: false,
+        // A dropped (noisy/dirty) run still gets no point, but the line
+        // bridges it with a faint dash: a dashed span is visibly "not a
+        // measurement", where a solid segment across the gap would be
+        // indistinguishable from one and a hard break reads as broken data.
+        spanGaps: true,
+        segment: {
+          borderColor: ctx =>
+            (ctx.p0.skip || ctx.p1.skip) ? COLORS[ki] + '55' : undefined,
+          borderDash: ctx =>
+            (ctx.p0.skip || ctx.p1.skip) ? [4, 4] : undefined,
+        },
         yAxisID: isQps ? 'yQps' : 'y',
       };
     });
