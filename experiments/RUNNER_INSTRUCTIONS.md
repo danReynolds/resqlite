@@ -355,24 +355,44 @@ then remove the local scaffolding before opening the PR.
 - If an idea targets memory or allocation, prefer profiler/RSS evidence over
   wall-time-only claims.
 
-### Keep the dashboard charts moving: clean headline runs
+### The headline release run: required for accepted runtime code
 
 The experiments dashboard ([`../docs/experiments/index.html`](../docs/experiments/index.html))
 plots one point per experiment that has a mapped **headline release run** —
 `benchmark/run_release.dart` output, the pristine peer-comparison suite that
 feeds `history.json`. Focused microbenchmarks under `benchmark/experiments/`
-never feed the charts; an experiment gets a chart point only when a release
-run is captured and linked. To contribute one:
+never feed the charts, and — more important — they only watch the lanes the
+experimenter thought to include. The release run is the *no-collateral-damage*
+sweep: it is **required for any accepted experiment that ships runtime code**
+(`lib/`, `native/`, `hook/`), so a regression in an unanticipated lane is
+caught in the run that measures it, attributed to the experiment that caused
+it — not discovered weeks later as an unattributed drift. (~7 minutes on a
+quiet host; the focused A/B remains the decision evidence.)
 
-1. Run the headline suite **from a clean, committed tree**:
+1. Run the headline suite **from the committed post-change tree**, with the
+   regression gate on:
 
    ```bash
-   dart run benchmark/run_release.dart expNNN-short-slug --repeat=5 --no-auto-compare
+   dart run benchmark/run_release.dart expNNN-short-slug --repeat=5 \
+     --skip-memory --fail-on-regression --fail-on-memory-regression
    ```
 
    Label it `expNNN-...` so `generate_history.dart` maps it to the experiment
    by exact prefix. Commit the resulting `.md` + `.json` under
    `benchmark/results/` as sources (the bot regenerates `history.json`).
+   Leave auto-compare on (no `--no-auto-compare`): it finds the previous
+   anchor in `benchmark/results/` and compares your cross-repeat medians
+   against the anchor's, with per-lane thresholds of
+   `max(10%, 3 × MAD, MDE_ci)`. `--skip-memory` stays until the exp 262
+   sqlite_async peer segfault is fixed.
+
+   **A non-zero exit is the experiment-time regression net firing.** It means
+   a lane moved beyond its own noise threshold. Two honest responses: the
+   change regressed something the focused A/B didn't watch — fix it before
+   the verdict — or the movement is a real, accepted trade-off — document it
+   in the writeup's Results/Decision with reasoning, and keep the artifact
+   (its 🔴 row plus your paragraph is the record). Never relabel, cherry-pick
+   a quieter rerun, or drop the flags to get a green exit.
 
 2. **The tree must be clean and multi-sample.** `run_release.dart` records
    `git status` at run start; the chart intentionally hides any run flagged
@@ -387,13 +407,13 @@ run is captured and linked. To contribute one:
    `baseline` / `pre` — that trips the linker's baseline guard. Name the
    candidate run plainly (`expNNN-<slug>`).
 
-Declaring `**Benchmark Run:** none (…)` stays a valid opt-out for a
-focused-only change, but it means **no chart point** — and a run of
-focused-only accepted work stalls the headline timeline. When a stretch has
-gone focused-only, capture one clean headline run at HEAD and map it to the
-newest accepted milestone to refresh the timeline; that experiment's
-`**Benchmark Run:**` header then cites the run instead of opting out (see
-exp 229).
+Declaring `**Benchmark Run:** none (…)` remains a valid opt-out **only for
+experiments that ship no runtime code** — recorded rejections,
+measurement-only work, tooling, docs. An accepted experiment that touches
+`lib/`, `native/` or `hook/` captures the headline run above; the 2026-07/08
+stretch of focused-only accepted work left `main` unmeasured for 24 days and
+let chart staleness read as a broken page (see exps 229 and 266 for the
+header pattern that cites the run instead of opting out).
 
 ## Postflight
 
