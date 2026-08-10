@@ -32,14 +32,19 @@ void main() {
       expect(markdown, contains('## High-Cardinality Stream Fan-out (v1)'));
       expect(markdown, contains('### 20 streams × 50 writes'));
 
-      // Reactive peers: resqlite, sqlite_async, drift.
+      // Reactive peers: resqlite, drift.
       expect(markdown, contains('| resqlite '));
-      expect(markdown, contains('| sqlite_async '));
       expect(markdown, contains('| drift '));
       expect(
         markdown,
         isNot(contains('| sqlite3 ')),
         reason: 'sqlite3 has no streams and must be omitted',
+      );
+      expect(
+        markdown,
+        isNot(contains('| sqlite_async ')),
+        reason: 'sqlite_async is excluded while its pool-notify segfault '
+            'stands (exp 262 peer regression) — restore with the arm',
       );
 
       // 8-column header (Wall med/p90, Main med/p90, Init drain, Write
