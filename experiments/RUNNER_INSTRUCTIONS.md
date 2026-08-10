@@ -387,12 +387,36 @@ quiet host; the focused A/B remains the decision evidence.)
    sqlite_async peer segfault is fixed.
 
    **A non-zero exit is the experiment-time regression net firing.** It means
-   a lane moved beyond its own noise threshold. Two honest responses: the
-   change regressed something the focused A/B didn't watch — fix it before
-   the verdict — or the movement is a real, accepted trade-off — document it
-   in the writeup's Results/Decision with reasoning, and keep the artifact
-   (its 🔴 row plus your paragraph is the record). Never relabel, cherry-pick
-   a quieter rerun, or drop the flags to get a green exit.
+   a lane moved beyond its own noise threshold, and it is **your job, in this
+   run, to find out why** — the whole point of the net is that whoever is
+   holding it when it fires does the looking, while the diff is one
+   experiment wide. Three honest dispositions, every one of them written
+   down:
+
+   - **It's your change.** The focused A/B didn't watch that lane. Fix it
+     before the verdict, or if the cost is a real, deliberate trade-off,
+     accept it in the writeup's Results/Decision — *with the mechanism*.
+     "Accepted variance" without an explanation of why this lane, this
+     direction, this size is not a disposition; if you cannot explain it,
+     you have case three, not case two.
+   - **It's a trade-off you're accepting.** Same as above: mechanism,
+     magnitude, and why the price is fair, in the writeup. The committed
+     artifact's 🔴 row plus that paragraph is the record.
+   - **It isn't plausibly yours.** Your diff is known — when no mechanism
+     connects it to the lane, don't absorb the movement as your variance.
+     Characterize it: a diagnostic repeat of that lane (its focused harness
+     or the suite) to separate one-off blip from real shift. A real shift
+     that isn't yours gets *attributed* — environment drift (SDK, macOS,
+     peer bump) or an earlier merge — **filed as a GitHub issue** so it has
+     an owner, and recorded in your `signals/entries/NNN.json` so the next
+     experimenter inherits the fact instead of rediscovering the mystery.
+
+   A diagnostic rerun to characterize a lane is fine; swapping in reruns
+   until the gate reads green is not. Never relabel, cherry-pick a quieter
+   rerun, or drop the flags to get a green exit. And a fired gate is
+   **surfaced, not just archived**: name the flagged lane(s) and your
+   disposition of each in the PR description, where the reviewer sees them
+   without opening the artifact.
 
 2. **The tree must be clean and multi-sample.** `run_release.dart` records
    `git status` at run start; the chart intentionally hides any run flagged

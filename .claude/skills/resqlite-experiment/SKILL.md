@@ -134,8 +134,14 @@ Run this mental (or literal) checklist:
 - [ ] Does that file's filename timestamp match `grep "^**Date:**" experiments/NNN-*.md`?
 - [ ] If accepted and it ships runtime code: did the headline release run exit
       zero under `--fail-on-regression --fail-on-memory-regression`? If it
-      exited non-zero, is each flagged lane either fixed or explicitly
-      accepted (with reasoning) in the writeup? Never rerun-until-green.
+      exited non-zero, every flagged lane needs one of three *written*
+      dispositions: fixed; accepted with the mechanism explained in the
+      writeup (no unexplained "accepted variance"); or — when no mechanism
+      connects it to your diff — characterized with a diagnostic repeat,
+      attributed (environment drift or an earlier merge), **filed as a
+      GitHub issue**, and recorded in `signals/entries/NNN.json`. Name the
+      flagged lanes and dispositions in the PR description. Never
+      rerun-until-green.
 - [ ] Is the experiment's README row in its own file,
       `experiments/index/NNN.json` (`{file, title, impact, status, link}`)?
       `README.md` is generated from these — don't hand-edit the table.
