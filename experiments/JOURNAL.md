@@ -1069,6 +1069,49 @@ reclaimed when that instance is used again, and run the retention guards first
 rather than last. The general shape is that lazy cleanup is a hidden dependency
 on the very traffic pattern a routing change exists to alter.*
 
+### An O(capacity) maintenance cost makes the capacity look well-tuned
+
+[Exp 267](267-stmt-cache-capacity.md) raised three 32-entry SQL-keyed caches to
+128 and measured a reproduced **+42%** on the one lane where no cache size can
+help. The cause was not the larger cache: `stmt_cache_insert` reclaimed a slot
+by compacting the array, moving `(capacity − 1) × 1.6 KB` on *every* insert, so
+quadrupling the capacity quadrupled a cost paid per prepare. Removing the
+compaction — which preserved no ordering the lookup's promote-by-swap had not
+already given up — turned that lane into a −12% win *against the 32-entry
+baseline*, because the old capacity was paying the same tax at a quarter scale.
+Two earlier experiments had probed this cache's lookup path and neither had
+looked at what insertion cost.
+
+*Reapplies to any bounded structure whose maintenance — eviction, compaction,
+rehash, defragment, scan-on-insert — is O(capacity) rather than O(1): caches,
+pools, free lists, ring buffers, interning tables. The tell is that growing it
+makes things worse, which reads as "the current size is optimal" and is
+actually "the size is bounded by a bug." Price one maintenance operation in
+bytes moved before concluding a capacity is well-chosen, and re-run the sizing
+question after the cost is O(1).*
+
+### A follow-up nobody owns is never built, and it silently blocks a direction
+
+[Exp 071](071-stmt-cache-mru-scan.md) and
+[exp 073](073-schema-cache-fast-path.md) were each rejected because no
+benchmark could reach the cache they changed, and each closed by asking for the
+same workload — many rotating SQL shapes, cache at capacity — *before any
+cache-sizing experiment*. Neither built it. Roughly 190 experiments later
+[exp 267](267-stmt-cache-capacity.md) built it in an afternoon and found a
+reproduced 2× cliff behind it. Two experiments in between
+([207](207-stmt-cache-hot-sql-fastpath.md),
+[248](248-stmt-cache-stable-slots.md)) worked on the same cache and went after
+its lookup path instead, because that was the part the existing lanes could
+see.
+
+*Reapplies whenever a rejection's stated reason is "no workload can measure
+this." That sentence names a prerequisite, and a prerequisite attached to a
+closed experiment has no owner — later runners inherit the conclusion without
+the condition and optimise whatever the current suite happens to illuminate.
+When picking work, grep old rejections for the instrument they asked for, and
+treat "we could not measure it" as a live candidate rather than a settled
+verdict.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

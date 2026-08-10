@@ -417,7 +417,8 @@ void main() {
       await Future.wait(futures);
     });
 
-    // The pool's 32-entry per-SQL memory is shared by two consumers whose
+    // The pool's per-SQL memory ([ReaderPool.rowSizeMemoryMax] entries) is
+    // shared by two consumers whose
     // entries are not worth the same, so eviction prefers small statements. What
     // matters is that a statement which has proven large keeps its *hint*, not
     // that it stays present: an evicted statement is re-inserted on its next
@@ -445,10 +446,11 @@ void main() {
         await arm(pool, report);
         expect(pool.rowSizeHintFor(report), greaterThan(0));
 
-        // 300 distinct one-off point statements through a 32-slot map. Eviction
-        // must keep taking the small ones, so the report's hint survives.
+        // Distinct one-off point statements, several times the map's capacity.
+        // Eviction must keep taking the small ones, so the report's hint
+        // survives.
         for (var round = 0; round < 6; round++) {
-          await floodWith(pool, 50, 'r$round');
+          await floodWith(pool, ReaderPool.rowSizeMemoryMax, 'r$round');
           expect(
             pool.rowSizeHintFor(report),
             greaterThan(0),
@@ -482,7 +484,7 @@ void main() {
 
         // No small entries to prefer, so eviction falls back to insertion order.
         // This is the limit of the preference, not a defect.
-        for (var i = 0; i < 40; i++) {
+        for (var i = 0; i < ReaderPool.rowSizeMemoryMax + 8; i++) {
           await pool.select('SELECT * FROM items ORDER BY id -- big$i');
         }
         expect(pool.rowSizeHintFor(first), isNull);
@@ -493,8 +495,11 @@ void main() {
         final pool = await ReaderPool.spawn(db.handle.address, 2);
         addTearDown(pool.close);
 
-        await floodWith(pool, 200, 'cap');
-        expect(pool.rowSizeMemoryLength, lessThanOrEqualTo(32));
+        await floodWith(pool, ReaderPool.rowSizeMemoryMax * 2, 'cap');
+        expect(
+          pool.rowSizeMemoryLength,
+          lessThanOrEqualTo(ReaderPool.rowSizeMemoryMax),
+        );
       });
     });
 

@@ -40,7 +40,15 @@ static char* resqlite_strdup(const char* s) {
 // Statement cache (per connection)
 // ---------------------------------------------------------------------------
 
-#define STMT_CACHE_MAX 32
+// Per-connection prepared-statement cache capacity.
+//
+// Eviction is front-of-array with promote-on-hit, i.e. approximately LRU,
+// which turns a cyclic workload of more than STMT_CACHE_MAX distinct
+// statements into a total miss: the entry each read needs is the one the
+// previous miss evicted. The cap is therefore a cliff rather than a slope,
+// and 32 is where an application's statement mix reaches it
+// ([EXP-267](../experiments/267-stmt-cache-capacity.md)).
+#define STMT_CACHE_MAX 128
 
 // [EXP-106](../experiments/106-column-level-deps.md): column-level dependency
 // tracking. Columns are stored as structured table/column pairs; the wildcard
@@ -177,16 +185,30 @@ static resqlite_cached_stmt* stmt_cache_insert(resqlite_stmt_cache* c,
                                               const char* sql,
                                               int sql_len,
                                               sqlite3_stmt* stmt) {
-    if (c->count >= STMT_CACHE_MAX) {
-        stmt_cache_entry_dispose(&c->entries[0]);
-        memmove(&c->entries[0], &c->entries[1],
-                (STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt));
-        c->count = STMT_CACHE_MAX - 1;
-    }
     char* sql_copy = (char*)malloc(sql_len + 1);
     if (!sql_copy) return NULL;
     memcpy(sql_copy, sql, sql_len);
     sql_copy[sql_len] = '\0';
+
+    // Full: reclaim the least-recently-used slot and build the new entry in
+    // place. Entry order is already only approximate — `stmt_cache_lookup_entry`
+    // promotes by swapping the hit with the tail rather than shifting — so
+    // compacting the array to keep the newest entry at the tail buys no
+    // ordering guarantee that the swap has not already given up, and it costs
+    // `(STMT_CACHE_MAX - 1) * sizeof(resqlite_cached_stmt)` bytes on every
+    // eviction: 203 KB per prepare at 128 entries of ~1.6 KB
+    // ([EXP-267](../experiments/267-stmt-cache-capacity.md)).
+    //
+    // The new entry therefore starts at the front, where the next eviction
+    // will take it if nothing looks it up first. That is the right default for
+    // the workload that reaches this branch at all: a statement nobody reuses
+    // is exactly the one worth dropping, and one that is reused is promoted to
+    // the tail by its next lookup.
+    if (c->count >= STMT_CACHE_MAX) {
+        stmt_cache_entry_dispose(&c->entries[0]);
+        stmt_cache_entry_init(&c->entries[0], sql_copy, sql_len, stmt);
+        return &c->entries[0];
+    }
 
     stmt_cache_entry_init(&c->entries[c->count], sql_copy, sql_len, stmt);
     c->count++;

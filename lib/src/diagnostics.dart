@@ -42,7 +42,7 @@ final class Diagnostics {
   /// Prepared-statement memory across the writer and idle readers.
   /// Corresponds to `SQLITE_DBSTATUS_STMT_USED`.
   ///
-  /// Bounded by the per-connection statement cache (32 entries by
+  /// Bounded by the per-connection statement cache (128 entries by
   /// default). Useful for verifying cache size tuning doesn't over-grow.
   final int sqliteStmtBytes;
 

@@ -37,12 +37,16 @@
 //     3,300 lands on 6,400 against 4,096, so it loses), which is what stops the
 //     pair reporting whichever alignment happens to flatter.
 //   hint-thrash-fits / -overflows
-//     The same read behind 20 or 40 never-before-seen SQL strings, which claim
-//     slots in the pool's 32-entry row-size memory. The only lanes exercising
-//     more distinct statements than the pool can remember; every other lane uses
-//     a handful, so a per-SQL memory can stop working and nothing moves. 20 fits
-//     inside the capacity and 40 does not, so the pair separates an eviction
-//     policy problem from a capacity one.
+//     The same read behind half or twice `ReaderPool.rowSizeMemoryMax`
+//     never-before-seen SQL strings, which claim slots in the pool's row-size
+//     memory. The only lanes exercising more distinct statements than the pool
+//     can remember; every other lane uses a handful, so a per-SQL memory can
+//     stop working and nothing moves. One width fits inside the capacity and the
+//     other does not, so the pair separates an eviction policy problem from a
+//     capacity one. The widths are derived from the constant rather than written
+//     out because exp 267 raised it from 32 to 128, which would have left two
+//     literals of 20 and 40 both comfortably inside it and the pair silently
+//     measuring nothing.
 //
 // Two shape constraints worth keeping. Every timed statement stays below
 // `sacrificeSlotThreshold` (32,768 slots) unless the lane is deliberately
@@ -60,6 +64,9 @@
 import 'dart:io';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
+// The thrash lanes have to bracket the pool's row-size memory capacity, and a
+// literal that once did stopped doing it silently when exp 267 raised the cap.
+import 'package:resqlite/src/reader/reader_pool.dart' show ReaderPool;
 
 import '../shared/memory_probe.dart';
 
@@ -147,7 +154,8 @@ final class _Lane {
   ///
   /// Unlike [poisonWidth], which re-executes [selectSql] with different
   /// parameters, each of these is a fresh SQL string that has never been seen
-  /// before, so it claims a new slot in `ReaderPool._rowHints` (capacity 32).
+  /// before, so it claims a new slot in `ReaderPool._rowHints` (capacity
+  /// [ReaderPool.rowSizeMemoryMax]).
   /// This is the only thing in the suite that exercises having more distinct
   /// statements in play than the pool can remember — the gap that let exp 264
   /// widen eviction pressure on exp 260's growth hint without any lane noticing.
@@ -314,7 +322,7 @@ final _lanes = <_Lane>[
     5000,
     (r, c) => r * 31 + c,
     expectRows: 5000,
-    thrashWidth: 20,
+    thrashWidth: ReaderPool.rowSizeMemoryMax ~/ 2,
   ),
   _Lane(
     'hint-thrash-overflows',
@@ -322,7 +330,7 @@ final _lanes = <_Lane>[
     5000,
     (r, c) => r * 31 + c,
     expectRows: 5000,
-    thrashWidth: 40,
+    thrashWidth: ReaderPool.rowSizeMemoryMax * 2,
   ),
 ];
 

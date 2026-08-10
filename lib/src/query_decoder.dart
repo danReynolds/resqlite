@@ -331,7 +331,7 @@ int nextRowHint(int rowCount) => rowCount + (rowCount >> 2);
 /// Capped at [_schemaCacheMax] entries (matching the C-level statement cache)
 /// to bound memory for apps with dynamic SQL. On eviction, the oldest entry
 /// is removed (FIFO via insertion order of [LinkedHashMap]).
-const int _schemaCacheMax = 32;
+const int _schemaCacheMax = 128;
 final Map<String, CachedSchema> schemaCache =
     LinkedHashMap<String, CachedSchema>();
 
