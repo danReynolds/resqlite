@@ -3,8 +3,14 @@
 **Date:** 2026-08-09
 **Status:** Accepted
 **Direction:** `result-transfer-shape`, `stream-rerun-dispatch`
-**Benchmark Run:** none — focused AOT A/B, twenty-four alternating-order
-  lane-isolated passes in two collections of twelve, of
+**Benchmark Run:** Release headline suite re-captured at HEAD on 2026-08-09
+  (5-sample medians,
+  [`benchmark/results/2026-08-09T20-36-47-exp266-headline-refresh.md`](../benchmark/results/2026-08-09T20-36-47-exp266-headline-refresh.md)),
+  mapped to this experiment as the newest accepted milestone — the first
+  completed release run since exp 229, unblocked by `--skip-memory` and the
+  A11b `sqlite_async` arm exclusion (the exp 262 peer regression). The
+  decision itself rested on the focused AOT A/B: twenty-four
+  alternating-order lane-isolated passes in two collections of twelve, of
   [`benchmark/experiments/reader_dispatch_stickiness.dart`](../benchmark/experiments/reader_dispatch_stickiness.dart);
   full per-pass tables, drift verdicts and RSS in
   [`benchmark/results/2026-08-09T10-40-00Z-exp266-sticky-reader-dispatch.md`](../benchmark/results/2026-08-09T10-40-00Z-exp266-sticky-reader-dispatch.md).
