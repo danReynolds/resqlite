@@ -374,7 +374,7 @@ quiet host; the focused A/B remains the decision evidence.)
 
    ```bash
    dart run benchmark/run_release.dart expNNN-short-slug --repeat=5 \
-     --skip-memory --fail-on-regression --fail-on-memory-regression
+     --fail-on-regression --fail-on-memory-regression
    ```
 
    Label it `expNNN-...` so `generate_history.dart` maps it to the experiment
@@ -383,8 +383,10 @@ quiet host; the focused A/B remains the decision evidence.)
    Leave auto-compare on (no `--no-auto-compare`): it finds the previous
    anchor in `benchmark/results/` and compares your cross-repeat medians
    against the anchor's, with per-lane thresholds of
-   `max(10%, 3 × MAD, MDE_ci)`. `--skip-memory` stays until the exp 262
-   sqlite_async peer segfault is fixed.
+   `max(10%, 3 × MAD, MDE_ci)`. (The exp 262 peer segfault that briefly
+   forced `--skip-memory` traced to the un-pinned `sqlite3_connection_pool`
+   transitive, now pinned in `pubspec.yaml`; the flag remains available if
+   a peer breaks the suite again.)
 
    **A non-zero exit is the experiment-time regression net firing.** It means
    a lane moved beyond its own noise threshold, and it is **your job, in this

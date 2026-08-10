@@ -42,6 +42,15 @@ dev_dependencies:
   # catching incompatibility with newer releases.
   sqlite3: 3.5.0
   sqlite_async: 0.14.4
+  # sqlite_async's own dep is only caret-constrained (`^0.2.7`), and
+  # pubspec.lock is untracked, so this transitive floats on every fresh
+  # `pub get` even though the peers above are pinned exactly. 0.2.8/0.2.9
+  # refactored pool lifetime management and segfault under sqlite_async
+  # 0.14.4's concurrent watch load (exp 262's release-suite crash;
+  # `pkg_sqlite3_connection_pool_notify_updates` → strlen on a freed
+  # string). Pin to the last version the July runs proved good; drop the
+  # pin when sqlite_async ships a release built against the new contract.
+  sqlite3_connection_pool: 0.2.7
   # Drift is benchmarked as a peer (cross-library benchmark comparison).
   # `drift` is the runtime dep; `drift_dev` + `build_runner` regenerate
   # the `*_drift_db.g.dart` codegen files from the `@DriftDatabase`

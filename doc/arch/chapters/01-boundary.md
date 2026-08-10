@@ -49,6 +49,6 @@ The boundary's rules are narrow on purpose, and the rejections define their edge
 
 Wrapping blobs in the *batch* path regressed. The wrap's benefit comes from many independent round-trips each parking a fresh allocation on the heap while the writer is mid-step; one batch round-trip has no such pattern to relieve [[237.1]].
 
-Wrapping `selectBytes`' result bought nothing ([[bench:Select → JSON Bytes / Large payload (~650KB) / resqlite selectBytes() ~ 0.323 +-20%]]). Its bytes are already a view over a native buffer — there is no GC-heap destination to escape, so the wrap relocated one copy and added machinery [[242.1]].
+Wrapping `selectBytes`' result bought nothing ([[bench:Select → JSON Bytes / Large payload (~650KB) / resqlite selectBytes() ~ 0.24 +-20%]]). Its bytes are already a view over a native buffer — there is no GC-heap destination to escape, so the wrap relocated one copy and added machinery [[242.1]].
 
 And the question underneath all of these — is sacrifice worth keeping? — resisted answering for a long time because the obvious experiment is invalid. Alternating send and sacrifice inside one live pool measures a treatment that mutates the pool it runs in: each sacrifice clears caches and respawns workers, changing the conditions for the next sample. The answer only came from splitting the question into independent estimands and measuring each in isolation [[241.1]]. That methodological lesson generalized well beyond this subsystem.

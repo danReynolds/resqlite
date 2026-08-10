@@ -221,11 +221,7 @@ jobs:
 
       - name: Run benchmark suite
         continue-on-error: true
-        # --skip-memory: the sqlite_async peer segfaults inside the Memory
-        # scenario (exp 262 regression), which killed every suite run before
-        # any artifact was written — behind continue-on-error, silently.
-        # Drop the flag when the peer is fixed.
-        run: dart run benchmark/run_release.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary --no-auto-compare --skip-memory
+        run: dart run benchmark/run_release.dart "ci-${{ github.sha }}" --repeat=3 --hardware-summary --no-auto-compare
 
       - name: Run head-to-head
         continue-on-error: true
