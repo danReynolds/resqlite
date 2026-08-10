@@ -213,7 +213,7 @@ your change *first*, then run
 
 ```bash
 dart run benchmark/run_release.dart expNNN-slug --repeat=5 \
-  --skip-memory --fail-on-regression --fail-on-memory-regression
+  --fail-on-regression --fail-on-memory-regression
 ```
 
 and confirm `"gitDirty": false` in the `.json`. A run captured with the change
@@ -225,8 +225,10 @@ lane into a non-zero exit — the experiment-time regression net. On a non-zero
 exit, either fix the regressed lane before the verdict, or document the
 accepted variance (with reasoning) in the writeup's Results/Decision and keep
 the artifact. Never relabel, rerun-until-green, or drop the flags to clear a
-flag. `--skip-memory` stays until the exp 262 sqlite_async peer segfault is
-fixed.
+flag. (If the suite itself crashes in a peer, `--skip-memory` skips the
+scenario that historically hosted peer instability — the exp 262 segfault
+traced to the un-pinned `sqlite3_connection_pool` transitive, since pinned in
+`pubspec.yaml`.)
 
 ## Validating locally before pushing
 
