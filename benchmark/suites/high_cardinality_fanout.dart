@@ -14,7 +14,8 @@
 /// stream engine scales to the upper end of that range without
 /// falling over.
 ///
-/// Peers: resqlite, sqlite_async. sqlite3.dart excluded (no streams).
+/// Peers: resqlite, drift. sqlite3.dart excluded (no streams); sqlite_async
+/// excluded while its pool-notify segfault stands (exp 262 peer regression).
 ///
 /// ## History
 ///
@@ -112,7 +113,12 @@ Future<String> _runFanoutBenchmark({
   try {
     final peers = await PeerSet.open(
       tempDir.path,
-      require: (p) => p.hasStreams,
+      // sqlite_async excluded: its native pool's update-notification thread
+      // segfaults under this scenario's watch load — Dart_PostCObject on a
+      // freed string, the exp 262 peer regression. Both 2026-08-09 headline
+      // crashes trace to this arm (one mid-arm, one landing during the next
+      // scenario). Restore the arm when the peer is fixed.
+      require: (p) => p.hasStreams && p.name != 'sqlite_async',
       driftFactory: driftFactoryFor((exec) => HighCardFanoutDriftDb(exec)),
     );
     try {
