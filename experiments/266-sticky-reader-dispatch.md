@@ -123,8 +123,8 @@ percentages divide by an increasing execution count.
 The prediction the experiment was gated on is the actual result: the effect
 decays monotonically across `first4` → `first8` → `first32` → steady state, and
 by the eight-thousandth execution of one statement (`point1`) it is gone.
-`first4` and `first8` are faster in all 24 passes; `first32` is faster in 22 of
-24. In collection 2, all six pass-pairs for each of `first4` and `first8`
+`first4` and `first8` are faster in all 24 passes; `first32` is faster in 22 of 24
+passes. In collection 2, all six pass-pairs for each of `first4` and `first8`
 classify as REPRODUCED; four of six `first32` pairs reproduce and two reverse
 sign across the order flip, so the drift checker marks those two
 drift-suspected. Nothing about the per-read path changed, and the steady-state
