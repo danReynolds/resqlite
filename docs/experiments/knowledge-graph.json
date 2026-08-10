@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 56,
-    "totalEntries": 137
+    "entriesWithClaims": 57,
+    "totalEntries": 138
   },
   "experiments": [
     {
@@ -2127,6 +2127,17 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "267",
+      "title": "How many statements a connection can hold",
+      "file": "267-stmt-cache-capacity.md",
+      "date": "2026-08-10",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "accepted"
     }
   ],
   "claims": [
@@ -3216,6 +3227,45 @@
       "text": "Sticky reader dispatch does not regress stream fan-out: the stream-rerun-dispatch Tracelite preset (high-cardinality-fanout, keyed-pk-subscriptions, many-streams-writer-throughput) measured -10.7%/-20.5%/-7.5% elapsed against origin/main, none slower, with warmup guardrails all pointing down 36-53% (too noisy to classify individually). The keyed-PK -20.5% at p~1e-5 hints stream reruns themselves benefit from landing on a warm worker, but no stream win is claimed from a guard run.",
       "conditions": "Tracelite A/B, stream-rerun-dispatch direction preset, arm64 macOS; harness verdict 'inconclusive' only because the preset gates on a 43.5% improvement expectation",
       "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "267.1",
+      "source": "267",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Raising the three SQL-keyed read-path caps (`STMT_CACHE_MAX`, `_schemaCacheMax`, `ReaderPool.rowSizeMemoryMax`) from 32 to 128, together with in-place LRU-slot reclaim in `stmt_cache_insert`, is worth a reproduced -55.5% at 40 rotating distinct statements, -55.1% at 64 and -53.3% at 128, on a lane issuing 256 point reads per sample. Per read that is 14.0 us -> 6.1 us. The win is flat across 40-128 statements, which is the cliff signature; every lane inside the old cap (`rotate8`, `rotate24`, `rotate32`, `point1`) is neutral in two independent order-flipped collections, and peak RSS rises 0.8-1.2 MB.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · 4-worker pool · lane-isolated, 4 alternating-order passes, 51 samples/lane, two independent ab_drift_check pairs · host 62-72% idle · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "266.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "266.1"
+      ]
+    },
+    {
+      "id": "267.2",
+      "source": "267",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The statement cache's eviction compaction cost `(STMT_CACHE_MAX - 1) * ~1.6 KB` of `memmove` per prepare and dominated the capacity question. Raising the cap alone measured a reproduced +42.1% on `churn-unique` (256 never-repeated statements per sample); removing the compaction took the same lane to a reproduced -11.9%, an improvement over the 32-entry baseline. The compaction preserved no ordering that `stmt_cache_lookup_entry`'s promote-by-swap had not already given up.",
+      "conditions": "M1 Pro · AOT · `churn-unique` lane in `benchmark/experiments/stmt_cache_pressure.dart`, 4 alternating-order passes per candidate version · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "267.3",
+      "source": "267",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A bounded SQL-keyed cache returning the wrong entry is silent, not fatal: the caller receives a well-formed result belonging to a different statement. `test/stmt_cache_pressure_test.dart` gates this by pushing 400 distinct statements through every cache and checking each statement's identity from its result — the row it selects, the columns it projects, its parameter arity, and a stream's dependency capture after churn. Four of the five tests were verified to fail against a deliberately mismatched entry (a new `sqlite3_stmt` installed under the evicted entry's old SQL text).",
+      "conditions": "JIT `dart test`, 400 distinct statements against 128-entry caps · 2026-08",
       "state": "live"
     }
   ]
