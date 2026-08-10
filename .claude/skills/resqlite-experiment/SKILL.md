@@ -25,7 +25,14 @@ and those files feed the live charts on the GitHub Pages site
    fragment (`{file, title, impact, status, link}`). `experiments/README.md` is
    *generated* from those fragments — never hand-edit the README table.
 3. **At least one benchmark result file** — `benchmark/results/<ISO-timestamp>-<label>.md`
-   whose **filename timestamp's date** matches the experiment doc's `**Date:**`
+   whose **filename timestamp's date** matches the experiment doc's `**Date:**`.
+   For an **accepted experiment that ships runtime code** (`lib/`, `native/`,
+   `hook/`) this must be the headline release run from the committed
+   post-change tree with the regression gate on (see *A run only charts…*
+   below) — focused-harness output alone no longer satisfies the contract.
+   The focused A/B stays the decision evidence; the release run is the
+   no-collateral-damage sweep that catches regressions in lanes the A/B
+   didn't watch, at the moment they ship.
 
 If you're unsure whether a commit needs a benchmark result, it's because you
 ran `dart run benchmark/run_release.dart <label>` locally to validate. That
@@ -125,6 +132,16 @@ Run this mental (or literal) checklist:
 
 - [ ] `git status --short benchmark/results/` — is there an untracked result file?
 - [ ] Does that file's filename timestamp match `grep "^**Date:**" experiments/NNN-*.md`?
+- [ ] If accepted and it ships runtime code: did the headline release run exit
+      zero under `--fail-on-regression --fail-on-memory-regression`? If it
+      exited non-zero, every flagged lane needs one of three *written*
+      dispositions: fixed; accepted with the mechanism explained in the
+      writeup (no unexplained "accepted variance"); or — when no mechanism
+      connects it to your diff — characterized with a diagnostic repeat,
+      attributed (environment drift or an earlier merge), **filed as a
+      GitHub issue**, and recorded in `signals/entries/NNN.json`. Name the
+      flagged lanes and dispositions in the PR description. Never
+      rerun-until-green.
 - [ ] Is the experiment's README row in its own file,
       `experiments/index/NNN.json` (`{file, title, impact, status, link}`)?
       `README.md` is generated from these — don't hand-edit the table.
@@ -193,9 +210,23 @@ stamps `git status` into the result's `.json`; `index.html` hides any run
 flagged `gitDirty` — or single-sample (`--repeat=1`) — as a **gap**, so it
 never becomes a point (the trend line skips untrusted/thin numbers). Commit
 your change *first*, then run
-`dart run benchmark/run_release.dart expNNN-slug --repeat=5 --no-auto-compare`,
+
+```bash
+dart run benchmark/run_release.dart expNNN-slug --repeat=5 \
+  --skip-memory --fail-on-regression --fail-on-memory-regression
+```
+
 and confirm `"gitDirty": false` in the `.json`. A run captured with the change
 still unstaged lands in `history.json` but is silently dropped from the chart.
+Leave auto-compare on (no `--no-auto-compare`): it compares your cross-repeat
+medians against the previous anchor's with per-lane
+`max(10%, 3 × MAD, MDE_ci)` thresholds, and the `--fail-on-*` flags turn a 🔴
+lane into a non-zero exit — the experiment-time regression net. On a non-zero
+exit, either fix the regressed lane before the verdict, or document the
+accepted variance (with reasoning) in the writeup's Results/Decision and keep
+the artifact. Never relabel, rerun-until-green, or drop the flags to clear a
+flag. `--skip-memory` stays until the exp 262 sqlite_async peer segfault is
+fixed.
 
 ## Validating locally before pushing
 

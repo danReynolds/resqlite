@@ -93,7 +93,7 @@ Map<String, Object?> buildHistoryData({
     // the sidecar JSON, so read it once for both code paths.
     final content = file.readAsStringSync();
     final metrics = sidecar != null
-        ? artifactMetrics(sidecar)
+        ? artifactTrendMetrics(sidecar)
         : extractResqliteMedians(content);
     if (metrics.isEmpty) {
       print('  Skipping $basename (no resqlite metrics found)');

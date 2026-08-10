@@ -85,6 +85,7 @@ Future<void> main(List<String> args) async {
   // Filenames are fixed up front so each completed repeat can be persisted
   // into them as it lands.
   MemoryComparison? memoryComparison;
+  ReleaseComparison? releaseComparison;
 
   final runTimestamp = DateTime.now()
       .toIso8601String()
@@ -213,13 +214,28 @@ Future<void> main(List<String> args) async {
 
     final prevContent = baseline.file!.readAsStringSync();
     final prevName = baseline.fileName;
-    final comparison = generateReleaseComparison(
-      currentAggregates,
-      prevContent,
-      prevName,
-    );
-    markdown.writeln(comparison);
-    print(comparison);
+    // Prefer the baseline's cross-repeat aggregate medians over its
+    // representative-repeat tables: the representative repeat is one sample,
+    // and a noisy one on the baseline side reads as a phantom delta on every
+    // lane it wobbled.
+    final prevSidecar = loadReleaseArtifactSidecarForMarkdown(baseline.file!);
+    final prevTrend = prevSidecar == null
+        ? const <String, double>{}
+        : artifactTrendMetrics(prevSidecar);
+    releaseComparison = prevTrend.isNotEmpty
+        ? compareRelease(
+            currentAggregates,
+            prevTrend,
+            prevName,
+            previousSource: 'cross-repeat aggregate medians',
+          )
+        : compareRelease(
+            currentAggregates,
+            extractResqliteMedians(prevContent),
+            prevName,
+          );
+    markdown.writeln(releaseComparison.markdown);
+    print(releaseComparison.markdown);
 
     memoryComparison = compareMemory(representativeMarkdown, prevContent);
     if (memoryComparison.markdown.isNotEmpty) {
@@ -335,11 +351,30 @@ Future<void> main(List<String> args) async {
     );
   }
 
+  final regressionGateFailed = shouldFailOnRegressions(
+    failOnRegression: options.failOnRegression,
+    comparison: releaseComparison,
+  );
+  if (regressionGateFailed) {
+    print('');
+    print(
+      '!! Failing the run: --fail-on-regression was passed and the comparison '
+      'found regressions beyond per-lane noise thresholds:',
+    );
+    for (final name in releaseComparison!.regressedBenchmarks) {
+      print('   - $name');
+    }
+    print(
+      '   Either the change regressed the lane (fix it), or the variance is '
+      'accepted (document why in the experiment writeup).',
+    );
+  }
+
   // Force exit — persistent writer isolate and sqlite_async connections can
   // keep the event loop alive. The status has to be passed explicitly: setting
   // the global `exitCode` and then calling `exit(0)` discards it, which is how
   // the gate above shipped unable to fail anything.
-  exit(memoryGateFailed ? 1 : 0);
+  exit(memoryGateFailed || regressionGateFailed ? 1 : 0);
 }
 
 void _printHardwareSummary(Map<String, AggregateStats> metrics, String label) {
@@ -669,6 +704,7 @@ final class _RunAllOptions {
     required this.label,
     required this.repeatCount,
     required this.failOnMemoryRegression,
+    required this.failOnRegression,
     required this.compareToPath,
     required this.autoCompare,
     required this.hardwareSummary,
@@ -683,6 +719,12 @@ final class _RunAllOptions {
   /// per-benchmark threshold. Off by default so a local run still reports the
   /// regression without failing; CI opts in.
   final bool failOnMemoryRegression;
+
+  /// Exit non-zero when the wall-time comparison finds a lane beyond its
+  /// per-lane decision threshold (`max(10%, 3 × MAD, MDE_ci)`). Off by default
+  /// so a local run still reports; the experiment protocol opts in so a
+  /// regression is caught in the run that measures it, not weeks later.
+  final bool failOnRegression;
   final String? compareToPath;
   final bool autoCompare;
   final bool hardwareSummary;
@@ -704,6 +746,7 @@ _RunAllOptions _parseOptions(List<String> args) {
   var label = 'unlabeled';
   var repeatCount = 5;
   var failOnMemoryRegression = false;
+  var failOnRegression = false;
   String? compareToPath;
   var autoCompare = true;
   var hardwareSummary = false;
@@ -713,6 +756,8 @@ _RunAllOptions _parseOptions(List<String> args) {
   for (final arg in args) {
     if (arg == '--fail-on-memory-regression') {
       failOnMemoryRegression = true;
+    } else if (arg == '--fail-on-regression') {
+      failOnRegression = true;
     } else if (arg.startsWith('--repeat=')) {
       repeatCount = int.parse(arg.substring('--repeat='.length));
     } else if (arg.startsWith('--compare-to=')) {
@@ -742,6 +787,7 @@ _RunAllOptions _parseOptions(List<String> args) {
     label: label,
     repeatCount: repeatCount,
     failOnMemoryRegression: failOnMemoryRegression,
+    failOnRegression: failOnRegression,
     compareToPath: compareToPath,
     autoCompare: autoCompare,
     hardwareSummary: hardwareSummary,
@@ -754,7 +800,8 @@ void _printUsageAndExit() {
   print(
     'Usage: dart run benchmark/run_release.dart [label] [--repeat=N] '
     '[--compare-to=PATH] [--no-auto-compare] [--hardware-summary] '
-    '[--include-slow] [--skip-memory]',
+    '[--include-slow] [--skip-memory] [--fail-on-regression] '
+    '[--fail-on-memory-regression]',
   );
   print('');
   print('  --repeat=N           Run the suite N times (default: 5)');

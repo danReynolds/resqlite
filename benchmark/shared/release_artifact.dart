@@ -72,6 +72,31 @@ Map<String, double> artifactMetrics(Map<String, Object?> artifact) {
   return _doubleMap(artifact['metrics']);
 }
 
+/// Metrics a trend consumer (charts, anchor-to-anchor comparison) should read.
+///
+/// `metrics` holds the representative repeat's medians — one sample per lane.
+/// A multi-repeat run also carries `repeatAggregates`, whose per-lane `median`
+/// spans every completed repeat. Trends must prefer the aggregate: charting the
+/// representative repeat re-injects exactly the per-repeat noise the run paid
+/// N repeats to remove (a single tail repeat once read as a +27% regression on
+/// a lane whose cross-repeat medians had actually improved).
+Map<String, double> artifactTrendMetrics(Map<String, Object?> artifact) {
+  final repeats = artifact['repeatCount'];
+  final aggregates = artifact['repeatAggregates'];
+  if (repeats is int && repeats > 1 && aggregates is Map<String, Object?>) {
+    final medians = <String, double>{};
+    for (final entry in aggregates.entries) {
+      final value = entry.value;
+      if (value is Map<String, Object?>) {
+        final median = value['median'];
+        if (median is num) medians[entry.key] = median.toDouble();
+      }
+    }
+    if (medians.isNotEmpty) return medians;
+  }
+  return artifactMetrics(artifact);
+}
+
 Map<String, Object?>? artifactEnvironment(Map<String, Object?> artifact) {
   final value = artifact['environment'];
   return value is Map<String, Object?> ? value : null;

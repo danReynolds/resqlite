@@ -55,21 +55,82 @@ String renderRepeatStability(Map<String, AggregateStats> aggregates) {
   return buf.toString();
 }
 
+/// A release comparison's rendered table plus the verdict a caller can act on.
+///
+/// Same split the memory comparison got in [EXP-262]: the table has always
+/// named 🔴 regressions, but nothing could ever *fail* on one — which is how a
+/// lane can regress in the very run that measured it and still merge unnoticed.
+/// Exposing the counts is what makes [shouldFailOnRegressions] possible.
+final class ReleaseComparison {
+  const ReleaseComparison({
+    required this.markdown,
+    required this.wins,
+    required this.regressions,
+    required this.neutral,
+    required this.regressedBenchmarks,
+  });
+
+  final String markdown;
+  final int wins;
+  final int regressions;
+  final int neutral;
+
+  /// Benchmark names that regressed beyond their threshold, with the delta, in
+  /// the order they appear in the table.
+  final List<String> regressedBenchmarks;
+
+  bool get hasRegression => regressions > 0;
+
+  /// Nothing to compare (no shared lanes, or an unparseable side).
+  const ReleaseComparison.empty(this.markdown)
+    : wins = 0,
+      regressions = 0,
+      neutral = 0,
+      regressedBenchmarks = const [];
+}
+
+/// Whether a run should fail because of wall-time regressions. Mirrors
+/// [shouldFailOnMemory]; extracted so the decision is testable on its own.
+bool shouldFailOnRegressions({
+  required bool failOnRegression,
+  required ReleaseComparison? comparison,
+}) => failOnRegression && comparison != null && comparison.hasRegression;
+
+/// Render-only wrapper kept for callers that just want the table, comparing
+/// against the previous run's representative-repeat tables in [previousContent].
 String generateReleaseComparison(
   Map<String, AggregateStats> current,
   String previousContent,
   String previousFileName,
-) {
-  final previous = extractResqliteMedians(previousContent);
+) => compareRelease(
+  current,
+  extractResqliteMedians(previousContent),
+  previousFileName,
+).markdown;
 
+/// Compare current aggregates against a previous run's per-lane medians.
+///
+/// [previous] should be the previous run's cross-repeat aggregate medians
+/// (`artifactTrendMetrics`) when its sidecar exists — comparing against its
+/// representative-repeat tables instead puts one noisy repeat on the baseline
+/// side of every delta. [previousSource] names which of the two the caller
+/// supplied, so the rendered table says what it compared.
+ReleaseComparison compareRelease(
+  Map<String, AggregateStats> current,
+  Map<String, double> previous,
+  String previousFileName, {
+  String previousSource = 'representative-repeat tables',
+}) {
   if (current.isEmpty || previous.isEmpty) {
-    return '## Comparison\n\nCould not parse results for comparison.\n';
+    return const ReleaseComparison.empty(
+      '## Comparison\n\nCould not parse results for comparison.\n',
+    );
   }
 
   final buf = StringBuffer();
   buf.writeln('## Comparison vs Previous Run');
   buf.writeln();
-  buf.writeln('Previous: `$previousFileName`');
+  buf.writeln('Previous: `$previousFileName` ($previousSource)');
   buf.writeln();
   buf.writeln(
     '| Benchmark | Previous (ms) | Current med (ms) | Delta | Decision threshold | MDE_ci | Stability | Status |',
@@ -79,6 +140,7 @@ String generateReleaseComparison(
   var wins = 0;
   var regressions = 0;
   var neutral = 0;
+  final regressed = <String>[];
 
   final allKeys = current.keys.where(previous.containsKey).toList()..sort();
 
@@ -108,6 +170,9 @@ String generateReleaseComparison(
       status =
           '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
       regressions++;
+      regressed.add(
+        '$key (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(1)}%)',
+      );
     } else {
       status = stats.runs.length > 1 ? '⚪ Within noise' : '⚪ Neutral';
       neutral++;
@@ -155,7 +220,13 @@ String generateReleaseComparison(
   }
   buf.writeln();
 
-  return buf.toString();
+  return ReleaseComparison(
+    markdown: buf.toString(),
+    wins: wins,
+    regressions: regressions,
+    neutral: neutral,
+    regressedBenchmarks: regressed,
+  );
 }
 
 /// A memory comparison's rendered table plus the verdict a caller can act on.
