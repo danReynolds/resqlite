@@ -114,7 +114,12 @@ Future<String> runStreamingBenchmark() async {
           });
           final sw = Stopwatch()..start();
           await resqliteDb.execute(seedSql, ['inv_${counter++}', i]);
-          await reEmit.future.timeout(const Duration(seconds: 2));
+          // The deadline exists to abort a run whose emission never arrives,
+          // not to bound a sample — the stopwatch records whatever the real
+          // latency was. It must sit far above worst-case scheduling blips:
+          // a one-off late peer notification against a 2s deadline kills the
+          // entire multi-repeat run, not just the sample.
+          await reEmit.future.timeout(const Duration(seconds: 10));
           sw.stop();
           sqTiming.wallUs.add(sw.elapsedMicroseconds);
           sqTiming.mainUs.add(sw.elapsedMicroseconds);
@@ -142,7 +147,7 @@ Future<String> runStreamingBenchmark() async {
           });
           final sw = Stopwatch()..start();
           await asyncDb.execute(seedSql, ['inv_${counter++}', i]);
-          await reEmit.future.timeout(const Duration(seconds: 2));
+          await reEmit.future.timeout(const Duration(seconds: 10));
           sw.stop();
           asyncTiming.wallUs.add(sw.elapsedMicroseconds);
           asyncTiming.mainUs.add(sw.elapsedMicroseconds);
@@ -237,7 +242,7 @@ Future<String> runStreamingBenchmark() async {
 
           final sw = Stopwatch()..start();
           await resqliteDb.execute(seedSql, ['unread_${counter++}', i]);
-          await waitCanary.future.timeout(const Duration(seconds: 2));
+          await waitCanary.future.timeout(const Duration(seconds: 10));
           sw.stop();
           sqTiming.wallUs.add(sw.elapsedMicroseconds);
           sqTiming.mainUs.add(sw.elapsedMicroseconds);
@@ -298,7 +303,7 @@ Future<String> runStreamingBenchmark() async {
           waitCanary = Completer<void>();
           final sw = Stopwatch()..start();
           await asyncDb.execute(seedSql, ['unread_${counter++}', i]);
-          await waitCanary.future.timeout(const Duration(seconds: 2));
+          await waitCanary.future.timeout(const Duration(seconds: 10));
           sw.stop();
           asyncTiming.wallUs.add(sw.elapsedMicroseconds);
           asyncTiming.mainUs.add(sw.elapsedMicroseconds);
