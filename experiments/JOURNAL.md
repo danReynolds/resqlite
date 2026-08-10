@@ -1112,6 +1112,82 @@ When picking work, grep old rejections for the instrument they asked for, and
 treat "we could not measure it" as a live candidate rather than a settled
 verdict.*
 
+### A "floor" that has never been measured is a decision, not a floor
+
+"Below the round-trip floor" closed candidates in this repo for months — exp
+258's sub-threshold columnar transfer, exp 264's remaining point-read cost, the
+premise behind exps 209 and 239 both trying to *amortise* the hop across several
+queries. [Exp 265](265-inline-main-isolate-select.md) priced it by removing it:
+on a six-column point read the isolate round trip was 6.3 us of an 8.4 us read.
+The floor was real and it was most of the operation — so every candidate
+rejected against it had been compared to a denominator four times larger than
+the work it was actually competing with. The candidate that produced the number
+was itself rejected; the number outlived it.
+
+*Reapplies whenever a rejection cites a fixed cost the experiment did not itself
+measure. Two questions separate a floor from an unexamined assumption: how large
+is it against the thing being optimised, and what makes it fixed? A cost that is
+fixed only because nobody has tried to remove it is a candidate — and pricing it
+is worth doing even when the thing that prices it does not ship.*
+
+### A safety property must be enforced, not predicted
+
+[Exp 265](265-inline-main-isolate-select.md) shipped two guards and they failed
+differently. A row cap that aborts mid-decode and falls back to a worker is
+correct whether or not the prediction in front of it was right — it cost +24.7%
+on the one execution that tripped it, once per statement, and it is the part of
+the design that survived. An *eligibility test* that admits a statement based on
+what it returned before is correct only when the prediction holds, and it did
+not hold along three independent axes: one row can hold a 5 MB blob, `count(*)`
+returns one row after unbounded work, and cost varies per execution of the same
+statement so no per-SQL history repairs it. The fix was never a better
+predictor. It was two more enforcement points — `sqlite3_column_bytes` before
+the copy, `sqlite3_progress_handler` every N VM steps — after which the
+prediction stops being load-bearing and becomes what it is good at: avoiding
+wasted aborts.
+
+*Reapplies to any admission test, routing rule, cache-eligibility check or fast
+path gated on a learned signal. Ask what happens when the signal is wrong, and
+whether the answer is "it costs some work" or "it violates the property the
+system promises". If the latter, the signal is in the wrong place — move the
+guard to where the truth is known, even if that means starting work you may have
+to abandon.*
+
+### A guard set built from the lanes you have tests the hypothesis you believe
+
+[Exp 265](265-inline-main-isolate-select.md) wrote nine lanes, declared kill
+conditions, and met all of them — then was rejected on failure modes no lane
+could see. Every lane was small integers and short TEXT, indexed lookups, a hot
+page cache, because those were the shapes the surrounding experiments had built
+harnesses for. Every kill condition tested whether the row-count hint was
+*wrong*, which was the one failure mode the row cap already handled. The three
+that mattered needed lanes that did not exist — a one-row 5 MB blob read, a
+`count(*)` over a large table, a frame-shaped workload — and nobody builds those
+while the happy path is reading −75%.
+
+*Reapplies before declaring kill conditions, not after. Write them from the
+mechanism's failure modes rather than from the available lanes, and if a failure
+mode has no lane, that is the next thing to build — a guard set inherited from
+the previous experiment measures the previous experiment's risk.*
+
+### Measure a scheduling change under contention, or measure half of it
+
+Exps 244, 245 and 246 measured cross-isolate transfer carefully — a prepared-
+result barrier for the intrinsic cost, an 8-request/4-worker burst for pool
+capacity — and every lane held the request population constant.
+[Exp 265](265-inline-main-isolate-select.md) found the other half: a point read
+issued while four large reads occupy the pool costs 533-1169 us against 37-52 us
+for one that skips the queue, a 19x difference that is entirely admission and
+nothing to do with transfer. The same run's guard lane inverted the expected
+trade — eight concurrent point reads are 70% *faster* run serially on one
+isolate than four-wide across the pool, because parallelism cannot recover a
+per-request overhead larger than the request.
+
+*Reapplies to any dispatch, queueing, batching or pool-sizing change. A lane
+that has the resource to itself measures latency; a lane that contends for it
+measures what a caller actually waits for. Run both, and expect them to disagree
+about how large the effect is.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

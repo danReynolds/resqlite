@@ -23,6 +23,7 @@ Current experiments:
 - [pool_size.dart](pool_size.dart)
 - [pool_vs_exit.dart](pool_vs_exit.dart)
 - [row_map_facade.dart](row_map_facade.dart)
+- [select_inline_dispatch.dart](select_inline_dispatch.dart)
 - [select_rows_text_decode.dart](select_rows_text_decode.dart)
 - [resultset_foreach_consumer.dart](resultset_foreach_consumer.dart)
 - [single_stream_long_payload_hash.dart](single_stream_long_payload_hash.dart)
