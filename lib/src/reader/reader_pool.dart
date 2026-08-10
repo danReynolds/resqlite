@@ -66,7 +66,7 @@ final class ReaderPool {
 
   /// How many SQL strings the pool remembers a result size for. Matches the
   /// per-worker schema cache and the C statement cache.
-  static const int _rowHintMax = 32;
+  static const int rowSizeMemoryMax = 128;
 
   /// How large a result each SQL produces, sized on the request so a worker can
   /// allocate its result buffer in one shot
@@ -129,7 +129,7 @@ final class ReaderPool {
   /// statement loses only its initial-allocation mark, worth under a microsecond
   /// per read; a large one loses the growth hint, worth roughly 40% of its read.
   /// Small statements are also the overwhelming majority in any application with
-  /// more than [_rowHintMax] distinct queries, so without this preference
+  /// more than [rowSizeMemoryMax] distinct queries, so without this preference
   /// point-read churn evicts precisely the entries that matter. Reordering by
   /// recency does not help — the slots being shared is the problem, not the order
   /// they are reclaimed in.
@@ -137,7 +137,7 @@ final class ReaderPool {
   /// Falls back to insertion order when every entry has proven large, which is
   /// the best available when no victim is cheap.
   ///
-  /// O([_rowHintMax]), and only on a miss that overflows — never per read.
+  /// O([rowSizeMemoryMax]), and only on a miss that overflows — never per read.
   String _evictionVictim() {
     for (final entry in _rowHints.entries) {
       if (entry.value.highWater <= initialResultRows) return entry.key;
@@ -154,7 +154,7 @@ final class ReaderPool {
       return;
     }
     _rowHints[sql] = RowSizeMemory()..record(rowCount);
-    if (_rowHints.length > _rowHintMax) {
+    if (_rowHints.length > rowSizeMemoryMax) {
       _rowHints.remove(_evictionVictim());
     }
   }

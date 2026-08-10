@@ -1,5 +1,10 @@
 // Focused workload for exp 248 — `stmt_cache_lookup_entry` move-to-back swap.
 //
+// NOTE: exp 267 raised `STMT_CACHE_MAX` from 32 to 128 and replaced the
+// eviction memmove with in-place reclaim. The description below is the
+// code this harness was written against; re-run it against current main
+// only with that in mind.
+//
 // The C-side per-connection statement cache (`STMT_CACHE_MAX = 32`) keeps its
 // MRU entry at `entries[count - 1]`. Before exp 248, a lookup that matched any
 // other slot promoted it by swapping structs:
