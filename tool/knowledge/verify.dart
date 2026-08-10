@@ -210,8 +210,11 @@ Future<void> _applyFixes(
       }
       final old = r.pin.raw;
       // Replace only the expectation, preserving the target and any tolerance.
+      // The expectation match must be numeric: a metric key can itself contain
+      // `~` (e.g. `Large payload (~650KB)`), and a first-`~` match swallows
+      // the key from there to the tolerance.
       final updated = old.contains('~')
-          ? old.replaceFirst(RegExp(r'~\s*[^+]+\s*\+-'), '~ $actual +-')
+          ? old.replaceFirst(RegExp(r'~\s*[-0-9.eE]+\s*\+-'), '~ $actual +-')
           : old.contains('@')
           ? '${old.substring(0, old.lastIndexOf('@'))}@$actual]]'
           : '${old.substring(0, old.indexOf('='))}=$actual]]';
