@@ -27,6 +27,8 @@ Current experiments:
 - [select_rows_text_decode.dart](select_rows_text_decode.dart)
 - [resultset_foreach_consumer.dart](resultset_foreach_consumer.dart)
 - [single_stream_long_payload_hash.dart](single_stream_long_payload_hash.dart)
+- [stmt_cache_init.dart](stmt_cache_init.dart)
+- [stmt_cache_pressure.dart](stmt_cache_pressure.dart)
 - [stream_scheduler.dart](stream_scheduler.dart)
 
 Use these when tuning internals, not when producing the headline package comparison.

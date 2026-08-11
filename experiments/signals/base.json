@@ -329,10 +329,10 @@
           "blockedOn": "Exp 251 measures worker-side decode/result construction, not application cell consumption. Needs a representative downstream AOT full-consumer workload where many INTEGER cells are actually read, main-isolate consumption is material, and columnar-vs-flat Row dispatch leaves TEXT and mixed paths neutral."
         },
         {
-          "idea": "measure distinct-SQL churn against ReaderPool._rowHintMax (32) in a representative app trace; an evicted row-size entry loses both exp 260's growth hint and exp 264's high-water mark, so cap thrash silently reverts both wins",
+          "idea": "measure distinct-SQL churn against ReaderPool.rowSizeMemoryMax (128 after exp 267) in a representative app trace; an evicted row-size entry loses both exp 260's growth hint and exp 264's high-water mark, so cap thrash silently reverts both wins",
           "addedDate": "2026-08-06",
           "addedAfter": "264",
-          "blockedOn": "needs a representative downstream statement mix; the repo's suites use a handful of SQL strings and cannot thrash a 32-entry cap"
+          "blockedOn": "needs a representative downstream statement mix; the repo's suites use a handful of SQL strings and cannot thrash the current 128-entry cap"
         },
         {
           "addedDate": "2026-08-10",
