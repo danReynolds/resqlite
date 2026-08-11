@@ -159,7 +159,15 @@ final class Database {
     final handle = await _openNativeDatabase(
       path: path,
       encryptionKey: encryptionKey,
-      readerCount: readerCount,
+      // One connection past the pool. The extra one belongs to the calling
+      // isolate, which runs small reads on it directly rather than sending
+      // them to a worker, under caps that abandon the attempt the moment it
+      // stops being small
+      // ([EXP-269](../../experiments/269-enforced-inline-reads.md); see
+      // [select] for the user-visible statement of that). It must not be
+      // shared with a worker, since reader connections are opened
+      // `SQLITE_OPEN_NOMUTEX`.
+      readerCount: readerCount + 1,
       extensions: extensions,
     );
 
@@ -218,8 +226,16 @@ final class Database {
   /// buffer — accessing `row['column']` is a hash lookup, not a map copy.
   /// Use `Map<String, Object?>.from(row)` if you need a mutable copy.
   ///
-  /// Runs on a background worker isolate. The main isolate only receives
-  /// the finished result.
+  /// Runs on a background worker isolate, with one exception: a statement the
+  /// pool has watched twice and never seen return more than 64 rows runs on the
+  /// calling isolate instead, because at that size the isolate round trip costs
+  /// several times what the query does
+  /// ([EXP-269](../../experiments/269-enforced-inline-reads.md)). Such a read
+  /// is capped at 64 rows, 64 KB of text and blob content, and 10,000 SQLite VM
+  /// steps, and exceeding any of those hands it back to a worker mid-flight, so
+  /// a query that turns out not to be small cannot hold this isolate. A run of
+  /// them is capped too, at 1 ms per event-loop turn. Results are identical
+  /// either way; building with `-DRESQLITE_INLINE_ROW_MAX=0` disables it.
   ///
   /// Throws a [ResqliteQueryException] if the SQL is malformed.
   ///
@@ -617,6 +633,17 @@ final class Database {
     );
   }
 }
+
+/// The [ReaderPool] [db] built for itself, for tests that need to assert on
+/// pool state rather than on query results.
+///
+/// A top-level function rather than a member, because `lib/resqlite.dart`
+/// exports `Database` wholesale and a member would be public API. Prefer this
+/// over spawning a second pool over the same handle in a test: the pools would
+/// share reader connections, which are `SQLITE_OPEN_NOMUTEX`, so two isolates
+/// could step the same one.
+Future<ReaderPool> debugReaderPoolOf(Database db) async =>
+    (await db._runtime).readerPool;
 
 typedef _DatabaseRuntime = ({
   ReaderPool readerPool,

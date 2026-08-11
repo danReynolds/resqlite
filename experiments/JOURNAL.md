@@ -1188,6 +1188,48 @@ that has the resource to itself measures latency; a lane that contends for it
 measures what a caller actually waits for. Run both, and expect them to disagree
 about how large the effect is.*
 
+## A safety property must be enforced, not predicted — and enforcement is often cheaper than the predictor
+
+[Exp 239](239-select-overflow-batching.md) tried to bound a read's cost from
+queue depth and [exp 265](265-inline-main-isolate-select.md) from a per-SQL
+row-count history; both were rejected, and exp 265 generalised the pair
+correctly — nothing about a query's *shape* or its *position in a queue* bounds
+its cost, because the expensive part can precede the first row and can hide
+inside a single cell. What that generalisation did not say, and what
+[exp 269](269-enforced-inline-reads.md) found, is that the conclusion is not
+"stop trying to route reads". It is "stop trying to *classify* them". The
+quantities that actually bound the work — rows produced, bytes about to be
+copied, VDBE opcodes executed — are all readable while the query runs, and
+checking them turned out to be three comparisons and a progress handler, less
+code than the predictor they replaced. The design that ships is the one where
+being wrong about a statement costs speed and nothing else: if every hint the
+pool held were wrong, every attempt would abort and the library would behave
+exactly as it does today.
+
+*Reapplies whenever an optimization is gated on a guess about a workload —
+cache admission, prefetch, speculative execution, routing, batching. Ask what
+the guess is protecting against, then ask whether that thing is observable
+while it happens. If it is, the guess stops being load-bearing and becomes an
+optimization you are allowed to get wrong.*
+
+## Build your guard lanes from the failure mode, not from the example in the writeup
+
+Exp 265 named `SELECT count(*) FROM huge_table` as the canonical shape whose
+work precedes its first row. SQLite answers a bare `count(*)` with one
+`OP_Count` opcode whatever the table size, so it is genuinely cheap and a guard
+lane built from that literal query tests nothing —
+[exp 269](269-enforced-inline-reads.md) had to reach for a count with a
+predicate and an unindexed `ORDER BY ... LIMIT` before anything tripped. The
+prior writeup was right about the *category* and wrong about the *instance*,
+which is the normal case: the category was reasoned about, the instance was
+typed from memory.
+
+*Reapplies to every guard lane inherited from a prior experiment's prose. Run
+it once and confirm it fails against the build it is supposed to catch, before
+trusting that it passes against the build you are shipping — the same
+negative-control discipline [exp 267](267-stmt-cache-capacity.md) established
+for tests, applied to benchmark lanes.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

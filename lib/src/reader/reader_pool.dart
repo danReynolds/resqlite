@@ -35,9 +35,24 @@ import 'read_worker.dart';
 /// busy, callers wait until one becomes available (finishes its query or
 /// respawns after sacrifice).
 final class ReaderPool {
-  ReaderPool._(this._workers);
+  ReaderPool._(this._workers, this._dbHandleAddr, this._inlineReaderId);
 
   final List<_WorkerSlot> _workers;
+
+  /// The native `resqlite_db*`, kept so [_selectInline] can call into it from
+  /// the main isolate without going through a worker.
+  final int _dbHandleAddr;
+
+  /// The reader connection reserved for [_selectInline]
+  /// ([EXP-269](../../../experiments/269-enforced-inline-reads.md)).
+  ///
+  /// One past the last worker's, and no worker is ever given it. The
+  /// connections are `SQLITE_OPEN_NOMUTEX`, so main and a worker stepping the
+  /// same one concurrently would be a data race — and a worker's own slot is
+  /// not safe to borrow even when the pool believes it idle, because the reply
+  /// that frees the slot is sent *before* the worker's `finally` releases the
+  /// connection.
+  final int _inlineReaderId;
 
   /// Where [_dispatch]'s next scan starts
   /// ([EXP-266](../../../experiments/266-sticky-reader-dispatch.md)).
@@ -63,6 +78,33 @@ final class ReaderPool {
   /// per connection, so it has no such requirement.
   int _preferred = 0;
   bool _closed = false;
+
+  /// Reads this pool ran on the main isolate, reads it started there and handed
+  /// back to a worker, and reads it declined to start
+  /// ([EXP-269](../../../experiments/269-enforced-inline-reads.md)).
+  ///
+  /// Which route a `select()` took is otherwise unobservable — the result is
+  /// identical either way, which is the point — so the routing tests have
+  /// nothing else to assert on. Exactly one of the first two is incremented per
+  /// inline attempt that reached SQLite: one field increment against a read
+  /// costing microseconds.
+  int inlineSelectTotal = 0;
+  int inlineAbortTotal = 0;
+
+  /// Reads that were eligible but ran on a worker because the current
+  /// event-loop turn had already spent [inlineTurnBudgetUs] inline.
+  int inlineTurnYieldTotal = 0;
+
+  /// Wall time this event-loop turn has spent inside [_selectInline].
+  ///
+  /// Running rather than reset per read: what has to be bounded is the whole
+  /// uninterrupted stretch, since nothing between two awaited inline reads
+  /// returns to the event loop. Started by the first inline read of a turn and
+  /// retired by a zero-duration [Timer], which by construction cannot fire
+  /// until the microtask queue has drained — the exact boundary the budget is
+  /// about.
+  final Stopwatch _turnWatch = Stopwatch();
+  bool _turnOpen = false;
 
   /// How many SQL strings the pool remembers a result size for. Matches the
   /// per-worker schema cache and the C statement cache.
@@ -110,8 +152,12 @@ final class ReaderPool {
 
   int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
 
+  /// Spawns [count] worker isolates over reader connections `0 ..= count - 1`.
+  ///
+  /// The native handle must have been opened with `count + 1` readers: the last
+  /// one belongs to the main isolate ([_inlineReaderId]).
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
-    final pool = ReaderPool._([]);
+    final pool = ReaderPool._([], dbHandleAddr, count);
     final slots = List.generate(
       count,
       (i) => _WorkerSlot(pool._notifyAvailable, i),
@@ -166,6 +212,76 @@ final class ReaderPool {
     }
   }
 
+  /// Retire the current inline turn. Scheduled as a zero-duration [Timer], so
+  /// it runs when the event loop next gets control — never during a microtask
+  /// chain, which is what the budget exists to bound.
+  void _endInlineTurn() {
+    _turnOpen = false;
+    _turnWatch.stop();
+  }
+
+  /// Run [sql] on the main isolate instead of sending it to a worker
+  /// ([EXP-269](../../../experiments/269-enforced-inline-reads.md)).
+  ///
+  /// Returns null when the query was not attempted, or was attempted and
+  /// abandoned; in either case the caller dispatches it normally. The whole
+  /// body is synchronous — that is the point, since the round trip it removes
+  /// is a scheduling cost rather than a computational one — which is also what
+  /// makes borrowing [_inlineReaderId] safe: no worker can be handed a request
+  /// while this runs, because handing one out happens on this isolate too.
+  ///
+  /// Three reasons not to attempt, none of them load-bearing for safety:
+  ///
+  ///  * the pool has watched the statement fewer than twice
+  ///    ([RowSizeMemory.initialRows] is 0 until then), because one observation
+  ///    cannot tell a point read from the small leg of a `LIMIT ?`;
+  ///  * it has ever returned more than [inlineRowMax] rows, or has already
+  ///    aborted an inline attempt, so trying again would waste the work twice;
+  ///  * this event-loop turn has already spent its inline budget, in which case
+  ///    dispatching is the *point* rather than a fallback — awaiting a worker
+  ///    parks on a message from another isolate and hands the event loop back.
+  ///
+  /// If all three are wrong the read still cannot overrun, because
+  /// [executeQueryInline] enforces its caps against the rows, bytes and opcodes
+  /// the query actually produces.
+  List<Map<String, Object?>>? _selectInline(
+    String sql,
+    List<Object?> parameters,
+    RowSizeMemory memory,
+  ) {
+    if (memory.initialRows == 0 ||
+        memory.highWater > inlineRowMax ||
+        memory.inlineDisqualified) {
+      return null;
+    }
+    if (!_turnOpen) {
+      _turnOpen = true;
+      _turnWatch
+        ..reset()
+        ..start();
+      Timer.run(_endInlineTurn);
+    } else if (_turnWatch.elapsedMicroseconds >= inlineTurnBudgetUs) {
+      inlineTurnYieldTotal++;
+      return null;
+    }
+    final raw = executeQueryInline(
+      _dbHandleAddr,
+      _inlineReaderId,
+      sql,
+      parameters,
+      memory.hint,
+      memory.initialRows,
+    );
+    if (raw == null) {
+      inlineAbortTotal++;
+      memory.inlineDisqualified = true;
+      return null;
+    }
+    inlineSelectTotal++;
+    memory.record(raw.rowCount);
+    return raw.toResultSet();
+  }
+
   /// Execute a query on the next available worker.
   Future<List<Map<String, Object?>>> select(
     String sql, [
@@ -173,6 +289,12 @@ final class ReaderPool {
     int? traceCorrelationId,
   ]) async {
     final memory = _rowHints[sql];
+    if (memory != null && !_closed) {
+      final inline = _selectInline(sql, parameters, memory);
+      // No `materializeCells`: the inline decode wraps nothing, because the
+      // byte cap is below the threshold at which a cell would be wrapped.
+      if (inline != null) return inline;
+    }
     final result = await _dispatch(
       SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
       memory,

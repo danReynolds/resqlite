@@ -1,0 +1,102 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "`tool/knowledge/impact.dart origin/main` reports no recorded belief retired by this range, and that is the correct reading: exp 269 does not contradict exp 265's measurements, it removes the condition they were rejected under. Every wall-time claim exp 265 recorded (265.1 through 265.5) still stands, was re-measured here at similar magnitudes on a post-266 base, and is now shipping. What changes is 265.6, the rejection itself — and it changes by having its own named remedy built rather than by being wrong.",
+    "The belief that mattered and has moved is about *method*, not about resqlite. Exp 239 could not encode query cost in queue depth; exp 265 could not encode it in row count; and exp 265's own generalisation was that no signal derived from a query's shape or queue position bounds its cost, because the expensive part can precede the first row and can hide inside one cell. That is still true, and it is no longer a reason not to route reads, because the signals SQLite computes while running — column bytes, VM steps — turn out to be sufficient on their own. A design does not need a cost predictor if it has a cost *ceiling*. Anyone reading exp 239's or exp 265's rejections for guidance should read them as 'this admission test is unsound', not as 'read routing is closed'.",
+    "One documented passage is now standing on something that moved: exp 265's writeup says the successor 'needs byte and VM-step caps beside it ... plus an answer to microtask coalescing that neither provides. A candidate that solves two of the three is not ready.' All three are solved and the third — the one it called a design question with no obvious cheap answer — measured *better* than the status quo. Its `## Future work` note that stream reruns 'inherit all three problems' is the passage to re-read: two of the three do not apply to a hash-only re-query, so the argument against `selectIfChanged` needs rewriting rather than citing.",
+    "A second passage that moved is exp 265's naming of `SELECT count(*) FROM huge_table` as the canonical unbounded-work shape. SQLite answers a bare `count(*)` with a single `OP_Count` opcode whatever the table size, so it is genuinely cheap and correctly runs inline. The shape is real but the example is wrong; a filtered count or an unindexed sort is what the VM-step cap actually catches, and a guard set built from the literal example would have tested nothing."
+  ],
+  "claims": [
+    {
+      "id": "269.1",
+      "text": "A safety property enforced against work in flight makes a cost *predictor* unnecessary. Routing a `select()` to the calling isolate is sound when the read is capped at 64 rows, 64 KB of TEXT/BLOB payload and 10,000 VDBE opcodes, each checked against what the query is producing and each aborting into an ordinary worker dispatch. The pool's per-SQL row high-water mark survives as an optimization only: it decides whether an attempt is worth making, and if every hint it gave were wrong the caps would abort every attempt and the library would behave exactly as it does today, slower by the wasted decode. Verified by removing the byte and VM-step enforcement, which fails the three cap tests on the routing counter while they still pass on the returned data.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · `select()` only; `selectBytes` and `tx.select` unchanged · caps are compile-time (`RESQLITE_INLINE_*`)",
+      "edges": [
+        {
+          "type": "supersedes",
+          "target": "265.6"
+        },
+        {
+          "type": "dependsOn",
+          "target": "265.4"
+        }
+      ]
+    },
+    {
+      "id": "269.2",
+      "text": "An unbudgeted chain of inline reads costs two entire dropped 60 Hz frames, and a 1 ms per-event-loop-turn budget makes worst-case frame lateness BETTER than dispatch. Measured on a lane that issues awaited point reads continuously for 50 ms while a 16667 us timer runs, reporting the worst lateness that timer suffers: dispatch 2381 us, budgeted inline 1147 us (-45%, reproduced in six order-flipped verdicts), and a build identical to the candidate except that the budget is unreachable 33,344 us — two frame intervals to within 10 us, i.e. every deadline in the sample missed. Budgeted inline wins because the dispatch arm answers ~6,000 reads in the window and every reply is a port message whose microtask chain competes with the timer. The budget costs 2.8% of the throughput win (410 us vs 399 us on `point1`).",
+      "conditions": "M1 Pro · AOT · `frame-jitter` lane, 50 ms of continuous awaited point reads · 3 collections x 2 order-flipped pairs · budget is a whole-turn stopwatch, so unrelated application work in the turn also consumes it",
+      "edges": [
+        {
+          "type": "refutes",
+          "target": "265.6"
+        }
+      ]
+    },
+    {
+      "id": "269.3",
+      "text": "`SQLITE_OMIT_PROGRESS_CALLBACK` was in resqlite's build defines, so the enforcement point exp 265 named did not exist in the shipped library; removing it is below the measurement floor. A build differing from `origin/main` only by that flag measures -0.31% on `point1`, +0.07% on `page64` and -2.19% on `int20-10k` over four order-flipped passes — the lane running by far the most opcodes comes out FASTER, which added work cannot produce. SQLite's VDBE reaches the check only at jump-back opcodes and sets `nProgressLimit = LARGEST_UINT64` when no handler is installed, so the compiled-in cost is one 64-bit compare per loop-back, not a per-opcode test.",
+      "conditions": "M1 Pro · AOT · four order-flipped passes, four lanes · sqlite3mc 2.3.5 (SQLite 3.53.2) · measured with no progress handler installed on any connection",
+      "edges": []
+    },
+    {
+      "id": "269.4",
+      "text": "A SQLite progress handler cannot be a Dart callback on this code path. The handler fires inside `sqlite3_step`, which the decoder enters through `resqlite_step_row` declared `isLeaf: true`, and a leaf call cannot re-enter Dart — the VM aborts the process with `Cannot invoke native callback from a leaf call`. The abort decision has to live in C. Two further mechanics are load-bearing for any reuse: `SQLITE_STMTSTATUS_VM_STEP` accumulates over a cached prepared statement's whole life and the handler fires on multiples of its interval, so a per-execution budget must reset the counter or a cheap statement aborts spuriously once every `budget / steps-per-execution` executions; and the handler is per-connection, so it must be removed after the read rather than left installed.",
+      "conditions": "Dart 3.12.2 · applies to any `@Native(isLeaf: true)` binding that can trigger a SQLite callback (progress, authorizer, busy, preupdate) · verified by process abort, not inferred",
+      "edges": []
+    },
+    {
+      "id": "269.5",
+      "text": "A cap check in the shared decode loop is worth writing as an unconditional compare against a sentinel rather than a guarded one. `inlineByteCap != 0 && (inlineBytes += len) > inlineByteCap` executes on every TEXT and BLOB cell of every worker read, and on a 1,000-row four-TEXT-column control lane it measured +4.5% and +4.6% in two collections. Passing a `noInlineCap = 1 << 62` sentinel so the guard is one unconditional add-and-compare took the same lane to +2.8%. The residue is at the 3% floor and is not separable from binary layout: the same lane reads +34.9% in one pass of a comparison between two binaries that differ only by a compile flag, so it cannot resolve an effect this size.",
+      "conditions": "M1 Pro · AOT · `mixed6-1k` (1,000 rows x canonical 6-column row) · `int20-10k`, which decodes 10x as much through the INTEGER arm that has no byte check, is within +/-2.1% in all three collections",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "265.1"
+        }
+      ]
+    },
+    {
+      "id": "269.6",
+      "text": "A bare `SELECT count(*)` is not the unbounded-work shape it is usually cited as. SQLite answers it with one `OP_Count` opcode regardless of table size, so over 20,000 rows it runs well inside a 10,000-opcode budget and correctly routes to the calling isolate. The shapes that actually spend unbounded work before producing their first row are a count with a predicate (`WHERE ... LIKE`, a full scan) and an unindexed `ORDER BY ... LIMIT` (a full sort), both of which the VM-step cap aborts. Any guard set for work-before-first-row must use one of those.",
+      "conditions": "sqlite3mc 2.3.5 (SQLite 3.53.2) · 20,000-row table, no index on the filtered column · verified by routing counter, both directions",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.6"
+        }
+      ]
+    },
+    {
+      "id": "269.7",
+      "text": "The release suite's auto-compare anchor is the most recent file in `benchmark/results/`, which makes a stale anchor an ordinary and silent failure mode rather than an exotic one. Exp 269's first sweep compared against exp 266's headline refresh — two days and two merged experiments back — and flagged four lanes at +15.4% to +53.1%, none of them reachable from the diff (`selectBytes` opts out of inline routing, two are writer-connection lanes, one is a `selectIfChanged` hash pass that decodes nothing). A baseline captured from the actual parent commit on the same host minutes earlier cleared all four: 1 win, 0 regressions, 168 neutral. Two contributing mechanics: exp 267's merged statement-cache change sat between the two anchors, and a focused-harness receipt committed under the same date sorts ahead of the release artifact and shadows it as the anchor.",
+      "conditions": "M1 Pro · macOS 26.2 · `run_release.dart --repeat=5 --skip-memory --fail-on-regression` · anchor two merged experiments old · host under concurrent load",
+      "edges": []
+    },
+    {
+      "id": "269.8",
+      "text": "Reserving a reader connection for the calling isolate costs +0.8 to +1.2 MB of peak RSS against a ~30 MB floor, and 16 KiB on the exp 185 `JSON buffer reclaim` release guard (64.0 -> 80.0 KiB against a 512 KiB budget). The second number is the more useful one because it is exactly attributable: one connection's initial 16 KB `json_buf` (exp 183), a floor rather than retention, and unaffected by the reclaim path because `selectBytes` opts out of inline routing. Exp 266's signal named this guard as the thing to run early when changing which connection serves what; it applies equally to adding a connection.",
+      "conditions": "M1 Pro · release suite `--repeat=5 --skip-memory` against a same-host parent-commit baseline · pool of 4 workers + 1 inline connection · maxRss via exp 261's probe on the focused lanes",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "265.5"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/select_inline_dispatch.dart` is now complete as a routing gate and its lane roles are worth preserving exactly. `frame-jitter` is the important addition and the only lane in the repo that measures latency-under-load rather than throughput: it reports the worst lateness a 60 Hz timer suffers during a 50 ms read burst, and it is the lane that can reject a routing change on jank while every throughput lane improves. `blob1-5mb` and `scan-count` are inert by design once enforcement works — they exist so that a future candidate which quietly stops enforcing shows up as a large win on them rather than as nothing. Pair any change to them with the routing counters in `test/inline_read_routing_test.dart`, because a wall-time harness cannot tell 'correctly dispatched' from 'incorrectly run inline and fast'.",
+    "The next target in this direction is `selectIfChanged`, and exp 265's reason for warning against it no longer transfers. It called stream re-queries 'the same shape' inheriting all three failure modes; under enforcement only one of the three applies, because an unchanged re-query is a C hash pass that decodes nothing — there are no rows and no bytes to cap, leaving the VM-step budget as the sole bound. That is a genuinely open question rather than a closed one: it is the cheapest thing the pool carries and therefore the largest relative hop, and exp 249's rule holds for measuring it — A/B across worktrees on `benchmark/experiments/stream_rerun_latency.dart`, never with an in-process toggle.",
+    "Statement preparation on the inline connection is the one unbounded cost this design leaves, and nobody has priced it. `resqlite_stmt_acquire_on` prepares each statement the first time the calling isolate's connection sees it, preparation runs no VDBE opcodes, and so no cap covers it. It is once per (statement, connection) and it is work a worker would have done anyway, but it lands on the isolate that paints frames. The cheap measurement is a lane whose statements are all new — `stmt_cache_pressure.dart`'s `churn-unique` already has the shape — read through `frame-jitter`'s lens rather than a throughput one.",
+    "The three cap values are budgets for frame time, not thresholds where inline stops winning, and the harness can now price a change to any of them: `page64` shows the win still at -24% at the row cap, so raising it buys throughput and spends `frame-jitter`. The byte cap alone has a hard ceiling — it must stay below `BlobTransfer.cellThreshold`, because that is what makes the decoder's `TransferableTypedData` wrap branch unreachable inline rather than merely skipped. Exp 265 skipped it and copied blobs of any size onto the calling isolate; a future runner raising `inlineByteMax` past 256 KB reintroduces exactly that bug, and the assert in `decodeQuery` is what stops it.",
+    "The pool now holds three pieces of main-isolate per-read policy — exp 260/264's row hints, exp 266's `_preferred` cursor, and this run's turn budget and disqualification latch — and each has needed its own test-only accessor (`rowSizeHintFor`, `preferredWorkerIndex`, and now three counters). Exp 266's signal called a fourth the point at which a single small `ReaderPool` diagnostics view beats another bespoke getter; that point has arrived.",
+    "Read `RESQLITE_INLINE_ROW_MAX=0` as the kill switch if any of this goes wrong in the field: it disables inline routing entirely without touching the decode path, since the caps then never admit a statement. The three caps and the turn budget are all `int.fromEnvironment`, so a downstream build can retune them without a resqlite release — which is deliberate, because the right frame-time budget is a property of the embedding application and not of the database.",
+    "Capture a same-host `baseline-for-expNNN` release run from the parent commit before trusting `--fail-on-regression`, rather than letting auto-compare choose. Exp 269's first sweep flagged four lanes at +15% to +53% purely from a two-experiment-old anchor and cleared every one of them against a baseline taken minutes earlier on the same host; the flags were confidently wrong in a way that reads exactly like a real regression, and three of the four lanes were on code paths the diff cannot reach. Name that reachability check first — it is what turns a flag into a hypothesis instead of a verdict. Note also that a focused receipt timestamped later in the day than the release artifact will shadow it as the next run's anchor, which is why this run's receipt is stamped T06."
+  ],
+  "blockedOnMeasurement": []
+}

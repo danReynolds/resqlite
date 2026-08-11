@@ -2069,6 +2069,28 @@ int resqlite_test_text_is_ascii(const unsigned char* p, int len) {
     return text_is_ascii(p, len);
 }
 
+// Always aborts. The handler is only ever installed with the caller's whole
+// budget as its interval, so being called at all means the budget is spent.
+static int inline_budget_exhausted(void* unused) {
+    (void)unused;
+    return 1;
+}
+
+void resqlite_set_vm_step_budget(sqlite3_stmt* stmt, int n_ops) {
+    sqlite3* db = sqlite3_db_handle(stmt);
+    if (db == NULL) return;
+    if (n_ops > 0) {
+        // The VM-step counter accumulates over a prepared statement's whole
+        // life and the handler fires on multiples of its interval, so without
+        // this reset a cheap statement in the C cache would abort spuriously
+        // once every `n_ops / steps-per-execution` executions.
+        sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_VM_STEP, 1);
+        sqlite3_progress_handler(db, n_ops, inline_budget_exhausted, NULL);
+    } else {
+        sqlite3_progress_handler(db, 0, NULL, NULL);
+    }
+}
+
 RESQLITE_HOT int resqlite_step_row(
     sqlite3_stmt* stmt,
     int col_count,

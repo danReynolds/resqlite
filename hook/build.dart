@@ -204,7 +204,14 @@ ${sorted.map((s) => '    $s;').join('\n')}
         'SQLITE_OMIT_DECLTYPE': null,
         'SQLITE_OMIT_DEPRECATED': null,
         'SQLITE_OMIT_GET_TABLE': null,
-        'SQLITE_OMIT_PROGRESS_CALLBACK': null,
+        // SQLITE_OMIT_PROGRESS_CALLBACK is deliberately NOT set. The progress
+        // handler is the only preemptive bound on work SQLite does before it
+        // produces a row, which is what lets a read run on the calling isolate
+        // without a `SELECT count(*) FROM huge_table` holding it for an
+        // unbounded time
+        // ([EXP-269](../experiments/269-enforced-inline-reads.md)). With no
+        // handler installed the VDBE compiles in one `nVmStep >= LARGEST_UINT64`
+        // compare at its jump-back opcodes, not a per-opcode check.
         'SQLITE_OMIT_SHARED_CACHE': null,
         'SQLITE_OMIT_TCL_VARIABLE': null,
         'SQLITE_OMIT_TRACE': null,
