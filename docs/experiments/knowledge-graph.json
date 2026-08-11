@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 57,
-    "totalEntries": 138
+    "entriesWithClaims": 58,
+    "totalEntries": 139
   },
   "experiments": [
     {
@@ -2117,6 +2117,17 @@
       "outcomeClass": "accepted"
     },
     {
+      "id": "265",
+      "title": "Run a small read on the isolate that asked for it",
+      "file": "265-inline-main-isolate-select.md",
+      "date": "2026-08-08",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected"
+    },
+    {
       "id": "266",
       "title": "Send the read back to the worker that ran the last one",
       "file": "266-sticky-reader-dispatch.md",
@@ -3143,6 +3154,103 @@
       "text": "Every wall-time figure in exp 264 was collected on a host at 0.0% CPU idle. `top` reported 57% user / 43% sys / 0% idle, with an unrelated Virtualization.framework VM at 190% CPU, FSEvents at 57%, and other Dart processes at 100% and 44%; load average read 33/39/50 on ten cores. Six `run_release.dart` processes from earlier sessions were also resident, wedged 1-4 days at 0.0% CPU — the #282 peer crash does not merely kill a run, it leaves the parent blocked forever, and they accumulate. The order-flipped design cancels a stationary component and the controls held to +/-2%, and the mechanism is independently corroborated by a standalone allocation probe with no isolates or SQLite (423 ns vs 21.5 ns per call) whose magnitudes match the lane deltas; the *direction and mechanism* are therefore sound. The precise percentages were not, and were re-measured once the host freed up: the narrow point read moved from -7.4% to -13.5% and the wide one from -27.4% to -27.1%, with controls tightening from +/-4% to +/-1.7%. So the saturation cost about six points of accuracy on the smaller effect and none on the larger. The general hazard stands: a per-read microsecond measurement on a saturated host is dominated by reader-isolate scheduling latency. A confirmation pass attempted late in the run read +50.6% on `int20-10k`, a lane the candidate cannot reach, which is how the saturation was discovered. The same host had 352-440 MB free on a 460 GB volume. That is worth recording beside the crash narrative exps 260-262 built on: a disk this full is an independent explanation for a SQLite-backed suite dying at the memory-heavy scenario 15 and for the parent never exiting, and it has never been ruled out. Not asserted here — untested — but it should be checked before the next runner attributes that crash to the peer.",
       "conditions": "M1 Pro · macOS 26.2 · host at 0.0% idle and ~400 MB free disk throughout · 2026-08",
       "state": "live"
+    },
+    {
+      "id": "265.1",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The `select()` isolate round trip is 6.3 us of an 8.4 us canonical 6-column point read. Measured by running the query on the calling isolate instead — same `resqlite_stmt_acquire_on`, same `decodeQuery`, no SendPort and no `Isolate.exit` — which is worth a reproduced -74.8% there, -71.0% on a 21-column point read and -35.7% on a 20-row page. Two collections of four alternating-order lane-isolated AOT passes (41 then 51 samples/lane), `ab_drift_check` REPRODUCED on every primary pair in the second collection; both control lanes return more rows than the cap admits, run byte-identical code in both arms, and read +0.1% and +3.2%. Unlike claim 264.1 the effect is flat in projection width, because what it removes is per-request rather than per-slot. The routing candidate that produced this number is REJECTED (claim 265.6); the number is not, and it is the denominator any future candidate in this direction should be compared against. Collected against 4b963ad, before exp 266's stickiness landed; exp 266's term decays to -1.6% by a statement's eight-thousandth execution and every lane here runs well past that, so the pricing should hold on current main but was not re-measured there.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · lane-isolated, 4 alternating-order passes x 2 collections · host at 0-39% CPU idle · pre-266 baseline · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "258.2"
+        },
+        {
+          "type": "dependsOn",
+          "target": "264.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "264.1"
+      ]
+    },
+    {
+      "id": "265.6",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Routing a `select()` to the calling isolate on the strength of a per-SQL row-count high-water mark is REJECTED, because row count cannot bound main-isolate work along three independent axes. (1) Bytes: one row can be arbitrarily large, `SELECT * FROM photos WHERE id = ?` keeps a permanent high-water mark of 1, and with no hop to serialise for, exp 236's 256 KB blob wrap is suppressed — so a 5 MB image copies straight onto the calling isolate, unchecked. Cost varies per execution of the same statement, so no per-SQL history repairs it. (2) Query cost: `count(*)` over a large table and an unindexed `ORDER BY ... LIMIT 10` return few rows after unbounded work, which a result-shape signal cannot see because the work precedes the first row. (3) Scheduling: an inline `select()` returns a `List` rather than a `Future`, so a chain of them drains in microtasks with no event-loop turn — N reads are one uninterruptible block, not N interleavable slices, evidenced by exp 265's own `point1` lane at 200 reads / 427 us. The first draft of the writeup claimed a `~16 us per admitted read` bound; that was the bound for the measured shapes (small integers, short TEXT, indexed lookups, hot cache) stated as though general. Prototype preserved at `archive/exp-265`.",
+      "conditions": "M1 Pro · AOT · analysis against the exp 265 prototype; failure modes identified by inspection, not measured — the discriminating lanes do not exist yet · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "239.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "265.2",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A read that never enters the dispatch queue is ~19x faster than one that does when the pool is busy. One point read issued while four outstanding 1,000-row reads occupy all four workers measures 533-1169 us across four passes against 37-52 us inline (-94.9% mean, REPRODUCED in both pairs). The hop's cost to a caller is its latency plus the queue depth in front of it, and every prior measurement of transfer cost in this direction held the request population constant and therefore measured only the first term. Independent of exp 265's rejection: it is a property of the queue, not of the routing policy.",
+      "conditions": "M1 Pro · AOT · `point-under-load` lane, 4 background 1,000-row reads, 10 timed point reads/sample · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "265.3",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Serialising concurrent point reads on one isolate beats spreading them across the four-worker pool. Eight distinct point reads issued together via `Future.wait` measure -70.3% inline (REPRODUCED, both pairs, 10 groups per sample). The pool's parallelism cannot recover a per-request overhead larger than the request itself, which bounds where the pool is worth having: above the size at which decode dominates dispatch, and not below it.",
+      "conditions": "M1 Pro · AOT · `concurrent8` lane, 8 distinct 1-row statements x 10 groups/sample · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "265.4",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "An abort-and-fall-back cap costs +24.7% on the one execution that trips it, once per statement, and is the one part of exp 265's design that survives its rejection — because it enforces rather than predicts. A statement armed by two one-row executions and then returning 400 rows starts decoding inline, throws past row 64, resets and re-runs on a worker: 129 us against 163 us, REPRODUCED in both pairs. It cannot recur, because the high-water mark rises with the large result. The reset is not optional: a statement abandoned mid-iteration holds its connection's read transaction open, and every later read on that connection is then served from the pre-abort snapshot. Any future routing design should reuse this shape and add byte and VM-step caps beside it, rather than improving the predictor in front of it.",
+      "conditions": "M1 Pro · AOT · `cap-abort` lane, fresh SQL string per sample · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "264.2"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "264.2"
+      ]
+    },
+    {
+      "id": "265.5",
+      "source": "265",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A reader connection reserved for the calling isolate costs +0.1 to +1.7 MB of peak RSS, with two of nine lanes reading slightly down — at or below what exp 261's guard resolves (claim 261.2). Expected, since a connection's page cache is demand-filled and the inline connection reads pages the workers have already made resident. Recorded because it prices the connection for any future design that needs one: it cannot be shared with an idle worker, since the reply that frees a worker slot is sent before the worker's `finally` releases its connection, so `isAvailable` on the main isolate does not imply idle in C, and the connections are `SQLITE_OPEN_NOMUTEX`.",
+      "conditions": "M1 Pro · AOT · maxRss, one process per lane, 9 lanes · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.2"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "261.2"
+      ]
     },
     {
       "id": "266.1",
