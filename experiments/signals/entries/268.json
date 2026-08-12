@@ -1,0 +1,50 @@
+{
+  "directions": [
+    "result-transfer-shape",
+    "measurement-system"
+  ],
+  "outcomeClass": "accepted",
+  "changedBeliefs": [
+    "Exp 267's measured +0.8-1.2 MB statement-cache RSS was real, but most of the four-reader price was not retained prepared statements or populated dependency metadata. `resqlite_db` comes from `calloc`, then `stmt_cache_init` wrote the complete 128-entry array again; optimized arm64 removed that redundant write for the adjacent writer cache but retained a 273,408-byte `bzero` for every reader. Four readers therefore eagerly touched 1,093,632 bytes before any cache slot became live. Removing that clear recovers 1,056,768 bytes of median max RSS, almost the whole observation that named dynamic metadata as the next target.",
+    "The native statement-cache entry is 2,136 bytes, not the approximate 1.6 KB carried from exp 248 into exp 267. `resqlite_column_dep` is 24 bytes, so `dep_columns[64]` alone occupies 1,536 bytes; one 128-entry cache is exactly 273,408 bytes (`0x42c00`). The corrected size strengthens exp 267's eviction-compaction explanation but changes the footprint follow-up: unused capacity can stay virtual without changing entry ownership at all.",
+    "A count-bounded inline array has an explicit publication boundary. `stmt_cache_lookup_entry` and `stmt_cache_clear` inspect only `[0, count)`, while `stmt_cache_insert` fully zeroes the selected slot through `stmt_cache_entry_init` before incrementing count. Under that invariant, clearing capacity at container construction is not defensive initialization; it is an eager page-fault policy. The 400-statement eviction suite and dependency-reliability tests remain green because every live and recycled slot still takes the same full initialization path.",
+    "A source-level `calloc` argument is insufficient evidence that unused capacity stays non-resident. Dead-store elimination differed by placement inside one function: the compiler removed the writer-cache clear adjacent to `calloc` and retained the identical reader-cache clear inside the connection-open loop. The durable attribution paired optimized assembly with two- and four-reader fresh-process RSS; source inspection alone would have predicted either all clears or no clears and missed the actual binary.",
+    "Dynamic dependency metadata is no longer the first-order response to exp 267's memory number. It may still shrink a populated 128-entry cache and make a future capacity raise cheaper, but it adds one or two allocations per prepare, failure-conservative reliability semantics, fragmentation and disposal ownership. After empty capacity stays virtual, that complexity needs a representative filled-cache or >128-statement trace; empty-open RSS cannot justify it."
+  ],
+  "claims": [
+    {
+      "id": "268.1",
+      "text": "Making `stmt_cache_init` count-only reduces median max RSS by 589,824 bytes at two readers (18,923,520 -> 18,333,696, -3.12%) and 1,056,768 bytes at four readers (21,012,480 -> 19,955,712, -5.03%). RSS growth from immediately before native open falls 540,672 and 974,848 bytes. The candidate is lower in all 48 paired observations across 12 alternating-order fresh-process passes; going from two to four readers adds 231-237 KB of mean savings per reader, 84-87% of the 273,408-byte optimized-code prediction and directionally consistent under process max-RSS granularity.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · native-asset-aware AOT CLI · fresh process per lane and arm · 12 alternating-order passes · host roughly 51-62% idle · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "267.1"
+        }
+      ]
+    },
+    {
+      "id": "268.2",
+      "text": "The actual `resqlite_cached_stmt` layout is 2,136 bytes and one 128-entry cache is 273,408 bytes (`0x42c00`). Baseline arm64 AOT code calls `_bzero` with that exact size once per successfully opened reader; candidate code omits the call. Both binaries already omit the writer-side clear immediately after `calloc`. This explains why the memory saving scales with readers rather than writer plus readers and corrects exp 267's approximate 1.6 KB entry-size account.",
+      "conditions": "Disassembly of baseline and candidate native dylibs built by `dart build cli` from origin/main 96e6730 · arm64 macOS · 2026-08"
+    },
+    {
+      "id": "268.3",
+      "text": "Count-only cache initialization does not regress native open, fill, lookup or eviction. Six alternating-order AOT passes improve median-of-pass native open medians by 2.42% at two readers and 2.73% at four; the only three candidate-slower comparisons are +1.15%, +0.46% and +1.57%. Four AOT pressure passes are neutral for first-slot/hot-hit `point1` (-0.48%), exact-fill `rotate128` (-0.61%) and always-evict `churn-unique` (-0.51%), with sign reversals and all individual deltas within +/-3.04%. Twenty-three focused tests pass, including 400-statement reader/writer eviction and dependency reliability/fault fallback.",
+      "conditions": "M1 Pro · AOT wall lanes: 6 alternating-order passes, 61 samples, 16 opens/sample · AOT pressure lanes: 4 alternating-order passes, 41 samples, 256 reads/sample · serial focused tests · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "267.3"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/stmt_cache_init.dart` is the durable gate for changes to connection-open native footprint. Keep both `rss2` and `rss4`: one fresh process per lane gives an absolute observation, while the reader-count slope discriminates a per-reader cache mechanism from the Dart process floor and writer-side work. Pair max RSS with the lane's start-to-peak growth; neither is a byte-exact allocator counter.",
+    "Inspect optimized code before attributing a large `calloc`-backed structure's resident footprint. A nested initializer can fault every page again even when the parent begins zeroed, and the compiler can eliminate one call site while retaining another. The minimum proof is the live-range invariant, a binary-level check that the write exists, and a cardinality sweep (reader count here) that scales the measured memory.",
+    "Exact-sized `read_tables` / `dep_columns` storage remains open only for populated-cache footprint. Gate it on `point1`, `rotate128` and `churn-unique` AOT pressure lanes, the 400-statement correctness suite, overflow/OOM reliability tests, and a representative workload that actually fills many entries. Empty-open RSS has been consumed and cannot support the added allocations.",
+    "Exp 267's approximate 1.6 KB entry size should not be reused in new arithmetic. The current layout is 2,136 bytes and the exact cache array is 273,408 bytes at 128 entries; remeasure `sizeof(resqlite_cached_stmt)` whenever dependency fields or cached JSON metadata change.",
+    "One existing test gap is now named: no test combines `selectBytes()` cached JSON-name tokens with more than 128 distinct SQL identities. This experiment does not add risk there because each recycled slot is still memset before use, but the next change to entry ownership or disposal should add that over-capacity token-reuse case before claiming all fields are eviction-gated."
+  ]
+}

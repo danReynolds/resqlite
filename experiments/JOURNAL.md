@@ -1185,6 +1185,23 @@ that has the resource to itself measures latency; a lane that contends for it
 measures what a caller actually waits for. Run both, and expect them to disagree
 about how large the effect is.*
 
+### `calloc` does not keep a structure lazy if initialization writes it again
+
+[Exp 268](268-stmt-cache-lazy-init.md) found that the 128-entry statement
+cache was already inside one `calloc`-backed database allocation, but its
+initializer immediately zeroed the complete array again. The compiler removed
+that second write for the writer cache and retained a 273,408-byte `bzero` for
+every reader, so a normal four-reader open eagerly made about 1 MiB resident
+before any statement used a slot. Setting only `count = 0` recovered 1.06 MiB
+of peak RSS. The proof was not that zeroes are unnecessary: lookup and cleanup
+inspect only `[0, count)`, and insertion fully initializes one slot before
+raising the count.
+
+*Reapplies to large inline arrays and fixed-capacity pools inside a zero-filled
+parent allocation. Inspect optimized assembly before assuming the compiler
+eliminates a nested clear, then prove the live-range boundary and initialize an
+element at publication time instead of faulting every page at construction.*
+
 ### A signal good enough to correct late is not good enough to answer with
 
 [Exp 270](270-read-result-cache.md) built a `select()` result cache on

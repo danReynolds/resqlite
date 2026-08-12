@@ -111,7 +111,10 @@ typedef struct {
 
 static void stmt_cache_init(resqlite_stmt_cache* c) {
     c->count = 0;
-    memset(c->entries, 0, sizeof(c->entries));
+    // Entries outside [0, count) are never inspected. Each slot is fully
+    // zeroed by stmt_cache_entry_init before it becomes live, so clearing all
+    // 128 slots here only faults otherwise-unused cache pages during open
+    // ([EXP-268](../experiments/268-stmt-cache-lazy-init.md)).
 }
 
 static void stmt_cache_entry_clear_read_tables(resqlite_cached_stmt* entry) {
