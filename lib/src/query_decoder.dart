@@ -184,29 +184,6 @@ int _finishInitialHash(int hash, int rowCount) {
   return ((hash ^ rowCount) * _fnvPrime) & _fnvMask;
 }
 
-/// Raised by [decodeQuery] when a decode running under an inline budget
-/// exceeded it — too many rows, or too many payload bytes.
-///
-/// Only the main-isolate inline read path passes a budget, and its only handler
-/// resets the statement and re-runs the query on a worker
-/// ([EXP-269](../../experiments/269-enforced-inline-reads.md)). It is not a
-/// [ResqliteException] because it never reaches a caller: a query that turned
-/// out to be larger than the pool expected is not an error, it is a routing
-/// decision that has to be taken back.
-final class InlineBudgetExceeded implements Exception {
-  const InlineBudgetExceeded();
-}
-
-/// The value [decodeQuery]'s inline caps take when there is no cap.
-///
-/// A sentinel rather than 0 so the checks in the decode loop are a single
-/// unconditional compare against a value no result can reach, instead of a
-/// `cap != 0 &&` test in front of them. The loop is shared with every worker
-/// decode, which passes no caps at all, and on a TEXT-heavy 1,000-row read the
-/// guarded form measured ~4-5% — a cost paid by the reads this feature does not
-/// serve, to bound the ones it does.
-const int noInlineCap = 1 << 62;
-
 Never _throwStepException(ffi.Pointer<ffi.Void> stmt, String sql, int rc) {
   final db = sqlite3DbHandle(stmt);
   final message = db == ffi.nullptr
@@ -250,21 +227,6 @@ final class RowSizeMemory {
   /// opinion" (meaning [initialResultRows]). Never exceeds
   /// [initialResultRows].
   int initialRows = 0;
-
-  /// Set once an inline attempt at this SQL exceeded one of its enforced caps,
-  /// after which the pool stops trying
-  /// ([EXP-269](../../experiments/269-enforced-inline-reads.md)).
-  ///
-  /// An abort is correct but not free — the work up to the cap is thrown away
-  /// and the query re-runs on a worker — so a statement that has demonstrated
-  /// it does not fit is not offered again. One latch rather than a per-cap
-  /// statistic because the three caps fail for unrelated reasons and none of
-  /// them is worth retrying: `count(*)` costs the same opcodes every time, and
-  /// a table holding one 5 MB image holds others.
-  ///
-  /// Deliberately not a safety mechanism. It bounds *wasted* aborts; the caps
-  /// bound the work, and they do so whether or not this flag is right.
-  bool inlineDisqualified = false;
 
   void record(int rowCount) {
     if (rowCount > highWater) highWater = rowCount;
@@ -460,34 +422,12 @@ final class RawQueryResult {
 /// The statement must already be acquired and bound (via
 /// `resqlite_stmt_acquire_on` or `resqlite_stmt_acquire_writer`).
 /// The caller must NOT finalize the statement — it's owned by the C cache.
-///
-/// [inlineRowCap] and [inlineByteCap] are [noInlineCap] on every isolate-worker
-/// call and real values only when the main isolate is running the query itself
-/// ([EXP-269](../../experiments/269-enforced-inline-reads.md)). Together they
-/// bound how long that decode is allowed to hold the isolate that paints
-/// frames: past either the decode throws [InlineBudgetExceeded] and the caller
-/// re-runs the query on a worker. They are enforced against what the decode is
-/// actually producing, so they hold whatever the pool predicted about the
-/// statement beforehand — which is the property [EXP-265] lacked.
-///
-/// A real [inlineByteCap] must stay strictly below
-/// [BlobTransfer.cellThreshold]. That is what makes the wrapping branch below
-/// unreachable on the inline path rather than merely skipped: a cell large
-/// enough to be worth wrapping for a hop always trips the byte cap first, so
-/// the read is handed to a worker that will wrap it.
 RawQueryResult decodeQuery(
   ffi.Pointer<ffi.Void> stmt,
   String sql, {
   int rowHint = 0,
   int? initialRowHint,
-  int inlineRowCap = noInlineCap,
-  int inlineByteCap = noInlineCap,
 }) {
-  assert(
-    inlineByteCap == noInlineCap ||
-        inlineByteCap < BlobTransfer.cellThreshold,
-    'inline byte cap must be below the blob wrap threshold',
-  );
   final colCount = sqlite3ColumnCount(stmt);
   final entry = _schemaFor(stmt, sql, colCount);
   final schema = entry.schema;
@@ -507,16 +447,10 @@ RawQueryResult decodeQuery(
   var writeIdx = 0;
   var rowCount = 0;
   var hasWrappedCells = false;
-  // Payload bytes this decode has committed to copying onto the heap. Always
-  // accumulated, because an unconditional add and compare against
-  // [noInlineCap] is cheaper in the shared loop than testing whether a cap
-  // exists.
-  var inlineBytes = 0;
 
   var rc = resqliteStepRow(stmt, colCount, buf);
   while (rc == sqliteRow) {
     rowCount++;
-    if (rowCount > inlineRowCap) throw const InlineBudgetExceeded();
     if (writeIdx + colCount > values.length) {
       values.length = grownSlots(colCount, values.length, hint);
     }
@@ -532,9 +466,6 @@ RawQueryResult decodeQuery(
           values[writeIdx++] = cellsF64[i64Base + valI64];
         case sqliteTextAscii:
           final textLen = cellsI32[i32Base + lenI32];
-          if ((inlineBytes += textLen) > inlineByteCap) {
-            throw const InlineBudgetExceeded();
-          }
           if (textLen == 0) {
             values[writeIdx++] = '';
           } else {
@@ -547,31 +478,20 @@ RawQueryResult decodeQuery(
         case sqliteText:
           // Reported only when the native scan found a byte >= 0x80, so this
           // arm goes straight to UTF-8. Empty text always classifies as ASCII.
-          final textLen = cellsI32[i32Base + lenI32];
-          if ((inlineBytes += textLen) > inlineByteCap) {
-            throw const InlineBudgetExceeded();
-          }
           values[writeIdx++] = utf8.decode(
             ffi.Pointer<ffi.Uint8>.fromAddress(
               cellsI64[i64Base + valI64],
-            ).asTypedList(textLen),
+            ).asTypedList(cellsI32[i32Base + lenI32]),
           );
         case sqliteBlob:
           final blobAddr = cellsI64[i64Base + valI64];
           final blobLen = cellsI32[i32Base + lenI32];
-          // Checked before the copy, not after: `blobLen` is the size of a cell
-          // still sitting in SQLite's own memory, and the whole point of the cap
-          // is that a 5 MB image never reaches the calling isolate's heap.
-          if ((inlineBytes += blobLen) > inlineByteCap) {
-            throw const InlineBudgetExceeded();
-          }
           if (blobLen == 0) {
             values[writeIdx++] = Uint8List(0);
           } else if (blobLen >= BlobTransfer.cellThreshold) {
             hasWrappedCells = true;
             // Copies native -> external instead of native -> heap; see
-            // [BlobTransfer.cellThreshold]. Unreachable under a byte cap, which
-            // is required to be smaller than the threshold.
+            // [BlobTransfer.cellThreshold].
             values[writeIdx++] = TransferableTypedData.fromList([
               ffi.Pointer<ffi.Uint8>.fromAddress(blobAddr).asTypedList(blobLen),
             ]);

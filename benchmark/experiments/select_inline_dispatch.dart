@@ -2,17 +2,18 @@
 //
 // Focused A/B harness for where a `select()` runs ([EXP-265], [EXP-269]).
 //
-// This is the gate for read-*routing* work — a different question from every
-// other harness in `benchmark/experiments/`, which measure what a read costs
-// rather than where it runs.
+// Both inline-routing candidates were REJECTED, and on current main every lane
+// below runs the ordinary worker path. This remains mechanism evidence and a
+// partial gate for future read-*routing* work — a different question from
+// harnesses that measure only what a read costs rather than where it runs.
 //
-// Exp 265 left the lane set deliberately incomplete and said so: nine lanes of
-// small integers and short TEXT on a hot page cache met every kill condition
-// that experiment declared and could not see any of the three failure modes
-// that actually killed it. Exp 269 adds the three it named — `blob1-5mb`,
-// `scan-count` and `frame-jitter` below — and they are the load-bearing lanes
-// now. The first two fail against `archive/exp-265`, which is the point of
-// having them.
+// Exp 269 adds the three lanes exp 265 named — `blob1-5mb`, `scan-count` and
+// `frame-jitter` — but its own rejection shows the set is still incomplete.
+// These lanes cover a large result cell, work spread over many VM operations,
+// and yielding across a chain of cheap reads. They do not cover work hidden
+// inside one SQLite operation, cold preparation, callbacks, or VFS/busy waits.
+// Run `select_inline_opaque_work.dart` before trusting a successor. The first
+// two lanes here fail against `archive/exp-265`, which is why they remain.
 //
 // Every read resqlite serves crosses to a reader isolate and back. That hop is
 // scheduling, not work: the request is copied to a worker, the worker steps and
@@ -42,11 +43,11 @@
 //   concurrent8               Eight distinct point reads issued together.
 //     GUARD, and the one that can kill the idea: four workers run four of them
 //     at once, while a caller that runs them itself runs them one after another.
-//   mixed6-1k / int20-10k     CONTROL. Both return far more rows than the cap
-//     allows, so both arms run byte-identical code and the lanes read the
-//     cross-worktree binary offset directly (the exp 254 trap). int20-10k is
-//     also where the one per-row comparison this change adds to the shared
-//     decode loop would show up if it cost anything.
+//   mixed6-1k / int20-10k     SHARED-PATH CONTROLS. Both return far more rows
+//     than the cap allows and finish on workers, but the exp 269 candidate also
+//     changed that worker decode loop: every row sees the cap comparison and
+//     every TEXT/BLOB cell sees byte accounting. They therefore expose shared
+//     overhead and binary drift; they are not byte-identical controls.
 //   cap-abort                 GUARD for the mispredict: a statement whose first
 //     two executions return one row and whose third returns 400, so the decode
 //     starts on the calling isolate, gives up past the cap, and re-runs on a
@@ -57,21 +58,23 @@
 //     WHERE id = ?` over rows holding a 5 MB image. One row forever, so no
 //     row-count history ever stops it — this is the shape that killed exp 265,
 //     where the blob was copied onto the calling isolate unchecked at any size.
-//     A successor passes by *aborting*: the byte cap trips before the copy and
-//     the read finishes on a worker, which wraps the cell as usual.
+//     Exp 269 aborted the first large attempt and then dispatched this SQL to a
+//     worker. Because the generic harness warms before timing, the samples see
+//     post-latch dispatch rather than the inline abort itself.
 //   scan-count                GUARD, added by exp 269, for work that happens
 //     before the first row. Exp 265 named `count(*)` for this and it is the
 //     wrong query: SQLite answers a bare `count(*)` with one `OP_Count` opcode,
 //     so it is genuinely cheap and correctly runs inline. A filtered count is
-//     the real shape — one small row after a full scan — and it must abort on
-//     the VM-step cap.
+//     the real shape — one small row after a full scan. Exp 269 aborted it on
+//     the VM-step cap; warmup means timed samples see post-latch dispatch.
 //   frame-jitter              GUARD, added by exp 269, and the only lane here
 //     that measures latency rather than throughput. An inline read never yields,
 //     so an awaited chain of them drains as one uninterruptible microtask block
 //     and a frame callback cannot run until it ends. The sample value is the
 //     WORST lateness a 60 Hz timer suffers while reads are issued continuously
 //     for `_frameLaneMs`, so this lane is the one that can reject the design on
-//     jank even while every throughput lane improves.
+//     jank even while every throughput lane improves. It establishes whether
+//     a chain of cheap reads yields; it does not bound one opaque read.
 //
 // Usage:
 //   dart run benchmark/experiments/select_inline_dispatch.dart \
@@ -253,8 +256,8 @@ final _lanes = <_Lane>[
     repeats: 8,
     mode: _Mode.concurrent,
   ),
-  // CONTROL: 1,000 and 10,000 rows are far past the cap, so neither arm can
-  // reach the changed path and both run the same machine code.
+  // SHARED-PATH CONTROLS: both finish on workers, but exp 269's cap accounting
+  // also changed the worker decoder, so the arms are not byte-identical.
   _Lane('mixed6-1k', rows: 1000),
   _Lane('int20-10k', rows: 10000, columns: 20),
   // GUARD: fresh statement per sample, armed small, timed large.
@@ -422,7 +425,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
     case _Mode.plain:
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       return sw.elapsedMicroseconds;
@@ -434,7 +441,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
       ];
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       await Future.wait(background);
@@ -482,7 +493,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
         },
       );
       while (sw.elapsedMicroseconds < _frameLaneMs * 1000) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       frames.cancel();
       // A deadline the read chain blocked straight through never gets a

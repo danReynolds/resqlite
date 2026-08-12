@@ -1130,28 +1130,25 @@ is it against the thing being optimised, and what makes it fixed? A cost that is
 fixed only because nobody has tried to remove it is a candidate — and pricing it
 is worth doing even when the thing that prices it does not ship.*
 
-### A safety property must be enforced, not predicted
+### A progress counter is not a preemption boundary
 
-[Exp 265](265-inline-main-isolate-select.md) shipped two guards and they failed
-differently. A row cap that aborts mid-decode and falls back to a worker is
-correct whether or not the prediction in front of it was right — it cost +24.7%
-on the one execution that tripped it, once per statement, and it is the part of
-the design that survived. An *eligibility test* that admits a statement based on
-what it returned before is correct only when the prediction holds, and it did
-not hold along three independent axes: one row can hold a 5 MB blob, `count(*)`
-returns one row after unbounded work, and cost varies per execution of the same
-statement so no per-SQL history repairs it. The fix was never a better
-predictor. It was two more enforcement points — `sqlite3_column_bytes` before
-the copy, `sqlite3_progress_handler` every N VM steps — after which the
-prediction stops being load-bearing and becomes what it is good at: avoiding
-wasted aborts.
+[Exp 265](265-inline-main-isolate-select.md) rejected caller-isolate reads
+because row history could not bound their work. [Exp 269](269-enforced-inline-reads.md)
+replaced prediction with row, payload-byte and SQLite VM-opcode caps plus a
+per-turn stopwatch, then found the same safety hole one layer deeper. After two
+tiny reads armed the route, `SELECT length(randomblob(?))` returned one INTEGER
+but spent 26–28 ms inside one SQLite function opcode. It crossed no cap, and the
+stopwatch was checked only before entering the synchronous call. Main let a
+1 ms timer run while a worker did the database work; the candidate held the
+calling isolate until the whole operation finished. Busy/VFS waits, callbacks,
+cold preparation and native value scans have the same shape.
 
-*Reapplies to any admission test, routing rule, cache-eligibility check or fast
-path gated on a learned signal. Ask what happens when the signal is wrong, and
-whether the answer is "it costs some work" or "it violates the property the
-system promises". If the latter, the signal is in the wrong place — move the
-guard to where the truth is known, even if that means starting work you may have
-to abandon.*
+*Reapplies whenever a safety claim is expressed as a counter, timeout or
+stopwatch around opaque synchronous work. Ask where control can actually be
+regained. A budget checked only before the call is admission; a callback between
+VM operations is cancellation; neither is preemption inside one operation. If
+the property is wall time, run an adversarial single-operation stall before
+optimising the happy path.*
 
 ### A guard set built from the lanes you have tests the hypothesis you believe
 
@@ -1187,48 +1184,6 @@ per-request overhead larger than the request.
 that has the resource to itself measures latency; a lane that contends for it
 measures what a caller actually waits for. Run both, and expect them to disagree
 about how large the effect is.*
-
-## A safety property must be enforced, not predicted — and enforcement is often cheaper than the predictor
-
-[Exp 239](239-select-overflow-batching.md) tried to bound a read's cost from
-queue depth and [exp 265](265-inline-main-isolate-select.md) from a per-SQL
-row-count history; both were rejected, and exp 265 generalised the pair
-correctly — nothing about a query's *shape* or its *position in a queue* bounds
-its cost, because the expensive part can precede the first row and can hide
-inside a single cell. What that generalisation did not say, and what
-[exp 269](269-enforced-inline-reads.md) found, is that the conclusion is not
-"stop trying to route reads". It is "stop trying to *classify* them". The
-quantities that actually bound the work — rows produced, bytes about to be
-copied, VDBE opcodes executed — are all readable while the query runs, and
-checking them turned out to be three comparisons and a progress handler, less
-code than the predictor they replaced. The design that ships is the one where
-being wrong about a statement costs speed and nothing else: if every hint the
-pool held were wrong, every attempt would abort and the library would behave
-exactly as it does today.
-
-*Reapplies whenever an optimization is gated on a guess about a workload —
-cache admission, prefetch, speculative execution, routing, batching. Ask what
-the guess is protecting against, then ask whether that thing is observable
-while it happens. If it is, the guess stops being load-bearing and becomes an
-optimization you are allowed to get wrong.*
-
-## Build your guard lanes from the failure mode, not from the example in the writeup
-
-Exp 265 named `SELECT count(*) FROM huge_table` as the canonical shape whose
-work precedes its first row. SQLite answers a bare `count(*)` with one
-`OP_Count` opcode whatever the table size, so it is genuinely cheap and a guard
-lane built from that literal query tests nothing —
-[exp 269](269-enforced-inline-reads.md) had to reach for a count with a
-predicate and an unindexed `ORDER BY ... LIMIT` before anything tripped. The
-prior writeup was right about the *category* and wrong about the *instance*,
-which is the normal case: the category was reasoned about, the instance was
-typed from memory.
-
-*Reapplies to every guard lane inherited from a prior experiment's prose. Run
-it once and confirm it fails against the build it is supposed to catch, before
-trusting that it passes against the build you are shipping — the same
-negative-control discipline [exp 267](267-stmt-cache-capacity.md) established
-for tests, applied to benchmark lanes.*
 
 ## How to add to this file
 

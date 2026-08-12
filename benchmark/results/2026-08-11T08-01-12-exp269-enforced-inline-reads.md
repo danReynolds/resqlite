@@ -1,5 +1,10 @@
 # resqlite Benchmark Results
 
+> **Disposition correction (2026-08-12): experiment 269 was rejected.** This
+> generated artifact remains the exact release-sweep receipt. Its 1 win,
+> 0 regressions and 168 neutral metrics establish collateral neutrality, not
+> safety or acceptance of the inline runtime.
+
 Generated: 2026-08-11T08:08:05.118486
 
 Libraries compared:
@@ -1112,5 +1117,3 @@ MDE_ci is the 95% bootstrap-CI half-width around the repeated-run median. That k
 **Granularity summary:** 0 fewer-re-emit, 0 more-re-emit, 6 neutral
 
 For **disjoint** workloads, fewer re-emits means tighter dependency tracking — a library with column-level tracking approaches zero. For **overlapping** workloads, the count should stay stable across runs; a drop there means writes are being silently elided.
-
-

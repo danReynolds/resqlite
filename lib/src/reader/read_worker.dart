@@ -110,82 +110,6 @@ bool _shouldSacrifice(RawQueryResult raw) =>
     raw.values.length > sacrificeSlotThreshold;
 
 // ---------------------------------------------------------------------------
-// Inline read budget ([EXP-269](../../../experiments/269-enforced-inline-reads.md))
-// ---------------------------------------------------------------------------
-//
-// Three caps, and what matters about them is not their values but that all
-// three are *enforced against work already happening* rather than predicted
-// from a statement's history. [EXP-265] ran small reads on the calling isolate
-// and decided eligibility from the row count the pool remembered; it was
-// rejected because rows-returned bounds neither how large a row is, nor how
-// much work precedes the first one. Each cap below closes one of those, and
-// each one holds whether or not the pool's expectation was right.
-//
-// Setting any of them to 0 disables inline reads entirely.
-
-/// The most rows an inline `select()` may decode before it is handed back to a
-/// worker.
-///
-/// Bounds the decode loop. This is a budget for how long a read may hold the
-/// isolate that paints frames, not a point where inline execution stops being
-/// faster — it keeps winning well past this.
-const int inlineRowMax = int.fromEnvironment(
-  'RESQLITE_INLINE_ROW_MAX',
-  defaultValue: 64,
-);
-
-/// The most payload bytes — TEXT and BLOB cell contents — an inline `select()`
-/// may copy onto the calling isolate's heap.
-///
-/// Bounds *width* where [inlineRowMax] bounds length, and it is the cap that
-/// exists because of the shape [EXP-265] could not see: `SELECT * FROM photos
-/// WHERE id = ?` returns exactly one row forever, so no row-count history ever
-/// stops it, and its one row can be a 5 MB image.
-///
-/// Must stay below `BlobTransfer.cellThreshold` (256 KB), which is what makes
-/// the decoder's wrap branch unreachable inline rather than wrongly skipped: a
-/// cell worth wrapping for a hop trips this first and goes to a worker, which
-/// wraps it. 64 KB is a few microseconds of copying.
-const int inlineByteMax = int.fromEnvironment(
-  'RESQLITE_INLINE_BYTE_MAX',
-  defaultValue: 64 * 1024,
-);
-
-/// The most SQLite VM steps an inline `select()` may execute.
-///
-/// Bounds the work that happens *before* a row is produced, which neither of
-/// the other two caps can see and no result-shape signal can predict:
-/// `SELECT count(*) FROM huge_table` returns one small row after scanning the
-/// whole table, and an unindexed `ORDER BY ... LIMIT 10` returns ten rows after
-/// a full sort.
-///
-/// Enforced by `sqlite3_progress_handler`, which aborts the statement with
-/// `SQLITE_INTERRUPT` once the VDBE has run this many opcodes. Roughly 100 us
-/// of SQLite at typical opcode rates.
-const int inlineVmStepMax = int.fromEnvironment(
-  'RESQLITE_INLINE_VM_STEP_MAX',
-  defaultValue: 10000,
-);
-
-/// Microseconds of inline reading allowed per event-loop turn.
-///
-/// The three caps above bound one read; this bounds a *chain* of them, which is
-/// the third failure [EXP-265] named and the one no per-read guard addresses.
-/// An inline read completes without an event-loop turn, so an awaited sequence
-/// of them drains entirely in microtasks — N inline reads are not N
-/// interleavable slices but one uninterruptible block, and a timer or frame
-/// callback cannot run until the whole chain finishes.
-///
-/// Past this budget the pool dispatches normally for the rest of the turn,
-/// which parks on a message from another isolate and hands the event loop back.
-/// 1 ms is under a tenth of a 60 Hz frame and holds roughly 470 back-to-back
-/// point reads, which is far more than an application issues in one turn.
-const int inlineTurnBudgetUs = int.fromEnvironment(
-  'RESQLITE_INLINE_TURN_BUDGET_US',
-  defaultValue: 1000,
-);
-
-// ---------------------------------------------------------------------------
 // Read worker isolate entrypoint
 // ---------------------------------------------------------------------------
 
@@ -398,28 +322,6 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireOn(
   int paramCount,
 );
 
-// Only [executeQueryInline] needs the three below. Every other decode runs its
-// statement to SQLITE_DONE on an isolate that has nothing else to do.
-
-// An abandoned statement holds its connection's WAL snapshot open until its
-// next acquire, which may never come — every later read on that connection
-// would then be served from a stale snapshot.
-@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>)>(
-  symbol: 'sqlite3_reset',
-  isLeaf: true,
-)
-external int _sqlite3Reset(ffi.Pointer<ffi.Void> stmt);
-
-// Installs a SQLite progress handler that aborts the statement once the VDBE
-// has run `nOps` opcodes; 0 removes it. The abort has to be decided in C: the
-// handler fires inside `sqlite3_step`, which [resqliteStepRow] enters as a leaf
-// call, and a leaf call cannot re-enter Dart.
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
-  symbol: 'resqlite_set_vm_step_budget',
-  isLeaf: true,
-)
-external void _resqliteSetVmStepBudget(ffi.Pointer<ffi.Void> stmt, int nOps);
-
 // ---------------------------------------------------------------------------
 // Query execution
 // ---------------------------------------------------------------------------
@@ -481,66 +383,6 @@ RawQueryResult executeQuery(
   (_, stmt) =>
       decodeQuery(stmt, sql, rowHint: rowHint, initialRowHint: initialRowHint),
 );
-
-/// Run a SELECT on [readerId] from the calling isolate and decode it there,
-/// with no isolate hop at either end
-/// ([EXP-269](../../../experiments/269-enforced-inline-reads.md)).
-///
-/// This is the same execution as [executeQuery]; what differs is who runs it
-/// and what happens when it turns out to be the wrong choice. The caller is the
-/// isolate that paints frames, so the read is executed under three enforced
-/// caps — [inlineRowMax] rows, [inlineByteMax] payload bytes, [inlineVmStepMax]
-/// SQLite VM steps — and exceeding any of them abandons the attempt. So does
-/// any other failure. Returns null in every one of those cases, meaning "run
-/// this on a worker instead".
-///
-/// Enforcement is the whole design. The pool decides *whether to try* from what
-/// it remembers about a statement, and it can be wrong about that at no cost to
-/// anything but speed; what a read is allowed to *do* once it starts is checked
-/// against the rows, bytes and opcodes it actually produces.
-///
-/// A null from a genuine SQL error costs one duplicate execution and then
-/// surfaces the identical exception from the pool, which is why this path
-/// reports none of its own: reader connections are `SQLITE_OPEN_READONLY`, so
-/// re-running a statement that failed here cannot repeat a side effect.
-///
-/// [readerId] must be a connection no worker isolate can touch. The connections
-/// are `SQLITE_OPEN_NOMUTEX`.
-RawQueryResult? executeQueryInline(
-  int handleAddr,
-  int readerId,
-  String sql,
-  List<Object?> parameters,
-  int rowHint,
-  int initialRowHint,
-) {
-  try {
-    return _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-      _resqliteSetVmStepBudget(stmt, inlineVmStepMax);
-      try {
-        return decodeQuery(
-          stmt,
-          sql,
-          rowHint: rowHint,
-          initialRowHint: initialRowHint,
-          inlineRowCap: inlineRowMax,
-          inlineByteCap: inlineByteMax,
-        );
-      } catch (_) {
-        // Reached with the statement mid-iteration, holding a read transaction
-        // this isolate has no other reason to come back for.
-        _sqlite3Reset(stmt);
-        rethrow;
-      } finally {
-        // Must not outlive the read: the handler is per-connection, and a
-        // later statement inheriting a stale budget would abort for no reason.
-        _resqliteSetVmStepBudget(stmt, 0);
-      }
-    });
-  } catch (_) {
-    return null;
-  }
-}
 
 /// Execute a query returning JSON bytes as a view over the reader
 /// connection's persistent `json_buf`, plus the number of rows serialized

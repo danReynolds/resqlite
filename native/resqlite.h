@@ -376,20 +376,6 @@ int resqlite_step_row_hash(
     uint64_t* hash
 );
 
-// Bound how many VDBE opcodes any statement on `stmt`'s connection may run
-// before sqlite3_step aborts it with SQLITE_INTERRUPT; `n_ops <= 0` removes
-// the bound. Exp 269 uses it to cap a read the *calling* isolate is running,
-// where a `SELECT ... ORDER BY <unindexed>` would otherwise hold the isolate
-// that paints frames for as long as the sort takes.
-//
-// The abort has to be decided in C. The handler fires from inside
-// sqlite3_step, which Dart calls through `resqlite_step_row` as a *leaf* call,
-// and a leaf call cannot re-enter Dart — the VM traps with "Cannot invoke
-// native callback from a leaf call". Taking `stmt` rather than the connection
-// keeps the whole budget one FFI call, since the caller already holds the
-// statement and not the sqlite3*.
-void resqlite_set_vm_step_budget(sqlite3_stmt* stmt, int n_ops);
-
 // Step-to-completion + hash all cells. Resets the statement at both
 // ends, so the caller can invoke this on a freshly-bound stmt OR on
 // one that was just drained by decodeQuery — either way works.

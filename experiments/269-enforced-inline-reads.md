@@ -1,275 +1,185 @@
 # Experiment 269: bound the read, don't predict it
 
-**Date:** 2026-08-11
-**Status:** Accepted
+**Date:** 2026-08-11 (verdict corrected 2026-08-12)
+**Status:** Rejected
 **Category:** Moonshot
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** Release headline suite at HEAD, 5-sample medians with the
-  regression gate on — this change touches every `select()` and a SQLite build
-  flag that affects every query, so the no-collateral-damage sweep matters more
-  than usual here. The **decision** rests on the focused AOT A/B, because no
-  release lane resolves a microsecond of per-read scheduling: three collections
-  of four alternating-order lane-isolated passes of
-  [`benchmark/experiments/select_inline_dispatch.dart`](../benchmark/experiments/select_inline_dispatch.dart),
-  plus two auxiliary builds that isolate the SQLite build-flag change and the
-  per-turn budget, all in
-  [`benchmark/results/2026-08-11T06-00-00Z-exp269-focused-ab.md`](../benchmark/results/2026-08-11T06-00-00Z-exp269-focused-ab.md).
+**Benchmark Run:** Focused AOT routing A/B in
+  [`benchmark/results/2026-08-11T06-00-00Z-exp269-focused-ab.md`](../benchmark/results/2026-08-11T06-00-00Z-exp269-focused-ab.md),
+  release sweep in
+  [`benchmark/results/2026-08-11T08-01-12-exp269-enforced-inline-reads.md`](../benchmark/results/2026-08-11T08-01-12-exp269-enforced-inline-reads.md),
+  and the decisive opaque-work A/B in
+  [`benchmark/results/2026-08-12T10-15-00Z-exp269-opaque-work.md`](../benchmark/results/2026-08-12T10-15-00Z-exp269-opaque-work.md).
+
+> **Rejected after adversarial review.** The small-read speedup is real, but the
+> candidate's defining claim is not: rows, payload bytes, VM opcodes, and a
+> pre-call stopwatch do not bound how long arbitrary SQLite work may hold the
+> calling isolate. The exact tested runtime is preserved at `archive/exp-269`
+> (`dd252db49a538777f0c23135f2e466be5c12e2a7`); all runtime changes are reverted
+> from the publication branch.
 
 ## Problem
 
-[Exp 265](265-inline-main-isolate-select.md) removed the isolate round trip
-from small reads and measured the win: on the canonical six-column point read
-the hop is 6.3 us of an 8.4 us read. Then it rejected itself, and the rejection
-is the reason this experiment exists.
+[Exp 265](265-inline-main-isolate-select.md) measured that an isolate round trip
+is most of a hot point read, then rejected running the query on the calling
+isolate because its row-count admission signal could not bound three hazards:
+one row may hold a huge value, expensive work may precede the first row, and an
+awaited chain of inline reads drains without an event-loop turn.
 
-It rejected itself because eligibility was a **prediction**. The pool already
-keeps, per SQL string, the largest row count that statement has ever returned —
-a buffer-sizing hint from exps [260](260-result-list-presize.md) and
-[264](264-initial-alloc-size-memory.md) — and exp 265 read a routing decision
-out of it: never returned more than 64 rows, so run it here. Rows returned
-bounds neither of the two things that make a read expensive. One row can be a
-5 MB image, and `SELECT * FROM photos WHERE id = ?` has a permanent high-water
-mark of 1. A filtered count returns one row after reading the whole table. And
-a third problem sat outside both: an inline read completes without an
-event-loop turn, so an awaited chain of them drains as one uninterruptible
-microtask block that a frame callback cannot interrupt.
-
-Its own writeup named the fix and declined to make it, on the grounds that it
-changes the thing being tested:
-
-> The row cap is the part of this design that holds up, because it does not
-> *predict* anything: it aborts mid-decode and falls back, and it is correct
-> whether or not the hint was right. The fix is to make every safety property
-> work that way — enforce rather than predict.
+Exp 269 challenged the broader assumption that those hazards require a worker.
+Instead of predicting query cost, it attempted to enforce ceilings while the
+query ran.
 
 ## Hypothesis
 
-**Assumption challenged: that a read has to be *classified* as cheap before it
-is allowed to run on the calling isolate.**
+**Assumption challenged: arbitrary `select()` work may run on the calling
+isolate if every relevant cost is stopped in flight.**
 
-It does not. It has to be *stopped* if it turns out not to be. Those are
-different designs and only the second one is sound, because the properties that
-matter — how many rows, how many bytes, how much work — are all observable
-while the query runs, and none of them is knowable from a statement's history.
+The candidate retained exp 265's private routing after two small observations,
+but added four limits:
 
-So: keep exp 265's routing, throw away its safety argument, and replace it with
-three caps enforced against what the query is producing, plus an answer to the
-microtask problem. The pool's row-count memory survives, demoted to what it is
-good at — avoiding *wasted* aborts — where being wrong costs speed and nothing
-else.
+- 64 decoded rows;
+- 64 KiB of TEXT/BLOB payload, checked before Dart copies each cell;
+- 10,000 SQLite VDBE opcodes through a progress handler;
+- 1 ms of inline work per event-loop turn, checked before starting another
+  inline read.
 
-Primary gate: the point-read wins survive enforcement, reproduced across order
-flips. Kill conditions, all three of which are new and none of which exp 265
-could see: a 5 MB blob reaching the calling isolate; a full scan running there;
-or worst-case frame lateness getting worse than dispatch.
+Crossing a per-query cap reset the statement and re-ran it on a worker. A
+per-SQL latch prevented repeating an abort. The proposal would be accepted only
+if these limits bounded caller-isolate work for the full supported `select()`
+surface while preserving exp 265's point-read win.
 
 ## Approach
 
-Three enforcement points, one budget, and one demotion.
+The prototype reserved a fifth read-only connection for the calling isolate.
+After a SQL string had produced two small results, `ReaderPool.select` executed
+it synchronously on that connection. `decodeQuery` enforced row and payload
+limits, native code installed a progress handler for the VM-step limit, and a
+zero-duration timer retired the pool's per-turn stopwatch after the event loop
+regained control.
 
-**Rows.** `decodeQuery` takes an `inlineRowCap` (64) and throws past it. This is
-exp 265's, unchanged, and it was always the sound part.
+The focused routing harness gained the three guards exp 265 requested:
 
-**Bytes.** `decodeQuery` also takes an `inlineByteCap` (64 KB) and accumulates
-TEXT and BLOB payload lengths against it. The length is read from the cell
-buffer *before* the copy, so a 5 MB image is never copied — it is still sitting
-in SQLite's memory when the decode gives up. The cap is required to be below
-`BlobTransfer.cellThreshold` (256 KB), which is what makes the decoder's
-`TransferableTypedData` wrap branch **unreachable** on the inline path rather
-than skipped: a cell big enough to be worth wrapping for a hop always trips the
-byte cap first and goes to a worker, which wraps it. Exp 265 skipped that branch
-and left the copy unchecked, which is the bug that killed it.
+- a one-row 5 MiB BLOB point read;
+- a filtered count and unindexed sort whose work precedes their small result;
+- frame-timer lateness during a continuous chain of cheap reads.
 
-**VM steps.** `resqlite_set_vm_step_budget` installs a SQLite progress handler
-that aborts the statement with `SQLITE_INTERRUPT` after 10,000 VDBE opcodes.
-This is the only one of the three that can see work happening *before* a row is
-produced. Two things about it were not obvious:
-
-- `SQLITE_OMIT_PROGRESS_CALLBACK` was in the build hook's define list, so the
-  enforcement point exp 265 named did not exist in the shipped library. It is
-  removed here. With no handler installed the VDBE compiles in one
-  `nVmStep >= LARGEST_UINT64` compare at its jump-back opcodes — SQLite's own
-  code is structured to keep this out of the per-opcode path — and a build that
-  changes only this flag measures below the harness floor (see the receipt).
-- The abort has to be decided in C. The handler fires inside `sqlite3_step`,
-  which Dart enters through `resqlite_step_row` as an `isLeaf` call, and a leaf
-  call cannot re-enter Dart: a `Pointer.fromFunction` callback traps the VM with
-  *Cannot invoke native callback from a leaf call*. The C helper also resets
-  `SQLITE_STMTSTATUS_VM_STEP`, because that counter accumulates over a cached
-  statement's whole life and the handler fires on multiples of its interval — so
-  without the reset a cheap statement would abort spuriously once every
-  `budget / steps-per-execution` executions.
-
-**The chain.** `ReaderPool` runs a stopwatch across the current event-loop turn,
-started by the turn's first inline read and retired by a zero-duration `Timer`,
-which by construction cannot fire until the microtask queue has drained. Past
-1 ms the pool dispatches for the rest of the turn — and there dispatching is the
-*point* rather than a fallback, because awaiting a worker parks on a message
-from another isolate and hands the event loop back.
-
-**The demotion.** The row high-water mark and a new `inlineDisqualified` latch
-decide only whether an attempt is *worth making*. A statement that has aborted
-once is never offered again, because none of the three caps fails for a reason
-that is worth retrying: a filtered count costs the same opcodes every time, and
-a table holding one 5 MB image holds others.
-
-Scope is `select()`. `selectBytes` builds no Dart result and serialises in C;
-`tx.select` runs on the writer connection. `Database.open` opens one reader
-connection past the pool, reserved for the calling isolate — it cannot borrow a
-worker's, because the connections are `SQLITE_OPEN_NOMUTEX` and the reply that
-frees a worker slot is sent *before* the worker's `finally` releases its
-connection.
+Those guards found the failures they were built for. They did not cover work
+hidden inside one SQLite operation, lock or I/O waits, first-time preparation,
+or application-defined callbacks. The lasting harness therefore also includes
+[`select_inline_opaque_work.dart`](../benchmark/experiments/select_inline_opaque_work.dart),
+which makes one expensive built-in function call and returns one INTEGER.
 
 ## Results
 
-Three collections, each four alternating-order lane-isolated passes, both arms
-built as native-asset-aware AOT CLI bundles from an identical harness source.
-Every verdict is `benchmark/ab_drift_check.dart` over two order-flipped passes,
-so each lane below carries six independent verdicts. Full tables in the
-[receipt](../benchmark/results/2026-08-11T06-00-00Z-exp269-focused-ab.md).
+### The latency mechanism is real
 
-| lane | role | c1 | c2 | c3 | verdict |
-|---|---|---:|---:|---:|---|
-| `point1` | primary | −62.4% | −62.9% | −60.0% | reproduced ×6 |
-| `point1-wide20` | primary | −64.7% | −64.7% | −64.9% | reproduced ×6 |
-| `page20` | primary | −37.2% | −39.0% | −38.2% | reproduced ×6 |
-| `page64` | primary | −25.1% | −22.2% | −24.0% | reproduced ×6 |
-| `point-under-load` | primary | −89.3% | −90.4% | −89.5% | reproduced ×6 |
-| `concurrent8` | guard | −68.3% | −68.2% | −69.8% | reproduced ×6 |
-| `frame-jitter` | guard | −39.5% | −45.2% | −45.6% | reproduced ×6 |
-| `cap-abort` | guard | +36.8% | +28.8% | +30.5% | reproduced ×6 |
-| `blob1-5mb` | guard | −0.5% | +1.2% | +1.2% | neutral ×6 |
-| `scan-count` | guard | +0.9% | +1.0% | +1.0% | neutral ×6 |
-| `int20-10k` | control | −1.5% | −2.1% | −2.1% | neutral ×6 |
-| `mixed6-1k` | control | +4.5% | +4.6% | +2.8% | mixed — see below |
+The focused AOT comparisons retained the expected large wins:
 
-A point read is **about two and a half times faster**, and a point read issued
-while four large reads hold the whole pool is **ten times faster**, because a
-read that never enters the queue does not wait behind it. The win decays with
-result size exactly as the mechanism predicts — 64 rows is −24%, one row is
-−62% — since what is removed is per-request, not per-row.
+| lane | final-candidate collection | interpretation |
+|---|---:|---|
+| `point1` | -60.0% | hot one-row read |
+| `point1-wide20` | -64.9% | hot one-row, 21 columns |
+| `page20` | -38.2% | 20-row page |
+| `page64` | -24.0% | 64-row page |
+| `point-under-load` | -89.5% | point read while all workers are busy |
+| `concurrent8` | -69.8% | eight point reads, serial inline vs four workers |
+| `cap-abort` | +30.5% | one abandoned decode plus worker replay |
 
-`concurrent8` was written by exp 265 as the lane that could kill the idea: four
-workers run four point reads at once, where a caller that runs them itself runs
-them one after another. It is −68%. Losing pool parallelism does not matter
-when the parallelism is recovering an overhead larger than the work.
+Only collection 3 used the final sentinel-based shared-loop implementation, so
+it supplies two order-flipped verdicts for that exact runtime. Collections 1 and
+2 used the earlier guarded-cap loop and are supporting mechanism evidence, not
+additional repetitions of the final candidate.
 
-**The three guards exp 265 asked for.** `blob1-5mb` and `scan-count` are
-neutral in all six verdicts, which is the result those lanes exist to produce:
-both shapes are recognised and handed to a worker, so they cost what they cost
-today. What makes them meaningful is the routing assertions in
-`test/inline_read_routing_test.dart`, verified against a build with enforcement
-removed — the byte cap aborts the 5 MB point read, and the VM-step cap aborts
-both a filtered count and an unindexed sort. Exp 265's own canonical example
-turns out to be wrong, incidentally: a bare `SELECT count(*)` is one `OP_Count`
-opcode however large the table, so it is genuinely cheap and correctly runs
-inline. The dangerous shape is a count with a predicate.
+The 5 MiB BLOB and scan guards were neutral after their SQL strings had latched
+to worker dispatch, and direct routing tests confirmed their first large
+execution aborted. A cheap-read chain with a 1 ms turn budget reduced the
+focused timer-lateness sample from 2381 us under dispatch to 1147 us; making the
+budget unreachable produced 33,344 us. This proves the budget yields a chain of
+already-cheap reads. It does not prove one synchronous read is bounded.
 
-**Frame lateness, which had no cheap fix.** The candidate's worst 60 Hz frame
-lateness is 1147 us against dispatch's 2381 us — the design is *better* than the
-pool it bypasses, because the dispatch arm answers ~6,000 reads in the 50 ms
-sample and every reply is a port message competing with the timer. A fourth
-build with the budget raised out of reach measures **33,344 us**, two frame
-intervals to within 10 us: with no budget the chain holds the event loop for the
-entire sample and every deadline in it is missed. Exp 265's objection was
-correct and severe; the budget removes it, for 2.8% of the throughput win.
+The same-host release sweep against the actual parent commit recorded 1 win, 0
+regressions, and 168 neutral metrics. That is a collateral-damage check, not a
+product-value receipt: the sole win was the synthetic point-query throughput
+lane, while representative chat/feed lanes were neutral.
 
-**Costs.** `cap-abort` is +29% to +37%: a statement whose first two executions
-returned one row and whose third returns 256 pays for the abandoned decode. That
-is once per statement, because the abort latches. `mixed6-1k` is the one
-unresolved lane — a 1,000-row control that cannot reach the changed path, which
-nonetheless moved +4.5% in the first two collections. Replacing the cap checks'
-`!= 0` guard with a sentinel, so the shared decode loop pays one unconditional
-compare instead of a guarded one, took it to +2.8%; the residue sits at the 3%
-floor and cannot be separated from binary layout, because the same lane reads
-+34.9% in one pass of a comparison between two binaries that differ only by a
-compile flag. `int20-10k`, which decodes ten times as much and is stable within
-±2.1%, is the control to trust.
+### The safety premise is false
 
-The fifth reader connection is the memory cost, and it is visible twice. Peak
-RSS is +0.8 to +1.2 MB against a ~30 MB floor across all three collections. And
-the release suite's `JSON buffer reclaim` guard — the exp 185 lane exp 266's
-signal says to check early when changing anything about which connection serves
-what — reads 80.0 KiB against the baseline's 64.0 KiB. That is exactly one more
-connection's 16 KB initial `json_buf` (exp 183), it is well inside the lane's
-512 KiB budget, and it is a floor rather than retention: `selectBytes` opts out
-of inline routing entirely, so the reclaim path itself is untouched.
+The decisive probe arms this SQL with two one-byte executions, then requests a
+16 MiB value:
 
-### The release-suite sweep, and one lesson about its anchor
+```sql
+SELECT length(randomblob(?)) AS n
+```
 
-The focused harness decides this experiment, but the release suite is the
-no-collateral-damage check, and it matters more than usual here because the
-SQLite build-flag change touches every query in the library rather than only
-the reads being rerouted. Against a same-host `origin/main` baseline captured
-minutes earlier
-([`2026-08-11T07-54-12-baseline-for-exp269.md`](../benchmark/results/2026-08-11T07-54-12-baseline-for-exp269.md)),
-5-sample medians with `--fail-on-regression`: **1 win, 0 regressions, 168
-neutral**, and all six streaming-granularity re-emit counts neutral. The gate
-exits zero.
+It returns one INTEGER, copies no result payload, and completes in far fewer
+than 10,000 VDBE opcodes. The expensive byte generation happens inside one
+SQLite function opcode, beyond every proposed cap. Three same-process samples:
 
-The first attempt at that sweep did not, and the reason is worth recording. Run
-against the newest artifact in `benchmark/results/` — exp 266's headline
-refresh from two days and two merged experiments earlier — it flagged four
-lanes: `selectBytes` large payload +15.4%, long-text unchanged fanout +53.1%,
-batched write inside a transaction +23.0%, nested savepoints depth=5 +43.5%.
-None of the four is reachable from this diff: `selectBytes` opts out of inline
-routing entirely, the two write lanes run on the writer connection, and the
-streaming lane is a `selectIfChanged` hash pass that decodes nothing. Repeating
-the sweep against a baseline built from the actual parent commit on the actual
-host cleared all four, which attributes them to the anchor — exp 267's merged
-statement-cache change sits between the two — and to host drift, not to this
-change.
+| arm | elapsed us | 1 ms timer fired before `select()` returned? |
+|---|---|---|
+| parent `96e6730` | 27,629 / 25,975 / 26,032 | yes / yes / yes |
+| candidate `dd252db` | 27,790 / 26,105 / 26,203 | **no / no / no** |
 
-The mechanical cause of picking the wrong anchor is worth naming too, because
-the next runner will hit it: auto-compare takes the most recent file in
-`benchmark/results/`, and a focused-harness receipt committed under the same
-date sorts ahead of the release run. The receipt here is timestamped `T06` so
-it cannot shadow a `T07`+ release artifact.
+The database work costs the same in both arms. Current main parks the caller on
+a worker, so the timer runs; the candidate executes synchronously and blocks the
+calling isolate for 26-28 ms. The nominal 1 ms per-turn budget is exceeded by
+more than 25x, proving it cannot cap one read, without crossing a row, byte, or
+opcode limit.
+
+Code audit found this is a class of failures, not one unusual built-in:
+
+- SQLite checks the progress handler at selected VM loop boundaries, not inside
+  an individual opcode. A user function, collation, virtual table, VFS/page
+  fault, or busy wait may therefore consume arbitrary wall time before another
+  check. Reader connections retain a 5-second busy timeout.
+- Statement acquisition, parameter packing, and a cold prepare occur before the
+  progress handler is installed. The dedicated inline connection is cold on its
+  first inline execution of each SQL string.
+- The payload limit is checked in Dart after native `resqlite_step_row` has
+  already scanned the complete TEXT value to classify it as ASCII, so it does
+  not bound native work for a wide TEXT cell.
+- Every inline error is swallowed and replayed on a worker. Read-only SQLite
+  connections prevent database-file writes, but extension functions and virtual
+  tables may have observable external or connection-local effects, so replay is
+  not generally side-effect-free.
+- The calling isolate's decoder cache is process-global and keyed only by SQL.
+  Two `Database` objects using identical SQL against different result schemas
+  can reuse the wrong `RowSchema`, returning incorrect column names.
+
+Supporting configuration problems reinforced the disposition: the advertised
+`RESQLITE_INLINE_ROW_MAX=0` kill switch still admits zero-row statements; the
+byte-cap/transfer-threshold invariant is assert-only in release builds; and the
+per-SQL abort latch is evicted with the same 128-entry row-memory cache, allowing
+dynamic-SQL churn to re-arm a previously rejected statement.
 
 ## Decision
 
-**Accepted.** All three of exp 265's failure modes are enforced rather than
-predicted, each verified by a test that fails when its mechanism is removed;
-the microtask objection is answered by a budget that measures better than the
-status quo; and the wins survive intact.
+**Rejected.** Exp 269 proves that caller-isolate execution can remove 24-90% of
+hot small-read latency, but it does not make arbitrary `select()` work safe to
+run there. An opcode counter is a useful cancellation mechanism; it is not a
+wall-time preemption boundary. A stopwatch read before entering synchronous
+native work is an admission check, not an execution budget.
 
-The property worth stating plainly: with this design, the pool's opinion about a
-statement is never load-bearing. If every hint were wrong, the caps would abort
-every attempt and the library would behave exactly as it does today, slower by
-the wasted decode. That is what makes it shippable when exp 265 was not.
+No runtime, build-hook, diagnostic, or test-only API change is kept. The final
+branch retains only the focused routing harness additions, the opaque-work
+probe, benchmark receipts, and the experiment/index/signal sources. The exact
+prototype remains at `archive/exp-269` for inspection, not for reuse as a
+shipping base.
 
-### What is still not bounded
+### Reopen conditions
 
-Two things, both stated rather than fixed:
+Do not retry another caller-isolate policy for the existing arbitrary-SQL
+`select()` contract using a richer predictor or more SQLite counters. Reopen
+only if at least one of these changes the architecture:
 
-- **Statement preparation.** `resqlite_stmt_acquire_on` prepares a statement the
-  first time the inline connection sees it, and preparation runs no VDBE
-  opcodes, so no cap covers it. It is once per (statement, connection) and it is
-  the same work a worker would have done, but it happens on the calling isolate.
-- **The 1 ms budget is a whole-turn stopwatch**, not a sum of read times, so a
-  turn that spends 1 ms on the application's own work stops inlining. That is
-  the conservative direction — the turn is already long — but it means the
-  budget is not a pure accounting of what this feature costs.
+1. an explicit restricted API whose SQL/function/VFS surface makes synchronous
+   wall time genuinely bounded and whose semantics permit that trade;
+2. a preemptible native execution mechanism that can yield or transfer control
+   during an individual SQLite operation without replaying observable work; or
+3. representative device evidence justifying a deliberately synchronous API,
+   with the blocking semantics public rather than hidden behind `select()`.
 
-### Reopen conditions for the caps themselves
-
-The three numbers (64 rows, 64 KB, 10,000 opcodes) are budgets for how long a
-read may hold the isolate that paints frames, not measurements of where inline
-stops being faster — it keeps winning well past all three. Raising them trades
-worst-case frame latency for a wider inline envelope, and the harness can price
-that: `frame-jitter` is the lane that moves. The byte cap has a hard ceiling at
-`BlobTransfer.cellThreshold`, above which the wrap branch stops being
-unreachable and the exp 265 bug comes back.
-
-## Future work
-
-- **`selectIfChanged` is the largest remaining hop** and exp 265 flagged it as
-  not a shortcut around its rejection. That reasoning applied to a *predicted*
-  design; under enforcement the objection is different, because an unchanged
-  re-query is a C hash pass with no Dart decode and therefore has no rows or
-  bytes to cap — only the VM-step budget would apply. Whether that is enough is
-  a real question and the answer is not obvious.
-- **The `mixed6-1k` residue.** A separate inline decode loop would remove the
-  shared-loop compare entirely at the cost of duplicating ~80 lines. Worth it
-  only if a future run can measure the compare above the layout floor, which
-  this one could not.
+For the current API, keep worker-first execution. Future attempts should run the
+opaque-work probe before optimizing happy-path routing, and should distinguish
+"a cheap-read chain yields" from "one read cannot monopolize the caller".
