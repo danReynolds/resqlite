@@ -1185,6 +1185,55 @@ that has the resource to itself measures latency; a lane that contends for it
 measures what a caller actually waits for. Run both, and expect them to disagree
 about how large the effect is.*
 
+### A signal good enough to correct late is not good enough to answer with
+
+[Exp 270](270-read-result-cache.md) built a `select()` result cache on
+resqlite's existing write-invalidation signal — the same table dependencies and
+dirty sets the stream engine has consumed since exp 106 — and it worked: −90% to
+−96% on repeated reads, every adversarial guard neutral. It was rejected because
+that signal reports *writes made through this `Database`*, and a second
+connection to the same file commits without it hearing anything. Streams
+tolerate that because a missed invalidation only delays a re-emit, and
+`stream()` documents the limitation. A read cannot: it returns the wrong rows,
+silently, with no error anywhere.
+
+*Reapplies whenever an existing mechanism is reused for a stricter consumer.
+Before adopting a signal, ask what its failure mode costs the current consumer
+and what it would cost the new one. "Precise enough" and "complete enough" are
+different questions, and a signal can be exactly precise within a scope that is
+too small.*
+
+### Put the cost of invalidation on the reader, not the writer
+
+Exp 270's first invalidation design mirrored the stream engine: a
+table→queries index, walked on every write, with column-level intersection to
+elide. It measured +16–19% on a lane alternating one write and one read, because
+a write pays that walk whether or not the cache ever helps. Replacing it with
+per-table version counters — stamped onto a result when its read is dispatched,
+compared when the result is looked up — took the same lane to neutral. The
+reader that benefits now pays, and stale entries simply lose on their next
+lookup.
+
+*Reapplies to any cache, memo, or dependent-invalidation scheme. Judge it on the
+path that gets no benefit first. Eager invalidation buys promptness nobody
+needed and charges it to the writer; lazy validation charges the beneficiary.*
+
+### A workload that never exercises the miss path cannot evaluate a cache
+
+Exp 270's release sweep reported `Select → Maps` at 100 rows improving 0.040 →
+0.005 ms, and the number was the benchmark measuring itself: every read scenario
+in the suite executes one statement thousands of times with nothing writing, so
+a cache keyed on statement identity hits every time after the first. This is
+exp 267's observation — the whole repo's benchmarks use under ten distinct SQL
+strings — arriving on a different axis. The honest numbers came from the two
+workload simulations, which mix reads with writes to what they read: 17.7% hit
+rate on Chat Sim against 84.3% on Feed Paging.
+
+*Reapplies to any candidate keyed on statement or request identity. Before
+believing a suite result, check whether the suite ever produces a miss. If the
+eligible share is 100% by construction, the lane measures the ceiling and the
+adoption question is still unanswered.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
