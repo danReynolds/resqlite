@@ -1130,28 +1130,25 @@ is it against the thing being optimised, and what makes it fixed? A cost that is
 fixed only because nobody has tried to remove it is a candidate — and pricing it
 is worth doing even when the thing that prices it does not ship.*
 
-### A safety property must be enforced, not predicted
+### A progress counter is not a preemption boundary
 
-[Exp 265](265-inline-main-isolate-select.md) shipped two guards and they failed
-differently. A row cap that aborts mid-decode and falls back to a worker is
-correct whether or not the prediction in front of it was right — it cost +24.7%
-on the one execution that tripped it, once per statement, and it is the part of
-the design that survived. An *eligibility test* that admits a statement based on
-what it returned before is correct only when the prediction holds, and it did
-not hold along three independent axes: one row can hold a 5 MB blob, `count(*)`
-returns one row after unbounded work, and cost varies per execution of the same
-statement so no per-SQL history repairs it. The fix was never a better
-predictor. It was two more enforcement points — `sqlite3_column_bytes` before
-the copy, `sqlite3_progress_handler` every N VM steps — after which the
-prediction stops being load-bearing and becomes what it is good at: avoiding
-wasted aborts.
+[Exp 265](265-inline-main-isolate-select.md) rejected caller-isolate reads
+because row history could not bound their work. [Exp 269](269-enforced-inline-reads.md)
+replaced prediction with row, payload-byte and SQLite VM-opcode caps plus a
+per-turn stopwatch, then found the same safety hole one layer deeper. After two
+tiny reads armed the route, `SELECT length(randomblob(?))` returned one INTEGER
+but spent 26–28 ms inside one SQLite function opcode. It crossed no cap, and the
+stopwatch was checked only before entering the synchronous call. Main let a
+1 ms timer run while a worker did the database work; the candidate held the
+calling isolate until the whole operation finished. Busy/VFS waits, callbacks,
+cold preparation and native value scans have the same shape.
 
-*Reapplies to any admission test, routing rule, cache-eligibility check or fast
-path gated on a learned signal. Ask what happens when the signal is wrong, and
-whether the answer is "it costs some work" or "it violates the property the
-system promises". If the latter, the signal is in the wrong place — move the
-guard to where the truth is known, even if that means starting work you may have
-to abandon.*
+*Reapplies whenever a safety claim is expressed as a counter, timeout or
+stopwatch around opaque synchronous work. Ask where control can actually be
+regained. A budget checked only before the call is admission; a callback between
+VM operations is cancellation; neither is preemption inside one operation. If
+the property is wall time, run an adversarial single-operation stall before
+optimising the happy path.*
 
 ### A guard set built from the lanes you have tests the hypothesis you believe
 
@@ -1204,6 +1201,55 @@ raising the count.
 parent allocation. Inspect optimized assembly before assuming the compiler
 eliminates a nested clear, then prove the live-range boundary and initialize an
 element at publication time instead of faulting every page at construction.*
+
+### A signal good enough to correct late is not good enough to answer with
+
+[Exp 270](270-read-result-cache.md) built a `select()` result cache on
+resqlite's existing write-invalidation signal — the same table dependencies and
+dirty sets the stream engine has consumed since exp 106 — and it worked: −90% to
+−96% on repeated reads, every adversarial guard neutral. It was rejected because
+that signal reports *writes made through this `Database`*, and a second
+connection to the same file commits without it hearing anything. Streams
+tolerate that because a missed invalidation only delays a re-emit, and
+`stream()` documents the limitation. A read cannot: it returns the wrong rows,
+silently, with no error anywhere.
+
+*Reapplies whenever an existing mechanism is reused for a stricter consumer.
+Before adopting a signal, ask what its failure mode costs the current consumer
+and what it would cost the new one. "Precise enough" and "complete enough" are
+different questions, and a signal can be exactly precise within a scope that is
+too small.*
+
+### Put the cost of invalidation on the reader, not the writer
+
+Exp 270's first invalidation design mirrored the stream engine: a
+table→queries index, walked on every write, with column-level intersection to
+elide. It measured +16–19% on a lane alternating one write and one read, because
+a write pays that walk whether or not the cache ever helps. Replacing it with
+per-table version counters — stamped onto a result when its read is dispatched,
+compared when the result is looked up — took the same lane to neutral. The
+reader that benefits now pays, and stale entries simply lose on their next
+lookup.
+
+*Reapplies to any cache, memo, or dependent-invalidation scheme. Judge it on the
+path that gets no benefit first. Eager invalidation buys promptness nobody
+needed and charges it to the writer; lazy validation charges the beneficiary.*
+
+### A workload that never exercises the miss path cannot evaluate a cache
+
+Exp 270's release sweep reported `Select → Maps` at 100 rows improving 0.040 →
+0.005 ms, and the number was the benchmark measuring itself: every read scenario
+in the suite executes one statement thousands of times with nothing writing, so
+a cache keyed on statement identity hits every time after the first. This is
+exp 267's observation — the whole repo's benchmarks use under ten distinct SQL
+strings — arriving on a different axis. The honest numbers came from the two
+workload simulations, which mix reads with writes to what they read: 17.7% hit
+rate on Chat Sim against 84.3% on Feed Paging.
+
+*Reapplies to any candidate keyed on statement or request identity. Before
+believing a suite result, check whether the suite ever produces a miss. If the
+eligible share is 100% by construction, the lane measures the ceiling and the
+adoption question is still unanswered.*
 
 ## How to add to this file
 

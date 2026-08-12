@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 58,
-    "totalEntries": 139
+    "entriesWithClaims": 60,
+    "totalEntries": 141
   },
   "experiments": [
     {
@@ -2149,6 +2149,29 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "269",
+      "title": "Bound the read, don't predict it",
+      "file": "269-enforced-inline-reads.md",
+      "date": "2026-08-11",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected"
+    },
+    {
+      "id": "270",
+      "title": "Answer the repeated read from memory",
+      "file": "270-read-result-cache.md",
+      "date": "2026-08-12",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -3374,6 +3397,169 @@
       ],
       "text": "A bounded SQL-keyed cache returning the wrong entry is silent, not fatal: the caller receives a well-formed result belonging to a different statement. `test/stmt_cache_pressure_test.dart` gates this by pushing 400 distinct statements through every cache and checking each statement's identity from its result — the row it selects, the columns it projects, its parameter arity, and a stream's dependency capture after churn. Four of the five tests were verified to fail against a deliberately mismatched entry (a new `sqlite3_stmt` installed under the evicted entry's old SQL text).",
       "conditions": "JIT `dart test`, 400 distinct statements against 128-entry caps · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "269.1",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Removing worker dispatch has a large, reproducible effect on hot small reads. The exact final candidate measured point reads at -60.0% to -64.9%, page20 at -38.2%, page64 at -24.0%, a point read queued behind four busy readers at -89.5%, and eight concurrent point reads at -69.8% over two order-flipped pairs. This confirms the latency mechanism; it does not establish that arbitrary `select()` work is safe on the caller.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · collection 3 only for the exact sentinel-based candidate · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "265.1"
+        },
+        {
+          "type": "validates",
+          "target": "265.2"
+        },
+        {
+          "type": "validates",
+          "target": "265.3"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "269.2",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Rows, result payload bytes, VDBE-opcode count and a stopwatch checked before a synchronous call do not bound caller-isolate wall time. After two one-byte arming reads, `SELECT length(randomblob(?))` with a 16 MiB argument returned one INTEGER in 25,975-27,790 us without crossing any proposed cap. A 1 ms timer fired before return on worker-first main in all three samples and failed to fire before return on the inline candidate in all three. The expensive built-in function call occurs inside one VM opcode, so a progress handler cannot preempt it.",
+      "conditions": "Same-host Dart JIT A/B · parent 96e6730 vs candidate dd252db · three 16 MiB samples per arm · timer result is the caller-responsiveness discriminator · 2026-08-12",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.6"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "269.3",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A SQLite progress handler is a cancellation opportunity, not wall-time preemption. SQLite invokes it at selected VM loop boundaries; one function, collation, virtual-table, VFS/page-fault or busy-handler interval may run before another check. In the rejected prototype, parameter packing and cold statement preparation also occurred before handler installation, reader connections retained a 5-second busy timeout, and native TEXT classification scanned a complete cell before Dart applied the output-byte cap.",
+      "conditions": "Code audit of candidate dd252db and bundled sqlite3mc 2.3.5 / SQLite 3.53.2 · supported arbitrary-SQL and extension surface · 2026-08-12",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "269.4",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The 1 ms per-turn budget measures and improves yielding across a chain of cheap reads, not the duration of one read. In the focused final-candidate lane, worst timer lateness was 1,253-1,313 us inline against 2,373-2,382 us through dispatch; making the budget unreachable produced a separate 33,344 us observation. The opaque-work probe shows why this cannot be promoted to a per-read wall bound.",
+      "conditions": "M1 Pro · AOT · final-candidate collection 3 for the focused lane; auxiliary unreachable-budget value recorded without raw samples · 2026-08",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "269.5",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Release-suite auto-comparison can silently choose a stale or non-release artifact. Exp 269's first sweep compared against a two-experiment-old anchor and reported four apparent regressions on unreachable paths; an explicit same-host baseline from the actual parent cleared them, yielding 1 win, 0 regressions and 168 neutral metrics. Always name the parent receipt explicitly and test diff reachability before interpreting an aggregate flag.",
+      "conditions": "M1 Pro · `run_release.dart --repeat=5 --skip-memory --fail-on-regression` · actual-parent baseline 96e6730 · 2026-08",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "270.1",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "A `select()` result served from a main-isolate cache costs 0.48 us against 4.65 us for the same read dispatched to a reader worker. Focused AOT A/B over two order-flipped collections: repeated one-row read -90.0%/-90.1%, the same at 21 columns -92.1%/-91.9%, eight cycled parameter sets -90.2%/-89.6%, a repeated 20-row page -95.1%/-95.7%, all REPRODUCED. Peak RSS is flat or lower (31.0 -> 25.9 MB on the page lane).",
+      "conditions": "M1 Pro (10 cores) · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · both arms built from one worktree and one native library, differing only in the kReadCacheEnabled constant · 8 alternating pairs per lane per collection, 51 samples per pass · 2026-08-12",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "269.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "270.2",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "resqlite's write invalidation is scoped to writes made through one `Database`, so a result cache behind `select()` returns superseded rows whenever another connection to the same file commits. Demonstrated directly: after a second `Database` on the same path commits, the cached arm reports the pre-write value while a fresh connection reports the post-write one. This is not fixable inside the cache; the preupdate hook only fires on the connection that wrote.",
+      "conditions": "`benchmark/experiments/select_cache_foreign_writer.dart`, both arms, same host · applies to any design that remembers a read result rather than re-executing it · 2026-08-12",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "270.3",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "`PRAGMA data_version` — SQLite's cross-connection change counter — costs 2 us at p50 and 5 us at max when idle, and 1 us at p50 with a 10 us max while a foreign connection commits continuously, stepping a cached statement on a main-isolate-owned reader connection under AOT. A cache hit validated by it would therefore cost about 2 us against a 4.65 us dispatch: roughly 2x rather than 10x. The median is affordable; the tail is unmeasured against cross-process contention, checkpoints and busy waits, and reading it requires the main-isolate SQLite connection exp 269 rejected.",
+      "conditions": "M1 Pro · AOT · 3,000 samples per phase · contention supplied by a same-process second `Database`, not a foreign process · 1 us stopwatch resolution, so p50 values are at the floor · 2026-08-12",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "269.3"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "269.3"
+      ]
+    },
+    {
+      "id": "270.4",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "An invalidation scheme's cost belongs on the reader, not the writer. A table-to-queries index with column-level intersection measured +16-19% on a lane alternating one write and one read, because the write walks it whether or not the cache ever helps. Per-table version counters stamped at dispatch and checked at lookup took the same lane to +0.7%/+1.8% (neutral), giving up column-level elision to do it.",
+      "conditions": "Same focused harness and host as claim 270.1 · `read-write-alternate` lane, 20 write/read pairs per sample · the +16-19% figure is from a single collection of the superseded implementation, not an order-flipped pair · 2026-08-12",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "270.5",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "Read repetition is workload-shaped, not constant. Chat Sim (A5) would serve 17.7% of its 9,006 `select()` calls from a (sql, parameters) cache and Feed Paging (A6) 84.3% of its 140. At 4.2 us saved per hit that is ~0.74 us and ~3.5 us per `select()` respectively. The release suite cannot supply this number at all: its read scenarios repeat one statement with nothing writing, so they measure the cache rather than the database.",
+      "conditions": "`benchmark/experiments/select_read_cache_incidence.dart` over the repo's two workload simulations · synthetic workloads, not production traces · hit-rate counts only, no timing · 2026-08-12",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "270.6",
+      "source": "270",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch"
+      ],
+      "text": "The release suite's read scenarios cannot evaluate a statement-keyed cache, and the explicit parent comparison shows it directly: 7 wins, 0 wall-time regressions, 162 neutral, where the wins are `Select -> Maps` 100 rows -86%, `Scaling` 100 rows -87% and keyset pagination -100% — all of them the suite repeating one statement with nothing writing. The only red row is `sqlite_async`'s overlapping-column re-emit count, which varied 3,466-4,503 across the five repeats of that same run while resqlite reported 0 disjoint / 10 overlapping in all five.",
+      "conditions": "M1 Pro · `run_release.dart --repeat=5 --fail-on-regression --fail-on-memory-regression` · explicit same-host baseline from parent 1237587 · quiet host; an earlier sweep of the same commit flagged 14 lanes at +12% to +40% while a separate multi-Database probe ran concurrently · 2026-08-12",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "269.5"
+        }
+      ],
       "state": "live"
     }
   ]
