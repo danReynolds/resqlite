@@ -182,9 +182,10 @@ repo uses a handful of SQL strings — showing up on a different axis, and it me
 
 The closest thing the repo has to an application is its two workload
 simulations, which at least mix reads with writes to the tables those reads
-depend on.
-[`select_read_cache_incidence.dart`](../benchmark/experiments/select_read_cache_incidence.dart)
-runs them and counts:
+depend on. A probe that runs them and counts what fraction of `select()` calls
+the cache could serve (`benchmark/experiments/select_read_cache_incidence.dart`,
+reverted with the runtime it reads counters from, recoverable at
+`archive/exp-270`):
 
 | workload | `select()` calls | hits | hit rate |
 |---|---:|---:|---:|
@@ -293,8 +294,8 @@ Reopen if any of these changes:
    by nearly 5× and neither is a production trace. A downstream AOT trace giving
    the real share of `select()` calls that repeat a (sql, parameters) pair with
    no intervening write is what decides whether ~4 µs per hit is worth any
-   complexity at all; `select_read_cache_incidence.dart` is the shape of the
-   measurement, it just needs a workload worth measuring.
+   complexity at all; the incidence probe at `archive/exp-270` is the shape of
+   the measurement, it just needs a workload worth measuring.
 3. **A narrower target with the same mechanism.** The stream engine already holds
    `entry.lastResult` for every active stream, invalidated by the same signal and
    already accepted as stream-scoped. Serving `select()` from an *existing
@@ -312,6 +313,7 @@ Reopen if any of these changes:
 - focused AOT A/B, nine lanes, two order-flipped collections of eight pairs;
   `dart run benchmark/ab_drift_check.dart` over all nine lane pairs
 - `benchmark/experiments/select_cache_foreign_writer.dart` on both arms
-- `benchmark/experiments/select_cache_data_version.dart`, AOT
+- `select_cache_data_version.dart` (AOT) and the incidence probe over the
+  Chat Sim / Feed Paging workloads
 - headline release sweep, `--repeat=5 --fail-on-regression --fail-on-memory-regression`
 - `dart run benchmark/finalize_experiment.dart --experiment=experiments/270-read-result-cache.md`
