@@ -4,6 +4,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 267's measured +0.8-1.2 MB statement-cache RSS was real, but most of the four-reader price was not retained prepared statements or populated dependency metadata. `resqlite_db` comes from `calloc`, then `stmt_cache_init` wrote the complete 128-entry array again; optimized arm64 removed that redundant write for the adjacent writer cache but retained a 273,408-byte `bzero` for every reader. Four readers therefore eagerly touched 1,093,632 bytes before any cache slot became live. Removing that clear recovers 1,056,768 bytes of median max RSS, almost the whole observation that named dynamic metadata as the next target.",
     "The native statement-cache entry is 2,136 bytes, not the approximate 1.6 KB carried from exp 248 into exp 267. `resqlite_column_dep` is 24 bytes, so `dep_columns[64]` alone occupies 1,536 bytes; one 128-entry cache is exactly 273,408 bytes (`0x42c00`). The corrected size strengthens exp 267's eviction-compaction explanation but changes the footprint follow-up: unused capacity can stay virtual without changing entry ownership at all.",

@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 192 replaced the exp-023 single-digit `fast_i64_to_str` loop with a two-digit `[00..99]` table; exp 194 specialised the FLOAT arm for integral REALs; exp 195 promoted the per-query token scratch onto `resqlite_cached_stmt`. Exp 220 tested whether the `fast_i64_to_str` inner shape itself still had headroom for the very common `0..9999` row-id / small-key / small-count case by adding a direct-write branch that bypasses `tmp[]`, sign-normalization, and the trailing `memcpy` from `tmp` to `buf`.",
     "The fast path reproduces its target win where every cell hits it. On `select_bytes_int_heavy.dart`'s new `10k x 20 small non-neg ints (0..9999)` and `10k x 8 small non-neg ints (0..9999)` lanes, medians move -11.6% / -10.4% and -10.9% / -9.7% across an order-flipped pair. The `~18-digit big ints` lane is neutral (+0.8% / +0.7%), confirming the fast path does not disturb the exp-192 general path when cells fall through.",

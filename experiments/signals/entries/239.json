@@ -3,7 +3,9 @@
     "stream-rerun-dispatch"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "Exp 209's small-read request-amortization win does not require a public `selectAll` API to exist mechanically. Exp 239 kept ordinary `Future.wait(db.select(...))`, preserved the pool's first four-way wave, and batched only already-parked plain selects in pool-sharded envelopes capped at four. Twenty point reads improve -26.2% / -33.2% and twenty roughly-ten-row reads improve -21.1% / -30.3% across the lane-isolated order flip, clearing the preset 15% target in both orderings.",
     "Sharding parked work across the pool avoids exp 209's one-worker large-read collapse. Twenty concurrent 10k-row reads are -21.6% then -0.3% at median, with p95 and peak RSS inside the declared guards. Aggregate sacrifice can amortize reader respawns as well as messages, so large homogeneous overflow is not itself the hidden-batching blocker.",

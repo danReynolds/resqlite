@@ -3,7 +3,8 @@
     "stream-rerun-dispatch",
     "measurement-system"
   ],
-  "outcomeClass": "accepted_measurement",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "Post-FIFO app-shaped workloads keep `dispatcherWakeRetryTotal` at zero, so ReaderPool wake policy is no longer the active dispatch target",
     "A11c overlap and keyed-PK workloads still produce high parked-dispatcher counts despite coalesced or hash-suppressed visible emissions, pointing the next dispatch experiment toward stream re-query admission/completion"

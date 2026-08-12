@@ -2,7 +2,8 @@
   "directions": [
     "measurement-system"
   ],
-  "outcomeClass": "accepted_measurement",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "The Tracelite workload-summary explanation layer now emits the interpretation exp 143 had to recover manually: dispatch floors, dispatch-bound point queries, work-bound merge rounds, tail spread, RSS movement, allocation counters, and WAL side effects",
     "`benchmark/profile/run_tracelite_profile.dart` now validates the stable workload insight IDs after `tracelite explain`; a thin `workload_loaded`-only artifact exits 65 instead of silently looking complete",

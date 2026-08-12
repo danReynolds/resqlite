@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_regression",
+  "outcomeClass": "rejected",
+  "outcomeReason": "regression",
   "changedBeliefs": [
     "A JIT row_map_facade sample made Row.values look like the remaining Row facade gap (baseline values iteration 8.607 ms vs LinkedHashMap 4.779 ms), but repeated JIT samples were contradictory after VM warmup: the baseline itself alternated between ~3 ms, ~9 ms, and ~11 ms on the values lane.",
     "Replacing Row.values with a fixed-length ListBase slice view produced stable-looking JIT samples around 3.4-3.7 ms, but the AOT check reversed the decision. Compiled baseline _RowValueIterator values iteration stayed at 2.663 / 2.675 / 2.687 ms, while the ListBase candidate regressed to 6.828 / 6.847 / 7.101 ms.",

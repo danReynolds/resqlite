@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "A narrow private RowSchema lookup change can still improve full row consumption without changing the ResultSet/Row public API",
     "The schema-name identity fast path plus HashMap fallback cut row_map_facade hot lookup from 10.750 -> 5.136 ms and keys+lookup from 20.602 -> 10.650 ms",

@@ -2,7 +2,9 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "accepted_correctness_and_performance",
+  "outcomeClass": "accepted",
+  "outcomeReason": "correctness",
+  "outcomeNote": "Shipped for correctness; also measured a performance improvement.",
   "changedBeliefs": [
     "Exp 077's row-count shortcut correctly proved that a growing result differed, but `resqlite_query_hash` returned the prefix-only accumulator and `executeQueryIfChanged` cached it as the complete changed result's next baseline. Once the cached count advanced, the immediate identical rerun computed a full hash, mismatched the partial baseline, decoded all rows, and publicly re-emitted unchanged data once.",
     "A stream result hash has two roles: change detection now and cached identity later. Any value stored in `StreamEntry.lastResultHash` must be canonical for the complete corresponding result; a fast-reject digest that stops early can only be safe as a visibly non-cacheable sentinel.",

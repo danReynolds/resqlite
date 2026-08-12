@@ -3,6 +3,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The JOURNAL's most-reapplied lesson — phase-ordered A/B gates confound code deltas with time-correlated drift — was enforced only by runner discipline. Every recent A/B writeup (exp 159, 167, 171, 173) re-derived the same CV-asymmetry + order-flip reasoning by hand. Encoding it as cvPct + classifyDriftFlag in benchmark/shared/stats.dart plus a benchmark/ab_drift_check.dart CLI makes the call deterministic and citable",
     "classifyDriftFlag reaches drift-suspected by two mechanisms: (1) CV asymmetry — the flagged phase's CV is >= 4x its clean phase's and above an 8% floor (the exp 159 signature, 0.20-0.46 vs 0.01-0.06), or (2) sign reversal across the order flip with both effects above a 3% floor (the exp 167 signature). Re-run against reconstructed exp 159 and exp 167 flags, the tool reproduces the verdicts those runners reached manually. reproduced requires both order-flipped passes to agree same-direction with comparable CVs",

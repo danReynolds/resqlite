@@ -3,6 +3,7 @@
     "parameter-encoding-and-binding"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The exp 179 single-row direct-ASCII allocateParams rewrite is materially beneficial once the bound text crosses the mid-tens-of-KB range — exactly the revisit condition exp 179 named. The new focused single_row_large_text_bind.dart workload (1 KB to 1 MB sequential INSERTs) measures -15.4% / -11.1% at 16 KB, -17.3% / -18.7% at 64 KB, -32.3% / -32.1% at 256 KB, and -26.7% / -28.5% at 1 MB across two order-flipped passes",
     "Encoder isolation reproduces exp 179's deltas exactly (-45% / -58% / -37% on the single_row_param_packing.dart micro), so the mechanism question (encoder faster vs slower) is settled separately from the workload-materiality question",

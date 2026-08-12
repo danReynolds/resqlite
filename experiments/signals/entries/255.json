@@ -3,6 +3,7 @@
     "stream-rerun-dispatch"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "A stream's initial emission was not guaranteed: if a write dirtied the entry while its initial query was in flight, `_createStream` discarded the initial rows unemitted and relied on a catch-up re-query, which then compared against the hash baseline taken from those same discarded rows and reported 'unchanged'. Both emissions suppressed each other and the stream stayed permanently silent. The fix keeps the suppression (exp 256 measured it as the better semantics) but poisons the baseline so the re-query always emits.",
     "The failure mode of this class of bug is silence, not staleness — the hardest kind for an application to notice, and the reason it survived so long behind an intermittent test failure."

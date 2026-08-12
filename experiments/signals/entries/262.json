@@ -1,6 +1,9 @@
 {
-  "directions": ["measurement-system"],
-  "outcomeClass": "accepted_measurement",
+  "directions": [
+    "measurement-system"
+  ],
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "Crash-resilience has to be granular enough to reach the crash. #282 correctly identified that a segfault destroyed whole runs and correctly chose to persist partial progress, but persisted per completed *repeat* — and the peer crash it was written against fires at the Memory scenario, the fifteenth of sixteen, inside repeat 1. No repeat ever completed, so the fix never engaged. Exps 260 and 261 each ran fourteen scenarios and produced no artifact. Persisting per scenario preserves nine scenarios and 153 metrics against a SIGKILL at scenario 10, where the previous behaviour preserved nothing.",
     "A partial run is worth keeping as long as it cannot be mistaken for a whole one. `repeatCount` now counts only repeats that finished, so a run killed inside repeat 1 reports 0 rather than 1, and `scenariosCompleted`/`scenarioTotal`/`partial` mark the shortfall — self-exclusion in the same shape as `gitDirty` and `--repeat=1`, which already drop a run from the trend charts.",
@@ -17,7 +20,12 @@
       "id": "262.2",
       "text": "The release suite can now fail on a memory regression. `compareMemory` returns wins/regressions/neutral plus the regressed benchmark names alongside the existing table, and `--fail-on-memory-regression` exits non-zero. Thresholds are unchanged (per-benchmark bootstrap MDE, 0.5 MB floor) — only the verdict is newly actionable. Opt-in rather than default: a local run reports without failing.",
       "conditions": "unit-tested behaviour, 10 cases · 2026-08",
-      "edges": [{ "type": "dependsOn", "target": "261.1" }]
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ]
     }
   ],
   "nextSignals": [

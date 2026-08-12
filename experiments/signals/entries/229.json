@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "experimentClass": "moonshot",
   "changedBeliefs": [
     "The codebase-wide assumption that `native/resqlite.c` must be ISA-agnostic scalar C is no longer load-bearing. Exp 229 introduces the first SIMD kernel (`json_write_base64_neon_bulk`) gated on `defined(__aarch64__) && defined(__ARM_NEON)`, with the exp 225 scalar 12-bit-LUT encoder retained as fallback for non-ARM64 targets and for the < 48-byte tail on all targets.",

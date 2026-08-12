@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "The `stmt_cache_lookup_entry` move-to-back promotion is far more expensive per firing than its two prior experiments implied, because `resqlite_cached_stmt` is 1,632 bytes — it embeds exp 106's `read_tables[64]` (512 B) and `dep_columns[64]` (1 KB) fixed arrays. One promotion copies 4,896 bytes (three full-struct copies); eviction memmoves ~50 KB. Exp 071 (MRU scan direction + SQL hash) and exp 207 (`last_lookup` fast path) both measured this function on a SINGLE repeated SQL, a shape where the hot entry is already parked at `entries[count - 1]` so the promotion branch is never reached. Their rejections therefore say nothing about the swap; it was an unmeasured cost hidden behind two 'this function is settled' results.",
     "The swap cost is now bounded by isolated C measurement over the real struct layout (2M iterations/lane): when it fires it costs ~60-65 ns per lookup — 85.47 vs 20.97 ns (cache=8, 2 distinct SQL), 90.14 vs 18.11 (cache=8, 4), 144.28 vs 88.98 (cache=32, 2), 146.77 vs 82.38 (cache=32, 4). Single-SQL control lanes are flat (22.42 vs 22.01; 83.01 vs 79.56), independently confirming the branch is inert on the exp 071/207 shape. Replacing the swap with a per-entry `lru_seq` recency stamp plus in-place min-stamp eviction removes that work at identical LRU policy.",

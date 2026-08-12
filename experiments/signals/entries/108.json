@@ -2,7 +2,8 @@
   "directions": [
     "measurement-system"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Persistent selectBytes out-parameter slots are below the current benchmark and RSS signal"
   ],

@@ -3,6 +3,7 @@
     "long-text-stream-hashing"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "claims": [
     {
       "id": "075.1",

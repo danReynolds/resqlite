@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "After [exp 195](195-stmt-cache-name-tokens.md) caches the JSON column-name token (`\"name\":` / `,\"name\":`) on the prepared-statement entry, the row loop in `write_json_to_buf` writes each token with `memcpy(dst, src, token_lens[i])`. The runtime length is a per-column int and the compiler cannot bound it, so this lowers to a libc `memcpy` call on every column of every row (~200 k calls per query on 10k rows x 20 int cols). Realistic column names are almost always <=16 bytes; the compiler was hiding a constant-width copy behind a call boundary.",
     "Giving the tokens buffer 16 bytes of zero-filled trailing padding (one `buf_ensure(&tokens, 16)` + `memset` at build time) lets the row loop issue `memcpy(dst, src, 16)` for the common `token_len <= 16` case, which clang / gcc lower to a single 128-bit load-store pair on ARM64 NEON and x86 SSE. `b->len` is still advanced by the real `token_len`, so the trailing over-written bytes are covered by the row-start `col_count * cell_max` reservation and are overwritten by the immediately following cell payload; long-name tokens stay on the runtime-length fallback. JSON output is byte-identical.",

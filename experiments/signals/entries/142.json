@@ -2,7 +2,8 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_no_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Direct single-row text parameter encoding did not produce current Tracelite production evidence despite the old focused-harness win from PR #130",
     "The retest over chat-sim and narrow-batch-insert did not clear the primary gate: resqlite changed +6.86% and +16.4% with neutral/inconclusive verdicts and high CV",

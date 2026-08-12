@@ -2,7 +2,8 @@
   "directions": [
     "long-text-stream-hashing"
   ],
-  "outcomeClass": "rejected_no_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "At 32 KB cells on a pool-of-4 reader fleet the byte-stream fold is no longer the dominant wall component: even an unrolled 16-byte FNV body is +4.5 % to +12.1 % vs the exp 110 8-byte body across two order-flipped passes, all inside a 2.6 → 6.0 ms per-pass spread",
     "The named ≥ 32 KB cell candidate is closed: the workload now exists (release-suite `Long-Text 32KB Unchanged Fanout` and focused `benchmark/experiments/long_text_32kb_hash.dart`) and shows that hash-loop unrolling beyond exp 110's 8-byte fold is below noise on this shape",

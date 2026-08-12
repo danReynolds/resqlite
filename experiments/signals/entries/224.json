@@ -3,7 +3,8 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 018/074's multi-row read prototypes were confounded by copying transient TEXT/BLOB payloads into a side arena. Exp 224 tested the remaining pure-numeric frontier without that copy: batch contiguous INTEGER/FLOAT/NULL rows dynamically, but return immediately after a pointer-backed row so Dart decodes SQLite-owned bytes before the next step.",
     "Collapsing a 10,000-row numeric scan from roughly 10,001 leaf FFI calls to about 157 does not improve end-to-end `select()`: 10k x 8 INTEGER is +1.9% / +0.5% candidate-slower across the order flip, while 10k x 20 INTEGER flips +4.6% / -0.5% around zero.",

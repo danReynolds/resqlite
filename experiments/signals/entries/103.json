@@ -2,7 +2,8 @@
   "directions": [
     "transaction-control-paths"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Native nested transaction helpers add complexity without a stable realistic-workload win"
   ],

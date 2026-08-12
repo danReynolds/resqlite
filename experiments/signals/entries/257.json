@@ -3,7 +3,8 @@
     "stream-rerun-dispatch"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal_bar",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Collapsing a homogeneous MultiExecuteRequest's per-member execute loop into one private C call is not enough while every member remains an independent SQLite autocommit. The public 5,120-insert gate improved 17.7% in candidate-first order but only 3.6% in baseline-first order, missing the predeclared 10% reproduced bar.",
     "The envelope adds a real fixed cost rather than merely failing to beat noise: an integer-only no-op UPDATE burst regressed 17.7% / 13.9% across the order flip. Whole-group allocateBatchParams packing, result-buffer materialization, and suffix repacking after errors can cost more than the scalar path's already-specialized one-row encoder and repeated FFI calls.",

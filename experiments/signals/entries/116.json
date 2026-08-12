@@ -4,6 +4,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
   ],

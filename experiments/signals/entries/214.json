@@ -3,7 +3,9 @@
     "stream-rerun-dispatch",
     "measurement-system"
   ],
-  "outcomeClass": "rejected_preserved_measurement",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Change not shipped; the measurement it produced is deliberately preserved.",
   "changedBeliefs": [
     "Directly reading the existing `resqlite_write_result` fields from the native pointer is not a stable public write-path win. The focused `write_result_direct_read.dart` harness produced mixed/small deltas in pair 1, a broad candidate-slower order flip in pair 2, and mixed/neutral confirmation in pair 3.",
     "The narrow scalar-decode cleanup is distinct from exp 095's persistent writer result buffer, but it lands in the same conclusion class: tiny `executeWrite()` result-handling savings are below the public writer-path decision floor unless a future mechanism changes more than the Dart-side view decode.",

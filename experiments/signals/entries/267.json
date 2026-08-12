@@ -1,6 +1,9 @@
 {
-  "directions": ["result-transfer-shape"],
+  "directions": [
+    "result-transfer-shape"
+  ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The 32-entry cap shared by the three SQL-keyed read-path caches was never a measured number, and it is a cliff rather than a slope. All three evict at the front and promote on hit, which is approximately LRU, and LRU is the worst possible policy for a cyclic scan: at D <= 32 distinct rotating statements every read hits, and at D = 33 the entry each read needs is the one the previous miss just evicted, so the hit rate collapses rather than degrading. Measured, the collapse is worth about half of every read — 14.0 us per read against 6.1 us — and it is FLAT from 40 rotating statements to 128, which is the signature of a cliff and would not be produced by gradual cache pressure.",
     "Exp 266 moved the workload that reaches the cap by a factor of four without moving the cap. Under the round-robin dispatch it replaced, a sequential loop over D distinct statements was partitioned across the four reader connections — each cache saw roughly D/4, so a 128-statement application still fit inside 32 per connection. Sticky dispatch sends the whole cycle to one worker. This is the tail risk exp 266's own signal named ('a workload with well over 32 hot statements might now evict where it previously did not') and it is real, but it is a change in exposure, not a regression exp 266 introduced: at any D the per-cache miss rate past the cap was always total.",
@@ -14,7 +17,12 @@
       "id": "267.1",
       "text": "Raising the three SQL-keyed read-path caps (`STMT_CACHE_MAX`, `_schemaCacheMax`, `ReaderPool.rowSizeMemoryMax`) from 32 to 128, together with in-place LRU-slot reclaim in `stmt_cache_insert`, is worth a reproduced -55.5% at 40 rotating distinct statements, -55.1% at 64 and -53.3% at 128, on a lane issuing 256 point reads per sample. Per read that is 14.0 us -> 6.1 us. The win is flat across 40-128 statements, which is the cliff signature; every lane inside the old cap (`rotate8`, `rotate24`, `rotate32`, `point1`) is neutral in two independent order-flipped collections, and peak RSS rises 0.8-1.2 MB.",
       "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · 4-worker pool · lane-isolated, 4 alternating-order passes, 51 samples/lane, two independent ab_drift_check pairs · host 62-72% idle · 2026-08",
-      "edges": [{"type": "dependsOn", "target": "266.1"}]
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "266.1"
+        }
+      ]
     },
     {
       "id": "267.2",

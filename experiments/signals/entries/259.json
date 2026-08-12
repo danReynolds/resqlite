@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The Dart row decoder was paying to answer a question C already had the inputs for. `fastDecodeText` had to classify every TEXT cell as ASCII (Latin-1 widen) or not (utf8.decode) before it could build the String, costing a second ExternalTypedData word view plus a bounds-checked scan per cell — and falling back to a byte-by-byte loop for values under 16 bytes or on an unaligned pointer, which covers most real database text. `resqlite_step_row` holds the same pointer and length one frame earlier, in cache, where the answer is a branch-free SWAR pass.",
     "Moving the classification into the native step loop (RESQLITE_TEXT_ASCII = type code 6) is worth a reproduced 10-24% on text-bearing select() reads, including 19-24% on the repo's canonical 6-column mixed product row, across two order-flipped AOT passes. The saving is per TEXT cell, so it scales with text carried per read rather than with row count; the 400 B lane gains most (-22.2% / -19.4%) because the replaced Dart scan walked ~50 words per cell, and the canonical mixed row gains as much as it does because its description column is ~85 bytes on its own.",

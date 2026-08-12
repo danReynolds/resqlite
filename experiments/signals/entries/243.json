@@ -3,6 +3,7 @@
     "parameter-encoding-and-binding"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 234's per-occurrence blob-param wrapping carried a latent aliasing regression: `wrapBlobParams` called `TransferableTypedData.fromList` once per qualifying position, so a caller passing the SAME `Uint8List` object to N positions (or reusing one buffer across a coalesced `MultiExecuteRequest` burst) got N independent external copies of one buffer. That is strictly worse than the graph copy exp 234 replaced, because `SendPort.send`'s object-graph copy preserves reference identity and would have copied the shared buffer once. The regression is invisible on single-reference writes (the common case) and only bites when one buffer is referenced multiple times in a send.",
     "The fix is the 'table protocol': wrap by identity via an identity-keyed cache (`HashMap(equals: identical, hashCode: identityHashCode)`), sharing ONE `TransferableTypedData` per unique backing buffer referenced at every occurrence. The graph copier sends the shared wrapper once (identity preserved across the hop); the writer materializes each unique wrapper exactly once (a second `materialize()` throws), so `unwrapBlobParams` dedups by wrapper identity and `_handleMultiExecute` threads one shared unwrap cache across the envelope's writes. Distinct buffers are unchanged (each still gets its own wrapper); the no-large-blob fast path still returns the input list with no allocation.",

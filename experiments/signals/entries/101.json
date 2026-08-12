@@ -3,6 +3,7 @@
     "transaction-control-paths"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Top-level transaction control still had removable SQLite prepare/finalize work"
   ],

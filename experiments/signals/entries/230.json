@@ -3,7 +3,8 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal_bar",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 229's suggestion that SIMD JSON escape scan is a real TEXT-side mechanism is confirmed only for very long safe spans. The final AArch64/NEON fused classify-and-copy prototype improves the 1 KiB safe ASCII lane -33.6% / -34.1% and the CJK lane -25.2% / -25.5% across the order flip.",
     "The practical break-even row is not strong enough to ship. Safe ASCII at 256 B improves -17.7% then -12.6%, missing the predeclared >=15% floor in the second ordering. A vector kernel can be compelling at 1 KiB while still failing the representative lower boundary where per-cell dispatch/setup is a material share.",

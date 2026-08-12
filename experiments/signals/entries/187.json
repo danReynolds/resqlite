@@ -3,6 +3,7 @@
     "parameter-encoding-and-binding"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 186's UTF-8-heavy follow-up now has a representative workload: single_row_large_text_bind.dart emits byte-matched CJK rows beside the ASCII rows, so future single-row bind changes can test both direct-ASCII and direct-UTF-8 payloads in one focused harness.",
     "Replacing the single-row non-ASCII _allocateParamsPreEncoded fallback with direct _utf8Length/_writeUtf8 packing removes one temporary Uint8List allocation plus one copy per non-ASCII string param. The CJK focused rows improve roughly 31-39% at 16 KB through 1 MB across the order-flipped pair.",

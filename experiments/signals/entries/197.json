@@ -1,7 +1,11 @@
 {
-  "directions": ["stream-rerun-dispatch"],
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "True commit merging is a large writer frontier: changing coalesced MultiExecuteRequest handling from N independent SQLite autocommits to one BEGIN IMMEDIATE / COMMIT moved writer_pipelining.dart's concurrent-burst lane from 49.999 ms to 5.931 ms in the candidate-first pass and from 44.919 ms to 5.717 ms in the baseline-first pass (-88.1% / -87.3%).",
     "The focused sequential-awaited lane stayed effectively neutral (+3.5% / -1.0%), and the transaction-guardrail lane stayed neutral after order flip (-12.5% / +0.1%), so the win is specific to concurrent standalone write bursts that currently pay many SQLite transaction boundaries.",

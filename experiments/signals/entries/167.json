@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_no_stable_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Closed exp 141's direct ResultSet.forEach override does not show a stable current win after exp 158's RowSchema lookup change when measured on real rows returned by Database.select()",
     "The focused SQLite-backed consumer lane showed Pair A forEach lookup at 30.525 -> 28.383 ms, but the longer confirmation reversed to 28.563 -> 30.942 ms; forEach length also reversed from 9.439 -> 8.010 ms to 8.652 -> 9.490 ms",

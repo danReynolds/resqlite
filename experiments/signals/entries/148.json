@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Plain worker-side reader-reply batching reduces completion callback counters but does not produce a mergeable measured-elapsed win on the stream-dispatch Tracelite suite",
     "The profile smoke cut A11c overlap completion callbacks from 4,527 to 1,425 and completion wall from 109.6 ms to 55.6 ms, but the formal A/B still measured high-cardinality fanout at +5.18%, many-streams writer throughput at +3.28%, and keyed-PK subscriptions at +13.5%",

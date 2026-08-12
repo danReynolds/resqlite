@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 174's bounded RSS high-water (~+15 MB after 200 x 651 KB selectBytes) becomes pathological under a one-off concurrent-burst shape: 8 concurrent x 8 MB selectBytes pin 32 MB of native json_buf across the 4-reader pool for the rest of the connection's life, and the recurring-large pattern (1 large per 50 small over 300 iterations) settles at 16 MB pinned. The exp 174 future-note about high-threshold reclaim is a real candidate, not a hypothetical",
     "Adding Diagnostics.readerJsonBufHighWaterBytes (sum of per-reader json_buf.cap) makes the high-water directly observable from any benchmark or downstream user — a reusable signal for future memory-sensitive selectBytes work alongside the existing exp 174 'large bytes' release lane",

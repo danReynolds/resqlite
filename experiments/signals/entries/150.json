@@ -3,6 +3,7 @@
     "parameter-encoding-and-binding"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The first-row string probe missed nullable generated-statement batches where row 0 carries NULL text columns and later rows carry strings",
     "Treating first-row NULL values as possible text admits nullable batches only after the existing 6-param / 600-total guard, preserving exp 146's small/narrow rejection",

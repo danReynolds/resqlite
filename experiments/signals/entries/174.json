@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The reader sacrifice path (Isolate.exit + reader respawn) is a win for the rows path (zero-copy transfer of already-built Dart objects) but counterproductive for selectBytes: native JSON must be Uint8List.fromList-copied before Isolate.exit can transfer it, so sacrifice saves zero copies on bytes and only adds a respawn; the non-sacrifice bytes path copied twice (fromList + SendPort)",
     "Sending a Uint8List view over the reader connection's persistent json_buf is sound (SendPort snapshots the bytes at send time; the single-threaded handler keeps the buffer stable through the send) and is the single mandatory copy at every size, so selectBytes never needs to sacrifice",

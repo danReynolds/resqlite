@@ -3,6 +3,7 @@
     "parameter-encoding-and-binding"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Parameter encoding still has worthwhile headroom when the change removes per-text/blob native allocations and SQLite strlen work"
   ],

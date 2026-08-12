@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 108's rejection of persistent `queryBytes` scratch slots was correct at ms-precision release-suite granularity but does not settle the question at µs precision. Reusing three per-isolate slots (buf pointer + length + row count) removes three `calloc` + three `calloc.free` per `selectBytes()` call and reproduces −3.4 % to −6.6 % candidate-faster on tiny-rowset lanes across two order-flipped passes on `select_bytes_repeated_calls.dart`, while 100 / 1000-row guard lanes stay flat and the exp 174 large-bytes lane is neutral.",
     "The load-bearing 1 row × 20 int lane holds −3.4 % to −4.6 % across all three pairs including the warmed one — the same warmed-pair third-pass gate that killed exp 206's `sqlite3_column_count` cache. Exp 195's `select_bytes_repeated_calls.dart` is the harness that discriminates: release-suite `Select JSON Bytes` cannot see µs-scale per-call setup, so exp 108 correctly rejected under it while exp 211 correctly accepts under the µs harness."

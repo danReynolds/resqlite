@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_no_stable_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Skipping the writer's preupdate_hook accumulation + reply harvest when _streamEngine.length == 0 at send time is a coherent residual-bucket attack — it removes per-row strcmp dedup + per-write FFI/toDartString/object work that no consumer reads, gated by a track_dirty flag on resqlite_db flipped from the writer isolate, with a DrainRequest no-op barrier from StreamEngine._createStream to fence in-flight non-tracking writes before a new stream's initial query",
     "The no-stream win is real: two order-flipped focused passes show sequential-awaited (2000 writes) -3.8% / -5.3% and wide-batch (10k rows x 20 params) -2.4% / -5.9%, matched by the release-suite Single Inserts -5.2% / Concurrent Single Inserts -3.8% / Batch Insert 10k -6.8% deltas (sub-MDE flags on the public guard)",

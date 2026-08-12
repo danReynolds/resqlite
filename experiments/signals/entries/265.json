@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
   "experimentClass": "moonshot",
   "changedBeliefs": [
     "The `select() round-trip floor` has been the terminal argument in this direction for months and was never a measurement. Claim 258.2 rejected a columnar result store partly because its sub-threshold transfer saving was `below the round-trip floor`; exp 264 put a point read at `5-8 us, most of which is the isolate round trip`; exps 209 and 239 both went after the floor by amortising a hop across several queries. It is now priced: on the canonical 6-column point read the hop is 6.3 us of an 8.4 us read, and removing it leaves 2.1 us. So the floor was real, it was most of a small read, and it is not a floor — it is a routing decision. Everything previously rejected as `below the round-trip floor` was measured against a denominator four times larger than the work it was competing with. This survives the candidate's rejection and is the run's lasting contribution.",

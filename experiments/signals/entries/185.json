@@ -3,7 +3,8 @@
     "result-transfer-shape",
     "measurement-system"
   ],
-  "outcomeClass": "accepted_measurement",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "Exp 183's json_buf reclaim now has release-suite visibility rather than only focused-audit evidence: SQLite Diagnostics emits a JSON buf (KiB) column and a dedicated `JSON buffer reclaim (8 large selectBytes + 64 small settles)` row.",
     "The row is an active regression guard, not just a reported counter. After an 8-call concurrent large selectBytes burst and 64 small selectBytes settles, the diagnostics suite throws if readerJsonBufHighWaterBytes remains above 512 KiB; the focused suite run settled at 64.0 KiB with readersBusy=0.",

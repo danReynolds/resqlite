@@ -3,6 +3,7 @@
     "stream-rerun-dispatch"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Cross-call write request batching (the 'group commit' lever exp 159 named) captures the per-round-trip residual that pipelining left: standalone execute() calls piling up while a send is in flight coalesce into one MultiExecuteRequest, and the release Concurrent Single Inserts lane improves -26% (baseline-first) / -32% (candidate-first), reproduced across order-flipped runs. exp 147's ~72% writer/request residual was attackable by collapsing N messages to ~2, not just by overlapping N messages (exp 159)",
     "Batching transport beats batching commits here: each coalesced statement runs as its own autocommit (per-call success/failure unchanged, no group BEGIN/COMMIT), because SQLite/commit is only ~9% of writer wall and a group transaction would change failure atomicity for independent writes",

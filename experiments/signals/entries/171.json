@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "The `await _runtime` microtask hop at the `Database` layer above exp 159's `Writer._request` cache is real (~1-2 us per call, theoretical upper bound ~6-12% on a 2000-call sequential burst) but sits at or below the focused-harness noise floor: two order-flipped passes on writer_pipelining.dart produced alternating-sign deltas inside per-round variance (sequential-awaited -2.3%/+2.5%, transaction-guardrail -7.5%/+6.1%, concurrent-burst +4-5% both passes)",
     "Trimming microtask hops at the Database layer above the writer does not move exp 159's stated sequential-write residual floor (port wake + event-loop scheduling); the next reduction candidate in this area needs to be group-commit-shaped or transport-shaped, not hop-shaped"

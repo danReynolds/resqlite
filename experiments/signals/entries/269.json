@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
   "experimentClass": "moonshot",
   "changedBeliefs": [
     "Exp 269 strengthens rather than supersedes exp 265's rejection. Row, payload-byte and VM-opcode caps still do not bound caller-isolate wall time: arbitrary work can occur inside one SQLite opcode, before the progress handler is installed, or while SQLite is waiting below the VM. The missing primitive is preemption, not a better predictor or another counter.",

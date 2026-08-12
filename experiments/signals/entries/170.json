@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "A synchronous `Mutex.tryLock()` plus a non-`async` `Writer.execute` / `executeBatch` is a coherent request-side scheduling change — exactly the request-side counterpart to exp 151's response-side `Completer<T>.sync()` attempt — but it does not move the primary sequential-write lane: Single Inserts (100 sequential) shifted +1.7 % (paired medians 3.099 ms -> 3.153 ms, 3.082 -> 2.982, 3.169 -> 3.501) and writer_pipelining `sequential-awaited (2000 writes)` shifted +2.0 % (34.047 -> 34.723), both within the run-to-run noise band and in the wrong direction",
     "Only Concurrent Single Inserts moved consistently (1.231 -> 1.135 ms, -7.8 %) — but that lane is owned by exp 159's send-gated writer-lock pipelining at -58 % to -61 %, so a second pass at the same workload is sub-decision-threshold gain at the cost of an extra slow-path branch plus the behavioral change of sync-before-close writes no longer being rejected",

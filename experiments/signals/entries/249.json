@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "experimentClass": "moonshot",
   "changedBeliefs": [
     "Invalidation-grouped rerun batching does NOT help reactive fan-out, and specifically regresses the metric that matters. Under table/column-level invalidation one write dirties every stream projecting the changed column (100 in `high_cardinality_fanout`), so batching those reruns into one message per worker is a natural-looking amortization. It was implemented internally (SelectIfChangedBatchRequest + worker loop, ReaderPool.selectBatchIfChanged, batched StreamEngine._flushQueue/_requeryBatch, lastRowCount cost-gate) with no public API change. Clean cross-worktree A/B (two binaries, 3 alternated rounds, warm regime) measured single-write emission latency SLOWER on every lane: homogeneous +22% p50 / +59% p95, heterogeneous +66% p50 / +52% p95. The mechanism: a batched reply is indivisible, so the one changed stream's fresh result is delivered only when its whole batch finishes — it waits behind ~24 cheap unchanged batch-mates' re-hashes. Message-count amortization is the wrong lever for a latency-bound workload. This is the third rejection of the same trade (exp 148 reduced completion callbacks but regressed measured elapsed; exp 239 rejected shared indivisible replies). The lastRowCount cost-gate keeps a large partition off the critical path but not the common many-small-partitions wait.",

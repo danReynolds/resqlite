@@ -3,7 +3,8 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal_bar",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 229's categorical claim that out-of-lined ISA-specific kernels are viable is now bounded: viable for BULK per-cell payloads (base64 amortises SIMD setup over an entire BLOB per call), NOT for SCALAR per-cell values. An AArch64/NEON i64→decimal kernel (magnitude split into low8/mid8/high groups via two /1e8 divides, each 8-digit group formatted with vector reciprocal splits (d*5243)>>19 and (p*205)>>11, out-of-lined and gated ≥ 1e8, byte-identical to the exp 192 scalar path) converts exactly one integer per call, so the call boundary + vector setup is paid per cell with nothing to amortise it against.",
     "The scalar two-digit-table itoa (exp 192) is confirmed as the floor for per-cell integer JSON encoding under the row-at-a-time architecture. Across 11 focused A/B passes in three methodologies (interleaved both orders, 5-round min-of-N) the 10k×20 ~18-digit BIGINT selectBytes lane never leaned candidate-faster: +1.2/+6.0/+9.8% (baseline-first), +28/+36/+16% (candidate-first, machine at its loudest), +11.3% at min-of-N, and only ~flat (-0.6%, within noise) in the single quiet pair. Identical-code control lanes drifted ±10-120% in the same session, confirming environmental noise rather than a code effect.",

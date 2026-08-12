@@ -1,6 +1,9 @@
 {
-  "directions": ["result-transfer-shape"],
-  "outcomeClass": "rejected_regression",
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "regression",
   "claims": [
     {
       "id": "067.1",

@@ -1,6 +1,10 @@
 {
-  "directions": ["measurement-system", "result-transfer-shape"],
-  "outcomeClass": "accepted_measurement",
+  "directions": [
+    "measurement-system",
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "Focused AOT harnesses can carry a memory reading, and the instrument is fixed by a hard constraint rather than chosen: an AOT binary exposes no VM service (`Service.getInfo()` returns null, `--enable-vm-service` is rejected as an unrecognized flag), so heap statistics and allocation profiles are unavailable in the only mode exp 193 permits for decode-path results. `ProcessInfo` is the whole instrument, and a `currentRss` read costs ~700 ns so it must stay outside the stopwatch.",
     "`maxRss` and a sampled `currentRss` peak can give opposite verdicts on the same change, by 76 percentage points. Pre- vs post-exp-260 on a lane crossing `sacrificeSlotThreshold`: sampled `currentRss` peak 36.6 -> 64.0 MB (+75%), `maxRss` 65.9 -> 64.8 MB (-1.7%). `maxRss` is the true high-water and is what a guard should gate on; the `currentRss` curve is a retention signal, and retention moves when reader isolates are sacrificed and return their pages. Within one isolate the VM keeps pages after GC, so a candidate freeing its own garbage reads as no change.",
@@ -19,15 +23,26 @@
       "text": "Exp 260 lowers peak RSS rather than raising it: `maxRss` falls -2.1% on 10k x 20 INTEGER, -11.5% on the canonical 6-column product row at 10k rows, and -28.0% on 5k x 4 INTEGER, with the point-read control flat at -0.3%. This supersedes the arithmetic in claim 260.4, which predicted peak capacity could rise 22-25% for results landing just under a doubling boundary.",
       "conditions": "M1 Pro · AOT · maxRss, one process per lane, 21 samples · 2026-08",
       "edges": [
-        { "type": "supersedes", "target": "260.4" },
-        { "type": "dependsOn", "target": "261.1" }
+        {
+          "type": "supersedes",
+          "target": "260.4"
+        },
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
       ]
     },
     {
       "id": "261.3",
       "text": "Peak read-path memory was flat within ~1 MB from v0.3.0 (2026-05-03) to exp 259 (2026-08-03) across eight checkpoints and roughly forty merged experiments, including the whole transfer-shape arc, while wall time on the same runs fell 25-40%. The only movement in the window is exps 259 and 260, both downward. No memory regression has accumulated.",
       "conditions": "M1 Pro · AOT · harness source held constant, rebuilt per checkpoint · maxRss, one process per lane · 2026-08",
-      "edges": [{ "type": "dependsOn", "target": "261.1" }]
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "261.1"
+        }
+      ]
     },
     {
       "id": "261.4",

@@ -3,6 +3,7 @@
     "stream-rerun-dispatch"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The exp 115 counters convert exp 114's previously ambiguous FIFO waiter idea into a direct measurement: under overloaded reads, wake retries drop from 6/66/378 to 0 at concurrency 8/16/32 while max parked depth remains unchanged",
     "Reader-pool shared-completer wake amplification is now a solved target; future dispatch work needs a different counter signal before adding more queue policy"

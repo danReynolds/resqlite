@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Changing writer response futures from `Completer<T>()` to `Completer<T>.sync()` is a coherent request-resolution implementation attempt, but it does not clear the Tracelite stream-dispatch primary gate",
     "The formal A/B measured high-cardinality fanout at +2.92%, keyed-PK subscriptions at +18.5% with too-noisy evidence, and many-streams writer throughput at +14.0%",

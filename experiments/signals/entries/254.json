@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Reading reader TEXT cells with `sqlite3_value_blob` instead of `sqlite3_value_text` is byte-identical (UTF-8 connection; exp 191 explicit-length invariant) but performance-neutral. `value_text`'s NUL-termination does not cost a per-cell malloc on the prepared-statement scan path: `sqlite3VdbeMemGrow` reuses each result `Mem`'s `zMalloc` buffer across rows, reducing it to an amortized memcpy below the focused-harness floor. Same-binary order-flipped A/B (6 passes) on `selectBytes` shows long-TEXT -0.6% / short-TEXT +2.4% against a +1.2% integer control; 2 KB text still ~-0.7%, no length scaling.",
     "Two-worktree A/B on this codebase can carry a per-worktree binary offset that is NOT drift: the byte-identical integer control moved ~-4.8% in the SAME direction across both order-flipped passes. A single-binary runtime toggle (env-gated, removed before merge) is the reliable isolation for a per-cell C change of this size."

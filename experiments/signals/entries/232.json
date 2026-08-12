@@ -2,7 +2,9 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "The exact-quarter mechanism is technically valid: `.25`/`.5`/`.75` REAL values under `abs(value) < 1e15` can reuse the i64 formatter with byte-identical spelling, and synthetic all-hit lanes improve 78-87% across both orderings.",
     "Synthetic eligibility is not adoption evidence. The 100%-quarter targets and 50%-quarter mixed row establish a ceiling, but exp 232 supplied no production trace, representative application, or schema distribution after exp 194 explicitly required a production profile before fractional specialization.",

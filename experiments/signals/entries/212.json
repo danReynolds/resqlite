@@ -4,6 +4,8 @@
   ],
   "experimentClass": "moonshot",
   "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Large win confined to empty nested-transaction bodies.",
   "changedBeliefs": [
     "Lazy nested-savepoint materialization is only attractive for empty nested transaction bodies. Skipping SAVEPOINT/RELEASE for empty fanout x500 improved -77.9% / -74.5% across an order-flipped focused pair, but that is not a representative production gate.",
     "Fusing SAVEPOINT + first execute into one writer-isolate request does not improve the meaningful nested-write shape. `savepoint_name_compression.dart` write fanout x100 regressed +74.8% in the baseline-first pair and +34.9% in the candidate-first pair; rollback fanout was neutral-to-slower and the depth=5 chain slowed in both passes.",

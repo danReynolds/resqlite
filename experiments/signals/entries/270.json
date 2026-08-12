@@ -4,6 +4,7 @@
     "stream-rerun-dispatch"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
   "experimentClass": "moonshot",
   "changedBeliefs": [
     "We believed resqlite's write-invalidation signal was a general-purpose fact about the database, used so far only by streams. It is not: it is a fact about writes made through one `Database` object. Streams can live with that because a missed invalidation only delays a re-emit, and `stream()` documents the limitation. `select()` cannot, because it re-reads the file today and therefore observes every committed write, whoever made it. Anyone reading the stream-engine chapters or the invalidation sections of the architecture doc should read 'invalidation' as scoped to this Database's own writes, not to the file.",

@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_regression",
+  "outcomeClass": "rejected",
+  "outcomeReason": "regression",
   "changedBeliefs": [
     "Increasing reader worker count can worsen writer throughput by increasing completion-side microtask churn"
   ],

@@ -3,7 +3,8 @@
     "long-text-stream-hashing",
     "measurement-system"
   ],
-  "outcomeClass": "benchmark_gap",
+  "outcomeClass": "rejected",
+  "outcomeReason": "benchmark_gap",
   "changedBeliefs": [
     "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable"
   ],
