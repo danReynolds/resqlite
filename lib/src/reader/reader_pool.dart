@@ -14,6 +14,7 @@ import '../exceptions.dart';
 import '../profile_counters.dart';
 import '../profile_mode.dart';
 import '../query_decoder.dart' show RowSizeMemory, initialResultRows;
+import '../read_cache.dart';
 import '../blob_transfer.dart' show blobTransfer;
 import '../tracelite_profile.dart';
 import 'read_worker.dart';
@@ -166,12 +167,69 @@ final class ReaderPool {
     }
   }
 
+  /// Results this pool may answer without dispatching
+  /// ([EXP-270](../../../experiments/270-read-result-cache.md)).
+  ///
+  /// Lives on the pool rather than beside the stream engine because `select` is
+  /// the only caller that may consult it: `selectWithDeps` and `selectIfChanged`
+  /// serve streams, which keep their own last result, and `selectBytes` returns
+  /// a view over native memory the next query overwrites. Transaction reads
+  /// never reach the pool at all.
+  final ReadCache readCache = ReadCache();
+
   /// Execute a query on the next available worker.
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) async {
+    if (!kReadCacheEnabled) {
+      return _selectUncached(sql, parameters, traceCorrelationId);
+    }
+
+    // One map lookup decides the whole path, and a statement already known to
+    // be uncacheable pays nothing else — no key, no parameter hash.
+    final description = readCache.describe(sql);
+    if (description == null) {
+      // A statement is described on its *second* sighting, not its first.
+      // Learning what a query reads costs a wider reply — the table names
+      // marshalled back from the worker — and a statement executed once
+      // can never be hit anyway, so paying on first sight taxes exactly the
+      // workload the cache cannot help. `_rowHints` already records every SQL
+      // the pool has run, so membership in it is the second-sighting test and
+      // costs no state of its own.
+      if (!_rowHints.containsKey(sql)) {
+        ReadCache.misses++;
+        return _selectUncached(sql, parameters, traceCorrelationId);
+      }
+      return _selectAndDescribe(sql, parameters, traceCorrelationId);
+    }
+    if (!description.cacheable) {
+      ReadCache.misses++;
+      return _selectUncached(sql, parameters, traceCorrelationId);
+    }
+
+    final key = ReadCacheKey(sql, parameters);
+    final cached = readCache.lookup(key);
+    if (cached != null) {
+      ReadCache.hits++;
+      return cached;
+    }
+
+    ReadCache.misses++;
+    final versions = readCache.versionsOf(description);
+    final epoch = readCache.epoch;
+    final rows = await _selectUncached(sql, parameters, traceCorrelationId);
+    readCache.store(key, description, rows, versions, epoch);
+    return rows;
+  }
+
+  /// The pre-270 path: dispatch, remember the result size, materialize blobs.
+  Future<List<Map<String, Object?>>> _selectUncached(
+    String sql,
+    List<Object?> parameters,
+    int? traceCorrelationId,
+  ) async {
     final memory = _rowHints[sql];
     final result = await _dispatch(
       SelectRequest(sql, parameters, traceCorrelationId: traceCorrelationId),
@@ -181,6 +239,60 @@ final class ReaderPool {
     _record(sql, memory, rows.length);
     blobTransfer.materializeCells(rows);
     return rows;
+  }
+
+  /// First execution of a SQL string: learn what it reads and whether it is
+  /// deterministic, on the same round trip that produces the rows.
+  ///
+  /// Only ever runs once per distinct SQL — the answer is a property of the
+  /// prepared statement, not of the bound parameters.
+  Future<List<Map<String, Object?>>> _selectAndDescribe(
+    String sql,
+    List<Object?> parameters,
+    int? traceCorrelationId,
+  ) async {
+    ReadCache.misses++;
+    final memory = _rowHints[sql];
+    final epoch = readCache.epoch;
+    final writesAt = readCache.writes;
+    final result = await _dispatch(
+      SelectDescribeRequest(
+        sql,
+        parameters,
+        traceCorrelationId: traceCorrelationId,
+      ),
+      memory,
+    );
+    final (rows, dependencies, deterministic) =
+        result as (List<Map<String, Object?>>, TableDependencies, bool);
+    _record(sql, memory, rows.length);
+    blobTransfer.materializeCells(rows);
+
+    final description = readCache.record(sql, dependencies, deterministic);
+    if (description.cacheable && readCache.writes == writesAt) {
+      // Versions have to be read *after* the round trip, because which tables
+      // to read them for is exactly what the round trip returned. That is why
+      // this path needs the write counter as well: a write landing mid-read
+      // would otherwise stamp pre-write rows with post-write versions.
+      readCache.store(
+        ReadCacheKey(sql, parameters),
+        description,
+        rows,
+        readCache.versionsOf(description),
+        epoch,
+      );
+    }
+    return rows;
+  }
+
+  /// Drop cached results a write may have changed.
+  ///
+  /// Routed through [StreamEngine.onDependencyChanges] so there is one place a
+  /// write's dependency set is delivered, and so a future write path cannot
+  /// invalidate streams while forgetting the cache.
+  void invalidateReadCache(TableDependencies changes) {
+    if (!kReadCacheEnabled) return;
+    readCache.onDependencyChanges(changes);
   }
 
   /// Execute a query and capture read dependencies.
@@ -379,6 +491,7 @@ final class ReaderPool {
   /// [ResqliteConnectionException] rather than looping over dead slots.
   Future<void> close() async {
     _closed = true;
+    readCache.reset();
     // Wake any parked dispatch waiters so they can re-check _closed.
     while (_dispatchWaiters.isNotEmpty) {
       _dispatchWaiters.removeFirst().complete();

@@ -69,6 +69,18 @@ final class SelectWithDepsRequest extends ReadRequest {
   });
 }
 
+/// Row query that also reports what the statement reads and whether it is
+/// deterministic, so the main isolate can decide whether the result may be
+/// cached ([EXP-270](../../../experiments/270-read-result-cache.md)).
+///
+/// Distinct from [SelectWithDepsRequest], which additionally hashes the whole
+/// result to seed a stream's change-detection baseline. A cache fill has no
+/// baseline to seed, and hashing every cell would put a per-row cost on the
+/// path this experiment exists to make cheaper.
+final class SelectDescribeRequest extends ReadRequest {
+  SelectDescribeRequest(super.sql, super.parameters, {super.traceCorrelationId});
+}
+
 /// JSON bytes query — serialized entirely in C, no Dart objects for result data.
 final class SelectBytesRequest extends ReadRequest {
   SelectBytesRequest(super.sql, super.parameters, {super.traceCorrelationId});
@@ -199,6 +211,18 @@ void readerEntrypoint(List<Object> args) {
           );
           sacrifice = _shouldSacrifice(raw);
           result = (_toRows(raw), dependencies, initialHash, initialRowCount);
+
+        case SelectDescribeRequest(:final sql, :final parameters):
+          final (raw, dependencies, deterministic) = executeQueryDescribed(
+            dbHandleAddr,
+            readerId,
+            sql,
+            parameters,
+            request.rowHint,
+            request.initialRowHint,
+          );
+          sacrifice = _shouldSacrifice(raw);
+          result = (_toRows(raw), dependencies, deterministic);
 
         case SelectBytesRequest(:final sql, :final parameters):
           // Unlike select() (rows), selectBytes never sacrifices: the result
@@ -437,6 +461,37 @@ RawQueryResult executeQuery(
     getReadTableDependencies(dbHandle, readerId),
     hash,
     raw.rowCount,
+  );
+});
+
+/// Execute a query and report what it read plus whether it is deterministic
+/// ([EXP-270](../../../experiments/270-read-result-cache.md)).
+///
+/// Both facts are properties of the *prepared statement*, so the C layer serves
+/// them from the cached entry the acquire just touched — the second and later
+/// executions of a SQL string cost nothing extra to describe. The pool only
+/// asks once per SQL anyway.
+(RawQueryResult, TableDependencies, bool) executeQueryDescribed(
+  int handleAddr,
+  int readerId,
+  String sql,
+  List<Object?> parameters, [
+  int rowHint = 0,
+  int initialRowHint = 0,
+]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (
+  dbHandle,
+  stmt,
+) {
+  final raw = decodeQuery(
+    stmt,
+    sql,
+    rowHint: rowHint,
+    initialRowHint: initialRowHint,
+  );
+  return (
+    raw,
+    getReadTableDependencies(dbHandle, readerId),
+    resqliteGetReadDeterministic(dbHandle, readerId) != 0,
   );
 });
 

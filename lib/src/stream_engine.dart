@@ -114,6 +114,12 @@ final class StreamEngine {
     TableDependencies changes, {
     int? traceCorrelationId,
   }) async {
+    // [EXP-270](../../experiments/270-read-result-cache.md): before the
+    // no-streams short circuit below, and synchronously, because `execute()`
+    // calls this the moment its write resolves and a caller's next `select()`
+    // must not be answered from a pre-write result.
+    _pool.invalidateReadCache(changes);
+
     if (_entries.isEmpty) {
       return;
     }
