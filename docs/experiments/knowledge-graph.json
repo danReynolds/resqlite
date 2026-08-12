@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 58,
-    "totalEntries": 139
+    "entriesWithClaims": 59,
+    "totalEntries": 140
   },
   "experiments": [
     {
@@ -2149,6 +2149,17 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted"
+    },
+    {
+      "id": "269",
+      "title": "Bound the read, don't predict it",
+      "file": "269-enforced-inline-reads.md",
+      "date": "2026-08-11",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -3374,6 +3385,79 @@
       ],
       "text": "A bounded SQL-keyed cache returning the wrong entry is silent, not fatal: the caller receives a well-formed result belonging to a different statement. `test/stmt_cache_pressure_test.dart` gates this by pushing 400 distinct statements through every cache and checking each statement's identity from its result — the row it selects, the columns it projects, its parameter arity, and a stream's dependency capture after churn. Four of the five tests were verified to fail against a deliberately mismatched entry (a new `sqlite3_stmt` installed under the evicted entry's old SQL text).",
       "conditions": "JIT `dart test`, 400 distinct statements against 128-entry caps · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "269.1",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Removing worker dispatch has a large, reproducible effect on hot small reads. The exact final candidate measured point reads at -60.0% to -64.9%, page20 at -38.2%, page64 at -24.0%, a point read queued behind four busy readers at -89.5%, and eight concurrent point reads at -69.8% over two order-flipped pairs. This confirms the latency mechanism; it does not establish that arbitrary `select()` work is safe on the caller.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · collection 3 only for the exact sentinel-based candidate · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "265.1"
+        },
+        {
+          "type": "validates",
+          "target": "265.2"
+        },
+        {
+          "type": "validates",
+          "target": "265.3"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "269.2",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Rows, result payload bytes, VDBE-opcode count and a stopwatch checked before a synchronous call do not bound caller-isolate wall time. After two one-byte arming reads, `SELECT length(randomblob(?))` with a 16 MiB argument returned one INTEGER in 25,975-27,790 us without crossing any proposed cap. A 1 ms timer fired before return on worker-first main in all three samples and failed to fire before return on the inline candidate in all three. The expensive built-in function call occurs inside one VM opcode, so a progress handler cannot preempt it.",
+      "conditions": "Same-host Dart JIT A/B · parent 96e6730 vs candidate dd252db · three 16 MiB samples per arm · timer result is the caller-responsiveness discriminator · 2026-08-12",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.6"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "269.3",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "A SQLite progress handler is a cancellation opportunity, not wall-time preemption. SQLite invokes it at selected VM loop boundaries; one function, collation, virtual-table, VFS/page-fault or busy-handler interval may run before another check. In the rejected prototype, parameter packing and cold statement preparation also occurred before handler installation, reader connections retained a 5-second busy timeout, and native TEXT classification scanned a complete cell before Dart applied the output-byte cap.",
+      "conditions": "Code audit of candidate dd252db and bundled sqlite3mc 2.3.5 / SQLite 3.53.2 · supported arbitrary-SQL and extension surface · 2026-08-12",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "269.4",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "The 1 ms per-turn budget measures and improves yielding across a chain of cheap reads, not the duration of one read. In the focused final-candidate lane, worst timer lateness was 1,253-1,313 us inline against 2,373-2,382 us through dispatch; making the budget unreachable produced a separate 33,344 us observation. The opaque-work probe shows why this cannot be promoted to a per-read wall bound.",
+      "conditions": "M1 Pro · AOT · final-candidate collection 3 for the focused lane; auxiliary unreachable-budget value recorded without raw samples · 2026-08",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "269.5",
+      "source": "269",
+      "directions": [
+        "result-transfer-shape"
+      ],
+      "text": "Release-suite auto-comparison can silently choose a stale or non-release artifact. Exp 269's first sweep compared against a two-experiment-old anchor and reported four apparent regressions on unreachable paths; an explicit same-host baseline from the actual parent cleared them, yielding 1 win, 0 regressions and 168 neutral metrics. Always name the parent receipt explicitly and test diff reachability before interpreting an aggregate flag.",
+      "conditions": "M1 Pro · `run_release.dart --repeat=5 --skip-memory --fail-on-regression` · actual-parent baseline 96e6730 · 2026-08",
+      "edges": [],
       "state": "live"
     }
   ]
