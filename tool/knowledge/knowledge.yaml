@@ -54,10 +54,26 @@ codeRoots:
 # writing, not better evidence.
 groundedness:
   minStrongPinsPerChapter: 2
-  # Chapters exempt from the floor, with the reason. A chapter belongs here
-  # when its subject genuinely has no testable or measurable surface.
+  # Documents exempt from the floor, each with its reason. Two kinds live here,
+  # and the difference matters: a document whose subject has no testable
+  # surface, and a document that owes pins nobody has written yet. Both are
+  # exempt; only the second is a debt. Saying which is which is the point of
+  # writing the reason down rather than keeping a bare list.
   exempt:
     07-meta.md: >-
       Describes the experiment process itself, so its citations are inherently
       claim-shaped; there is no runtime behaviour for a test or benchmark to
       pin.
+    home.md: >-
+      Landing page. Its one technical claim is carried by the quickstart sample
+      it includes, which is a real test file rather than prose.
+    architecture.md: >-
+      DEBT. Long-form narrative predating the chapter corpus, which now restates
+      most of it against pinned evidence. Either cite the chapters' claims or
+      retire the overlap; until then it asserts on its own authority.
+    cross-isolate-data-transfer.md: >-
+      DEBT, and the sharpest of the three. `lib/src/reader/read_worker.dart`
+      points at its §6a as the authority for the sacrifice threshold's mechanism
+      and measurements, so source code defers to a document that cites nothing.
+      It should carry `[[code:sacrificeSlotThreshold=32768]]` and the 245/246
+      claims at minimum.

@@ -48,19 +48,17 @@ late Database _db;
 
 Future<void> _seed(Database db) async {
   _db = db;
-  await db.execute('CREATE TABLE items('
-      'id INTEGER PRIMARY KEY, '
-      'owner_id INTEGER NOT NULL, '
-      'value INTEGER NOT NULL)');
+  await db.execute(
+    'CREATE TABLE items('
+    'id INTEGER PRIMARY KEY, '
+    'owner_id INTEGER NOT NULL, '
+    'value INTEGER NOT NULL)',
+  );
   await db.execute('CREATE INDEX items_owner ON items(owner_id)');
   final itemsPerOwner = _itemCount ~/ _streamCount;
-  await db.executeBatch(
-    'INSERT INTO items(owner_id, value) VALUES (?, ?)',
-    [
-      for (var i = 0; i < _itemCount; i++)
-        [(i ~/ itemsPerOwner) + 1, 0],
-    ],
-  );
+  await db.executeBatch('INSERT INTO items(owner_id, value) VALUES (?, ?)', [
+    for (var i = 0; i < _itemCount; i++) [(i ~/ itemsPerOwner) + 1, 0],
+  ]);
 }
 
 Future<(int drainMs, int writeBurstMs)> _singleIteration(int iter) async {
@@ -72,10 +70,9 @@ Future<(int drainMs, int writeBurstMs)> _singleIteration(int iter) async {
   for (var i = 0; i < _streamCount; i++) {
     final idx = i;
     final sub = _db
-        .stream(
-          'SELECT id, value FROM items WHERE owner_id = ? ORDER BY id',
-          [i + 1],
-        )
+        .stream('SELECT id, value FROM items WHERE owner_id = ? ORDER BY id', [
+          i + 1,
+        ])
         .listen((_) => emitCounts[idx]++);
     subs.add(sub);
   }
@@ -96,8 +93,7 @@ Future<(int drainMs, int writeBurstMs)> _singleIteration(int iter) async {
   final writeSw = Stopwatch()..start();
   for (var w = 0; w < _writeCount; w++) {
     final id = prng.nextInt(_itemCount) + 1;
-    await _db
-        .execute('UPDATE items SET value = ? WHERE id = ?', [w, id]);
+    await _db.execute('UPDATE items SET value = ? WHERE id = ?', [w, id]);
   }
 
   // Settle.

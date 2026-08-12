@@ -23,7 +23,11 @@ Map<String, double> extractResqliteMedians(String content) =>
 /// 0.74 ms to 1.23 ms. A resqlite number read across that window is measuring
 /// two things at once, and nothing said so.
 Map<String, double> extractPeerMedians(String content) {
-  final all = _extractMedians(content, resqlite: false);
+  final all = _extractMedians(
+    content,
+    resqlite: false,
+    measurementTablesOnly: true,
+  );
   return {
     for (final e in all.entries)
       if (_isPeerLane(e.key)) e.key: e.value,
@@ -33,16 +37,24 @@ Map<String, double> extractPeerMedians(String content) {
 /// The peer libraries resqlite is measured against.
 const peerLibraries = ['sqlite3', 'sqlite_async', 'drift'];
 
-/// Sections that restate other sections as deltas rather than measuring
-/// anything. Their rows carry library names too, and a delta compared against
-/// another delta is meaningless, so they are excluded by key prefix rather than
-/// by touching the shared walk (which `extractResqliteMedians` also uses).
-const _derivedSections = ['Comparison vs Previous Run'];
+/// The first header cell of a table that *measures* something.
+///
+/// This is the discriminator between a measurement and a restatement. Reports
+/// carry derived tables — `Comparison vs Previous Run`, `Memory Comparison vs
+/// Previous Run`, `Streaming (Column Granularity) Comparison` — whose rows also
+/// carry library names, but whose columns are deltas rather than timings. They
+/// head their first column `Benchmark`; measurement tables head theirs
+/// `Library`.
+///
+/// Matching on section titles was tried first and is not sufficient: it takes
+/// only one new report section, or one rename, to leak a delta table back in.
+/// `Memory Comparison vs Previous Run` slipped past an exact-match exclusion of
+/// `Comparison vs Previous Run` and put 430 lanes of megabytes into a map of
+/// milliseconds, read from the *previous* run's column at that. The table's own
+/// header is the property that actually distinguishes the two.
+const _measurementHeader = 'Library';
 
 bool _isPeerLane(String key) {
-  for (final section in _derivedSections) {
-    if (key.startsWith('$section /')) return false;
-  }
   final label = key.split('/').last.trim();
   return peerLibraries.any((p) => label.startsWith(p));
 }
@@ -50,12 +62,26 @@ bool _isPeerLane(String key) {
 /// The shared table walk. [resqlite] selects which rows are kept; everything
 /// about how a row becomes a key is deliberately common to both, because the
 /// two maps are only comparable if they are keyed the same way.
-Map<String, double> _extractMedians(String content, {required bool resqlite}) {
+///
+/// [measurementTablesOnly] additionally requires the enclosing table to be a
+/// measurement table (see [_measurementHeader]). Only the peer walk sets it:
+/// the resqlite walk predates this and its output is relied upon downstream, so
+/// it keeps its original acceptance rule exactly.
+Map<String, double> _extractMedians(
+  String content, {
+  required bool resqlite,
+  bool measurementTablesOnly = false,
+}) {
   final results = <String, double>{};
   final lines = content.split('\n');
 
   String? currentSection;
   String? currentSubsection;
+  // First cell of the header row of the table currently being walked. A
+  // markdown table's header is the line immediately above its `|---|` rule,
+  // which is the only reliable way to read it in a single forward pass.
+  String? currentHeader;
+  String? previousLine;
 
   // Sections whose tables contain `| resqlite ... |` rows but do NOT
   // represent wall-clock timings. These are parsed by their own dedicated
@@ -69,14 +95,23 @@ Map<String, double> _extractMedians(String content, {required bool resqlite}) {
   };
 
   for (final line in lines) {
+    if (_isTableRule(line)) {
+      currentHeader = _firstCell(previousLine);
+      previousLine = line;
+      continue;
+    }
+    previousLine = line;
     if (line.startsWith('## ')) {
       currentSection = line.substring(3).trim();
       currentSubsection = null;
+      currentHeader = null;
     } else if (line.startsWith('### ')) {
       currentSubsection = line.substring(4).trim();
+      currentHeader = null;
     } else if (line.startsWith('| ') &&
         line.startsWith('| resqlite') == resqlite &&
         !line.startsWith('|---') &&
+        (!measurementTablesOnly || currentHeader == _measurementHeader) &&
         !nonTimingSections.contains(currentSection)) {
       final parts = line
           .split('|')
@@ -505,4 +540,18 @@ Sqlite3SingleInsertWall extractSqlite3SingleInsertWall(String content) {
   }
 
   return null;
+}
+
+/// A markdown table's `|---|---|` rule, in any of its spellings.
+bool _isTableRule(String line) {
+  if (!line.startsWith('|')) return false;
+  final body = line.replaceAll(RegExp(r'[\s|:-]'), '');
+  return body.isEmpty && line.contains('-');
+}
+
+/// The first cell of a pipe-delimited row, or null if there isn't one.
+String? _firstCell(String? line) {
+  if (line == null || !line.startsWith('|')) return null;
+  final parts = line.split('|');
+  return parts.length < 2 ? null : parts[1].trim();
 }

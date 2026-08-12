@@ -74,7 +74,11 @@ class KnowledgeConfig {
       ),
       codeRoots: _stringList(_require<YamlList>(doc, 'codeRoots', file.path)),
       minStrongPinsPerChapter: grounded is YamlMap
-          ? (grounded['minStrongPinsPerChapter'] as int? ?? 0)
+          ? _optionalInt(
+              grounded,
+              'minStrongPinsPerChapter',
+              '${file.path}.groundedness',
+            )
           : 0,
       groundednessExempt: grounded is YamlMap && grounded['exempt'] is YamlMap
           ? {
@@ -103,4 +107,22 @@ class KnowledgeConfig {
 
   static List<String> _stringList(YamlList list) =>
       list.map((e) => e.toString()).toList();
+
+  /// An optional integer, defaulting to 0, that refuses to be anything else.
+  ///
+  /// A bare `as int?` throws [TypeError] on `"two"` or `2.0`, and the caller
+  /// catches only [StateError] — so a one-character config typo came out as an
+  /// unhandled cast error and a stack trace, in the class whose whole job is
+  /// making configuration failures legible.
+  static int _optionalInt(YamlMap map, String key, String where) {
+    final value = map[key];
+    if (value == null) return 0;
+    if (value is! int) {
+      throw StateError(
+        '$where: "$key" must be an integer, got ${value.runtimeType} '
+        '($value).',
+      );
+    }
+    return value;
+  }
 }

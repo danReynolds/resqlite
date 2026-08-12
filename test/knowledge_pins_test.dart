@@ -696,17 +696,41 @@ codeRoots: [lib]
       );
     });
 
+    // A bare `as int?` threw TypeError here, which the caller — catching only
+    // StateError — let escape as an unhandled cast error and a stack trace.
+    test('a non-integer floor throws StateError, naming the key', () {
+      final root = repoWith('''
+docs: [doc]
+sources: {claims: a, benchmarks: b, testResults: c}
+codeRoots: [lib]
+groundedness:
+  minStrongPinsPerChapter: "two"
+''');
+      expect(
+        () => KnowledgeConfig.load(root),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('minStrongPinsPerChapter'),
+          ),
+        ),
+      );
+    });
+
     // Omitting the floor must not be spelled the same way as passing it, or a
     // config that forgot it would silently disable the check.
     test('an absent groundedness block yields a floor of zero', () {
-      final c = KnowledgeConfig.load(repoWith('''
+      final c = KnowledgeConfig.load(
+        repoWith('''
 docs: [doc]
 sources:
   claims: a
   benchmarks: b
   testResults: c
 codeRoots: [lib]
-'''));
+'''),
+      );
       expect(c.minStrongPinsPerChapter, 0);
       expect(c.groundednessExempt, isEmpty);
     });

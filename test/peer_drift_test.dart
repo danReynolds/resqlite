@@ -81,6 +81,44 @@ void main() {
       expect(peerShift(lanes([1, 2, 3]), lanes([1, 2, 3]), 0.1), isNull);
       expect(peerShift(lanes([1, 2, 3, 4, 5]), {'other': 1}, 0.1), isNull);
     });
+
+    // `--min-ms=0` is a reasonable "show me every lane" request. Without a
+    // guard of its own, a zero baseline divides to NaN, and since every NaN
+    // comparison is false the tool then reports a confident all-clear.
+    test('a zero baseline is dropped even when the floor is disabled', () {
+      final s = peerShift(
+        {'z': 0, 'a': 1, 'b': 1, 'c': 1, 'd': 1, 'e': 1, 'f': 1},
+        {'z': 5, 'a': 1, 'b': 1, 'c': 1, 'd': 1, 'e': 1, 'f': 1},
+        0,
+      )!;
+      expect(s.lanes, 6);
+      expect(s.median.isNaN, isFalse);
+      expect(s.median, 0);
+    });
+
+    // A zero median has no sign to agree with, so `agreement` is then counting
+    // unchanged lanes. Callers must branch on this rather than print the
+    // agreement figure as a direction.
+    test('a zero median reports no direction', () {
+      final s = peerShift(
+        lanes([1, 1, 1, 1, 1, 1]),
+        lanes([1, 1, 1, 1, 1.5, 0.5]),
+        0.1,
+      )!;
+      expect(s.median, 0);
+      expect(s.hasDirection, isFalse);
+      expect(s.unchanged, 4);
+    });
+
+    test('a nonzero median does report a direction', () {
+      final s = peerShift(
+        lanes([1, 1, 1, 1, 1, 1]),
+        lanes([1.2, 1.2, 1.2, 1.2, 1.2, 1.2]),
+        0.1,
+      )!;
+      expect(s.hasDirection, isTrue);
+      expect(s.unchanged, 0);
+    });
   });
 
   group('extractPeerMedians', () {
@@ -115,7 +153,7 @@ void main() {
 
     // Derived sections restate other sections as deltas. A delta compared
     // against another delta is meaningless, and these rows carry library names
-    // too, so they have to be excluded by section rather than by label.
+    // too, so the table's own header is what has to exclude them.
     test('the comparison section is not mistaken for a measurement', () {
       expect(
         extractPeerMedians(table).keys.where((k) => k.startsWith('Comparison')),
@@ -123,13 +161,44 @@ void main() {
       );
     });
 
+    // Regression: excluding derived tables by section title missed
+    // `Memory Comparison vs Previous Run`, which does not start with
+    // `Comparison`, and put 430 lanes of megabytes — read from the *previous*
+    // run's column — into a map of milliseconds. A `Benchmark` header is the
+    // property that actually marks a table as derived.
+    test(
+      'a Benchmark-headed delta table is excluded whatever it is called',
+      () {
+        const derived = '''
+## Memory Comparison vs Previous Run
+
+| Benchmark | Prev (MB) | Curr (MB) | Delta | MDE | Status |
+|---|---|---|---|---|---|
+| Memory / Batch insert 10k rows / sqlite3 executeBatch() | 4.06 | 0.00 | -4.06 MB | ±0.50 MB | ⚪ Within MDE |
+| Memory / Batch insert 10k rows / drift batch() | 0.52 | 0.00 | -0.52 MB | ±0.50 MB | 🟢 Win |
+''';
+        expect(extractPeerMedians(derived), isEmpty);
+      },
+    );
+
+    test('a Library-headed table in an oddly named section is kept', () {
+      const odd = '''
+## Some Future Section Nobody Predicted
+
+| Library | Wall med (ms) | Wall p90 (ms) | Main med (ms) | Main p90 (ms) |
+|---|---|---|---|---|
+| sqlite3 select() | 1.23 | 1.32 | 1.23 | 1.32 |
+''';
+      expect(extractPeerMedians(odd), hasLength(2));
+    });
+
     test('peer and resqlite lanes are keyed identically', () {
-      final peer = extractPeerMedians(table).keys.firstWhere(
-        (k) => k.contains('sqlite3'),
-      );
-      final own = extractResqliteMedians(table).keys.firstWhere(
-        (k) => k.endsWith('resqlite select()'),
-      );
+      final peer = extractPeerMedians(
+        table,
+      ).keys.firstWhere((k) => k.contains('sqlite3'));
+      final own = extractResqliteMedians(
+        table,
+      ).keys.firstWhere((k) => k.endsWith('resqlite select()'));
       expect(
         peer.replaceAll('sqlite3 select()', ''),
         own.replaceAll('resqlite select()', ''),

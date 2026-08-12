@@ -66,6 +66,12 @@ Future<void> main(List<String> args) async {
   for (final doc in docs) {
     final rel = doc.path.replaceFirst('${root.path}/', '');
     final pins = parsePins(rel, doc.readAsStringSync());
+    // Register the document before walking its pins, so a chapter with *no*
+    // pins still reaches the groundedness floor. Populating this map only from
+    // inside the loop below meant a chapter citing nothing at all never
+    // appeared here and was never checked — the one case the floor exists for,
+    // passing silently while a chapter citing two claims failed.
+    byDoc[rel] ??= [];
     for (final pin in pins) {
       final resolver = resolvers[pin.namespace];
       final result = resolver == null

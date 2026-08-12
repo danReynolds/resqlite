@@ -50,6 +50,21 @@
 /// agreement near half is ordinary noise, however violently individual lanes
 /// swung. Same discipline the suite already applies with MAD and MDE, one level
 /// up.
+///
+/// ## Known limitation: synchronous peers vote twice
+///
+/// Wall and `[main]` columns become separate lanes. For a synchronous peer they
+/// hold the same number — `| sqlite3 select() | 1.230 | 1.317 | 1.230 | 1.317 |`
+/// — because sqlite3 runs on the calling isolate, so each sqlite3 benchmark
+/// casts two perfectly-correlated votes into [PeerShift.agreement] where
+/// sqlite_async and drift cast two different ones. A shift confined to sqlite3
+/// therefore clears the agreement bar on fewer distinct benchmarks than one
+/// confined to a peer that reports a real main/wall split. Left as-is because
+/// the alternatives — dropping `[main]` lanes that equal their wall counterpart,
+/// or weighting per benchmark rather than per lane — both discard information
+/// that is genuinely different for the async peers, and the bias is small next
+/// to the lane noise it sits inside. Worth revisiting if a real shift is ever
+/// missed here.
 library;
 
 import 'dart:io';
@@ -110,8 +125,12 @@ void main(List<String> args) {
   }
 
   print(
-    'Median peer movement ${_pct(shift.median)} across ${shift.lanes} lanes, '
-    '${(shift.agreement * 100).toStringAsFixed(0)}% moving the same way.',
+    shift.hasDirection
+        ? 'Median peer movement ${_pct(shift.median)} across ${shift.lanes} '
+              'lanes, ${(shift.agreement * 100).toStringAsFixed(0)}% moving '
+              'the same way.'
+        : 'No net peer movement across ${shift.lanes} lanes '
+              '(${shift.unchanged} unchanged, the rest cancelling out).',
   );
 
   if (!shift.exceeds(threshold, agreement)) {
@@ -188,7 +207,12 @@ PeerShift? peerShift(
   for (final entry in before_.entries) {
     final before = entry.value;
     final after = after_[entry.key];
-    if (after == null || before < minMs || after < minMs) continue;
+    if (after == null) continue;
+    // `before <= 0` is checked on its own rather than left to the [minMs]
+    // filter: `--min-ms=0` is a reasonable "show me every lane" request, and
+    // without this a zero baseline divides to NaN, which then loses every
+    // comparison in `exceeds` and reports a confident all-clear.
+    if (before <= 0 || before < minMs || after < minMs) continue;
     drifts.add(_Drift(entry.key, before, after, (after - before) / before));
   }
   if (drifts.length < 5) return null;
@@ -197,12 +221,18 @@ PeerShift? peerShift(
   final median = deltas.length.isOdd
       ? deltas[deltas.length ~/ 2]
       : (deltas[deltas.length ~/ 2 - 1] + deltas[deltas.length ~/ 2]) / 2;
+  // Unmoved lanes count against a shift rather than for it, which is why
+  // agreement is taken over all lanes and not only the ones that moved. The
+  // consequence is that when the median lands on exactly zero this counts
+  // *unchanged* lanes, and it is then not a direction at all — see
+  // [PeerShift.hasDirection], which is what the report must branch on.
   final agreeing = deltas.where((d) => d.sign == median.sign).length;
 
   return PeerShift(
     lanes: drifts.length,
     median: median,
     agreement: agreeing / deltas.length,
+    unchanged: deltas.where((d) => d == 0).length,
     worst: drifts..sort((x, y) => y.delta.abs().compareTo(x.delta.abs())),
   );
 }
@@ -254,13 +284,27 @@ class PeerShift {
     required this.lanes,
     required this.median,
     required this.agreement,
+    required this.unchanged,
     required this.worst,
   });
 
   final int lanes;
   final double median;
+
+  /// Share of lanes whose delta carries the median's sign.
+  ///
+  /// Only meaningful when [hasDirection]; a zero median has no sign to agree
+  /// with, and this then reports the share of lanes that did not move.
   final double agreement;
+
+  /// Lanes that did not move at all.
+  final int unchanged;
+
   final List<_Drift> worst;
+
+  /// Whether the median points anywhere, and [agreement] therefore means what
+  /// its name says.
+  bool get hasDirection => median != 0;
 
   bool exceeds(double threshold, double minAgreement) =>
       median.abs() >= threshold && agreement >= minAgreement;
