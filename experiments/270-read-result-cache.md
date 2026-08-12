@@ -4,7 +4,12 @@
 **Status:** Rejected
 **Category:** Moonshot
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** PLACEHOLDER
+**Benchmark Run:** Headline sweep in
+  [`benchmark/results/2026-08-12T08-10-19-exp270-vs-parent.md`](../benchmark/results/2026-08-12T08-10-19-exp270-vs-parent.md),
+  compared explicitly against the same-host parent-commit baseline
+  [`benchmark/results/2026-08-12T07-42-23-exp270-parent-baseline.md`](../benchmark/results/2026-08-12T07-42-23-exp270-parent-baseline.md).
+  The decision evidence is the focused AOT A/B and the probes below; the final
+  branch ships no runtime code.
 
 ## Problem
 
@@ -103,9 +108,11 @@ constant, so no per-`.so` placement offset can exist between them
 | `mixed6-1k` (guard) | −2.2% | +0.9% | neutral |
 | `concurrent8` (guard) | +2.7% | +0.6% | neutral |
 
-In absolute terms a dispatched point read costs ~4.65 µs and a hit ~0.48 µs. The
-`page20-repeat` lane also *lowers* peak RSS, 31.0 → 25.9 MB, because fifty
-repetitions per sample stop allocating fifty result sets.
+In absolute terms a dispatched point read costs ~4.65 µs (the `uncacheable-fn`
+baseline median, 929 µs over 200 reads) and a hit ~0.48 µs (`point1-repeat`
+candidate, 95 µs over 200). The `page20-repeat` lane also *lowers* peak RSS,
+31.0 → 25.9 MB, because fifty repetitions per sample stop allocating fifty
+result sets.
 
 The guards are the load-bearing half. `churn-unique` — every read a SQL string
 never seen before, so no cache of any size could help — is neutral only because
@@ -194,7 +201,31 @@ constant, and that the write-mixed case is the modest one.
 
 ### Collateral damage
 
-RELEASE_PLACEHOLDER
+The headline sweep ran against a same-host baseline captured from the exact
+parent commit, passed explicitly — exp 269's claim 269.5 warns that the
+auto-selected anchor can be a non-release artifact, and it was: the automatic
+comparison picked exp 269's hand-authored opaque-work receipt and skipped itself
+for missing environment metadata.
+
+Against the parent, the candidate is **7 wins, 0 wall-time regressions, 162
+neutral**, with memory **1 win, 0 regressions, 14 neutral**. The wins are the
+measurement artifact described above and not a result: `Select → Maps` at 100
+rows −86%, `Scaling` at 100 rows −87%, keyset pagination −100%.
+
+One row is flagged red — `Streaming (Column Granularity) / Overlapping column
+writes`, −592 re-emits. It is `sqlite_async`'s row, not resqlite's, and it moved
+3,466 / 3,894 / 4,347 / 3,663 / 4,185 across the five repeats *inside this single
+run*; resqlite reports 0 disjoint and 10 overlapping re-emits in all five. Peer
+non-determinism, nothing to attribute.
+
+A first sweep of the same commit against the same baseline flagged fourteen
+lanes at +12% to +40% — writes, streaming fan-out, subscription rate. None had a
+mechanism connecting them to a diff that adds one method call to the write path
+and one map lookup to the read path, and the cause was the host rather than the
+code: a separate multi-`Database` probe was running concurrently. The quiet
+repeat above is the receipt. The lesson is the one already in the journal — check
+the host before trusting a benchmark — applied to the release suite rather than a
+focused harness.
 
 ## Decision
 
@@ -253,11 +284,12 @@ Reopen if any of these changes:
    the read path — `PRAGMA data_version` on a bounded main-isolate mechanism, or
    SQLite's `sqlite3_update_hook`-equivalent across connections — priced against a
    contended, cross-process writer rather than a same-process one.
-2. **Incidence evidence appears.** A representative downstream AOT trace showing
-   what share of `select()` calls repeat a (sql, parameters) pair with no
-   intervening write to its tables. That number, which nothing in this repo can
-   currently produce, is what decides whether a ~4 µs saving per hit is worth any
-   complexity at all.
+2. **Better incidence evidence appears.** The two workload simulations disagree
+   by nearly 5× and neither is a production trace. A downstream AOT trace giving
+   the real share of `select()` calls that repeat a (sql, parameters) pair with
+   no intervening write is what decides whether ~4 µs per hit is worth any
+   complexity at all; `select_read_cache_incidence.dart` is the shape of the
+   measurement, it just needs a workload worth measuring.
 3. **A narrower target with the same mechanism.** The stream engine already holds
    `entry.lastResult` for every active stream, invalidated by the same signal and
    already accepted as stream-scoped. Serving `select()` from an *existing
