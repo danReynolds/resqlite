@@ -416,7 +416,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "060",
@@ -462,7 +462,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_regression"
+      "outcomeClass": "rejected"
     },
     {
       "id": "068",
@@ -585,7 +585,7 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "rejected_after_noise_check"
+      "outcomeClass": "rejected"
     },
     {
       "id": "089",
@@ -657,7 +657,7 @@
         "long-text-stream-hashing",
         "measurement-system"
       ],
-      "outcomeClass": "benchmark_gap"
+      "outcomeClass": "rejected"
     },
     {
       "id": "100",
@@ -668,7 +668,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_regression"
+      "outcomeClass": "rejected"
     },
     {
       "id": "101",
@@ -697,7 +697,7 @@
       "directions": [
         "transaction-control-paths"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "104",
@@ -715,7 +715,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_regression"
+      "outcomeClass": "rejected"
     },
     {
       "id": "106",
@@ -733,7 +733,7 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "109",
@@ -768,7 +768,7 @@
         "transaction-control-paths",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "112",
@@ -780,7 +780,7 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "113",
@@ -803,7 +803,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "115",
@@ -815,7 +815,7 @@
         "measurement-system",
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "116",
@@ -861,7 +861,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "120",
@@ -884,7 +884,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "122",
@@ -929,7 +929,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "136",
@@ -941,7 +941,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "142",
@@ -952,7 +952,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "143",
@@ -963,7 +963,7 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "144",
@@ -985,7 +985,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "146",
@@ -996,7 +996,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "147",
@@ -1008,7 +1008,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "148",
@@ -1019,7 +1019,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "149",
@@ -1052,7 +1052,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "158",
@@ -1086,7 +1086,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "164",
@@ -1098,7 +1098,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_no_stable_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "167",
@@ -1109,7 +1109,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_no_stable_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "169",
@@ -1120,7 +1120,7 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "170",
@@ -1131,7 +1131,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "171",
@@ -1142,7 +1142,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "172",
@@ -1154,7 +1154,7 @@
         "long-text-stream-hashing",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "173",
@@ -1165,7 +1165,7 @@
       "directions": [
         "long-text-stream-hashing"
       ],
-      "outcomeClass": "rejected_no_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "174",
@@ -1188,7 +1188,7 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "176",
@@ -1232,7 +1232,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "180",
@@ -1254,7 +1254,7 @@
       "directions": [
         "long-text-stream-hashing"
       ],
-      "outcomeClass": "rejected_no_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "182",
@@ -1265,7 +1265,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_no_stable_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "183",
@@ -1287,7 +1287,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "185",
@@ -1299,7 +1299,7 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "186",
@@ -1343,7 +1343,7 @@
       "directions": [
         "transaction-control-paths"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "190",
@@ -1365,7 +1365,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "accepted_correctness_guard"
+      "outcomeClass": "accepted"
     },
     {
       "id": "192",
@@ -1387,7 +1387,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_regression"
+      "outcomeClass": "rejected"
     },
     {
       "id": "194",
@@ -1420,7 +1420,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "197",
@@ -1431,7 +1431,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "198",
@@ -1464,7 +1464,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_semantic_mismatch"
+      "outcomeClass": "rejected"
     },
     {
       "id": "201",
@@ -1475,7 +1475,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "202",
@@ -1486,7 +1486,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "203",
@@ -1508,7 +1508,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "205",
@@ -1530,7 +1530,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "207",
@@ -1541,7 +1541,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "210",
@@ -1553,7 +1553,7 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_preserved_measurement"
+      "outcomeClass": "rejected"
     },
     {
       "id": "211",
@@ -1586,7 +1586,7 @@
       "directions": [
         "transaction-control-paths"
       ],
-      "outcomeClass": "rejected_pattern_not_encouraged"
+      "outcomeClass": "rejected"
     },
     {
       "id": "214",
@@ -1598,7 +1598,7 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_preserved_measurement"
+      "outcomeClass": "rejected"
     },
     {
       "id": "215",
@@ -1610,7 +1610,7 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "216",
@@ -1654,7 +1654,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "222",
@@ -1665,7 +1665,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "223",
@@ -1676,7 +1676,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "224",
@@ -1687,7 +1687,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "225",
@@ -1709,7 +1709,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "227",
@@ -1731,7 +1731,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_correctness_and_performance"
+      "outcomeClass": "accepted"
     },
     {
       "id": "229",
@@ -1753,7 +1753,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "231",
@@ -1764,7 +1764,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "232",
@@ -1775,7 +1775,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "233",
@@ -1786,7 +1786,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "234",
@@ -1836,7 +1836,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "239",
@@ -1847,7 +1847,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "240",
@@ -1858,7 +1858,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "241",
@@ -1935,7 +1935,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "249",
@@ -1946,7 +1946,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "250",
@@ -1957,7 +1957,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential"
+      "outcomeClass": "rejected"
     },
     {
       "id": "251",
@@ -1969,7 +1969,7 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement_premise_refuted"
+      "outcomeClass": "accepted"
     },
     {
       "id": "252",
@@ -1980,7 +1980,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "253",
@@ -1991,7 +1991,7 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "254",
@@ -2035,7 +2035,7 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_signal_bar"
+      "outcomeClass": "rejected"
     },
     {
       "id": "258",
@@ -2046,7 +2046,7 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal"
+      "outcomeClass": "rejected"
     },
     {
       "id": "259",
@@ -2080,7 +2080,7 @@
         "measurement-system",
         "result-transfer-shape"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "262",
@@ -2091,7 +2091,7 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "263",
@@ -2103,7 +2103,7 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement"
+      "outcomeClass": "accepted"
     },
     {
       "id": "264",

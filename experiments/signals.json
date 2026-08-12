@@ -1325,6 +1325,7 @@
         "sqlite-version-and-build-config"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "claims": [
         {
           "id": "016.1",
@@ -1338,6 +1339,7 @@
         "sqlite-version-and-build-config"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "claims": [
         {
           "id": "044.1",
@@ -1350,7 +1352,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "claims": [
         {
           "id": "059.1",
@@ -1363,7 +1366,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_regression",
+      "outcomeClass": "rejected",
+      "outcomeReason": "regression",
       "claims": [
         {
           "id": "067.1",
@@ -1377,6 +1381,7 @@
         "long-text-stream-hashing"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "claims": [
         {
           "id": "075.1",
@@ -1389,7 +1394,8 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "rejected_after_noise_check",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Single-run tail wins need confirmation against control metrics before acceptance"
       ],
@@ -1423,7 +1429,8 @@
         "long-text-stream-hashing",
         "measurement-system"
       ],
-      "outcomeClass": "benchmark_gap",
+      "outcomeClass": "rejected",
+      "outcomeReason": "benchmark_gap",
       "changedBeliefs": [
         "Byte-stream hash-loop changes need long-text stream workloads before they are meaningfully testable"
       ],
@@ -1442,7 +1449,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_regression",
+      "outcomeClass": "rejected",
+      "outcomeReason": "regression",
       "changedBeliefs": [
         "Bounded rerun scheduling can harm high-cardinality stream fan-out even if it looks attractive for unrelated reads"
       ],
@@ -1455,6 +1463,7 @@
         "transaction-control-paths"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Top-level transaction control still had removable SQLite prepare/finalize work"
       ],
@@ -1473,7 +1482,8 @@
       "directions": [
         "transaction-control-paths"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Native nested transaction helpers add complexity without a stable realistic-workload win"
       ],
@@ -1485,7 +1495,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_regression",
+      "outcomeClass": "rejected",
+      "outcomeReason": "regression",
       "changedBeliefs": [
         "Increasing reader worker count can worsen writer throughput by increasing completion-side microtask churn"
       ],
@@ -1497,7 +1508,8 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Persistent selectBytes out-parameter slots are below the current benchmark and RSS signal"
       ],
@@ -1510,6 +1522,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Parameter encoding still has worthwhile headroom when the change removes per-text/blob native allocations and SQLite strlen work"
       ],
@@ -1523,6 +1536,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The missing long-text unchanged-fanout benchmark was the blocker for evaluating byte-stream hash-loop work",
         "The archived 8-byte FNV byte fold becomes a clear win once the workload carries 4KB TEXT cells"
@@ -1544,7 +1558,8 @@
         "transaction-control-paths",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Even on a worst-case shallow-fan-out workload (50 SAVEPOINTs per iteration), the savepoint string allocation cost is below the per-benchmark decision threshold — per-isolate-round-trip cost dominates",
         "The missing nested-transaction benchmark from exp 102 / exp 103 is now in the suite, so future savepoint-related experiments can be evaluated without forcing the same gap"
@@ -1566,7 +1581,8 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Pre-sizing the temporary executeBatch flat parameter list is below the current benchmark signal",
         "The shared inline parameter encoder should stay centralized unless a profiler proves batch flattening is material"
@@ -1582,6 +1598,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The two-parameter batch insert shape is not a sufficient proxy for batch parameter overhead",
         "Avoiding the temporary flat Dart parameter list becomes measurable once batch rows are wide enough"
@@ -1595,7 +1612,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Reader-pool wake amplification (single shared completer waking every parked dispatcher) was a real but workload-dependent cost: -10 % to -32 % on streaming fan-out paths against pre-exp-106 main, then collapsed into noise once exp 106 polish landed and elided most stream re-queries on the writer side",
         "Reader-pool-internal dispatch optimizations need a workload that exp 106's column-level elision cannot short-circuit (reads-only contention, or streams whose projections all intersect the modified columns) — without one, the parked-dispatcher path is rarely hit and the wins are unmeasurable"
@@ -1611,7 +1629,8 @@
         "measurement-system",
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The parked-dispatcher path inside `ReaderPool._dispatch` is now directly observable via `ProfileCounters.dispatcherParkedTotal`, `dispatcherWakeRetryTotal`, and `dispatcherMaxParkedConcurrent` — gated behind `kProfileMode` so release builds stay zero-cost",
         "Future dispatch-area experiments (exp 114 archive, exp 083, slot-handoff variants) can gate evaluation on direct parking evidence rather than wall-time delta alone, closing the exp 099 / exp 110 evaluation-gap pattern earlier in the loop"
@@ -1627,6 +1646,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The release write suite now covers parameter width directly instead of relying on the two-parameter batch insert as the only public batch proxy"
       ],
@@ -1653,6 +1673,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The exp 115 counters convert exp 114's previously ambiguous FIFO waiter idea into a direct measurement: under overloaded reads, wake retries drop from 6/66/378 to 0 at concurrency 8/16/32 while max parked depth remains unchanged",
         "Reader-pool shared-completer wake amplification is now a solved target; future dispatch work needs a different counter signal before adding more queue policy"
@@ -1667,7 +1688,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Post-FIFO app-shaped workloads keep `dispatcherWakeRetryTotal` at zero, so ReaderPool wake policy is no longer the active dispatch target",
         "A11c overlap and keyed-PK workloads still produce high parked-dispatcher counts despite coalesced or hash-suppressed visible emissions, pointing the next dispatch experiment toward stream re-query admission/completion"
@@ -1682,6 +1704,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The 3,590-park / 46-max signal exp 119 measured on A11c overlap was upstream over-dispatch from `StreamEngine._flushQueue`, not reader-pool admission proper. Snapshotting `availableWorkerCount` once and decrementing per pop drops parking to zero on overlap and keyed-PK, with disjoint unchanged and high-cardinality fan-out (the exp-100 killer) within ±10% noise",
         "After this, every measured stream workload reports `dispatcherParkedTotal == 0` on top of `dispatcherWakeRetryTotal == 0`. Future reader-pool dispatch optimizations need a different counter (completion-side scheduling, writer-side dispatch wall, invalidation traversal) before they are worth implementing"
@@ -1704,7 +1727,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Under a corrected wall convention (stopwatch stops on the last write, not after a fixed drain), invalidation traversal is at the *edge* of the wall-time noise floor on A11c overlap (10–15% of wall, intersection 2.5–5.7%) and keyed-PK (13.5–13.9%, intersection ~4%). The earlier ~7%/~1.6% figures were biased low by an arbitrary 50 ms drain sleep included in the wall denominator",
         "Per-write `onDependencyChanges` cost is workload-shape-stable at ~16–27 µs A11c, ~14 µs keyed-PK. Removing the entire path would save ~8–14 ms on a 100 ms A11c overlap burst — measurable in the focused harness, but at the per-benchmark decision threshold edge of the release suite",
@@ -1723,6 +1747,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 120 fixed the per-flush over-dispatch signal; exp 122 removes the remaining async handoff by constructing `StreamEngine` with a concrete `ReaderPool`, so `_flushQueue` stays synchronous and admitted reads reach pool dispatch without awaiting a pool future",
         "The post-rebase profile pass on top of exp 120 and exp 121 preserves zero `dispatcherParkedTotal`, zero `dispatcherWakeRetryTotal`, and zero max parked depth on A11c overlap and keyed-PK workloads, while tests now verify stream registry cleanup through `Database.diagnostics().streamLength` instead of a private stream-engine getter"
@@ -1737,6 +1762,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Large wide ASCII-heavy batches still had removable per-string UTF-8 allocation after exp 113's matrix encoder",
         "A guarded ASCII fast path can improve wide batch parameter packing without changing the public API or weakening Unicode fallback behavior"
@@ -1758,6 +1784,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Large wide non-ASCII batches have the same removable per-string allocation pattern exp 125 found for ASCII: direct UTF-8 payload writing improves focused Unicode 10k x20 by 13.5% and emoji 10k x20 by 27.8%",
         "Dart-compatible surrogate-pair and replacement-character encoding can stay private to the guarded batch encoder while preserving embedded-NUL byte lengths through sqlite3_bind_text"
@@ -1778,7 +1805,9 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "Row-level dirty precision can remove the keyed-PK miss-path cost: verified simple `WHERE id = ?` INTEGER PRIMARY KEY streams skipped when dirty rowids did not overlap",
         "The keyed-PK profile workload reached per-stream column intersection only for actual watched-row hits: `intersection_entries` dropped 10000 → 3 and writer-burst wall dropped 25.54 → 12.45 ms",
@@ -1801,7 +1830,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "On A11c overlap the reader-worker port handler accounts for 28.57% of total wall (burst + drain) at ~18 µs per call across 4,228 calls per burst — the largest remaining reachable main-isolate slice",
         "Subscriber-fanout emit is < 1% of the completion chain on every measured workload; batching `controller.add` is not the optimization target",
@@ -1825,7 +1855,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Direct single-row text parameter encoding did not produce current Tracelite production evidence despite the old focused-harness win from PR #130",
         "The retest over chat-sim and narrow-batch-insert did not clear the primary gate: resqlite changed +6.86% and +16.4% with neutral/inconclusive verdicts and high CV",
@@ -1841,7 +1872,8 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Pinned Tracelite profile runs already produce decision-useful structured evidence: dispatch floors, floor-subtracted work, operation tails, memory deltas, allocation counters, source provenance, and validated graph data",
         "The current canonical profile workload shows point queries are median dispatch-bound (0-1 us of floor-subtracted work), merge rounds are work-bound (77 us of floor-subtracted work), and point queries still carry allocation/RSS cost that wall time alone hides",
@@ -1865,6 +1897,7 @@
         "sqlite-version-and-build-config"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Once SQLite ships a `.2` point release and sqlite3mc cuts a tracking release, exp 090's vendoring-bump audit moves from `defer` to `do` without any further policy debate — the 3.53.x line is the canonical case",
         "The 3.53.0 default-FP-rounding hazard does not reach resqlite output because we never use `sqlite3_column_text` for REAL values; the proposed `SQLITE_DBCONFIG_FP_DIGITS=15` shim is unnecessary",
@@ -1888,7 +1921,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "`StreamEngine._flushQueue` helper allocation is not the active stream-dispatch target after exp 120 and exp 122; replacing `take(...).toList()` and `where(...).length` with inline loops kept dispatch counters at zero but produced mixed wall-time movement",
         "A11c overlap can move in a favorable direction from tiny queue-shape changes, but keyed-PK noise/regression risk means collection-helper cleanup needs allocator evidence before it is worth carrying",
@@ -1904,7 +1938,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Lowering the ASCII batch-packing guard from 8 params / 8192 total params to 2 params / 64 total params did not improve the Tracelite narrow-batch-insert primary lane",
         "The clean A/B run measured resqlite at +1.45% with neutral verdict and 13.2% max CV, while the sqlite_async guardrail was too noisy to add confidence",
@@ -1920,7 +1955,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "SQLite-facing write calls are a minority of writer-side burst wall on active stream workloads: A11c overlap is 9.4% SQLite and keyed-PK is 18.1% SQLite",
         "After subtracting SQLite-facing calls and stream invalidation, residual writer/request wall remains the largest bucket on A11c overlap and keyed-PK",
@@ -1942,7 +1978,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Plain worker-side reader-reply batching reduces completion callback counters but does not produce a mergeable measured-elapsed win on the stream-dispatch Tracelite suite",
         "The profile smoke cut A11c overlap completion callbacks from 4,527 to 1,425 and completion wall from 109.6 ms to 55.6 ms, but the formal A/B still measured high-cardinality fanout at +5.18%, many-streams writer throughput at +3.28%, and keyed-PK subscriptions at +13.5%",
@@ -1959,6 +1996,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Tracelite profile merge rounds expose a material six-parameter batch shape between exp 146's rejected small/narrow guard and exp 125/126's large wide guard",
         "Lowering the ASCII batch-packing guard to 6 params / 600 total params improved merge-round executeBatch p50 from 88 us to 75 us and writer SQLite time from 87,895 us to 75,947 us",
@@ -1975,6 +2013,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The first-row string probe missed nullable generated-statement batches where row 0 carries NULL text columns and later rows carry strings",
         "Treating first-row NULL values as possible text admits nullable batches only after the existing 6-param / 600-total guard, preserving exp 146's small/narrow rejection",
@@ -1990,7 +2029,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Changing writer response futures from `Completer<T>()` to `Completer<T>.sync()` is a coherent request-resolution implementation attempt, but it does not clear the Tracelite stream-dispatch primary gate",
         "The formal A/B measured high-cardinality fanout at +2.92%, keyed-PK subscriptions at +18.5% with too-noisy evidence, and many-streams writer throughput at +14.0%",
@@ -2007,6 +2047,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "A narrow private RowSchema lookup change can still improve full row consumption without changing the ResultSet/Row public API",
         "The schema-name identity fast path plus HashMap fallback cut row_map_facade hot lookup from 10.750 -> 5.136 ms and keys+lookup from 20.602 -> 10.650 ms",
@@ -2026,6 +2067,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The writer request path carried removable fixed cost on every round-trip: a per-request RawReceivePort, a guaranteed microtask hop awaiting the already-resolved worker-port future, and async reply completers — replacing them with a persistent reply port, cached SendPort, and sync FIFO completers drops exp 147 residual_us on all four audit workloads",
         "Holding the write lock across the full round-trip for standalone writes added no exclusion a later BEGIN needs (the worker's port FIFO already orders them); releasing at send time pipelines concurrent standalone writes and improves the focused concurrent-burst benchmark 36-45%",
@@ -2042,7 +2084,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The exp 159 send-gated writer-lock pipelining shape is now visible on the release write suite as a paired Single Inserts (100 sequential) / Concurrent Single Inserts (100 concurrent) row pair using the same schema and parameter values",
         "Resqlite concurrent median is ~1.1 ms vs sequential ~2.9 ms in two paired smoke runs (-58% to -61%); the pipelining effect lands in the same band as exp 159's focused script (-36% to -45%)",
@@ -2059,7 +2102,8 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_no_stable_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "SQLite EXPLAIN QUERY PLAN can avoid a custom SQL parser for rowid lookup detection, but it did not make private row-level stream invalidation cheap enough to keep",
         "The focused Tracelite stream-initial-drain rowid lane measured -2.33% with neutral/inconclusive evidence while text and indexed-int setup guardrails did not provide a clean offsetting signal",
@@ -2075,7 +2119,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_no_stable_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Closed exp 141's direct ResultSet.forEach override does not show a stable current win after exp 158's RowSchema lookup change when measured on real rows returned by Database.select()",
         "The focused SQLite-backed consumer lane showed Pair A forEach lookup at 30.525 -> 28.383 ms, but the longer confirmation reversed to 28.563 -> 30.942 ms; forEach length also reversed from 9.439 -> 8.010 ms to 8.652 -> 9.490 ms",
@@ -2091,7 +2136,8 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The Tracelite workload-summary explanation layer now emits the interpretation exp 143 had to recover manually: dispatch floors, dispatch-bound point queries, work-bound merge rounds, tail spread, RSS movement, allocation counters, and WAL side effects",
         "`benchmark/profile/run_tracelite_profile.dart` now validates the stable workload insight IDs after `tracelite explain`; a thin `workload_loaded`-only artifact exits 65 instead of silently looking complete",
@@ -2114,7 +2160,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "A synchronous `Mutex.tryLock()` plus a non-`async` `Writer.execute` / `executeBatch` is a coherent request-side scheduling change — exactly the request-side counterpart to exp 151's response-side `Completer<T>.sync()` attempt — but it does not move the primary sequential-write lane: Single Inserts (100 sequential) shifted +1.7 % (paired medians 3.099 ms -> 3.153 ms, 3.082 -> 2.982, 3.169 -> 3.501) and writer_pipelining `sequential-awaited (2000 writes)` shifted +2.0 % (34.047 -> 34.723), both within the run-to-run noise band and in the wrong direction",
         "Only Concurrent Single Inserts moved consistently (1.231 -> 1.135 ms, -7.8 %) — but that lane is owned by exp 159's send-gated writer-lock pipelining at -58 % to -61 %, so a second pass at the same workload is sub-decision-threshold gain at the cost of an extra slow-path branch plus the behavioral change of sync-before-close writes no longer being rejected",
@@ -2130,7 +2177,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_current_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The `await _runtime` microtask hop at the `Database` layer above exp 159's `Writer._request` cache is real (~1-2 us per call, theoretical upper bound ~6-12% on a 2000-call sequential burst) but sits at or below the focused-harness noise floor: two order-flipped passes on writer_pipelining.dart produced alternating-sign deltas inside per-round variance (sequential-awaited -2.3%/+2.5%, transaction-guardrail -7.5%/+6.1%, concurrent-burst +4-5% both passes)",
         "Trimming microtask hops at the Database layer above the writer does not move exp 159's stated sequential-write residual floor (port wake + event-loop scheduling); the next reduction candidate in this area needs to be group-commit-shaped or transport-shaped, not hop-shaped"
@@ -2146,7 +2194,8 @@
         "long-text-stream-hashing",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The streaming suite now covers mixed long payloads beyond exp 110's 4KB TEXT shape: 8 unchanged streams over 64 rows with 32KB TEXT plus 32KB BLOB cells",
         "The current 8-byte FNV fold scales acceptably on the broader row in a focused run: 3.446 ms median for mixed long payloads beside 2.356 ms for the existing 4KB TEXT row",
@@ -2169,7 +2218,8 @@
       "directions": [
         "long-text-stream-hashing"
       ],
-      "outcomeClass": "rejected_no_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "At 32 KB cells on a pool-of-4 reader fleet the byte-stream fold is no longer the dominant wall component: even an unrolled 16-byte FNV body is +4.5 % to +12.1 % vs the exp 110 8-byte body across two order-flipped passes, all inside a 2.6 → 6.0 ms per-pass spread",
         "The named ≥ 32 KB cell candidate is closed: the workload now exists (release-suite `Long-Text 32KB Unchanged Fanout` and focused `benchmark/experiments/long_text_32kb_hash.dart`) and shows that hash-loop unrolling beyond exp 110's 8-byte fold is below noise on this shape",
@@ -2193,6 +2243,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The reader sacrifice path (Isolate.exit + reader respawn) is a win for the rows path (zero-copy transfer of already-built Dart objects) but counterproductive for selectBytes: native JSON must be Uint8List.fromList-copied before Isolate.exit can transfer it, so sacrifice saves zero copies on bytes and only adds a respawn; the non-sacrifice bytes path copied twice (fromList + SendPort)",
         "Sending a Uint8List view over the reader connection's persistent json_buf is sound (SendPort snapshots the bytes at send time; the single-threaded handler keeps the buffer stable through the send) and is the single mandatory copy at every size, so selectBytes never needs to sacrifice",
@@ -2217,7 +2268,8 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The release JSON-bytes suite now has an explicit large native-byte transfer row: `Large payload (~650KB) / resqlite selectBytes()` stays above the old 256KB sacrifice threshold and measured 0.323 ms wall / 0.000 ms main in the focused suite run",
         "The curated history now tracks `selectBytes() large bytes`, so exp 174's native-view transfer path is visible without relying on the existing 1K-row JSON-bytes metric that mostly exercises small-result copy behavior",
@@ -2235,6 +2287,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 158 added the schema-name identity fast path to RowSchema.indexOf (serving Row.operator[]) but not to Row.containsKey, which still went straight to the private HashMap and hashed the key on every call. Exp 158's 'containsKey neutral' row compared Row vs LinkedHashMap with containsKey unchanged on both sides of that diff, so it was never evidence that routing containsKey through the identity path is neutral",
         "Routing Row.containsKey through the identity scan (via a shared RowSchema.containsName(name) => indexOf(name) >= 0) improved the focused row_map_facade containsKey lane ~13.0 -> ~10.0 ms (-23%) across three order-stable passes, with the hot lookup control lane flat, flipping Row from ~+3.6 ms slower than LinkedHashMap to at-parity. The win is smaller than exp 158's -52% on operator[] because containsKey still pays MapMixin dispatch and the key-is-String check that operator[] does not; the identity scan removes only the hash",
@@ -2251,6 +2304,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The JOURNAL's most-reapplied lesson — phase-ordered A/B gates confound code deltas with time-correlated drift — was enforced only by runner discipline. Every recent A/B writeup (exp 159, 167, 171, 173) re-derived the same CV-asymmetry + order-flip reasoning by hand. Encoding it as cvPct + classifyDriftFlag in benchmark/shared/stats.dart plus a benchmark/ab_drift_check.dart CLI makes the call deterministic and citable",
         "classifyDriftFlag reaches drift-suspected by two mechanisms: (1) CV asymmetry — the flagged phase's CV is >= 4x its clean phase's and above an 8% floor (the exp 159 signature, 0.20-0.46 vs 0.01-0.06), or (2) sign reversal across the order flip with both effects above a 3% floor (the exp 167 signature). Re-run against reconstructed exp 159 and exp 167 flags, the tool reproduces the verdicts those runners reached manually. reproduced requires both order-flipped passes to agree same-direction with comparable CVs",
@@ -2273,6 +2327,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The experiment->chart linker in generate_history.dart guarded the wrong-file case (_assertAcceptedExperimentsLinkToCandidates, the exp-109 mixup) but silently tolerated the more common missing-file case: a chartable experiment with no linked benchmark run AND no **Benchmark Run:** opt-out declaration drops off the chart with no CI error, which is exactly what a forgotten result file or a Date/timestamp mismatch produces",
         "A structural tally on main confirmed the gap is live: of 23 accepted/in-review experiments whose linker produced a null run, only ~5 declared the **Benchmark Run:** opt-out header; the rest (several recent — 116, 118, 119, 125, 126, 136, 161, 172) are silently unmapped, indistinguishable from a forgotten file",
@@ -2294,7 +2349,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_no_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Extending exp 125/149's direct-code-unit batch write to the single-row allocateParams path (the exp 142 / PR #130 idea) makes the encoder itself materially faster, not slower: a DB-free micro (single_row_param_packing.dart, 200k cycles x 15 samples) measures -45% / -58% / -37% on 1-short / 5-mixed / 1-KB ASCII shapes with a flat blob+int control. Exp 142's +6.86% / +16.4% 'slower' was workload/Tracelite-overhead confound, not the encoder",
         "The encoder win is immaterial on every representative workload: release-suite A/B (5x5) is neutral (Parameterized Queries +0.04%, Single Inserts -1.7%, Concurrent +0.8%; 1 timing win / 0 regressions / 166 neutral, the flags on untouched result-read paths). The single-row bind is too small a fraction of any lane to register",
@@ -2310,6 +2366,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Cross-call write request batching (the 'group commit' lever exp 159 named) captures the per-round-trip residual that pipelining left: standalone execute() calls piling up while a send is in flight coalesce into one MultiExecuteRequest, and the release Concurrent Single Inserts lane improves -26% (baseline-first) / -32% (candidate-first), reproduced across order-flipped runs. exp 147's ~72% writer/request residual was attackable by collapsing N messages to ~2, not just by overlapping N messages (exp 159)",
         "Batching transport beats batching commits here: each coalesced statement runs as its own autocommit (per-call success/failure unchanged, no group BEGIN/COMMIT), because SQLite/commit is only ~9% of writer wall and a group transaction would change failure atomicity for independent writes",
@@ -2326,7 +2383,8 @@
       "directions": [
         "long-text-stream-hashing"
       ],
-      "outcomeClass": "rejected_no_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The single-stream open candidate from exp 173 has been consumed: benchmark/experiments/single_stream_long_payload_hash.dart uses an internal one-reader runtime so one unchanged stream hashes 64 rows x 64 KB TEXT + 64 KB BLOB (~8 MB) before a queued COUNT(*) barrier can emit",
         "Removing reader-pool parallelism did not reveal a 16-byte FNV win. Across an order-flipped pair, baseline medians were 2.771 / 2.777 ms and candidate medians were 2.763 / 2.792 ms (-0.3% / +0.5%), with overlapping ranges",
@@ -2349,7 +2407,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_no_stable_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Skipping the writer's preupdate_hook accumulation + reply harvest when _streamEngine.length == 0 at send time is a coherent residual-bucket attack — it removes per-row strcmp dedup + per-write FFI/toDartString/object work that no consumer reads, gated by a track_dirty flag on resqlite_db flipped from the writer isolate, with a DrainRequest no-op barrier from StreamEngine._createStream to fence in-flight non-tracking writes before a new stream's initial query",
         "The no-stream win is real: two order-flipped focused passes show sequential-awaited (2000 writes) -3.8% / -5.3% and wide-batch (10k rows x 20 params) -2.4% / -5.9%, matched by the release-suite Single Inserts -5.2% / Concurrent Single Inserts -3.8% / Batch Insert 10k -6.8% deltas (sub-MDE flags on the public guard)",
@@ -2368,6 +2427,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 174's bounded RSS high-water (~+15 MB after 200 x 651 KB selectBytes) becomes pathological under a one-off concurrent-burst shape: 8 concurrent x 8 MB selectBytes pin 32 MB of native json_buf across the 4-reader pool for the rest of the connection's life, and the recurring-large pattern (1 large per 50 small over 300 iterations) settles at 16 MB pinned. The exp 174 future-note about high-threshold reclaim is a real candidate, not a hypothetical",
         "Adding Diagnostics.readerJsonBufHighWaterBytes (sum of per-reader json_buf.cap) makes the high-water directly observable from any benchmark or downstream user — a reusable signal for future memory-sensitive selectBytes work alongside the existing exp 174 'large bytes' release lane",
@@ -2391,7 +2451,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Re-running exp 147's writer_sqlite_wall_audit on main after exp 159 + exp 180 shows the writer-burst breakdown essentially unchanged (A11c overlap SQLite 13.6% / invalidation 16.0% / residual 70.3% vs exp 147's 9.4 / 18.8 / 71.8). Expected: the audit issues writes sequentially (audit_workloads.dart:167) and exp 180 coalesces only concurrent bursts, so the sequential writer path it measures is unmoved",
         "The sequential writer residual (55-70%) is the per-write isolate round-trip — the SDK-gated floor; the only lever left there is a shared-memory transport. Writer-residual micro-optimization is retired from the active candidate list",
@@ -2407,7 +2468,8 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Exp 183's json_buf reclaim now has release-suite visibility rather than only focused-audit evidence: SQLite Diagnostics emits a JSON buf (KiB) column and a dedicated `JSON buffer reclaim (8 large selectBytes + 64 small settles)` row.",
         "The row is an active regression guard, not just a reported counter. After an 8-call concurrent large selectBytes burst and 64 small selectBytes settles, the diagnostics suite throws if readerJsonBufHighWaterBytes remains above 512 KiB; the focused suite run settled at 64.0 KiB with readersBusy=0.",
@@ -2424,6 +2486,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The exp 179 single-row direct-ASCII allocateParams rewrite is materially beneficial once the bound text crosses the mid-tens-of-KB range — exactly the revisit condition exp 179 named. The new focused single_row_large_text_bind.dart workload (1 KB to 1 MB sequential INSERTs) measures -15.4% / -11.1% at 16 KB, -17.3% / -18.7% at 64 KB, -32.3% / -32.1% at 256 KB, and -26.7% / -28.5% at 1 MB across two order-flipped passes",
         "Encoder isolation reproduces exp 179's deltas exactly (-45% / -58% / -37% on the single_row_param_packing.dart micro), so the mechanism question (encoder faster vs slower) is settled separately from the workload-materiality question",
@@ -2448,6 +2511,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 186's UTF-8-heavy follow-up now has a representative workload: single_row_large_text_bind.dart emits byte-matched CJK rows beside the ASCII rows, so future single-row bind changes can test both direct-ASCII and direct-UTF-8 payloads in one focused harness.",
         "Replacing the single-row non-ASCII _allocateParamsPreEncoded fallback with direct _utf8Length/_writeUtf8 packing removes one temporary Uint8List allocation plus one copy per non-ASCII string param. The CJK focused rows improve roughly 31-39% at 16 KB through 1 MB across the order-flipped pair.",
@@ -2471,6 +2535,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 178's pilot cutoff (`_benchmarkRunDeclarationCutoff = 178`) left ~17 pre-cutoff chartable experiments outside the missing-run-without-declaration guard's scope, still indistinguishable from forgotten result files. The follow-up exp 178 named (`backfill **Benchmark Run:** headers and lower the cutoff`) walks the cutoff back to 1, so every accepted/in-review experiment is now under the same forced-declaration discipline",
         "All 16 silently-unmapped chartable experiments at the time of the backfill (003, 004, 007, 008, 009, 037, 038, 083, 116, 118, 119, 125, 126, 136, 161, 172) plus exp 174 (whose existing `**Benchmark Run:** Focused A/B (...)` header was descriptive but did not start with one of the opt-out keywords) gain a declared `**Benchmark Run:** none ...` line that explains why no release artifact exists. docs/experiments/history.json is byte-for-byte unchanged because the `_skipBenchmarkRunMapping` flag is consumed inside `_attachBenchmarkRunMappings` before serialization and none of these experiments were linked to a release run anyway",
@@ -2486,7 +2551,8 @@
       "directions": [
         "transaction-control-paths"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Savepoint naming compression (same-name cached SQL for `SAVEPOINT s`, `RELEASE s`, and `ROLLBACK TO s`) can move best-case focused control rows: empty fanout improved about 6-7%, rollback fanout improved 13-17%, and repeated deep chains improved 7-8% across the order-flipped pair.",
         "The representative nested-write fanout did not reproduce: baseline-first measured -1.3%, then the candidate-first pass measured +21.6% slower. That is the load-bearing row because it matches the real nested transaction shape better than empty control-only fanout.",
@@ -2510,6 +2576,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The C-side JSON encoder in `write_json_to_buf` (the only `selectBytes()` codepath) was re-running its per-column emission sequence (comma + `json_write_string` SWAR/escape scan + colon = four `buf_write*` calls) on every row even though the column name is invariant — the same per-row-amortizable pattern exp 034 caught at the Dart `RowSchema` layer and exp 037 caught at the json_buf layer was still firing at the byte-emission layer",
         "Pre-building each column's `\"col\":` / `,\"col\":` token once at first-row time into a per-query scratch `resqlite_buf tokens_buf` and replacing the per-row inner loop with a single `buf_write(b, tokens_buf.data + token_offsets[i], token_lens[i])` removes that compounded work without behavior change (the pre-encode reuses `json_write_string`, so escape semantics for unusual column names are bit-identical)",
@@ -2526,7 +2593,9 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "accepted_correctness_guard",
+      "outcomeClass": "accepted",
+      "outcomeReason": "correctness",
+      "outcomeNote": "Shipped as a correctness guard.",
       "changedBeliefs": [
         "The broader embedded-NUL public API audit candidate is consumed as correctness support, not a performance result. Current main already covers wide executeBatch with multibyte embedded-NUL TEXT, and exp 187 covers single-row execute in flight; exp 191 adds the missing reader surfaces.",
         "selectBytes preserves embedded-NUL TEXT seeded by SQLite char(0): select() returns the expected Dart string, hex(CAST(body AS BLOB)) matches _hexUtf8(body), and native JSON bytes decode back to the same value.",
@@ -2543,6 +2612,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 023 left bounded headroom inside `write_json_to_buf`'s `SQLITE_INTEGER` arm — the single-digit `fast_i64_to_str` body runs one `% 10` / `/ 10` per output digit, and 10k × 20 INTEGER selectBytes performs 200k of these calls. Replacing the body with a two-digit `[00..99]` lookup table (one `% 100` / `/ 100` + one 2-byte memcpy per digit pair) cuts focused integer-heavy `selectBytes` by −8 to −26 % across two order-flipped passes on `select_bytes_int_heavy.dart`, with the biggest win on the deepest-digit shape (10k × 20 ~18-digit big ints, −24 to −26 %) — exactly the shape the algorithm predicts gains most from halving the division count",
         "The release suite is not the right denominator for this change: no public selectBytes lane is integer-heavy enough for per-cell encoder savings to register. The same `Select 10k rows → JSON Bytes` lane reads 3.545 / 5.213 / 3.598 / 3.739 ms across baseline-first / candidate-second / candidate-first / baseline-second — *which side ran first* explains more variance than *which side is candidate*. Remaining release flags (Long-Text / Long-Payload Unchanged Fanout, Nested Transactions, column-granularity re-emit counters) reverse sign across the order flip and live on hash/savepoint/dependency paths the change cannot mechanically touch, so they read as exp 159 / exp 177 phase-correlated drift, not real regressions",
@@ -2558,7 +2628,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_regression",
+      "outcomeClass": "rejected",
+      "outcomeReason": "regression",
       "changedBeliefs": [
         "A JIT row_map_facade sample made Row.values look like the remaining Row facade gap (baseline values iteration 8.607 ms vs LinkedHashMap 4.779 ms), but repeated JIT samples were contradictory after VM warmup: the baseline itself alternated between ~3 ms, ~9 ms, and ~11 ms on the values lane.",
         "Replacing Row.values with a fixed-length ListBase slice view produced stable-looking JIT samples around 3.4-3.7 ms, but the AOT check reversed the decision. Compiled baseline _RowValueIterator values iteration stayed at 2.663 / 2.675 / 2.687 ms, while the ListBase candidate regressed to 6.828 / 6.847 / 7.101 ms.",
@@ -2575,6 +2646,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The SQLITE_FLOAT arm in write_json_to_buf still paid snprintf(\"%.17g\") for every REAL cell after exp 190 and exp 192 tightened neighboring selectBytes encoder work.",
         "Finite, exactly integral REAL values inside the exact double integer range (abs(v) <= 2^53) can reuse fast_i64_to_str without changing JSON spelling, while fractional values, huge values, non-finite values, and negative zero stay on snprintf.",
@@ -2591,6 +2663,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 190's per-query `tokens_buf` + first-row pre-encode walk is not noise on small-rowset selectBytes — it is invisible to the `wide_cols.dart` 1-row / 100-row regression guards because their reporting is millisecond-precision, not because the underlying ~0.5-1 µs per query is below the wall floor. Caching the encoded tokens on `resqlite_cached_stmt` (built lazily, freed in `stmt_cache_entry_dispose`) eliminates the per-query `buf_init(64)` + `free` pair and the first-row pre-encode walk while keeping per-row work and JSON output bit-identical to exp 190.",
         "A new microsecond-precision focused harness `select_bytes_repeated_calls.dart` (1000 calls/sample × 11 samples after 16-call warmup) exposes the predicted shape: 1-row × 20-col improves −9.2 % / −7.2 % and 10-row × 20-col improves −5.1 % / −2.7 % across two order-flipped passes. Per exp 177's drift classifier this reproduces same-direction across the flip. 100/1000-row guards show sign reversal (+1.8 % / −2.7 % and +1.0 % / −1.7 %) consistent with drift-suspected, because per-query setup is < 0.2 % of wall at those sizes.",
@@ -2607,7 +2680,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The selectBytes encoder's structural framing — the per-row `{` / `}` and inter-row `,` writes in `write_json_to_buf` — is below the noise floor. Batching the inter-row `}` + `,` + `{` into a single `buf_write(\"},{\", 3)` (with the final `}` emitted once after the loop, output byte-identical) moved `select_bytes_wide_cols.dart` by −0.3% to −3.9% on the 10k-row shapes, but the deltas did not reproduce across the order flip (the −3.9% on 10k×20 int collapsed to −0.4%; the mixed shape flipped sign to +1.8%) and the control moved as much as the targets — all inside the ~2.5% baseline-to-baseline noise.",
         "After exp 190/192/194/195 tightened the per-cell token and value work, encoder wall is dominated by the per-cell formatters (`fast_i64_to_str`, `fast_double_to_json_num`) and `json_write_string`'s SWAR escape scan, which run once per cell — not by the once-per-row `buf_write` framing calls."
@@ -2622,7 +2696,9 @@
         "stream-rerun-dispatch"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "True commit merging is a large writer frontier: changing coalesced MultiExecuteRequest handling from N independent SQLite autocommits to one BEGIN IMMEDIATE / COMMIT moved writer_pipelining.dart's concurrent-burst lane from 49.999 ms to 5.931 ms in the candidate-first pass and from 44.919 ms to 5.717 ms in the baseline-first pass (-88.1% / -87.3%).",
         "The focused sequential-awaited lane stayed effectively neutral (+3.5% / -1.0%), and the transaction-guardrail lane stayed neutral after order flip (-12.5% / +0.1%), so the win is specific to concurrent standalone write bursts that currently pay many SQLite transaction boundaries.",
@@ -2639,6 +2715,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "After exp 192 (two-digit itoa body) and exp 194 (integer-real fast path), the `SQLITE_INTEGER` and `SQLITE_FLOAT` cell sites inside `write_json_to_buf` still paid one short `memcpy` (≤ 20 bytes for integers, ≤ ~25 for floats) per cell to copy a stack scratch buffer into the output buffer via `buf_write_str` -> `buf_write` -> `memcpy`. The formatters already take a raw destination pointer, so the scratch buffer is just a non-load-bearing intermediate. Reserving the max cell length once (`buf_ensure(b, 24)` for int, 33 for float) and pointing the formatter at `(char*)(b->data + b->len)` removes the per-cell `memcpy` and the `buf_write` indirection while keeping JSON output bit-identical (same digit formatters, same snprintf fallback semantics for negative zero / NaN / Inf / fractional doubles).",
         "Two order-flipped focused passes on `select_bytes_int_heavy.dart` reproduce the win same-direction on every integer-heavy lane: 10k x 8 small ints -7.2 % / -7.4 %, 10k x 20 small ints -2.5 % / -6.8 %, 10k x 20 big ints (~18 digits) -8.7 % / -9.4 %, 1k x 2 ints -9.5 % / -7.8 %. The mixed-row guard (4 int + 2 text + 2 real) is sub-2 % phase noise (its int contribution is ~25 % of per-row work), the same shape exp 192 saw on the same guard.",
@@ -2655,6 +2732,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "After [exp 195](195-stmt-cache-name-tokens.md) cached the column-name tokens on the prepared-statement entry and [exp 198](198-direct-buf-int-float-json.md) collapsed the per-cell integer/float formatter to a direct write, the inner per-cell loop of `write_json_to_buf` still paid one `buf_ensure` per token write and one per cell value — roughly `2N + 2` ensures per N-column row. Hoisting them all into a single row-level `buf_ensure(prelude + tokens_total + col_count * (RESQLITE_JSON_FLOAT_MAX + 1) + 1)` and writing NULL / INTEGER / FLOAT cells directly to `b->data + b->len` removes the per-cell ensures without changing the output. TEXT / BLOB cells take the existing helpers and pay one extra `buf_ensure(remaining_tokens + remaining_cells + 1)` after each variable-cell call, which exactly offsets the per-cell ensure they would have used.",
         "Two order-flipped focused passes on `select_bytes_int_heavy.dart` reproduce the win same-direction on all five integer-heavy lanes: 10k × 8 small ints −1.6 % / −4.0 %, 10k × 20 small ints −6.8 % / −2.8 %, 10k × 20 big ints −1.7 % / −3.0 %, mixed-row (4 int + 2 text + 2 real) −0.6 % / −0.6 %, 1k × 2 ints −3.8 % / −1.9 %. The magnitude is smaller than exp 192 / exp 198 (−7 % to −9 % on the same lanes) because what is left after exp 198 is the per-cell ensure branch itself — one predicted comparison — not a multi-byte memcpy or formatter call.",
@@ -2671,7 +2749,9 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_semantic_mismatch",
+      "outcomeClass": "rejected",
+      "outcomeReason": "premise_refuted",
+      "outcomeNote": "Rejected on a semantic mismatch: the assumed invariant did not hold.",
       "changedBeliefs": [
         "Skipping per-cell `sqlite3_column_type()` by caching first-row storage classes is not safe as a hidden `selectBytes()` default. SQLite storage class is per value, not per column: a local probe with an untyped column containing row 1 INTEGER and row 2 TEXT produced `[{\"v\":1},{\"v\":0}]` from the prototype while `select()` saw `[{\"v\":1},{\"v\":\"abc\"}]`.",
         "There is plausible fixed-shape headroom in wide rows: `select_bytes_wide_cols.dart` measured candidate-faster on 10k-row integer and mixed-column shapes in both pass orderings. The magnitude is not load-bearing because the flipped baseline drifted much slower than the first baseline, but one `sqlite3_column_type()` call per cell is not free.",
@@ -2687,7 +2767,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Collapsing `json_write_base64` from quote write + payload ensure + quote write into one `buf_ensure(encoded_len + 2)` with direct quote writes is below the current decision bar. The many-cell lanes that should expose per-BLOB framing overhead did not reproduce a win: 10k x 8 tiny blobs moved +0.3% / -0.1%, 10k x 20 tiny blobs moved -2.0% / +0.8%, and 10k x 8 small blobs moved +0.1% / +2.0%.",
         "Medium and large BLOB lanes trended candidate-faster (-1.3% / -1.9% on 10k x 4 medium blobs, -7.7% / -3.7% on 1k x 2 large blobs), but that is not the load-bearing mechanism for a per-cell quote/framing optimization because those lanes have far fewer BLOB cells and are dominated by base64 loop/transfer volume.",
@@ -2703,7 +2784,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Pre-reserving `len + 2` in `json_write_string` and directly writing quote + payload + quote for no-escape strings is below the current decision bar. The safe ASCII lanes did not reproduce a material win: 10k x 8 short ASCII moved +0.7% / -0.8%, 10k x 20 short ASCII moved -0.8% / +0.0%, and the 1k x 2 narrow guard moved -0.9% / +1.7%.",
         "Medium safe ASCII and mixed TEXT/INTEGER/REAL lanes trended slightly candidate-faster (-0.7% to -1.6%), and escaped text trended -1.1% / -1.7%, but those magnitudes are in the same band as the controls and are not enough to keep a runtime helper rewrite.",
@@ -2720,6 +2802,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "After [exp 195](195-stmt-cache-name-tokens.md), [exp 198](198-direct-buf-int-float-json.md), and [exp 199](199-row-level-buf-ensure.md) had collapsed the per-cell formatter, column-name token, and `buf_ensure` work inside `write_json_to_buf`, the remaining per-cell cost was the SQLite API itself: every `sqlite3_column_*` call runs a fresh `columnMem` lookup (mutex enter/leave + result-row range check, all no-op on the NOMUTEX connections resqlite opens but still function calls) plus `columnMallocFailure` (mutex leave + `sqlite3ApiExit`). Two-three of those fire per cell — `sqlite3_column_type` + `sqlite3_column_int64/double` for INT/FLOAT, `sqlite3_column_type` + `sqlite3_column_text/blob` + `sqlite3_column_bytes` for TEXT/BLOB.",
         "Hoisting `sqlite3_column_value(stmt, i)` to the top of the per-cell switch and dispatching through `sqlite3_value_type` / `sqlite3_value_int64` / `sqlite3_value_double` / `sqlite3_value_text` / `sqlite3_value_bytes` / `sqlite3_value_blob` collapses those 2-3 `columnMem` lookups into one. The SQLite amalgamation literally defines `sqlite3_column_*` as `sqlite3_value_* ∘ columnMem`, so the output is bit-identical. The `unprotected sqlite3_value` warning the SQLite docs attach to `sqlite3_column_value` does not apply: it targets multithreaded races, and resqlite opens every connection with SQLITE_OPEN_NOMUTEX and dedicates each connection to a single isolate worker.",
@@ -2736,7 +2819,9 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "The exact UTF-8 length prepass in single-row `allocateParams` is measurable on non-ASCII strings: `single_row_param_packing.dart` improved the unicode-1 shape from 296.5 ns/op to 236.2 ns/op when the prototype skipped `_utf8Length`.",
         "Large CJK single-row binds have remaining headroom beyond exp 187's direct writer: the archived prototype improved 64 KB through 1 MB CJK payloads in both focused orderings, roughly -6% to -12%.",
@@ -2753,6 +2838,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 203's per-cell `sqlite3_column_value` reuse pattern is also measurable on the rows path. `Database.select()` decode on 10k-row INTEGER, short-TEXT, and mixed-schema lanes runs roughly 1-6% faster on `select_rows_step_row_ffi.dart` with same-sign deltas across two order-flipped passes.",
         "`resqlite_step_row`, `resqlite_step_row_hash`, and `resqlite_query_hash` share the same per-cell FFI prologue as `write_json_to_buf`, so the same `Mem*`-reuse mechanism applies to every prepared-statement decode loop in the codebase, not only the JSON encoder."
@@ -2767,7 +2853,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Reusing exp 195's cached `json_name_tokens_col_count` to skip one `sqlite3_column_count(stmt)` per hot repeated `selectBytes()` execution is below the current signal bar. The first two `select_bytes_repeated_calls.dart` pairs were candidate-faster, but the warmed pair flipped the load-bearing 1-row lanes to +8.8%, +9.6%, and +10.9% candidate-slower.",
         "After cached JSON name tokens, the remaining query-level column-count call is too small for the repeated-call harness to isolate reliably. Keeping an extra branch in `write_json_to_buf` is not justified without a new runtime or benchmark fact."
@@ -2782,7 +2869,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "A `last_lookup` pointer fast-path on `stmt_cache_lookup_entry` does not move per-call wall on a hot-SQL workload, even when the cache is pre-filled with 31 length-matched cold SQLs to defeat the existing `sql_len` short-circuit. Three order-flipped pairs on `stmt_cache_hot_sql.dart` show no candidate-faster lane and a reproduced +6% to +30% regression on the very cache-pressure lanes the fast-path was meant to help.",
         "The reason is not 'extra compare on every miss' — after warmup the fast-path should fire on every call. The candidate's added 8-byte `last_lookup` field shifts the layout of `resqlite_stmt_cache` and the surrounding `resqlite_db` / `resqlite_reader` structs, and the linear scan it replaces was already short on absolute work (most cached SQLs differ in length, so the `sql_len` shortcut elides the expensive `memcmp` body for most entries; per-reader cache pressure is bounded to ~8 entries even when 31 distinct cold SQLs have been issued across a 4-reader pool)."
@@ -2798,7 +2886,9 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_preserved_measurement",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Change not shipped; the measurement it produced is deliberately preserved.",
       "changedBeliefs": [
         "Repeated large-BLOB object identity does remove Dart-side marshalling work in isolation: the 1 KB reused-BLOB marshal lanes improved -29% to -46% on 1,000/10,000-row x 8/20-param shapes.",
         "The useful threshold is much higher than the older 64-byte prototype suggested. A 256-byte reused-BLOB sweep made the identity-map candidate slower on the target 10,000 x 8 lane, so small/medium BLOBs should not pay per-cell identity tracking.",
@@ -2815,6 +2905,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 108's rejection of persistent `queryBytes` scratch slots was correct at ms-precision release-suite granularity but does not settle the question at µs precision. Reusing three per-isolate slots (buf pointer + length + row count) removes three `calloc` + three `calloc.free` per `selectBytes()` call and reproduces −3.4 % to −6.6 % candidate-faster on tiny-rowset lanes across two order-flipped passes on `select_bytes_repeated_calls.dart`, while 100 / 1000-row guard lanes stay flat and the exp 174 large-bytes lane is neutral.",
         "The load-bearing 1 row × 20 int lane holds −3.4 % to −4.6 % across all three pairs including the warmed one — the same warmed-pair third-pass gate that killed exp 206's `sqlite3_column_count` cache. Exp 195's `select_bytes_repeated_calls.dart` is the harness that discriminates: release-suite `Select JSON Bytes` cannot see µs-scale per-call setup, so exp 108 correctly rejected under it while exp 211 correctly accepts under the µs harness."
@@ -2831,6 +2922,8 @@
       ],
       "experimentClass": "moonshot",
       "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Large win confined to empty nested-transaction bodies.",
       "changedBeliefs": [
         "Lazy nested-savepoint materialization is only attractive for empty nested transaction bodies. Skipping SAVEPOINT/RELEASE for empty fanout x500 improved -77.9% / -74.5% across an order-flipped focused pair, but that is not a representative production gate.",
         "Fusing SAVEPOINT + first execute into one writer-isolate request does not improve the meaningful nested-write shape. `savepoint_name_compression.dart` write fanout x100 regressed +74.8% in the baseline-first pair and +34.9% in the candidate-first pair; rollback fanout was neutral-to-slower and the depth=5 chain slowed in both passes.",
@@ -2854,7 +2947,9 @@
         "transaction-control-paths"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_pattern_not_encouraged",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "The win was real but only for a usage pattern the library does not encourage.",
       "changedBeliefs": [
         "The per-execute round-trip floor inside `db.transaction()` is measurably not fundamental for the `Future.wait([tx.execute(...) x N])` shape: buffering N calls in one microtask and flushing as a single `MultiExecuteRequest` against the still-open transaction improved the focused `tx_body_write_coalescing.dart` `tx-burst-future-wait` lane -26.0% / -31.2% across two order-flipped passes with `ab_drift_check.dart` verdict REPRODUCED. This is the reproducible measurement, not the acceptance verdict — see below.",
         "The rejection is about the *pattern*, not the numbers. `Future.wait([tx.execute × N])` inside a transaction has no strong idiomatic case in the resqlite public API: same-SQL bulk atomic writes belong on `executeBatch` (one `BatchRequest`, whole matrix runs in C), different-SQL non-atomic bursts are covered by exp 180's standalone coalescing (`db.execute` outside a tx), and different-SQL atomic bursts are rare enough that the maintenance cost of the runtime change is not warranted.",
@@ -2880,7 +2975,9 @@
         "stream-rerun-dispatch",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_preserved_measurement",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Change not shipped; the measurement it produced is deliberately preserved.",
       "changedBeliefs": [
         "Directly reading the existing `resqlite_write_result` fields from the native pointer is not a stable public write-path win. The focused `write_result_direct_read.dart` harness produced mixed/small deltas in pair 1, a broad candidate-slower order flip in pair 2, and mixed/neutral confirmation in pair 3.",
         "The narrow scalar-decode cleanup is distinct from exp 095's persistent writer result buffer, but it lands in the same conclusion class: tiny `executeWrite()` result-handling savings are below the public writer-path decision floor unless a future mechanism changes more than the Dart-side view decode.",
@@ -2897,7 +2994,8 @@
         "parameter-encoding-and-binding",
         "measurement-system"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The exp 108 -> exp 211 revisit pattern (persistent per-isolate scratch slots re-tested under a µs harness after a ms-precision rejection) does not automatically transfer to the writer side. Exp 215 applied the exact same mechanism shape to `executeWrite()`'s `calloc<Uint8>(_writeResultSize)` under exp 214's `write_result_direct_read.dart` and did not reproduce a same-sign candidate-faster delta on the primary order-flipped pair (P1 noop +1.5 % candidate-slower vs P2 noop -0.9 % faster). Two other same-order passes (P2, P4) did show coherent 0.9-5.2 % candidate-faster shapes, but the pair 1 sign flip on the lowest-baseline lane — the lane a fixed ~200 ns mechanism should show its largest relative win on — is exactly the exp 214 failure pattern on this same harness.",
         "Together with exp 214, this closes both Dart-side writer-result micro-optimizations under `write_result_direct_read.dart`: exp 214 rejected the ByteData-view decode change, exp 215 rejected the persistent native scratch slot. The 6.5-14 µs writer floor on this harness is neither calloc-limited nor view-limited; the remaining wall is SQLite step, isolate transport, and Dart-side param handling. Exp 095's release-suite rejection, exp 214's decode rejection, and exp 215's scratch rejection now form a consistent `writer-result path is not the next lever` signal."
@@ -2913,6 +3011,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 201 correctly rejected quote/framing reservation for `json_write_base64`, but its future note left the base64 payload loop as the next real BLOB encoder target. Exp 216 consumes that follow-up: unrolling the scalar loop from one 3-byte group per trip to four groups per trip keeps the same base64 table, same JSON quotes, same encoded length, and same tail padding while reducing loop-control work on payload-heavy cells.",
         "The load-bearing `select_bytes_blob_base64.dart` signal is strongest where the mechanism predicts. The 1k rows x 2 large blobs (4KB) lane reproduces candidate-faster across all three passes: -13.6%, -12.9%, and -11.9%. The 10k rows x 4 medium blobs (128B) lane is also same-direction faster: -1.1%, -9.3%, and -4.7%. The 10k rows x 8 small blobs (16B) lane is candidate-faster in the primary order-flipped pair (-5.9%, -6.9%), though the extra warmed baseline pass hit a slow outlier and is not load-bearing.",
@@ -2929,6 +3028,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 216 proved `json_write_base64` loop-control work was worth removing up to a four-triplet scalar unroll. Exp 218 tested the immediate follow-up: widening that same loop to eight triplets per iteration while preserving the base64 table, quotes, encoded length, and padding.",
         "The 8x unroll is not a stable improvement over exp 216's scalar baseline. The focused `select_bytes_blob_base64.dart` 4KB throughput gate mixed across four paired passes: -10.0%, +2.0%, -13.6%, and +0.8%. The 128B medium-BLOB lane stayed candidate-faster, but that secondary signal is not enough when the load-bearing large-payload row fails to reproduce.",
@@ -2945,6 +3045,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 202 correctly rejected quote/payload reservation for safe TEXT strings, but its future note left escaped control-character formatting as a narrower TEXT encoder target. Exp 219 consumes that follow-up for unnamed control bytes: `json_write_string` now emits `\\u00XX` directly from a hex table instead of formatting through `snprintf(\"\\\\u%04x\")`.",
         "The target control-character TEXT lane in `select_bytes_text_string_reserve.dart` reproduced the candidate win across the order flip: 35927 -> 6371 us/query (-82.3%) and 35824 -> 6370 us/query (-82.2%). The result is mechanism-specific: bytes such as 0x01, 0x02, and 0x03 no longer pay a stdio formatter per escape.",
@@ -2960,7 +3061,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 192 replaced the exp-023 single-digit `fast_i64_to_str` loop with a two-digit `[00..99]` table; exp 194 specialised the FLOAT arm for integral REALs; exp 195 promoted the per-query token scratch onto `resqlite_cached_stmt`. Exp 220 tested whether the `fast_i64_to_str` inner shape itself still had headroom for the very common `0..9999` row-id / small-key / small-count case by adding a direct-write branch that bypasses `tmp[]`, sign-normalization, and the trailing `memcpy` from `tmp` to `buf`.",
         "The fast path reproduces its target win where every cell hits it. On `select_bytes_int_heavy.dart`'s new `10k x 20 small non-neg ints (0..9999)` and `10k x 8 small non-neg ints (0..9999)` lanes, medians move -11.6% / -10.4% and -10.9% / -9.7% across an order-flipped pair. The `~18-digit big ints` lane is neutral (+0.8% / +0.7%), confirming the fast path does not disturb the exp-192 general path when cells fall through.",
@@ -2977,7 +3079,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 109 established the inline `[resqlite_param structs][TEXT/BLOB payload]` arena, and exp 186/187 made 64 KiB-1 MiB single-row ASCII/CJK binds representative public workloads. Exp 222 tested the remaining allocator-policy question: arenas above the 64 KiB reuse cap used per-call `calloc` even though the packer overwrites every field and payload byte that native `bind_params` reads.",
         "Replacing the one-shot branch with `malloc` / `malloc.free` is behaviorally safe - the reusable arena already carries non-zero bytes between calls, `type` is always written, and C reads only the active union member - and all 53 database tests pass. Safety alone does not justify the change without a workload win.",
@@ -2994,7 +3097,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "After exp 195/198/203/205 tightened `write_json_to_buf`'s per-cell body, exp 223 tested whether the remaining row-boundary control flow (per-iteration `if (row_index > 0)`, split `[` + `{` writes, empty-result path through the row loop) was still material. Peeling row 0 out of the loop fuses `[{` into a single 2-byte prelude, short-circuits empty results to `[]`, and drops the per-row branch from the shared body.",
         "The per-row branch predicts well and the bracket fuse is byte-count noise on typical row shapes. Two order-flipped passes of `select_bytes_repeated_calls.dart` reproduce candidate-faster only at ~1-2% on 10-100 rows (inside the ~3% effect floor); the 1000-row lane collapses from -1.5% to -0.2% (drift), and the 1 row × 8 int cols lane trends candidate-slower on both passes (+0.4%, +4.6%). The `select_bytes_wide_cols.dart` single pass shows the same magnitude class with the load-bearing 10k × 8 int lane at +5.7% - a drift signature, not a real regression.",
@@ -3012,7 +3116,8 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 018/074's multi-row read prototypes were confounded by copying transient TEXT/BLOB payloads into a side arena. Exp 224 tested the remaining pure-numeric frontier without that copy: batch contiguous INTEGER/FLOAT/NULL rows dynamically, but return immediately after a pointer-backed row so Dart decodes SQLite-owned bytes before the next step.",
         "Collapsing a 10,000-row numeric scan from roughly 10,001 leaf FFI calls to about 157 does not improve end-to-end `select()`: 10k x 8 INTEGER is +1.9% / +0.5% candidate-slower across the order flip, while 10k x 20 INTEGER flips +4.6% / -0.5% around zero.",
@@ -3029,6 +3134,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 218 closed loop-unroll variants of `json_write_base64` (8x unroll rejected; loop control was no longer the ceiling), and signals.json's future-work note said further BLOB work needs a different mechanism. Exp 225 consumes that follow-up: widening the inner lookup from a 6-bit table (four per triplet) to a 12-bit pair table (two per triplet) halves per-triplet loads/stores while keeping exp 216's 4x-unrolled outer loop.",
         "The 4 KB (2 blob) and 128 B (4 blob) decision lanes reproduce candidate-faster across three order-flipped passes on `select_bytes_blob_base64.dart` (4 KB: -26.5%, -29.1%, -31.4%; 128 B: -17.4%, -26.4%, -31.2%). Roughly 1.3-1.5x faster BLOB base64 encoding for medium and large payloads at the cost of 8 KiB `.bss`.",
@@ -3044,7 +3150,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "After exp 113 removed the temporary flattened list, numeric-only batch matrices still made a payload-sizing pass and a struct-writing pass even though their arena size is exactly `24 * totalCount`. Exp 226 confirms that removing the sizing pass is a real encoder-local mechanism: marshal-only 10k x 8 improves -28.0% / -27.6% and 10k x 20 improves -25.4% / -25.8% across the order flip.",
         "The marshal saving is only about 0.11-0.23 ms and does not clear the public workload gate. Numeric executeBatch 10k x 8 moves -0.9% / -6.0% with unstable magnitude; 10k x 20 moves -3.4% / -1.4%, below the predeclared 5% gate in both orderings.",
@@ -3061,6 +3168,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "After [exp 195](195-stmt-cache-name-tokens.md) caches the JSON column-name token (`\"name\":` / `,\"name\":`) on the prepared-statement entry, the row loop in `write_json_to_buf` writes each token with `memcpy(dst, src, token_lens[i])`. The runtime length is a per-column int and the compiler cannot bound it, so this lowers to a libc `memcpy` call on every column of every row (~200 k calls per query on 10k rows x 20 int cols). Realistic column names are almost always <=16 bytes; the compiler was hiding a constant-width copy behind a call boundary.",
         "Giving the tokens buffer 16 bytes of zero-filled trailing padding (one `buf_ensure(&tokens, 16)` + `memset` at build time) lets the row loop issue `memcpy(dst, src, 16)` for the common `token_len <= 16` case, which clang / gcc lower to a single 128-bit load-store pair on ARM64 NEON and x86 SSE. `b->len` is still advanced by the real `token_len`, so the trailing over-written bytes are covered by the row-start `col_count * cell_max` reservation and are overwritten by the immediately following cell payload; long-name tokens stay on the runtime-length fallback. JSON output is byte-identical.",
@@ -3076,7 +3184,9 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "accepted_correctness_and_performance",
+      "outcomeClass": "accepted",
+      "outcomeReason": "correctness",
+      "outcomeNote": "Shipped for correctness; also measured a performance improvement.",
       "changedBeliefs": [
         "Exp 077's row-count shortcut correctly proved that a growing result differed, but `resqlite_query_hash` returned the prefix-only accumulator and `executeQueryIfChanged` cached it as the complete changed result's next baseline. Once the cached count advanced, the immediate identical rerun computed a full hash, mismatched the partial baseline, decoded all rows, and publicly re-emitted unchanged data once.",
         "A stream result hash has two roles: change detection now and cached identity later. Any value stored in `StreamEntry.lastResultHash` must be canonical for the complete corresponding result; a fast-reject digest that stops early can only be safe as a visibly non-cacheable sentinel.",
@@ -3093,6 +3203,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "experimentClass": "moonshot",
       "changedBeliefs": [
         "The codebase-wide assumption that `native/resqlite.c` must be ISA-agnostic scalar C is no longer load-bearing. Exp 229 introduces the first SIMD kernel (`json_write_base64_neon_bulk`) gated on `defined(__aarch64__) && defined(__ARM_NEON)`, with the exp 225 scalar 12-bit-LUT encoder retained as fallback for non-ARM64 targets and for the < 48-byte tail on all targets.",
@@ -3119,7 +3230,8 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 229's suggestion that SIMD JSON escape scan is a real TEXT-side mechanism is confirmed only for very long safe spans. The final AArch64/NEON fused classify-and-copy prototype improves the 1 KiB safe ASCII lane -33.6% / -34.1% and the CJK lane -25.2% / -25.5% across the order flip.",
         "The practical break-even row is not strong enough to ship. Safe ASCII at 256 B improves -17.7% then -12.6%, missing the predeclared >=15% floor in the second ordering. A vector kernel can be compelling at 1 KiB while still failing the representative lower boundary where per-cell dispatch/setup is a material share.",
@@ -3136,7 +3248,8 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 229's categorical claim that out-of-lined ISA-specific kernels are viable is now bounded: viable for BULK per-cell payloads (base64 amortises SIMD setup over an entire BLOB per call), NOT for SCALAR per-cell values. An AArch64/NEON i64→decimal kernel (magnitude split into low8/mid8/high groups via two /1e8 divides, each 8-digit group formatted with vector reciprocal splits (d*5243)>>19 and (p*205)>>11, out-of-lined and gated ≥ 1e8, byte-identical to the exp 192 scalar path) converts exactly one integer per call, so the call boundary + vector setup is paid per cell with nothing to amortise it against.",
         "The scalar two-digit-table itoa (exp 192) is confirmed as the floor for per-cell integer JSON encoding under the row-at-a-time architecture. Across 11 focused A/B passes in three methodologies (interleaved both orders, 5-round min-of-N) the 10k×20 ~18-digit BIGINT selectBytes lane never leaned candidate-faster: +1.2/+6.0/+9.8% (baseline-first), +28/+36/+16% (candidate-first, machine at its loudest), +11.3% at min-of-N, and only ~flat (-0.6%, within noise) in the single quiet pair. Identical-code control lanes drifted ±10-120% in the same session, confirming environmental noise rather than a code effect.",
@@ -3152,7 +3265,9 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "The exact-quarter mechanism is technically valid: `.25`/`.5`/`.75` REAL values under `abs(value) < 1e15` can reuse the i64 formatter with byte-identical spelling, and synthetic all-hit lanes improve 78-87% across both orderings.",
         "Synthetic eligibility is not adoption evidence. The 100%-quarter targets and 50%-quarter mixed row establish a ceiling, but exp 232 supplied no production trace, representative application, or schema distribution after exp 194 explicitly required a production profile before fractional specialization.",
@@ -3171,7 +3286,9 @@
         "stream-rerun-dispatch"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "Inline checkpoint ownership is a real first-crossing ceiling: moving the existing 500-frame PASSIVE checkpoint to a dedicated keyed connection cuts the known 529-frame batch p50 by 46-56% across an order-flipped pair, with immediate NOOP state proving the writer replies before checkpoint backfill.",
         "A level-triggered WAL hook is not safely converted to asynchronous work by adding coalescing alone. While `pages_in_wal >= 500` remains true, subsequent commits repeatedly move the four-state worker through requested/running/rerun, so sustained PASSIVE work competes with the writer instead of remaining one bounded maintenance event.",
@@ -3189,6 +3306,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The `parameter-encoding-and-binding` open question — whether any blob-heavy parameter shape is dominated by encoding rather than SQLite stepping — is answered for the single-row blob write path. A `Uint8List` blob param is copied three times before it reaches a database page: (1) main->writer via the VM object-graph copy inside `SendPort.send` (`runtime/vm/object_graph_copy.cc` — one copy, on the sender, landing on the shared GC heap; there is NO receive-side rebuild since Dart 2.15 isolate groups), (2) writer->native param arena in `allocateParams`, (3) arena->SQLite page in `sqlite3_step`. Copies (2) and (3) are irreducible; copy (1)'s cost is not the copy itself but its destination.",
         "Wrapping large blob params in `TransferableTypedData` is a reproduced ~15-20% end-to-end win on 256 KB-512 KB single-row blob INSERTs (256 KB -16.4%/-22.7%, 512 KB -10.4%/-11.8% across order-flipped passes; every 256/512 KB leg candidate-faster across ~7 passes, sub-threshold controls flip sign as noise). Mechanism, each part measured separately in `blob_param_mechanism_proof.dart` / `blob_param_gc_split.dart`: BOTH routes copy the payload exactly once on the main isolate (send()'s synchronous wall scales linearly with size; fromList is one linear memcpy; materialize() is ~1 us flat = a view). The win is the copy's destination — direct sends park every in-flight blob on the shared GC heap where scavenges must evacuate it (29 GCs / 8.6 ms pause vs 20 GCs / 1.2 ms per 300 x 256 KB inserts on the real path) and every collection safepoints the whole isolate group including the writer mid-step; the wrapped buffer is malloc'd external memory the GC never traces. `fromList` does NOT neuter its source, so the public caller-keeps-its-blob contract holds.",
@@ -3212,6 +3330,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "`resqlite_json_write_string`'s SWAR escape scan is no longer all-or-nothing. Before exp 235 the SWAR 8-byte fast-skip broke to the byte-by-byte path on the first escapable byte and never returned, so one escape near the start of a long TEXT value forced the entire tail onto the one-byte-at-a-time loop. Exp 235 re-enters the SWAR skip after each dirty chunk, so a sparse escape only downgrades the single 8-byte chunk that contains it.",
         "Sparse-escape TEXT was a real, previously-invisible headroom pocket in selectBytes. The pre-235 harness had `escaped` (dense, ~1/3 escapable) and `lateEscape` (escape at the very end) lanes; neither exercised the resume inefficiency, so the win did not appear until `sparseNewline` (a newline every ~80 bytes, realistic multi-line text) and `sparseEarly` lanes were added. Load-bearing 256B sparse-newline reproduced -23.4% across the order flip; sparse-early lanes reproduced -44%.",
@@ -3242,6 +3361,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The read side paid three distinct costs for large blob cells that exp 234's write-side mechanism analysis predicted and exp 236 removes: (1) decodeQuery copied every blob cell native->heap; (2) results estimated > 256 KB sacrificed the reader isolate per query — Isolate.exit is zero-copy but costs ~2-5 ms respawn plus statement-cache and schema-cache warmth, a per-query tax no benchmark lane priced (a temporary spawn counter measured baseline 270 reader spawns for 270 large-blob reads — exactly 1:1 — vs candidate 0, and interspersing other work still produced 270 spawns because blob reads outrun the ~4-worker pool's respawn capacity); (3) tx.select runs on the writer, which can never sacrifice, so large blob rows paid the full unmitigated graph copy. Decoding blob cells >= 256 KB directly into TransferableTypedData (native->malloc'd-external, one copy, GC-invisible) and weighing sacrifice on residual bytes only makes blob-dominated reads 3-6x faster (512 KB select -80% to -83% across three order-flipped passes) and tx.select ~6-7x faster (-84% to -87%).",
         "selectBytes was already optimal and should not be touched: it sends a native-backed Uint8List view, and the VM's object-graph copy routes external typed data into a fresh malloc'd buffer — the GC-invisible destination. This retroactively explains part of exp 174's ~2x win and closes the 'should selectBytes use TransferableTypedData' question: same copy count, same destination class, wrapper overhead for nothing.",
@@ -3269,7 +3389,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The `parameter-encoding-and-binding` open question — does exp 234's `TransferableTypedData` blob-transfer win extend to the batch (`BatchRequest`/`executeBatch`) path carrying per-set blobs — is answered NO. On a blob-heavy `executeBatch` (30 rows/batch, one blob param each), wrapping each qualifying blob is a reproduced REGRESSION at the sizes where single-row INSERT won: 256 KB is candidate-slower on 8/8 order-flipped legs across four runs (+7.6% to +18.1%, median ~+9.5%), 512 KB leans slower (7/8 legs), and 1 MB is uniformly slightly slower (WAL-dominated). No payload size shows a win. Sub-threshold 64/128 KB same-code-path controls swing +/-100%+ in both directions, which calibrates the noise floor — the wrapped-lane regression reproduces same-direction where the controls' noise does not.",
         "The exp 234 blob-transfer win is NOT 'large blobs on the GC heap are expensive' in the abstract; it is specific to MANY INDEPENDENT WRITE ROUND-TRIPS. The mechanism: across N single-row INSERTs, each `SendPort.send` parks a fresh blob on the young-generation heap, and a scavenge triggered while the writer is mid-`sqlite3_step` on the *previous* blob safepoints the whole isolate group including the writer — a stall that compounds over N round-trips and that moving blobs into GC-invisible malloc'd memory removes. `executeBatch` carries all N parameter sets across ONE `SendPort.send` and runs them in ONE writer round-trip inside one transaction, so there is no interleaving of scavenge-versus-writer-step to reclaim. The very cost exp 234 optimized is absent in the batch path.",
@@ -3293,7 +3414,9 @@
         "stream-rerun-dispatch"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "Exp 209's small-read request-amortization win does not require a public `selectAll` API to exist mechanically. Exp 239 kept ordinary `Future.wait(db.select(...))`, preserved the pool's first four-way wave, and batched only already-parked plain selects in pool-sharded envelopes capped at four. Twenty point reads improve -26.2% / -33.2% and twenty roughly-ten-row reads improve -21.1% / -30.3% across the lane-isolated order flip, clearing the preset 15% target in both orderings.",
         "Sharding parked work across the pool avoids exp 209's one-worker large-read collapse. Twenty concurrent 10k-row reads are -21.6% then -0.3% at median, with p95 and peak RSS inside the declared guards. Aggregate sacrifice can amortize reader respawns as well as messages, so large homogeneous overflow is not itself the hidden-batching blocker.",
@@ -3318,7 +3441,8 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 231 rejected per-value NEON i64 formatting for lack of amortisation and named a reopen: batch many integer cells into one encode call (a columnar/bulk transfer that hands the kernel an array of i64s). Exp 240 built that batched form as three test-only native array encoders and measured it directly in isolation.",
         "Isolated conversion (i64_batch_encode.dart, no JSON tokens/no SQLite): a 2-way software-pipelined SCALAR encoder (`pipe2`) overlaps two values' divide chains and reproduces -6 to -13% on mid/big magnitudes across passes, flat on short/mixed. The NEON vector kernel run over the array still loses +45 to +60% on realistic short (<9 digit) values because the fixed vector setup can't amortise below ~9 digits — exp 231's per-value finding reproduced WITH an array in hand, so the SIMD reopen door is closed harder, not opened.",
@@ -3335,6 +3459,8 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "unspecified",
+      "outcomeNote": "Migrated: the entry does not state why the re-evaluation fell the way it did.",
       "changedBeliefs": [
         "The `Isolate.exit` sacrifice policy (kill the reader to zero-copy a >=256 KB result heap instead of paying the SendPort graph copy) was re-evaluated against the Dart 2.15 isolate-group send model, where SendPort.send SHARES immutable leaves (strings/ints/canonical) and only COPIES the mutable structural graph. Confirmed transport model (`native_vs_heap_send.dart`): send cost tracks the mutable/copyable payload — a heap Uint8List send blows up with size (203-272 us at 512-731 KB) while a native-backed view sends cheaply (23-44 us). So send is cheap exactly when the result is immutable-heavy (text) or externally backed, and expensive only for large mutable structure.",
         "Sacrifice-vs-send crossover (A/B via a reverted RESQLITE_SACRIFICE_THRESHOLD define): on a numeric lane (structure-only, slots = rows x cols) send is faster-or-level up to ~20k slots and sacrifice edges ahead only above ~32k slots by a noisy ~3-4% (2000/8000/20000/32000/48000 slots: sacrifice 76.8/238.6/976.5/1194.8/1856.3 vs send 72.3/226.3/931.9/1233.8/1932.6). On a text lane (200 B strings) send wins everywhere and large (1000 rows: 149.4 vs 438.3 us) because strings are shared on send while sacrifice pays a respawn for a copy it never needed. The crossover metric is STRUCTURAL SLOT COUNT, not bytes.",
@@ -3359,6 +3485,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "premise_refuted",
       "changedBeliefs": [
         "The exp 234/236 `TransferableTypedData` win does NOT generalize to the `selectBytes` result buffer, and the reason is the source representation of the bytes. Exp 234 (blob param) and exp 236 (blob cell) both start from a heap-allocated `Uint8List` whose `SendPort` graph copy lands on the shared GC heap — the wrap wins by relocating that copy to external memory. `selectBytes` bytes are `result.ptr.asTypedList(length)`: a view directly over the reader's native `json_buf` (a per-reader malloc'd C buffer reused across queries). The single mandatory `SendPort.send` copy of the `(bytes, rowCount)` record is the snapshot that protects the view from json_buf reuse — there is no separate heap-destination copy for a wrap to escape.",
         "Measured A/B (prototype behind `RESQLITE_SELECTBYTES_TTD`, reverted): wrapping the selectBytes view in `TransferableTypedData` is neutral-to-worse at every JSON size spanning the 256 KB new-space cap — dead even at 142 KB (297.3 vs 305.3 us) and 362 KB (700.1 vs 702.0), ~25% SLOWER at 731 KB (1391.7 vs 1742.3). Both lanes showed the same steady tiny `Scavenge(external)` stream under --verbose_gc (sub-0.2 ms pauses); there was no heap-pressure difference for the wrap to relieve. The wrap does not remove the one copy; it relocates it to a `fromList` memcpy into a fresh external buffer on the reader and adds malloc + finalizer + ownership-move machinery — same copy count, extra work, so it loses at size and breaks even below it."
@@ -3386,6 +3513,7 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 234's per-occurrence blob-param wrapping carried a latent aliasing regression: `wrapBlobParams` called `TransferableTypedData.fromList` once per qualifying position, so a caller passing the SAME `Uint8List` object to N positions (or reusing one buffer across a coalesced `MultiExecuteRequest` burst) got N independent external copies of one buffer. That is strictly worse than the graph copy exp 234 replaced, because `SendPort.send`'s object-graph copy preserves reference identity and would have copied the shared buffer once. The regression is invisible on single-reference writes (the common case) and only bites when one buffer is referenced multiple times in a send.",
         "The fix is the 'table protocol': wrap by identity via an identity-keyed cache (`HashMap(equals: identical, hashCode: identityHashCode)`), sharing ONE `TransferableTypedData` per unique backing buffer referenced at every occurrence. The graph copier sends the shared wrapper once (identity preserved across the hop); the writer materializes each unique wrapper exactly once (a second `materialize()` throws), so `unwrapBlobParams` dedups by wrapper identity and `_handleMultiExecute` threads one shared unwrap cache across the envelope's writes. Distinct buffers are unchanged (each still gets its own wrapper); the no-large-blob fast path still returns the input list with no allocation.",
@@ -3415,6 +3543,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "premise_refuted",
       "experimentClass": "measurement",
       "changedBeliefs": [
         "The pool-replacement-capacity estimand of the send-vs-sacrifice question is resolved AT THE PRODUCTION POOL SIZE (4 workers), and the answer overturns the concern that motivated exp 241/244: sacrifice does NOT deplete pool capacity — it is neutral-to-favorable. In an 8-request/4-worker barrier burst (fire 8 identical large sacrificing selects, 1-4 grab workers, 5-8 park, measure parked queue-wait = assignedAt-enqueuedAt via a decode-free ReaderPool.debugDispatchTimings hook, pool reset between bursts, 40x3 reps), the SEND (no-sacrifice) lane has the HIGHEST parked queue-wait — highest in all 3 reps, ~+500 us / +19% over the sacrifice lanes (send 3175 vs sacrifice-current 2652, sacrifice-eager 2684 us median). A large result's SendPort graph copy runs on the worker before it can take the next request and blocks the slot LONGER than Isolate.exit + an overlapped respawn. So at pool-4, sacrifice frees the slot sooner than not-sacrificing.",
@@ -3446,6 +3575,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "experimentClass": "measurement",
       "changedBeliefs": [
         "The INTRINSIC send-vs-Isolate.exit transfer cost is now measured cleanly (prepared-result barrier: worker builds+holds the real ResultSet, main times Go-sent -> received as first op, one process per observation, ABBA, empty-envelope control). Three facts: (1) Isolate.exit has a ~47 us FIXED-overhead premium over send (empty envelope 147 vs 100 us) from its sendability walk + isolate teardown/reassignment; (2) strings/immutable leaves are SHARED on send, not copied — a 400 KB string adds ~0 us to send (payload -4), a 1 MB string +18 us; (3) send's copy cost is driven by the MUTABLE flat-list SLOT COUNT (pointer-array backing), not payload bytes — send payload rises 27 -> 163 -> 636 us across 20k -> 48k -> 200k int slots but is ~zero for a single huge string.",
@@ -3481,6 +3611,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The sacrifice trigger now routes on MUTABLE SLOT COUNT (`raw.values.length`, i.e. rows x columns), not estimated bytes. Exp 245 established that send's copy cost tracks slot count while strings/immutable leaves are shared free, so the byte threshold misrouted big-string/big-blob results (few slots, many bytes) into a needless sacrifice + reader respawn. Slot routing fixes that: the misroute shape (4 rows x 100 KB string) stopped sacrificing (1.00 -> 0.00 per select) and got 31% faster (131 -> 91 us end-to-end), while every numeric/structural shape kept byte-for-byte identical routing at parity latency. Slot count is also free (the flat list's length), unlike the decoder's per-cell byte estimate.",
         "The chosen slot threshold is 32*1024 = the exact all-integer equivalent of the legacy 256 KB byte threshold (8 bytes/cell). This is END-TO-END tuning, deliberately BELOW exp 245's ~48k INTRINSIC crossover: a first pass at 48k regressed the 40k-slot band by +12% (it sent a result that should sacrifice), because exp 244 showed the send copy sits on the worker's critical path so at the production pool sacrifice becomes favorable earlier. 32k reconciles the intrinsic transfer, the pool dynamics, and numeric parity with the old byte trigger.",
@@ -3513,7 +3644,8 @@
       "directions": [
         "result-transfer-shape"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "The `stmt_cache_lookup_entry` move-to-back promotion is far more expensive per firing than its two prior experiments implied, because `resqlite_cached_stmt` is 1,632 bytes — it embeds exp 106's `read_tables[64]` (512 B) and `dep_columns[64]` (1 KB) fixed arrays. One promotion copies 4,896 bytes (three full-struct copies); eviction memmoves ~50 KB. Exp 071 (MRU scan direction + SQL hash) and exp 207 (`last_lookup` fast path) both measured this function on a SINGLE repeated SQL, a shape where the hot entry is already parked at `entries[count - 1]` so the promotion branch is never reached. Their rejections therefore say nothing about the swap; it was an unmeasured cost hidden behind two 'this function is settled' results.",
         "The swap cost is now bounded by isolated C measurement over the real struct layout (2M iterations/lane): when it fires it costs ~60-65 ns per lookup — 85.47 vs 20.97 ns (cache=8, 2 distinct SQL), 90.14 vs 18.11 (cache=8, 4), 144.28 vs 88.98 (cache=32, 2), 146.77 vs 82.38 (cache=32, 4). Single-SQL control lanes are flat (22.42 vs 22.01; 83.01 vs 79.56), independently confirming the branch is inert on the exp 071/207 shape. Replacing the swap with a per-entry `lru_seq` recency stamp plus in-place min-stamp eviction removes that work at identical LRU policy.",
@@ -3531,7 +3663,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "experimentClass": "moonshot",
       "changedBeliefs": [
         "Invalidation-grouped rerun batching does NOT help reactive fan-out, and specifically regresses the metric that matters. Under table/column-level invalidation one write dirties every stream projecting the changed column (100 in `high_cardinality_fanout`), so batching those reruns into one message per worker is a natural-looking amortization. It was implemented internally (SelectIfChangedBatchRequest + worker loop, ReaderPool.selectBatchIfChanged, batched StreamEngine._flushQueue/_requeryBatch, lastRowCount cost-gate) with no public API change. Clean cross-worktree A/B (two binaries, 3 alternated rounds, warm regime) measured single-write emission latency SLOWER on every lane: homogeneous +22% p50 / +59% p95, heterogeneous +66% p50 / +52% p95. The mechanism: a batched reply is indivisible, so the one changed stream's fresh result is delivered only when its whole batch finishes — it waits behind ~24 cheap unchanged batch-mates' re-hashes. Message-count amortization is the wrong lever for a latency-bound workload. This is the third rejection of the same trade (exp 148 reduced completion callbacks but regressed measured elapsed; exp 239 rejected shared indivisible replies). The lastRowCount cost-gate keeps a large partition off the critical path but not the common many-small-partitions wait.",
@@ -3549,7 +3682,9 @@
         "stream-rerun-dispatch"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_preserved_potential",
+      "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
+      "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
       "changedBeliefs": [
         "Exp 233's asynchronous checkpoint storm was a trigger-policy failure, not an unavoidable property of moving PASSIVE work off the writer. Observed-reset/high-water re-arming schedules the first 500-frame crossing, advances only on a fresh 500-frame delta, preserves one coalesced rerun for growth during an active checkpoint, and re-arms after an observed WAL page-count drop. That removes the continuously-true level trigger that previously requested work on every sustained commit.",
         "The off-writer mechanism retains substantial local value once the storm is fixed. First threshold-crossing p50 improves 53.0% / 63.9% across the order flip, and foreground reads improve as well, confirming that inline PASSIVE ownership is a real latency ceiling when the crossing occurs.",
@@ -3577,7 +3712,9 @@
         "measurement-system"
       ],
       "experimentClass": "measurement",
-      "outcomeClass": "accepted_measurement_premise_refuted",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
+      "outcomeNote": "Measurement contribution that also refuted the premise it was built to test.",
       "changedBeliefs": [
         "Exp 245/246 showed transfer is only 6-12% of a large select and left the other ~90% labelled SQLite stepping plus Dart object-graph build. Exp 251 decomposes that residual with the real resqliteStepRow/executeQuery paths in a native-asset-aware AOT harness across five fresh processes and four representative integer, mixed, and text shapes.",
         "The direct worker-path full proxy is typically 84-94% of separately measured main-observed select() latency, but it contains no universal dominant sub-cost: the mixed row is result-construction-heavy (63%), the small integer row is step-heavy (60%), and the two other shapes are roughly even. Estimated result construction is 34-58% of observed latency, so the residual bucket is not itself an optimization candidate and a broad decode/storage rewrite cannot cite general decode dominance.",
@@ -3621,7 +3758,8 @@
       "directions": [
         "stream-rerun-dispatch"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Writer dirty-column merging has fresh representative incidence: Dune runs two executeBatch UPDATEs every 2 seconds for the first 20 seconds after connect and every 5 seconds thereafter, updating three columns across all devices and two columns across all peers. That downstream evidence was strong enough to justify an exploit even though exp 057 rejected the analogous dirty-table dedup and exp 182 bounded all dependency-tracking savings at roughly 3-6% on wide no-stream writes.",
         "A per-batch pending dependency mask removes substantial real work only at extreme width and row count. The archived candidate makes a synthetic 10,000-row x 20-SET-column UPDATE 64.5% / 60.9% faster across the order flip, proving that repeated dependency merges can dominate that ceiling.",
@@ -3638,7 +3776,8 @@
       "directions": [
         "parameter-encoding-and-binding"
       ],
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "One SendPort envelope is not sufficient evidence that unique large BLOBs should stay on the graph-copy path. In public Future.wait write bursts, an identity census plus direct routing for unique 256 KiB MultiExecute buffers regressed 10.2% / 7.2% across order-flipped worktrees at the first production-admitted size, so the current envelope-shared TransferableTypedData route remains. The end-to-end run does not attribute the delta between census overhead and transfer route.",
         "There may be a larger-payload crossover: distinct 512 KiB buffers were candidate-faster by 10.1% / 4.6%, but the repository drift checker classifies the lane as drift-suspected because one baseline process had a 31.5% sample CV. That endpoint cannot justify moving or splitting the threshold after measurement. A larger-size-only rule needs a predeclared sweep, multi-host reproduction, and a production distribution concentrated above the crossover.",
@@ -3656,6 +3795,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Reading reader TEXT cells with `sqlite3_value_blob` instead of `sqlite3_value_text` is byte-identical (UTF-8 connection; exp 191 explicit-length invariant) but performance-neutral. `value_text`'s NUL-termination does not cost a per-cell malloc on the prepared-statement scan path: `sqlite3VdbeMemGrow` reuses each result `Mem`'s `zMalloc` buffer across rows, reducing it to an amortized memcpy below the focused-harness floor. Same-binary order-flipped A/B (6 passes) on `selectBytes` shows long-TEXT -0.6% / short-TEXT +2.4% against a +1.2% integer control; 2 KB text still ~-0.7%, no length scaling.",
         "Two-worktree A/B on this codebase can carry a per-worktree binary offset that is NOT drift: the byte-identical integer control moved ~-4.8% in the SAME direction across both order-flipped passes. A single-binary runtime toggle (env-gated, removed before merge) is the reliable isolation for a per-cell C change of this size."
@@ -3670,6 +3810,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "A stream's initial emission was not guaranteed: if a write dirtied the entry while its initial query was in flight, `_createStream` discarded the initial rows unemitted and relied on a catch-up re-query, which then compared against the hash baseline taken from those same discarded rows and reported 'unchanged'. Both emissions suppressed each other and the stream stayed permanently silent. The fix keeps the suppression (exp 256 measured it as the better semantics) but poisons the baseline so the re-query always emits.",
         "The failure mode of this class of bug is silence, not staleness — the hardest kind for an application to notice, and the reason it survived so long behind an intermittent test failure."
@@ -3708,6 +3849,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "When a write races a stream's initial query, the stream suppresses the known-stale initial rows and emits only the corrected result. Measured cost is ~1.4 ms at 20k rows and ~0.4 ms at 60k on time-to-correct-value, because the catch-up re-query is already in flight in either design; the benefit is removing the one stale frame that emit-then-correct rendered on every raced stream.",
         "Time-to-first-emission is the wrong metric for a reactive stream when the first emission is known to be superseded. The metric that matters is time-to-correct-value — when the subscriber can trust what it sees — and on that clock the two designs are within about a millisecond."
@@ -3729,7 +3871,8 @@
         "stream-rerun-dispatch"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal_bar",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Collapsing a homogeneous MultiExecuteRequest's per-member execute loop into one private C call is not enough while every member remains an independent SQLite autocommit. The public 5,120-insert gate improved 17.7% in candidate-first order but only 3.6% in baseline-first order, missing the predeclared 10% reproduced bar.",
         "The envelope adds a real fixed cost rather than merely failing to beat noise: an integer-only no-op UPDATE burst regressed 17.7% / 13.9% across the order flip. Whole-group allocateBatchParams packing, result-buffer materialization, and suffix repacking after errors can cost more than the scalar path's already-specialized one-row encoder and repeated FFI calls.",
@@ -3753,7 +3896,8 @@
         "result-transfer-shape"
       ],
       "experimentClass": "moonshot",
-      "outcomeClass": "rejected_below_signal",
+      "outcomeClass": "rejected",
+      "outcomeReason": "below_signal",
       "changedBeliefs": [
         "Exp 055 assessed per-column typed arrays (Int64List/Float64List) but never implemented them, estimating the throughput win as too small; exp 081 measured only a row-major binary slab. Exp 258 gave the first real AOT measurement of the columnar typed-array mechanism, isolating build (worker), hop (transfer), and consume (main) across a real worker->main SendPort hop with two order-flipped passes.",
         "Columnar builds 60-90% faster worker-side (no boxing; biggest on REAL, ~10x on 10k x 20 REAL) and its transfer is 73-91% cheaper on a SendPort A/B. But the build win is worker wall (off the main isolate), and the transfer win does not reach production: results large enough for the transfer to matter (>32768 structural slots) already zero-copy via the Isolate.exit sacrifice path, and sub-threshold SendPort results save only tens of microseconds, below the exp 105 round-trip floor.",
@@ -3794,6 +3938,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The Dart row decoder was paying to answer a question C already had the inputs for. `fastDecodeText` had to classify every TEXT cell as ASCII (Latin-1 widen) or not (utf8.decode) before it could build the String, costing a second ExternalTypedData word view plus a bounds-checked scan per cell — and falling back to a byte-by-byte loop for values under 16 bytes or on an unaligned pointer, which covers most real database text. `resqlite_step_row` holds the same pointer and length one frame earlier, in cache, where the answer is a branch-free SWAR pass.",
         "Moving the classification into the native step loop (RESQLITE_TEXT_ASCII = type code 6) is worth a reproduced 10-24% on text-bearing select() reads, including 19-24% on the repo's canonical 6-column mixed product row, across two order-flipped AOT passes. The saving is per TEXT cell, so it scales with text carried per read rather than with row count; the 400 B lane gains most (-22.2% / -19.4%) because the replaced Dart scan walked ~50 words per cell, and the canonical mixed row gains as much as it does because its description column is ~85 bytes on its own.",
@@ -3834,6 +3979,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Growing `decodeQuery`'s `List<Object?>` is not amortised-free, and it is the single largest Dart-side cost of a large read. A standalone AOT reproduction of the decode loop over a fixed cell buffer measures 2318 us for the doubling path against 865 us pre-sized on 10k x 20 INTEGER, with loads + switch + stores together under 500 us. That lands within 8% of exp 251's 2524 us of `Dart result construction` on the same shape, so the bucket exp 251 refused to design against is mostly buffer growth rather than cell decoding. Growth costs what it costs because a `List<Object?>` grow copies every live element with a store barrier into a freshly faulted array; a 200k-slot result copies ~322k slots through ~5 MB of transient garbage.",
         "Exp 059 rejected this mechanism for the wrong reason and with a design defect. Its stated grounds were the April release suite's noise floor and medians taken across iterations; its mechanism claim (`list growth is already cheap`, `only ~3-4 growths`) counts growths rather than slots copied and is false; and it sized the *initial* allocation from the hint, which is precisely the change exp 067 measured as a 40-44% regression on small-query workloads the same day. A win on large reads and a regression on small ones nets to the noise it reported.",
@@ -3891,7 +4037,8 @@
         "measurement-system",
         "result-transfer-shape"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Focused AOT harnesses can carry a memory reading, and the instrument is fixed by a hard constraint rather than chosen: an AOT binary exposes no VM service (`Service.getInfo()` returns null, `--enable-vm-service` is rejected as an unrecognized flag), so heap statistics and allocation profiles are unavailable in the only mode exp 193 permits for decode-path results. `ProcessInfo` is the whole instrument, and a `currentRss` read costs ~700 ns so it must stay outside the stopwatch.",
         "`maxRss` and a sampled `currentRss` peak can give opposite verdicts on the same change, by 76 percentage points. Pre- vs post-exp-260 on a lane crossing `sacrificeSlotThreshold`: sampled `currentRss` peak 36.6 -> 64.0 MB (+75%), `maxRss` 65.9 -> 64.8 MB (-1.7%). `maxRss` is the true high-water and is what a guard should gate on; the `currentRss` curve is a retention signal, and retention moves when reader isolates are sacrificed and return their pages. Within one isolate the VM keeps pages after GC, so a candidate freeing its own garbage reads as no change.",
@@ -3948,7 +4095,8 @@
       "directions": [
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "Crash-resilience has to be granular enough to reach the crash. #282 correctly identified that a segfault destroyed whole runs and correctly chose to persist partial progress, but persisted per completed *repeat* — and the peer crash it was written against fires at the Memory scenario, the fifteenth of sixteen, inside repeat 1. No repeat ever completed, so the fix never engaged. Exps 260 and 261 each ran fourteen scenarios and produced no artifact. Persisting per scenario preserves nine scenarios and 153 metrics against a SIGKILL at scenario 10, where the previous behaviour preserved nothing.",
         "A partial run is worth keeping as long as it cannot be mistaken for a whole one. `repeatCount` now counts only repeats that finished, so a run killed inside repeat 1 reports 0 rather than 1, and `scenariosCompleted`/`scenarioTotal`/`partial` mark the shortfall — self-exclusion in the same shape as `gitDirty` and `--repeat=1`, which already drop a run from the trend charts.",
@@ -3985,7 +4133,8 @@
         "result-transfer-shape",
         "measurement-system"
       ],
-      "outcomeClass": "accepted_measurement",
+      "outcomeClass": "accepted",
+      "outcomeReason": "measurement",
       "changedBeliefs": [
         "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Two corrections were needed to say what does. First, the raw 396 B/row marginal cannot be divided by the payload: a one-column and a six-column read of the same table make the same btree leaves resident, so the `id` lane's 140 B/row is a per-row storage-side cost independent of representation, and differencing the projections isolates the Dart side at 256 B/row for the five non-key columns. Second, that is 1.9x their 134.9 B of cell content, and BELOW a first-principles accounting of what they must occupy (~296 B: four OneByteStrings at a 24 B header plus rounded data, one boxed double, five values-list slots). The row representation has no headroom.",
         "The `Row` facade costs nothing in a retained result. It is three fields and a header, but the iterator creates those objects transiently and only the `ResultSet` is held, so a per-row facade charge does not belong in an accounting of what a result occupies.",
@@ -4040,6 +4189,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Claim 067.1 said `decodeQuery`'s initial `List<Object?>.filled(colCount * 256, null)` must not be shrunk. That holds for the change exp 067 actually made — an unconditional cut to `colCount * 4`, which forces every result larger than four rows to double its way up — but not for the general statement, and the reasoning underneath it was wrong in an instructive way. Exp 067 attributed its regressions to a VM fast path that makes one large null-filled list cheaper *per slot* than a small one. That is true and it does not support the conclusion: a standalone AOT reproduction of the allocation shape measures 1,536 slots at 0.28 ns/slot against 12 slots at 1.8 ns/slot, so the large allocation is six times cheaper per slot and twenty times more expensive in total. What actually made exp 067 regress was growth, not allocation, and exp 260 has since supplied the thing that lets the shrink avoid growth: a per-SQL memory of how many rows each statement returns. Conditioned on that memory and clamped so it can only ever shrink, the initial allocation is worth a reproduced 7.4% on the canonical 6-column point read and 27.4% on a 21-column one.",
         "A buffer-size hint that can *under*-predict must be a high-water mark, not a sliding window, and this is the single most transferable thing the run produced. Exp 260's growth hint takes the smaller of a SQL's last two row counts, which is right for growth because over-sizing is the expensive mistake there. Taking the *larger* of the last two by symmetry, for the initial allocation, was measured at +40% in all four order-flipped passes on a statement returning 3,300 rows behind a burst of 20-row executions: a window of two is defeated by any burst longer than two, because the two observations before the large execution are both small, so the large result is sized for 20 rows and doubles its way up — every time, not once. A high-water mark cannot repeat. What it gives up is a statement that was once large and is now permanently small, which keeps today's allocation forever.",
@@ -4124,6 +4274,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
       "experimentClass": "moonshot",
       "changedBeliefs": [
         "The `select() round-trip floor` has been the terminal argument in this direction for months and was never a measurement. Claim 258.2 rejected a columnar result store partly because its sub-threshold transfer saving was `below the round-trip floor`; exp 264 put a point read at `5-8 us, most of which is the isolate round trip`; exps 209 and 239 both went after the floor by amortising a hop across several queries. It is now priced: on the canonical 6-column point read the hop is 6.3 us of an 8.4 us read, and removing it leaves 2.1 us. So the floor was real, it was most of a small read, and it is not a floor — it is a routing decision. Everything previously rejected as `below the round-trip floor` was measured against a denominator four times larger than the work it was competing with. This survives the candidate's rejection and is the run's lasting contribution.",
@@ -4207,6 +4358,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "`dart run tool/knowledge/impact.dart origin/main` reports no recorded belief retired or transitively unsupported by this run, and that is correct: nothing here contradicts a prior claim. What it adds is a cost class the direction had no vocabulary for. Every read-path claim from exp 251 onward is a *per-read* rate — nanoseconds per cell, microseconds per request, a fraction of transfer versus decode — and each was measured on a lane that executes one statement thousands of times, which is the only way to resolve a rate. A fixed per-(statement, worker) cost is invisible in that regime by construction, and this run measures one at roughly 18 us: the prepare, schema build and page warm each of four reader isolates pays independently for a statement the first one has already run. Read alongside claim 264.1 and claim 260.1, both of which are real and both of which are per-read: they describe the cost of the ten-thousandth execution of a statement, and this describes the cost of its first.",
         "The reader pool's round-robin was never a load-balancing decision that anyone measured; it was the obvious way to write a scan, and it has been in place since exp 011 built the persistent pool. Exp 030 optimised what a worker does once it is chosen (dedicated reader indices, no C pool mutex) and exp 105 sized the pool, but which idle worker an idle pool picks had never been an experiment. It is worth about a third of a statement's first four executions, so the general belief to carry forward is that a policy nobody has measured is not the same as a policy that has been validated — especially one whose cost is structurally invisible to the suite that would have caught it.",
@@ -4273,6 +4425,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "The 32-entry cap shared by the three SQL-keyed read-path caches was never a measured number, and it is a cliff rather than a slope. All three evict at the front and promote on hit, which is approximately LRU, and LRU is the worst possible policy for a cyclic scan: at D <= 32 distinct rotating statements every read hits, and at D = 33 the entry each read needs is the one the previous miss just evicted, so the hit rate collapses rather than degrading. Measured, the collapse is worth about half of every read — 14.0 us per read against 6.1 us — and it is FLAT from 40 rotating statements to 128, which is the signature of a cliff and would not be produced by gradual cache pressure.",
         "Exp 266 moved the workload that reaches the cap by a factor of four without moving the cap. Under the round-robin dispatch it replaced, a sequential loop over D distinct statements was partitioned across the four reader connections — each cache saw roughly D/4, so a 128-statement application still fit inside 32 per connection. Sticky dispatch sends the whole cycle to one worker. This is the tail risk exp 266's own signal named ('a workload with well over 32 hot statements might now evict where it previously did not') and it is real, but it is a change in exposure, not a regression exp 266 introduced: at any D the per-cache miss rate past the cap was always total.",
@@ -4319,6 +4472,7 @@
         "measurement-system"
       ],
       "outcomeClass": "accepted",
+      "outcomeReason": "performance",
       "changedBeliefs": [
         "Exp 267's measured +0.8-1.2 MB statement-cache RSS was real, but most of the four-reader price was not retained prepared statements or populated dependency metadata. `resqlite_db` comes from `calloc`, then `stmt_cache_init` wrote the complete 128-entry array again; optimized arm64 removed that redundant write for the adjacent writer cache but retained a 273,408-byte `bzero` for every reader. Four readers therefore eagerly touched 1,093,632 bytes before any cache slot became live. Removing that clear recovers 1,056,768 bytes of median max RSS, almost the whole observation that named dynamic metadata as the next target.",
         "The native statement-cache entry is 2,136 bytes, not the approximate 1.6 KB carried from exp 248 into exp 267. `resqlite_column_dep` is 24 bytes, so `dep_columns[64]` alone occupies 1,536 bytes; one 128-entry cache is exactly 273,408 bytes (`0x42c00`). The corrected size strengthens exp 267's eviction-compaction explanation but changes the footprint follow-up: unused capacity can stay virtual without changing entry ownership at all.",
@@ -4368,6 +4522,7 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "tradeoff",
       "experimentClass": "moonshot",
       "changedBeliefs": [
         "Exp 269 strengthens rather than supersedes exp 265's rejection. Row, payload-byte and VM-opcode caps still do not bound caller-isolate wall time: arbitrary work can occur inside one SQLite opcode, before the progress handler is installed, or while SQLite is waiting below the VM. The missing primitive is preemption, not a better predictor or another counter.",
@@ -4441,6 +4596,7 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "rejected",
+      "outcomeReason": "premise_refuted",
       "experimentClass": "moonshot",
       "changedBeliefs": [
         "We believed resqlite's write-invalidation signal was a general-purpose fact about the database, used so far only by streams. It is not: it is a fact about writes made through one `Database` object. Streams can live with that because a missed invalidation only delays a re-emit, and `stream()` documents the limitation. `select()` cannot, because it re-reads the file today and therefore observes every committed write, whoever made it. Anyone reading the stream-engine chapters or the invalidation sections of the architecture doc should read 'invalidation' as scoped to this Database's own writes, not to the file.",
