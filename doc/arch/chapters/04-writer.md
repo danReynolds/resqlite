@@ -25,7 +25,7 @@ The single-row path followed once a workload existed to show it mattered. Below 
 
 Large blob parameters take the boundary's wrap route: one copy into external memory, then an ownership move instead of a graph copy [[234.1]].
 
-Wrapping is identity-keyed, and that detail is load-bearing rather than an optimization. The graph copier preserves object identity — pass the same buffer to two positions and it is copied once and aliased twice. Naive per-occurrence wrapping broke that property, duplicating one buffer into N external copies and making the wrapped path *worse* than the copy it replaced. Keying wrappers by buffer identity across the whole message envelope restores it, so a blob reused across the writes of a coalesced group crosses exactly once [[243.1]].
+Wrapping is identity-keyed, and that detail is load-bearing rather than an optimization. The graph copier preserves object identity — pass the same buffer to two positions and it is copied once and aliased twice. Naive per-occurrence wrapping broke that property, duplicating one buffer into N external copies and making the wrapped path *worse* than the copy it replaced. Keying wrappers by buffer identity across the whole message envelope restores it, so a blob reused across the writes of a coalesced group crosses exactly once [[243.1]] ([[test:test/blob_alias_table_test.dart#blob reused across writes shares one wrapper across the group@12nn]]).
 
 Concurrent standalone writes coalesce into a single envelope per round trip. That is why the identity table has to span the envelope rather than a single statement — the reuse case it exists for is precisely a caller looping `execute` with the same buffer.
 
@@ -33,4 +33,4 @@ Batch blobs deliberately do **not** wrap. Measured on a blob-heavy `executeBatch
 
 ## Dirty tracking rides along
 
-The writer connection installs SQLite's preupdate hook, so every insert, update, and delete records its table into a deduplicated set that returns *with the write response*. There is no separate notification channel and no polling — stream invalidation is a field on a reply the caller was already waiting for. Inside a transaction the set accumulates and returns at commit; a rollback discards it without waking anything.
+The writer connection installs SQLite's preupdate hook, so every insert, update, and delete records its table into a deduplicated set that returns *with the write response*. There is no separate notification channel and no polling — stream invalidation is a field on a reply the caller was already waiting for. Inside a transaction the set accumulates and returns at commit; a rollback discards it without waking anything ([[test:test/transaction_test.dart#stream does not fire after rolled-back transaction@15oy]]).

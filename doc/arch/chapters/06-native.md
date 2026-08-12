@@ -30,7 +30,7 @@ Version policy is evidence-driven rather than temperamental: track sqlite3mc poi
 
 The JSON encoders are the one area where resqlite spends real instruction-level effort, because `selectBytes` makes them the whole cost of a read.
 
-Base64 encoding for blobs went through scalar unrolling, then a 12-bit pair lookup table, then a NEON `vqtbl4q_u8` kernel gated on `__aarch64__` with the scalar LUT retained as fallback — roughly 2× on payload-throughput lanes [[229.1]]. One implementation detail is preserved as a rule: the SIMD kernel stays `noinline`, because inlining it degraded code generation on the small-input scalar path that most cells actually take.
+Base64 encoding for blobs went through scalar unrolling, then a 12-bit pair lookup table, then a NEON `vqtbl4q_u8` kernel gated on `__aarch64__` with the scalar LUT retained as fallback — roughly 2× on payload-throughput lanes [[229.1]], which is what holds the large-payload read at [[bench:Select → JSON Bytes / Large payload (~650KB) / resqlite selectBytes() ~ 0.24 +-20%]] ms. One implementation detail is preserved as a rule: the SIMD kernel stays `noinline`, because inlining it degraded code generation on the small-input scalar path that most cells actually take.
 
 Integer encoding is the counter-example, and the reason is structural rather than algorithmic. A byte-identical NEON i64-to-decimal kernel never beat the scalar two-digit itoa, because it pays an out-of-line call plus vector setup for a single integer with no cross-cell batching to amortize it — unlike base64, which amortizes across a whole blob. Per-cell integer SIMD is closed until some future architecture batches many integer cells into one call.
 
@@ -40,4 +40,4 @@ Hashing for stream re-queries also lives here: computing the result hash in C du
 
 Checkpointing remains inline on the writer. Moving `PASSIVE` work off the writer is genuinely attractive — first threshold-crossing latency improves 53–64% — and an early attempt failed loudly with a checkpoint storm. The diagnosis matters more than the verdict: the storm was a re-arming policy bug, not an inherent property of moving the work, and observed-reset/high-water scheduling fixes it [[250.1]]. The mechanism is documented and parked rather than discarded.
 
-Native memory is observable rather than opaque: the per-reader JSON buffer reclaims above a cap and reports its high-water mark through diagnostics [[183.1]].
+Native memory is observable rather than opaque: the per-reader JSON buffer reclaims above a cap and reports its high-water mark through diagnostics [[183.1]] ([[test:test/diagnostics_test.dart#toString includes all counter fields@q7ik]]).

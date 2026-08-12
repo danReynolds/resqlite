@@ -17,7 +17,7 @@ Two read shapes exist because two different consumers exist. `select` returns Da
 
 `select` does not return a list of maps. It returns a `ResultSet` over a single flat `List<Object?>` laid out row-major, with lightweight `Row` views created lazily on indexing. Callers get ordinary map ergonomics; the boundary gets a graph with almost no structural objects in it.
 
-That choice was made for transfer, not ergonomics. `Isolate.exit` validates the object graph it hands over, and a 20,000-row result built from per-row maps reaches hundreds of thousands of internal objects — measured at roughly 38% of total query time. The flat list collapses that to the values array, one schema, and a wrapper. The same property later became the basis of the sacrifice trigger itself: slot count is both what `send` copies and what the exit walk visits.
+That choice was made for transfer, not ergonomics. `Isolate.exit` validates the object graph it hands over, and a 20,000-row result built from per-row maps reaches hundreds of thousands of internal objects — measured at roughly 38% of total query time. The flat list collapses that to the values array, one schema, and a wrapper. The same property later became the basis of the sacrifice trigger itself: slot count is both what `send` copies and what the exit walk visits, and the trigger routes on it directly ([[code:sacrificeSlotThreshold=32768]]).
 
 ## Streams: hashing, dispatch, and elision
 

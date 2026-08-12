@@ -18,6 +18,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../tool/knowledge/config.dart';
 import '../tool/knowledge/pin.dart';
 import '../tool/knowledge/resolvers.dart';
 
@@ -329,7 +330,7 @@ void main() {
     }
 
     Future<PinResult> check(Directory root, String text) =>
-        CodeResolver(root).resolve(onePin(text));
+        CodeResolver(root, const ['lib']).resolve(onePin(text));
 
     test('a constant matching the pinned value is current', () async {
       final root = repoWith('const threshold = 32768;');
@@ -630,6 +631,84 @@ void main() {
         '[[bench:Large read ~ 0.32 +-15%]]',
       );
       expect(r.status, PinStatus.unknown);
+    });
+  });
+
+  // The wiring the whole system reads. Its failure mode is the quiet one: a
+  // verifier pointed at the wrong trees reports a confident pass over prose it
+  // never opened, so absence and malformity have to be loud rather than
+  // defaulted around.
+  group('KnowledgeConfig', () {
+    Directory repoWith(String yaml) {
+      Directory('${tmp.path}/tool/knowledge').createSync(recursive: true);
+      File(
+        '${tmp.path}/${KnowledgeConfig.defaultPath}',
+      ).writeAsStringSync(yaml);
+      return tmp;
+    }
+
+    const complete = '''
+docs: [doc/arch/chapters]
+sources:
+  claims: experiments/signals/entries
+  benchmarks: docs/experiments/history.json
+  testResults: build/passing-tests.txt
+codeRoots: [lib]
+groundedness:
+  minStrongPinsPerChapter: 2
+  exempt:
+    07-meta.md: process chapter, nothing runtime to pin
+''';
+
+    test('a complete config loads every field', () {
+      final c = KnowledgeConfig.load(repoWith(complete));
+      expect(c.docDirs, ['doc/arch/chapters']);
+      expect(c.claimEntries, 'experiments/signals/entries');
+      expect(c.history, 'docs/experiments/history.json');
+      expect(c.testResults, 'build/passing-tests.txt');
+      expect(c.codeRoots, ['lib']);
+      expect(c.minStrongPinsPerChapter, 2);
+      expect(c.groundednessExempt, contains('07-meta.md'));
+    });
+
+    test('a missing config throws rather than defaulting', () {
+      Directory('${tmp.path}/tool/knowledge').createSync(recursive: true);
+      expect(() => KnowledgeConfig.load(tmp), throwsStateError);
+    });
+
+    test('a missing required source throws, naming the key', () {
+      final root = repoWith('''
+docs: [doc]
+sources:
+  claims: experiments/signals/entries
+  benchmarks: docs/experiments/history.json
+codeRoots: [lib]
+''');
+      expect(
+        () => KnowledgeConfig.load(root),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('testResults'),
+          ),
+        ),
+      );
+    });
+
+    // Omitting the floor must not be spelled the same way as passing it, or a
+    // config that forgot it would silently disable the check.
+    test('an absent groundedness block yields a floor of zero', () {
+      final c = KnowledgeConfig.load(repoWith('''
+docs: [doc]
+sources:
+  claims: a
+  benchmarks: b
+  testResults: c
+codeRoots: [lib]
+'''));
+      expect(c.minStrongPinsPerChapter, 0);
+      expect(c.groundednessExempt, isEmpty);
     });
   });
 }

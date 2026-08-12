@@ -1,0 +1,63 @@
+# Project wiring for the knowledge-pin system.
+#
+# Everything in tool/knowledge/ except resolvers.dart is portable. This file and
+# that one are the whole project-specific surface: this says *where* to look,
+# resolvers.dart says *how* to read what it finds. Porting the system to another
+# repo means rewriting these two and nothing else.
+
+# Trees whose markdown carries pins. Only `.md` directly inside each is read —
+# the walk is deliberately not recursive, so a stray copy of a chapter in a
+# subfolder cannot start failing the build.
+docs:
+  - doc/arch/chapters
+  - doc/arch
+
+# Source of truth per namespace. Each is what its resolver reads to decide
+# whether a pinned statement still holds.
+sources:
+  # `claim:` / `was:` — the experiment graph, one file per experiment. Read from
+  # the fragments rather than the generated signals.json, because on an
+  # experiment branch the aggregate is deliberately stale (it is bot-owned on
+  # main) while the fragments are current.
+  claims: experiments/signals/entries
+
+  # `bench:` — the published run history. Generated on main; a pin resolves
+  # against the newest run in it that is neither dirty-tree nor noisy.
+  benchmarks: docs/experiments/history.json
+
+  # `test:` — names of tests that passed, written by record_passing_tests.dart
+  # from the test reporter's JSON. A CI artifact: absent locally, which yields
+  # `unknown` rather than a false pass.
+  testResults: build/passing-tests.txt
+
+# Trees `code:` pins search for a named declaration. lib/ is the shipped
+# library; tool/ is included because some documented constants govern the
+# tooling itself. native/ is absent on purpose — the C sources have no Dart
+# declaration syntax for the resolver to match, so a C constant should be
+# pinned through the Dart binding that exposes it.
+codeRoots:
+  - lib
+  - tool
+
+# The groundedness floor, enforced by `verify.dart --strict`.
+#
+# A chapter can be fully "verified" while resting entirely on `claim:` pins,
+# which prove only that nobody has yet written a contradicting experiment. That
+# is the weakest thing the system can say, and it is also the cheapest pin to
+# write — so without a floor the corpus drifts toward it. The floor names a
+# minimum of load-bearing citations per chapter that are `test:`, `bench:`, or
+# `code:` — the namespaces that check a statement against something other than
+# our own opinion.
+#
+# It is a floor, not a target. Prose that explains *why* should stay unpinned;
+# raising this number until every sentence carries a hash would be worse
+# writing, not better evidence.
+groundedness:
+  minStrongPinsPerChapter: 2
+  # Chapters exempt from the floor, with the reason. A chapter belongs here
+  # when its subject genuinely has no testable or measurable surface.
+  exempt:
+    07-meta.md: >-
+      Describes the experiment process itself, so its citations are inherently
+      claim-shaped; there is no runtime behaviour for a test or benchmark to
+      pin.

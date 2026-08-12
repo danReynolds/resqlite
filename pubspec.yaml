@@ -59,3 +59,9 @@ dev_dependencies:
   drift: 2.34.3
   drift_dev: ^2.21.0
   build_runner: ^2.4.0
+  # Reads tool/knowledge/knowledge.yaml, the project wiring for the pin system.
+  # YAML rather than JSON specifically because that file has to carry comments:
+  # it says which trees hold documented prose and which hold ground truth, and
+  # each of those is a judgement that needs its reason recorded next to it.
+  # Dev-only — the pin tooling never ships to consumers.
+  yaml: ^3.1.2
