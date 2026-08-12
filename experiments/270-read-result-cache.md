@@ -3,7 +3,7 @@
 **Date:** 2026-08-12
 **Status:** Rejected
 **Category:** Moonshot
-**Direction:** `result-transfer-shape`
+**Direction:** `result-transfer-shape`, `stream-rerun-dispatch`
 **Benchmark Run:** Headline sweep in
   [`benchmark/results/2026-08-12T08-10-19-exp270-vs-parent.md`](../benchmark/results/2026-08-12T08-10-19-exp270-vs-parent.md),
   compared explicitly against the same-host parent-commit baseline
@@ -248,9 +248,14 @@ none of that is the question. Three things decide it:
    A permanent semantic narrowing is a poor trade for the first number, and the
    second is a workload that barely writes.
 
-The runtime is reverted from the publication branch. What is kept is the
-evidence: the focused A/B harness, the foreign-writer probe, and the
-`data_version` price.
+The runtime is reverted from the publication branch. The exact prototype is
+preserved at `archive/exp-270` (`ae60084`) for inspection, not as a base to
+build on — its `SQLITE_FUNCTION` purity capture and version-stamped invalidation
+are both reusable ideas, and neither is worth carrying on `main` for a design
+that cannot ship. What is kept here is the evidence: the focused A/B harness,
+the foreign-writer probe, and the `data_version` price. The incidence probe went
+with the runtime, since it reads the cache's own counters; its numbers are above
+and its shape is recoverable from the archive tag.
 
 ### What this changes for future runners
 

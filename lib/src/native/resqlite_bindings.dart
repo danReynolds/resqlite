@@ -365,19 +365,6 @@ external int resqliteGetReadTables(
   int maxTables,
 );
 
-// [EXP-270](../../../experiments/270-read-result-cache.md): whether the most
-// recent statement acquired on this reader is built only from allowlisted
-// deterministic SQL functions. Returns 0 for anything unproven, so a caller
-// that reads it as "cacheable" is never wrong by default.
-@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Void>, ffi.Int)>(
-  symbol: 'resqlite_get_read_deterministic',
-  isLeaf: true,
-)
-external int resqliteGetReadDeterministic(
-  ffi.Pointer<ffi.Void> db,
-  int readerId,
-);
-
 // [EXP-106](../../../experiments/106-column-level-deps.md): column-level
 // dependency tracking. The C layer captures structured table/column pairs
 // alongside table dependencies; these bindings fetch them on the same cadence

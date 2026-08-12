@@ -87,15 +87,6 @@ typedef struct {
     // failure. When 0, the column getters return 0 entries, so Dart builds a
     // plain table-level dependency and skips column elision.
     int dep_columns_reliable;
-    // [EXP-270](../experiments/270-read-result-cache.md): 1 when every SQL
-    // function this statement invokes is on the deterministic allowlist below,
-    // so two executions with the same parameters against unchanged tables must
-    // produce the same rows. 0 for `random()`, `datetime('now')`, any
-    // user-registered function, and anything else not proven pure.
-    //
-    // Captured by the authorizer at prepare time and stored here because a
-    // cache hit never re-runs the authorizer. Only the reader path reads it.
-    int deterministic;
     // [EXP-195] Cached JSON column-name tokens (extends exp 190's per-query
     // token amortization across re-executions of the same prepared SQL).
     // Built lazily on the first `write_json_to_buf` call against this entry;
@@ -280,11 +271,6 @@ typedef struct resqlite_authz_ctx_s {
     // SQLITE_UPDATE / SQLITE_INSERT / SQLITE_DELETE actions. Reader
     // contexts leave this zero.
     int track_writes;
-    // [EXP-270](../experiments/270-read-result-cache.md): set to 1 while
-    // preparing a statement that invokes a function outside
-    // `authz_function_is_deterministic`. Reset by the caller before each
-    // prepare and read immediately after; meaningless at any other time.
-    int impure;
 } resqlite_authz_ctx;
 
 typedef struct {
@@ -390,39 +376,6 @@ struct resqlite_db {
 #define SQLITE_INSERT 18
 #define SQLITE_DELETE 9
 #define SQLITE_UPDATE 23  // authorizer action: UPDATE column write
-#define SQLITE_FUNCTION 31  // authorizer action: SQL function invocation
-
-// [EXP-270] SQL functions whose result depends only on their arguments, so a
-// statement built from them alone returns the same rows until a tracked table
-// changes. Sorted for `bsearch`.
-//
-// This is an allowlist, not a denylist of `random()` and friends, because the
-// set of functions a caller can register is open: an unrecognised name must
-// mean "assume impure". Date/time functions are absent because they accept
-// `'now'`; `changes` / `last_insert_rowid` / `total_changes` because they read
-// connection state no table dependency covers.
-static const char* const kDeterministicFunctions[] = {
-    "abs",     "avg",       "char",   "coalesce", "concat", "concat_ws",
-    "count",   "format",    "glob",   "group_concat", "hex", "ifnull",
-    "iif",     "instr",     "length", "like",     "likelihood", "likely",
-    "lower",   "ltrim",     "max",    "min",      "nullif", "printf",
-    "quote",   "replace",   "round",  "rtrim",    "sign",   "string_agg",
-    "substr",  "substring", "sum",    "total",    "trim",   "typeof",
-    "unhex",   "unicode",   "unlikely", "upper",  "zeroblob",
-};
-
-static int authz_function_name_cmp(const void* key, const void* element) {
-    return sqlite3_stricmp((const char*)key, *(const char* const*)element);
-}
-
-static int authz_function_is_deterministic(const char* name) {
-    if (!name) return 0;
-    return bsearch(name, kDeterministicFunctions,
-                   sizeof(kDeterministicFunctions) /
-                       sizeof(kDeterministicFunctions[0]),
-                   sizeof(kDeterministicFunctions[0]),
-                   authz_function_name_cmp) != NULL;
-}
 
 static int authorizer_callback(
     void* user_data,
@@ -462,11 +415,6 @@ static int authorizer_callback(
                 // the column-intersection optimisation for this table.
                 resqlite_column_set_add(ctx->columns, arg1, "*");
             }
-            break;
-        case SQLITE_FUNCTION:
-            // [EXP-270] arg2 is the function name; arg1 is NULL for this
-            // action. Fires once per call site at prepare time only.
-            if (!authz_function_is_deterministic(arg2)) ctx->impure = 1;
             break;
         default:
             break;
@@ -1373,17 +1321,6 @@ int resqlite_get_read_tables(
     return count;
 }
 
-// [EXP-270](../experiments/270-read-result-cache.md): 1 when the most recent
-// acquired statement on this reader invokes only allowlisted deterministic
-// functions, 0 otherwise — including when no statement has been acquired, so
-// an unknown state can never read as "safe to cache".
-int resqlite_get_read_deterministic(resqlite_db* db, int reader_id) {
-    if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) return 0;
-    if (reader_id < 0 || reader_id >= db->reader_count) return 0;
-    resqlite_cached_stmt* entry = db->readers[reader_id].last_entry;
-    return entry ? entry->deterministic : 0;
-}
-
 // [EXP-106](../experiments/106-column-level-deps.md): return read-column
 // metadata for the most recent acquired statement on this reader. Entries are
 // structured table/column pairs owned by the cached stmt entry; the caller MUST
@@ -1571,7 +1508,6 @@ static resqlite_cached_stmt* get_or_prepare_reader(
     // Reset before preparing so this statement captures only its own deps.
     resqlite_read_set_reset(&reader->read_tables);
     resqlite_column_set_reset(&reader->read_columns);
-    reader->authz_ctx.impure = 0;
 
     sqlite3_stmt* stmt = NULL;
     int rc = sqlite3_prepare_v3(reader->db, sql, sql_len, SQLITE_PREPARE_PERSISTENT, &stmt, NULL);
@@ -1588,7 +1524,6 @@ static resqlite_cached_stmt* get_or_prepare_reader(
     }
     stmt_cache_entry_set_read_tables(entry, &reader->read_tables);
     stmt_cache_entry_set_dep_columns(entry, &reader->read_columns);
-    entry->deterministic = reader->authz_ctx.impure ? 0 : 1;
     reader->last_entry = entry;
     *out_rc = SQLITE_OK;
     return entry;

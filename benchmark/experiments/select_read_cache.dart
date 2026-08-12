@@ -3,6 +3,13 @@
 // Focused A/B harness for a main-isolate `select()` result cache
 // ([EXP-270](../../experiments/270-read-result-cache.md)).
 //
+// The cache was REJECTED, and on current main every lane below runs the ordinary
+// worker path, so the two arms are identical. This remains mechanism evidence
+// for how much of a hot read is the isolate round trip, and the guard set for
+// any future work that remembers a read result instead of re-executing it —
+// but run `select_cache_foreign_writer.dart` first. It is the lane that killed
+// exp 270 and no timing here can see what it sees.
+//
 // Every read resqlite serves crosses to a reader isolate and back, and exp 265
 // priced that hop at most of a hot point read. Exp 269 tried to remove it by
 // running the statement on the calling isolate and was rejected: arbitrary
