@@ -1,0 +1,72 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "Exp 269 strengthens rather than supersedes exp 265's rejection. Row, payload-byte and VM-opcode caps still do not bound caller-isolate wall time: arbitrary work can occur inside one SQLite opcode, before the progress handler is installed, or while SQLite is waiting below the VM. The missing primitive is preemption, not a better predictor or another counter.",
+    "The small-read mechanism remains real. On the exact final candidate, two order-flipped pairs measured point reads at -60.0% to -64.9%, 20- and 64-row pages at -38.2% and -24.0%, a point read behind four busy workers at -89.5%, and eight point reads at -69.8%. Collections 1 and 2 used an earlier decode-loop implementation, so they support the mechanism but are not extra repetitions of the final runtime.",
+    "A per-event-loop-turn stopwatch can make a chain of already-cheap reads yield, but checking it before entering synchronous native work cannot limit one read. The decisive query returned one INTEGER and copied no payload while spending 26-28 ms in one built-in function opcode; current main let a 1 ms timer fire during worker execution, while the candidate blocked the timer until the read returned.",
+    "Abort-and-replay is not a generally safe fallback for arbitrary read-only SQL. READONLY prevents writes to the database file; it does not make extension functions or virtual-table callbacks free of external or connection-local effects. Routing needs a typed, non-replaying failure contract before application callbacks can participate.",
+    "The release sweep remains useful only as a collateral-damage receipt. Its one win was synthetic point-query throughput; representative chat and feed lanes stayed within the declared noise floor, so it did not satisfy exp 265's request for production incidence evidence."
+  ],
+  "claims": [
+    {
+      "id": "269.1",
+      "text": "Removing worker dispatch has a large, reproducible effect on hot small reads. The exact final candidate measured point reads at -60.0% to -64.9%, page20 at -38.2%, page64 at -24.0%, a point read queued behind four busy readers at -89.5%, and eight concurrent point reads at -69.8% over two order-flipped pairs. This confirms the latency mechanism; it does not establish that arbitrary `select()` work is safe on the caller.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · collection 3 only for the exact sentinel-based candidate · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "265.1"
+        },
+        {
+          "type": "validates",
+          "target": "265.2"
+        },
+        {
+          "type": "validates",
+          "target": "265.3"
+        }
+      ]
+    },
+    {
+      "id": "269.2",
+      "text": "Rows, result payload bytes, VDBE-opcode count and a stopwatch checked before a synchronous call do not bound caller-isolate wall time. After two one-byte arming reads, `SELECT length(randomblob(?))` with a 16 MiB argument returned one INTEGER in 25,975-27,790 us without crossing any proposed cap. A 1 ms timer fired before return on worker-first main in all three samples and failed to fire before return on the inline candidate in all three. The expensive built-in function call occurs inside one VM opcode, so a progress handler cannot preempt it.",
+      "conditions": "Same-host Dart JIT A/B · parent 96e6730 vs candidate dd252db · three 16 MiB samples per arm · timer result is the caller-responsiveness discriminator · 2026-08-12",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.6"
+        }
+      ]
+    },
+    {
+      "id": "269.3",
+      "text": "A SQLite progress handler is a cancellation opportunity, not wall-time preemption. SQLite invokes it at selected VM loop boundaries; one function, collation, virtual-table, VFS/page-fault or busy-handler interval may run before another check. In the rejected prototype, parameter packing and cold statement preparation also occurred before handler installation, reader connections retained a 5-second busy timeout, and native TEXT classification scanned a complete cell before Dart applied the output-byte cap.",
+      "conditions": "Code audit of candidate dd252db and bundled sqlite3mc 2.3.5 / SQLite 3.53.2 · supported arbitrary-SQL and extension surface · 2026-08-12",
+      "edges": []
+    },
+    {
+      "id": "269.4",
+      "text": "The 1 ms per-turn budget measures and improves yielding across a chain of cheap reads, not the duration of one read. In the focused final-candidate lane, worst timer lateness was 1,253-1,313 us inline against 2,373-2,382 us through dispatch; making the budget unreachable produced a separate 33,344 us observation. The opaque-work probe shows why this cannot be promoted to a per-read wall bound.",
+      "conditions": "M1 Pro · AOT · final-candidate collection 3 for the focused lane; auxiliary unreachable-budget value recorded without raw samples · 2026-08",
+      "edges": []
+    },
+    {
+      "id": "269.5",
+      "text": "Release-suite auto-comparison can silently choose a stale or non-release artifact. Exp 269's first sweep compared against a two-experiment-old anchor and reported four apparent regressions on unreachable paths; an explicit same-host baseline from the actual parent cleared them, yielding 1 win, 0 regressions and 168 neutral metrics. Always name the parent receipt explicitly and test diff reachability before interpreting an aggregate flag.",
+      "conditions": "M1 Pro · `run_release.dart --repeat=5 --skip-memory --fail-on-regression` · actual-parent baseline 96e6730 · 2026-08",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "Keep worker-first execution for the existing arbitrary-SQL `select()` API. Do not retry this design by adding predictors or SQLite counters: none can preempt opaque work inside one synchronous operation.",
+    "Run `benchmark/experiments/select_inline_opaque_work.dart` before happy-path routing measurements. A successor also needs cold-prepare, large-TEXT, busy-lock/VFS, slow UDF/collation/virtual-table, two-database schema, zero-cap build, transfer-threshold and greater-than-128-SQL latch-churn lanes, with worker-measured service time and caller timer lateness reported separately.",
+    "Reopen caller-isolate work only for an explicitly restricted API with a genuinely bounded execution surface, a preemptible native mechanism that can yield within one SQLite operation, or a deliberately synchronous public API backed by representative device incidence evidence.",
+    "Keep the focused routing receipt as mechanism evidence, but read collections 1 and 2 as pre-sentinel prototypes and collection 3 as the only exact-final-candidate run. The blob and scan timings are post-latch worker dispatch after warmup, not measurements of the first inline abort.",
+    "Capture a same-host release baseline from the exact parent commit and pass it explicitly to comparison. Auto-selected anchors must be treated as hypotheses until both commit ancestry and code-path reachability are checked."
+  ],
+  "blockedOnMeasurement": []
+}

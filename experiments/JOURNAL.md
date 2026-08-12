@@ -1130,28 +1130,25 @@ is it against the thing being optimised, and what makes it fixed? A cost that is
 fixed only because nobody has tried to remove it is a candidate — and pricing it
 is worth doing even when the thing that prices it does not ship.*
 
-### A safety property must be enforced, not predicted
+### A progress counter is not a preemption boundary
 
-[Exp 265](265-inline-main-isolate-select.md) shipped two guards and they failed
-differently. A row cap that aborts mid-decode and falls back to a worker is
-correct whether or not the prediction in front of it was right — it cost +24.7%
-on the one execution that tripped it, once per statement, and it is the part of
-the design that survived. An *eligibility test* that admits a statement based on
-what it returned before is correct only when the prediction holds, and it did
-not hold along three independent axes: one row can hold a 5 MB blob, `count(*)`
-returns one row after unbounded work, and cost varies per execution of the same
-statement so no per-SQL history repairs it. The fix was never a better
-predictor. It was two more enforcement points — `sqlite3_column_bytes` before
-the copy, `sqlite3_progress_handler` every N VM steps — after which the
-prediction stops being load-bearing and becomes what it is good at: avoiding
-wasted aborts.
+[Exp 265](265-inline-main-isolate-select.md) rejected caller-isolate reads
+because row history could not bound their work. [Exp 269](269-enforced-inline-reads.md)
+replaced prediction with row, payload-byte and SQLite VM-opcode caps plus a
+per-turn stopwatch, then found the same safety hole one layer deeper. After two
+tiny reads armed the route, `SELECT length(randomblob(?))` returned one INTEGER
+but spent 26–28 ms inside one SQLite function opcode. It crossed no cap, and the
+stopwatch was checked only before entering the synchronous call. Main let a
+1 ms timer run while a worker did the database work; the candidate held the
+calling isolate until the whole operation finished. Busy/VFS waits, callbacks,
+cold preparation and native value scans have the same shape.
 
-*Reapplies to any admission test, routing rule, cache-eligibility check or fast
-path gated on a learned signal. Ask what happens when the signal is wrong, and
-whether the answer is "it costs some work" or "it violates the property the
-system promises". If the latter, the signal is in the wrong place — move the
-guard to where the truth is known, even if that means starting work you may have
-to abandon.*
+*Reapplies whenever a safety claim is expressed as a counter, timeout or
+stopwatch around opaque synchronous work. Ask where control can actually be
+regained. A budget checked only before the call is admission; a callback between
+VM operations is cancellation; neither is preemption inside one operation. If
+the property is wall time, run an adversarial single-operation stall before
+optimising the happy path.*
 
 ### A guard set built from the lanes you have tests the hypothesis you believe
 

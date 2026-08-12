@@ -1,19 +1,19 @@
 // ignore_for_file: avoid_print
 //
-// Focused A/B harness for where a `select()` runs ([EXP-265]).
+// Focused A/B harness for where a `select()` runs ([EXP-265], [EXP-269]).
 //
-// The exp 265 candidate this was built to gate was REJECTED, and on current
-// main every lane below runs the ordinary dispatch path in both arms. It is kept
-// as the gate for any future read-*routing* work — a different question from
-// every other harness in `benchmark/experiments/`, which measure what a read
-// costs rather than where it runs.
+// Both inline-routing candidates were REJECTED, and on current main every lane
+// below runs the ordinary worker path. This remains mechanism evidence and a
+// partial gate for future read-*routing* work — a different question from
+// harnesses that measure only what a read costs rather than where it runs.
 //
-// Read the lane set as INCOMPLETE, which is one of exp 265's findings: nine lanes
-// of small integers and short TEXT on a hot page cache met every kill condition
-// the experiment declared and could not see any of the three failure modes that
-// actually killed it. Before trusting a successor, add: a one-row read returning
-// a 5 MB blob, a `count(*)` over a large table, and a frame-shaped workload that
-// can see microtask coalescing. The first two fail against `archive/exp-265`.
+// Exp 269 adds the three lanes exp 265 named — `blob1-5mb`, `scan-count` and
+// `frame-jitter` — but its own rejection shows the set is still incomplete.
+// These lanes cover a large result cell, work spread over many VM operations,
+// and yielding across a chain of cheap reads. They do not cover work hidden
+// inside one SQLite operation, cold preparation, callbacks, or VFS/busy waits.
+// Run `select_inline_opaque_work.dart` before trusting a successor. The first
+// two lanes here fail against `archive/exp-265`, which is why they remain.
 //
 // Every read resqlite serves crosses to a reader isolate and back. That hop is
 // scheduling, not work: the request is copied to a worker, the worker steps and
@@ -43,17 +43,38 @@
 //   concurrent8               Eight distinct point reads issued together.
 //     GUARD, and the one that can kill the idea: four workers run four of them
 //     at once, while a caller that runs them itself runs them one after another.
-//   mixed6-1k / int20-10k     CONTROL. Both return far more rows than the cap
-//     allows, so both arms run byte-identical code and the lanes read the
-//     cross-worktree binary offset directly (the exp 254 trap). int20-10k is
-//     also where the one per-row comparison this change adds to the shared
-//     decode loop would show up if it cost anything.
+//   mixed6-1k / int20-10k     SHARED-PATH CONTROLS. Both return far more rows
+//     than the cap allows and finish on workers, but the exp 269 candidate also
+//     changed that worker decode loop: every row sees the cap comparison and
+//     every TEXT/BLOB cell sees byte accounting. They therefore expose shared
+//     overhead and binary drift; they are not byte-identical controls.
 //   cap-abort                 GUARD for the mispredict: a statement whose first
 //     two executions return one row and whose third returns 400, so the decode
 //     starts on the calling isolate, gives up past the cap, and re-runs on a
 //     worker. Each sample uses a fresh SQL string, because a high-water mark
 //     makes the abort once-per-statement — measured any other way the lane goes
 //     inert after its first sample.
+//   blob1-5mb                 GUARD, added by exp 269. `SELECT * FROM photos
+//     WHERE id = ?` over rows holding a 5 MB image. One row forever, so no
+//     row-count history ever stops it — this is the shape that killed exp 265,
+//     where the blob was copied onto the calling isolate unchecked at any size.
+//     Exp 269 aborted the first large attempt and then dispatched this SQL to a
+//     worker. Because the generic harness warms before timing, the samples see
+//     post-latch dispatch rather than the inline abort itself.
+//   scan-count                GUARD, added by exp 269, for work that happens
+//     before the first row. Exp 265 named `count(*)` for this and it is the
+//     wrong query: SQLite answers a bare `count(*)` with one `OP_Count` opcode,
+//     so it is genuinely cheap and correctly runs inline. A filtered count is
+//     the real shape — one small row after a full scan. Exp 269 aborted it on
+//     the VM-step cap; warmup means timed samples see post-latch dispatch.
+//   frame-jitter              GUARD, added by exp 269, and the only lane here
+//     that measures latency rather than throughput. An inline read never yields,
+//     so an awaited chain of them drains as one uninterruptible microtask block
+//     and a frame callback cannot run until it ends. The sample value is the
+//     WORST lateness a 60 Hz timer suffers while reads are issued continuously
+//     for `_frameLaneMs`, so this lane is the one that can reject the design on
+//     jank even while every throughput lane improves. It establishes whether
+//     a chain of cheap reads yields; it does not bound one opaque read.
 //
 // Usage:
 //   dart run benchmark/experiments/select_inline_dispatch.dart \
@@ -61,7 +82,9 @@
 //
 // Emits one `shape=... median_us=... samples_us=...` line per lane, so two
 // worktree runs can be paired into `benchmark/ab_drift_check.dart` input.
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:resqlite/resqlite.dart' as resqlite;
 
@@ -86,7 +109,23 @@ enum _Mode {
   /// Arm a never-before-seen statement with two one-row executions, then time
   /// one execution that returns far more rows than the cap allows.
   capAbort,
+
+  /// Issue reads continuously for [_frameLaneMs] while a 60 Hz timer runs, and
+  /// report the worst lateness that timer suffers rather than read throughput.
+  frameJitter,
 }
+
+/// How long one `frame-jitter` sample issues reads for. Three 60 Hz frames, so
+/// the lane always contains frame deadlines a read chain can miss.
+const int _frameLaneMs = 50;
+
+/// The 60 Hz frame interval the `frame-jitter` lane holds a timer to.
+const int _frameIntervalUs = 16667;
+
+/// Bytes per row in the `blob1-5mb` lane — well past both the inline byte cap
+/// (64 KB) and the blob wrap threshold (256 KB), so the two arms must differ in
+/// what they do rather than only in how fast they do it.
+const int _largeBlobBytes = 5 * 1024 * 1024;
 
 /// Enough large reads outstanding to occupy every worker in the largest pool
 /// `Database.open` will build (four).
@@ -97,11 +136,22 @@ const int _backgroundReaders = 4;
 /// that has to decide whether losing pool parallelism costs anything.
 const int _concurrentRounds = 10;
 
+/// What the lane's table holds.
+enum _Schema {
+  /// The repo's canonical mixed row, or [_Lane.columns] INTEGER columns beside
+  /// `id` when that is non-zero.
+  standard,
+
+  /// `id INTEGER PRIMARY KEY, img BLOB` with [_largeBlobBytes] per row.
+  largeBlob,
+}
+
 final class _Lane {
   const _Lane(
     this.label, {
     required this.rows,
     this.columns = 0,
+    this.schema = _Schema.standard,
     this.selectSql = 'SELECT * FROM items',
     this.selectParams = const [],
     this.expectRows,
@@ -116,6 +166,8 @@ final class _Lane {
 
   /// Generated INTEGER columns beside `id`, or 0 for the canonical mixed row.
   final int columns;
+
+  final _Schema schema;
 
   final String selectSql;
   final List<Object?> selectParams;
@@ -204,8 +256,8 @@ final _lanes = <_Lane>[
     repeats: 8,
     mode: _Mode.concurrent,
   ),
-  // CONTROL: 1,000 and 10,000 rows are far past the cap, so neither arm can
-  // reach the changed path and both run the same machine code.
+  // SHARED-PATH CONTROLS: both finish on workers, but exp 269's cap accounting
+  // also changed the worker decoder, so the arms are not byte-identical.
   _Lane('mixed6-1k', rows: 1000),
   _Lane('int20-10k', rows: 10000, columns: 20),
   // GUARD: fresh statement per sample, armed small, timed large.
@@ -216,6 +268,35 @@ final _lanes = <_Lane>[
     selectParams: [400],
     expectRows: 400,
     mode: _Mode.capAbort,
+  ),
+  // GUARD (exp 269): one row, 5 MB of it. Permanently high-water 1.
+  _Lane(
+    'blob1-5mb',
+    rows: 8,
+    schema: _Schema.largeBlob,
+    selectSql: 'SELECT * FROM items WHERE id = ?',
+    selectParams: [3],
+    expectRows: 1,
+    repeats: 4,
+  ),
+  // GUARD (exp 269): one row out, a full scan in. A bare `count(*)` is one
+  // opcode, so the predicate is what makes the work real.
+  _Lane(
+    'scan-count',
+    rows: 20000,
+    selectSql: "SELECT count(*) FROM items WHERE description LIKE '%9997%'",
+    expectRows: 1,
+    repeats: 4,
+  ),
+  // GUARD (exp 269): latency, not throughput. Sample value is the worst frame
+  // lateness in microseconds, so lower is still better.
+  _Lane(
+    'frame-jitter',
+    rows: 2000,
+    selectSql: 'SELECT * FROM items WHERE id = ?',
+    selectParams: [17],
+    expectRows: 1,
+    mode: _Mode.frameJitter,
   ),
 ];
 
@@ -270,7 +351,12 @@ Future<void> _runLane(
     final String createSql;
     final String insertSql;
     final List<Object?> Function(int row) row;
-    if (lane.columns == 0) {
+    if (lane.schema == _Schema.largeBlob) {
+      createSql = 'CREATE TABLE items(id INTEGER PRIMARY KEY, img BLOB)';
+      insertSql = 'INSERT INTO items(img) VALUES (?)';
+      final image = Uint8List(_largeBlobBytes);
+      row = (_) => [image];
+    } else if (lane.columns == 0) {
       createSql = _standardCreate;
       insertSql = _standardInsert;
       row = _standardRow;
@@ -285,7 +371,9 @@ Future<void> _runLane(
     }
     await db.execute(createSql);
 
-    const chunk = 500;
+    // 5 MB a row: batching these the way the other lanes do would build a
+    // 4 GB parameter matrix.
+    final chunk = lane.schema == _Schema.largeBlob ? 1 : 500;
     for (var start = 0; start < lane.rows; start += chunk) {
       final end = start + chunk < lane.rows ? start + chunk : lane.rows;
       await db.executeBatch(insertSql, [
@@ -337,7 +425,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
     case _Mode.plain:
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       return sw.elapsedMicroseconds;
@@ -349,7 +441,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
       ];
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       await Future.wait(background);
@@ -380,6 +476,35 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
       _check(lane, await db.select(sql, lane.selectParams), expect);
       sw.stop();
       return sw.elapsedMicroseconds;
+
+    case _Mode.frameJitter:
+      // Not a duration: the returned number is how late the frame timer was at
+      // its worst, so it is still "lower is better" but it is a latency, and
+      // the two arms do different amounts of reading inside the same window.
+      var worstLateUs = 0;
+      var ticks = 0;
+      final sw = Stopwatch()..start();
+      final frames = Timer.periodic(
+        const Duration(microseconds: _frameIntervalUs),
+        (_) {
+          ticks++;
+          final late = sw.elapsedMicroseconds - ticks * _frameIntervalUs;
+          if (late > worstLateUs) worstLateUs = late;
+        },
+      );
+      while (sw.elapsedMicroseconds < _frameLaneMs * 1000) {
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
+      }
+      frames.cancel();
+      // A deadline the read chain blocked straight through never gets a
+      // callback, so it is invisible above and has to be charged here.
+      final pending = sw.elapsedMicroseconds - (ticks + 1) * _frameIntervalUs;
+      sw.stop();
+      return pending > worstLateUs ? pending : worstLateUs;
   }
 }
 
