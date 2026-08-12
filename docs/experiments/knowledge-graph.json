@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 60,
-    "totalEntries": 141
+    "entriesWithClaims": 61,
+    "totalEntries": 142
   },
   "experiments": [
     {
@@ -2151,6 +2151,18 @@
       "outcomeClass": "accepted"
     },
     {
+      "id": "268",
+      "title": "Leave empty statement caches virtual",
+      "file": "268-stmt-cache-lazy-init.md",
+      "date": "2026-08-11",
+      "status": "accepted",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "outcomeClass": "accepted"
+    },
+    {
       "id": "269",
       "title": "Bound the read, don't predict it",
       "file": "269-enforced-inline-reads.md",
@@ -3397,6 +3409,51 @@
       ],
       "text": "A bounded SQL-keyed cache returning the wrong entry is silent, not fatal: the caller receives a well-formed result belonging to a different statement. `test/stmt_cache_pressure_test.dart` gates this by pushing 400 distinct statements through every cache and checking each statement's identity from its result — the row it selects, the columns it projects, its parameter arity, and a stream's dependency capture after churn. Four of the five tests were verified to fail against a deliberately mismatched entry (a new `sqlite3_stmt` installed under the evicted entry's old SQL text).",
       "conditions": "JIT `dart test`, 400 distinct statements against 128-entry caps · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "268.1",
+      "source": "268",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Making `stmt_cache_init` count-only reduces median max RSS by 589,824 bytes at two readers (18,923,520 -> 18,333,696, -3.12%) and 1,056,768 bytes at four readers (21,012,480 -> 19,955,712, -5.03%). RSS growth from immediately before native open falls 540,672 and 974,848 bytes. The candidate is lower in all 48 paired observations across 12 alternating-order fresh-process passes; going from two to four readers adds 231-237 KB of mean savings per reader, 84-87% of the 273,408-byte optimized-code prediction and directionally consistent under process max-RSS granularity.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · native-asset-aware AOT CLI · fresh process per lane and arm · 12 alternating-order passes · host roughly 51-62% idle · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "267.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "268.2",
+      "source": "268",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "The actual `resqlite_cached_stmt` layout is 2,136 bytes and one 128-entry cache is 273,408 bytes (`0x42c00`). Baseline arm64 AOT code calls `_bzero` with that exact size once per successfully opened reader; candidate code omits the call. Both binaries already omit the writer-side clear immediately after `calloc`. This explains why the memory saving scales with readers rather than writer plus readers and corrects exp 267's approximate 1.6 KB entry-size account.",
+      "conditions": "Disassembly of baseline and candidate native dylibs built by `dart build cli` from origin/main 96e6730 · arm64 macOS · 2026-08",
+      "state": "live"
+    },
+    {
+      "id": "268.3",
+      "source": "268",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Count-only cache initialization does not regress native open, fill, lookup or eviction. Six alternating-order AOT passes improve median-of-pass native open medians by 2.42% at two readers and 2.73% at four; the only three candidate-slower comparisons are +1.15%, +0.46% and +1.57%. Four AOT pressure passes are neutral for first-slot/hot-hit `point1` (-0.48%), exact-fill `rotate128` (-0.61%) and always-evict `churn-unique` (-0.51%), with sign reversals and all individual deltas within +/-3.04%. Twenty-three focused tests pass, including 400-statement reader/writer eviction and dependency reliability/fault fallback.",
+      "conditions": "M1 Pro · AOT wall lanes: 6 alternating-order passes, 61 samples, 16 opens/sample · AOT pressure lanes: 4 alternating-order passes, 41 samples, 256 reads/sample · serial focused tests · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "267.3"
+        }
+      ],
       "state": "live"
     },
     {
