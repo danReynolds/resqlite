@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 201 correctly rejected quote/framing reservation for `json_write_base64`, but its future note left the base64 payload loop as the next real BLOB encoder target. Exp 216 consumes that follow-up: unrolling the scalar loop from one 3-byte group per trip to four groups per trip keeps the same base64 table, same JSON quotes, same encoded length, and same tail padding while reducing loop-control work on payload-heavy cells.",
     "The load-bearing `select_bytes_blob_base64.dart` signal is strongest where the mechanism predicts. The 1k rows x 2 large blobs (4KB) lane reproduces candidate-faster across all three passes: -13.6%, -12.9%, and -11.9%. The 10k rows x 4 medium blobs (128B) lane is also same-direction faster: -1.1%, -9.3%, and -4.7%. The 10k rows x 8 small blobs (16B) lane is candidate-faster in the primary order-flipped pair (-5.9%, -6.9%), though the extra warmed baseline pass hit a slow outlier and is not load-bearing.",

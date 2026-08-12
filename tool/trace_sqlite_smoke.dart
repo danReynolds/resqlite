@@ -82,15 +82,20 @@ Future<void> _waitFor(bool Function() predicate, String label) async {
 ''');
 
     await _run('pub get', tempDir.path, ['pub', 'get']);
-    await _run('run smoke', tempDir.path, [
-      'run',
-      '-DRESQLITE_PROFILE=true',
-      '-DRESQLITE_TRACELITE=true',
-      'bin/main.dart',
-    ], environment: {
-      'TRACELITE_REGION': traceLogPath,
-      'TRACELITE_RUNTIME': runtimePath,
-    });
+    await _run(
+      'run smoke',
+      tempDir.path,
+      [
+        'run',
+        '-DRESQLITE_PROFILE=true',
+        '-DRESQLITE_TRACELITE=true',
+        'bin/main.dart',
+      ],
+      environment: {
+        'TRACELITE_REGION': traceLogPath,
+        'TRACELITE_RUNTIME': runtimePath,
+      },
+    );
 
     final traceLog = await File(traceLogPath).readAsString();
     _expectTrace(traceLog, 'attach');

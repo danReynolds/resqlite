@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
   "experimentClass": "measurement",
   "changedBeliefs": [
     "The pool-replacement-capacity estimand of the send-vs-sacrifice question is resolved AT THE PRODUCTION POOL SIZE (4 workers), and the answer overturns the concern that motivated exp 241/244: sacrifice does NOT deplete pool capacity — it is neutral-to-favorable. In an 8-request/4-worker barrier burst (fire 8 identical large sacrificing selects, 1-4 grab workers, 5-8 park, measure parked queue-wait = assignedAt-enqueuedAt via a decode-free ReaderPool.debugDispatchTimings hook, pool reset between bursts, 40x3 reps), the SEND (no-sacrifice) lane has the HIGHEST parked queue-wait — highest in all 3 reps, ~+500 us / +19% over the sacrifice lanes (send 3175 vs sacrifice-current 2652, sacrifice-eager 2684 us median). A large result's SendPort graph copy runs on the worker before it can take the next request and blocks the slot LONGER than Isolate.exit + an overlapped respawn. So at pool-4, sacrifice frees the slot sooner than not-sacrificing.",

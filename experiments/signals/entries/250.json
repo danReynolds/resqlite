@@ -3,7 +3,9 @@
     "stream-rerun-dispatch"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "Exp 233's asynchronous checkpoint storm was a trigger-policy failure, not an unavoidable property of moving PASSIVE work off the writer. Observed-reset/high-water re-arming schedules the first 500-frame crossing, advances only on a fresh 500-frame delta, preserves one coalesced rerun for growth during an active checkpoint, and re-arms after an observed WAL page-count drop. That removes the continuously-true level trigger that previously requested work on every sustained commit.",
     "The off-writer mechanism retains substantial local value once the storm is fixed. First threshold-crossing p50 improves 53.0% / 63.9% across the order flip, and foreground reads improve as well, confirming that inline PASSIVE ownership is a real latency ceiling when the crossing occurs.",

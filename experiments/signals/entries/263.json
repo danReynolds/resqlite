@@ -3,7 +3,8 @@
     "result-transfer-shape",
     "measurement-system"
   ],
-  "outcomeClass": "accepted_measurement",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "The ~60x payload-to-peak ratio recorded as claim 261.4 does not describe the result representation. Two corrections were needed to say what does. First, the raw 396 B/row marginal cannot be divided by the payload: a one-column and a six-column read of the same table make the same btree leaves resident, so the `id` lane's 140 B/row is a per-row storage-side cost independent of representation, and differencing the projections isolates the Dart side at 256 B/row for the five non-key columns. Second, that is 1.9x their 134.9 B of cell content, and BELOW a first-principles accounting of what they must occupy (~296 B: four OneByteStrings at a 24 B header plus rounded data, one boxed double, five values-list slots). The row representation has no headroom.",
     "The `Row` facade costs nothing in a retained result. It is three fields and a header, but the iterator creates those objects transiently and only the `ResultSet` is held, so a per-row facade charge does not belong in an accounting of what a result occupies.",

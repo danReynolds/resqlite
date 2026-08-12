@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_below_signal_bar",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Pre-reserving `len + 2` in `json_write_string` and directly writing quote + payload + quote for no-escape strings is below the current decision bar. The safe ASCII lanes did not reproduce a material win: 10k x 8 short ASCII moved +0.7% / -0.8%, 10k x 20 short ASCII moved -0.8% / +0.0%, and the 1k x 2 narrow guard moved -0.9% / +1.7%.",
     "Medium safe ASCII and mixed TEXT/INTEGER/REAL lanes trended slightly candidate-faster (-0.7% to -1.6%), and escaped text trended -1.1% / -1.7%, but those magnitudes are in the same band as the controls and are not enough to keep a runtime helper rewrite.",

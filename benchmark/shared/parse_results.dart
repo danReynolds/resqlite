@@ -8,12 +8,80 @@
 /// Returns a map of benchmark label → median ms value. Keys follow the
 /// pattern `section / subsection / library` with an optional `[main]`
 /// suffix for main-isolate timings.
-Map<String, double> extractResqliteMedians(String content) {
+Map<String, double> extractResqliteMedians(String content) =>
+    _extractMedians(content, resqlite: true);
+
+/// Extract *peer* median wall times (sqlite3, sqlite_async, drift) from the
+/// same tables, keyed identically to [extractResqliteMedians].
+///
+/// The peers are the measurement's control. Every release run prints them and,
+/// until this existed, every release run then dropped them: neither the sidecar
+/// artifact nor `history.json` carried a single non-resqlite lane, so nothing
+/// downstream could tell a resqlite win from the whole host getting slower.
+/// That is not hypothetical — between the 2026-04-06 baseline and the
+/// 2026-08-09 headline, `sqlite3 select()` on the identical 1000-row lane went
+/// 0.74 ms to 1.23 ms. A resqlite number read across that window is measuring
+/// two things at once, and nothing said so.
+Map<String, double> extractPeerMedians(String content) {
+  final all = _extractMedians(
+    content,
+    resqlite: false,
+    measurementTablesOnly: true,
+  );
+  return {
+    for (final e in all.entries)
+      if (_isPeerLane(e.key)) e.key: e.value,
+  };
+}
+
+/// The peer libraries resqlite is measured against.
+const peerLibraries = ['sqlite3', 'sqlite_async', 'drift'];
+
+/// The first header cell of a table that *measures* something.
+///
+/// This is the discriminator between a measurement and a restatement. Reports
+/// carry derived tables — `Comparison vs Previous Run`, `Memory Comparison vs
+/// Previous Run`, `Streaming (Column Granularity) Comparison` — whose rows also
+/// carry library names, but whose columns are deltas rather than timings. They
+/// head their first column `Benchmark`; measurement tables head theirs
+/// `Library`.
+///
+/// Matching on section titles was tried first and is not sufficient: it takes
+/// only one new report section, or one rename, to leak a delta table back in.
+/// `Memory Comparison vs Previous Run` slipped past an exact-match exclusion of
+/// `Comparison vs Previous Run` and put 430 lanes of megabytes into a map of
+/// milliseconds, read from the *previous* run's column at that. The table's own
+/// header is the property that actually distinguishes the two.
+const _measurementHeader = 'Library';
+
+bool _isPeerLane(String key) {
+  final label = key.split('/').last.trim();
+  return peerLibraries.any((p) => label.startsWith(p));
+}
+
+/// The shared table walk. [resqlite] selects which rows are kept; everything
+/// about how a row becomes a key is deliberately common to both, because the
+/// two maps are only comparable if they are keyed the same way.
+///
+/// [measurementTablesOnly] additionally requires the enclosing table to be a
+/// measurement table (see [_measurementHeader]). Only the peer walk sets it:
+/// the resqlite walk predates this and its output is relied upon downstream, so
+/// it keeps its original acceptance rule exactly.
+Map<String, double> _extractMedians(
+  String content, {
+  required bool resqlite,
+  bool measurementTablesOnly = false,
+}) {
   final results = <String, double>{};
   final lines = content.split('\n');
 
   String? currentSection;
   String? currentSubsection;
+  // First cell of the header row of the table currently being walked. A
+  // markdown table's header is the line immediately above its `|---|` rule,
+  // which is the only reliable way to read it in a single forward pass.
+  String? currentHeader;
+  String? previousLine;
 
   // Sections whose tables contain `| resqlite ... |` rows but do NOT
   // represent wall-clock timings. These are parsed by their own dedicated
@@ -27,19 +95,33 @@ Map<String, double> extractResqliteMedians(String content) {
   };
 
   for (final line in lines) {
+    if (_isTableRule(line)) {
+      currentHeader = _firstCell(previousLine);
+      previousLine = line;
+      continue;
+    }
+    previousLine = line;
     if (line.startsWith('## ')) {
       currentSection = line.substring(3).trim();
       currentSubsection = null;
+      currentHeader = null;
     } else if (line.startsWith('### ')) {
       currentSubsection = line.substring(4).trim();
-    } else if (line.startsWith('| resqlite') &&
+      currentHeader = null;
+    } else if (line.startsWith('| ') &&
+        line.startsWith('| resqlite') == resqlite &&
+        !line.startsWith('|---') &&
+        (!measurementTablesOnly || currentHeader == _measurementHeader) &&
         !nonTimingSections.contains(currentSection)) {
       final parts = line
           .split('|')
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
-      if (parts.length >= 2) {
+      // A numeric first column is a Concurrent Reads row (`| 4 | 0.88 | ... |`),
+      // not a library name. Only the peer walk can reach those here; the
+      // resqlite walk still falls through to the dedicated branch below.
+      if (parts.length >= 2 && double.tryParse(parts[0]) == null) {
         final label = parts[0];
         final wallMed = double.tryParse(parts[1]);
         // Standard timing rows have 4 numeric columns after the label
@@ -68,7 +150,8 @@ Map<String, double> extractResqliteMedians(String content) {
           }
         }
       }
-    } else if (currentSection != null &&
+    } else if (resqlite &&
+        currentSection != null &&
         currentSection.contains('Concurrent Reads') &&
         line.startsWith('| ') &&
         !line.startsWith('|---') &&
@@ -457,4 +540,18 @@ Sqlite3SingleInsertWall extractSqlite3SingleInsertWall(String content) {
   }
 
   return null;
+}
+
+/// A markdown table's `|---|---|` rule, in any of its spellings.
+bool _isTableRule(String line) {
+  if (!line.startsWith('|')) return false;
+  final body = line.replaceAll(RegExp(r'[\s|:-]'), '');
+  return body.isEmpty && line.contains('-');
+}
+
+/// The first cell of a pipe-delimited row, or null if there isn't one.
+String? _firstCell(String? line) {
+  if (line == null || !line.startsWith('|')) return null;
+  final parts = line.split('|');
+  return parts.length < 2 ? null : parts[1].trim();
 }

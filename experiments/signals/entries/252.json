@@ -2,7 +2,8 @@
   "directions": [
     "stream-rerun-dispatch"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Writer dirty-column merging has fresh representative incidence: Dune runs two executeBatch UPDATEs every 2 seconds for the first 20 seconds after connect and every 5 seconds thereafter, updating three columns across all devices and two columns across all peers. That downstream evidence was strong enough to justify an exploit even though exp 057 rejected the analogous dirty-table dedup and exp 182 bounded all dependency-tracking savings at roughly 3-6% on wide no-stream writes.",
     "A per-batch pending dependency mask removes substantial real work only at extreme width and row count. The archived candidate makes a synthetic 10,000-row x 20-SET-column UPDATE 64.5% / 60.9% faster across the order flip, proving that repeated dependency merges can dominate that ceiling.",

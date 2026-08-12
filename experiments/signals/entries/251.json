@@ -4,7 +4,9 @@
     "measurement-system"
   ],
   "experimentClass": "measurement",
-  "outcomeClass": "accepted_measurement_premise_refuted",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
+  "outcomeNote": "Measurement contribution that also refuted the premise it was built to test.",
   "changedBeliefs": [
     "Exp 245/246 showed transfer is only 6-12% of a large select and left the other ~90% labelled SQLite stepping plus Dart object-graph build. Exp 251 decomposes that residual with the real resqliteStepRow/executeQuery paths in a native-asset-aware AOT harness across five fresh processes and four representative integer, mixed, and text shapes.",
     "The direct worker-path full proxy is typically 84-94% of separately measured main-observed select() latency, but it contains no universal dominant sub-cost: the mixed row is result-construction-heavy (63%), the small integer row is step-heavy (60%), and the two other shapes are roughly even. Estimated result construction is 34-58% of observed latency, so the residual bucket is not itself an optimization candidate and a broad decode/storage rewrite cannot cite general decode dominance.",

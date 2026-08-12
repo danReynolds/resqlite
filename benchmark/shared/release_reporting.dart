@@ -170,9 +170,7 @@ ReleaseComparison compareRelease(
       status =
           '🔴 Regression (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(0)}%)';
       regressions++;
-      regressed.add(
-        '$key (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(1)}%)',
-      );
+      regressed.add('$key (${pct > 0 ? '+' : ''}${pct.toStringAsFixed(1)}%)');
     } else {
       status = stats.runs.length > 1 ? '⚪ Within noise' : '⚪ Neutral';
       neutral++;

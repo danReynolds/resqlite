@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "After exp 195/198/203/205 tightened `write_json_to_buf`'s per-cell body, exp 223 tested whether the remaining row-boundary control flow (per-iteration `if (row_index > 0)`, split `[` + `{` writes, empty-result path through the row loop) was still material. Peeling row 0 out of the loop fuses `[{` into a single 2-byte prelude, short-circuits empty results to `[]`, and drops the per-row branch from the shared body.",
     "The per-row branch predicts well and the bracket fuse is byte-count noise on typical row shapes. Two order-flipped passes of `select_bytes_repeated_calls.dart` reproduce candidate-faster only at ~1-2% on 10-100 rows (inside the ~3% effect floor); the 1000-row lane collapses from -1.5% to -0.2% (drift), and the 1 row × 8 int cols lane trends candidate-slower on both passes (+0.4%, +4.6%). The `select_bytes_wide_cols.dart` single pass shows the same magnitude class with the load-bearing 10k × 8 int lane at +5.7% - a drift signature, not a real regression.",

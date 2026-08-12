@@ -2,7 +2,8 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 109 established the inline `[resqlite_param structs][TEXT/BLOB payload]` arena, and exp 186/187 made 64 KiB-1 MiB single-row ASCII/CJK binds representative public workloads. Exp 222 tested the remaining allocator-policy question: arenas above the 64 KiB reuse cap used per-call `calloc` even though the packer overwrites every field and payload byte that native `bind_params` reads.",
     "Replacing the one-shot branch with `malloc` / `malloc.free` is behaviorally safe - the reusable arena already carries non-zero bytes between calls, `type` is always written, and C reads only the active union member - and all 53 database tests pass. Safety alone does not justify the change without a workload win.",

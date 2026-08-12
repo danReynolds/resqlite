@@ -3,7 +3,9 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_semantic_mismatch",
+  "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
+  "outcomeNote": "Rejected on a semantic mismatch: the assumed invariant did not hold.",
   "changedBeliefs": [
     "Skipping per-cell `sqlite3_column_type()` by caching first-row storage classes is not safe as a hidden `selectBytes()` default. SQLite storage class is per value, not per column: a local probe with an untyped column containing row 1 INTEGER and row 2 TEXT produced `[{\"v\":1},{\"v\":0}]` from the prototype while `select()` saw `[{\"v\":1},{\"v\":\"abc\"}]`.",
     "There is plausible fixed-shape headroom in wide rows: `select_bytes_wide_cols.dart` measured candidate-faster on 10k-row integer and mixed-column shapes in both pass orderings. The magnitude is not load-bearing because the flipped baseline drifted much slower than the first baseline, but one `sqlite3_column_type()` call per cell is not free.",

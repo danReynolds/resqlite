@@ -2,7 +2,8 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "After exp 113 removed the temporary flattened list, numeric-only batch matrices still made a payload-sizing pass and a struct-writing pass even though their arena size is exactly `24 * totalCount`. Exp 226 confirms that removing the sizing pass is a real encoder-local mechanism: marshal-only 10k x 8 improves -28.0% / -27.6% and 10k x 20 improves -25.4% / -25.8% across the order flip.",
     "The marshal saving is only about 0.11-0.23 ms and does not clear the public workload gate. Numeric executeBatch 10k x 8 moves -0.9% / -6.0% with unstable magnitude; 10k x 20 moves -3.4% / -1.4%, below the predeclared 5% gate in both orderings.",

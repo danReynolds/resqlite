@@ -3,7 +3,8 @@
     "parameter-encoding-and-binding",
     "measurement-system"
   ],
-  "outcomeClass": "rejected_below_current_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Pre-sizing the temporary executeBatch flat parameter list is below the current benchmark signal",
     "The shared inline parameter encoder should stay centralized unless a profiler proves batch flattening is material"

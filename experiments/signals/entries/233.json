@@ -3,7 +3,9 @@
     "stream-rerun-dispatch"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "Inline checkpoint ownership is a real first-crossing ceiling: moving the existing 500-frame PASSIVE checkpoint to a dedicated keyed connection cuts the known 529-frame batch p50 by 46-56% across an order-flipped pair, with immediate NOOP state proving the writer replies before checkpoint backfill.",
     "A level-triggered WAL hook is not safely converted to asynchronous work by adding coalescing alone. While `pages_in_wal >= 500` remains true, subsequent commits repeatedly move the four-state worker through requested/running/rerun, so sustained PASSIVE work competes with the writer instead of remaining one bounded maintenance event.",

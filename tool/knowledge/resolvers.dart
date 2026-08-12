@@ -182,9 +182,12 @@ class ClaimResolver implements PinResolver {
 /// is heuristic (it only sees textual change, not semantic change) and is
 /// reported as drift for a human to judge.
 class CodeResolver implements PinResolver {
-  CodeResolver(this.root);
+  CodeResolver(this.root, this.searchRoots);
 
   final Directory root;
+
+  /// Trees to search for a declaration, from `knowledge.yaml`'s `codeRoots`.
+  final List<String> searchRoots;
 
   @override
   String get namespace => 'code';
@@ -289,7 +292,7 @@ class CodeResolver implements PinResolver {
   }
 
   Iterable<File> _dartFiles() sync* {
-    for (final dir in ['lib', 'tool']) {
+    for (final dir in searchRoots) {
       final d = Directory('${root.path}/$dir');
       if (!d.existsSync()) continue;
       for (final f in d.listSync(recursive: true).whereType<File>()) {

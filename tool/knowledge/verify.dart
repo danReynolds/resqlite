@@ -16,15 +16,9 @@ library;
 
 import 'dart:io';
 
+import 'config.dart';
 import 'pin.dart';
 import 'resolvers.dart';
-
-/// Project wiring. Everything above this line is portable; everything in here
-/// is what a different repo would change.
-const _docGlobs = ['doc/arch/chapters', 'doc/arch'];
-const _claimEntries = 'experiments/signals/entries';
-const _history = 'docs/experiments/history.json';
-const _testResults = 'build/passing-tests.txt';
 
 Future<void> main(List<String> args) async {
   final fix = args.contains('--fix');
@@ -35,20 +29,31 @@ Future<void> main(List<String> args) async {
   // and a green build would advertise coverage that is not there.
   final strict = args.contains('--strict');
   final root = Directory.current;
+  final KnowledgeConfig config;
+  try {
+    config = KnowledgeConfig.load(root);
+  } on StateError catch (e) {
+    print('::error::${e.message}');
+    exitCode = 1;
+    return;
+  }
 
   final resolvers = <String, PinResolver>{
     for (final r in [
-      ClaimResolver(Directory('${root.path}/$_claimEntries')),
-      ClaimResolver(Directory('${root.path}/$_claimEntries'), namespace: 'was'),
-      CodeResolver(root),
-      TestResolver(root, File('${root.path}/$_testResults')),
-      BenchResolver(File('${root.path}/$_history')),
+      ClaimResolver(Directory('${root.path}/${config.claimEntries}')),
+      ClaimResolver(
+        Directory('${root.path}/${config.claimEntries}'),
+        namespace: 'was',
+      ),
+      CodeResolver(root, config.codeRoots),
+      TestResolver(root, File('${root.path}/${config.testResults}')),
+      BenchResolver(File('${root.path}/${config.history}')),
     ])
       r.namespace: r,
   };
 
   final docs = <File>[];
-  for (final g in _docGlobs) {
+  for (final g in config.docDirs) {
     final d = Directory('${root.path}/$g');
     if (!d.existsSync()) continue;
     for (final f in d.listSync().whereType<File>()) {
@@ -61,6 +66,12 @@ Future<void> main(List<String> args) async {
   for (final doc in docs) {
     final rel = doc.path.replaceFirst('${root.path}/', '');
     final pins = parsePins(rel, doc.readAsStringSync());
+    // Register the document before walking its pins, so a chapter with *no*
+    // pins still reaches the groundedness floor. Populating this map only from
+    // inside the loop below meant a chapter citing nothing at all never
+    // appeared here and was never checked — the one case the floor exists for,
+    // passing silently while a chapter citing two claims failed.
+    byDoc[rel] ??= [];
     for (final pin in pins) {
       final resolver = resolvers[pin.namespace];
       final result = resolver == null
@@ -107,6 +118,7 @@ Future<void> main(List<String> args) async {
   }
 
   if (report) _printGroundedness(byDoc, resolvers);
+  failures += _checkGroundednessFloor(byDoc, resolvers, config, strict);
 
   if (failures > 0) {
     print('$failures pin(s) need attention.');
@@ -114,6 +126,51 @@ Future<void> main(List<String> args) async {
     return;
   }
   print('All ${results.length} knowledge pins verify.');
+}
+
+/// Fails a chapter that rests entirely on the weakest thing the system can say.
+///
+/// A `claim:` pin proves only that no experiment has yet contradicted the
+/// belief — an argument from silence, and by a wide margin the cheapest pin to
+/// write. Nothing pushed back on that, so the corpus drifted the way cheapness
+/// points: at the time this check was added, 54 of 60 pins were `claim:`, and
+/// four of seven chapters cited nothing else. Chapters were "fully verified"
+/// while resting entirely on our own unchallenged opinion.
+///
+/// The floor is deliberately low. It is not a coverage target — prose that
+/// explains *why* should stay unpinned — it just denies a chapter the ability
+/// to assert load-bearing facts with nothing but self-reference behind them.
+int _checkGroundednessFloor(
+  Map<String, List<PinResult>> byDoc,
+  Map<String, PinResolver> resolvers,
+  KnowledgeConfig config,
+  bool strict,
+) {
+  final floor = config.minStrongPinsPerChapter;
+  if (floor <= 0) return 0;
+  // "Strong" is defined by the resolvers' own strength ordering rather than a
+  // hardcoded namespace list, so adding a namespace cannot silently bypass it.
+  final claimStrength = resolvers['claim']?.strength ?? 40;
+  var failures = 0;
+  for (final entry in byDoc.entries) {
+    final name = entry.key.split('/').last;
+    if (config.groundednessExempt.containsKey(name)) continue;
+    final strong = entry.value
+        .where(
+          (r) => (resolvers[r.pin.namespace]?.strength ?? 0) > claimStrength,
+        )
+        .length;
+    if (strong >= floor) continue;
+    print(
+      '::${strict ? 'error' : 'warning'} file=${entry.key},line=1::'
+      'only $strong of ${entry.value.length} pins in $name check anything '
+      'beyond our own claims (floor is $floor). Upgrade its load-bearing '
+      'assertions to test:/bench:/code:, or record an exemption with its '
+      'reason in ${KnowledgeConfig.defaultPath}.',
+    );
+    if (strict) failures++;
+  }
+  return failures;
 }
 
 /// Groundedness: how much of each chapter's argument rests on something

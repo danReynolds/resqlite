@@ -3,7 +3,9 @@
     "transaction-control-paths"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_pattern_not_encouraged",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "The win was real but only for a usage pattern the library does not encourage.",
   "changedBeliefs": [
     "The per-execute round-trip floor inside `db.transaction()` is measurably not fundamental for the `Future.wait([tx.execute(...) x N])` shape: buffering N calls in one microtask and flushing as a single `MultiExecuteRequest` against the still-open transaction improved the focused `tx_body_write_coalescing.dart` `tx-burst-future-wait` lane -26.0% / -31.2% across two order-flipped passes with `ab_drift_check.dart` verdict REPRODUCED. This is the reproducible measurement, not the acceptance verdict — see below.",
     "The rejection is about the *pattern*, not the numbers. `Future.wait([tx.execute × N])` inside a transaction has no strong idiomatic case in the resqlite public API: same-SQL bulk atomic writes belong on `executeBatch` (one `BatchRequest`, whole matrix runs in C), different-SQL non-atomic bursts are covered by exp 180's standalone coalescing (`db.execute` outside a tx), and different-SQL atomic bursts are rare enough that the maintenance cost of the runtime change is not warranted.",

@@ -4,6 +4,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 120 fixed the per-flush over-dispatch signal; exp 122 removes the remaining async handoff by constructing `StreamEngine` with a concrete `ReaderPool`, so `_flushQueue` stays synchronous and admitted reads reach pool dispatch without awaiting a pool future",
     "The post-rebase profile pass on top of exp 120 and exp 121 preserves zero `dispatcherParkedTotal`, zero `dispatcherWakeRetryTotal`, and zero max parked depth on A11c overlap and keyed-PK workloads, while tests now verify stream registry cleanup through `Database.diagnostics().streamLength` instead of a private stream-engine getter"

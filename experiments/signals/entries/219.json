@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Exp 202 correctly rejected quote/payload reservation for safe TEXT strings, but its future note left escaped control-character formatting as a narrower TEXT encoder target. Exp 219 consumes that follow-up for unnamed control bytes: `json_write_string` now emits `\\u00XX` directly from a hex table instead of formatting through `snprintf(\"\\\\u%04x\")`.",
     "The target control-character TEXT lane in `select_bytes_text_string_reserve.dart` reproduced the candidate win across the order flip: 35927 -> 6371 us/query (-82.3%) and 35824 -> 6370 us/query (-82.2%). The result is mechanism-specific: bytes such as 0x01, 0x02, and 0x03 no longer pay a stdio formatter per escape.",

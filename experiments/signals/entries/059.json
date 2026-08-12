@@ -1,6 +1,9 @@
 {
-  "directions": ["result-transfer-shape"],
-  "outcomeClass": "rejected_below_signal",
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "claims": [
     {
       "id": "059.1",

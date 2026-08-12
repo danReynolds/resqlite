@@ -3,6 +3,7 @@
     "sqlite-version-and-build-config"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Once SQLite ships a `.2` point release and sqlite3mc cuts a tracking release, exp 090's vendoring-bump audit moves from `defer` to `do` without any further policy debate — the 3.53.x line is the canonical case",
     "The 3.53.0 default-FP-rounding hazard does not reach resqlite output because we never use `sqlite3_column_text` for REAL values; the proposed `SQLITE_DBCONFIG_FP_DIGITS=15` shim is unnecessary",

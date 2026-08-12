@@ -3,7 +3,8 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 231 rejected per-value NEON i64 formatting for lack of amortisation and named a reopen: batch many integer cells into one encode call (a columnar/bulk transfer that hands the kernel an array of i64s). Exp 240 built that batched form as three test-only native array encoders and measured it directly in isolation.",
     "Isolated conversion (i64_batch_encode.dart, no JSON tokens/no SQLite): a 2-way software-pipelined SCALAR encoder (`pipe2`) overlaps two values' divide chains and reproduces -6 to -13% on mid/big magnitudes across passes, flat on short/mixed. The NEON vector kernel run over the array still loses +45 to +60% on realistic short (<9 digit) values because the fixed vector setup can't amortise below ~9 digits — exp 231's per-value finding reproduced WITH an array in hand, so the SIMD reopen door is closed harder, not opened.",

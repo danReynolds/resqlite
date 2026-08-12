@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "Growing `decodeQuery`'s `List<Object?>` is not amortised-free, and it is the single largest Dart-side cost of a large read. A standalone AOT reproduction of the decode loop over a fixed cell buffer measures 2318 us for the doubling path against 865 us pre-sized on 10k x 20 INTEGER, with loads + switch + stores together under 500 us. That lands within 8% of exp 251's 2524 us of `Dart result construction` on the same shape, so the bucket exp 251 refused to design against is mostly buffer growth rather than cell decoding. Growth costs what it costs because a `List<Object?>` grow copies every live element with a store barrier into a freshly faulted array; a 200k-slot result copies ~322k slots through ~5 MB of transient garbage.",
     "Exp 059 rejected this mechanism for the wrong reason and with a design defect. Its stated grounds were the April release suite's noise floor and medians taken across iterations; its mechanism claim (`list growth is already cheap`, `only ~3-4 growths`) counts growths rather than slots copied and is false; and it sized the *initial* allocation from the hint, which is precisely the change exp 067 measured as a 40-44% regression on small-query workloads the same day. A win on large reads and a regression on small ones nets to the noise it reported.",

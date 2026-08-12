@@ -1,14 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'experiment_outcomes.dart';
 import 'generate_signals.dart' as generate_signals;
 
 const _experimentsDir = 'experiments';
 const _readmePath = '$_experimentsDir/README.md';
 const _signalsPath = '$_experimentsDir/signals.json';
-final _outcomeClassPattern = RegExp(
-  r'^(accepted(_.+)?|rejected(_.+)?|in_review(_.+)?|watch|benchmark_gap|deferred)$',
-);
 
 void main() {
   final errors = <_ValidationError>[];
@@ -289,7 +287,14 @@ void _checkSignals(
       }
     }
     final outcomeClass = _requireString(note, 'outcomeClass', path, errors);
-    _checkOutcomeConsistency(experiment, outcomeClass, path, errors);
+    final outcomeReason = note['outcomeReason']?.toString();
+    _checkOutcomeConsistency(
+      experiment,
+      outcomeClass,
+      outcomeReason,
+      path,
+      errors,
+    );
     _stringList(note, 'changedBeliefs', path, errors);
     _stringList(note, 'nextSignals', path, errors);
     _collectClaims(note, expId, path, allClaims, errors);
@@ -428,40 +433,26 @@ int? _intField(
 void _checkOutcomeConsistency(
   _ExperimentEntry experiment,
   String? outcomeClass,
+  String? outcomeReason,
   String path,
   List<_ValidationError> errors,
 ) {
   if (outcomeClass == null) return;
   final normalized = outcomeClass.toLowerCase();
-  if (!_outcomeClassPattern.hasMatch(normalized)) {
-    _signalError(
-      errors,
-      '$path.outcomeClass "$outcomeClass" must match '
-      'accepted(_...), rejected(_...), in_review(_...), watch, '
-      'benchmark_gap, or deferred.',
-    );
+  final invalid = validateOutcome(
+    normalized,
+    outcomeReason,
+    minting: !grandfatheredUnspecified.contains(experiment.id),
+  );
+  if (invalid != null) {
+    _signalError(errors, '$path.$invalid');
+    return;
   }
-  if (experiment.status == 'accepted' && !normalized.startsWith('accepted')) {
+  if (!outcomeMatchesStatus(normalized, experiment.status)) {
     _signalError(
       errors,
-      '$path.outcomeClass "$outcomeClass" must start with accepted for an '
-      'accepted README entry.',
-    );
-  }
-  if (experiment.status == 'rejected' &&
-      (normalized.startsWith('accepted') ||
-          normalized.startsWith('in_review'))) {
-    _signalError(
-      errors,
-      '$path.outcomeClass "$outcomeClass" contradicts rejected README status.',
-    );
-  }
-  if (experiment.status == 'in_review' &&
-      (normalized.startsWith('accepted') ||
-          normalized.startsWith('rejected'))) {
-    _signalError(
-      errors,
-      '$path.outcomeClass "$outcomeClass" contradicts in-review README status.',
+      '$path.outcomeClass "$outcomeClass" contradicts the '
+      '"${experiment.status}" README status in index/${experiment.id}.json.',
     );
   }
 }

@@ -2,7 +2,8 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "The `parameter-encoding-and-binding` open question — does exp 234's `TransferableTypedData` blob-transfer win extend to the batch (`BatchRequest`/`executeBatch`) path carrying per-set blobs — is answered NO. On a blob-heavy `executeBatch` (30 rows/batch, one blob param each), wrapping each qualifying blob is a reproduced REGRESSION at the sizes where single-row INSERT won: 256 KB is candidate-slower on 8/8 order-flipped legs across four runs (+7.6% to +18.1%, median ~+9.5%), 512 KB leans slower (7/8 legs), and 1 MB is uniformly slightly slower (WAL-dominated). No payload size shows a win. Sub-threshold 64/128 KB same-code-path controls swing +/-100%+ in both directions, which calibrates the noise floor — the wrapped-lane regression reproduces same-direction where the controls' noise does not.",
     "The exp 234 blob-transfer win is NOT 'large blobs on the GC heap are expensive' in the abstract; it is specific to MANY INDEPENDENT WRITE ROUND-TRIPS. The mechanism: across N single-row INSERTs, each `SendPort.send` parks a fresh blob on the young-generation heap, and a scavenge triggered while the writer is mid-`sqlite3_step` on the *previous* blob safepoints the whole isolate group including the writer — a stall that compounds over N round-trips and that moving blobs into GC-invisible malloc'd memory removes. `executeBatch` carries all N parameter sets across ONE `SendPort.send` and runs them in ONE writer round-trip inside one transaction, so there is no interleaving of scavenge-versus-writer-step to reclaim. The very cost exp 234 optimized is absent in the batch path.",

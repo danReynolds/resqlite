@@ -3,6 +3,7 @@
     "sqlite-version-and-build-config"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "claims": [
     {
       "id": "016.1",

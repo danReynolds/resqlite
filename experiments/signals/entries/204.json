@@ -2,7 +2,9 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_preserved_potential",
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "outcomeNote": "Mechanism proved out; the direction is deliberately preserved for a future run.",
   "changedBeliefs": [
     "The exact UTF-8 length prepass in single-row `allocateParams` is measurable on non-ASCII strings: `single_row_param_packing.dart` improved the unicode-1 shape from 296.5 ns/op to 236.2 ns/op when the prototype skipped `_utf8Length`.",
     "Large CJK single-row binds have remaining headroom beyond exp 187's direct writer: the archived prototype improved 64 KB through 1 MB CJK payloads in both focused orderings, roughly -6% to -12%.",

@@ -2,7 +2,8 @@
   "directions": [
     "measurement-system"
   ],
-  "outcomeClass": "rejected_after_noise_check",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Single-run tail wins need confirmation against control metrics before acceptance"
   ],

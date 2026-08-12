@@ -2,7 +2,8 @@
   "directions": [
     "result-transfer-shape"
   ],
-  "outcomeClass": "rejected_below_signal_bar",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Reusing exp 195's cached `json_name_tokens_col_count` to skip one `sqlite3_column_count(stmt)` per hot repeated `selectBytes()` execution is below the current signal bar. The first two `select_bytes_repeated_calls.dart` pairs were candidate-faster, but the warmed pair flipped the load-bearing 1-row lanes to +8.8%, +9.6%, and +10.9% candidate-slower.",
     "After cached JSON name tokens, the remaining query-level column-count call is too small for the repeated-call harness to isolate reliably. Keeping an extra branch in `write_json_to_buf` is not justified without a new runtime or benchmark fact."
@@ -13,4 +14,3 @@
     "Do not generalize this rejection to `sqlite3_column_bytes`: TEXT/BLOB length lookup is per variable cell and needs a separate TEXT/BLOB-focused workload before accepting or rejecting it."
   ]
 }
-

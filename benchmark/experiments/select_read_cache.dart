@@ -329,7 +329,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
     case _Mode.plain:
       final sw = Stopwatch()..start();
       for (var n = 0; n < lane.repeats; n++) {
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       return sw.elapsedMicroseconds;
@@ -352,7 +356,11 @@ Future<int> _sample(resqlite.Database db, _Lane lane) async {
         await db.execute('UPDATE items SET value = value + 1 WHERE id = ?', [
           17,
         ]);
-        _check(lane, await db.select(lane.selectSql, lane.selectParams), expect);
+        _check(
+          lane,
+          await db.select(lane.selectSql, lane.selectParams),
+          expect,
+        );
       }
       sw.stop();
       return sw.elapsedMicroseconds;

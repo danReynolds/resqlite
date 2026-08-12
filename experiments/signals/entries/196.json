@@ -1,6 +1,9 @@
 {
-  "directions": ["result-transfer-shape"],
-  "outcomeClass": "rejected_below_signal",
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "The selectBytes encoder's structural framing — the per-row `{` / `}` and inter-row `,` writes in `write_json_to_buf` — is below the noise floor. Batching the inter-row `}` + `,` + `{` into a single `buf_write(\"},{\", 3)` (with the final `}` emitted once after the loop, output byte-identical) moved `select_bytes_wide_cols.dart` by −0.3% to −3.9% on the 10k-row shapes, but the deltas did not reproduce across the order flip (the −3.9% on 10k×20 int collapsed to −0.4%; the mixed shape flipped sign to +1.8%) and the control moved as much as the targets — all inside the ~2.5% baseline-to-baseline noise.",
     "After exp 190/192/194/195 tightened the per-cell token and value work, encoder wall is dominated by the per-cell formatters (`fast_i64_to_str`, `fast_double_to_json_num`) and `json_write_string`'s SWAR escape scan, which run once per cell — not by the once-per-row `buf_write` framing calls."

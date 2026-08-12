@@ -3,6 +3,7 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "experimentClass": "measurement",
   "changedBeliefs": [
     "The INTRINSIC send-vs-Isolate.exit transfer cost is now measured cleanly (prepared-result barrier: worker builds+holds the real ResultSet, main times Go-sent -> received as first op, one process per observation, ABBA, empty-envelope control). Three facts: (1) Isolate.exit has a ~47 us FIXED-overhead premium over send (empty envelope 147 vs 100 us) from its sendability walk + isolate teardown/reassignment; (2) strings/immutable leaves are SHARED on send, not copied — a 400 KB string adds ~0 us to send (payload -4), a 1 MB string +18 us; (3) send's copy cost is driven by the MUTABLE flat-list SLOT COUNT (pointer-array backing), not payload bytes — send payload rises 27 -> 163 -> 636 us across 20k -> 48k -> 200k int slots but is ~zero for a single huge string.",

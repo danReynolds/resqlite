@@ -3,6 +3,8 @@
     "result-transfer-shape"
   ],
   "outcomeClass": "rejected",
+  "outcomeReason": "unspecified",
+  "outcomeNote": "Migrated: the entry does not state why the re-evaluation fell the way it did.",
   "changedBeliefs": [
     "The `Isolate.exit` sacrifice policy (kill the reader to zero-copy a >=256 KB result heap instead of paying the SendPort graph copy) was re-evaluated against the Dart 2.15 isolate-group send model, where SendPort.send SHARES immutable leaves (strings/ints/canonical) and only COPIES the mutable structural graph. Confirmed transport model (`native_vs_heap_send.dart`): send cost tracks the mutable/copyable payload — a heap Uint8List send blows up with size (203-272 us at 512-731 KB) while a native-backed view sends cheaply (23-44 us). So send is cheap exactly when the result is immutable-heavy (text) or externally backed, and expensive only for large mutable structure.",
     "Sacrifice-vs-send crossover (A/B via a reverted RESQLITE_SACRIFICE_THRESHOLD define): on a numeric lane (structure-only, slots = rows x cols) send is faster-or-level up to ~20k slots and sacrifice edges ahead only above ~32k slots by a noisy ~3-4% (2000/8000/20000/32000/48000 slots: sacrifice 76.8/238.6/976.5/1194.8/1856.3 vs send 72.3/226.3/931.9/1233.8/1932.6). On a text lane (200 B strings) send wins everywhere and large (1000 rows: 149.4 vs 438.3 us) because strings are shared on send while sacrifice pays a respawn for a copy it never needed. The crossover metric is STRUCTURAL SLOT COUNT, not bytes.",

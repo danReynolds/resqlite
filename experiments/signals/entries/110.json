@@ -4,6 +4,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The missing long-text unchanged-fanout benchmark was the blocker for evaluating byte-stream hash-loop work",
     "The archived 8-byte FNV byte fold becomes a clear win once the workload carries 4KB TEXT cells"

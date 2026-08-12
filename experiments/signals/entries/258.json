@@ -3,7 +3,8 @@
     "result-transfer-shape"
   ],
   "experimentClass": "moonshot",
-  "outcomeClass": "rejected_below_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Exp 055 assessed per-column typed arrays (Int64List/Float64List) but never implemented them, estimating the throughput win as too small; exp 081 measured only a row-major binary slab. Exp 258 gave the first real AOT measurement of the columnar typed-array mechanism, isolating build (worker), hop (transfer), and consume (main) across a real worker->main SendPort hop with two order-flipped passes.",
     "Columnar builds 60-90% faster worker-side (no boxing; biggest on REAL, ~10x on 10k x 20 REAL) and its transfer is 73-91% cheaper on a SendPort A/B. But the build win is worker wall (off the main isolate), and the transfer win does not reach production: results large enough for the transfer to matter (>32768 structural slots) already zero-copy via the Isolate.exit sacrifice path, and sub-threshold SendPort results save only tens of microseconds, below the exp 105 round-trip floor.",

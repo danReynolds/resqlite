@@ -3,7 +3,8 @@
     "long-text-stream-hashing",
     "measurement-system"
   ],
-  "outcomeClass": "accepted_measurement",
+  "outcomeClass": "accepted",
+  "outcomeReason": "measurement",
   "changedBeliefs": [
     "The streaming suite now covers mixed long payloads beyond exp 110's 4KB TEXT shape: 8 unchanged streams over 64 rows with 32KB TEXT plus 32KB BLOB cells",
     "The current 8-byte FNV fold scales acceptably on the broader row in a focused run: 3.446 ms median for mixed long payloads beside 2.356 ms for the existing 4KB TEXT row",

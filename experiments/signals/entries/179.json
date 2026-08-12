@@ -2,7 +2,8 @@
   "directions": [
     "parameter-encoding-and-binding"
   ],
-  "outcomeClass": "rejected_no_signal",
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
   "changedBeliefs": [
     "Extending exp 125/149's direct-code-unit batch write to the single-row allocateParams path (the exp 142 / PR #130 idea) makes the encoder itself materially faster, not slower: a DB-free micro (single_row_param_packing.dart, 200k cycles x 15 samples) measures -45% / -58% / -37% on 1-short / 5-mixed / 1-KB ASCII shapes with a flat blob+int control. Exp 142's +6.86% / +16.4% 'slower' was workload/Tracelite-overhead confound, not the encoder",
     "The encoder win is immaterial on every representative workload: release-suite A/B (5x5) is neutral (Parameterized Queries +0.04%, Single Inserts -1.7%, Concurrent +0.8%; 1 timing win / 0 regressions / 166 neutral, the flags on untouched result-read paths). The single-row bind is too small a fraction of any lane to register",

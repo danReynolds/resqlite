@@ -3,6 +3,7 @@
     "measurement-system"
   ],
   "outcomeClass": "accepted",
+  "outcomeReason": "performance",
   "changedBeliefs": [
     "The experiment->chart linker in generate_history.dart guarded the wrong-file case (_assertAcceptedExperimentsLinkToCandidates, the exp-109 mixup) but silently tolerated the more common missing-file case: a chartable experiment with no linked benchmark run AND no **Benchmark Run:** opt-out declaration drops off the chart with no CI error, which is exactly what a forgotten result file or a Date/timestamp mismatch produces",
     "A structural tally on main confirmed the gap is live: of 23 accepted/in-review experiments whose linker produced a null run, only ~5 declared the **Benchmark Run:** opt-out header; the rest (several recent — 116, 118, 119, 125, 126, 136, 161, 172) are silently unmapped, indistinguishable from a forgotten file",

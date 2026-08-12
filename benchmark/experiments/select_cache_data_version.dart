@@ -111,7 +111,9 @@ Future<void> main(List<String> args) async {
     final churn = () async {
       var n = 0;
       while (!stop) {
-        await writer.execute('UPDATE items SET v = ? WHERE id = 1', ['v${n++}']);
+        await writer.execute('UPDATE items SET v = ? WHERE id = 1', [
+          'v${n++}',
+        ]);
       }
       return n;
     }();
