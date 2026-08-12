@@ -1,0 +1,53 @@
+{
+  "directions": ["result-transfer-shape", "stream-rerun-dispatch"],
+  "outcomeClass": "rejected",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "We believed resqlite's write-invalidation signal was a general-purpose fact about the database, used so far only by streams. It is not: it is a fact about writes made through one `Database` object. Streams can live with that because a missed invalidation only delays a re-emit, and `stream()` documents the limitation. `select()` cannot, because it re-reads the file today and therefore observes every committed write, whoever made it. Anyone reading the stream-engine chapters or the invalidation sections of the architecture doc should read 'invalidation' as scoped to this Database's own writes, not to the file.",
+    "The round-trip headroom exp 265 priced and exp 269 confirmed is collectable without running SQLite on the caller. A cache hit measured 0.48 us against a 4.65 us dispatched point read, reproduced at -90% to -96% across four lanes and two order-flipped collections, with every adversarial guard neutral and peak RSS flat or lower. The blocker is not performance and not the bounding problem exp 269 hit; it is that the invalidation signal has the wrong scope.",
+    "The cost of a cache is paid on the write path, and that is where an invalidation design should be judged first. A table-to-queries index with column-level elision — the shape the stream engine uses — measured +16-19% on a read/write-alternating lane, because a write pays it whether or not anything is cached. Replacing it with per-table version counters checked at lookup moved the whole cost onto the reader that benefits and took the same lane to neutral.",
+    "The release suite cannot evaluate a read cache. Its read scenarios execute one statement thousands of times with nothing writing, so `Select -> Maps` at 100 rows reports 0.040 ms -> 0.005 ms and the number is the benchmark measuring itself. This is exp 267's observation (every benchmark in the repo uses under ten distinct SQL strings) on a new axis, and it generalises: any candidate keyed on statement identity needs a workload that mixes reads with writes to what they read.",
+    "A first incidence number now exists for read repetition. Across the repo's two application-shaped workloads, Chat Sim (A5) would serve 17.7% of 9,006 `select()` calls from cache and Feed Paging (A6) 84.3% of 140 — a near-5x spread between two workloads in the same repository, so the value of remembering a read is a property of how much a workload writes to what it reads, not a constant. Neither is a production trace."
+  ],
+  "claims": [
+    {
+      "id": "270.1",
+      "text": "A `select()` result served from a main-isolate cache costs 0.48 us against 4.65 us for the same read dispatched to a reader worker. Focused AOT A/B over two order-flipped collections: repeated one-row read -90.0%/-90.1%, the same at 21 columns -92.1%/-91.9%, eight cycled parameter sets -90.2%/-89.6%, a repeated 20-row page -95.1%/-95.7%, all REPRODUCED. Peak RSS is flat or lower (31.0 -> 25.9 MB on the page lane).",
+      "conditions": "M1 Pro (10 cores) · macOS 26.2 · Dart 3.12.2 · AOT CLI bundle · both arms built from one worktree and one native library, differing only in the kReadCacheEnabled constant · 8 alternating pairs per lane per collection, 51 samples per pass · 2026-08-12",
+      "edges": [{ "type": "validates", "target": "269.1" }]
+    },
+    {
+      "id": "270.2",
+      "text": "resqlite's write invalidation is scoped to writes made through one `Database`, so a result cache behind `select()` returns superseded rows whenever another connection to the same file commits. Demonstrated directly: after a second `Database` on the same path commits, the cached arm reports the pre-write value while a fresh connection reports the post-write one. This is not fixable inside the cache; the preupdate hook only fires on the connection that wrote.",
+      "conditions": "`benchmark/experiments/select_cache_foreign_writer.dart`, both arms, same host · applies to any design that remembers a read result rather than re-executing it · 2026-08-12",
+      "edges": []
+    },
+    {
+      "id": "270.3",
+      "text": "`PRAGMA data_version` — SQLite's cross-connection change counter — costs 2 us at p50 and 5 us at max when idle, and 1 us at p50 with a 10 us max while a foreign connection commits continuously, stepping a cached statement on a main-isolate-owned reader connection under AOT. A cache hit validated by it would therefore cost about 2 us against a 4.65 us dispatch: roughly 2x rather than 10x. The median is affordable; the tail is unmeasured against cross-process contention, checkpoints and busy waits, and reading it requires the main-isolate SQLite connection exp 269 rejected.",
+      "conditions": "M1 Pro · AOT · 3,000 samples per phase · contention supplied by a same-process second `Database`, not a foreign process · 1 us stopwatch resolution, so p50 values are at the floor · 2026-08-12",
+      "edges": [{ "type": "dependsOn", "target": "269.3" }]
+    },
+    {
+      "id": "270.4",
+      "text": "An invalidation scheme's cost belongs on the reader, not the writer. A table-to-queries index with column-level intersection measured +16-19% on a lane alternating one write and one read, because the write walks it whether or not the cache ever helps. Per-table version counters stamped at dispatch and checked at lookup took the same lane to +0.7%/+1.8% (neutral), giving up column-level elision to do it.",
+      "conditions": "Same focused harness and host as claim 270.1 · `read-write-alternate` lane, 20 write/read pairs per sample · the +16-19% figure is from a single collection of the superseded implementation, not an order-flipped pair · 2026-08-12",
+      "edges": []
+    },
+    {
+      "id": "270.5",
+      "text": "Read repetition is workload-shaped, not constant. Chat Sim (A5) would serve 17.7% of its 9,006 `select()` calls from a (sql, parameters) cache and Feed Paging (A6) 84.3% of its 140. At 4.2 us saved per hit that is ~0.74 us and ~3.5 us per `select()` respectively. The release suite cannot supply this number at all: its read scenarios repeat one statement with nothing writing, so they measure the cache rather than the database.",
+      "conditions": "`benchmark/experiments/select_read_cache_incidence.dart` over the repo's two workload simulations · synthetic workloads, not production traces · hit-rate counts only, no timing · 2026-08-12",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "Do not re-propose a `select()` cache invalidated only by resqlite's own writes. The blocker is the scope of the invalidation signal (claim 270.2), not bookkeeping, precision, or performance.",
+    "Run `benchmark/experiments/select_cache_foreign_writer.dart` before any future design that remembers a read result. It fails on the cached arm and passes on main, and no amount of care inside the cache changes that.",
+    "The narrower successor worth trying: serve `select()` from an existing `StreamEntry.lastResult` when a stream for the same (sql, parameters) is already active. It carries no new staleness contract, because the caller has already opted into stream semantics for that query, and the machinery already exists.",
+    "Judge any future invalidation design on the write path first (claim 270.4). A table-to-queries index costs the writer 16-19% on a read/write-alternating lane; version stamps checked at lookup cost it nothing measurable.",
+    "The empty dirty set is the dangerous signal, not the unknown one. DDL and virtual-table writes are indistinguishable from a no-op write at the Dart boundary, so exp 068's deferred `PRAGMA schema_version` watchdog is a prerequisite for anything that trusts an empty set to mean 'nothing changed'.",
+    "Any candidate keyed on statement identity needs a workload that mixes reads with writes to the tables they read. The release suite has none, and its read lanes will report a large fake win for such a candidate."
+  ],
+  "blockedOnMeasurement": []
+}
