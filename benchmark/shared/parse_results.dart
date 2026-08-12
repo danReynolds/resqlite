@@ -8,7 +8,49 @@
 /// Returns a map of benchmark label → median ms value. Keys follow the
 /// pattern `section / subsection / library` with an optional `[main]`
 /// suffix for main-isolate timings.
-Map<String, double> extractResqliteMedians(String content) {
+Map<String, double> extractResqliteMedians(String content) =>
+    _extractMedians(content, resqlite: true);
+
+/// Extract *peer* median wall times (sqlite3, sqlite_async, drift) from the
+/// same tables, keyed identically to [extractResqliteMedians].
+///
+/// The peers are the measurement's control. Every release run prints them and,
+/// until this existed, every release run then dropped them: neither the sidecar
+/// artifact nor `history.json` carried a single non-resqlite lane, so nothing
+/// downstream could tell a resqlite win from the whole host getting slower.
+/// That is not hypothetical — between the 2026-04-06 baseline and the
+/// 2026-08-09 headline, `sqlite3 select()` on the identical 1000-row lane went
+/// 0.74 ms to 1.23 ms. A resqlite number read across that window is measuring
+/// two things at once, and nothing said so.
+Map<String, double> extractPeerMedians(String content) {
+  final all = _extractMedians(content, resqlite: false);
+  return {
+    for (final e in all.entries)
+      if (_isPeerLane(e.key)) e.key: e.value,
+  };
+}
+
+/// The peer libraries resqlite is measured against.
+const peerLibraries = ['sqlite3', 'sqlite_async', 'drift'];
+
+/// Sections that restate other sections as deltas rather than measuring
+/// anything. Their rows carry library names too, and a delta compared against
+/// another delta is meaningless, so they are excluded by key prefix rather than
+/// by touching the shared walk (which `extractResqliteMedians` also uses).
+const _derivedSections = ['Comparison vs Previous Run'];
+
+bool _isPeerLane(String key) {
+  for (final section in _derivedSections) {
+    if (key.startsWith('$section /')) return false;
+  }
+  final label = key.split('/').last.trim();
+  return peerLibraries.any((p) => label.startsWith(p));
+}
+
+/// The shared table walk. [resqlite] selects which rows are kept; everything
+/// about how a row becomes a key is deliberately common to both, because the
+/// two maps are only comparable if they are keyed the same way.
+Map<String, double> _extractMedians(String content, {required bool resqlite}) {
   final results = <String, double>{};
   final lines = content.split('\n');
 
@@ -32,14 +74,19 @@ Map<String, double> extractResqliteMedians(String content) {
       currentSubsection = null;
     } else if (line.startsWith('### ')) {
       currentSubsection = line.substring(4).trim();
-    } else if (line.startsWith('| resqlite') &&
+    } else if (line.startsWith('| ') &&
+        line.startsWith('| resqlite') == resqlite &&
+        !line.startsWith('|---') &&
         !nonTimingSections.contains(currentSection)) {
       final parts = line
           .split('|')
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
-      if (parts.length >= 2) {
+      // A numeric first column is a Concurrent Reads row (`| 4 | 0.88 | ... |`),
+      // not a library name. Only the peer walk can reach those here; the
+      // resqlite walk still falls through to the dedicated branch below.
+      if (parts.length >= 2 && double.tryParse(parts[0]) == null) {
         final label = parts[0];
         final wallMed = double.tryParse(parts[1]);
         // Standard timing rows have 4 numeric columns after the label
@@ -68,7 +115,8 @@ Map<String, double> extractResqliteMedians(String content) {
           }
         }
       }
-    } else if (currentSection != null &&
+    } else if (resqlite &&
+        currentSection != null &&
         currentSection.contains('Concurrent Reads') &&
         line.startsWith('| ') &&
         !line.startsWith('|---') &&

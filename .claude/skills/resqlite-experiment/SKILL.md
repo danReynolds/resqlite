@@ -200,6 +200,30 @@ Label patterns that work well with the chart:
 - `round5-baseline` — round-level baselines for diff anchors
 - `round5-aggregate` — post-round aggregate result
 
+### Comparing against a baseline you did not just take
+
+A fresh `baseline-for-expNNN` needs none of this — it was measured minutes
+before the candidate on the same host. But any comparison reaching further
+back (an older anchor, a headline refresh, a trend claim in a writeup) is also
+comparing two environments, and until recently nothing said so: the peers are
+measured every run and were then discarded, so neither the sidecar artifact nor
+`history.json` held a single non-resqlite lane.
+
+```bash
+dart run benchmark/check_peer_drift.dart --since=<baseline-date>
+```
+
+It reports the **median** movement of the peer lanes and how many moved the
+same way. Near-zero median with agreement near half means the apparatus held
+and your delta is yours, however wildly individual lanes swung. A large median
+with high agreement means the host, SDK, or a peer version moved, and a
+resqlite number read across that window carries both.
+
+Do not read a single peer lane and conclude anything. Individual lanes on this
+host move tens of percent between adjacent runs; a per-lane threshold flagged
+140 of 143 real steps in the corpus. The median is the statistic; a lane is an
+anecdote.
+
 Avoid committing: intermediate exploration runs (e.g., the 8+ files I
 accidentally created while iterating on a single experiment), PGO
 training outputs, or aborted pipeline runs. One clean "after experiment"
@@ -351,9 +375,22 @@ agree, and `check_experiment_signals.dart` enforces the index↔outcomeClass lin
 
 - `experiments/index/NNN.json` → `"status"` (`accepted` / `rejected`)
 - `experiments/NNN-*.md` → `**Status:**` (`Accepted` / `Rejected`)
-- `experiments/signals/entries/NNN.json` → `outcomeClass` (must start with
-  `accepted` / `rejected`, e.g. `accepted`, `accepted_measurement`,
-  `rejected_below_signal`)
+- `experiments/signals/entries/NNN.json` → `outcomeClass` + `outcomeReason`,
+  both from the **closed** vocabulary in
+  [`benchmark/experiment_outcomes.dart`](../../../benchmark/experiment_outcomes.dart):
+
+  | class | reasons |
+  |---|---|
+  | `accepted` | `performance` · `measurement` · `correctness` |
+  | `rejected` | `below_signal` · `regression` · `tradeoff` · `premise_refuted` · `benchmark_gap` |
+  | `deferred` / `watch` | *(no reason — the class is the explanation)* |
+
+  Do **not** invent a new spelling to capture nuance — that is how one field
+  grew twenty values and six synonyms for "under the noise floor", and stopped
+  being groupable. Nuance goes in the free-text `outcomeNote`. Adding a genuinely
+  new reason means editing the closed set, which is a reviewed change.
+  `unspecified` exists only to mark migrated history whose reason was never
+  written down; a new entry using it is a validation error.
 
 ### Label the PR
 
