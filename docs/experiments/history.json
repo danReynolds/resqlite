@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-12T14:13:19.953666",
+  "generated": "2026-08-14T15:30:46.199515",
   "runs": [
     {
       "id": "baseline-before-authorizer-hooks",
@@ -28608,6 +28608,25 @@
         "date": "2026-08-12",
         "timestamp": "2026-08-12T07:29:09",
         "source": "exact"
+      }
+    },
+    {
+      "id": "271",
+      "title": "Catch the writer before the port",
+      "date": "2026-08-14",
+      "status": "rejected",
+      "summary": "Moonshot: rejected. A worker-first C11-atomic mailbox proved that the main isolate can observe a completed scalar write before Dart delivers its canonical reply: a focused diagnostic caught 69.9% of eligible attempts. That mechanism did not produce value. Native-asset-aware AOT B-A-A-B measured the cheapest no-op write 84.1% and 62.7% slower, constraint errors 205.1% and 368.4% slower, and continuous write throughput 65.6% and 37.3% lower; point updates and inserts won in only one order. A 32 us tuning arm made every decision lane worse. The effective 16 ms heartbeat delivered 278/279 deadlines in A1 and 279/279 in A2, with maximum gaps of 33.609/25.729 ms; the originally emitted missed-frame field used the wrong effective period and is discarded. Tested correctness guards passed, but an earlier-batch/later-catch completion-order question remains open. Errors can never publish and therefore always burn the full poll, while current main already completes a no-op in 5.9-10.2 us. The lesson sharpens exp 184: a large residual percentage does not make active waiting cheaper than port delivery, and a catch rate is not an end-to-end value metric. Runtime reverted; exact prototype at archive/exp-271; reusable public-API writer/error/heartbeat harness retained.",
+      "commit": null,
+      "problem": "[Exp 159](159-writer-pipelining.md) removed per-write port allocation and\npipelined concurrent standalone writes.\n[Exp 180](180-group-commit-request-batching.md) then amortised concurrent\nbursts without changing their independent commits.\n[Exp 184](184-writer-residual-resplit.md) re-measured the remaining sequential\npath and attributed 55-70% of representative writer wall to residual\nrequest/round-trip time. It named shared memory as the remaining structural\nlever.\n\nThat conclusion had not been tested. Native pointers already cross Dart\nisolates as integer addresses, and resqlite already relies on C11 atomics. A\nworker can therefore publish a completed scalar result into process-visible\nmemory without moving SQLite onto the caller isolate — avoiding exp 265/269's\nunbounded-caller-work f...",
+      "hypothesis": "**Assumption challenged: a successful sequential write must wait for its\nwriter-isolate reply event after SQLite and dependency harvesting have already\nfinished.**\n\nThe candidate would be accepted only if it improved sequential no-stream writes\nby at least 15% in both run orders. A bounded per-turn budget had to prevent a\nchain of caught futures from monopolising the main isolate, and every miss,\nerror, transaction, batch, concurrent group, stream, profile, and close path had\nto retain existing semantics.",
+      "approach": "The prototype allocated one native completion slot per `Writer`. The slot held\nan atomic ready flag, affected-row count, last insert ID, and profile time. A\nsingle eligible `ExecuteRequest` carried its address to the writer isolate.\n\nAfter SQLite returned and native dirty dependencies were drained, the worker\nrelease-published the scalar payload, then sent the same canonical\n`ExecuteResponse` as main. The main isolate synchronously acquire-polled the slot\nfor at most 24 us per attempt, 48 us and two attempts per event-loop turn. A hit\ncompleted the caller with empty dependencies — eligibility required no active\nstreams — and left its already-completed completer in the FIFO. The later port\nreply removed that tombstone. A miss simply awaited the canonical reply.\n\nThe scope was intentional...",
+      "results": "### The signal can be caught\n\nA 5,000-write diagnostic at the default budget attempted 3,818 polls and caught\n2,669 completions: a **69.9% catch rate**, with 17.8 us mean polling time. In\nthat candidate-only comparison, polling improved 38.33 to 35.14 us per write\nversus compiling the same runtime with polling disabled — an 8.3% mechanism\neffect, below the 15% product gate.\n\nThis is the useful distinction: observing a native completion early is\npossible; doing useful work by busy-waiting for it is not established by the hit\nrate.\n\n### End-to-end AOT rejects it\n\nNative-asset-aware AOT bundles ran baseline B1, candidate A1, candidate A2, then\nbaseline B2. Medians are microseconds per operation; each delta is paired to its\nadjacent order baseline.\n\n| lane | B1 -> A1 | delta | A2 -> B2 | de...",
+      "reasoning": "**Rejected.** Exp 271 updates exp 184's interpretation: a large *percentage* of\nwriter wall being residual does not imply that active waiting can remove it.\nThe current AOT reply-port path completes the cheapest write in 5.9-10.2 us,\nbelow the candidate's 24 us window. Shared-memory readiness is not itself a\nwakeup primitive, and a catch percentage is not an end-to-end value metric.\n\nNo native ABI, build-hook, writer, worker, diagnostic, or test-only runtime\nchange is kept. The public-API harness remains as the durable sequential-write,\nerror, and heartbeat-timer gate. The exact prototype remains at\n`archive/exp-271` for inspection, not as a shipping base.\n\n### Reopen conditions\n\nDo not retry a longer spin, a larger per-turn budget, or an error predictor.\nReopen only if one of these cha...",
+      "benchmarkRun": {
+        "id": "exp270-parent-baseline",
+        "date": "2026-08-12",
+        "timestamp": "2026-08-12T07:42:23",
+        "source": "nearby"
       }
     }
   ],

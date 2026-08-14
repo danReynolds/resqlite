@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 61,
-    "totalEntries": 142
+    "entriesWithClaims": 62,
+    "totalEntries": 143
   },
   "experiments": [
     {
@@ -2184,6 +2184,17 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "271",
+      "title": "Catch the writer before the port",
+      "file": "271-worker-completion-catch.md",
+      "date": "2026-08-14",
+      "status": "rejected",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -3617,6 +3628,61 @@
           "target": "269.5"
         }
       ],
+      "state": "live"
+    },
+    {
+      "id": "271.1",
+      "source": "271",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "A single-producer C11-atomic writer completion mailbox can be observed from the main Dart isolate before the canonical reply-port event without running SQLite on main. At the 24 us default, a 5,000-write diagnostic attempted 3,818 polls and caught 2,669 completions (69.9%) with 17.8 us mean polling time.",
+      "conditions": "M1 Pro class arm64 macOS host, Dart 3.12.2 JIT diagnostic, no active streams, scalar no-op point update, one mailbox per Writer, 2026-08-14",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "271.2",
+      "source": "271",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "Bounded active polling does not improve sequential writer wall on the current runtime. Native-asset-aware AOT B-A-A-B measured no-op writes at +84.1% and +62.7%; point updates at +15.0% and -18.8%; small inserts at +7.3% and -10.9%. No target win reproduced in both orders against the required 15% gate.",
+      "conditions": "origin/main 5555dfa versus archive/exp-271 cbc6a7f, 7 samples per lane per pass, 1,200 no-op / 1,000 point / 600 insert operations per sample, run order B1-A1-A2-B2, arm64 macOS, Dart 3.12.2 AOT CLI bundles, 2026-08-14",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "271.3",
+      "source": "271",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "Speculative success polling structurally penalizes errors because they never publish the completion slot. Constraint-error latency regressed from 11.823 to 36.073 us (+205.1%) in the first order and from 8.542 to 40.010 us (+368.4%) in the second; SQLite code 19, SQL, parameters, and recovery all remained correct.",
+      "conditions": "Same AOT B-A-A-B as claim 271.2, 96 errors per sample, 7 samples per pass, 672 verified errors per run, 24 us attempt budget, 2026-08-14",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "271.4",
+      "source": "271",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "Increasing the completion poll from 24 to 32 us does not rescue the mechanism. One full AOT arm measured 21.702 us no-op, 37.214 us point update, 34.617 us insert, and 44.833 us constraint error, worse than both baseline pass medians on every decision lane.",
+      "conditions": "Exact archive/exp-271 candidate with only RESQLITE_WRITE_COMPLETION_POLL_US default changed 24 to 32, full 7-sample harness, arm64 macOS, Dart 3.12.2 AOT, 2026-08-14",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "271.5",
+      "source": "271",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "The per-turn cap kept candidate heartbeat callbacks live but did not prevent throughput loss. At the VM's effective 16 ms period, A1/A2 delivered 278/279 and 279/279 deadlines with p99/max gaps of 21.094/33.609 ms and 19.803/25.729 ms, while continuous sequential throughput fell 53,204 to 18,314 writes/s (-65.6%) and 45,892 to 28,757 writes/s (-37.3%). The originally emitted missed-frame count used the requested rather than effective period and is not evidence.",
+      "conditions": "Three 1.5-second timer runs per harness pass, requested 16,667 us and effective 16,000 us period on Dart 3.12.2, same AOT B-A-A-B as claim 271.2; B2 delivered 270/279 with a separate 95.692 ms host-noise gap, 2026-08-14",
+      "edges": [],
       "state": "live"
     }
   ]
