@@ -1,0 +1,7 @@
+{
+  "file": "271-worker-completion-catch.md",
+  "title": "Catch the writer before the port",
+  "impact": "Moonshot: rejected. A worker-first C11-atomic mailbox proved that the main isolate can observe a completed scalar write before Dart delivers its canonical reply: a focused diagnostic caught 69.9% of eligible attempts. That mechanism did not produce value. Native-asset-aware AOT B-A-A-B measured the cheapest no-op write 84.1% and 62.7% slower, constraint errors 205.1% and 368.4% slower, and continuous write throughput 65.6% and 37.3% lower; point updates and inserts won in only one order. A 32 us tuning arm made every decision lane worse. The effective 16 ms heartbeat delivered 278/279 deadlines in A1 and 279/279 in A2, with maximum gaps of 33.609/25.729 ms; the originally emitted missed-frame field used the wrong effective period and is discarded. Tested correctness guards passed, but an earlier-batch/later-catch completion-order question remains open. Errors can never publish and therefore always burn the full poll, while current main already completes a no-op in 5.9-10.2 us. The lesson sharpens exp 184: a large residual percentage does not make active waiting cheaper than port delivery, and a catch rate is not an end-to-end value metric. Runtime reverted; exact prototype at archive/exp-271; reusable public-API writer/error/heartbeat harness retained.",
+  "status": "rejected",
+  "link": ""
+}

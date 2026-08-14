@@ -12,9 +12,9 @@
 // streams. The remaining lanes are guardrails for paths that should either
 // bypass a bounded fast catch or preserve their existing semantics: active
 // streams, concurrent submissions, transactions, deliberately slow writes,
-// and SQLite errors. The 60 Hz lane deliberately performs no explicit yield
-// between sequential writes. Its timer heartbeat exposes event-loop starvation
-// if a chain of immediately completed write futures monopolizes the isolate.
+// and SQLite errors. The 16 ms heartbeat lane deliberately performs no
+// explicit yield between sequential writes. Its timer exposes event-loop
+// starvation if immediately completed write futures monopolize the isolate.
 //
 // Every timed sample is emitted as JSON after its stopwatch has stopped. The
 // final `RESULT` line contains the complete machine-readable result.
@@ -43,7 +43,8 @@ const _slowRows = 20000;
 const _slowWritesPerSample = 4;
 const _constraintErrorsPerSample = 96;
 
-const _framePeriodUs = 16667;
+const _heartbeatPeriod = Duration(milliseconds: 16);
+const _heartbeatPeriodUs = 16000;
 const _pointUpdateSql = 'UPDATE items SET value = value + 1 WHERE id = ?';
 const _pointUpdateParameters = <Object?>[1];
 
@@ -71,7 +72,7 @@ Future<void> main(List<String> args) async {
     'workload_divisor': options.workloadDivisor,
     'jitter_runs': options.jitterRuns,
     'jitter_duration_ms': options.jitterDuration.inMilliseconds,
-    'frame_period_us': _framePeriodUs,
+    'heartbeat_period_us': _heartbeatPeriodUs,
     'pid': pid,
   };
   print('Writer completion catch benchmark (exp 271)');
@@ -108,7 +109,7 @@ Future<void> main(List<String> args) async {
       'active_stream': activeStream.guard,
       'constraint_error': constraint.guard,
     },
-    'jitter_60hz': jitter.summary,
+    'heartbeat_16ms': jitter.summary,
     'jitter_runs_detail': [for (final run in jitter.runs) run.toJson()],
   };
   print('RESULT ${jsonEncode(result)}');
@@ -548,19 +549,9 @@ Future<_JitterResult> _runJitterGuard(_Options options) {
     for (var run = 1; run <= options.jitterRuns; run++) {
       final stopwatch = Stopwatch()..start();
       final callbackTimesUs = <int>[];
-      final callbackLatenessUs = <int>[];
-      final timer = Timer.periodic(
-        const Duration(microseconds: _framePeriodUs),
-        (timer) {
-          final nowUs = stopwatch.elapsedMicroseconds;
-          callbackTimesUs.add(nowUs);
-          // `tick` advances across timer deadlines missed while this isolate is
-          // busy, so lateness remains a per-delivery metric. Missing callbacks
-          // are reported separately as dropped frames.
-          final expectedUs = timer.tick * _framePeriodUs;
-          callbackLatenessUs.add(math.max(0, nowUs - expectedUs));
-        },
-      );
+      final timer = Timer.periodic(_heartbeatPeriod, (timer) {
+        callbackTimesUs.add(stopwatch.elapsedMicroseconds);
+      });
 
       var writes = 0;
       while (stopwatch.elapsed < options.jitterDuration) {
@@ -587,7 +578,6 @@ Future<_JitterResult> _runJitterGuard(_Options options) {
         elapsedUs: stopwatch.elapsedMicroseconds,
         writes: writes,
         callbackTimesUs: callbackTimesUs,
-        callbackLatenessUs: callbackLatenessUs,
       );
       runs.add(jitterRun);
       print('JITTER_RUN ${jsonEncode(jitterRun.toJson())}');
@@ -752,10 +742,8 @@ final class _JitterRun {
     required this.run,
     required this.elapsedUs,
     required this.writes,
-    required this.expectedFrames,
     required this.callbackTimesUs,
     required this.callbackGapsUs,
-    required this.callbackLatenessUs,
   });
 
   factory _JitterRun.fromCallbacks({
@@ -763,7 +751,6 @@ final class _JitterRun {
     required int elapsedUs,
     required int writes,
     required List<int> callbackTimesUs,
-    required List<int> callbackLatenessUs,
   }) {
     final gaps = <int>[];
     var previousUs = 0;
@@ -776,23 +763,26 @@ final class _JitterRun {
       run: run,
       elapsedUs: elapsedUs,
       writes: writes,
-      expectedFrames: elapsedUs ~/ _framePeriodUs,
       callbackTimesUs: callbackTimesUs,
       callbackGapsUs: gaps,
-      callbackLatenessUs: callbackLatenessUs,
     );
   }
 
   final int run;
   final int elapsedUs;
   final int writes;
-  final int expectedFrames;
   final List<int> callbackTimesUs;
   final List<int> callbackGapsUs;
-  final List<int> callbackLatenessUs;
 
   int get callbacks => callbackTimesUs.length;
-  int get missedFrames => math.max(0, expectedFrames - callbacks);
+  // This deliberately reports a conservative lower bound from each observed
+  // gap instead of subtracting callback count from elapsed time. Periodic
+  // timers may deliver later callbacks less than one period apart, so total
+  // callback count can mask an earlier gap spanning multiple periods.
+  int get longGapMissedPeriodsLowerBound => callbackGapsUs.fold<int>(
+    0,
+    (total, gapUs) => total + math.max(0, gapUs ~/ _heartbeatPeriodUs - 1),
+  );
   double get writesPerSecond =>
       elapsedUs == 0 ? 0 : writes * 1000000 / elapsedUs;
 
@@ -801,20 +791,14 @@ final class _JitterRun {
     'elapsed_us': elapsedUs,
     'writes': writes,
     'writes_per_second': writesPerSecond,
-    'frame_period_us': _framePeriodUs,
-    'expected_frames': expectedFrames,
+    'heartbeat_period_us': _heartbeatPeriodUs,
     'timer_callbacks': callbacks,
-    'missed_frames': missedFrames,
+    'long_gap_missed_periods_lower_bound': longGapMissedPeriodsLowerBound,
+    'callback_gaps_us': callbackGapsUs,
     'p50_callback_gap_us': _percentileInt(callbackGapsUs, 0.50),
     'p95_callback_gap_us': _percentileInt(callbackGapsUs, 0.95),
     'p99_callback_gap_us': _percentileInt(callbackGapsUs, 0.99),
     'max_callback_gap_us': callbackGapsUs.reduce(math.max),
-    'p50_callback_lateness_us': _percentileInt(callbackLatenessUs, 0.50),
-    'p95_callback_lateness_us': _percentileInt(callbackLatenessUs, 0.95),
-    'p99_callback_lateness_us': _percentileInt(callbackLatenessUs, 0.99),
-    'max_callback_lateness_us': callbackLatenessUs.isEmpty
-        ? elapsedUs
-        : callbackLatenessUs.reduce(math.max),
   };
 }
 
@@ -825,40 +809,25 @@ final class _JitterResult {
 
   Map<String, Object?> get summary {
     final gaps = <int>[for (final run in runs) ...run.callbackGapsUs];
-    final lateness = <int>[for (final run in runs) ...run.callbackLatenessUs];
     final writesPerSecond = <double>[
       for (final run in runs) run.writesPerSecond,
     ];
-    final expectedFrames = runs.fold<int>(
-      0,
-      (total, run) => total + run.expectedFrames,
-    );
     final callbacks = runs.fold<int>(0, (total, run) => total + run.callbacks);
-    final missedFrames = runs.fold<int>(
+    final longGapMissedPeriodsLowerBound = runs.fold<int>(
       0,
-      (total, run) => total + run.missedFrames,
+      (total, run) => total + run.longGapMissedPeriodsLowerBound,
     );
     return <String, Object?>{
       'completed': true,
       'runs': runs.length,
-      'frame_period_us': _framePeriodUs,
+      'heartbeat_period_us': _heartbeatPeriodUs,
       'median_writes_per_second': _percentileDouble(writesPerSecond, 0.50),
-      'expected_frames': expectedFrames,
       'timer_callbacks': callbacks,
-      'missed_frames': missedFrames,
-      'missed_frame_ratio': expectedFrames == 0
-          ? 0
-          : missedFrames / expectedFrames,
+      'long_gap_missed_periods_lower_bound': longGapMissedPeriodsLowerBound,
       'p50_callback_gap_us': _percentileInt(gaps, 0.50),
       'p95_callback_gap_us': _percentileInt(gaps, 0.95),
       'p99_callback_gap_us': _percentileInt(gaps, 0.99),
       'max_callback_gap_us': gaps.reduce(math.max),
-      'p50_callback_lateness_us': _percentileInt(lateness, 0.50),
-      'p95_callback_lateness_us': _percentileInt(lateness, 0.95),
-      'p99_callback_lateness_us': _percentileInt(lateness, 0.99),
-      'max_callback_lateness_us': lateness.isEmpty
-          ? runs.map((run) => run.elapsedUs).reduce(math.max)
-          : lateness.reduce(math.max),
     };
   }
 }
@@ -1031,7 +1000,7 @@ Options:
   --samples=N               Timed samples per latency lane (default 7).
   --warmup-ops=N            Fast writes used to warm each lane (default 1200).
   --workload-divisor=N      Divide default lane sizes by N.
-  --jitter-runs=N           60 Hz write-chain runs (default 3).
+  --jitter-runs=N           16 ms heartbeat write-chain runs (default 3).
   --jitter-ms=N             Duration of each jitter run (default 1500).
   --quick                    Small smoke configuration, overridable afterward.
   --help                     Show this message.
