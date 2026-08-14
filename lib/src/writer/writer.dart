@@ -3,51 +3,12 @@ import 'dart:collection';
 import 'dart:ffi';
 import 'dart:isolate';
 
-import 'package:ffi/ffi.dart';
 import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
-import 'package:resqlite/src/profile_mode.dart';
 import 'package:resqlite/src/blob_transfer.dart' show blobTransfer;
 import 'package:resqlite/src/writer/write_worker.dart';
-
-const int _completionPollAttemptUs = int.fromEnvironment(
-  'RESQLITE_WRITE_COMPLETION_POLL_US',
-  defaultValue: 24,
-);
-const int _completionPollTurnUs = int.fromEnvironment(
-  'RESQLITE_WRITE_COMPLETION_TURN_US',
-  defaultValue: 48,
-);
-const int _completionPollTurnAttempts = int.fromEnvironment(
-  'RESQLITE_WRITE_COMPLETION_TURN_ATTEMPTS',
-  defaultValue: 2,
-);
-const bool _completionDiagnostics = bool.fromEnvironment(
-  'RESQLITE_WRITE_COMPLETION_DIAGNOSTICS',
-  defaultValue: false,
-);
-
-/// Experiment-only counters for the bounded writer completion catch.
-///
-/// All writes to these counters are compile-time removed unless
-/// `RESQLITE_WRITE_COMPLETION_DIAGNOSTICS=true` is supplied.
-final class WriterCompletionCatchDiagnostics {
-  static bool get enabled => _completionDiagnostics;
-
-  static int attempts = 0;
-  static int hits = 0;
-  static int misses = 0;
-  static int pollUs = 0;
-
-  static void reset() {
-    attempts = 0;
-    hits = 0;
-    misses = 0;
-    pollUs = 0;
-  }
-}
 
 final class Writer {
   final StreamEngine _streamEngine;
@@ -71,21 +32,6 @@ final class Writer {
   /// Completers for in-flight requests, in send order.
   final ListQueue<Completer<Object?>> _pending =
       ListQueue<Completer<Object?>>();
-
-  /// One process-visible completion slot, reused only after the preceding
-  /// scalar request has either been caught or replied through the port.
-  late final Pointer<Uint8> _completionMailbox;
-  late final Pointer<Int> _completionAffectedRows;
-  late final Pointer<Int64> _completionLastInsertId;
-  late final Pointer<Int64> _completionWriterSqliteUs;
-  bool _completionMailboxDisposed = false;
-
-  /// Polling is capped across one event-loop turn so a chain of synchronously
-  /// caught writes cannot monopolize the main isolate.
-  final Stopwatch _completionPollClock = Stopwatch()..start();
-  int _completionTurnUsRemaining = _completionPollTurnUs;
-  int _completionTurnAttemptsRemaining = _completionPollTurnAttempts;
-  bool _completionTurnResetScheduled = false;
 
   // Writer mutex — ensures concurrent db.execute() / db.transaction() calls
   // don't interleave on the writer isolate. Callers wait for the lock;
@@ -116,12 +62,6 @@ final class Writer {
     Pointer<void> handle,
   ) async {
     final writer = Writer._(streamEngine);
-    final mailboxSize = resqliteWriteCompletionSize();
-    writer._completionMailbox = calloc<Uint8>(mailboxSize);
-    writer._completionAffectedRows = calloc<Int>();
-    writer._completionLastInsertId = calloc<Int64>();
-    writer._completionWriterSqliteUs = calloc<Int64>();
-    resqliteWriteCompletionInit(writer._completionMailbox.cast());
 
     final handshake = Completer<SendPort>();
     final receivePort = ReceivePort();
@@ -144,9 +84,6 @@ final class Writer {
     // after close) is dropped rather than crashing the port handler.
     if (_pending.isEmpty) return;
     final completer = _pending.removeFirst();
-    // A completion caught through the native slot still has one canonical
-    // port reply in flight. Pop that tombstone to preserve FIFO matching.
-    if (completer.isCompleted) return;
     if (response is ResqliteException) {
       completer.completeError(response);
     } else {
@@ -176,102 +113,6 @@ final class Writer {
     _pending.addLast(completer);
     sendPort.send(request);
     return completer.future;
-  }
-
-  Future<ExecuteResponse> _requestExecuteWithCompletionCatch(
-    _PendingWrite pending,
-  ) {
-    final sendPort = _sendPort;
-    if (sendPort == null) {
-      throw ResqliteConnectionException.databaseClosed();
-    }
-
-    resqliteWriteCompletionReset(_completionMailbox.cast());
-    final request = ExecuteRequest(
-      pending.sql,
-      pending.parameters,
-      _replyPort.sendPort,
-      traceCorrelationId: pending.traceCorrelationId,
-      completionMailboxAddress: _completionMailbox.address,
-    );
-    final completer = Completer<ExecuteResponse>.sync();
-    _pending.addLast(completer);
-    sendPort.send(request);
-
-    final budgetUs = _takeCompletionPollBudget();
-    if (budgetUs == 0) return completer.future;
-
-    if (_completionDiagnostics) {
-      WriterCompletionCatchDiagnostics.attempts++;
-    }
-    final startedUs = _completionPollClock.elapsedMicroseconds;
-    final deadlineUs = startedUs + budgetUs;
-    var caught = false;
-    do {
-      caught =
-          resqliteWriteCompletionTryRead(
-            _completionMailbox.cast(),
-            _completionAffectedRows,
-            _completionLastInsertId,
-            _completionWriterSqliteUs,
-          ) !=
-          0;
-      if (caught) {
-        completer.complete(
-          ExecuteResponse(
-            WriteResult(
-              _completionAffectedRows.value,
-              _completionLastInsertId.value,
-            ),
-            TableDependencies.none,
-            writerSqliteUs: _completionWriterSqliteUs.value,
-          ),
-        );
-        break;
-      }
-    } while (_completionPollClock.elapsedMicroseconds < deadlineUs);
-
-    final elapsedUs = _completionPollClock.elapsedMicroseconds - startedUs;
-    final remainingUs = _completionTurnUsRemaining - elapsedUs;
-    _completionTurnUsRemaining = remainingUs > 0 ? remainingUs : 0;
-    if (_completionDiagnostics) {
-      WriterCompletionCatchDiagnostics.pollUs += elapsedUs;
-      if (caught) {
-        WriterCompletionCatchDiagnostics.hits++;
-      } else {
-        WriterCompletionCatchDiagnostics.misses++;
-      }
-    }
-    return completer.future;
-  }
-
-  int _takeCompletionPollBudget() {
-    if (_completionPollAttemptUs <= 0 ||
-        _completionTurnUsRemaining <= 0 ||
-        _completionTurnAttemptsRemaining <= 0) {
-      return 0;
-    }
-    if (!_completionTurnResetScheduled) {
-      _completionTurnResetScheduled = true;
-      Timer.run(() {
-        _completionTurnUsRemaining = _completionPollTurnUs;
-        _completionTurnAttemptsRemaining = _completionPollTurnAttempts;
-        _completionTurnResetScheduled = false;
-      });
-    }
-    _completionTurnAttemptsRemaining--;
-    return _completionPollAttemptUs < _completionTurnUsRemaining
-        ? _completionPollAttemptUs
-        : _completionTurnUsRemaining;
-  }
-
-  void _disposeCompletionMailbox() {
-    if (_completionMailboxDisposed) return;
-    _completionMailboxDisposed = true;
-    calloc.free(_completionWriterSqliteUs);
-    calloc.free(_completionLastInsertId);
-    calloc.free(_completionAffectedRows);
-    calloc.free(_completionMailbox);
   }
 
   void _ensureOpen() {
@@ -329,16 +170,14 @@ final class Writer {
             _ensureOpen();
             if (group.length == 1) {
               final p = group.first;
-              singleReply = !kProfileMode && _streamEngine.length == 0
-                  ? _requestExecuteWithCompletionCatch(p)
-                  : _request<ExecuteResponse>(
-                      (replyPort) => ExecuteRequest(
-                        p.sql,
-                        p.parameters,
-                        replyPort,
-                        traceCorrelationId: p.traceCorrelationId,
-                      ),
-                    );
+              singleReply = _request<ExecuteResponse>(
+                (replyPort) => ExecuteRequest(
+                  p.sql,
+                  p.parameters,
+                  replyPort,
+                  traceCorrelationId: p.traceCorrelationId,
+                ),
+              );
             } else {
               groupReply = _request<MultiExecuteResponse>(
                 (replyPort) => MultiExecuteRequest([
@@ -555,20 +394,16 @@ final class Writer {
   Future<void> close() async {
     _closed = true;
 
-    try {
-      await _mutex.run(() async {
-        final sendPort = _sendPort;
-        if (sendPort == null) return;
-        final done = Completer<Object?>.sync();
-        _pending.addLast(done);
-        sendPort.send(CloseRequest(_replyPort.sendPort));
-        _sendPort = null;
-        await done.future;
-      });
-      _replyPort.close();
-    } finally {
-      _disposeCompletionMailbox();
-    }
+    await _mutex.run(() async {
+      final sendPort = _sendPort;
+      if (sendPort == null) return;
+      final done = Completer<Object?>.sync();
+      _pending.addLast(done);
+      sendPort.send(CloseRequest(_replyPort.sendPort));
+      _sendPort = null;
+      await done.future;
+    });
+    _replyPort.close();
   }
 }
 

@@ -39,12 +39,10 @@ final class ExecuteRequest extends WriterRequest {
     List<Object?> params,
     super.replyPort, {
     super.traceCorrelationId,
-    this.completionMailboxAddress = 0,
     // Wraps on the main isolate, before send; see blob_transfer.dart.
   }) : params = blobTransfer.wrapParams(params);
   final String sql;
   final List<Object?> params;
-  final int completionMailboxAddress;
 }
 
 /// A coalesced group of standalone writes (exp 180), each run as its own
@@ -303,26 +301,9 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
-  // Allocate the canonical response before publication. Once ready becomes
-  // visible the main isolate may report success, so no fallible Dart object
-  // construction may remain between publication and the tombstone reply.
-  final response = ExecuteResponse(
-    result,
-    modifications,
-    writerSqliteUs: writerSqliteUs,
+  msg.replyPort.send(
+    ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
   );
-  // Publish only after dirty dependencies have been harvested. The main
-  // isolate may then finish a no-stream scalar write before this canonical
-  // reply-port event is delivered, without racing native dependency state.
-  if (msg.completionMailboxAddress != 0) {
-    resqliteWriteCompletionPublish(
-      ffi.Pointer<ffi.Void>.fromAddress(msg.completionMailboxAddress),
-      result.affectedRows,
-      result.lastInsertId,
-      writerSqliteUs,
-    );
-  }
-  msg.replyPort.send(response);
 }
 
 void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
