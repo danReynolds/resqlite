@@ -1,0 +1,2164 @@
+{
+  "schema_version": 1,
+  "experiment": 271,
+  "slug": "writer-completion-catch",
+  "generated_utc": "2026-08-14T14:57:54Z",
+  "environment": {
+    "os": "macOS arm64",
+    "dart": "3.12.2 stable",
+    "mode": "native-asset-aware AOT CLI bundle"
+  },
+  "provenance": {
+    "recorded_utc": "2026-08-14T14:58:14Z",
+    "sources": {
+      "baseline_source_commit": "5555dfa6d84b3513fac5f11cfa09e7325643e2bd",
+      "harness_commit": "172102dc9a8dd9a7ff158d54df69835944556dbd",
+      "measured_baseline_tree": "d14301df015441beac96893f86743efa4da3b97e",
+      "candidate_archive_commit": "cbc6a7fd0c4271aea9a6eb5937f4bdd5d12a7126",
+      "candidate_archive_ref": "archive/exp-271",
+      "candidate_runtime_patch_sha256": "b1fad52e21d7c403e9c34c83e83509512b8982009faff5236afcbffe19226348",
+      "candidate32_diff_sha256": "09fd0904eab9b007f3587c1a464d383f239f2bf2f7a7b6e6464a571d6bed2a37",
+      "candidate32_change": "AOT bundle inputs from the candidate with only RESQLITE_WRITE_COMPLETION_POLL_US defaultValue changed from 24 to 32"
+    },
+    "conditions": {
+      "execution": "sequential",
+      "parallel_benchmark_load": false,
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "requested_timer_period_us": 16667,
+      "effective_vm_heartbeat_period_us": 16000,
+      "effective_deadlines_per_run": 93,
+      "run_order": [
+        "aot-baseline-b1",
+        "aot-candidate-a1",
+        "aot-candidate-a2",
+        "aot-baseline-b2",
+        "aot-candidate-poll32"
+      ]
+    },
+    "builds": [
+      {
+        "arm": "baseline",
+        "historical_working_directory": "/private/tmp/resqlite-exp271-baseline.C33Xs4",
+        "historical_command": "dart build cli --target=benchmark/experiments/writer_completion_catch.dart --output=/private/tmp/resqlite-exp271-aot.LqEhjR/baseline-bundle-build",
+        "bundle_sha256": "a475e327f2697c6aa060836013c29580ed87d9d0906537855b7a5fe443242516"
+      },
+      {
+        "arm": "candidate",
+        "historical_working_directory": "/Users/dan/.codex/worktrees/de3d/resqlite",
+        "historical_command": "dart build cli --target=benchmark/experiments/writer_completion_catch.dart --output=/private/tmp/resqlite-exp271-aot.LqEhjR/candidate-bundle-build",
+        "bundle_sha256": "784cea0b62e8c4ea57e04713e38794610c78ac9ce64407f5ef92d0703153d03f"
+      },
+      {
+        "arm": "candidate-poll32",
+        "historical_working_directory": "/private/tmp/resqlite-exp271-candidate32.XFgRQF",
+        "historical_command": "dart build cli --target=benchmark/experiments/writer_completion_catch.dart --output=/private/tmp/resqlite-exp271-aot.LqEhjR/candidate32-bundle-build",
+        "bundle_sha256": "0d2b77f92cd0d97ea77cb901de81f1a213d0a2554dc09ae3782d1f353ef72cd6"
+      }
+    ],
+    "valid_runs": [
+      {
+        "label": "aot-baseline-b1",
+        "historical_command": "/private/tmp/resqlite-exp271-aot.LqEhjR/baseline-bundle-build/bundle/bin/writer_completion_catch --label=aot-baseline-b1",
+        "log_file": "B1-baseline-aot-valid.log",
+        "log_sha256": "7cc1a99789cbfc138feb792d5b278d13be400a034f18ec8281fc89d38925cb66"
+      },
+      {
+        "label": "aot-candidate-a1",
+        "historical_command": "/private/tmp/resqlite-exp271-aot.LqEhjR/candidate-bundle-build/bundle/bin/writer_completion_catch --label=aot-candidate-a1",
+        "log_file": "A1-candidate-aot-valid.log",
+        "log_sha256": "54aff7e12e65c6dd46af985df5c9a011cb3607221ea4f6915a1cde04e2570332"
+      },
+      {
+        "label": "aot-candidate-a2",
+        "historical_command": "/private/tmp/resqlite-exp271-aot.LqEhjR/candidate-bundle-build/bundle/bin/writer_completion_catch --label=aot-candidate-a2",
+        "log_file": "A2-candidate-aot-valid.log",
+        "log_sha256": "8921e32f3d08a91ec3c2197d17d6f1205b326be5cf2e1bc5d539732ef788cffd"
+      },
+      {
+        "label": "aot-baseline-b2",
+        "historical_command": "/private/tmp/resqlite-exp271-aot.LqEhjR/baseline-bundle-build/bundle/bin/writer_completion_catch --label=aot-baseline-b2",
+        "log_file": "B2-baseline-aot-valid.log",
+        "log_sha256": "ed6a5f111c98b82b1918d3dedac09a51d3a3698a6c4697db77324af13c4e4c54"
+      },
+      {
+        "label": "aot-candidate-poll32",
+        "historical_command": "/private/tmp/resqlite-exp271-aot.LqEhjR/candidate32-bundle-build/bundle/bin/writer_completion_catch --label=aot-candidate-poll32",
+        "log_file": "C32-candidate-aot-valid.log",
+        "log_sha256": "1d7202e00a6eb1de0e73df0d85f6ef6f38ce960413e352a5128e4786045fcd6f"
+      }
+    ],
+    "supporting_artifacts_sha256": {
+      "parsed-lanes-aot.json": "e7ae150616f1fd886254245a16da56f0fa58f015ae44c563c556a0f5bf58ad80",
+      "parsed-jitter-guards-aot.json": "1cc0b6823710a72718827c24bc258a7da8207b8a8cc0c1c59324ac6d270ccd59",
+      "paired-deltas-aot.json": "01df4d7c119af614e147399b6bb837481eea0c2545d1e4357f4c23ed0db59b47",
+      "RUN_PROVENANCE_AOT.txt": "eefe3cc01380ad62175100b771039da523421f9d6bfaec4642717bb89d05b25b"
+    },
+    "excluded_evidence": [
+      {
+        "file": "B1-baseline-aot.log",
+        "included_in_results": false,
+        "reason": "Invalid direct dart compile exe preflight: the executable did not carry the native asset and failed before benchmarking."
+      }
+    ],
+    "path_note": "Absolute paths above record historical commands and working directories only; they are ephemeral and are not durable artifact locations.",
+    "notes": [
+      "Baseline is origin/main plus the identical harness only.",
+      "Candidate archive commit has the exact runtime, native, and harness inputs used by the default AOT bundle; its additional test files do not enter the bundle."
+    ]
+  },
+  "decision_gates": {
+    "required_target_wall_improvement_percent": 15,
+    "required_orders": 2,
+    "result": "rejected"
+  },
+  "measurement_limitations": {
+    "legacy_missed_frames_valid": false,
+    "reason": "On Dart VM 3.12.2, Duration(microseconds: 16667) was truncated to a 16 ms timer while the collected harness divided elapsed time by the requested 16,667 us. Later callbacks may also arrive less than one period apart, so aggregate callback count can hide an earlier long gap.",
+    "retained_raw_field_policy": "The original frame_period_us, expected_frames, missed_frames, and callback_lateness fields remain verbatim inside runs for log fidelity but are not interpreted.",
+    "decision_fields": [
+      "median_writes_per_second",
+      "p99_callback_gap_us",
+      "max_callback_gap_us"
+    ],
+    "candidate_callback_gap_summary_us": {
+      "aot-candidate-a1": {
+        "p99": 21094,
+        "max": 33609
+      },
+      "aot-candidate-a2": {
+        "p99": 19803,
+        "max": 25729
+      },
+      "aot-candidate-poll32": {
+        "p99": 16861,
+        "max": 19945
+      }
+    },
+    "corrected_effective_deadline_counts": {
+      "aot-baseline-b1": {
+        "delivered": 279,
+        "effective_deadlines": 279,
+        "missed": 0
+      },
+      "aot-candidate-a1": {
+        "delivered": 278,
+        "effective_deadlines": 279,
+        "missed": 1
+      },
+      "aot-candidate-a2": {
+        "delivered": 279,
+        "effective_deadlines": 279,
+        "missed": 0
+      },
+      "aot-baseline-b2": {
+        "delivered": 270,
+        "effective_deadlines": 279,
+        "missed": 9
+      },
+      "aot-candidate-poll32": {
+        "delivered": 279,
+        "effective_deadlines": 279,
+        "missed": 0
+      }
+    },
+    "retained_harness_fix": "Future runs request an explicit 16 ms heartbeat and emit complete callback_gaps_us plus long_gap_missed_periods_lower_bound instead of requested-period expected-minus-callback and tick-based lateness fields."
+  },
+  "order_paired_comparison": {
+    "comparison": "process medians; lower is better for latency and higher is better for jitter throughput",
+    "latency_percent": {
+      "sequential_no_stream_noop_update": {
+        "A1_vs_B1": 84.09570724841662,
+        "A2_vs_B2": 62.69277845777233
+      },
+      "sequential_no_stream_point_update": {
+        "A1_vs_B1": 14.990837618963159,
+        "A2_vs_B2": -18.816436617483735
+      },
+      "sequential_no_stream_small_insert": {
+        "A1_vs_B1": 7.309729000103848,
+        "A2_vs_B2": -10.926221411746816
+      },
+      "active_stream_sequential_guard": {
+        "A1_vs_B1": -6.684103458297008,
+        "A2_vs_B2": -40.0
+      },
+      "concurrent_burst_guard": {
+        "A1_vs_B1": 1.089324618736387,
+        "A2_vs_B2": -8.88954085374798
+      },
+      "transaction_guard": {
+        "A1_vs_B1": -18.312597200622083,
+        "A2_vs_B2": 43.15600717274357
+      },
+      "slow_write_miss_path": {
+        "A1_vs_B1": 7.786952256376711,
+        "A2_vs_B2": -26.87848862172606
+      },
+      "constraint_error_fidelity": {
+        "A1_vs_B1": 205.1101321585903,
+        "A2_vs_B2": 368.4146341463415
+      }
+    },
+    "jitter_median_writes_per_second_percent": {
+      "A1_vs_B1": -65.5780008971367,
+      "A2_vs_B2": -37.33801337540188
+    },
+    "poll32_latency_percent": {
+      "C32_vs_B1": {
+        "sequential_no_stream_noop_update": 266.53061224489795,
+        "sequential_no_stream_point_update": 119.97990187385467,
+        "sequential_no_stream_small_insert": 115.65777177863153,
+        "constraint_error_fidelity": 279.2070484581498
+      },
+      "C32_vs_B2": {
+        "sequential_no_stream_noop_update": 112.50101999184005,
+        "sequential_no_stream_point_update": 18.083452324290008,
+        "sequential_no_stream_small_insert": 57.81475571765065,
+        "constraint_error_fidelity": 424.8780487804878
+      }
+    }
+  },
+  "pooled_lane_comparison": [
+    {
+      "lane": "active_stream_sequential_guard",
+      "baseline_run_medians": [
+        21.50625,
+        54.0625
+      ],
+      "candidate_run_medians": [
+        20.06875,
+        32.4375
+      ],
+      "baseline_pooled_median": 30.706249999999997,
+      "candidate_pooled_median": 26.925,
+      "delta_percent": -12.314268267860761,
+      "poll32_median": 39.3,
+      "poll32_vs_baseline_percent": 27.986973336047228
+    },
+    {
+      "lane": "concurrent_burst_guard",
+      "baseline_run_medians": [
+        9.861328125,
+        13.314453125
+      ],
+      "candidate_run_medians": [
+        9.96875,
+        12.130859375
+      ],
+      "baseline_pooled_median": 10.2470703125,
+      "candidate_pooled_median": 11.330078125,
+      "delta_percent": 10.568950729057459,
+      "poll32_median": 15.154296875,
+      "poll32_vs_baseline_percent": 47.88906890307825
+    },
+    {
+      "lane": "constraint_error_fidelity",
+      "baseline_run_medians": [
+        11.822916666666666,
+        8.541666666666666
+      ],
+      "candidate_run_medians": [
+        36.072916666666664,
+        40.010416666666664
+      ],
+      "baseline_pooled_median": 11.447916666666668,
+      "candidate_pooled_median": 38.91145833333333,
+      "delta_percent": 239.8999090081892,
+      "poll32_median": 44.833333333333336,
+      "poll32_vs_baseline_percent": 291.6287534121929
+    },
+    {
+      "lane": "sequential_no_stream_noop_update",
+      "baseline_run_medians": [
+        5.920833333333333,
+        10.2125
+      ],
+      "candidate_run_medians": [
+        10.9,
+        16.615
+      ],
+      "baseline_pooled_median": 6.684166666666666,
+      "candidate_pooled_median": 12.475416666666668,
+      "delta_percent": 86.64131654407183,
+      "poll32_median": 21.701666666666668,
+      "poll32_vs_baseline_percent": 224.67273407305828
+    },
+    {
+      "lane": "sequential_no_stream_point_update",
+      "baseline_run_medians": [
+        16.917,
+        31.515
+      ],
+      "candidate_run_medians": [
+        19.453,
+        25.585
+      ],
+      "baseline_pooled_median": 19.543999999999997,
+      "candidate_pooled_median": 22.984,
+      "delta_percent": 17.60130986492021,
+      "poll32_median": 37.214,
+      "poll32_vs_baseline_percent": 90.41137945149408
+    },
+    {
+      "lane": "sequential_no_stream_small_insert",
+      "baseline_run_medians": [
+        16.051666666666666,
+        21.935
+      ],
+      "candidate_run_medians": [
+        17.225,
+        19.538333333333334
+      ],
+      "baseline_pooled_median": 16.560000000000002,
+      "candidate_pooled_median": 18.571666666666665,
+      "delta_percent": 12.147745571658586,
+      "poll32_median": 34.61666666666667,
+      "poll32_vs_baseline_percent": 109.0378421900161
+    },
+    {
+      "lane": "slow_write_miss_path",
+      "baseline_run_medians": [
+        6116,
+        9316
+      ],
+      "candidate_run_medians": [
+        6592.25,
+        6812
+      ],
+      "baseline_pooled_median": 7641.375,
+      "candidate_pooled_median": 6702.125,
+      "delta_percent": -12.291635994830774,
+      "poll32_median": 9007,
+      "poll32_vs_baseline_percent": 17.87145638055978
+    },
+    {
+      "lane": "transaction_guard",
+      "baseline_run_medians": [
+        42.86666666666667,
+        27.883333333333333
+      ],
+      "candidate_run_medians": [
+        35.016666666666666,
+        39.916666666666664
+      ],
+      "baseline_pooled_median": 40.24166666666667,
+      "candidate_pooled_median": 38.45,
+      "delta_percent": -4.452267550217426,
+      "poll32_median": 56.416666666666664,
+      "poll32_vs_baseline_percent": 40.19465727893974
+    }
+  ],
+  "guard_and_jitter_summaries": [
+    {
+      "label": "aot-candidate-a2",
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1706,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 28756.87322336176,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16003,
+        "p95_callback_gap_us": 16535,
+        "p99_callback_gap_us": 19803,
+        "max_callback_gap_us": 25729,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 2499
+      }
+    },
+    {
+      "label": "aot-candidate-a1",
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1372,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 18313.780234637183,
+        "expected_frames": 268,
+        "timer_callbacks": 278,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 15999,
+        "p95_callback_gap_us": 17156,
+        "p99_callback_gap_us": 21094,
+        "max_callback_gap_us": 33609,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 351
+      }
+    },
+    {
+      "label": "aot-baseline-b2",
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1731,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 45892.054772603035,
+        "expected_frames": 267,
+        "timer_callbacks": 270,
+        "missed_frames": 3,
+        "missed_frame_ratio": 0.011235955056179775,
+        "p50_callback_gap_us": 16057,
+        "p95_callback_gap_us": 17179,
+        "p99_callback_gap_us": 21766,
+        "max_callback_gap_us": 95692,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 1389,
+        "max_callback_lateness_us": 1839
+      }
+    },
+    {
+      "label": "aot-candidate-poll32",
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1500,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 42361.080095218604,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16000,
+        "p95_callback_gap_us": 16239,
+        "p99_callback_gap_us": 16861,
+        "max_callback_gap_us": 19945,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 194
+      }
+    },
+    {
+      "label": "aot-baseline-b1",
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1244,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 53203.708999904666,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16034,
+        "p95_callback_gap_us": 17048,
+        "p99_callback_gap_us": 17153,
+        "max_callback_gap_us": 18055,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 411,
+        "max_callback_lateness_us": 1388
+      }
+    }
+  ],
+  "runs": [
+    {
+      "experiment": "writer_completion_catch",
+      "label": "aot-baseline-b1",
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "frame_period_us": 16667,
+      "pid": 85822,
+      "lanes": {
+        "sequential_no_stream_noop_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1200,
+          "samples_elapsed_us": [
+            8515,
+            7527,
+            7151,
+            7059,
+            7105,
+            7092,
+            6977
+          ],
+          "samples_us_per_unit": [
+            7.095833333333333,
+            6.2725,
+            5.9591666666666665,
+            5.8825,
+            5.920833333333333,
+            5.91,
+            5.814166666666667
+          ],
+          "min_us_per_unit": 5.814166666666667,
+          "median_us_per_unit": 5.920833333333333,
+          "p90_us_per_unit": 6.2725,
+          "max_us_per_unit": 7.095833333333333
+        },
+        "sequential_no_stream_point_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1000,
+          "samples_elapsed_us": [
+            16064,
+            15500,
+            16917,
+            20723,
+            17279,
+            16546,
+            17222
+          ],
+          "samples_us_per_unit": [
+            16.064,
+            15.5,
+            16.917,
+            20.723,
+            17.279,
+            16.546,
+            17.222
+          ],
+          "min_us_per_unit": 15.5,
+          "median_us_per_unit": 16.917,
+          "p90_us_per_unit": 17.279,
+          "max_us_per_unit": 20.723
+        },
+        "sequential_no_stream_small_insert": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 600,
+          "samples_elapsed_us": [
+            10050,
+            9636,
+            10061,
+            9631,
+            9369,
+            8915,
+            9513
+          ],
+          "samples_us_per_unit": [
+            16.75,
+            16.06,
+            16.768333333333334,
+            16.051666666666666,
+            15.615,
+            14.858333333333333,
+            15.855
+          ],
+          "min_us_per_unit": 14.858333333333333,
+          "median_us_per_unit": 16.051666666666666,
+          "p90_us_per_unit": 16.75,
+          "max_us_per_unit": 16.768333333333334
+        },
+        "active_stream_sequential_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 160,
+          "samples_elapsed_us": [
+            3441,
+            3543,
+            3787,
+            2995,
+            4457,
+            3141,
+            3244
+          ],
+          "samples_us_per_unit": [
+            21.50625,
+            22.14375,
+            23.66875,
+            18.71875,
+            27.85625,
+            19.63125,
+            20.275
+          ],
+          "min_us_per_unit": 18.71875,
+          "median_us_per_unit": 21.50625,
+          "p90_us_per_unit": 23.66875,
+          "max_us_per_unit": 27.85625
+        },
+        "concurrent_burst_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 512,
+          "bursts_per_sample": 16,
+          "writes_per_burst": 32,
+          "samples_elapsed_us": [
+            5016,
+            5219,
+            5088,
+            5032,
+            5069,
+            4948,
+            5049
+          ],
+          "samples_us_per_unit": [
+            9.796875,
+            10.193359375,
+            9.9375,
+            9.828125,
+            9.900390625,
+            9.6640625,
+            9.861328125
+          ],
+          "min_us_per_unit": 9.6640625,
+          "median_us_per_unit": 9.861328125,
+          "p90_us_per_unit": 9.9375,
+          "max_us_per_unit": 10.193359375
+        },
+        "transaction_guard": {
+          "unit": "transaction",
+          "samples": 7,
+          "units_per_sample": 60,
+          "writes_per_transaction": 3,
+          "writes_per_sample": 180,
+          "samples_elapsed_us": [
+            2831,
+            3202,
+            2260,
+            2469,
+            2360,
+            2572,
+            3340
+          ],
+          "samples_us_per_unit": [
+            47.18333333333333,
+            53.36666666666667,
+            37.666666666666664,
+            41.15,
+            39.333333333333336,
+            42.86666666666667,
+            55.666666666666664
+          ],
+          "min_us_per_unit": 37.666666666666664,
+          "median_us_per_unit": 42.86666666666667,
+          "p90_us_per_unit": 53.36666666666667,
+          "max_us_per_unit": 55.666666666666664
+        },
+        "slow_write_miss_path": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 4,
+          "rows_per_write": 20000,
+          "samples_elapsed_us": [
+            23590,
+            22875,
+            24516,
+            24183,
+            24464,
+            27224,
+            27333
+          ],
+          "samples_us_per_unit": [
+            5897.5,
+            5718.75,
+            6129,
+            6045.75,
+            6116,
+            6806,
+            6833.25
+          ],
+          "min_us_per_unit": 5718.75,
+          "median_us_per_unit": 6116,
+          "p90_us_per_unit": 6806,
+          "max_us_per_unit": 6833.25
+        },
+        "constraint_error_fidelity": {
+          "unit": "error",
+          "samples": 7,
+          "units_per_sample": 96,
+          "samples_elapsed_us": [
+            1133,
+            1065,
+            1144,
+            1135,
+            3356,
+            1064,
+            1206
+          ],
+          "samples_us_per_unit": [
+            11.802083333333334,
+            11.09375,
+            11.916666666666666,
+            11.822916666666666,
+            34.958333333333336,
+            11.083333333333334,
+            12.5625
+          ],
+          "min_us_per_unit": 11.083333333333334,
+          "median_us_per_unit": 11.822916666666666,
+          "p90_us_per_unit": 12.5625,
+          "max_us_per_unit": 34.958333333333336
+        }
+      },
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1244,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter_60hz": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 53203.708999904666,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16034,
+        "p95_callback_gap_us": 17048,
+        "p99_callback_gap_us": 17153,
+        "max_callback_gap_us": 18055,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 411,
+        "max_callback_lateness_us": 1388
+      },
+      "jitter_runs_detail": [
+        {
+          "run": 1,
+          "elapsed_us": 1500019,
+          "writes": 89895,
+          "writes_per_second": 59929.24089628198,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16032,
+          "p95_callback_gap_us": 17030,
+          "p99_callback_gap_us": 17153,
+          "max_callback_gap_us": 18051,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 397,
+          "max_callback_lateness_us": 1384
+        },
+        {
+          "run": 2,
+          "elapsed_us": 1500802,
+          "writes": 78978,
+          "writes_per_second": 52623.86377416874,
+          "frame_period_us": 16667,
+          "expected_frames": 90,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16034,
+          "p95_callback_gap_us": 17047,
+          "p99_callback_gap_us": 18004,
+          "max_callback_gap_us": 18055,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 178,
+          "max_callback_lateness_us": 1388
+        },
+        {
+          "run": 3,
+          "elapsed_us": 1500027,
+          "writes": 79807,
+          "writes_per_second": 53203.708999904666,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16035,
+          "p95_callback_gap_us": 17052,
+          "p99_callback_gap_us": 17078,
+          "max_callback_gap_us": 17083,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 411,
+          "max_callback_lateness_us": 775
+        }
+      ]
+    },
+    {
+      "experiment": "writer_completion_catch",
+      "label": "aot-candidate-a1",
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "frame_period_us": 16667,
+      "pid": 85880,
+      "lanes": {
+        "sequential_no_stream_noop_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1200,
+          "samples_elapsed_us": [
+            18139,
+            22053,
+            11547,
+            10876,
+            12322,
+            13080,
+            14014
+          ],
+          "samples_us_per_unit": [
+            15.115833333333333,
+            18.3775,
+            9.6225,
+            9.063333333333333,
+            10.268333333333333,
+            10.9,
+            11.678333333333333
+          ],
+          "min_us_per_unit": 9.063333333333333,
+          "median_us_per_unit": 10.9,
+          "p90_us_per_unit": 15.115833333333333,
+          "max_us_per_unit": 18.3775
+        },
+        "sequential_no_stream_point_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1000,
+          "samples_elapsed_us": [
+            19453,
+            17922,
+            16033,
+            23927,
+            19555,
+            20873,
+            18089
+          ],
+          "samples_us_per_unit": [
+            19.453,
+            17.922,
+            16.033,
+            23.927,
+            19.555,
+            20.873,
+            18.089
+          ],
+          "min_us_per_unit": 16.033,
+          "median_us_per_unit": 19.453,
+          "p90_us_per_unit": 20.873,
+          "max_us_per_unit": 23.927
+        },
+        "sequential_no_stream_small_insert": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 600,
+          "samples_elapsed_us": [
+            10335,
+            9461,
+            10414,
+            10029,
+            11395,
+            9773,
+            10536
+          ],
+          "samples_us_per_unit": [
+            17.225,
+            15.768333333333333,
+            17.356666666666666,
+            16.715,
+            18.991666666666667,
+            16.288333333333334,
+            17.56
+          ],
+          "min_us_per_unit": 15.768333333333333,
+          "median_us_per_unit": 17.225,
+          "p90_us_per_unit": 17.56,
+          "max_us_per_unit": 18.991666666666667
+        },
+        "active_stream_sequential_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 160,
+          "samples_elapsed_us": [
+            3181,
+            4243,
+            3104,
+            3139,
+            3809,
+            3211,
+            4373
+          ],
+          "samples_us_per_unit": [
+            19.88125,
+            26.51875,
+            19.4,
+            19.61875,
+            23.80625,
+            20.06875,
+            27.33125
+          ],
+          "min_us_per_unit": 19.4,
+          "median_us_per_unit": 20.06875,
+          "p90_us_per_unit": 26.51875,
+          "max_us_per_unit": 27.33125
+        },
+        "concurrent_burst_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 512,
+          "bursts_per_sample": 16,
+          "writes_per_burst": 32,
+          "samples_elapsed_us": [
+            5228,
+            4947,
+            5061,
+            5107,
+            5090,
+            5104,
+            5538
+          ],
+          "samples_us_per_unit": [
+            10.2109375,
+            9.662109375,
+            9.884765625,
+            9.974609375,
+            9.94140625,
+            9.96875,
+            10.81640625
+          ],
+          "min_us_per_unit": 9.662109375,
+          "median_us_per_unit": 9.96875,
+          "p90_us_per_unit": 10.2109375,
+          "max_us_per_unit": 10.81640625
+        },
+        "transaction_guard": {
+          "unit": "transaction",
+          "samples": 7,
+          "units_per_sample": 60,
+          "writes_per_transaction": 3,
+          "writes_per_sample": 180,
+          "samples_elapsed_us": [
+            2567,
+            5230,
+            3036,
+            2101,
+            2066,
+            1904,
+            1638
+          ],
+          "samples_us_per_unit": [
+            42.78333333333333,
+            87.16666666666667,
+            50.6,
+            35.016666666666666,
+            34.43333333333333,
+            31.733333333333334,
+            27.3
+          ],
+          "min_us_per_unit": 27.3,
+          "median_us_per_unit": 35.016666666666666,
+          "p90_us_per_unit": 50.6,
+          "max_us_per_unit": 87.16666666666667
+        },
+        "slow_write_miss_path": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 4,
+          "rows_per_write": 20000,
+          "samples_elapsed_us": [
+            31197,
+            24375,
+            26369,
+            26076,
+            24593,
+            27977,
+            27575
+          ],
+          "samples_us_per_unit": [
+            7799.25,
+            6093.75,
+            6592.25,
+            6519,
+            6148.25,
+            6994.25,
+            6893.75
+          ],
+          "min_us_per_unit": 6093.75,
+          "median_us_per_unit": 6592.25,
+          "p90_us_per_unit": 6994.25,
+          "max_us_per_unit": 7799.25
+        },
+        "constraint_error_fidelity": {
+          "unit": "error",
+          "samples": 7,
+          "units_per_sample": 96,
+          "samples_elapsed_us": [
+            3463,
+            3384,
+            3279,
+            3223,
+            3599,
+            3789,
+            4012
+          ],
+          "samples_us_per_unit": [
+            36.072916666666664,
+            35.25,
+            34.15625,
+            33.572916666666664,
+            37.489583333333336,
+            39.46875,
+            41.791666666666664
+          ],
+          "min_us_per_unit": 33.572916666666664,
+          "median_us_per_unit": 36.072916666666664,
+          "p90_us_per_unit": 39.46875,
+          "max_us_per_unit": 41.791666666666664
+        }
+      },
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1372,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter_60hz": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 18313.780234637183,
+        "expected_frames": 268,
+        "timer_callbacks": 278,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 15999,
+        "p95_callback_gap_us": 17156,
+        "p99_callback_gap_us": 21094,
+        "max_callback_gap_us": 33609,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 351
+      },
+      "jitter_runs_detail": [
+        {
+          "run": 1,
+          "elapsed_us": 1500113,
+          "writes": 65173,
+          "writes_per_second": 43445.39378033522,
+          "frame_period_us": 16667,
+          "expected_frames": 90,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 15999,
+          "p95_callback_gap_us": 16257,
+          "p99_callback_gap_us": 17102,
+          "max_callback_gap_us": 21094,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 0
+        },
+        {
+          "run": 2,
+          "elapsed_us": 1500018,
+          "writes": 27471,
+          "writes_per_second": 18313.780234637183,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16002,
+          "p95_callback_gap_us": 17631,
+          "p99_callback_gap_us": 19619,
+          "max_callback_gap_us": 21902,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 0
+        },
+        {
+          "run": 3,
+          "elapsed_us": 1500017,
+          "writes": 21206,
+          "writes_per_second": 14137.173112038063,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 92,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 15999,
+          "p95_callback_gap_us": 18420,
+          "p99_callback_gap_us": 23778,
+          "max_callback_gap_us": 33609,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 351
+        }
+      ]
+    },
+    {
+      "experiment": "writer_completion_catch",
+      "label": "aot-candidate-a2",
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "frame_period_us": 16667,
+      "pid": 86422,
+      "lanes": {
+        "sequential_no_stream_noop_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1200,
+          "samples_elapsed_us": [
+            40691,
+            14034,
+            20721,
+            15391,
+            21945,
+            14550,
+            19938
+          ],
+          "samples_us_per_unit": [
+            33.909166666666664,
+            11.695,
+            17.2675,
+            12.825833333333334,
+            18.2875,
+            12.125,
+            16.615
+          ],
+          "min_us_per_unit": 11.695,
+          "median_us_per_unit": 16.615,
+          "p90_us_per_unit": 18.2875,
+          "max_us_per_unit": 33.909166666666664
+        },
+        "sequential_no_stream_point_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1000,
+          "samples_elapsed_us": [
+            22506,
+            25585,
+            25624,
+            28416,
+            32214,
+            24363,
+            23462
+          ],
+          "samples_us_per_unit": [
+            22.506,
+            25.585,
+            25.624,
+            28.416,
+            32.214,
+            24.363,
+            23.462
+          ],
+          "min_us_per_unit": 22.506,
+          "median_us_per_unit": 25.585,
+          "p90_us_per_unit": 28.416,
+          "max_us_per_unit": 32.214
+        },
+        "sequential_no_stream_small_insert": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 600,
+          "samples_elapsed_us": [
+            11279,
+            11435,
+            11723,
+            11007,
+            12636,
+            24015,
+            19849
+          ],
+          "samples_us_per_unit": [
+            18.798333333333332,
+            19.058333333333334,
+            19.538333333333334,
+            18.345,
+            21.06,
+            40.025,
+            33.08166666666666
+          ],
+          "min_us_per_unit": 18.345,
+          "median_us_per_unit": 19.538333333333334,
+          "p90_us_per_unit": 33.08166666666666,
+          "max_us_per_unit": 40.025
+        },
+        "active_stream_sequential_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 160,
+          "samples_elapsed_us": [
+            4476,
+            5243,
+            5190,
+            4465,
+            4040,
+            5930,
+            5359
+          ],
+          "samples_us_per_unit": [
+            27.975,
+            32.76875,
+            32.4375,
+            27.90625,
+            25.25,
+            37.0625,
+            33.49375
+          ],
+          "min_us_per_unit": 25.25,
+          "median_us_per_unit": 32.4375,
+          "p90_us_per_unit": 33.49375,
+          "max_us_per_unit": 37.0625
+        },
+        "concurrent_burst_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 512,
+          "bursts_per_sample": 16,
+          "writes_per_burst": 32,
+          "samples_elapsed_us": [
+            6211,
+            6370,
+            6073,
+            6190,
+            6319,
+            6064,
+            6324
+          ],
+          "samples_us_per_unit": [
+            12.130859375,
+            12.44140625,
+            11.861328125,
+            12.08984375,
+            12.341796875,
+            11.84375,
+            12.3515625
+          ],
+          "min_us_per_unit": 11.84375,
+          "median_us_per_unit": 12.130859375,
+          "p90_us_per_unit": 12.3515625,
+          "max_us_per_unit": 12.44140625
+        },
+        "transaction_guard": {
+          "unit": "transaction",
+          "samples": 7,
+          "units_per_sample": 60,
+          "writes_per_transaction": 3,
+          "writes_per_sample": 180,
+          "samples_elapsed_us": [
+            2755,
+            3025,
+            2219,
+            2491,
+            2198,
+            2192,
+            2395
+          ],
+          "samples_us_per_unit": [
+            45.916666666666664,
+            50.416666666666664,
+            36.983333333333334,
+            41.516666666666666,
+            36.63333333333333,
+            36.53333333333333,
+            39.916666666666664
+          ],
+          "min_us_per_unit": 36.53333333333333,
+          "median_us_per_unit": 39.916666666666664,
+          "p90_us_per_unit": 45.916666666666664,
+          "max_us_per_unit": 50.416666666666664
+        },
+        "slow_write_miss_path": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 4,
+          "rows_per_write": 20000,
+          "samples_elapsed_us": [
+            24790,
+            23297,
+            26311,
+            28722,
+            27248,
+            28348,
+            29400
+          ],
+          "samples_us_per_unit": [
+            6197.5,
+            5824.25,
+            6577.75,
+            7180.5,
+            6812,
+            7087,
+            7350
+          ],
+          "min_us_per_unit": 5824.25,
+          "median_us_per_unit": 6812,
+          "p90_us_per_unit": 7180.5,
+          "max_us_per_unit": 7350
+        },
+        "constraint_error_fidelity": {
+          "unit": "error",
+          "samples": 7,
+          "units_per_sample": 96,
+          "samples_elapsed_us": [
+            3897,
+            3841,
+            3700,
+            4260,
+            3771,
+            3633,
+            4339
+          ],
+          "samples_us_per_unit": [
+            40.59375,
+            40.010416666666664,
+            38.541666666666664,
+            44.375,
+            39.28125,
+            37.84375,
+            45.197916666666664
+          ],
+          "min_us_per_unit": 37.84375,
+          "median_us_per_unit": 40.010416666666664,
+          "p90_us_per_unit": 44.375,
+          "max_us_per_unit": 45.197916666666664
+        }
+      },
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1706,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter_60hz": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 28756.87322336176,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16003,
+        "p95_callback_gap_us": 16535,
+        "p99_callback_gap_us": 19803,
+        "max_callback_gap_us": 25729,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 2499
+      },
+      "jitter_runs_detail": [
+        {
+          "run": 1,
+          "elapsed_us": 1500012,
+          "writes": 34486,
+          "writes_per_second": 22990.482742804725,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16003,
+          "p95_callback_gap_us": 16996,
+          "p99_callback_gap_us": 18633,
+          "max_callback_gap_us": 19803,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 0
+        },
+        {
+          "run": 2,
+          "elapsed_us": 1500175,
+          "writes": 44311,
+          "writes_per_second": 29537.220657589947,
+          "frame_period_us": 16667,
+          "expected_frames": 90,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 15998,
+          "p95_callback_gap_us": 16330,
+          "p99_callback_gap_us": 21858,
+          "max_callback_gap_us": 24470,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 2499
+        },
+        {
+          "run": 3,
+          "elapsed_us": 1500024,
+          "writes": 43136,
+          "writes_per_second": 28756.87322336176,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16011,
+          "p95_callback_gap_us": 16230,
+          "p99_callback_gap_us": 17177,
+          "max_callback_gap_us": 25729,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 358
+        }
+      ]
+    },
+    {
+      "experiment": "writer_completion_catch",
+      "label": "aot-baseline-b2",
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "frame_period_us": 16667,
+      "pid": 86848,
+      "lanes": {
+        "sequential_no_stream_noop_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1200,
+          "samples_elapsed_us": [
+            13968,
+            10615,
+            11870,
+            14380,
+            14548,
+            12255,
+            7239
+          ],
+          "samples_us_per_unit": [
+            11.64,
+            8.845833333333333,
+            9.891666666666667,
+            11.983333333333333,
+            12.123333333333333,
+            10.2125,
+            6.0325
+          ],
+          "min_us_per_unit": 6.0325,
+          "median_us_per_unit": 10.2125,
+          "p90_us_per_unit": 11.983333333333333,
+          "max_us_per_unit": 12.123333333333333
+        },
+        "sequential_no_stream_point_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1000,
+          "samples_elapsed_us": [
+            29695,
+            27782,
+            18365,
+            42371,
+            34236,
+            31515,
+            35973
+          ],
+          "samples_us_per_unit": [
+            29.695,
+            27.782,
+            18.365,
+            42.371,
+            34.236,
+            31.515,
+            35.973
+          ],
+          "min_us_per_unit": 18.365,
+          "median_us_per_unit": 31.515,
+          "p90_us_per_unit": 35.973,
+          "max_us_per_unit": 42.371
+        },
+        "sequential_no_stream_small_insert": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 600,
+          "samples_elapsed_us": [
+            9822,
+            13161,
+            16189,
+            11979,
+            8700,
+            29287,
+            20353
+          ],
+          "samples_us_per_unit": [
+            16.37,
+            21.935,
+            26.981666666666666,
+            19.965,
+            14.5,
+            48.81166666666667,
+            33.92166666666667
+          ],
+          "min_us_per_unit": 14.5,
+          "median_us_per_unit": 21.935,
+          "p90_us_per_unit": 33.92166666666667,
+          "max_us_per_unit": 48.81166666666667
+        },
+        "active_stream_sequential_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 160,
+          "samples_elapsed_us": [
+            5369,
+            12618,
+            6598,
+            10402,
+            15459,
+            8650,
+            8185
+          ],
+          "samples_us_per_unit": [
+            33.55625,
+            78.8625,
+            41.2375,
+            65.0125,
+            96.61875,
+            54.0625,
+            51.15625
+          ],
+          "min_us_per_unit": 33.55625,
+          "median_us_per_unit": 54.0625,
+          "p90_us_per_unit": 78.8625,
+          "max_us_per_unit": 96.61875
+        },
+        "concurrent_burst_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 512,
+          "bursts_per_sample": 16,
+          "writes_per_burst": 32,
+          "samples_elapsed_us": [
+            6817,
+            6518,
+            11562,
+            6357,
+            9203,
+            5274,
+            7130
+          ],
+          "samples_us_per_unit": [
+            13.314453125,
+            12.73046875,
+            22.58203125,
+            12.416015625,
+            17.974609375,
+            10.30078125,
+            13.92578125
+          ],
+          "min_us_per_unit": 10.30078125,
+          "median_us_per_unit": 13.314453125,
+          "p90_us_per_unit": 17.974609375,
+          "max_us_per_unit": 22.58203125
+        },
+        "transaction_guard": {
+          "unit": "transaction",
+          "samples": 7,
+          "units_per_sample": 60,
+          "writes_per_transaction": 3,
+          "writes_per_sample": 180,
+          "samples_elapsed_us": [
+            1875,
+            5546,
+            1318,
+            1673,
+            1533,
+            1343,
+            2537
+          ],
+          "samples_us_per_unit": [
+            31.25,
+            92.43333333333334,
+            21.966666666666665,
+            27.883333333333333,
+            25.55,
+            22.383333333333333,
+            42.28333333333333
+          ],
+          "min_us_per_unit": 21.966666666666665,
+          "median_us_per_unit": 27.883333333333333,
+          "p90_us_per_unit": 42.28333333333333,
+          "max_us_per_unit": 92.43333333333334
+        },
+        "slow_write_miss_path": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 4,
+          "rows_per_write": 20000,
+          "samples_elapsed_us": [
+            34375,
+            37264,
+            35955,
+            33798,
+            49420,
+            81537,
+            63455
+          ],
+          "samples_us_per_unit": [
+            8593.75,
+            9316,
+            8988.75,
+            8449.5,
+            12355,
+            20384.25,
+            15863.75
+          ],
+          "min_us_per_unit": 8449.5,
+          "median_us_per_unit": 9316,
+          "p90_us_per_unit": 15863.75,
+          "max_us_per_unit": 20384.25
+        },
+        "constraint_error_fidelity": {
+          "unit": "error",
+          "samples": 7,
+          "units_per_sample": 96,
+          "samples_elapsed_us": [
+            3426,
+            1516,
+            818,
+            820,
+            824,
+            799,
+            798
+          ],
+          "samples_us_per_unit": [
+            35.6875,
+            15.791666666666666,
+            8.520833333333334,
+            8.541666666666666,
+            8.583333333333334,
+            8.322916666666666,
+            8.3125
+          ],
+          "min_us_per_unit": 8.3125,
+          "median_us_per_unit": 8.541666666666666,
+          "p90_us_per_unit": 15.791666666666666,
+          "max_us_per_unit": 35.6875
+        }
+      },
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1731,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter_60hz": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 45892.054772603035,
+        "expected_frames": 267,
+        "timer_callbacks": 270,
+        "missed_frames": 3,
+        "missed_frame_ratio": 0.011235955056179775,
+        "p50_callback_gap_us": 16057,
+        "p95_callback_gap_us": 17179,
+        "p99_callback_gap_us": 21766,
+        "max_callback_gap_us": 95692,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 1389,
+        "max_callback_lateness_us": 1839
+      },
+      "jitter_runs_detail": [
+        {
+          "run": 1,
+          "elapsed_us": 1500011,
+          "writes": 62657,
+          "writes_per_second": 41771.02701246858,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 86,
+          "missed_frames": 3,
+          "p50_callback_gap_us": 16050,
+          "p95_callback_gap_us": 17354,
+          "p99_callback_gap_us": 56639,
+          "max_callback_gap_us": 95692,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 566,
+          "max_callback_lateness_us": 1409
+        },
+        {
+          "run": 2,
+          "elapsed_us": 1500020,
+          "writes": 68839,
+          "writes_per_second": 45892.054772603035,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16060,
+          "p95_callback_gap_us": 17061,
+          "p99_callback_gap_us": 17855,
+          "max_callback_gap_us": 18056,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 776,
+          "max_callback_lateness_us": 1389
+        },
+        {
+          "run": 3,
+          "elapsed_us": 1500020,
+          "writes": 71631,
+          "writes_per_second": 47753.36328848948,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 91,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16059,
+          "p95_callback_gap_us": 17102,
+          "p99_callback_gap_us": 18291,
+          "max_callback_gap_us": 46494,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 1510,
+          "max_callback_lateness_us": 1839
+        }
+      ]
+    },
+    {
+      "experiment": "writer_completion_catch",
+      "label": "aot-candidate-poll32",
+      "samples": 7,
+      "warmup_ops": 1200,
+      "workload_divisor": 1,
+      "jitter_runs": 3,
+      "jitter_duration_ms": 1500,
+      "frame_period_us": 16667,
+      "pid": 87587,
+      "lanes": {
+        "sequential_no_stream_noop_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1200,
+          "samples_elapsed_us": [
+            28014,
+            17499,
+            24613,
+            27431,
+            21507,
+            26042,
+            32013
+          ],
+          "samples_us_per_unit": [
+            23.345,
+            14.5825,
+            20.510833333333334,
+            22.859166666666667,
+            17.9225,
+            21.701666666666668,
+            26.6775
+          ],
+          "min_us_per_unit": 14.5825,
+          "median_us_per_unit": 21.701666666666668,
+          "p90_us_per_unit": 23.345,
+          "max_us_per_unit": 26.6775
+        },
+        "sequential_no_stream_point_update": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 1000,
+          "samples_elapsed_us": [
+            40205,
+            37214,
+            33322,
+            32886,
+            37974,
+            34710,
+            38371
+          ],
+          "samples_us_per_unit": [
+            40.205,
+            37.214,
+            33.322,
+            32.886,
+            37.974,
+            34.71,
+            38.371
+          ],
+          "min_us_per_unit": 32.886,
+          "median_us_per_unit": 37.214,
+          "p90_us_per_unit": 38.371,
+          "max_us_per_unit": 40.205
+        },
+        "sequential_no_stream_small_insert": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 600,
+          "samples_elapsed_us": [
+            16319,
+            42485,
+            25487,
+            33229,
+            20770,
+            12263,
+            16970
+          ],
+          "samples_us_per_unit": [
+            27.198333333333334,
+            70.80833333333334,
+            42.47833333333333,
+            55.38166666666667,
+            34.61666666666667,
+            20.438333333333333,
+            28.283333333333335
+          ],
+          "min_us_per_unit": 20.438333333333333,
+          "median_us_per_unit": 34.61666666666667,
+          "p90_us_per_unit": 55.38166666666667,
+          "max_us_per_unit": 70.80833333333334
+        },
+        "active_stream_sequential_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 160,
+          "samples_elapsed_us": [
+            7696,
+            6231,
+            4707,
+            6519,
+            6288,
+            6159,
+            6906
+          ],
+          "samples_us_per_unit": [
+            48.1,
+            38.94375,
+            29.41875,
+            40.74375,
+            39.3,
+            38.49375,
+            43.1625
+          ],
+          "min_us_per_unit": 29.41875,
+          "median_us_per_unit": 39.3,
+          "p90_us_per_unit": 43.1625,
+          "max_us_per_unit": 48.1
+        },
+        "concurrent_burst_guard": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 512,
+          "bursts_per_sample": 16,
+          "writes_per_burst": 32,
+          "samples_elapsed_us": [
+            7441,
+            9056,
+            8179,
+            6369,
+            9297,
+            7759,
+            6467
+          ],
+          "samples_us_per_unit": [
+            14.533203125,
+            17.6875,
+            15.974609375,
+            12.439453125,
+            18.158203125,
+            15.154296875,
+            12.630859375
+          ],
+          "min_us_per_unit": 12.439453125,
+          "median_us_per_unit": 15.154296875,
+          "p90_us_per_unit": 17.6875,
+          "max_us_per_unit": 18.158203125
+        },
+        "transaction_guard": {
+          "unit": "transaction",
+          "samples": 7,
+          "units_per_sample": 60,
+          "writes_per_transaction": 3,
+          "writes_per_sample": 180,
+          "samples_elapsed_us": [
+            4403,
+            3384,
+            3385,
+            1931,
+            2268,
+            4820,
+            3823
+          ],
+          "samples_us_per_unit": [
+            73.38333333333334,
+            56.4,
+            56.416666666666664,
+            32.18333333333333,
+            37.8,
+            80.33333333333333,
+            63.71666666666667
+          ],
+          "min_us_per_unit": 32.18333333333333,
+          "median_us_per_unit": 56.416666666666664,
+          "p90_us_per_unit": 73.38333333333334,
+          "max_us_per_unit": 80.33333333333333
+        },
+        "slow_write_miss_path": {
+          "unit": "write",
+          "samples": 7,
+          "units_per_sample": 4,
+          "rows_per_write": 20000,
+          "samples_elapsed_us": [
+            36811,
+            33552,
+            26881,
+            27572,
+            36028,
+            39603,
+            52760
+          ],
+          "samples_us_per_unit": [
+            9202.75,
+            8388,
+            6720.25,
+            6893,
+            9007,
+            9900.75,
+            13190
+          ],
+          "min_us_per_unit": 6720.25,
+          "median_us_per_unit": 9007,
+          "p90_us_per_unit": 9900.75,
+          "max_us_per_unit": 13190
+        },
+        "constraint_error_fidelity": {
+          "unit": "error",
+          "samples": 7,
+          "units_per_sample": 96,
+          "samples_elapsed_us": [
+            4113,
+            4304,
+            4259,
+            4254,
+            4425,
+            4597,
+            4333
+          ],
+          "samples_us_per_unit": [
+            42.84375,
+            44.833333333333336,
+            44.364583333333336,
+            44.3125,
+            46.09375,
+            47.885416666666664,
+            45.135416666666664
+          ],
+          "min_us_per_unit": 42.84375,
+          "median_us_per_unit": 44.833333333333336,
+          "p90_us_per_unit": 46.09375,
+          "max_us_per_unit": 47.885416666666664
+        }
+      },
+      "guards": {
+        "active_stream": {
+          "passed": true,
+          "emissions": 1500,
+          "final_stream_value": 2320,
+          "expected_final_value": 2320
+        },
+        "constraint_error": {
+          "passed": true,
+          "caught_errors": 672,
+          "sqlite_code": 19,
+          "sql_preserved": true,
+          "parameters_preserved": true,
+          "writer_recovered": true
+        }
+      },
+      "jitter_60hz": {
+        "completed": true,
+        "runs": 3,
+        "frame_period_us": 16667,
+        "median_writes_per_second": 42361.080095218604,
+        "expected_frames": 268,
+        "timer_callbacks": 279,
+        "missed_frames": 0,
+        "missed_frame_ratio": 0,
+        "p50_callback_gap_us": 16000,
+        "p95_callback_gap_us": 16239,
+        "p99_callback_gap_us": 16861,
+        "max_callback_gap_us": 19945,
+        "p50_callback_lateness_us": 0,
+        "p95_callback_lateness_us": 0,
+        "p99_callback_lateness_us": 0,
+        "max_callback_lateness_us": 194
+      },
+      "jitter_runs_detail": [
+        {
+          "run": 1,
+          "elapsed_us": 1500020,
+          "writes": 41250,
+          "writes_per_second": 27499.633338222156,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16000,
+          "p95_callback_gap_us": 16433,
+          "p99_callback_gap_us": 16861,
+          "max_callback_gap_us": 18564,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 194
+        },
+        {
+          "run": 2,
+          "elapsed_us": 1500127,
+          "writes": 63547,
+          "writes_per_second": 42361.080095218604,
+          "frame_period_us": 16667,
+          "expected_frames": 90,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 16001,
+          "p95_callback_gap_us": 16069,
+          "p99_callback_gap_us": 16424,
+          "max_callback_gap_us": 19945,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 0
+        },
+        {
+          "run": 3,
+          "elapsed_us": 1500027,
+          "writes": 72386,
+          "writes_per_second": 48256.464716968425,
+          "frame_period_us": 16667,
+          "expected_frames": 89,
+          "timer_callbacks": 93,
+          "missed_frames": 0,
+          "p50_callback_gap_us": 15999,
+          "p95_callback_gap_us": 16097,
+          "p99_callback_gap_us": 16309,
+          "max_callback_gap_us": 17088,
+          "p50_callback_lateness_us": 0,
+          "p95_callback_lateness_us": 0,
+          "p99_callback_lateness_us": 0,
+          "max_callback_lateness_us": 0
+        }
+      ]
+    }
+  ]
+}

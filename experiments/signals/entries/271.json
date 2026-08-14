@@ -1,0 +1,55 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "regression",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "Exp 184 was right that shared memory is the remaining structural way to observe writer completion without moving SQLite onto the caller, but a shared ready flag is not a wakeup primitive. The exp 271 mailbox caught 69.9% of eligible completions; end-to-end AOT still regressed no-op writes by 84.1% and 62.7% and continuous-write throughput by 65.6% and 37.3%. Catch rate is mechanism evidence, not a value metric.",
+    "A large writer-residual percentage does not imply a large absolute waiting budget. Current main completes the AOT no-op lane in 5.9-10.2 us and point updates in 16.9-31.5 us. A 24 us active poll therefore spends as much or more caller time as the port path it tries to avoid; raising it to 32 us made every target worse.",
+    "The error miss path is a first-class gate for speculative completion. Failed SQLite statements never publish a success slot, so they always consume the full poll before their canonical typed error. Constraint-error latency regressed 205.1% and 368.4% across the order pair, and the 32 us arm was worse again. Do not add predictors or error latches to rescue a spin design that already loses its cheapest success lane.",
+    "A per-event-turn token bounded each synchronous polling burst, but the candidate is not proven heartbeat-safe. Dart 3.12.2 truncated the requested 16,667 us period to 16 ms: A1/A2 delivered 278/279 and 279/279 effective deadlines, with p99/max gaps of 21.094/33.609 ms and 19.803/25.729 ms. The originally emitted missed-frame field used the wrong effective period and is discarded. Tested stream, transaction, group, slow-miss, typed-error, and close paths passed, while an earlier-batch/later-catch completion-order question remains unresolved.",
+    "The durable successor gate is now a public-API harness with sequential no-op, point-update and insert lanes plus active-stream, concurrent, transaction, slow-write, constraint-error and 16 ms heartbeat guards. Future completion-transport work must use native-asset-aware AOT in both orders; JIT samples showed material within-run warm-up drift."
+  ],
+  "claims": [
+    {
+      "id": "271.1",
+      "text": "A single-producer C11-atomic writer completion mailbox can be observed from the main Dart isolate before the canonical reply-port event without running SQLite on main. At the 24 us default, a 5,000-write diagnostic attempted 3,818 polls and caught 2,669 completions (69.9%) with 17.8 us mean polling time.",
+      "conditions": "M1 Pro class arm64 macOS host, Dart 3.12.2 JIT diagnostic, no active streams, scalar no-op point update, one mailbox per Writer, 2026-08-14",
+      "edges": []
+    },
+    {
+      "id": "271.2",
+      "text": "Bounded active polling does not improve sequential writer wall on the current runtime. Native-asset-aware AOT B-A-A-B measured no-op writes at +84.1% and +62.7%; point updates at +15.0% and -18.8%; small inserts at +7.3% and -10.9%. No target win reproduced in both orders against the required 15% gate.",
+      "conditions": "origin/main 5555dfa versus archive/exp-271 cbc6a7f, 7 samples per lane per pass, 1,200 no-op / 1,000 point / 600 insert operations per sample, run order B1-A1-A2-B2, arm64 macOS, Dart 3.12.2 AOT CLI bundles, 2026-08-14",
+      "edges": []
+    },
+    {
+      "id": "271.3",
+      "text": "Speculative success polling structurally penalizes errors because they never publish the completion slot. Constraint-error latency regressed from 11.823 to 36.073 us (+205.1%) in the first order and from 8.542 to 40.010 us (+368.4%) in the second; SQLite code 19, SQL, parameters, and recovery all remained correct.",
+      "conditions": "Same AOT B-A-A-B as claim 271.2, 96 errors per sample, 7 samples per pass, 672 verified errors per run, 24 us attempt budget, 2026-08-14",
+      "edges": []
+    },
+    {
+      "id": "271.4",
+      "text": "Increasing the completion poll from 24 to 32 us does not rescue the mechanism. One full AOT arm measured 21.702 us no-op, 37.214 us point update, 34.617 us insert, and 44.833 us constraint error, worse than both baseline pass medians on every decision lane.",
+      "conditions": "Exact archive/exp-271 candidate with only RESQLITE_WRITE_COMPLETION_POLL_US default changed 24 to 32, full 7-sample harness, arm64 macOS, Dart 3.12.2 AOT, 2026-08-14",
+      "edges": []
+    },
+    {
+      "id": "271.5",
+      "text": "The per-turn cap kept candidate heartbeat callbacks live but did not prevent throughput loss. At the VM's effective 16 ms period, A1/A2 delivered 278/279 and 279/279 deadlines with p99/max gaps of 21.094/33.609 ms and 19.803/25.729 ms, while continuous sequential throughput fell 53,204 to 18,314 writes/s (-65.6%) and 45,892 to 28,757 writes/s (-37.3%). The originally emitted missed-frame count used the requested rather than effective period and is not evidence.",
+      "conditions": "Three 1.5-second timer runs per harness pass, requested 16,667 us and effective 16,000 us period on Dart 3.12.2, same AOT B-A-A-B as claim 271.2; B2 delivered 270/279 with a separate 95.692 ms host-noise gap, 2026-08-14",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "Do not retry shared-memory completion with a longer spin, a larger per-turn budget, or a success/error predictor. Reopen only for a wait/notify or park/wake primitive that does not burn caller-isolate time, or representative downstream evidence of a much larger sequential-write floor.",
+    "Use benchmark/experiments/writer_completion_catch.dart for any future writer-completion transport. The load-bearing gates are both-order AOT no-op/point/insert wall, constraint-error latency and fidelity, continuous 16 ms heartbeat delivery, active streams, coalesced groups, transactions, slow misses, and close ordering.",
+    "Do not use completion catch rate as an acceptance metric. Exp 271 caught 69.9% and still lost end-to-end; compare public Future completion wall against the exact parent commit.",
+    "Treat JIT writer microbenchmarks as exploratory only. Exp 271's JIT samples improved materially within a pass despite warmup, while native-asset-aware AOT supplied the decisive result.",
+    "Keep SQLite on the writer isolate. Exp 271 avoided exp 265/269's caller-isolate SQLite hazard; its rejection is about active waiting cost, not permission to revive synchronous arbitrary SQLite work on main."
+  ],
+  "blockedOnMeasurement": []
+}
