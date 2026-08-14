@@ -98,6 +98,26 @@ typedef struct {
     long long last_insert_id;
 } resqlite_write_result;
 
+// Opaque cross-isolate write completion mailbox. Dart owns the allocation;
+// use resqlite_write_completion_size() to allocate enough suitably aligned
+// storage, then initialize it before first use. A successful try_read does not
+// consume the value: reset the mailbox before publishing the next completion.
+int resqlite_write_completion_size(void);
+void resqlite_write_completion_init(void* mailbox);
+void resqlite_write_completion_reset(void* mailbox);
+void resqlite_write_completion_publish(
+    void* mailbox,
+    int affected_rows,
+    int64_t last_insert_id,
+    int64_t writer_sqlite_us
+);
+int resqlite_write_completion_try_read(
+    void* mailbox,
+    int* out_affected_rows,
+    int64_t* out_last_insert_id,
+    int64_t* out_writer_sqlite_us
+);
+
 // Execute a simple statement with no params (DDL, simple DML).
 int resqlite_exec(resqlite_db* db, const char* sql);
 

@@ -1029,7 +1029,7 @@ Usage:
 Options:
   --label=NAME              Label stored in the final JSON result.
   --samples=N               Timed samples per latency lane (default 7).
-  --warmup-ops=N            Fast writes used to warm each lane (default 96).
+  --warmup-ops=N            Fast writes used to warm each lane (default 1200).
   --workload-divisor=N      Divide default lane sizes by N.
   --jitter-runs=N           60 Hz write-chain runs (default 3).
   --jitter-ms=N             Duration of each jitter run (default 1500).

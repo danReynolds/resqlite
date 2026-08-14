@@ -117,6 +117,49 @@ external int resqliteExecute(
   ffi.Pointer<ffi.Uint8> outResult,
 );
 
+@ffi.Native<ffi.Int Function()>(
+  symbol: 'resqlite_write_completion_size',
+  isLeaf: true,
+)
+external int resqliteWriteCompletionSize();
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_write_completion_init',
+  isLeaf: true,
+)
+external void resqliteWriteCompletionInit(ffi.Pointer<ffi.Void> mailbox);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Void>)>(
+  symbol: 'resqlite_write_completion_reset',
+  isLeaf: true,
+)
+external void resqliteWriteCompletionReset(ffi.Pointer<ffi.Void> mailbox);
+
+@ffi.Native<
+  ffi.Void Function(ffi.Pointer<ffi.Void>, ffi.Int, ffi.Int64, ffi.Int64)
+>(symbol: 'resqlite_write_completion_publish', isLeaf: true)
+external void resqliteWriteCompletionPublish(
+  ffi.Pointer<ffi.Void> mailbox,
+  int affectedRows,
+  int lastInsertId,
+  int writerSqliteUs,
+);
+
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Int>,
+    ffi.Pointer<ffi.Int64>,
+    ffi.Pointer<ffi.Int64>,
+  )
+>(symbol: 'resqlite_write_completion_try_read', isLeaf: true)
+external int resqliteWriteCompletionTryRead(
+  ffi.Pointer<ffi.Void> mailbox,
+  ffi.Pointer<ffi.Int> outAffectedRows,
+  ffi.Pointer<ffi.Int64> outLastInsertId,
+  ffi.Pointer<ffi.Int64> outWriterSqliteUs,
+);
+
 @ffi.Native<
   ffi.Int Function(
     ffi.Pointer<ffi.Void>,

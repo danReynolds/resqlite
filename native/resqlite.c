@@ -804,6 +804,77 @@ sqlite3* resqlite_writer_handle(resqlite_db* db) {
     return db->writer;
 }
 
+// [EXP-271] Heap-backed single-producer/single-consumer completion mailbox.
+// The ready flag is the publication boundary: payload writes happen before the
+// release store, and an acquiring reader may inspect them only after observing
+// ready == 1. Dart owns and eventually frees the opaque allocation.
+typedef struct {
+    atomic_int ready;
+    int affected_rows;
+    int64_t last_insert_id;
+    int64_t writer_sqlite_us;
+} resqlite_write_completion;
+
+int resqlite_write_completion_size(void) {
+    return (int)sizeof(resqlite_write_completion);
+}
+
+void resqlite_write_completion_init(void* mailbox) {
+    if (!mailbox) return;
+    resqlite_write_completion* completion =
+        (resqlite_write_completion*)mailbox;
+    completion->affected_rows = 0;
+    completion->last_insert_id = 0;
+    completion->writer_sqlite_us = 0;
+    atomic_init(&completion->ready, 0);
+}
+
+void resqlite_write_completion_reset(void* mailbox) {
+    if (!mailbox) return;
+    resqlite_write_completion* completion =
+        (resqlite_write_completion*)mailbox;
+    atomic_store_explicit(&completion->ready, 0, memory_order_relaxed);
+}
+
+void resqlite_write_completion_publish(
+    void* mailbox,
+    int affected_rows,
+    int64_t last_insert_id,
+    int64_t writer_sqlite_us
+) {
+    if (!mailbox) return;
+    resqlite_write_completion* completion =
+        (resqlite_write_completion*)mailbox;
+    completion->affected_rows = affected_rows;
+    completion->last_insert_id = last_insert_id;
+    completion->writer_sqlite_us = writer_sqlite_us;
+    atomic_store_explicit(&completion->ready, 1, memory_order_release);
+}
+
+int resqlite_write_completion_try_read(
+    void* mailbox,
+    int* out_affected_rows,
+    int64_t* out_last_insert_id,
+    int64_t* out_writer_sqlite_us
+) {
+    if (!mailbox) return 0;
+    resqlite_write_completion* completion =
+        (resqlite_write_completion*)mailbox;
+    if (!atomic_load_explicit(&completion->ready, memory_order_acquire)) {
+        return 0;
+    }
+    if (out_affected_rows) {
+        *out_affected_rows = completion->affected_rows;
+    }
+    if (out_last_insert_id) {
+        *out_last_insert_id = completion->last_insert_id;
+    }
+    if (out_writer_sqlite_us) {
+        *out_writer_sqlite_us = completion->writer_sqlite_us;
+    }
+    return 1;
+}
+
 int resqlite_exec(resqlite_db* db, const char* sql) {
     if (!db || atomic_load_explicit(&db->closed, memory_order_acquire)) {
         return SQLITE_MISUSE;
