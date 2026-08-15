@@ -1,0 +1,38 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
+  "experimentClass": "measurement",
+  "changedBeliefs": [
+    "The 32-entry per-isolate `cachedSqlUtf8` LRU is mechanically out of alignment with exp 267's 128-entry statement, schema and row-hint caches, but cache-cap alignment is not itself product value. Three captured downstream Dune flow traces spanning five test lifecycles recorded 911 accesses across 25 isolate lifetimes; all 316 repeats had one-based reuse rank at most 32, so replay at 128 rescued zero of 595 misses and zero SQL bytes. The implementation premise is refuted for the measured flows and no runtime cap change ships.",
+    "Total or lifetime-unique SQL is the wrong incidence measure for an isolate-local LRU. The message writer used 77 unique identities and each canvas writer used 79, yet every repeated access still fell within the 32 most recently used identities. Cold migrations and feature breadth can make a database look diverse without creating the reusable 33-128 working set this candidate needs.",
+    "Claim 267.1 remains live: a genuinely cyclic working set beyond the adjacent statement-cache cap has a sharp performance cliff. For the UTF-8 pointer cache it supplies an eligible workload, not a measured per-miss saving. Shipping this separate capacity raise requires per-isolate reuse-rank incidence, measured conversion/free cost and aggregate representative impact.",
+    "The premise-refuted measurement escape applies before an implementation A/B when the trace makes the candidate mechanically inert. With zero rescued accesses, operation frequency times eligible share times per-hit saving is zero; timing a 100%-eligible synthetic cycle would not repair the missing product-value term."
+  ],
+  "claims": [
+    {
+      "id": "272.1",
+      "text": "Three captured downstream Dune flow traces spanning five test lifecycles produced 911 `cachedSqlUtf8` accesses across 25 current-process reader/writer isolate lifetimes. There were 595 first-touch misses and 316 repeated accesses; all 316 repeats had exact one-based LRU rank 1-32, with zero at 33-128 or above 128 and a maximum rank of 19. Replaying at capacity 128 therefore rescued zero misses and zero SQL bytes, while the 32-entry replay matched the real hit bit on all 911 events.",
+      "conditions": "Apple M1 Pro, macOS 26.2, Dart 3.12.2, Resqlite 2e182044, Dune 75fd6467, JIT integration tests for admin onboarding, message round-trip, and canvas sync/lifecycle, synchronous trace of current-process worker isolates, 2026-08-15",
+      "edges": []
+    },
+    {
+      "id": "272.2",
+      "text": "Lifetime SQL diversity does not establish pressure on an LRU cache. The message-round-trip writer recorded 77 unique SQL identities in 146 calls, and two canvas writers recorded 79 unique identities in 116 and 104 calls, yet none of their repeated accesses had one-based reuse rank above 32.",
+      "conditions": "Same traces as claim 272.1; identity is exact SQL UTF-8 bytes and one-based reuse rank is computed separately per isolate"
+    },
+    {
+      "id": "272.3",
+      "text": "The current source has a real capacity mismatch: each isolate's SQL UTF-8 native-pointer LRU is capped at 32 while the native prepared-statement cache, worker schema cache, and pool row-size memory are capped at 128. Raising the pointer cache to 128 can avoid allocation only for reused SQL with one-based per-isolate rank 33-128; no such access occurred in the exp 272 traces.",
+      "conditions": "Resqlite origin/main 2e182044; lib/src/native/request_cache.dart, native/resqlite.c, lib/src/query_decoder.dart, lib/src/reader/reader_pool.dart; 2026-08-15"
+    }
+  ],
+  "nextSignals": [
+    "Do not raise `_sqlCacheMax` from a synthetic rotate40/64/128 result or from a count of unique SQL. Reopen investigation when a longer, lower-perturbation downstream trace records SQL identity per reader/writer isolate and finds nonzero one-based reuse rank 33-128.",
+    "A reopening trace must replay independent 32- and 128-entry LRUs, report incremental misses and rescued SQL byte lengths, and combine them with call frequency and measured `toNativeUtf8` plus eviction/free cost. Bound the retained memory of 96 extra Dart string keys and native UTF-8 buffers per isolate before implementation.",
+    "If incidence appears, implement only when frequency times rescued share times measured conversion/free saving predicts at least 3% representative wall impact. Choose the smallest trace-supported cap and require at least 3% in both orders of two independent order-flipped AOT pairs; rank-at-most-32, point, unique-churn and above-cap controls must show no reproduced regression of 3% or more, with bounded RSS.",
+    "The current evidence covers short deterministic JIT Dune tests and current-process worker stderr only. Synchronous logging can change availability-based reader assignment, so reader sequences describe captured instrumented routing; the FIFO writer evidence is stronger. Hours-long dogfood, a broader downstream AOT lifecycle, or a different application can legitimately reopen the candidate."
+  ]
+}
