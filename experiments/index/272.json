@@ -1,0 +1,7 @@
+{
+  "file": "272-sql-utf8-cache-incidence.md",
+  "title": "Trace the SQL UTF-8 cache boundary",
+  "impact": "Measurement: rejected, premise refuted. Exp 267 raised the native statement, worker schema, and pool row-hint SQL-keyed caches from 32 to 128, while each isolate's cachedSqlUtf8 pointer LRU remained at 32. Raising that pointer cache can avoid repeated native UTF-8 allocation only at one-based reuse rank 33-128. Three captured Dune flow traces spanning five test lifecycles recorded 911 accesses across 25 reader/writer isolate lifetimes: 595 first-touch misses and 316 repeats, all 316 within rank 32 and none above rank 19. Replaying the exact per-isolate sequences at 128 rescued zero misses and zero SQL bytes, and the 32-entry replay matched the real hit bit on 911/911 events. Writers still saw as many as 79 unique SQL identities, proving that total diversity is not a reusable working-set measurement. The temporary tracer and SQL-bearing logs were removed; an anonymized event stream and offline analyzer remain, and no runtime candidate ships. Reopen from nonzero downstream reuse at rank 33-128; adopt only if predicted and both-order AOT wall impact reach 3% with neutral controls and bounded RSS.",
+  "status": "rejected",
+  "link": ""
+}
