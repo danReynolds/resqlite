@@ -29,13 +29,24 @@ import 'dart:io';
 import 'package:resqlite/resqlite.dart';
 
 Future<void> main(List<String> args) async {
-  const trials = 60;
+  var trials = 60;
+  var raw = false;
+  for (final arg in args) {
+    if (arg.startsWith('--trials=')) {
+      trials = int.parse(arg.substring('--trials='.length));
+    } else if (arg == '--raw') {
+      raw = true;
+    } else {
+      throw ArgumentError('unknown argument: $arg');
+    }
+  }
+  if (trials < 1) throw ArgumentError('--trials must be >= 1');
   for (final hetero in [false, true]) {
     final label = hetero ? 'hetero-10large+90small' : 'homogeneous-100small';
     final h = await _LatencyHarness.open(hetero: hetero);
     try {
       final samples = await h.trials(trials: trials);
-      _report(label, samples);
+      _report(label, samples, raw: raw);
     } finally {
       await h.close();
     }
@@ -53,13 +64,16 @@ double _p95(List<double> xs) {
   return s[((s.length - 1) * 0.95).round()];
 }
 
-void _report(String label, List<double> samples) {
+void _report(String label, List<double> samples, {required bool raw}) {
   print(
     '$label  single-write emit latency ms: '
     'p50=${_median(samples).toStringAsFixed(3)} '
     'p95=${_p95(samples).toStringAsFixed(3)} '
     '(n=${samples.length})',
   );
+  if (raw) {
+    print('$label samples_ms=${samples.join(',')}');
+  }
 }
 
 class _LatencyHarness {
