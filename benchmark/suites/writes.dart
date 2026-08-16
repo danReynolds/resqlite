@@ -283,14 +283,6 @@ Future<String> runWritesBenchmark() async {
       }
     }
 
-    // EXP-273's AOT bundle intentionally packages only Resqlite's native
-    // asset. The sections below construct sqlite_async directly instead of
-    // going through PeerSet, so stop after the shared release write shapes;
-    // transaction coverage is supplied by tx_body_write_coalescing.dart.
-    if (Platform.environment['RESQLITE_BENCH_ONLY'] == '1') {
-      return markdown.toString();
-    }
-
     // -----------------------------------------------------------------
     // Transaction with mixed read + write
     // -----------------------------------------------------------------

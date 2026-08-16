@@ -15,7 +15,7 @@
 //
 // See benchmark/EXPERIMENTS.md for the experiment-mode workflow.
 import 'dart:convert';
-import 'dart:io' show Directory, File, Platform, Process, exit, stderr;
+import 'dart:io' show Directory, File, Process, exit, stderr;
 
 import 'shared/baseline_compatibility.dart';
 import 'shared/benchmark_environment.dart';
@@ -525,15 +525,7 @@ Future<String> _runSuiteOnce({
   await step('Point Query', runPointQueryBenchmark);
   await step('Parameterized Queries', runParameterizedBenchmark);
   await step('Writes', runWritesBenchmark);
-  if (Platform.environment['RESQLITE_BENCH_ONLY'] == '1') {
-    await step('Streaming (focused separately)', () async {
-      return '## Streaming\n\n'
-          'Skipped in the Resqlite-only AOT bundle; the durable '
-          '`stream_rerun_latency.dart` harness supplies this gate.\n\n';
-    });
-  } else {
-    await step('Streaming', runStreamingBenchmark);
-  }
+  await step('Streaming', runStreamingBenchmark);
   await step('Streaming (Column Granularity)', runDisjointColumnsBenchmark);
   await step('Keyed PK Subscriptions (A11)', runKeyedPkSubscriptionsBenchmark);
   await step('Chat Sim (A5)', runChatSimBenchmark);

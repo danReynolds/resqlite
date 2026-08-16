@@ -31,9 +31,11 @@ it records a rejection under the predeclared pair-replication rule.
 
 ## Raw log inventory
 
-All logs are under
-`2026-08-16T10-45-55Z-exp273-stream-adjudication-raw/` and are exact copies of
-the ten `/private/tmp/resqlite-exp273/logs/stream-adj-*.log` inputs.
+The ten exact logs are preserved only on `archive/exp-273`, under
+`2026-08-16T10-45-55Z-exp273-stream-adjudication-raw/`. They are byte-identical
+copies of the `/private/tmp/resqlite-exp273/logs/stream-adj-*.log` inputs; the
+publication branch keeps this inventory and aggregate receipt without shipping
+the raw process logs.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |

@@ -44,10 +44,6 @@ void main(List<String> args) async {
     final traceliteRoot = traceSqlite
         ? input.userDefines.path('tracelite_root')?.toFilePath()
         : null;
-    final pgoGenerateDirectory = input.userDefines.path(
-      'pgo_generate_directory',
-    );
-    final pgoUseProfile = input.userDefines.path('pgo_use_profile');
 
     if (traceSqlite) {
       if (traceliteRoot == null || !Directory(traceliteRoot).existsSync()) {
@@ -55,36 +51,6 @@ void main(List<String> args) async {
           'resqlite trace_sqlite=true requires user define '
           '`tracelite_root` pointing at a tracelite checkout.',
         );
-      }
-    }
-
-    if (pgoGenerateDirectory != null && pgoUseProfile != null) {
-      throw StateError(
-        'resqlite PGO generation and profile use are mutually exclusive.',
-      );
-    }
-    if (pgoGenerateDirectory != null || pgoUseProfile != null) {
-      if (traceSqlite) {
-        throw StateError(
-          'resqlite PGO cannot be combined with trace_sqlite because the '
-          'traced SQLite ABI does not match the release native asset.',
-        );
-      }
-      if (targetOS != OS.macOS) {
-        throw UnsupportedError(
-          'resqlite continuous PGO experiment currently supports macOS only.',
-        );
-      }
-      if (pgoGenerateDirectory != null) {
-        Directory.fromUri(pgoGenerateDirectory).createSync(recursive: true);
-      } else if (!File.fromUri(pgoUseProfile!).existsSync()) {
-        throw StateError(
-          'resqlite pgo_use_profile does not exist: '
-          '${pgoUseProfile.toFilePath()}',
-        );
-      }
-      if (pgoUseProfile != null) {
-        output.dependencies.add(pgoUseProfile);
       }
     }
 
@@ -244,8 +210,6 @@ ${sorted.map((s) => '    $s;').join('\n')}
         'SQLITE_OMIT_TRACE': null,
         'SQLITE_OMIT_UTF16': null, // we only use UTF-8 via FFI
         if (traceSqlite) 'TRACELITE_SQLITE3_EMBEDDED': null,
-        if (pgoGenerateDirectory != null || pgoUseProfile != null)
-          'RESQLITE_PGO': null,
       },
       flags: [
         if (targetOS == OS.windows) '/experimental:c11atomics',
@@ -269,30 +233,6 @@ ${sorted.map((s) => '    $s;').join('\n')}
           '-headerpad_max_install_names',
           '-install_name',
           '@rpath/libresqlite.dylib',
-        ],
-
-        // LLVM's Darwin continuous mode persists counters even when the Dart
-        // VM terminates worker isolates without running native atexit hooks.
-        // Continuous mode does not support value profiling, so generation and
-        // use must both disable it to keep the indexed profile compatible.
-        if (pgoGenerateDirectory != null) ...[
-          '-fprofile-generate=${pgoGenerateDirectory.toFilePath()}',
-          '-fprofile-continuous',
-          '-fprofile-update=atomic',
-          '-mllvm',
-          '-disable-vp',
-          '-mllvm',
-          '-static-func-full-module-prefix=false',
-        ],
-        if (pgoUseProfile != null) ...[
-          '-fprofile-use=${pgoUseProfile.toFilePath()}',
-          '-mllvm',
-          '-disable-vp',
-          '-mllvm',
-          '-static-func-full-module-prefix=false',
-          '-Werror=profile-instr-out-of-date',
-          '-Werror=profile-instr-unprofiled',
-          '-Werror=backend-plugin',
         ],
       ],
       std: targetOS == OS.windows ? 'c11' : 'gnu11',

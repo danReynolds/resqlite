@@ -1,0 +1,7 @@
+{
+  "file": "273-continuous-pgo-recheck.md",
+  "title": "Recheck continuous profile-guided optimization",
+  "impact": "Performance: rejected under a predeclared important-lane guard despite broad positive evidence. Apple Clang 21 continuous counter profiles retire exp 054's dylib-exit blocker, and a strict macOS arm64 PGO-use build improved 65 release wall/QPS lanes by a combined 5.65%, improved the 44 native/floor-filtered lanes by 7.54%, reproduced about 5.5% higher focused point QPS, left focused transaction checks neutral-to-faster, and reduced dylib size 15.04%. The decisive fixed-binary homogeneous stream adjudication regressed by at least 3% and 0.02 ms in three of five 300-trial pairs (2, 4, and 5), triggering the exact rejection rule. Pooled homogeneous p50 was only +1.53%/+0.017 ms and its bootstrap interval crossed zero, so the record does not claim a stable intrinsic slowdown; pooling cannot replace the declared adjacent-pair rule. Shipping also requires hidden LLVM controls, atomic training, cross-worktree proof, and source/compiler/target-specific profiles or fallbacks. Exact prototype/profile go to `archive/exp-273`; publication keeps only generalized stream measurement support and evidence.",
+  "status": "rejected",
+  "link": ""
+}

@@ -1251,6 +1251,24 @@ believing a suite result, check whether the suite ever produces a miss. If the
 eligible share is 100% by construction, the lane measures the ceiling and the
 adoption question is still unanswered.*
 
+### A profile-guided win includes the profile's lifecycle in its cost
+
+[Exp 273](273-continuous-pgo-recheck.md) made continuous PGO work inside a Dart-loaded
+macOS dylib and measured broad 9-19% native-path wins. It still did not produce
+a product exploit: the source/compiler/target-matched profile needs permanent
+retraining and provenance machinery, and homogeneous stream p50 crossed the
+declared >=3% and >=0.02 ms boundary in three of five 300-trial pairs. The
+pooled delta was only +1.53% with a confidence interval spanning zero, so this
+is a replicated-gate failure amid phase variance, not proof of a stable
+slowdown. The candidate was not just `-fprofile-use`; it was the training
+corpus, generated artifact, compatibility contract, fallback policy, and every
+narrow regression guard together.
+
+*Reapplies to PGO, BOLT, generated tuning tables, and other build-time
+optimization artifacts. Count generation, versioning, validation, and fallback
+as implementation complexity, honor the declared replicated guard, and report
+pooled uncertainty so a kill decision is not overstated as a stable effect.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
