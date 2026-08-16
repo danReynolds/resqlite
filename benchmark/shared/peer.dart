@@ -697,11 +697,18 @@ final class PeerSet {
     if (!tempDir.existsSync()) {
       await tempDir.create(recursive: true);
     }
+    // EXP-273: an AOT bundle built for Resqlite's native PGO experiment does
+    // not package the benchmark-only peers' native assets. Keep every release
+    // scenario intact while selecting only the library whose native asset is
+    // under test. Normal release runs remain four-way by default.
+    final resqliteOnly = Platform.environment['RESQLITE_BENCH_ONLY'] == '1';
     final candidates = <BenchmarkPeer>[
       ResqlitePeer(),
-      Sqlite3Peer(),
-      SqliteAsyncPeer(),
-      if (driftFactory != null) DriftPeer(driftFactory),
+      if (!resqliteOnly) ...[
+        Sqlite3Peer(),
+        SqliteAsyncPeer(),
+        if (driftFactory != null) DriftPeer(driftFactory),
+      ],
     ];
     final chosen = require == null
         ? candidates

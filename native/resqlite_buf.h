@@ -12,7 +12,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(RESQLITE_PGO)
+// PGO's measured function counts own hotness. Keeping manual hot attributes
+// would override a representative profile and produce backend warnings when a
+// rare guard path is correctly cold. Normal O3 builds retain the annotations.
 #define RESQLITE_HOT
 #else
 #define RESQLITE_HOT __attribute__((hot))
