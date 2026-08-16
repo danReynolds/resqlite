@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 63,
-    "totalEntries": 144
+    "entriesWithClaims": 64,
+    "totalEntries": 145
   },
   "experiments": [
     {
@@ -2206,6 +2206,17 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "273",
+      "title": "Recheck continuous profile-guided optimization",
+      "file": "273-continuous-pgo-recheck.md",
+      "date": "2026-08-16",
+      "status": "rejected",
+      "directions": [
+        "sqlite-version-and-build-config"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -3725,6 +3736,39 @@
       ],
       "text": "The current source has a real capacity mismatch: each isolate's SQL UTF-8 native-pointer LRU is capped at 32 while the native prepared-statement cache, worker schema cache, and pool row-size memory are capped at 128. Raising the pointer cache to 128 can avoid allocation only for reused SQL with one-based per-isolate rank 33-128; no such access occurred in the exp 272 traces.",
       "conditions": "Resqlite origin/main 2e182044; lib/src/native/request_cache.dart, native/resqlite.c, lib/src/query_decoder.dart, lib/src/reader/reader_pool.dart; 2026-08-15",
+      "state": "live"
+    },
+    {
+      "id": "273.1",
+      "source": "273",
+      "directions": [
+        "sqlite-version-and-build-config"
+      ],
+      "text": "Apple clang 21 continuous instrumentation can generate a usable Resqlite PGO profile from a Dart-loaded dylib. Three representative AOT inputs merged into a 522,568-byte indexed profile covering 2,406 functions, 31,934 blocks, and 2,556,436,455 counter events; strict `-fprofile-use` then built without stale-profile, unprofiled-function, or backend warnings.",
+      "conditions": "Apple clang/llvm-profdata 21.0.0, Xcode 26.6, arm64 macOS 26.2, Dart 3.12.2, source 02592093e6b6; counter-only continuous mode with atomic updates, value profiling disabled, and stable static-function profile keys; 2026-08-16",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "273.2",
+      "source": "273",
+      "directions": [
+        "sqlite-version-and-build-config"
+      ],
+      "text": "Representative counter-only PGO produced same-direction broad native-path wins in both comparisons of a B-C-C-B AOT release run: executeBatch at 100/1,000/10,000 rows improved -14.6%/-12.5%, -16.7%/-16.8%, and -19.2%/-19.3%; the 10,000 x 20 wide batch improved -12.4%/-9.2%, parameterized reads -10.6%/-10.4%, and selectBytes at 1,000/10,000 rows -9.2%/-9.3% and -8.6%/-7.9%.",
+      "conditions": "Separate baseline and PGO AOT native-asset bundles from source 02592093e6b6, baseline-candidate-candidate-baseline order, one full Resqlite-only release pass per arm, same Apple M1 Pro host; 2026-08-16",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "273.3",
+      "source": "273",
+      "directions": [
+        "sqlite-version-and-build-config"
+      ],
+      "text": "The PGO candidate failed the preregistered homogeneous stream-emission kill rule: p50 regression of at least 3% and at least 0.02 ms in at least three of five adjacent 300-trial AOT pairs. Pair p50 deltas were -9.63%, +4.38% (+0.0465 ms), -15.61%, +43.37% (+0.3285 ms), and +11.69% (+0.1315 ms), so pairs 2/4/5 satisfied both thresholds. The pooled delta was +1.53% with a confidence interval spanning zero; the evidence is a declared replicated-gate failure amid phase variance, not proof of a stable slowdown.",
+      "conditions": "`benchmark/experiments/stream_rerun_latency.dart --trials=300 --raw`, five adjacent baseline/candidate process pairs, `homogeneous-100small` single-write emission p50, arm64 macOS; predeclared kill rule requires both >=3% and >=0.02 ms candidate regression in >=3/5 pairs; 2026-08-16",
+      "edges": [],
       "state": "live"
     }
   ]
