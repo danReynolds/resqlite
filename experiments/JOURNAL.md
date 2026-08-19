@@ -1269,6 +1269,41 @@ optimization artifacts. Count generation, versioning, validation, and fallback
 as implementation complexity, honor the declared replicated guard, and report
 pooled uncertainty so a kill decision is not overstated as a stable effect.*
 
+### Count the queue before you schedule it
+
+[Exp 275](275-cost-aware-read-admission.md) gave `ReaderPool` a cost-aware
+admission policy and measured it working: a point read issued into a saturated
+pool went from 256-374 us to 52-65 us, and cheap reads queued behind large ones
+finished 37-42% sooner from reordering alone. Then one counter over one release
+suite pass ended it — 335,221 reader dispatches, 312 of which parked for a
+worker at all, and **zero** cheap reads parked behind a costly one. The policy
+was correct, reproduced in every pass, and scheduled a queue that does not form.
+The counter cost ten minutes; the two arms, three AOT binaries and two
+collections that preceded it cost the rest of the run.
+
+*Reapplies to anything that changes an ORDER rather than a cost — priority,
+fairness, cost classes, sharding, reservation, work stealing, batching by
+queue depth. The eligible population is not "operations of this kind", it is
+"operations that actually contend", and those are usually far rarer. One
+counter on the contention path, run first, is cheaper than an A/B that can only
+tell you the reordering works.*
+
+### A lane that saturates a pool must time the first request alone
+
+Exp 265's `point-under-load` lane issues four large reads to fill the pool, then
+times ten point reads and reports their sum. Only the first of the ten waits:
+sticky dispatch ([exp 266](266-sticky-reader-dispatch.md)) sends the whole
+sequential run back to whichever worker freed first, so reads two through ten
+measure an idle pool in every arm. That was right for exp 265, whose candidate
+took all ten off the pool. It was wrong for [exp 275](275-cost-aware-read-admission.md),
+which changed only who waits: on identical binaries the summed lane read -13%
+and the first-read-only lane read -75%.
+
+*Reapplies whenever a lane establishes a contended condition and then measures
+repeatedly inside it. Check whether the condition survives the first
+measurement. If the treatment consumes the contention it was measuring, every
+later repeat is a control being averaged into the result.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
