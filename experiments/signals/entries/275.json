@@ -1,0 +1,56 @@
+{
+  "directions": ["stream-rerun-dispatch", "result-transfer-shape"],
+  "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "We believed the admission half of exp 265's round-trip price (claim 265.2) was unreachable without moving SQLite to the calling isolate, because the three experiments that attacked it — 265, 269, 270 — all did so by removing the worker. That is now false as a statement about mechanism: scheduling the wait rather than removing it collects 75-86% of a point read's latency behind a saturated pool, with no caller-isolate SQLite, no staleness contract and no starvation. A reader of exps 265/269/270 should stop treating 'the pool is busy' latency as intrinsically coupled to the transport question; it is a scheduling property and it is separable.",
+    "We also believed, without ever measuring it, that reader-pool queueing is a real cost on real workloads — the premise under exps 105, 114, 118, 120, 239 and 249 and under this one. It is not, at the pool's shipped width. One full release-suite pass measured 335,221 dispatches, 325,909 of them cheap by a 64-row classifier, 312 cheap reads that parked at all, and zero that parked behind a costly waiter. Exps 118 and 120 reported dispatcherParkedTotal at zero for stream workloads specifically; the general statement is stronger and it is what closes this experiment. Anyone reading those experiments as 'streams stopped parking the dispatcher' should read them instead as 'four workers exceed what these workloads ask for at once'.",
+    "The reservation arm's rejection is the fourth instance of one pattern, and the pattern should now be assumed rather than rediscovered. Exps 197, 213, 239 and 249 each proved a mechanism and each died because the mechanism silently spent one caller's cost on another's benefit. Exp 275's reservation buys point-read latency with a reproduced +47 to +63% on four concurrent large reads. A reader of any of those five writeups should treat 'hidden policy that reallocates cost between callers' as rejected by default, and require an explicit caller-visible mode before measuring it.",
+    "Exp 265's `point-under-load` lane is not a reusable measurement for admission work and its methodology passage should not be copied. It sums ten point reads issued after the pool is saturated, but sticky dispatch (exp 266) puts reads two through ten on a worker that has already freed, so nine of the ten measure an idle pool in every arm. That was correct for exp 265, whose candidate removed all ten from the pool, and wrong for anything that changes only who waits: measured that way this candidate read -13% instead of -75%.",
+    "Exp 239's stated reopen condition — 'a reliable private cost signal' — has been satisfiable since exps 260/264 shipped RowSizeMemory.highWater, and nobody noticed because the signal was built in a different direction for buffer sizing. It is available on the dispatch fast path, one line above the worker scan, and classifying a statement from it costs nothing measurable. Future readers of exp 239 should know the blocker it named is gone; what remains blocking is incidence, which is a different objection."
+  ],
+  "claims": [
+    {
+      "id": "275.1",
+      "text": "Reader-pool admission ordering has effectively zero incidence on the repo's representative workloads. One full `benchmark/run_release.dart --repeat=1` pass — chat sim, feed paging, concurrent reads 4x/8x, streaming fan-out, keyed-PK subscriptions, diagnostics and memory scenarios — recorded 335,221 reader dispatches, of which 325,909 (97.2%) were cheap by a 64-row per-SQL high-water classifier. Only 312 cheap dispatches (0.096% of cheap) parked for a worker at all, and 0 parked while any costly request was already waiting. The probe build held the last-free-worker reservation ON, which parks costly requests more often than main does, so 0 is an upper bound.",
+      "conditions": "Apple M1 Pro (10 cores, reader pool = 4), macOS 26.2 / Darwin 25.2.0, Dart 3.12.x JIT, resqlite branch exp-275 at a05e3dc over origin/main f44c2c4, temporary unguarded counters in ReaderPool._dispatch read at each Database.close(), 2026-08-19",
+      "edges": [{"type": "refines", "target": "265.2"}]
+    },
+    {
+      "id": "275.2",
+      "text": "Holding the reader pool's last free worker back for cheap reads takes a point read issued into a saturated pool from 256-374 us to 52-65 us (-75.0%, -75.2%, -75.6%, -86.1%; REPRODUCED in both order-flipped pairs of both collections), against ~20 us for the same read on an idle pool. It collects most of claim 265.2's inline win without running SQLite on the calling isolate, without a freshness contract, and without starvation: the costly-read latency guard stayed neutral. It is REJECTED because the same policy costs a reproduced +46.6% to +63.1% on four concurrent 1,000-row reads whenever cheap reads are recent, and because claim 275.1 measures zero incidence for the shape it improves.",
+      "conditions": "Three native-asset-aware AOT CLI bundles (`dart build cli`) from one harness source built at origin/main f44c2c4 and branch exp-275 a05e3dc; benchmark/experiments/reader_admission_priority.dart, lane-isolated processes, 41 samples after 10 warmup, two collections each with an order-flipped pair; Apple M1 Pro, macOS 26.2, reader pool = 4, 2026-08-19",
+      "edges": [{"type": "dependsOn", "target": "265.2"}]
+    },
+    {
+      "id": "275.3",
+      "text": "Waking a parked cheap read ahead of parked costly ones, with no capacity withheld, improves eight point reads queued behind eight 1,000-row reads by -37.0% to -42.4% (REPRODUCED in both order-flipped pairs of both collections) and makes the costly read FASTER rather than slower (-3.4% to -8.8%, reproduced), because serving the short jobs first empties the queue sooner. Every non-parking control is neutral, so the per-dispatch classification is below the harness floor. It is REJECTED on claim 275.1: the population it reorders occurred zero times in 335,221 dispatches.",
+      "conditions": "Same three AOT bundles and protocol as claim 275.2; candA arm (`reserveLastWorker = false`), lanes `mixed-queue` and `costly-latency`, 2026-08-19",
+      "edges": [{"type": "dependsOn", "target": "275.1"}]
+    },
+    {
+      "id": "275.4",
+      "text": "A saturate-the-pool-then-read lane must time the first read alone. Sticky dispatch (exp 266) sends a sequential run of point reads back to whichever worker frees first, so in exp 265's `point-under-load` shape only read 1 waits (300-956 us) and reads 2-10 cost ~20 us in every arm. Summing ten, as exp 265 did, dilutes the signal ninefold: the exp 275 reservation measured -13% under the summed lane and -75% under the first-read-only lane, on identical binaries.",
+      "conditions": "Direct per-read probe and lane-isolated AOT A/B, Apple M1 Pro, reader pool = 4, 1,000-row background reads, 2026-08-19",
+      "edges": [{"type": "refines", "target": "265.2"}]
+    },
+    {
+      "id": "275.5",
+      "text": "A last-free-worker reservation needs no per-request denial cap to stay live, and adding one silently defeats it. Refusing a costly request only when the free slot is the pool's last means at least one other worker is busy, so a worker-free event is always still pending, and the request is admitted as soon as two slots are free. A first prototype that also capped refusals at two per request had the reserved slot taken by the woken costly waiter after two wakes, which cut its own primary lane from -75% to -13%.",
+      "conditions": "ReaderPool._dispatch prototype at archive/exp-275, reader pool = 4, JIT and AOT, 2026-08-19",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "Do not reopen either arm without a workload where cheap reads actually queue behind costly ones — more than four concurrent reads of genuinely mixed cost on one Database. Claim 275.1 is the gate: a downstream trace showing a nonzero count of cheap dispatches parked behind a costly waiter. No benchmark in this repo builds that shape, and the release suite cannot, because its concurrent lanes issue one statement N times.",
+    "If it is ever reopened, reopen the priority waiter queues (candA) only. They withhold no capacity, every control is neutral, and the starvation guard came out faster. The last-free-worker reservation (candB) is closed as hidden policy regardless of incidence — it belongs behind an explicit caller-visible mode, which the near-frozen public API has no room for.",
+    "Use benchmark/experiments/reader_admission_priority.dart for any future work on WHEN a read is admitted — priority, cost classes, pool sharding, reservation, work stealing. `bulk4-mixed` is the load-bearing price lane and `bulk4-cold` the hysteresis control; `costly-latency` is the starvation gate. Time the first read only in any saturated-pool lane (claim 275.4).",
+    "Measure the queue before proposing anything that reorders it. A four-worker pool parks a cheap read three times in a thousand across every workload the repo can run (claim 275.1); the theoretical ceiling of all admission-ordering work on the measurable corpus is that number.",
+    "Exp 239's named blocker is resolved: RowSizeMemory.highWater is a reliable private per-SQL cost signal on the dispatch fast path, costing nothing measurable to read. Anything still citing 'no cost signal' as the reason a dispatch-side candidate is blocked should cite incidence instead.",
+    "The downstream trace vehicle exp 272 used is not available on this host — the sibling checkout it drove through dependency_overrides is an empty Flutter scaffold with no lib/ and no resqlite dependency. Any future incidence question that needs a real application trace has to re-establish that vehicle first."
+  ],
+  "blockedOnMeasurement": [
+    "a representative downstream trace with more than four concurrent reads of mixed cost on one Database, reporting how often a cheap read parks behind a costly waiter — without one, reader-pool admission ordering stays closed (claim 275.1)"
+  ]
+}

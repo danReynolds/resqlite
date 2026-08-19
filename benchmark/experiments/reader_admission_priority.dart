@@ -2,6 +2,14 @@
 //
 // Focused A/B harness for reader-pool *admission* ([EXP-275]).
 //
+// Exp 275 was REJECTED and current main runs every lane below on the unchanged
+// cost-blind dispatcher. The harness is kept because it is the only thing in
+// the repo that measures what a read WAITS for rather than what it costs, and
+// because the rejection was about incidence rather than mechanism: a successor
+// that arrives with a workload where cheap reads actually queue behind costly
+// ones has to clear these lanes, and `bulk4-mixed` is the one it has to pay.
+// The rejected prototype is at `archive/exp-275`.
+//
 // Every other harness in this directory measures what a read costs. This one
 // measures what a read WAITS for. `ReaderPool._dispatch` takes the first free
 // worker and otherwise parks on a FIFO queue, so a point read that arrives
@@ -50,6 +58,10 @@
 //   concurrent8-cheap   CONTROL. Eight point reads together and nothing else.
 //     Every waiter is cheap, so there is no reordering available and the lane
 //     isolates whatever the split waiter queues cost by themselves.
+//
+// Against current main every lane is a single-arm measurement of the cost-blind
+// dispatcher; the deltas the lane comments describe only exist when the harness
+// is run against a candidate build, as exp 275 did with `dart build cli`.
 //
 // Usage:
 //   dart run benchmark/experiments/reader_admission_priority.dart \

@@ -33,9 +33,7 @@ import 'read_worker.dart';
 ///
 /// Dispatch never sends two queries to the same worker. If all workers are
 /// busy, callers wait until one becomes available (finishes its query or
-/// respawns after sacrifice). Which waiter that worker goes to is decided by
-/// what the parked statements have historically cost, not by arrival order
-/// alone — see [ReaderPool._notifyAvailable] and [ReaderPool.reserveWindow].
+/// respawns after sacrifice).
 final class ReaderPool {
   ReaderPool._(this._workers);
 
@@ -104,61 +102,13 @@ final class ReaderPool {
   /// worker ran a query is not observable from any other surface.
   int get preferredWorkerIndex => _preferred;
 
-  /// The most rows any execution of a SQL may have returned for [_dispatch] to
-  /// treat it as cheap ([EXP-275](../../../experiments/275-cost-aware-read-admission.md)).
-  ///
-  /// Matches the row cap [EXP-265](../../../experiments/265-inline-main-isolate-select.md)
-  /// used to decide a statement was small enough to run without a worker, so
-  /// the two experiments classify the same statements the same way.
-  static const int cheapRowCap = 64;
-
-  /// TEMPORARY [EXP-275] A/B gate: whether the last-free-worker reservation is
-  /// compiled in. The priority waiter queues are always on; this separates the
-  /// second arm so the two can be measured against the same baseline from
-  /// binaries that differ in nothing else. Removed before merge.
-  static const bool reserveLastWorker = true;
-
-  /// Consecutive costly admissions after which [_dispatch] stops holding a
-  /// worker back for cheap reads.
-  ///
-  /// Without it a pool that once served a point read would run large reads
-  /// three-wide forever. With it, a connection that only ever issues large
-  /// reads pays the reservation for its first [reserveWindow] of them and then
-  /// uses the whole pool; any cheap read resets the count.
-  static const int reserveWindow = 32;
-
-  /// How many times the head costly waiter may be passed over by a cheap one
-  /// before [_notifyAvailable] wakes it regardless.
-  ///
-  /// Bounds the priority queue's starvation: a costly read's extra wait is at
-  /// most this many cheap admissions, and a cheap read is single-digit
-  /// microseconds against the milliseconds a costly one already takes.
-  static const int maxCheapSkips = 8;
-
-  /// FIFO waiters parked by _dispatch while no worker is available, split by
-  /// what the parked request is expected to cost
-  /// ([EXP-275](../../../experiments/275-cost-aware-read-admission.md)).
+  /// FIFO waiters parked by _dispatch while no worker is available.
   ///
   /// Each worker-free event wakes one waiter instead of completing a
-  /// shared future observed by every parked dispatcher. Which one it wakes is
-  /// [_notifyAvailable]'s decision: a read whose statement has never returned
-  /// more than [cheapRowCap] rows costs microseconds and is admitted ahead of
-  /// reads that cost milliseconds, up to [maxCheapSkips] in a row.
-  final Queue<Completer<void>> _cheapWaiters = Queue();
-  final Queue<Completer<void>> _costlyWaiters = Queue();
-
-  /// Cheap waiters admitted ahead of the head costly one since it last ran.
-  int _cheapSkips = 0;
-
-  /// Costly dispatches since the last cheap one, saturating at
-  /// [reserveWindow]. See [reserveWindow].
-  int _costlyRun = reserveWindow;
+  /// shared future observed by every parked dispatcher.
+  final Queue<Completer<void>> _dispatchWaiters = Queue();
 
   int get availableWorkerCount => _workers.where((e) => e.isAvailable).length;
-
-  /// Waiters currently parked, cheap and costly together. For tests asserting
-  /// that neither queue leaks a waiter.
-  int get parkedWaiterCount => _cheapWaiters.length + _costlyWaiters.length;
 
   static Future<ReaderPool> spawn(int dbHandleAddr, int count) async {
     final pool = ReaderPool._([]);
@@ -209,42 +159,11 @@ final class ReaderPool {
     }
   }
 
-  /// Wake up one caller waiting for an available worker, preferring one whose
-  /// statement is known to be cheap
-  /// ([EXP-275](../../../experiments/275-cost-aware-read-admission.md)).
-  ///
-  /// Arrival order decides between waiters of the same class; between classes
-  /// the cheap one goes first, because the freed worker will be handed back in
-  /// microseconds rather than milliseconds. [maxCheapSkips] bounds how long the
-  /// head costly waiter can be passed over, so the reordering cannot starve it.
+  /// Wake up any callers waiting for an available worker.
   void _notifyAvailable() {
-    if (_cheapWaiters.isEmpty) {
-      if (_costlyWaiters.isNotEmpty) {
-        _cheapSkips = 0;
-        _costlyWaiters.removeFirst().complete();
-      }
-      return;
+    if (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
     }
-    if (_costlyWaiters.isNotEmpty) {
-      if (_cheapSkips >= maxCheapSkips) {
-        _cheapSkips = 0;
-        _costlyWaiters.removeFirst().complete();
-        return;
-      }
-      _cheapSkips++;
-    }
-    _cheapWaiters.removeFirst().complete();
-  }
-
-  /// Whether [index] is the only slot currently free.
-  ///
-  /// Only ever asked on behalf of a costly request while the reservation is
-  /// active, so the extra scan stays off the cheap-read path.
-  bool _isLastFreeSlot(int index) {
-    for (var i = 0; i < _workers.length; i++) {
-      if (i != index && _workers[i].isAvailable) return false;
-    }
-    return true;
   }
 
   /// Execute a query on the next available worker.
@@ -366,44 +285,11 @@ final class ReaderPool {
     final count = _workers.length;
     var hasPreviouslyParked = false;
 
-    // [EXP-275]: a statement the pool has watched at least once and never seen
-    // return more than [cheapRowCap] rows. A statement it has never seen is
-    // costly, since the alternative is to let an unbounded first execution
-    // claim the reserved worker and jump the queue.
-    final cheap =
-        memory != null &&
-        memory.previous >= 0 &&
-        memory.highWater <= cheapRowCap;
-
-    // Hold the last free worker back for a cheap read, but only on a pool that
-    // has served one recently ([reserveWindow]) and only while at least one
-    // other worker is busy.
-    //
-    // That second condition is what makes the reservation safe without a cap on
-    // how often one request may be refused. A refusal happens only when some
-    // other worker is running, so a worker-free event is always still coming;
-    // and the refused request is admitted as soon as two workers are free,
-    // because then no single slot is the last one. A costly read can therefore
-    // be held behind a busy pool, never behind an idle one.
     while (true) {
-      // Recomputed on every wake: whether cheap reads are still recent is a
-      // property of the pool, not of the request that parked.
-      final reserving =
-          reserveLastWorker &&
-          !cheap &&
-          count > 1 &&
-          _costlyRun < reserveWindow;
-
       for (var attempt = 0; attempt < count; attempt++) {
         final index = (_preferred + attempt) % count;
         final slot = _workers[index];
         if (slot.isAvailable) {
-          if (reserving && _isLastFreeSlot(index)) break;
-          if (cheap) {
-            _costlyRun = 0;
-          } else if (_costlyRun < reserveWindow) {
-            _costlyRun++;
-          }
           _preferred = sticky ? index : (index + 1) % count;
           if (kProfileMode && kTraceliteProfileMode) {
             final typeId = TraceliteProfile.internString(
@@ -435,10 +321,9 @@ final class ReaderPool {
         );
       }
 
-      // All workers busy or dead, or the only free one is being held back for
-      // a cheap read. Wait for a worker-free event.
+      // All workers busy or dead. Wait for a worker-free event.
       final waiter = Completer<void>.sync();
-      (cheap ? _cheapWaiters : _costlyWaiters).add(waiter);
+      _dispatchWaiters.add(waiter);
       if (kProfileMode) {
         ProfileCounters.dispatcherParkedTotal++;
         TraceliteProfile.counter(
@@ -495,11 +380,8 @@ final class ReaderPool {
   Future<void> close() async {
     _closed = true;
     // Wake any parked dispatch waiters so they can re-check _closed.
-    while (_cheapWaiters.isNotEmpty) {
-      _cheapWaiters.removeFirst().complete();
-    }
-    while (_costlyWaiters.isNotEmpty) {
-      _costlyWaiters.removeFirst().complete();
+    while (_dispatchWaiters.isNotEmpty) {
+      _dispatchWaiters.removeFirst().complete();
     }
     await Future.wait(_workers.map((slot) => slot.close()));
   }
