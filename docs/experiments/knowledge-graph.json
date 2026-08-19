@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 64,
-    "totalEntries": 145
+    "entriesWithClaims": 65,
+    "totalEntries": 146
   },
   "experiments": [
     {
@@ -2217,6 +2217,18 @@
         "sqlite-version-and-build-config"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "275",
+      "title": "Which read gets the next free worker",
+      "file": "275-cost-aware-read-admission.md",
+      "date": "2026-08-19",
+      "status": "rejected",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -3768,6 +3780,92 @@
       ],
       "text": "The PGO candidate failed the preregistered homogeneous stream-emission kill rule: p50 regression of at least 3% and at least 0.02 ms in at least three of five adjacent 300-trial AOT pairs. Pair p50 deltas were -9.63%, +4.38% (+0.0465 ms), -15.61%, +43.37% (+0.3285 ms), and +11.69% (+0.1315 ms), so pairs 2/4/5 satisfied both thresholds. The pooled delta was +1.53% with a confidence interval spanning zero; the evidence is a declared replicated-gate failure amid phase variance, not proof of a stable slowdown.",
       "conditions": "`benchmark/experiments/stream_rerun_latency.dart --trials=300 --raw`, five adjacent baseline/candidate process pairs, `homogeneous-100small` single-write emission p50, arm64 macOS; predeclared kill rule requires both >=3% and >=0.02 ms candidate regression in >=3/5 pairs; 2026-08-16",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "275.1",
+      "source": "275",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "Reader-pool admission ordering has effectively zero incidence on the repo's representative workloads. One full `benchmark/run_release.dart --repeat=1` pass — chat sim, feed paging, concurrent reads 4x/8x, streaming fan-out, keyed-PK subscriptions, diagnostics and memory scenarios — recorded 335,221 reader dispatches, of which 325,909 (97.2%) were cheap by a 64-row per-SQL high-water classifier. Only 312 cheap dispatches (0.096% of cheap) parked for a worker at all, and 0 parked while any costly request was already waiting. The probe build held the last-free-worker reservation ON, which parks costly requests more often than main does, so 0 is an upper bound.",
+      "conditions": "Apple M1 Pro (10 cores, reader pool = 4), macOS 26.2 / Darwin 25.2.0, Dart 3.12.x JIT, resqlite branch exp-275 at a05e3dc over origin/main f44c2c4, temporary unguarded counters in ReaderPool._dispatch read at each Database.close(), 2026-08-19",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.2"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "275.2",
+      "source": "275",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "Holding the reader pool's last free worker back for cheap reads takes a point read issued into a saturated pool from 256-374 us to 52-65 us (-75.0%, -75.2%, -75.6%, -86.1%; REPRODUCED in both order-flipped pairs of both collections), against ~20 us for the same read on an idle pool. It collects most of claim 265.2's inline win without running SQLite on the calling isolate, without a freshness contract, and without starvation: the costly-read latency guard stayed neutral. It is REJECTED because the same policy costs a reproduced +46.6% to +63.1% on four concurrent 1,000-row reads whenever cheap reads are recent, and because claim 275.1 measures zero incidence for the shape it improves.",
+      "conditions": "Three native-asset-aware AOT CLI bundles (`dart build cli`) from one harness source built at origin/main f44c2c4 and branch exp-275 a05e3dc; benchmark/experiments/reader_admission_priority.dart, lane-isolated processes, 41 samples after 10 warmup, two collections each with an order-flipped pair; Apple M1 Pro, macOS 26.2, reader pool = 4, 2026-08-19",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "265.2"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "265.2"
+      ]
+    },
+    {
+      "id": "275.3",
+      "source": "275",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "Waking a parked cheap read ahead of parked costly ones, with no capacity withheld, improves eight point reads queued behind eight 1,000-row reads by -37.0% to -42.4% (REPRODUCED in both order-flipped pairs of both collections) and makes the costly read FASTER rather than slower (-3.4% to -8.8%, reproduced), because serving the short jobs first empties the queue sooner. Every non-parking control is neutral, so the per-dispatch classification is below the harness floor. It is REJECTED on claim 275.1: the population it reorders occurred zero times in 335,221 dispatches.",
+      "conditions": "Same three AOT bundles and protocol as claim 275.2; candA arm (`reserveLastWorker = false`), lanes `mixed-queue` and `costly-latency`, 2026-08-19",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "275.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "275.1"
+      ]
+    },
+    {
+      "id": "275.4",
+      "source": "275",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "A saturate-the-pool-then-read lane must time the first read alone. Sticky dispatch (exp 266) sends a sequential run of point reads back to whichever worker frees first, so in exp 265's `point-under-load` shape only read 1 waits (300-956 us) and reads 2-10 cost ~20 us in every arm. Summing ten, as exp 265 did, dilutes the signal ninefold: the exp 275 reservation measured -13% under the summed lane and -75% under the first-read-only lane, on identical binaries.",
+      "conditions": "Direct per-read probe and lane-isolated AOT A/B, Apple M1 Pro, reader pool = 4, 1,000-row background reads, 2026-08-19",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.2"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "275.5",
+      "source": "275",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "A last-free-worker reservation needs no per-request denial cap to stay live, and adding one silently defeats it. Refusing a costly request only when the free slot is the pool's last means at least one other worker is busy, so a worker-free event is always still pending, and the request is admitted as soon as two slots are free. A first prototype that also capped refusals at two per request had the reserved slot taken by the woken costly waiter after two wakes, which cut its own primary lane from -75% to -13%.",
+      "conditions": "ReaderPool._dispatch prototype at archive/exp-275, reader pool = 4, JIT and AOT, 2026-08-19",
       "edges": [],
       "state": "live"
     }
