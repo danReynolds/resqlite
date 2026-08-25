@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 65,
-    "totalEntries": 146
+    "entriesWithClaims": 67,
+    "totalEntries": 147
   },
   "experiments": [
     {
@@ -1139,6 +1139,9 @@
       "file": "171-resolved-runtime-cache.md",
       "date": "2026-06-14",
       "status": "rejected",
+      "amendedBy": [
+        "278"
+      ],
       "directions": [
         "stream-rerun-dispatch"
       ],
@@ -2229,6 +2232,19 @@
         "result-transfer-shape"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "278",
+      "title": "What the async prologue on a read is worth",
+      "file": "278-sync-read-prologue.md",
+      "date": "2026-08-25",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -2429,6 +2445,19 @@
       "text": "The Tracelite workload-summary explanation layer emits the interpretation exp 143 had to recover manually, and validates stable insight IDs so a thin artifact fails loudly instead of looking complete.",
       "conditions": "tooling · 2026-06 · backfilled 2026-07",
       "state": "live"
+    },
+    {
+      "id": "171.1",
+      "source": "171",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "The `await _runtime` microtask hop at the `Database` layer above exp 159's `Writer._request` cache is real — estimated at ~1-2 us per call, from which a theoretical upper bound of ~6-12% on a 2,000-call sequential write burst was derived — but it sits at or below the focused harness's noise floor: two order-flipped passes on `writer_pipelining.dart` produced alternating-sign deltas inside per-round variance (sequential-awaited -2.3% / +2.5%, transaction-guardrail -7.5% / +6.1%, concurrent-burst +4-5% in both passes). No runtime code was kept, and exp 159's framing stands: the sequential-write residual is the round-trip floor itself, so the next reduction has to be group-commit-shaped or transport-shaped rather than hop-shaped.",
+      "conditions": "arm64 macOS · JIT `dart run` · `benchmark/experiments/writer_pipelining.dart`, 2 order-flipped passes · write path only, no read lane measured · 2026-06 · minted retroactively by exp 278 from this entry's own changedBeliefs",
+      "state": "superseded",
+      "by": [
+        "278.1"
+      ]
     },
     {
       "id": "172.1",
@@ -3867,6 +3896,57 @@
       "text": "A last-free-worker reservation needs no per-request denial cap to stay live, and adding one silently defeats it. Refusing a costly request only when the free slot is the pool's last means at least one other worker is busy, so a worker-free event is always still pending, and the request is admitted as soon as two slots are free. A first prototype that also capped refusals at two per request had the reserved slot taken by the woken costly waiter after two wakes, which cut its own primary lane from -75% to -13%.",
       "conditions": "ReaderPool._dispatch prototype at archive/exp-275, reader pool = 4, JIT and AOT, 2026-08-19",
       "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "278.1",
+      "source": "278",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
+      "text": "Dart's async plumbing is a nanosecond-scale cost, not a microsecond-scale one, and resqlite's read prologue is priced accordingly. Measured with no SQLite, no isolates and no resqlite code — a sync completer resolved from a separate microtask, reached through four amounts of plumbing, five AOT runs of 21 samples x 200,000 calls: awaiting an already-resolved future before the real one costs 70.7 ns, and each `async` function that only forwards a future costs 34.6 ns. The prologue `Database.select` -> `ReaderPool.select` -> `ReaderPool._dispatch` -> `_WorkerSlot.request` therefore carried 142.7 ns over a direct await, of which a candidate that makes `Database.select`, `Database.selectBytes` and `_dispatch`'s first scan non-async removes ~108 ns. Divided by what it wraps that is 2.0% of a 5.4 us point read, 1.1% of a 20-row page, 0.05% of a 1,000-row read and 0.004% of a sacrificed 10,000-row one — a ceiling below the 5% decision gate on every shape resqlite measures, so no implementation of the idea can clear it. Exp 171 estimated the same resolved-future hop at 1-2 us per call and derived 6-12% of headroom from that estimate; the figure is 14-28x too large and the headroom never existed.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.x · AOT (`dart compile exe`) · `benchmark/experiments/async_prologue_price.dart`, 5 runs x 21 samples x 200,000 calls · differences only; absolute ns/call includes completer allocation and loop · 2026-08",
+      "edges": [
+        {
+          "type": "supersedes",
+          "target": "171.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "278.2",
+      "source": "278",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
+      "text": "The end-to-end lanes agree with that ceiling by being flat, and the control lane is what proves the collection could not have seen 2% anyway. Twelve alternating-order lane-isolated AOT passes over `reader_dispatch_stickiness.dart` (121 samples per lane per arm, two collections of six): no primary-lane pass pair reproduced a win — fourteen of eighteen primary scenarios classify neutral under `ab_drift_check.dart`, two drift-suspected, and the two classified REPRODUCED point the wrong way. Pooled over twelve passes every one of the twelve lanes lands between -3.5% and +1.2%, including `mixed6-10k` at -2.9%, a lane on which the candidate's arithmetic ceiling is 0.004%. That control is the ruler: about 3% of apparent movement in this collection is apparatus, and `point1`'s pooled -3.0% is the same number as the lane that cannot have changed. The declared shape prediction is also unmet — a fixed per-call saving must shrink as the read grows, and `mixed6-20` (+0.4%) is not ordered against `point1` (-3.0%) at all. `first32-newsql` is the one lane with a persistent median (-9.9%, nine of twelve passes negative) and the mechanism rather than the statistics rules it out: it times 32 executions at ~6.6 us each, so the prologue is worth the same ~2% there as on `point1`, which read -2.1%.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.x · two `dart build cli` AOT bundles from one harness source · 12 alternating-order lane-isolated passes, 121 samples/lane/arm · collection 1 at 76.7% CPU idle / load 4.77, collection 2 at load 8.64 with per-lane CVs to 100-290% · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "278.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "278.1"
+      ]
+    },
+    {
+      "id": "278.3",
+      "source": "278",
+      "directions": [
+        "result-transfer-shape",
+        "stream-rerun-dispatch",
+        "measurement-system"
+      ],
+      "text": "Removing the read path's async frames is behaviour-safe, which is worth recording separately from its being worthless. `Database.select` and `Database.selectBytes` can return the reader pool's future directly, and `ReaderPool._dispatch` can return the worker's future on a successful first scan, provided every rejection path — unresolved runtime, closed database, `selectBytes` inside a transaction, closed pool — stays on an `async` sibling or an explicit `Future.error`, because those failures are delivered today as failed futures and a synchronous throw would be a silent API change. Under that split all 503 tests pass, `test/reader_pool_test.dart`'s four-un-awaited-reads assertion holds, and the `conc4` / `conc8` parking guards, the `mixed6-10k` sacrifice guard and the `bytes-first8-newsql` guard all read neutral with sign flips. Peak RSS is unmoved. The exact prototype is at `archive/exp-278`, so a future runner whose denominator has changed can cherry-pick rather than rewrite.",
+      "conditions": "M1 Pro · Dart 3.12.x · full `dart test` (503 tests) plus the harness guard lanes · prototype at `archive/exp-278` · 2026-08",
       "state": "live"
     }
   ]
