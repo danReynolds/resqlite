@@ -266,22 +266,59 @@ final class ReaderPool {
   /// query that will never consult a hint pays one map lookup rather than two.
   /// `selectBytes` passes none: it serializes in C and never builds a Dart
   /// result buffer.
+  ///
+  /// Not `async`: a read that finds a free worker on the first scan — 99.9% of
+  /// them, per exp 275's release-suite dispatch census (335,221 dispatches,
+  /// 312 parked) — would otherwise pay an async frame and a microtask
+  /// suspension for a park that never happens. The parking loop keeps its own
+  /// frame in [_dispatchParked].
   Future<Object?> _dispatch(
     ReadRequest request, [
     RowSizeMemory? memory,
     bool sticky = true,
-  ]) async {
+  ]) {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
     // fires during close) doesn't park forever waiting for a worker
     // that will never come back.
     if (_closed) {
-      throw ResqliteConnectionException('Reader pool is closed.');
+      return Future.error(
+        ResqliteConnectionException('Reader pool is closed.'),
+      );
     }
 
     request.rowHint = memory?.hint ?? 0;
     request.initialRowHint = memory?.initialRows ?? 0;
 
+    final count = _workers.length;
+    for (var attempt = 0; attempt < count; attempt++) {
+      final index = (_preferred + attempt) % count;
+      final slot = _workers[index];
+      if (slot.isAvailable) {
+        _preferred = sticky ? index : (index + 1) % count;
+        if (kProfileMode && kTraceliteProfileMode) {
+          final typeId = TraceliteProfile.internString(
+            request.runtimeType.toString(),
+          );
+          return TraceliteProfile.traceAsync(
+            TraceliteResqliteSpans.readerPoolDispatch,
+            () => slot.request(request),
+            correlationId:
+                request.traceCorrelationId ??
+                TraceliteProfile.nextCorrelationId(),
+            beginArgs: [typeId],
+          );
+        }
+        return slot.request(request);
+      }
+    }
+
+    return _dispatchParked(request, sticky);
+  }
+
+  /// [_dispatch]'s slow half: every worker was busy on the first scan, so this
+  /// caller parks on [_dispatchWaiters] and rescans on each wake.
+  Future<Object?> _dispatchParked(ReadRequest request, bool sticky) async {
     final count = _workers.length;
     var hasPreviouslyParked = false;
 

@@ -72,7 +72,7 @@ final class Database {
       // Spawn the single writer isolate.
       final writer = await Writer.spawn(streamEngine, _handle);
 
-      return (
+      return _resolvedRuntime = (
         readerPool: readerPool,
         streamEngine: streamEngine,
         writer: writer,
@@ -83,6 +83,15 @@ final class Database {
   final ffi.Pointer<ffi.Void> _handle;
 
   late final Future<_DatabaseRuntime> _runtime;
+
+  /// [_runtime]'s value once it has one, readable without an `await`.
+  ///
+  /// Every public method needs the runtime, and after the spawn completes
+  /// `await _runtime` is an await on an already-resolved future — which still
+  /// suspends and resumes through the microtask queue. Assigned in the same
+  /// microtask that completes [_runtime], so no caller can observe a
+  /// partially-built runtime through it.
+  _DatabaseRuntime? _resolvedRuntime;
 
   /// The filesystem path the database was opened with. Retained so
   /// [diagnostics] can read the `-wal` sidecar size. `:memory:` or
@@ -230,12 +239,31 @@ final class Database {
   Future<List<Map<String, Object?>>> select(
     String sql, [
     List<Object?> parameters = const [],
-  ]) async {
+  ]) {
     final transaction = Transaction.current;
     if (transaction != null) {
       return transaction.select(sql, parameters);
     }
 
+    // Not `async`: on an open database this hands the caller the reader pool's
+    // own future, so the read reaches `SendPort.send` in the caller's own turn
+    // instead of one microtask later. Everything that has to suspend — an
+    // unresolved runtime, the trace wrapper — goes to [_selectSlow], which
+    // keeps the original shape (including delivering `_ensureOpen`'s throw as
+    // a failed future rather than a synchronous one).
+    final runtime = _resolvedRuntime;
+    if (runtime == null ||
+        _closedCompleter != null ||
+        (kProfileMode && kTraceliteProfileMode)) {
+      return _selectSlow(sql, parameters);
+    }
+    return runtime.readerPool.select(sql, parameters);
+  }
+
+  Future<List<Map<String, Object?>>> _selectSlow(
+    String sql,
+    List<Object?> parameters,
+  ) async {
     _ensureOpen();
 
     // No post-await _ensureOpen re-check: if close() has run while we
@@ -244,7 +272,7 @@ final class Database {
     // *in-flight* reads that had already dispatched to a worker finish
     // via the pool's drain semantics, while reads still parked on the
     // pool future bail out cleanly.
-    final _DatabaseRuntime(:readerPool) = await _runtime;
+    final _DatabaseRuntime(:readerPool) = _resolvedRuntime ?? await _runtime;
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
         : null;
@@ -291,7 +319,27 @@ final class Database {
   Future<BytesResult> selectBytes(
     String sql, [
     List<Object?> parameters = const [],
-  ]) async {
+  ]) {
+    // See [select]: the open-database path skips the async prologue. The
+    // result still has to be wrapped, so this one keeps a `then` where
+    // `select` keeps nothing. Every rejection stays in [_selectBytesSlow] so
+    // it is still delivered as a failed future, not a synchronous throw.
+    final runtime = _resolvedRuntime;
+    if (runtime == null ||
+        _closedCompleter != null ||
+        Transaction.current != null ||
+        (kProfileMode && kTraceliteProfileMode)) {
+      return _selectBytesSlow(sql, parameters);
+    }
+    return runtime.readerPool
+        .selectBytes(sql, parameters)
+        .then((result) => BytesResult(result.bytes, result.rowCount));
+  }
+
+  Future<BytesResult> _selectBytesSlow(
+    String sql,
+    List<Object?> parameters,
+  ) async {
     if (Transaction.current != null) {
       throw StateError(
         'selectBytes() cannot be used inside a transaction. '
@@ -301,7 +349,7 @@ final class Database {
 
     _ensureOpen();
 
-    final _DatabaseRuntime(:readerPool) = await _runtime;
+    final _DatabaseRuntime(:readerPool) = _resolvedRuntime ?? await _runtime;
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
         : null;
@@ -404,7 +452,8 @@ final class Database {
 
     _ensureOpen();
 
-    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+    final _DatabaseRuntime(:streamEngine, :writer) =
+        _resolvedRuntime ?? await _runtime;
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
         : null;
@@ -462,7 +511,8 @@ final class Database {
 
     _ensureOpen();
 
-    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+    final _DatabaseRuntime(:streamEngine, :writer) =
+        _resolvedRuntime ?? await _runtime;
 
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
@@ -524,7 +574,7 @@ final class Database {
 
     _ensureOpen();
 
-    final runtime = await _runtime;
+    final runtime = _resolvedRuntime ?? await _runtime;
     final writer = runtime.writer;
     final int? correlationId = kProfileMode && kTraceliteProfileMode
         ? TraceliteProfile.nextCorrelationId()
