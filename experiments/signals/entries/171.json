@@ -12,5 +12,12 @@
     "do not retry the `Database` runtime cache against the same writer_pipelining harness without a measurement system that can resolve sub-1us per-call deltas on real workloads",
     "keep exp 159's framing: the next stream-rerun-dispatch implementation candidate against the sequential-write floor should reduce round-trip count (group commit) or change transport, not chase per-call microtask hops",
     "same shape as the recent overhead-removal rejection cluster (exp 145, exp 148, exp 151): theoretical hop savings or counter reductions may move but measured-elapsed does not once per-call cost drops below ~2 us"
+  ],
+  "claims": [
+    {
+      "id": "171.1",
+      "text": "The `await _runtime` microtask hop at the `Database` layer above exp 159's `Writer._request` cache is real \u2014 estimated at ~1-2 us per call, from which a theoretical upper bound of ~6-12% on a 2,000-call sequential write burst was derived \u2014 but it sits at or below the focused harness's noise floor: two order-flipped passes on `writer_pipelining.dart` produced alternating-sign deltas inside per-round variance (sequential-awaited -2.3% / +2.5%, transaction-guardrail -7.5% / +6.1%, concurrent-burst +4-5% in both passes). No runtime code was kept, and exp 159's framing stands: the sequential-write residual is the round-trip floor itself, so the next reduction has to be group-commit-shaped or transport-shaped rather than hop-shaped.",
+      "conditions": "arm64 macOS \u00b7 JIT `dart run` \u00b7 `benchmark/experiments/writer_pipelining.dart`, 2 order-flipped passes \u00b7 write path only, no read lane measured \u00b7 2026-06 \u00b7 minted retroactively by exp 278 from this entry's own changedBeliefs"
+    }
   ]
 }

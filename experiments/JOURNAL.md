@@ -1304,6 +1304,32 @@ repeatedly inside it. Check whether the condition survives the first
 measurement. If the treatment consumes the contention it was measuring, every
 later repeat is a control being averaged into the result.*
 
+### Price the machinery before you build the candidate that removes it
+
+[Exp 171](171-resolved-runtime-cache.md) proposed skipping an `await` on an
+already-resolved future, estimated that hop at "~1–2 µs per call", derived
+6–12% of headroom from the estimate, built the change and measured nothing.
+[Exp 278](278-sync-read-prologue.md) went back for the larger version of the
+same idea — three `async` frames off the read path, not one hop — and started
+by measuring what a frame is worth. In a 90-line harness with no SQLite, no
+isolates and no resqlite code, an `await` on a resolved future prices at ~71 ns
+and an `async` function that only forwards a future at ~35 ns. Exp 171's
+estimate was 14–28× too large; the headroom it computed never existed, and its
+empty result was the correct one for a reason it could not see.
+
+Divide the unit price by the wall time of the operation the machinery wraps and
+the verdict falls out before any code is written: ~108 ns against resqlite's
+~5.5 µs point read is 2.0%, against a 1,000-row read 0.05%, and the decision
+gate is 5%. That arithmetic is the whole experiment.
+
+*Reapplies to any candidate whose saving is "remove a layer" — async frames,
+closures, a boxing, a virtual dispatch, a map lookup, a defensive copy. Write
+the microbenchmark that prices one unit, divide by the operation it wraps, and
+compare that to the gate first. It is the unit-price twin of exp 275's "count
+the queue before you schedule it": that lesson says measure how often the
+mechanism is reached, this one says measure what one occurrence is worth, and
+either number can close a candidate for the cost of ten minutes.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
