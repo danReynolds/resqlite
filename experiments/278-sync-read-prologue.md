@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-25
 **Status:** Rejected
-**Direction:** `result-transfer-shape`, `stream-rerun-dispatch`
+**Direction:** `result-transfer-shape`, `stream-rerun-dispatch`, `measurement-system`
 **Benchmark Run:** none — no runtime code ships. The decision evidence is the
   mechanism price plus twelve alternating-order lane-isolated AOT passes of
   [`benchmark/experiments/reader_dispatch_stickiness.dart`](../benchmark/experiments/reader_dispatch_stickiness.dart),
