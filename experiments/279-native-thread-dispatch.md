@@ -125,6 +125,11 @@ inline path does not is inside it:
 | `iso-result` | 3.20 | + a point read's reply inbound |
 | `iso-full` | 3.22 | both, in one trip |
 
+The adders are not additive: 1.46 + 0.50 + 1.74 is 3.70 µs, and carrying both
+in one trip measures 3.22. Part of what each shape costs is per-trip rather than
+per-payload, so measuring the combination rather than summing the parts is what
+the `iso-full` lane is for.
+
 **A point read's entire transport is 3.22 µs — roughly half of the 6.3 µs hop.**
 The other ~3.1 µs is resqlite's own per-request work on the two sides of it:
 pool bookkeeping and the row-size memory lookup, request construction, the
