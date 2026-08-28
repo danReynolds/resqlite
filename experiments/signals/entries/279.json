@@ -1,0 +1,77 @@
+{
+  "directions": [
+    "result-transfer-shape",
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
+  "experimentClass": "moonshot",
+  "outcomeNote": "The candidate transport is slower than the one it was meant to replace, at every payload size and end to end, so the vehicle question closes rather than staying open. Runtime reverted; prototype at `archive/exp-279`; the isolate-only lanes are retained as `benchmark/experiments/isolate_transport_price.dart`.",
+  "changedBeliefs": [
+    "We believed the isolate round trip's 6.3 us (claim 265.1) was the price of keeping SQLite off the calling isolate, and that the four rejections since — unbounded caller work (265.6), unbounded opaque SQLite work (269.2), foreign-writer staleness (exp 270), zero incidence (275.1) — were each about a consequence of removing the worker rather than about the hop itself. That framing left the hop looking collectable by anyone who solved the safety problem. We now believe it is not collectable at all by changing vehicles: a POSIX worker thread, which gives the caller identical protection, costs 4.28 us per round trip parked on a condvar and 3.18 us spinning, against 1.46 us for a Dart isolate. The Dart VM's same-group message path is the cheapest available way to get work off the calling isolate and an answer back, and a future runner should stop looking for a better one.",
+    "We believed — implicitly, because nobody had split it — that most of the 6.3 us hop was messages. It is not: a point read's whole transport, request object out and result shape back, is 3.22 us. The other half is resqlite's own per-request work on the two sides of the messages, and a perfect zero-cost transport would leave it standing. Claim 279.3 refines claim 265.1 rather than replacing it: the 6.3 us is still right as the price of the hop, but it is now decomposed, and the half worth attacking is the one nobody has measured. Anyone reading exp 265 for where to aim next should read 279.3 beside it.",
+    "We believed exp 174's view-send was right because it avoided a `Uint8List.fromList` copy. The measurement says the reason is larger than that and worth stating on its own: the VM charges for a payload's *backing*, not its size. Byte-for-byte identical 256 KB sends in 9.01 us as a view over malloc'd memory and 43.06 us as a heap `Uint8List` — 4.8x. Claim 279.4 validates claim 174.1 with the number it was reasoned from, and it now constrains anything future: a path that assembles bytes on the Dart heap before sending them pays roughly five times the transfer, and nothing downstream of the send recovers it.",
+    "`dart run tool/knowledge/impact.dart origin/main` reports nothing retired and no documented passage standing on moved ground. 265.1 is refined rather than superseded, so the figure every writeup quotes stays correct; 174.1 is validated. `doc/arch/cross-isolate-data-transfer.md` is the one passage a reader should revisit — not because anything in it is now wrong, but because §6a's send-vs-sacrifice account is where the backing-vs-size result belongs alongside exp 245's copy-per-slot rule, and a future edit should put it there."
+  ],
+  "claims": [
+    {
+      "id": "279.1",
+      "text": "Running a read on a native POSIX thread instead of a Dart reader isolate is slower, not faster, and the primitive is not the reason. An awaited Dart isolate round trip costs 1.46 us; handing the same job to a worker thread and getting an answer back through `Dart_PostCObject_DL` costs 4.28 us parked on a condvar and 3.18 us with the worker spinning on the queue (a burned core, included so the result cannot be blamed on the wake primitive). End to end against a real database the same shape holds: `db.selectBytes()` on one row is 5.48 us against 6.43 us for the native worker (+17.3%), at 1,000 rows 246.5 against 249.3 (+1.1%), and at 5,000 rows 1239 against 1233 (-0.5%, inside the floor). Native dispatch is never faster at any size. The vehicle question is therefore closed: keeping SQLite off the calling isolate does not cost extra because a Dart isolate was chosen.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · 6 order-flipped lane-isolated passes for the mechanism lanes, 4 for the end-to-end pair, 11 samples x 2,000 round trips (60-2,000 end to end) · one native worker thread · prototype at `archive/exp-279` · 2026-08"
+    },
+    {
+      "id": "279.2",
+      "text": "The 2-3 us by which native dispatch loses is the cross-thread wake, not the native port. A post issued from the calling thread itself, so the main isolate never sleeps between issuing and receiving, costs 0.67 us — `Dart_PostCObject_DL` delivery plus one event-loop turn. Everything above that in the native lanes is the OS scheduling round trip, and the Dart VM performs the equivalent handoff in both directions for 1.46 us. This is the number that makes the rejection conditional rather than permanent: a runtime or SDK where a foreign thread can wake a sleeping isolate cheaply would change the arithmetic, and nothing else in the mechanism would have to change.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · 6 order-flipped lane-isolated passes, 11 samples x 2,000 round trips · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "279.1"
+        }
+      ]
+    },
+    {
+      "id": "279.3",
+      "text": "A point read's cross-isolate transport is 3.22 us — about half of claim 265.1's 6.3 us hop. Measured with no SQLite and no resqlite code, one persistent echo isolate, changing only what crosses the boundary: an int each way is 1.46 us, a `SelectRequest`-shaped object outbound adds 0.50 us, a point read's reply shape inbound (one row of six cells, six column names, the `(result, sacrificed, error)` envelope, pre-built on the worker) adds 1.74 us, and both together in one trip are 3.22 us. The remaining ~3.1 us of the hop is resqlite's own per-request work on the two sides of the messages — pool bookkeeping and the row-size memory lookup, request construction, the worker's `setBusy` bracket and request dispatch, the completion handler chain, blob materialization — none of which a transport change touches. Any future candidate in this direction should be aimed at that half; the messages have at most 3.22 us in them.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · 6 order-flipped lane-isolated passes, 11 samples x 2,000 round trips · `benchmark/experiments/isolate_transport_price.dart` · reply shape uses plain lists rather than `Row` facades, so it is a floor for the reply leg · 2026-08",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "265.1"
+        }
+      ]
+    },
+    {
+      "id": "279.4",
+      "text": "What `SendPort.send` charges for a bulk payload is its backing, not its size. Byte-for-byte identical 256 KB costs 9.01 us to send as a view over malloc'd memory and 43.06 us as an ordinary heap `Uint8List` — 4.8x, reproduced in every pass of two collections with the two lanes differing in nothing else. This is the measurement behind exp 174's choice to send a `Uint8List` view over the reader's persistent `json_buf` rather than materialize the result first, and it generalises past `selectBytes`: any path that assembles bytes on the Dart heap before sending them pays roughly five times the transfer. It is the bulk-payload counterpart to claim 245.1's copy-per-slot rule for result structure.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · 256 KB payload, 4 order-flipped passes on the full harness plus 6 on the retained one, 11 samples x 2,000 round trips · 2026-08",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "174.1"
+        }
+      ]
+    },
+    {
+      "id": "279.5",
+      "text": "Copying is a wash between the two transports, so external typed data buys only what it saves by not copying at all — and that variant is not implementable. A malloc plus a 256 KB `memcpy` on the native side costs 6.28 us (`nport-bytes` 11.91 minus `nport-bytes-nocopy` 5.63); the VM's copy of the same view costs 7.55 us (`iso-bytes` 9.01 minus `iso-echo` 1.46). The realistic native variant therefore loses by 2.90 us, which is its dispatch penalty and nothing else. Posting the buffer itself with no copy is 3.38 us faster than the shipped path, but making that real means handing `json_buf` to the main isolate and giving the connection a fresh one, forfeiting the buffer reuse exp 174 measured as decisive (a `NativeFinalizer` zero-copy transfer was 14-24% slower at every size) and the shrink-and-reclaim policy exp 183 built on it. The prize is 1.4% of a 1,000-row `selectBytes` against a fixed dispatch tax on every small read.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · 256 KB payload, 6 order-flipped lane-isolated passes · subtractions across lanes measured in the same collection · 2026-08",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "279.1"
+        },
+        {
+          "type": "validates",
+          "target": "174.1"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "Do not propose another transport for the read path. Exps 265, 269, 270 and 275 removed the worker four different ways and were each rejected on a consequence; exp 279 kept the worker and changed what it is, and the replacement is 2.2-2.9x more expensive. The only reopen condition is claim 279.2's numerator: an SDK or platform where a foreign thread can wake a sleeping isolate for materially less than ~2 us. Re-run the archived prototype at `archive/exp-279` against `isolate_transport_price.dart` before assuming otherwise.",
+    "The next candidate in this direction should target the half of claim 265.1 that is not transport. Claim 279.3 puts a point read's messages at 3.22 us of the 6.3 us hop, leaving ~3.1 us in per-request work that no transport change reaches: `ReaderPool._dispatch`'s row-hint lookup and stamping, request object construction, the worker's `resqliteReaderSetBusy` bracket and request-type dispatch, `_WorkerSlot`'s completion handler chain, `_record`, and `blobTransfer.materializeCells`. None of these has ever been measured individually and several are plausibly sub-microsecond, so the first step is a decomposition, not a candidate.",
+    "`benchmark/experiments/isolate_transport_price.dart` is the ruler for anything that changes what crosses the isolate boundary. It needs no database, no native code and no isolate pool, runs in seconds, and prices request shape, reply shape and bulk payload separately. Run it before proposing a message-shape change — including any revival of columnar transfer (exps 055, 081, 251, 258) — and divide by the read it wraps.",
+    "Claim 279.4 is a constraint on future design, not just a finding: a bulk payload's Dart backing decides its send cost, at 4.8x for 256 KB. Any candidate that would build a `Uint8List` on the Dart heap before sending it — a worker-side decode, a re-encode, a concatenation of chunks — pays that multiple, and the fix is always to keep the bytes native and send a view."
+  ]
+}

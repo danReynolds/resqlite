@@ -41,9 +41,6 @@ void main(List<String> args) async {
     final packageRoot = input.packageRoot;
     final targetOS = input.config.code.targetOS;
     final traceSqlite = _isEnabled(input.userDefines['trace_sqlite']);
-    // exp 279 prototype gate: POSIX target with the Dart SDK's dart_api_dl
-    // sources on hand. Null disables the prototype everywhere at once.
-    final nportInclude = targetOS == OS.windows ? null : _dartApiDlDir();
     final traceliteRoot = traceSqlite
         ? input.userDefines.path('tracelite_root')?.toFilePath()
         : null;
@@ -150,19 +147,12 @@ ${sorted.map((s) => '    $s;').join('\n')}
         packageFilePath(packageRoot, 'native/resqlite_deps.c'),
         packageFilePath(packageRoot, 'native/resqlite_json.c'),
         packageFilePath(packageRoot, 'native/resqlite.c'),
-        // exp 279 prototype: compiled only where dart_api_dl is available and
-        // the target is POSIX. Both files drop out of the build otherwise.
-        if (nportInclude != null) ...[
-          packageFilePath(packageRoot, 'native/resqlite_nport.c'),
-          p.join(nportInclude, 'dart_api_dl.c'),
-        ],
         // Windows-only: linker /export directives for the FFI symbols.
         if (windowsExportSource != null) windowsExportSource,
       ],
       includes: [
         packageFilePath(packageRoot, 'third_party/sqlite3mc'),
         packageFilePath(packageRoot, 'native'),
-        if (nportInclude != null) nportInclude,
         if (traceSqlite) p.join(traceliteRoot!, 'native'),
       ],
       defines: {
@@ -220,7 +210,6 @@ ${sorted.map((s) => '    $s;').join('\n')}
         'SQLITE_OMIT_TRACE': null,
         'SQLITE_OMIT_UTF16': null, // we only use UTF-8 via FFI
         if (traceSqlite) 'TRACELITE_SQLITE3_EMBEDDED': null,
-        if (nportInclude != null) 'RESQLITE_NPORT': null,
       },
       flags: [
         if (targetOS == OS.windows) '/experimental:c11atomics',
@@ -270,7 +259,6 @@ ${sorted.map((s) => '    $s;').join('\n')}
 Set<String> _resolveFfiSymbols(Uri packageRoot, bool traceSqlite) {
   final symbols = <String>{
     ..._exportedSymbols,
-    if (_dartApiDlDir() != null) ..._nportSymbols,
     if (traceSqlite)
       for (final symbol in _tracedSqliteSymbols) 'tlt_$symbol',
   };
@@ -377,33 +365,6 @@ const _exportedSymbols = [
   // (test/native_encoder_diff_test.dart).
   'resqlite_test_text_is_ascii',
 ];
-
-// Prototype: exp 279 native-thread dispatch / native-port completion
-// (benchmark/experiments/native_port_dispatch.dart). Added to the export set
-// only when the prototype is actually compiled — see [_dartApiDlDir].
-const _nportSymbols = [
-  'resqlite_nport_init',
-  'resqlite_nport_post_here',
-  'resqlite_nport_start',
-  'resqlite_nport_set_spin',
-  'resqlite_nport_stop',
-  'resqlite_nport_echo',
-  'resqlite_nport_bytes',
-  'resqlite_nport_prepare_bytes',
-  'resqlite_nport_query',
-  'resqlite_nport_bytes_nocopy',
-];
-
-/// The Dart SDK's `include/` directory, when `dart_api_dl` can be compiled
-/// against it — `<sdk>/bin/dart` sits one level under it. Null when the SDK
-/// ships no headers, which disables the exp 279 prototype rather than failing
-/// the build.
-String? _dartApiDlDir() {
-  final sdk = p.dirname(p.dirname(Platform.resolvedExecutable));
-  final include = p.join(sdk, 'include');
-  if (!File(p.join(include, 'dart_api_dl.c')).existsSync()) return null;
-  return include;
-}
 
 bool _isEnabled(Object? value) {
   if (value is bool) {

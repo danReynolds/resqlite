@@ -1330,6 +1330,32 @@ the queue before you schedule it": that lesson says measure how often the
 mechanism is reached, this one says measure what one occurrence is worth, and
 either number can close a candidate for the cost of ten minutes.*
 
+### A stand-in payload must match the real one's representation, not just its size
+
+[Exp 279](279-native-thread-dispatch.md) built a synthetic lane to ask whether a
+native thread could hand 256 KB to the main isolate more cheaply than a reader
+isolate can. The lane sent a heap `Uint8List` of the right size, and the
+candidate came back 6× ahead — 76.8 µs for the isolate send against 12.7 µs for
+the native post. That number was an artifact. `selectBytes` does not send a heap
+list; it sends a *view over native memory* (exp 174), and the VM's message copy
+charges very differently for the two: the same 256 KB costs 9.0 µs as a view and
+43.1 µs on the heap. Swapping the lane to a native-backed view turned a 6× win
+into a 32% loss, and the end-to-end pair then agreed with the corrected lane to
+within a percent.
+
+The tell was available before the correction: the synthetic said the candidate
+should win by ~60 µs on a 1,000-row read, and the end-to-end pair — run first as
+a smoke test — read dead even. When a stand-in and the real path disagree by
+that much, the stand-in is wrong, and the thing to check first is what the real
+path actually puts on the wire.
+
+*Reapplies whenever a harness substitutes a constructed payload for a real one:
+bytes, strings, lists, maps. Size is the obvious dimension to match and usually
+not the expensive one — backing (heap vs external), mutability, and whether
+leaves are shared all move the cost by multiples. Build the stand-in by copying
+what the shipped path constructs, and if a cheap end-to-end probe exists, run it
+early enough to catch the synthetic lying.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
