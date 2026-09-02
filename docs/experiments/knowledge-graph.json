@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 68,
-    "totalEntries": 148
+    "entriesWithClaims": 69,
+    "totalEntries": 149
   },
   "experiments": [
     {
@@ -2257,6 +2257,17 @@
         "stream-rerun-dispatch"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "280",
+      "title": "Who should pack the parameters",
+      "file": "280-caller-side-param-arena.md",
+      "date": "2026-09-02",
+      "status": "rejected",
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -4049,6 +4060,70 @@
       "restsOn": [
         "279.1"
       ]
+    },
+    {
+      "id": "280.1",
+      "source": "280",
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
+      "text": "The write path's parameter graph copy is material for ordinary scalar batches, and the sending isolate pays essentially all of it. Priced with no SQLite and no resqlite code, one persistent echo isolate receiving the matrix and replying with an int: the copy is 1287 us for a 10k x 20 mixed matrix (5.6% of the same shape's `executeBatch`), 818 us for 10k x 4 ASCII (9.7%), 773 us for 10k x 8 integer (17.0%), and 6 us for 100 x 8 (5.7%). `SendPort.send` alone — the serialize half, run on the sending isolate — is 1171, 708, 764 and 7 us of those, i.e. 91-99%. The receiving isolate rebuilds the graph almost for free. Strings and numbers are shared within an isolate group, so what is being copied is the matrix's structure: 10,000 inner lists and 200,000 slots.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · 11 samples after 3 warmup, one process · `benchmark/experiments/batch_param_transport_price.dart` · 2026-09",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "234.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "280.2",
+      "source": "280",
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
+      "text": "Packing `executeBatch`'s parameter arena on the issuing isolate and sending the writer its address is faster end to end on every batch shape measured, and worse for the main isolate on every text-bearing one. Two order-flipped collections from separate worktrees and separate AOT bundles, 15 samples per lane: wall -23.6%/-21.9% (10k x 8 integer), -13.6%/-13.1% (10k x 4 ASCII), -7.8%/-7.6% (10k x 20 mixed), -4.9%/-4.1% (100 x 8 mixed), -19.4%/-18.8% (10k x 8 integer inside `db.transaction`). Median event-loop blocking over the same calls moves -34.4%/-33.3%, +229.3%/+253.7%, +371.4%/+369.2%, +160.0%/+188.9% and -18.6%/-20.4% respectively — a 10k x 20 batch takes the main isolate from 1.2 ms to 5.7 ms of continuous unavailability. Every lane reproduces to within 1.8 percentage points across the order flip.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · separate baseline and candidate bundles built from separate worktrees (exp 249's in-process toggle reported a false -27%) · 15 samples after 3 warmup per lane · blocking measured as the largest gap seen by a self-rescheduling event-queue probe running for the duration of the awaited call · prototype at `archive/exp-280` · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "280.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "280.1"
+      ]
+    },
+    {
+      "id": "280.3",
+      "source": "280",
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
+      "text": "The exchange rate for relocating parameter encoding is `pack/send`, and it is decided by whether the matrix holds text. Packing the same matrix costs 0.81x what serializing it costs for a fixed-width 10k x 8 integer matrix, 2.86x for 100 x 8 mixed, 3.96x for 10k x 4 ASCII and 4.92x for 10k x 20 mixed. Numeric matrices are the only shape where a caller-side packer does less work than the send it replaces, and they are the only shape where the candidate improved both wall and blocking. They also have no representative incidence in this repo: the release suite's Batch Insert lane binds `['item_$i', i * 1.5]` and its Wide Batch Insert lane binds a 20-column mixed row, so both carry text in every row.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · same harness and samples as claim 280.1 · eligibility read from `benchmark/suites/writes.dart` at `36ac04f` · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "280.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "280.1"
+      ]
+    },
+    {
+      "id": "280.4",
+      "source": "280",
+      "directions": [
+        "parameter-encoding-and-binding"
+      ],
+      "text": "A parameter arena packed on one isolate and freed on another must be owned memory. `allocateReusableParamStructBuf` hands packs of 64 KB or less an isolate-local scratch buffer, and `freeReusableParamStructBuf` decides whether to free by comparing the pointer against that isolate's own scratch pointer; a buffer packed elsewhere misses the comparison and is freed while the packing isolate still holds it. Any cross-isolate arena design therefore forfeits the scratch buffer for small packs, which is what the 100 x 8 lane's blocking regression (+160%/+189% on a 26 us base) prices.",
+      "conditions": "Read from `lib/src/native/request_cache.dart` at `36ac04f`; exercised by the `archive/exp-280` prototype, whose `owned: true` flag exists for this reason · 2026-09",
+      "state": "live"
     }
   ]
 }
