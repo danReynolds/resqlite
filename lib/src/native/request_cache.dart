@@ -29,8 +29,16 @@ ffi.Pointer<Utf8> cachedSqlUtf8(String sql) {
 ffi.Pointer<ffi.Uint8> _reusableParamStructBuf = ffi.nullptr;
 int _reusableParamStructBufBytes = 0;
 
-ffi.Pointer<ffi.Uint8> allocateReusableParamStructBuf(int byteCount) {
-  if (byteCount > _maxReusableParamBufBytes) {
+/// When [owned] is set the caller takes ownership of a fresh allocation
+/// instead of borrowing this isolate's shared scratch buffer. The scratch
+/// buffer is isolate-local, so a buffer that will be freed by a *different*
+/// isolate must be owned — otherwise the freeing isolate compares it against
+/// its own scratch pointer, misses, and frees memory this isolate still holds.
+ffi.Pointer<ffi.Uint8> allocateReusableParamStructBuf(
+  int byteCount, {
+  bool owned = false,
+}) {
+  if (owned || byteCount > _maxReusableParamBufBytes) {
     return calloc<ffi.Uint8>(byteCount);
   }
   if (_reusableParamStructBuf == ffi.nullptr ||

@@ -72,15 +72,25 @@ final class QueryRequest extends WriterRequest {
 }
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
+///
+/// The parameter matrix crosses as a native arena address, not as a Dart
+/// object graph ([EXP-280]): the issuing isolate packs it with
+/// `allocateBatchParams(..., owned: true)` and the writer binds straight from
+/// [paramsAddress], then frees it. The writer owns the arena from the moment
+/// this request is sent.
 final class BatchRequest extends WriterRequest {
   BatchRequest(
     this.sql,
-    this.paramSets,
+    this.paramsAddress,
+    this.paramCount,
+    this.rowCount,
     super.replyPort, {
     super.traceCorrelationId,
   });
   final String sql;
-  final List<List<Object?>> paramSets;
+  final int paramsAddress;
+  final int paramCount;
+  final int rowCount;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
@@ -337,11 +347,18 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
+  final params = ffi.Pointer<ffi.Uint8>.fromAddress(msg.paramsAddress);
   if (state.txDepth > 0) {
     // Inside an open transaction: skip the batch's own BEGIN/COMMIT and
     // let the dirty set accumulate until the outermost commit.
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-    executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    executeNestedBatchWriteFromArena(
+      state.dbHandle,
+      msg.sql,
+      params,
+      msg.paramCount,
+      msg.rowCount,
+    );
     msg.replyPort.send(
       BatchResponse(
         TableDependencies.none,
@@ -350,7 +367,13 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     );
   } else {
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
-    executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
+    executeBatchWriteFromArena(
+      state.dbHandle,
+      msg.sql,
+      params,
+      msg.paramCount,
+      msg.rowCount,
+    );
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     msg.replyPort.send(
       BatchResponse(

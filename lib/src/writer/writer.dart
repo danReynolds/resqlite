@@ -291,10 +291,19 @@ final class Writer {
     // "internal error" response.
     assertUniformParamSets(sql, paramSets);
 
+    // Pack the matrix here, on the issuing isolate, and hand the writer an
+    // address ([EXP-280]). The graph copy that a `List<List<Object?>>` request
+    // would pay on this isolate is replaced by the packing walk the writer
+    // would otherwise have done after the copy landed. The writer frees the
+    // arena on every path out of `_handleBatch`.
+    final params = allocateBatchParams(paramSets, owned: true);
+
     return _request<BatchResponse>(
       (replyPort) => BatchRequest(
         sql,
-        paramSets,
+        params.address,
+        paramSets.first.length,
+        paramSets.length,
         replyPort,
         traceCorrelationId: traceCorrelationId,
       ),
