@@ -1,0 +1,61 @@
+{
+  "directions": [
+    "parameter-encoding-and-binding"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "experimentClass": "moonshot",
+  "outcomeNote": "The mechanism works and is faster end to end on every batch shape measured, in both orders. It is rejected because the wall win is bought with main-isolate blocking: `SendPort.send` alone is 91-99% of the parameter graph copy, so relocating the packing walk to the caller exchanges serialize for pack at 4-5x on any matrix holding text. Runtime reverted; prototype at `archive/exp-280`; harnesses retained as `benchmark/experiments/batch_param_transport_price.dart` and `batch_param_arena_ab.dart`.",
+  "changedBeliefs": [
+    "We believed the write path's main->writer object-graph copy was a blob problem. Exp 234 measured it for a single large `Uint8List` and named it 'copy (1)', and claim 234.1 says a mutable `Uint8List` is the one write value `SendPort.send` truly copies — true of leaves, and it left the impression that a matrix of scalars crosses cheaply because strings and numbers are shared within an isolate group. They are; the *structure* is not. A 10k x 20 parameter matrix is 10,000 inner lists and 200,000 slots, and copying them is 1.29 ms — 5.6% of that batch write, and 17.0% of a 10k x 8 integer one. Claim 280.1 refines 234.1: the parameter hop has a real cost for ordinary scalar batches, not only for blob payloads.",
+    "We believed, without ever checking, that moving work off the writer isolate is a way to make writes cheaper for the caller. It is the opposite here, and the number that says so is new: the sending isolate pays 91-99% of the graph copy, and the receiving isolate rebuilds it almost for free. So the parameter hop is not a cost sitting between the isolates that a cleverer transport could collect — it is already main-isolate work, and any candidate that changes what crosses the boundary is trading main-isolate time, not saving it. Claim 280.1 is the general form and it should be read before the next transport-shaped proposal on the write path, the way claim 279.3 is read before one on the read path.",
+    "We believed a reproduced two-order wall win on a representative shape was close to sufficient for a write-path candidate. This one has that — -7.8%/-7.6% on the release suite's own Wide Batch Insert shape, -13.6%/-13.1% on its Batch Insert shape, reproduced to within 1.8 points — and is still rejected, because the same change takes the main isolate from 1.2 ms to 5.7 ms of continuous unavailability on that same shape. No release-suite lane reports that, which is why it took a purpose-built probe to see it. A future runner moving work between isolates should measure event-loop blocking alongside wall; claim 280.2 is the worked example of a candidate the wall number alone would have accepted.",
+    "`dart run tool/knowledge/impact.dart origin/main` reports nothing retired and no claim losing its justification: 234.1 is refined rather than superseded, so the blob-transfer threshold and its reasoning stand unchanged. The one documented passage a reader should revisit is `doc/arch/cross-isolate-data-transfer.md` — not because anything in it is wrong, but because its account of what the boundary costs is written from the result side, and the parameter side now has numbers of its own (the sender pays essentially all of a graph copy, and packing is 0.81x that for numeric matrices and 4-5x for text). A future edit should put the write-path half beside it."
+  ],
+  "claims": [
+    {
+      "id": "280.1",
+      "text": "The write path's parameter graph copy is material for ordinary scalar batches, and the sending isolate pays essentially all of it. Priced with no SQLite and no resqlite code, one persistent echo isolate receiving the matrix and replying with an int: the copy is 1287 us for a 10k x 20 mixed matrix (5.6% of the same shape's `executeBatch`), 818 us for 10k x 4 ASCII (9.7%), 773 us for 10k x 8 integer (17.0%), and 6 us for 100 x 8 (5.7%). `SendPort.send` alone — the serialize half, run on the sending isolate — is 1171, 708, 764 and 7 us of those, i.e. 91-99%. The receiving isolate rebuilds the graph almost for free. Strings and numbers are shared within an isolate group, so what is being copied is the matrix's structure: 10,000 inner lists and 200,000 slots.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · 11 samples after 3 warmup, one process · `benchmark/experiments/batch_param_transport_price.dart` · 2026-09",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "234.1"
+        }
+      ]
+    },
+    {
+      "id": "280.2",
+      "text": "Packing `executeBatch`'s parameter arena on the issuing isolate and sending the writer its address is faster end to end on every batch shape measured, and worse for the main isolate on every text-bearing one. Two order-flipped collections from separate worktrees and separate AOT bundles, 15 samples per lane: wall -23.6%/-21.9% (10k x 8 integer), -13.6%/-13.1% (10k x 4 ASCII), -7.8%/-7.6% (10k x 20 mixed), -4.9%/-4.1% (100 x 8 mixed), -19.4%/-18.8% (10k x 8 integer inside `db.transaction`). Median event-loop blocking over the same calls moves -34.4%/-33.3%, +229.3%/+253.7%, +371.4%/+369.2%, +160.0%/+188.9% and -18.6%/-20.4% respectively — a 10k x 20 batch takes the main isolate from 1.2 ms to 5.7 ms of continuous unavailability. Every lane reproduces to within 1.8 percentage points across the order flip.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · separate baseline and candidate bundles built from separate worktrees (exp 249's in-process toggle reported a false -27%) · 15 samples after 3 warmup per lane · blocking measured as the largest gap seen by a self-rescheduling event-queue probe running for the duration of the awaited call · prototype at `archive/exp-280` · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "280.1"
+        }
+      ]
+    },
+    {
+      "id": "280.3",
+      "text": "The exchange rate for relocating parameter encoding is `pack/send`, and it is decided by whether the matrix holds text. Packing the same matrix costs 0.81x what serializing it costs for a fixed-width 10k x 8 integer matrix, 2.86x for 100 x 8 mixed, 3.96x for 10k x 4 ASCII and 4.92x for 10k x 20 mixed. Numeric matrices are the only shape where a caller-side packer does less work than the send it replaces, and they are the only shape where the candidate improved both wall and blocking. They also have no representative incidence in this repo: the release suite's Batch Insert lane binds `['item_$i', i * 1.5]` and its Wide Batch Insert lane binds a 20-column mixed row, so both carry text in every row.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · same harness and samples as claim 280.1 · eligibility read from `benchmark/suites/writes.dart` at `36ac04f` · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "280.1"
+        }
+      ]
+    },
+    {
+      "id": "280.4",
+      "text": "A parameter arena packed on one isolate and freed on another must be owned memory. `allocateReusableParamStructBuf` hands packs of 64 KB or less an isolate-local scratch buffer, and `freeReusableParamStructBuf` decides whether to free by comparing the pointer against that isolate's own scratch pointer; a buffer packed elsewhere misses the comparison and is freed while the packing isolate still holds it. Any cross-isolate arena design therefore forfeits the scratch buffer for small packs, which is what the 100 x 8 lane's blocking regression (+160%/+189% on a 26 us base) prices.",
+      "conditions": "Read from `lib/src/native/request_cache.dart` at `36ac04f`; exercised by the `archive/exp-280` prototype, whose `owned: true` flag exists for this reason · 2026-09"
+    }
+  ],
+  "nextSignals": [
+    "Do not propose caller-side parameter packing again as a shape-keyed default. Claim 280.3 gives the exchange rate and claim 280.2 the cost of being wrong; the eligibility test for the one winning shape is a full scan of the matrix, and a row-0 speculation is the shape exp 226 measured regressing a final-row TEXT fallback. The numeric case reopens only on a downstream AOT trace showing all-numeric `executeBatch` matrices are a material share of batch writes.",
+    "The version of this idea that is free has not been tried: fill the arena off both the writer and the caller. Nothing in the design needs the packing and the binding to happen on the same isolate — a third isolate, or the writer filling incrementally as rows arrive, would keep claim 280.2's wall win without its blocking cost. The prototype at `archive/exp-280` already has the ownership fix (claim 280.4) such a design needs.",
+    "`benchmark/experiments/batch_param_transport_price.dart` is the write-path counterpart to `isolate_transport_price.dart`. It needs no candidate: it prices the graph copy, the sender's half of it, the packing walk and the public `executeBatch` denominator for a given matrix shape in one run. Run it before proposing anything that changes what crosses the writer boundary, and read `send` rather than `copy` — claim 280.1 says they are nearly the same number and the difference is who pays.",
+    "Event-loop blocking is not in the release suite and should be, at least for the write lanes. `batch_param_arena_ab.dart`'s probe is small and reusable; claim 280.2 is a candidate the wall column alone would have accepted, on the library's own headline batch shape."
+  ]
+}

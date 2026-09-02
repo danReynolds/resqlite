@@ -1356,6 +1356,52 @@ leaves are shared all move the cost by multiples. Build the stand-in by copying
 what the shipped path constructs, and if a cheap end-to-end probe exists, run it
 early enough to catch the synthetic lying.*
 
+### A cost between two components usually belongs to one of them
+
+[Exp 280](280-caller-side-param-arena.md) proposed moving `executeBatch`'s
+parameter packing from the writer isolate to the caller, so the
+`List<List<Object?>>` graph copy on the main->writer hop would disappear. The
+graph copy is real — 1.29 ms for the release suite's 10k x 20 matrix, 5.6% of
+that write, and 17.0% of a 10k x 8 integer one — and removing it made every
+batch shape 4-24% faster in both run orders.
+
+It was still the wrong candidate, and one lane in the pricing harness said so
+before the A/B ran. Timing `SendPort.send` on its own, separately from the
+round trip, showed the *sender* pays 91-99% of the copy; the receiving isolate
+rebuilds the graph almost for free. So the hop was never a cost sitting between
+the two isolates waiting to be collected. It was main-isolate work already, and
+the candidate did not remove it — it swapped a serialize walk for a packing
+walk, at 4-5x on any matrix holding text. Measured as event-loop blocking, the
+main isolate went from 1.2 ms to 5.7 ms unavailable on the same shape the wall
+column said improved 7.8%.
+
+*Reapplies to any boundary — isolate, thread, process, network — where a
+candidate proposes to move work across it. Before costing what the boundary
+charges, find out which side is charged. A one-line lane that times the send
+without the reply, or the request without the response, answers it, and it can
+invert the verdict: work that looks like it lives in the gap often lives on the
+side you were trying to protect. It pairs with exp 278's unit-price lesson —
+that one asks what one occurrence is worth, this one asks whose budget it comes
+out of.*
+
+### Wall time is not the contract
+
+Same experiment. The candidate improved the release suite's own Wide Batch
+Insert and Batch Insert shapes, reproduced across an order flip, from separate
+AOT bundles — everything the suite can see said accept. What said reject was a
+metric no release lane reports: the longest gap a self-rescheduling event-queue
+probe sees during the awaited call, which is how long the main isolate is
+unavailable to anything else. resqlite's stated promise is that its work runs
+"with zero main-isolate jank", and that promise has no column in the suite.
+
+*Reapplies whenever a candidate moves work between isolates rather than
+removing it. Wall time is conserved across such a move and jank is not, so a
+wall-only gate cannot see the trade at all. The probe is about twenty lines
+(`benchmark/experiments/batch_param_arena_ab.dart`); run it beside the wall
+number. More generally: when a library's headline claim is about something the
+benchmark suite does not measure, a candidate can pass every lane and still
+break the thing people chose the library for.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
