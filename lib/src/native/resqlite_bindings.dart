@@ -336,62 +336,6 @@ void executeNestedBatchWrite(
   }
 }
 
-/// Execute a batch from a parameter arena packed by *another* isolate.
-///
-/// The caller-side packing prototype ([EXP-280]) moves `allocateBatchParams`
-/// onto the isolate that issued the write, so the writer receives an address
-/// instead of a `List<List<Object?>>` graph. The arena is owned memory
-/// (`owned: true` at the pack site), and this function frees it on every path.
-void executeBatchWriteFromArena(
-  ffi.Pointer<ffi.Void> dbHandle,
-  String sql,
-  ffi.Pointer<ffi.Uint8> params,
-  int paramCount,
-  int rowCount,
-) {
-  if (rowCount == 0) return;
-  final sqlNative = cachedSqlUtf8(sql);
-  try {
-    final rc = resqliteRunBatch(dbHandle, sqlNative, params, paramCount, rowCount);
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        _queryErrorMessage(dbHandle, rc, paramCount),
-        sql: sql,
-        sqliteCode: rc,
-      );
-    }
-  } finally {
-    freeOwnedParamBuffer(params);
-  }
-}
-
-/// [executeBatchWriteFromArena] for a batch inside an already-open
-/// transaction. As with [executeNestedBatchWrite], the caller owns
-/// BEGIN / COMMIT / ROLLBACK.
-void executeNestedBatchWriteFromArena(
-  ffi.Pointer<ffi.Void> dbHandle,
-  String sql,
-  ffi.Pointer<ffi.Uint8> params,
-  int paramCount,
-  int rowCount,
-) {
-  if (rowCount == 0) return;
-  final sqlNative = cachedSqlUtf8(sql);
-  try {
-    final rc =
-        resqliteRunBatchNested(dbHandle, sqlNative, params, paramCount, rowCount);
-    if (rc != 0) {
-      throw ResqliteQueryException(
-        _queryErrorMessage(dbHandle, rc, paramCount),
-        sql: sql,
-        sqliteCode: rc,
-      );
-    }
-  } finally {
-    freeOwnedParamBuffer(params);
-  }
-}
-
 /// Per-worker persistent buffer for dirty-table pointer marshalling.
 /// Allocated once; reused across calls. Eliminates a ~512-byte calloc/free
 /// pair on every write
@@ -865,10 +809,7 @@ ffi.Pointer<ffi.Uint8> allocateParams(List<Object?> params) {
   return buf;
 }
 
-ffi.Pointer<ffi.Uint8> allocateBatchParams(
-  List<List<Object?>> paramSets, {
-  bool owned = false,
-}) {
+ffi.Pointer<ffi.Uint8> allocateBatchParams(List<List<Object?>> paramSets) {
   if (paramSets.isEmpty) return ffi.nullptr.cast();
   final paramCount = paramSets.first.length;
   final totalCount = paramSets.length * paramCount;
@@ -885,7 +826,6 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(
           paramCount,
           totalCount,
           payload.extraBytes,
-          owned,
         );
       }
 
@@ -894,12 +834,11 @@ ffi.Pointer<ffi.Uint8> allocateBatchParams(
         paramCount,
         totalCount,
         payload.extraBytes,
-        owned,
       );
     }
   }
 
-  return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount, owned);
+  return _allocateBatchParamsGeneric(paramSets, paramCount, totalCount);
 }
 
 bool _firstBatchRowMayContainText(List<Object?> params, int paramCount) {
@@ -953,14 +892,12 @@ ffi.Pointer<ffi.Uint8> _allocateAsciiBatchParams(
   int paramCount,
   int totalCount,
   int extraBytes,
-  bool owned,
 ) {
   return _allocatePackedBatchParams(
     paramSets,
     paramCount,
     totalCount,
     extraBytes,
-    owned,
     (value, out, offset, _) {
       for (var j = 0; j < value.length; j++) {
         out[offset + j] = value.codeUnitAt(j);
@@ -975,14 +912,12 @@ ffi.Pointer<ffi.Uint8> _allocateUtf8BatchParams(
   int paramCount,
   int totalCount,
   int extraBytes,
-  bool owned,
 ) {
   return _allocatePackedBatchParams(
     paramSets,
     paramCount,
     totalCount,
     extraBytes,
-    owned,
     (value, out, offset, _) => _writeUtf8(value, out, offset),
   );
 }
@@ -992,12 +927,11 @@ ffi.Pointer<ffi.Uint8> _allocatePackedBatchParams(
   int paramCount,
   int totalCount,
   int extraBytes,
-  bool owned,
   _BatchStringWriter writeString,
 ) {
   final structsBytes = _paramStructSize * totalCount;
   final totalBytes = structsBytes + extraBytes;
-  final buf = allocateReusableParamStructBuf(totalBytes, owned: owned);
+  final buf = allocateReusableParamStructBuf(totalBytes);
   final view = buf.asTypedList(totalBytes);
   final byteData = ByteData.sublistView(view);
   final bufAddr = buf.address;
@@ -1112,7 +1046,6 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
   List<List<Object?>> paramSets,
   int paramCount,
   int totalCount,
-  bool owned,
 ) {
   List<Uint8List?>? encodedStrings;
   var extraBytes = 0;
@@ -1137,7 +1070,6 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
     paramCount,
     totalCount,
     extraBytes,
-    owned,
     (value, out, offset, flatIndex) {
       final bytes = encodedStrings![flatIndex]!;
       out.setRange(offset, offset + bytes.length, bytes);
@@ -1149,14 +1081,6 @@ ffi.Pointer<ffi.Uint8> _allocateBatchParamsGeneric(
 void freeParamBuffer(ffi.Pointer<ffi.Uint8> buf) {
   if (buf == ffi.nullptr) return;
   freeReusableParamStructBuf(buf);
-}
-
-/// Frees an arena allocated with `owned: true`. Unlike [freeParamBuffer] this
-/// never consults the isolate-local scratch pointer, so it is correct on an
-/// isolate that did not do the packing.
-void freeOwnedParamBuffer(ffi.Pointer<ffi.Uint8> buf) {
-  if (buf == ffi.nullptr) return;
-  calloc.free(buf);
 }
 
 void freeParams(ffi.Pointer<ffi.Uint8> buf, List<Object?> _) {
