@@ -42,7 +42,7 @@ final class RowSchema {
 
   /// Name-to-index map, built by the first lookup the identity scan in
   /// [indexOf] cannot answer and never before
-  /// ([EXP-281](../../../experiments/281-schema-index-transfer.md)).
+  /// ([EXP-281](../../experiments/281-schema-index-transfer.md)).
   ///
   /// A worker builds one [RowSchema] per SQL and keeps it, but the schema
   /// *travels with every result*: `SendPort.send` copies the whole graph, and a
@@ -99,8 +99,8 @@ final class RowSchema {
   /// A source literal is *not* one of them, whatever its text: decoded column
   /// names are built by `String.fromCharCodes` and never canonicalized, so
   /// `row['name']` misses the scan every time and falls to the index
-  /// ([EXP-281](../../../experiments/281-schema-index-transfer.md) measured it;
-  /// [EXP-176](../../../experiments/176-row-containskey-identity-fastpath.md)
+  /// ([EXP-281](../../experiments/281-schema-index-transfer.md) measured it;
+  /// [EXP-176](../../experiments/176-row-containskey-identity-fastpath.md)
   /// predicted it). Wider schemas skip the scan and go straight to the index.
   bool containsName(String name) => indexOf(name) >= 0;
 }

@@ -1,0 +1,78 @@
+{
+  "directions": [
+    "result-transfer-shape"
+  ],
+  "experimentClass": "exploit",
+  "outcomeClass": "accepted",
+  "outcomeReason": "performance",
+  "outcomeNote": "RowSchema's name-to-index HashMap was built in the constructor and therefore copied on every read, for a lookup structure most results never consult. Building it on first use instead removes 0.30 us of hop at six columns, 1.17 us at 21 and 1.79 us at 40, against a build cost of 95/322/617 ns paid once per result set. End to end: wide40 -22.4%, wide21 -12.1%, point lanes negative in all six passes at the collection floor, a 1,000-row result consumed entirely by column name unchanged (-0.5%). One nullable field and one out-of-line method in lib/src/row.dart; no public API change.",
+  "changedBeliefs": [
+    "We believed a per-SQL schema cache on the worker made the result schema free. It makes its *construction* free; what crosses the isolate boundary is charged per read however long the sender kept it. The `HashMap` inside `RowSchema` costs 0.30 us to send at six columns and 1.79 us at forty, while the column-name list it is built from costs nothing measurable at any width — strings cross a same-group boundary by reference (claim 245.1), so the whole schema-transfer cost was the index. Claim 281.1 is the number; the general form a reader should carry away is that a cache on the sending side does not make a graph cheap to send, and any per-SQL structure attached to a result is a per-read cost.",
+    "We believed claim 279.3's split of claim 265.1's 6.3 us hop into 3.22 us of transport and ~3.1 us of per-request work left the per-request half unmeasured. One named item in it is now measured and removed: 0.30 us of a six-column point read, 1.79 us of a forty-column one, was the schema index. Claim 281.1 refines 279.3 rather than replacing it — 279.3's own conditions flagged that its reply lane used plain lists rather than `Row` facades and was therefore a floor, and this is how much was under the floor. The rest of that half is still unmeasured and still the place to look.",
+    "We believed — the code said so, in `RowSchema.containsName`'s doc comment — that the exp 158/176 identity fast path serves 'the common case, e.g. a literal column name'. It does not and cannot: decoded column names come from `String.fromCharCodes` and are never canonicalized, so `identical(row.keys.elementAt(1), 'name')` is false on a real read. Exp 176 recorded this correctly in its signal entry (now minted as claim 176.1) and nobody wrote it into the code. Claim 281.3 validates 176.1 with a direct measurement, the comment is corrected, and a test pins it. The practical consequence: `row['name']` has always paid the full hash probe, which is why the index still has to exist rather than being deleted.",
+    "A methodological belief that cost this run an hour: we believed a synthetic transfer harness measures the graph it is handed. It measures the graph AOT decides to keep. A field that no code anywhere in the program reads is eliminated from its class, and an eliminated field is never copied — so the first version of this harness reported a 40,000-slot result crossing an isolate boundary as fast as a six-slot one, which is a 50x error in the direction of 'nothing costs anything'. Any transfer lane must consume every field it means to price, and the harness now throws if its sink is zero. This applies to `isolate_transport_price.dart`, `batch_param_transport_price.dart` and anything built from them.",
+    "`dart run tool/knowledge/impact.dart origin/main` reports no recorded belief retired by this run: 281.1 refines 279.3 rather than superseding it, 281.3 validates a claim minted in the same commit, and nothing in `doc/arch/` quotes a figure that moved. `doc/arch/cross-isolate-data-transfer.md` gains rather than loses — its account of what `send` copies is correct and this is a worked example of it on a structure nobody had thought to count."
+  ],
+  "claims": [
+    {
+      "id": "281.1",
+      "text": "A result's `RowSchema` is free to send except for its index. Measured with no database and no resqlite code, one echo isolate, lanes differing only in whether the schema carries a `HashMap<String,int>`: a six-column reply costs 3.43/3.33 us with the map and 3.12/3.09 us without, a 21-column one 4.36/4.32 against 3.19/3.14, and a 40-column one 4.97/4.95 against 3.19/3.13 — so the map is worth 0.30, 1.17 and 1.79 us per read. The no-map lanes are flat across all three widths, because strings cross a same-group boundary by reference and only the map copies per entry. Building the same index on the receiving side costs 95 ns at six columns, 322 ns at 21 and 617 ns at 40, between a third and a quarter of what sending it costs, and once per result set rather than once per read.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart compile exe`) · 2 order-flipped passes, 11 samples x 2,000 round trips · `benchmark/experiments/schema_index_transfer.dart` · 2026-09",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "279.3"
+        },
+        {
+          "type": "dependsOn",
+          "target": "245.1"
+        }
+      ]
+    },
+    {
+      "id": "281.2",
+      "text": "Building the schema index lazily is worth -22.4% on a 40-column read and -12.1% on a 21-column one, reproduced in every pass of three order-flipped collections of two AOT bundles from separate worktrees. Point reads read negative in all six passes (-2.2% by-literal, -3.2% by-interned-key) but the collection's two zero-ceiling controls — `selectBytes`, which builds no schema, and a batch write, which never crosses one — range over -10% to +29%, so the harness resolves the wide lanes and not the point lanes; claim 281.1's 0.27 us against a ~4.8 us point read is the figure to use there. A 1,000-row six-column result consumed entirely by column name, 6,000 lookups against one build, reads -0.5%: the per-read saving and the per-lookup tax cancel at that size and the trade never goes negative.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · loaded host (load average 11-21, OS indexing) · lane-isolated, one process per lane, 41 samples after 8 warmup, 3 collections of order-flipped passes · `benchmark/experiments/schema_index_read_ab.dart` · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "281.1"
+        }
+      ]
+    },
+    {
+      "id": "281.3",
+      "text": "The `RowSchema` identity fast path never fires for a source literal on a real read. `identical(rows[0].keys.elementAt(1), 'name')` is false: decoded column names are built by `String.fromCharCodes` and are not canonicalized, so the idiomatic `row['name']` misses the identity scan every time and pays the full hash probe. This is a direct measurement of what exp 176 stated as a limitation of its benchmark (claim 176.1), and it is why the index is built lazily rather than deleted — a pure equality scan replacing it costs 16.7 ns against 6.2 ns on the interned path at six columns and 57.5 against 13.1 at forty, which would give back exps 158 and 176.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · direct `identical` assertion in `test/schema_index_test.dart` plus lookup lanes at 6/21/40 columns, 200,000 lookups x 41 samples · 2026-09",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "176.1"
+        }
+      ]
+    },
+    {
+      "id": "281.4",
+      "text": "A lazily initialized field on a hot lookup path has to keep its build out of line. Written as `(_indexByName ??= _buildIndex())[name]`, the lazy index cost the steady-state probe enough to read +1.1% and +4.0% against base on a 1,000-row by-literal consumption lane — 6,000 lookups amplify a sub-nanosecond regression past a once-per-read saving. Moving the build into a `@pragma('vm:never-inline')` sibling, so `indexOf` is a load, a never-taken branch and a probe, took that lane to -0.5% and left the residual tax at +0.28 ns per lookup at six columns and +0.83 ns at 21, with the identity path and the 40-column path unchanged.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT · in-process lookup lanes, 200,000 lookups x 41 samples x 6 passes; `rows1k-literal` end-to-end lane, both implementations against the same base · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "281.2"
+        }
+      ]
+    },
+    {
+      "id": "281.5",
+      "text": "A synthetic isolate-transfer harness measures the graph AOT keeps, not the graph it was handed. A field no code in the program ever reads is eliminated from its class, and an eliminated field is never copied: a first version of `schema_index_transfer.dart` reported a 40,000-slot result crossing a boundary in 3.3 us — the same as a six-slot one — while the identical list sent unwrapped cost 105 us. Every transfer lane must consume each field it means to price, on the receiving side, or it silently measures nothing. `isolate_transport_price.dart` (exp 279) and `batch_param_transport_price.dart` (exp 280) are built on the same pattern and anything derived from them inherits the trap.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart compile exe`) · 40,000-slot `List<Object?>` wrapped in a single-field class versus sent directly, 7 samples x 300 round trips · 2026-09"
+    }
+  ],
+  "nextSignals": [
+    "The schema index is the first item off claim 279.3's ~3.1 us of per-request work, and it was worth 0.30 us on a point read. The rest of that list is still unmeasured: `ReaderPool._dispatch`'s row-hint lookup and stamping, request construction, the worker's `resqliteReaderSetBusy` bracket and request-type dispatch, `_WorkerSlot`'s completion handler chain, `_record`, and `blobTransfer.materializeCells`. Price them the way this run priced the schema — against `isolate_transport_price.dart`'s floor, with every field consumed — before proposing a candidate.",
+    "Do not put a name lookup on a worker isolate without checking what it does to the wire. A worker's `RowSchema` is cached per SQL and now stays index-free; the first worker-side `indexOf` would materialize an index on the cached object and silently resume shipping it on every read of that statement. `resultSetHasNameIndex` and `test/schema_index_test.dart` are the guard.",
+    "The `digest` design — replacing the map with a flat `Uint32List` of the names' hash codes — ships for free at every width (it matches the no-map lanes) because typed data crosses as one buffer rather than one object per entry. It lost on lookup cost, not on transfer. Anything else on a result that copies per entry rather than per buffer is a candidate for the same substitution; `schema_index_transfer.dart`'s `digest` lanes are the ruler.",
+    "Raising `_identityLookupMaxColumns` past 32 now changes how often the index is built at all, not just which lookups are fast. Exp 158's sweep put the scan/hash crossover between 32 and 48; re-run `schema_index_read_ab.dart`'s lookup lanes alongside that sweep before moving it.",
+    "This run's release suite was captured on a host under sustained OS indexing load (load average 11-21). Read its absolute figures as a floor and not as a device-representative headline; the focused A/B is the decision evidence."
+  ]
+}

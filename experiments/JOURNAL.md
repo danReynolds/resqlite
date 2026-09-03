@@ -1402,6 +1402,43 @@ number. More generally: when a library's headline claim is about something the
 benchmark suite does not measure, a candidate can pass every lane and still
 break the thing people chose the library for.*
 
+### A transfer benchmark measures the graph AOT kept, not the graph you built
+
+[Exp 281](281-schema-index-transfer.md) set out to price a `HashMap` riding
+across an isolate hop and got its first answer in seconds: a 40,000-slot result
+crossed as fast as a six-slot one, and the map cost nothing. Both were false.
+AOT eliminates a field that no code in the program ever reads, and an eliminated
+field is never copied — so a harness that sends an object and never looks inside
+it on the receiving side is measuring an empty shell. The identical list sent
+unwrapped, where nothing could be elided, cost 105 µs against the 3 µs the
+wrapped version reported. Consume every field you mean to price, on the
+receiving side, and make the harness throw if its sink is zero.
+
+*Reapplies to every synthetic cross-isolate lane — `isolate_transport_price.dart`
+(exp 279), `batch_param_transport_price.dart` (exp 280) and anything derived
+from them. The tell is a size sweep that comes out flat: real copying scales
+with slots (claim 245.1), so a lane where payload size does not move the number
+is not measuring a copy. More generally, in AOT any microbenchmark whose result
+is never observed can have its subject optimized away entirely, and the failure
+is silent and fast rather than loud.*
+
+### A cache on the sending side does not make a graph cheap to send
+
+The same experiment's actual finding, and the reason nobody had looked: reader
+workers cache one `RowSchema` per SQL string, so the name-to-index map inside it
+was built once and felt free. But the schema travels with every result, and
+`SendPort.send` charges for what it is handed, not for how long the sender kept
+it. The map cost 0.3 µs per read at six columns and 1.8 µs at forty — while the
+column-name list it was built from cost nothing measurable at any width, because
+strings cross a same-group boundary by reference (claim 245.1). Reuse on one
+side of a boundary and cost on the other are unrelated.
+
+*Reapplies whenever a per-SQL, per-connection or per-worker cache hangs off
+something that crosses an isolate boundary. Ask what the structure costs to
+*copy*, not what it costs to build, and remember that the copy is per entry for
+maps and per slot for lists but free for strings and flat typed data — a
+`Uint32List` of the same information ships for nothing.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
