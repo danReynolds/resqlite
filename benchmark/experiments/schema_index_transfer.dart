@@ -87,8 +87,9 @@ final class _Schema {
   final Uint32List? hashes;
 
   /// Built on demand by [indexOfLazy], standing in for a map the reply no
-  /// longer carries.
-  Map<String, int>? _lazyIndex;
+  /// longer carries. Concrete `HashMap`, so the lookup devirtualizes the way
+  /// the shipped final field did.
+  HashMap<String, int>? _lazyIndex;
 
   /// The shipped lookup: identity scan for narrow schemas, then the map.
   int indexOfHashed(String name) {

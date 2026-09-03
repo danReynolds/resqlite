@@ -56,7 +56,10 @@ final class RowSchema {
   /// Only main-isolate [Row] access calls [indexOf], so a worker's cached
   /// schema stays map-free and keeps sending the cheap shape. A worker that
   /// started looking columns up by name would put the map back on the wire.
-  Map<String, int>? _indexByName;
+  ///
+  /// Typed as the concrete `HashMap` rather than `Map` so the probe in
+  /// [indexOf] keeps the receiver type the old `final` field gave it.
+  HashMap<String, int>? _indexByName;
 
   /// The number of columns in this schema.
   int get columnCount => names.length;
@@ -68,15 +71,21 @@ final class RowSchema {
         if (identical(names[i], name)) return i;
       }
     }
-    return (_indexByName ??= _buildIndex())[name] ?? -1;
+    final index = _indexByName;
+    // The build is out of line so that the steady-state path — load, one
+    // never-taken branch, one probe — stays small enough to inline. Folding it
+    // in as `(_indexByName ??= _buildIndex())[name]` costs every later lookup.
+    if (index == null) return _buildIndexAndLookUp(name);
+    return index[name] ?? -1;
   }
 
-  Map<String, int> _buildIndex() {
-    final index = HashMap<String, int>();
+  @pragma('vm:never-inline')
+  int _buildIndexAndLookUp(String name) {
+    final index = _indexByName = HashMap<String, int>();
     for (var i = 0; i < names.length; i++) {
       index[names[i]] = i;
     }
-    return index;
+    return index[name] ?? -1;
   }
 
   /// Whether [name] is one of this schema's columns.

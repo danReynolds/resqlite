@@ -31,6 +31,14 @@
 //                   builds no `RowSchema` at all. Must read neutral — anything
 //                   it moves is apparatus, not this change.
 //   writes          GUARD: a small batch write, which never crosses a schema.
+//   lookup-*        `RowSchema.indexOf` alone, no database and no isolate, at
+//                   200,000 lookups against one schema so the one-time build
+//                   amortizes away and only the steady-state probe is left.
+//                   GUARD on the lazy field: a per-lookup tax here is paid on
+//                   every cell of every large result, and would swallow a
+//                   once-per-read saving. `-literal` is a caller's own string,
+//                   `-interned` the schema's own name object, `-miss` a column
+//                   that is not there.
 //
 // Usage:
 //   dart run benchmark/experiments/schema_index_read_ab.dart \
@@ -174,6 +182,47 @@ const _lanes = <_Lane>[
   _Lane('writes', sql: _standardInsert, repeats: 20, write: true),
 ];
 
+/// Lookup guard lanes: `<key kind>-<columns>`.
+const _lookupLanes = <String>[
+  'lookup-literal-6',
+  'lookup-interned-6',
+  'lookup-miss-6',
+  'lookup-literal-21',
+  'lookup-interned-21',
+  'lookup-literal-40',
+];
+
+const _lookupIterations = 200000;
+
+/// Column names as a real read produces them: decoded per query and never
+/// canonicalized, so a caller's literal of the same text is a different object.
+List<String> _decodedNames(int columns) => List<String>.generate(
+  columns,
+  (i) => String.fromCharCodes('column_name_$i'.codeUnits),
+  growable: false,
+);
+
+/// Times `RowSchema.indexOf` directly, in nanoseconds per lookup.
+double _runLookup(String lane, int iterations) {
+  final parts = lane.split('-');
+  final kind = parts[1];
+  final columns = int.parse(parts[2]);
+  final schema = resqlite.RowSchema(_decodedNames(columns));
+  final keys = switch (kind) {
+    'interned' => schema.names,
+    'miss' => List<String>.generate(columns, (i) => 'absent_column_$i'),
+    _ => List<String>.generate(columns, (i) => 'column_name_$i'),
+  };
+  final stopwatch = Stopwatch()..start();
+  var found = 0;
+  for (var i = 0; i < iterations; i++) {
+    found += schema.indexOf(keys[i % columns]);
+  }
+  stopwatch.stop();
+  _sink += found + iterations;
+  return stopwatch.elapsedMicroseconds * 1000 / iterations;
+}
+
 int _sink = 0;
 
 void _check(_Lane lane, int got, int want) {
@@ -304,6 +353,20 @@ Future<void> main(List<String> args) async {
 
   print('=== schema index read A/B ===');
   print('warmup=$warmup samples=$samples');
+  for (final lane in _lookupLanes) {
+    if (only != null && lane != only) continue;
+    _runLookup(lane, _lookupIterations ~/ 4);
+    final timings = <double>[];
+    for (var s = 0; s < samples; s++) {
+      timings.add(_runLookup(lane, _lookupIterations));
+    }
+    final sorted = List<double>.from(timings)..sort();
+    print(
+      'lane=$lane ns_per_lookup=${_median(sorted).toStringAsFixed(2)} '
+      'min=${sorted.first.toStringAsFixed(2)} '
+      'max=${sorted.last.toStringAsFixed(2)}',
+    );
+  }
   for (final lane in _lanes) {
     if (only != null && lane.name != only) continue;
     final timings = await _runLane(lane, warmup: warmup, samples: samples);
@@ -314,5 +377,7 @@ Future<void> main(List<String> args) async {
       'max=${sorted.last.toStringAsFixed(3)}',
     );
   }
-  if (_sink == 0) throw StateError('unreachable: results were never consumed');
+  if (_sink == 0 && only != 'writes') {
+    throw StateError('unreachable: results were never consumed');
+  }
 }
