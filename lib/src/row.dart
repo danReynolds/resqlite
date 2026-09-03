@@ -91,11 +91,17 @@ final class RowSchema {
   /// Whether [name] is one of this schema's columns.
   ///
   /// Shares the [indexOf] identity fast path: when the caller supplies one of
-  /// the schema's own column-name objects (the common case, e.g. a literal
-  /// column name or a key drawn from [names]) on a schema of at most
-  /// [_identityLookupMaxColumns] columns, the membership test is a short
-  /// pointer-identity scan that avoids hashing the key. Equal-but-non-identical
-  /// keys and wider schemas fall back to the [HashMap] index.
+  /// the schema's own column-name objects — a key drawn from [names], which is
+  /// what `for (final key in row.keys)` and [Row.forEach] re-feed — on a schema
+  /// of at most [_identityLookupMaxColumns] columns, the membership test is a
+  /// short pointer-identity scan that avoids hashing the key.
+  ///
+  /// A source literal is *not* one of them, whatever its text: decoded column
+  /// names are built by `String.fromCharCodes` and never canonicalized, so
+  /// `row['name']` misses the scan every time and falls to the index
+  /// ([EXP-281](../../../experiments/281-schema-index-transfer.md) measured it;
+  /// [EXP-176](../../../experiments/176-row-containskey-identity-fastpath.md)
+  /// predicted it). Wider schemas skip the scan and go straight to the index.
   bool containsName(String name) => indexOf(name) >= 0;
 }
 
