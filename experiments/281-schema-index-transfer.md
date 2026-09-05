@@ -1,7 +1,7 @@
 # Experiment 281: the lookup table that rides on every read
 
 **Date:** 2026-09-03
-**Status:** Accepted (in review)
+**Status:** Accepted
 **Direction:** `result-transfer-shape`
 **Benchmark Run:**
   [`benchmark/results/2026-09-03T08-00-00Z-schema-index-focused-ab.md`](../benchmark/results/2026-09-03T08-00-00Z-schema-index-focused-ab.md)
