@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 69,
-    "totalEntries": 149
+    "entriesWithClaims": 70,
+    "totalEntries": 150
   },
   "experiments": [
     {
@@ -2268,6 +2268,18 @@
         "parameter-encoding-and-binding"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "282",
+      "title": "The missing half of the hop",
+      "file": "282-read-request-residual.md",
+      "date": "2026-09-05",
+      "status": "rejected",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -4123,6 +4135,50 @@
       ],
       "text": "A parameter arena packed on one isolate and freed on another must be owned memory. `allocateReusableParamStructBuf` hands packs of 64 KB or less an isolate-local scratch buffer, and `freeReusableParamStructBuf` decides whether to free by comparing the pointer against that isolate's own scratch pointer; a buffer packed elsewhere misses the comparison and is freed while the packing isolate still holds it. Any cross-isolate arena design therefore forfeits the scratch buffer for small packs, which is what the 100 x 8 lane's blocking regression (+160%/+189% on a 26 us base) prices.",
       "conditions": "Read from `lib/src/native/request_cache.dart` at `36ac04f`; exercised by the `archive/exp-280` prototype, whose `owned: true` flag exists for this reason · 2026-09",
+      "state": "live"
+    },
+    {
+      "id": "282.1",
+      "source": "282",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "The per-request work claim 279.3 named is worth 78.8 ns, not ~3.1 us. Measured individually and AOT: `Completer.sync()` and its resolution 38.6 ns, the `_rowHints[sql]` lookup over a full 128-entry map 9.6 ns, the worker's `setBusy` bracket (two leaf FFI calls) 5.9 ns, `RowSizeMemory.record` 5.2 ns, `materializeCells` with nothing wrapped 4.8 ns, building and destructuring the reply envelope 4.7 ns, `_dispatch`'s four-slot scan 4.7 ns, `SelectRequest` construction plus the hint stamp 2.6 ns, and `toResultSet` 2.6 ns. That is 2.4% of the hop. Claim 279.3 is refuted and no candidate in the family it opened is worth a pass.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · load average 2.5-4.3 throughout · decomposition parts are single-process ladders with lane order rotated per sample, 15 samples · the A/B is two AOT bundles from separate worktrees, one lane per process, 4 order-flipped passes of 41 samples (plus an earlier 6-pass, 61-sample collection of `point1`) · prototype at `archive/exp-282`",
+      "state": "live"
+    },
+    {
+      "id": "282.2",
+      "source": "282",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A point read's isolate hop is 3.27 us on current main, not claim 265.1's 6.3 us. `db.select()` of one six-column row costs 4.625 us through the pool and 1.355 us run inline on the calling isolate. The inline arm here is cheaper than exp 265's -- it skips the async prologue, the `_runtime` hop and the hint bookkeeping that exp 265's inline routing kept -- so 3.27 us is an upper bound on what the worker path adds and the gap against 6.3 us is a floor. Any calculation that still divides by 6.3 us is overstating its headroom by about a factor of two.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · load average 2.5-4.3 throughout · decomposition parts are single-process ladders with lane order rotated per sample, 15 samples · the A/B is two AOT bundles from separate worktrees, one lane per process, 4 order-flipped passes of 41 samples (plus an earlier 6-pass, 61-sample collection of `point1`) · prototype at `archive/exp-282`",
+      "state": "live"
+    },
+    {
+      "id": "282.3",
+      "source": "282",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "An echo-isolate transport ladder reports a ~1 us penalty for a `SendPort` message containing a record that the shipping path does not have. In the ladder a record and a `List` holding identical values differ by 1.08 us (3.00 vs 1.92 us), the penalty does not scale with field count (a two-field record costs the same as a three-field one) and a second record in the same message is free; it survives pre-built vs freshly-allocated payloads, canonical vs freshly-decoded strings, a canonical vs a run-time-built schema, nesting, and a worker that burns 2.3 us before replying, at +0.85 to +1.59 us. In the library it is absent twice over: a `Stopwatch` around the real worker's `eventPort.send` reads 1416.8 ns for the record and 1457.3 ns for the class over 5,800 reads each, and the end-to-end A/B moves -0.84% where the ladder predicts -17% to -27%. The ladder's own tell is that its most faithful reply lane, 3.92 us one way, exceeds the whole 3.27 us round-trip hop it models.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · load average 2.5-4.3 throughout · decomposition parts are single-process ladders with lane order rotated per sample, 15 samples · the A/B is two AOT bundles from separate worktrees, one lane per process, 4 order-flipped passes of 41 samples (plus an earlier 6-pass, 61-sample collection of `point1`) · prototype at `archive/exp-282`",
+      "state": "live"
+    },
+    {
+      "id": "282.4",
+      "source": "282",
+      "directions": [
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Leaving the caller parked for longer does not make a round trip cost more. With the worker burning a calibrated interval before replying, the round trip's overhead above that interval is 3.17 us at 0 us of work, 2.64 at 2.25 us, 2.71 at 4.51 us and 3.09 at 11.27 us -- flat, with no step where the caller's isolate parks. There is no wake premium hiding in the hop, and a tight ladder is not flattered by keeping its caller hot.",
+      "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · load average 2.5-4.3 throughout · decomposition parts are single-process ladders with lane order rotated per sample, 15 samples · the A/B is two AOT bundles from separate worktrees, one lane per process, 4 order-flipped passes of 41 samples (plus an earlier 6-pass, 61-sample collection of `point1`) · prototype at `archive/exp-282`",
       "state": "live"
     }
   ]
