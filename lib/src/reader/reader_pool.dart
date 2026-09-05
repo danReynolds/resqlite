@@ -207,10 +207,11 @@ final class ReaderPool {
       ),
       memory,
     );
-    final typed = result as SelectWithDepsResult;
-    _record(sql, memory, typed.rowCount);
-    blobTransfer.materializeCells(typed.rows);
-    return (typed.rows, typed.dependencies, typed.hash, typed.rowCount);
+    final typed =
+        result as (List<Map<String, Object?>>, TableDependencies, int, int);
+    _record(sql, memory, typed.$4);
+    blobTransfer.materializeCells(typed.$1);
+    return typed;
   }
 
   /// Execute a query returning JSON-encoded bytes plus the serialized row
@@ -230,8 +231,7 @@ final class ReaderPool {
       // Rotates rather than sticks; see [_preferred].
       false,
     );
-    final typed = result as SelectBytesResult;
-    return (bytes: typed.bytes, rowCount: typed.rowCount);
+    return result as ({Uint8List bytes, int rowCount});
   }
 
   /// Execute a re-query with worker-side hash comparison.
@@ -255,11 +255,11 @@ final class ReaderPool {
       ),
       memory,
     );
-    final typed = result as SelectIfChangedResult;
-    _record(sql, memory, typed.rowCount);
-    final rows = typed.rows;
+    final typed = result as (List<Map<String, Object?>>?, int, int);
+    _record(sql, memory, typed.$3);
+    final rows = typed.$1;
     if (rows != null) blobTransfer.materializeCells(rows);
-    return (rows, typed.hash, typed.rowCount);
+    return typed;
   }
 
   /// [memory] is this SQL's result-size entry, read by the caller so the small
@@ -486,14 +486,13 @@ class _WorkerSlot {
       // inside this handler. Profile-mode only.
       final completionSw = kProfileMode ? (Stopwatch()..start()) : null;
 
-      final reply = msg as ReadReply;
-      final result = reply.result;
-      final error = reply.error;
+      final (result, sacrificed, error) =
+          msg as (Object?, bool, ResqliteException?);
 
       // If the isolate has sacrified itself in order to return a large response,
       // then the pending request is resolved with the response and the worker
       // spawns a new isolate to replace it.
-      if (reply.sacrificed) {
+      if (sacrificed) {
         _sendPort = null;
         _workerPort?.close();
         _workerPort = null;

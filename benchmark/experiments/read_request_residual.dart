@@ -46,6 +46,25 @@
 //             reply-listenv      the real reply with the envelope kept but
 //                                carried as a `List` instead of a record: the
 //                                candidate's actual wire shape.
+//             real-rec /         the same pair once more, over a reply whose
+//             real-class         schema is also freshly built rather than a
+//                                `const` literal list — object for object what
+//                                a reader replies with. This is the pair the
+//                                end-to-end A/B agrees with.
+//             busy-rec /         real-rec / real-class once more, with the
+//             busy-class         worker burning ~2.3 us before it replies —
+//                                about what a point read's SQLite half costs.
+//             fresh-rec-str /    the record and class envelopes again, over a
+//             fresh-class-str    payload whose TEXT cells are freshly built
+//                                rather than canonical literals — the shape a
+//                                real decode produces. This pair is what the
+//                                end-to-end A/B has to agree with.
+//             fresh-rec /        the same three envelopes over a reply built
+//             fresh-class /      FRESH on the worker for every message, which
+//             fresh-list         is what a real reader does. Every lane above
+//                                re-sends one long-lived instance; these are
+//                                the ones to believe.
+
 //             reply-nest-rec /   a record inside a record against a list
 //             reply-nest-list    inside a list, for whether the penalty is
 //                                per record instance or once per message.
@@ -112,6 +131,25 @@ List<Object?> _row() => <Object?>[
   1735689600000,
 ];
 
+/// Code units of the two TEXT cells, so [_freshRow] can build strings the
+/// receiving isolate has never seen. A `String` literal is canonical and
+/// crosses a same-group boundary by reference (claim 245.1); a string a worker
+/// just decoded out of SQLite is not, and has to be copied. Every lane built
+/// from [_row] carries the cheap kind.
+final List<int> _nameCodes = 'Widget'.codeUnits;
+final List<int> _descCodes = 'A short description'.codeUnits;
+
+/// The same row as [_row], but with both TEXT cells freshly allocated, which
+/// is what `decodeQuery`'s `String.fromCharCodes` hands the reply.
+List<Object?> _freshRow() => <Object?>[
+  1,
+  String.fromCharCodes(_nameCodes),
+  19.99,
+  String.fromCharCodes(_descCodes),
+  1,
+  1735689600000,
+];
+
 int _sink = 0;
 
 double _median(List<double> xs) {
@@ -122,6 +160,15 @@ double _median(List<double> xs) {
 // ---------------------------------------------------------------------------
 // Part: reply — what the messages actually carry
 // ---------------------------------------------------------------------------
+
+/// A `ReadReply`-shaped envelope: the class the candidate sends in place of
+/// the `(result, sacrificed, error)` record.
+final class _ClassEnv {
+  _ClassEnv(this.result, this.sacrificed, this.error);
+  final Object? result;
+  final bool sacrificed;
+  final Object? error;
+}
 
 /// A schema with the same fields as [RowSchema] minus the name index, so the
 /// `reply-nomap` lane can be measured on `main` without depending on exp 281.
@@ -162,6 +209,15 @@ const _markerBare = 9;
 const _markerListEnv = 10;
 const _markerNestRec = 11;
 const _markerNestList = 12;
+const _markerFreshRec = 13;
+const _markerFreshClass = 14;
+const _markerFreshList = 15;
+const _markerFreshRecStr = 16;
+const _markerFreshClassStr = 17;
+const _markerRealRec = 18;
+const _markerRealClass = 19;
+const _markerBusyRec = 20;
+const _markerBusyClass = 21;
 
 /// Markers at or above this ask the echo isolate to burn `marker - _markerBusy`
 /// spin units before sending the real reply. The marker is still one `int`, so
@@ -196,6 +252,21 @@ void _echoEntry(SendPort reply) {
   final list3 = <Object?>[1, false, null];
   final pair = (1, false);
   final bare = ResultSet(_row(), RowSchema(_columns), 1);
+  // A worker caches one schema per SQL, so the fresh lanes reuse it too and
+  // differ from each other only in the envelope.
+  final freshSchema = RowSchema(_columns);
+
+  // The real thing: a cached schema whose `names` list and column strings were
+  // built at run time, exactly as `_schemaFor` builds them from
+  // `sqlite3_column_name`. `_columns` is a `const` list of literals, which is
+  // canonical and crosses for free; this one is not, and has to be copied.
+  final realSchema = RowSchema(
+    List<String>.generate(
+      _columns.length,
+      (i) => String.fromCharCodes(_columns[i].codeUnits),
+      growable: false,
+    ),
+  );
   final listEnv = <Object?>[
     ResultSet(_row(), RowSchema(_columns), 1),
     false,
@@ -260,6 +331,43 @@ void _echoEntry(SendPort reply) {
         reply.send(nestRec);
       case _markerNestList:
         reply.send(nestList);
+      // The three lanes that matter most: a reply built FRESH per message,
+      // the way a real reader builds one, differing only in the envelope.
+      // The lanes above re-send one long-lived instance, which is not what
+      // the library does and may not cost what the library pays.
+      case _markerFreshRec:
+        reply.send((ResultSet(_row(), freshSchema, 1), false, null));
+      case _markerFreshClass:
+        reply.send(_ClassEnv(ResultSet(_row(), freshSchema, 1), false, null));
+      case _markerFreshList:
+        reply.send(<Object?>[ResultSet(_row(), freshSchema, 1), false, null]);
+      // The pair that decides the experiment: the same two envelopes over a
+      // payload whose strings are new to the receiver, as a real read's are.
+      case _markerFreshRecStr:
+        reply.send((ResultSet(_freshRow(), freshSchema, 1), false, null));
+      case _markerFreshClassStr:
+        reply.send(
+          _ClassEnv(ResultSet(_freshRow(), freshSchema, 1), false, null),
+        );
+      // Object for object, what a reader actually replies with: fresh cells,
+      // a fresh values list, and a cached-but-not-canonical schema.
+      case _markerRealRec:
+        reply.send((ResultSet(_freshRow(), realSchema, 1), false, null));
+      case _markerRealClass:
+        reply.send(
+          _ClassEnv(ResultSet(_freshRow(), realSchema, 1), false, null),
+        );
+      // The same pair with the worker doing ~2.3 us of work first, which is
+      // roughly what a point read's SQLite half costs. An echo isolate that
+      // replies instantly is the one thing no real worker ever does.
+      case _markerBusyRec:
+        _spin(4);
+        reply.send((ResultSet(_freshRow(), realSchema, 1), false, null));
+      case _markerBusyClass:
+        _spin(4);
+        reply.send(
+          _ClassEnv(ResultSet(_freshRow(), realSchema, 1), false, null),
+        );
       default:
         reply.send(marker);
     }
@@ -299,6 +407,15 @@ Future<void> _runReply(
       'reply-pair' => _markerPair,
       'reply-bare' => _markerBare,
       'reply-listenv' => _markerListEnv,
+      'fresh-rec' => _markerFreshRec,
+      'fresh-class' => _markerFreshClass,
+      'fresh-list' => _markerFreshList,
+      'fresh-rec-str' => _markerFreshRecStr,
+      'fresh-class-str' => _markerFreshClassStr,
+      'real-rec' => _markerRealRec,
+      'real-class' => _markerRealClass,
+      'busy-rec' => _markerBusyRec,
+      'busy-class' => _markerBusyClass,
       'reply-nest-rec' => _markerNestRec,
       'reply-nest-list' => _markerNestList,
       'req-one' => <Object?>[i],
@@ -327,6 +444,15 @@ const _replyLanes = <String>[
   'reply-pair',
   'reply-bare',
   'reply-listenv',
+  'fresh-rec',
+  'fresh-class',
+  'fresh-list',
+  'fresh-rec-str',
+  'fresh-class-str',
+  'real-rec',
+  'real-class',
+  'busy-rec',
+  'busy-class',
   'reply-nest-rec',
   'reply-nest-list',
   'req-one',

@@ -91,63 +91,6 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int? lastRowCount;
 }
 
-// ---------------------------------------------------------------------------
-// Reply types — sent from worker back to the pool
-// ---------------------------------------------------------------------------
-
-/// The envelope every reader reply travels in.
-///
-/// A plain class, not the `(result, sacrificed, error)` record it replaced,
-/// and the four result types below exist for the same reason. `SendPort.send`
-/// has a fast object-copy path for ordinary Dart objects and does not take it
-/// for a message whose graph contains a *record* anywhere: one record makes
-/// the whole message ~1 us more expensive to deliver, and a second one in the
-/// same message is free. So a record may be built on either side of the
-/// boundary, but must never cross it
-/// ([EXP-282](../../../experiments/282-record-payload-transport.md)).
-final class ReadReply {
-  const ReadReply(this.result, {this.sacrificed = false, this.error});
-
-  /// The request's payload: a [ResultSet], one of the result types below, or
-  /// null when [error] is set.
-  final Object? result;
-
-  /// Whether this reply arrived via `Isolate.exit` and the worker is gone.
-  final bool sacrificed;
-
-  final ResqliteException? error;
-}
-
-/// A [SelectWithDepsRequest]'s payload.
-final class SelectWithDepsResult {
-  const SelectWithDepsResult(
-    this.rows,
-    this.dependencies,
-    this.hash,
-    this.rowCount,
-  );
-  final List<Map<String, Object?>> rows;
-  final TableDependencies dependencies;
-  final int hash;
-  final int rowCount;
-}
-
-/// A [SelectIfChangedRequest]'s payload. [rows] is null when the result is
-/// unchanged.
-final class SelectIfChangedResult {
-  const SelectIfChangedResult(this.rows, this.hash, this.rowCount);
-  final List<Map<String, Object?>>? rows;
-  final int hash;
-  final int rowCount;
-}
-
-/// A [SelectBytesRequest]'s payload.
-final class SelectBytesResult {
-  const SelectBytesResult(this.bytes, this.rowCount);
-  final Uint8List bytes;
-  final int rowCount;
-}
-
 /// How large a result's *structure* (rows × columns) can grow before handing
 /// it to main via `Isolate.exit` — sacrificing this worker — beats sending it.
 ///
@@ -255,12 +198,7 @@ void readerEntrypoint(List<Object> args) {
             request.initialRowHint,
           );
           sacrifice = _shouldSacrifice(raw);
-          result = SelectWithDepsResult(
-            _toRows(raw),
-            dependencies,
-            initialHash,
-            initialRowCount,
-          );
+          result = (_toRows(raw), dependencies, initialHash, initialRowCount);
 
         case SelectBytesRequest(:final sql, :final parameters):
           // Unlike select() (rows), selectBytes never sacrifices: the result
@@ -268,13 +206,7 @@ void readerEntrypoint(List<Object> args) {
           // — saving no copy and only adding a reader respawn. Sending the
           // (bytes view, rowCount) record is the one mandatory SendPort copy,
           // at any size; the rowCount rides along for free.
-          final bytes = executeQueryBytes(
-            dbHandleAddr,
-            readerId,
-            sql,
-            parameters,
-          );
-          result = SelectBytesResult(bytes.bytes, bytes.rowCount);
+          result = executeQueryBytes(dbHandleAddr, readerId, sql, parameters);
           sacrifice = false;
 
         case SelectIfChangedRequest(
@@ -298,11 +230,7 @@ void readerEntrypoint(List<Object> args) {
             request.initialRowHint,
           );
           sacrifice = raw != null && _shouldSacrifice(raw);
-          result = SelectIfChangedResult(
-            raw == null ? null : _toRows(raw),
-            newHash,
-            newRowCount,
-          );
+          result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
       }
 
       if (sacrifice) {
@@ -322,9 +250,9 @@ void readerEntrypoint(List<Object> args) {
             correlationId: request.traceCorrelationId,
           );
         }
-        Isolate.exit(eventPort, ReadReply(result, sacrificed: true));
+        Isolate.exit(eventPort, (result, true, null));
       }
-      eventPort.send(ReadReply(result));
+      eventPort.send((result, false, null));
       // [EXP-183] After `SendPort.send` returns the bytes have been
       // snapshotted into the receiver, so the native `json_buf` is safe
       // to realloc. Shrink it back down when the buffer has grown past
@@ -334,7 +262,8 @@ void readerEntrypoint(List<Object> args) {
       // function is a no-op for warm small buffers (< 1 MB) and for
       // back-to-back large reads (last_used_len >= 256 KB), so the
       // common case has no extra work.
-      if (request is SelectBytesRequest && result is SelectBytesResult) {
+      if (request is SelectBytesRequest &&
+          result is ({Uint8List bytes, int rowCount})) {
         resqliteReaderMaybeShrinkJsonBuf(
           ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
           readerId,
@@ -353,7 +282,7 @@ void readerEntrypoint(List<Object> args) {
               sql: request.sql,
               parameters: request.parameters,
             );
-      eventPort.send(ReadReply(null, error: error));
+      eventPort.send((null, false, error));
     } finally {
       resqliteReaderSetBusy(
         ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
