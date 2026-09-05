@@ -1402,6 +1402,34 @@ number. More generally: when a library's headline claim is about something the
 benchmark suite does not measure, a candidate can pass every lane and still
 break the thing people chose the library for.*
 
+### A synthetic harness can be wrong by a microsecond, robustly
+
+Exp 282. An echo-isolate transport ladder reported that a `SendPort` message
+containing a record costs about a microsecond more than the same message built
+from ordinary objects — reproducibly, with no scaling in field count, and
+surviving five attempts to break it: pre-built against freshly-allocated
+payloads, canonical against freshly-decoded strings, a canonical against a
+run-time-built schema, nesting, and a worker made busy before it replied. Every
+reader reply carried such a record, so the candidate predicted −17% to −27% of a
+point read. End to end it measured −0.84% against a control at −0.42%, and the
+lane that lost *two* records came out positive. A `Stopwatch` around the real
+worker's own `send`, in both worktrees, said the two shapes cost the same.
+
+The tell was in the ladder's own output and nobody looked: its most faithful
+one-way reply lane priced at 3.92 µs, more than the entire 3.27 µs round trip it
+was modelling. A model that charges more for half a thing than the whole thing
+costs is not calibrated, however stable its lanes are.
+
+*Reapplies to every harness that stands in for a real path — echo isolates,
+mock transports, replayed traces. Two habits fall out. First, before believing
+an absolute figure from one, check it against the whole operation it lives
+inside; a part that exceeds the total is a calibration failure, not a finding.
+Second, when a synthetic harness and an A/B disagree by more than the A/B's
+control span, do not build a sixth harness variation — put twenty lines of
+`Stopwatch` in the real path in both worktrees and print it from the worker on
+shutdown. Four variations failed to resolve this; the in-situ counter took one
+run. Remove it in the same session: it belongs in the receipt, not in `lib/`.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
