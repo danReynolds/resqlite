@@ -22,20 +22,44 @@ void materializeTransferableBlobCells(List<Map<String, Object?>> rows) {
   }
 }
 
+/// Whether [rows] arrived carrying — or has since built — a name index.
+///
+/// The point of [RowSchema]'s lazy index is that a result crosses the isolate
+/// boundary without one ([EXP-281]), and nothing on the public surface can see
+/// whether it did. Not exported; test-only.
+bool resultSetHasNameIndex(List<Map<String, Object?>> rows) =>
+    rows is ResultSet && rows._schema._indexByName != null;
+
 /// Column metadata shared across all rows in a [ResultSet].
 ///
-/// Created once per query and reused by every [Row]. Contains the column
-/// names and a precomputed name-to-index map for O(1) lookups.
+/// Created once per query and reused by every [Row]. Holds the column names
+/// and, once something needs one, a name-to-index map for O(1) lookups.
 final class RowSchema {
-  RowSchema(this.names) : _indexByName = HashMap<String, int>() {
-    for (var i = 0; i < names.length; i++) {
-      _indexByName[names[i]] = i;
-    }
-  }
+  RowSchema(this.names);
 
   /// Column names in query order, matching the SELECT clause.
   final List<String> names;
-  final Map<String, int> _indexByName;
+
+  /// Name-to-index map, built by the first lookup the identity scan in
+  /// [indexOf] cannot answer and never before
+  /// ([EXP-281](../../experiments/281-schema-index-transfer.md)).
+  ///
+  /// A worker builds one [RowSchema] per SQL and keeps it, but the schema
+  /// *travels with every result*: `SendPort.send` copies the whole graph, and a
+  /// `HashMap` copies as one object per entry. Building the map in the
+  /// constructor therefore charged every read for a structure most results
+  /// never consult — 0.30 us of hop at six columns and 1.8 us at forty, against
+  /// a ~5.5 us point read. Building it here costs 95 ns to 620 ns over the same
+  /// range, once per result set, and only when a caller supplies a key the
+  /// identity scan misses.
+  ///
+  /// Only main-isolate [Row] access calls [indexOf], so a worker's cached
+  /// schema stays map-free and keeps sending the cheap shape. A worker that
+  /// started looking columns up by name would put the map back on the wire.
+  ///
+  /// Typed as the concrete `HashMap` rather than `Map` so the probe in
+  /// [indexOf] keeps the receiver type the old `final` field gave it.
+  HashMap<String, int>? _indexByName;
 
   /// The number of columns in this schema.
   int get columnCount => names.length;
@@ -47,17 +71,37 @@ final class RowSchema {
         if (identical(names[i], name)) return i;
       }
     }
-    return _indexByName[name] ?? -1;
+    final index = _indexByName;
+    // The build is out of line so that the steady-state path — load, one
+    // never-taken branch, one probe — stays small enough to inline. Folding it
+    // in as `(_indexByName ??= _buildIndex())[name]` costs every later lookup.
+    if (index == null) return _buildIndexAndLookUp(name);
+    return index[name] ?? -1;
+  }
+
+  @pragma('vm:never-inline')
+  int _buildIndexAndLookUp(String name) {
+    final index = _indexByName = HashMap<String, int>();
+    for (var i = 0; i < names.length; i++) {
+      index[names[i]] = i;
+    }
+    return index[name] ?? -1;
   }
 
   /// Whether [name] is one of this schema's columns.
   ///
   /// Shares the [indexOf] identity fast path: when the caller supplies one of
-  /// the schema's own column-name objects (the common case, e.g. a literal
-  /// column name or a key drawn from [names]) on a schema of at most
-  /// [_identityLookupMaxColumns] columns, the membership test is a short
-  /// pointer-identity scan that avoids hashing the key. Equal-but-non-identical
-  /// keys and wider schemas fall back to the [HashMap] index.
+  /// the schema's own column-name objects — a key drawn from [names], which is
+  /// what `for (final key in row.keys)` and [Row.forEach] re-feed — on a schema
+  /// of at most [_identityLookupMaxColumns] columns, the membership test is a
+  /// short pointer-identity scan that avoids hashing the key.
+  ///
+  /// A source literal is *not* one of them, whatever its text: decoded column
+  /// names are built by `String.fromCharCodes` and never canonicalized, so
+  /// `row['name']` misses the scan every time and falls to the index
+  /// ([EXP-281](../../experiments/281-schema-index-transfer.md) measured it;
+  /// [EXP-176](../../experiments/176-row-containskey-identity-fastpath.md)
+  /// predicted it). Wider schemas skip the scan and go straight to the index.
   bool containsName(String name) => indexOf(name) >= 0;
 }
 

@@ -13,5 +13,12 @@
     "containsName is coupled to indexOf by construction; it inherits whatever the identity scan does. Revisit only if exp 158's identity fast path is removed or its 32-column cap changes",
     "do not infer a broader result-shape change from this; it is a consistency fix inside the same private schema index (exp 158 Future Notes still apply)",
     "if a workload supplies containsKey with high-frequency equal-but-non-identical keys, the cost reverts to the HashMap probe (unchanged from before); no further work unless that workload is shown hot"
+  ],
+  "claims": [
+    {
+      "id": "176.1",
+      "text": "The `RowSchema` identity fast path (exps 158, 176) is interned-key-specific, and a source literal is not an interned key. In the real decode path schema names are freshly allocated by `fastDecodeText`, so a user-supplied literal is generally not `identical` to a decoded name and `indexOf` / `containsName` fall through to the `HashMap` at the same cost as before — never worse, but never faster either. `row_map_facade` hits the identity path only because both the schema and the probe key are string literals canonicalized to the same object. The path is worth what it is worth on `for (final key in row.keys) row[key]` and `Row.forEach`, which re-feed the schema's own name objects.",
+      "conditions": "M1 Pro · focused `row_map_facade` A/B, 8-column schema, three order-stable passes · stated as a limitation of the measurement rather than measured directly · 2026-06"
+    }
   ]
 }
