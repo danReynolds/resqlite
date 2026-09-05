@@ -3,7 +3,7 @@
 // End-to-end A/B for the lazy `RowSchema` name index ([EXP-281]).
 //
 // `schema_index_transfer.dart` prices the mechanism in isolation: the eager
-// `HashMap` costs 0.15 us of hop at six columns and 1.7 us at forty, and
+// `HashMap` costs 0.30 us of hop at six columns and 1.8 us at forty, and
 // building one on demand costs 95 ns to 620 ns. This harness checks that
 // arithmetic against real reads, where the saving is a fraction of a whole
 // query and the build lands on whichever caller looks a column up by name.

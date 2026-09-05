@@ -48,7 +48,7 @@ final class RowSchema {
   /// *travels with every result*: `SendPort.send` copies the whole graph, and a
   /// `HashMap` copies as one object per entry. Building the map in the
   /// constructor therefore charged every read for a structure most results
-  /// never consult — 0.15 us of hop at six columns and 1.7 us at forty, against
+  /// never consult — 0.30 us of hop at six columns and 1.8 us at forty, against
   /// a ~5.5 us point read. Building it here costs 95 ns to 620 ns over the same
   /// range, once per result set, and only when a caller supplies a key the
   /// identity scan misses.
