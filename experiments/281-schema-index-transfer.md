@@ -1,9 +1,15 @@
 # Experiment 281: the lookup table that rides on every read
 
 **Date:** 2026-09-03
-**Status:** PENDING
+**Status:** Accepted (in review)
 **Direction:** `result-transfer-shape`
-**Benchmark Run:** PENDING
+**Benchmark Run:**
+  [`benchmark/results/2026-09-03T08-00-00Z-schema-index-focused-ab.md`](../benchmark/results/2026-09-03T08-00-00Z-schema-index-focused-ab.md)
+  carries the decision — the mechanism price plus three order-flipped
+  collections of the end-to-end A/B. A release-suite pass was also captured as
+  [`benchmark/results/2026-09-03T09-13-52-exp281-schema-index-transfer.md`](../benchmark/results/2026-09-03T09-13-52-exp281-schema-index-transfer.md);
+  see [Why the release receipt is not evidence here](#why-the-release-receipt-is-not-evidence-here)
+  before reading its comparison section.
 
 ## Problem
 
@@ -38,9 +44,9 @@ away microseconds later.
 
 ## Hypothesis
 
-**Assumption challenged:** that a per-SQL cache on the worker makes the schema
+The belief this attacks is that a per-SQL cache on the worker makes the schema
 free. It makes the *construction* free. What crosses the boundary is charged per
-read regardless of how long the sender kept it.
+read regardless of how long the sender kept it, and nobody had counted it.
 
 Building the index on first use instead of in the constructor should remove it
 from every read's payload, at the cost of one `O(columns)` build on the
@@ -202,6 +208,24 @@ pins it. The idiomatic `row['name']` has always paid the full hash probe, which
 is exactly why the index still has to exist — and why building it lazily rather
 than deleting it is the right shape.
 
+### Why the release receipt is not evidence here
+
+The release suite ran on this branch and its receipt is committed, but its
+comparison section cannot be read as a verdict on this change, in either
+direction. Two things are wrong with it as an A/B. Its `--compare-to` baseline
+is exp 270's run of 2026-08-12 — three weeks and nine merged experiments
+earlier — so every delta in it is the sum of everything that landed in between,
+not of this diff. And it was captured on the same loaded host as the focused
+receipt (load average 11-21). All nine flagged regressions are on lanes whose
+absolute move is 0.03-0.04 ms against a 0.02 ms floor, except one moderate-
+stability streaming lane; none of them touches a path this change can reach,
+and the two lanes that *are* reachable behave as the focused harness says.
+
+The decision rests on the focused receipt, which is order-flipped,
+lane-isolated and carries zero-ceiling controls. A release-suite pass on a
+quiet host against a current baseline is worth having before this leaves the
+soak window; it is not what accepted or rejected the candidate.
+
 ## Decision
 
 **Accepted.** A `HashMap` that no result needs at the moment it crosses the
@@ -224,6 +248,12 @@ It does not touch `selectBytes`, which builds no `RowSchema` at all — the
 And it does not help a result read purely by position or by count, beyond
 removing the map from its payload, because that result never had a lookup to
 speed up.
+
+It also does nothing for a result large enough to sacrifice its worker. Above
+`sacrificeSlotThreshold` (32,768 slots — 5,462 rows of six columns) the reply
+leaves by `Isolate.exit`, which is zero-copy, so the map was never copied on
+that path and there is nothing to save. The saving is concentrated exactly where
+the round trip is the largest share of the read, which is where it should be.
 
 ### Reopen conditions
 
