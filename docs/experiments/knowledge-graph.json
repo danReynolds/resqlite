@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 70,
-    "totalEntries": 150
+    "entriesWithClaims": 73,
+    "totalEntries": 152
   },
   "experiments": [
     {
@@ -645,7 +645,11 @@
       "title": "One-pass initial stream decode and hash",
       "file": "097-one-pass-initial-stream-hash.md",
       "date": "2026-04-23",
-      "status": "accepted"
+      "status": "accepted",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "outcomeClass": "accepted"
     },
     {
       "id": "099",
@@ -2280,6 +2284,19 @@
         "measurement-system"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "283",
+      "title": "The second walk over the same rows",
+      "file": "283-stream-rerun-one-pass.md",
+      "date": "2026-09-06",
+      "status": "rejected",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -2344,6 +2361,17 @@
       ],
       "text": "sqlite3mc version bumps should wait for safer point releases when the newest SQLite release is a fresh .0.",
       "conditions": "policy · 2026-04 · backfilled 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "097.1",
+      "source": "097",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "`decodeQueryWithInitialHash` (driving the native `resqlite_step_row_hash`) produces a result and a result digest in one SQLite step pass, and that digest is bit-identical to the one `resqlite_query_hash` returns for the same rows — the two are interchangeable as a stream's stored baseline. Building the result and the digest together improved initial stream registration 14-16% (fan-out over 10 streams 0.267 -> 0.211 ms; 500 subscribe+cancel cycles 7.646 -> 6.063 ms) with no release-suite regression. Minted retroactively by exp 283, worded from exp 097's own record; exp 097 predates typed claims.",
+      "conditions": "Release suite plus focused stream setup lanes, April 2026, arm64 macOS. Interchangeability of the two digests is asserted by `test/query_decoder_test.dart`, not only by measurement.",
+      "edges": [],
       "state": "live"
     },
     {
@@ -2613,6 +2641,17 @@
       ],
       "text": "The per-execute round-trip floor inside db.transaction() is mechanically removable for Future.wait bursts, but the pattern has no idiomatic case in the public API — bulk atomic writes belong on executeBatch. Rejected on pattern, not numbers.",
       "conditions": "M1 Pro · 2026-07 · backfilled 2026-07",
+      "state": "live"
+    },
+    {
+      "id": "228.1",
+      "source": "228",
+      "directions": [
+        "stream-rerun-dispatch"
+      ],
+      "text": "Any value stored in `StreamEntry.lastResultHash` must be the canonical digest of the complete corresponding result. Exp 077's row-count shortcut returned a prefix-only accumulator that was cached as the next rerun's baseline, so the following identical rerun mismatched, decoded every row and publicly re-emitted unchanged data once — 9 of 9 grow-then-no-op cycles in each of three passes. Removing the shortcut took that to 0 of 9 and improved the combined grow-plus-no-op p50 by 19-36%. An early-reject digest is safe only as a visibly non-cacheable sentinel, or if the changed-result decode can produce the canonical hash without another full pass. Minted retroactively by exp 283, worded from exp 228's own changedBeliefs; exp 228 predates typed claims.",
+      "conditions": "`benchmark/experiments/canonical_stream_hash.dart`, three focused passes, arm64 macOS, July 2026.",
+      "edges": [],
       "state": "live"
     },
     {
@@ -4179,6 +4218,158 @@
       ],
       "text": "Leaving the caller parked for longer does not make a round trip cost more. With the worker burning a calibrated interval before replying, the round trip's overhead above that interval is 3.17 us at 0 us of work, 2.64 at 2.25 us, 2.71 at 4.51 us and 3.09 at 11.27 us -- flat, with no step where the caller's isolate parks. There is no wake premium hiding in the hop, and a tight ladder is not flattered by keeping its caller hot.",
       "conditions": "M1 Pro · macOS 26.2 · Dart 3.12.2 · AOT (`dart build cli`) · load average 2.5-4.3 throughout · decomposition parts are single-process ladders with lane order rotated per sample, 15 samples · the A/B is two AOT bundles from separate worktrees, one lane per process, 4 order-flipped passes of 41 samples (plus an earlier 6-pass, 61-sample collection of `point1`) · prototype at `archive/exp-282`",
+      "state": "live"
+    },
+    {
+      "id": "283.1",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Per-stream rerun coalescing dominates the rerun count in reactive fan-out, and the reruns that survive it are not overwhelmingly unchanged. On a scaled reproduction of the high-cardinality fan-out lane (100 streams over 100-row partitions, 200 sequential awaited random writes), the engine issues 847 reruns against the 20,000 that stream-count x write-count implies, and 56.4% of them change. The keyed-PK lane (50 streams each on one PK, 200 random-PK writes over 10,000 rows) issues 1,071 of a possible 10,000 with 0.28% changed, and a one-stream latest-50 feed under 100 like-count writes issues 100 with none changed. The '99 of 100 streams are unchanged' reading of fan-out describes writes, not reruns: a stream dirtied again while its rerun is in flight reruns once more, not once per write.",
+      "conditions": "JIT, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2, sequential awaited write bursts, scaled reproductions of the release suites' stream and write shapes. Counter and driver preserved at `archive/exp-283-census`.",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "283.2",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "The second SQLite pass a changed stream rerun makes is 35-45% of its SQLite-and-decode work, at every width measured. Timed with no pool, no isolates and no message hop: 100 rows x 2 cols, hash 4.54 us + decode 6.17 us against 6.50 us for the one-pass decoder (-4.22 us, -39.4%); 50 rows x 4 cols with TEXT, 4.33 + 6.93 against 7.36 (-3.91 us, -34.7%); 1 row x 3 cols, 1.02 + 1.13 against 1.19 (-0.97 us, -44.8%); 1,000 rows x 2 cols, 36.05 + 51.90 against 53.08 (-34.86 us, -39.6%). Folding the digest into the decode costs 0.6-1.2 us; the pass it removes costs 4.5-36 us. The converse is the miss tax: a decode built and discarded costs 17-70% of an unchanged rerun. This is a decomposition of cost, not a measure of waste: claim 283.6 shows the removed pass re-reads the database and that the re-read is load-bearing.",
+      "conditions": "`benchmark/experiments/stream_rerun_pass_price.dart`, JIT, 15 samples x 400 iterations per arm with arm order rotated per sample, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2.",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "097.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "097.1"
+      ]
+    },
+    {
+      "id": "283.3",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A stream's reruns change in runs, so the previous rerun's outcome is a usable predictor of the next one and needs no more state than one bool per stream. Measured on the shipping candidate under concurrent write bursts: the 100-stream fan-out lane armed 1,534 times over 2,699 reruns for 880 hits and 654 misses, and the 20-stream 1,000-row lane armed 479 times over 624 reruns for 370 hits and 109 misses. Against claim 283.2's roughly 2:1 exchange rate both are net positive. The two lanes whose reruns essentially never change armed 36 times (keyed-PK, 1,424 reruns) and 18 times (feed, 54 reruns) in a whole collection, so they are inert by construction rather than by two effects cancelling. The predictor's pure loss is a change run of length one: no hit, one miss.",
+      "conditions": "AOT candidate bundle with a temporary hit/miss counter, 13 concurrent write bursts per lane, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2. Counter removed before merge.",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "283.4",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "Decoding during the hash pass when the previous rerun changed is worth a reproduced -11.3% pooled (-9% to -12% in every pass) on 20 streams over 1,000-row partitions, and nothing measurable on 100 streams over 100-row partitions: -1.7% pooled, sign-reversing across the order flip, classified drift-suspected against a zero-ceiling write-only control that itself moved +16.5% in its worst pass and +5.6% pooled. The keyed-PK and feed guards are neutral. Four order-flipped passes, two AOT bundles from separate worktrees, one lane per process, 41 samples after 8 warmup. The mechanism scales with the result size it re-walks (claim 283.2 prices the removed pass at 34.86 us on 1,000 rows and 4.22 us on 100), and at 100 rows there is not enough of it to clear a focused harness's floor. End to end the candidate delivers about 47% of its isolated mechanism on the wide lane -- 401 us saved per burst against 849 us modelled from claim 283.2's figures and claim 283.3's hit counts. The runtime is archived regardless (claim 283.6).",
+      "conditions": "`benchmark/experiments/stream_rerun_one_pass_ab.dart`, AOT, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2, load average 1.8-4.1. An earlier collection with a defective sentinel -- a stream the burst could also change, with its completer armed before the burst -- reported -12.5% and -5.7% on these two lanes; those figures are withdrawn, see claim 283.8.",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "097.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "228.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "283.2"
+        },
+        {
+          "type": "dependsOn",
+          "target": "283.3"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "097.1",
+        "228.1",
+        "283.2",
+        "283.3"
+      ]
+    },
+    {
+      "id": "283.5",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A reactive fan-out A/B cannot be read off an awaited write-by-write burst. With each write awaited, every rerun overlaps the next write's latency and the wall reads as the write burst: the first metric tried here put the candidate within +-2% on its primary lane while the mechanism was worth -39% of a changed rerun. Issuing the burst concurrently and then timing a sentinel write through to the one stream it must change prices the whole backlog instead, because every rerun the burst scheduled - including the unchanged majority, which emits nothing and cannot be waited on - clears the queue first. The same eight-pass collection then reads -12.5%. A second requirement on the same metric: the sentinel must watch a partition the burst is excluded from, and its completer must be armed only after the burst has been issued. See claim 283.8.",
+      "conditions": "Both metrics implemented in `benchmark/experiments/stream_rerun_one_pass_ab.dart`; the awaited variant was replaced, not kept.",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "283.6",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "The two SQLite passes a changed stream rerun makes do not read the same database state, and the second one is load-bearing. `resqlite_query_hash` resets the statement on exit, so the `decodeQuery` that follows opens a fresh read transaction on a newer WAL snapshot: during a write burst the rows a stream emits are fresher than the digest it stores alongside them, and the stream converges in fewer emissions than a single-snapshot rerun would. Replacing the two passes with exp 097's one-pass decoder makes hash and rows agree - the more defensible contract - and costs about 12% more emissions during the burst (post-baseline emissions on the high-cardinality fan-out lane's first iteration: 91-101 over six runs on origin/main against 102-115 over eight runs on the candidate). Every extra emission carries genuinely different data; harness-side content comparison found zero same-content emissions on either arm. A one-pass rerun therefore needs a cheap freshness re-check, not just a correct digest.",
+      "conditions": "`benchmark/suites/high_cardinality_fanout.dart` with temporary harness-side content comparison, JIT, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2. Attribution confirmed by a third arm that wires the flag through but compiles the decoder branch out, which reproduces the baseline rate.",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "283.2"
+        },
+        {
+          "type": "dependsOn",
+          "target": "228.1"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "228.1"
+      ]
+    },
+    {
+      "id": "283.7",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "`High-Cardinality Stream Fan-out (v1) / 100 streams x 200 writes / resqlite` cannot resolve anything below 200 ms, and its headline value is bimodal on a race rather than on performance. Its settle loop waits a 200 ms quiet window and stops at the first window with no new emission, so a measured iteration that emits nothing costs one window and one that emits anything costs two: the lane reads ~246 ms or ~448 ms and nothing between, against roughly 46 ms of actual work. Because the suite re-seeds its PRNG per iteration, the measured iterations rewrite values iteration 1 already wrote and the correct emission count is zero, but a stream that has not finished converging emits anyway - 2 of 35 runs on origin/main and 10 of 35 on exp 283's candidate. A +91.4% regression flag on this lane is one settle window. It has been the largest resqlite number in the release suite for months and most of it is a sleep. Filed as issue #318.",
+      "conditions": "35 standalone invocations per arm, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2. Measured while investigating the release run of 2026-09-06.",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "283.8",
+      "source": "283",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape",
+        "measurement-system"
+      ],
+      "text": "A drain metric's sentinel must be unreachable by the workload it is draining. Exp 283's first harness armed its completer before the burst and let it be completed by any emission from an ordinary partition that the burst also wrote to, so each sample ended at whichever of that stream's reruns fired first -- a random prefix of the backlog, biased toward whichever arm finished changed reruns faster. It reported -12.5% and -5.7% on two fan-out lanes. Reserving a partition for the sentinel, excluding it from the burst, and arming the completer after the burst changed the same collection to -1.7% (drift-suspected) and -11.3% (reproduced): the headline lane's result was the defect and the wide lane's was understated. The general shape is that a sentinel which the measured work can also trigger converts a drain measurement into a race, and a race between two arms reads as a code effect.",
+      "conditions": "Found in review of exp 283's own PR (#319), not by the collection: four order-flipped passes had agreed on the wrong number. Both harness versions are in the branch history.",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "283.5"
+        }
+      ],
       "state": "live"
     }
   ]
