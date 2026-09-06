@@ -1,0 +1,76 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "accepted",
+  "outcomeReason": "performance",
+  "changedBeliefs": [
+    "We believed a stream rerun's two shapes were priced the way exp 075 left them: an unchanged rerun is one cheap C pass, and a changed one adds a Dart decode. The second half of that was wrong by omission — a changed rerun adds a decode *and* a second complete SQLite walk over the same rows, because the hash pass has already consumed the statement. Claim 283.2 prices that walk at 35-45% of a changed rerun's SQLite-and-decode work at every width from one row to a thousand. It had been there since April 2026 and nobody had measured it, because the two paths were always discussed as 'hash only' versus 'hash plus decode' rather than as one step pass versus two.",
+    "We believed reactive fan-out reruns were overwhelmingly unchanged — the release suites' own docstrings say so, and `stream_rerun_latency.dart` is built around one changed stream in a hundred. Claim 283.1 shows that describes the *writes*. Per-stream coalescing collapses 20,000 arithmetic reruns into 847 real ones on the high-cardinality shape, and 56% of the survivors change. Anyone reasoning about this direction should stop dividing stream count by write count: the quantity that matters is reruns after coalescing, and it is smaller and much more change-dense than the shape suggests. Keyed-PK and feed remain genuinely change-free (0.28% and 0%), so the direction now has two distinct fan-out regimes rather than one.",
+    "We believed a rerun-side use of exp 097's one-pass decoder needed foreknowledge nobody had. It needs one bool. Claim 283.3 shows reruns change in runs, so the previous outcome predicts the next one well enough to be net positive against a roughly 2:1 exchange rate, and — the part that makes the guards trustworthy — it stays structurally off on streams that do not change, arming 36 and 18 times in whole collections rather than arming and losing. Exp 228's parting condition, that early rejection reopens if 'the changed-result decode can produce the canonical hash without another full pass', is now satisfied rather than merely stated; claim 228.1 records that condition as a claim so the next candidate can edge to it.",
+    "A reader of exps 148, 239 and 249 should revisit how those rejections were sized, not their verdicts. Claim 283.4's end-to-end win is four times what its own per-rerun arithmetic predicts, on a metric that prices a backlog draining through four workers. If that gap is queueing, then reader-side rerun savings compound into wait times and the per-rerun denominators this direction has used to reject candidates understate them. Nothing here refutes those experiments — all three failed on latency shape, not on magnitude — but the next runner should sweep pool size across one burst before quoting a per-rerun figure as a ceiling.",
+    "Claim 283.5 is a measurement rule for this direction, learned the expensive way in this run. An awaited write-by-write fan-out burst cannot see reader-side rerun cost: each rerun hides inside the next write's latency, and the first metric tried here read the candidate as neutral while the mechanism was worth 39% of a changed rerun. Issue the burst concurrently and time a sentinel write through to the one stream it must change. The unchanged majority emits nothing and can never be waited on directly, which is exactly why the backlog has to be priced through something that can."
+  ],
+  "claims": [
+    {
+      "id": "283.1",
+      "text": "Per-stream rerun coalescing dominates the rerun count in reactive fan-out, and the reruns that survive it are not overwhelmingly unchanged. On a scaled reproduction of the high-cardinality fan-out lane (100 streams over 100-row partitions, 200 sequential awaited random writes), the engine issues 847 reruns against the 20,000 that stream-count x write-count implies, and 56.4% of them change. The keyed-PK lane (50 streams each on one PK, 200 random-PK writes over 10,000 rows) issues 1,071 of a possible 10,000 with 0.28% changed, and a one-stream latest-50 feed under 100 like-count writes issues 100 with none changed. The '99 of 100 streams are unchanged' reading of fan-out describes writes, not reruns: a stream dirtied again while its rerun is in flight reruns once more, not once per write.",
+      "conditions": "JIT, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2, sequential awaited write bursts, scaled reproductions of the release suites' stream and write shapes. Counter and driver preserved at `archive/exp-283-census`.",
+      "edges": []
+    },
+    {
+      "id": "283.2",
+      "text": "The second SQLite pass a changed stream rerun makes is 35-45% of its SQLite-and-decode work, at every width measured. Timed with no pool, no isolates and no message hop: 100 rows x 2 cols, hash 4.54 us + decode 6.17 us against 6.50 us for the one-pass decoder (-4.22 us, -39.4%); 50 rows x 4 cols with TEXT, 4.33 + 6.93 against 7.36 (-3.91 us, -34.7%); 1 row x 3 cols, 1.02 + 1.13 against 1.19 (-0.97 us, -44.8%); 1,000 rows x 2 cols, 36.05 + 51.90 against 53.08 (-34.86 us, -39.6%). Folding the digest into the decode costs 0.6-1.2 us; the pass it removes costs 4.5-36 us. The converse is the miss tax: a decode built and discarded costs 17-70% of an unchanged rerun.",
+      "conditions": "`benchmark/experiments/stream_rerun_pass_price.dart`, JIT, 15 samples x 400 iterations per arm with arm order rotated per sample, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2.",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "097.1"
+        }
+      ]
+    },
+    {
+      "id": "283.3",
+      "text": "A stream's reruns change in runs, so the previous rerun's outcome is a usable predictor of the next one and needs no more state than one bool per stream. Measured on the shipping candidate under concurrent write bursts: the 100-stream fan-out lane armed 1,534 times over 2,699 reruns for 880 hits and 654 misses, and the 20-stream 1,000-row lane armed 479 times over 624 reruns for 370 hits and 109 misses. Against claim 283.2's roughly 2:1 exchange rate both are net positive. The two lanes whose reruns essentially never change armed 36 times (keyed-PK, 1,424 reruns) and 18 times (feed, 54 reruns) in a whole collection, so they are inert by construction rather than by two effects cancelling. The predictor's pure loss is a change run of length one: no hit, one miss.",
+      "conditions": "AOT candidate bundle with a temporary hit/miss counter, 13 concurrent write bursts per lane, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2. Counter removed before merge.",
+      "edges": []
+    },
+    {
+      "id": "283.4",
+      "text": "Decoding during the hash pass when the previous rerun changed is worth a pooled -12.5% on 100 streams over 100-row partitions and -5.7% on 20 streams over 1,000-row partitions, with the keyed-PK and feed lanes neutral and a zero-ceiling write-only control at +0.6%. Eight order-flipped passes, two AOT bundles from separate worktrees, one lane per process, 41 samples after 8 warmup; `ab_drift_check.dart` classifies both fan-out lanes reproduced on the freshest pair (-25.5%/-23.5% and -15.4%/-5.1%) and the control drift-suspected. The end-to-end saving is about four times what claim 283.2's per-rerun figures and claim 283.3's hit counts predict (770 us per burst against 188 us), which is unexplained; the leading hypothesis is queueing, since the metric prices a backlog draining through four workers and service-time reductions compound into wait times.",
+      "conditions": "`benchmark/experiments/stream_rerun_one_pass_ab.dart`, AOT, arm64 macOS 26.2 (M1 Pro), Dart 3.12.2, load average 4.3-14.1 across the session; the zero-ceiling control swings +-8% in its worst pass and +-2% typically.",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "097.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "228.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "283.2"
+        },
+        {
+          "type": "dependsOn",
+          "target": "283.3"
+        }
+      ]
+    },
+    {
+      "id": "283.5",
+      "text": "A reactive fan-out A/B cannot be read off an awaited write-by-write burst. With each write awaited, every rerun overlaps the next write's latency and the wall reads as the write burst: the first metric tried here put the candidate within +-2% on its primary lane while the mechanism was worth -39% of a changed rerun. Issuing the burst concurrently and then timing a sentinel write through to the one stream it must change prices the whole backlog instead, because every rerun the burst scheduled - including the unchanged majority, which emits nothing and cannot be waited on - clears the queue first. The same eight-pass collection then reads -12.5%.",
+      "conditions": "Both metrics implemented in `benchmark/experiments/stream_rerun_one_pass_ab.dart`; the awaited variant was replaced, not kept.",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/stream_rerun_one_pass_ab.dart` is the durable gate for anything that changes what a stream rerun does on the reader side. Keep `keyed-pk` and `feed` as the predictor-off guards and `writes` as the zero-ceiling control, and keep the sentinel-drain metric: claim 283.5 is the record of what an awaited write burst hides.",
+    "`benchmark/experiments/stream_rerun_pass_price.dart` prices the hash pass, the decode pass and the one-pass decoder for a given result shape in seconds, with no pool and no isolates. Run it before proposing anything that changes how many times a rerun steps its statement.",
+    "Do not size a stream candidate by per-rerun cost alone. Claim 283.4's end-to-end win is four times its own per-rerun model, and if that is queueing then every reader-side rerun saving pays back multiplied on a saturated fan-out. Sweeping the reader pool size across the same burst would settle it and would recalibrate every past 'below the round-trip floor' rejection in this direction.",
+    "The unchanged side of the same walk is untouched. `resqlite_query_hash` steps every row to prove nothing moved, which claim 283.2 prices at 4.5-36 us; claim 228.1 constrains any early-reject shortcut to a non-cacheable sentinel.",
+    "Reruns that change in isolated single occurrences rather than runs are the predictor's loss case (claim 283.3) and no lane in the suite exercises them. A workload with one write per stream per burst would."
+  ]
+}

@@ -7,6 +7,14 @@
 /// step pass whenever the hash moved. This harness measures the shapes where
 /// that second pass is and is not paid.
 ///
+/// Each sample issues its write burst concurrently and then times a sentinel
+/// write through to the one stream it is guaranteed to change. Every rerun the
+/// burst scheduled — including the unchanged majority, which emits nothing and
+/// so cannot be waited on directly — has to clear the queue before the
+/// sentinel's own rerun runs, so the sentinel's emission prices the whole
+/// backlog. An awaited write-by-write burst cannot: each rerun overlaps the
+/// next write's latency and the wall reads as the write burst.
+///
 /// Lanes:
 ///   fanout      — 100 streams over 100-row partitions, 200 random writes.
 ///                 ~56% of its reruns change (see `stream_rerun_census.dart`),
@@ -75,7 +83,7 @@ Future<void> main(List<String> args) async {
 }
 
 class _Lane {
-  _Lane(this.name, this._db, this._writeCount, this._write);
+  _Lane(this.name, this._db, this._writeCount, this._write, this._sentinel);
 
   final String name;
   final Database _db;
@@ -86,9 +94,13 @@ class _Lane {
   /// silently turn every rerun into an unchanged one).
   final Future<void> Function(Database db, math.Random rng, int i) _write;
 
+  /// Issues a write that is guaranteed to change stream 0's result, or null
+  /// for a lane with no streams.
+  final Future<void> Function(Database db, int i)? _sentinel;
+
   final _subs = <StreamSubscription<Object?>>[];
-  var _emissions = 0;
   var _writeCursor = 0;
+  Completer<void>? _sentinelWaiter;
 
   static Future<_Lane> open(String name) async {
     switch (name) {
@@ -136,12 +148,21 @@ class _Lane {
         for (var r = 0; r < perOwner; r++) [o, 0],
     ]);
     final rows = owners * perOwner;
-    final lane = _Lane(name, db, writes, (d, rng, i) {
-      return d.execute('UPDATE items SET value = ? WHERE id = ?', [
+    final lane = _Lane(
+      name,
+      db,
+      writes,
+      (d, rng, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
         i,
         rng.nextInt(rows) + 1,
-      ]);
-    });
+      ]),
+      subscribe
+          ? (d, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
+              -i - 1,
+              1,
+            ])
+          : null,
+    );
     if (subscribe) {
       await lane._subscribeAll(
         owners,
@@ -168,12 +189,17 @@ class _Lane {
         for (var i = 1; i <= rowCount; i++) [i, i, 'row-$i'],
       ],
     );
-    final lane = _Lane('keyed-pk', db, 200, (d, rng, i) {
-      return d.execute('UPDATE items SET value = ? WHERE id = ?', [
+    final lane = _Lane(
+      'keyed-pk',
+      db,
+      200,
+      (d, rng, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
         i,
         rng.nextInt(rowCount) + 1,
-      ]);
-    });
+      ]),
+      (d, i) =>
+          d.execute('UPDATE items SET value = ? WHERE id = ?', [-i - 1, 1]),
+    );
     await lane._subscribeAll(
       streamCount,
       (s) => ('SELECT * FROM items WHERE id = ?', <Object?>[s + 1]),
@@ -196,12 +222,20 @@ class _Lane {
       ],
     );
     // Writes target the oldest half, which the latest-50 page never contains.
-    final lane = _Lane('feed', db, 100, (d, rng, i) {
-      return d.execute(
+    final lane = _Lane(
+      'feed',
+      db,
+      100,
+      (d, rng, i) => d.execute(
         'UPDATE posts SET like_count = like_count + 1 WHERE id = ?',
         [rng.nextInt(postCount ~/ 2) + 1],
-      );
-    });
+      ),
+      // The newest post is on the watched latest-50 page.
+      (d, i) => d.execute('UPDATE posts SET like_count = ? WHERE id = ?', [
+        i + 1,
+        postCount,
+      ]),
+    );
     await lane._subscribeAll(
       1,
       (_) => (
@@ -224,7 +258,10 @@ class _Lane {
       _subs.add(
         _db.stream(sql, params).listen((_) {
           seen[k] = true;
-          _emissions++;
+          if (k == 0) {
+            final w = _sentinelWaiter;
+            if (w != null && !w.isCompleted) w.complete();
+          }
         }),
       );
     }
@@ -237,33 +274,26 @@ class _Lane {
     }
   }
 
-  /// One measured burst: issue every write, then wait for the fan-out it
-  /// triggered to go quiet. Emission count is the settle signal, so both arms
-  /// stop at the same observable state.
+  /// One measured burst: issue every write concurrently, then a sentinel write
+  /// that must change stream 0, and stop when stream 0 emits.
   Future<double> burst() async {
     final rng = math.Random(0xCAFEF0);
+    final sentinel = _sentinel;
+    final waiter = sentinel == null
+        ? null
+        : (_sentinelWaiter = Completer<void>());
     final sw = Stopwatch()..start();
-    for (var w = 0; w < _writeCount; w++) {
-      await _write(_db, rng, _writeCursor++);
-    }
-    // The burst ends at the last emission it produced, not at the end of the
-    // quiet window that proves it: a fixed settle interval would be the same
-    // constant in both arms and would dilute the delta by its own size.
-    var mark = sw.elapsedMicroseconds;
-    var stable = 0;
-    var last = -1;
-    while (stable < 4) {
-      await Future<void>.delayed(const Duration(milliseconds: 3));
-      if (_emissions == last) {
-        stable++;
-      } else {
-        stable = 0;
-        last = _emissions;
-        mark = sw.elapsedMicroseconds;
-      }
+    final writes = <Future<void>>[
+      for (var w = 0; w < _writeCount; w++) _write(_db, rng, _writeCursor++),
+    ];
+    await Future.wait(writes);
+    if (sentinel != null) {
+      await sentinel(_db, _writeCursor++);
+      await waiter!.future;
     }
     sw.stop();
-    return mark / 1000.0;
+    _sentinelWaiter = null;
+    return sw.elapsedMicroseconds / 1000.0;
   }
 
   Future<void> close() async {

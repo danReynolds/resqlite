@@ -1,0 +1,22 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted",
+  "outcomeReason": "performance",
+  "changedBeliefs": [
+    "Initial stream registration decoded the result for subscribers and then replayed the same statement through `resqlite_query_hash` to establish the baseline. `resqlite_step_row_hash` folds the same masked-FNV accumulator while it fills the cell buffer, so `decodeQueryWithInitialHash` produces result and canonical digest in one SQLite pass. Stream setup improved 14-16% on fan-out and subscribe/cancel churn.",
+    "Stream re-queries were deliberately left on the hash-only path so an unchanged rerun could skip Dart decoding entirely; the one-pass decoder was scoped to initial registration only."
+  ],
+  "claims": [
+    {
+      "id": "097.1",
+      "text": "`decodeQueryWithInitialHash` (driving the native `resqlite_step_row_hash`) produces a result and a result digest in one SQLite step pass, and that digest is bit-identical to the one `resqlite_query_hash` returns for the same rows — the two are interchangeable as a stream's stored baseline. Building the result and the digest together improved initial stream registration 14-16% (fan-out over 10 streams 0.267 -> 0.211 ms; 500 subscribe+cancel cycles 7.646 -> 6.063 ms) with no release-suite regression. Minted retroactively by exp 283, worded from exp 097's own record; exp 097 predates typed claims.",
+      "conditions": "Release suite plus focused stream setup lanes, April 2026, arm64 macOS. Interchangeability of the two digests is asserted by `test/query_decoder_test.dart`, not only by measurement.",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "The one-pass decoder was scoped to initial registration. Applying it to reruns needs a way to know in advance whether a rerun will change, since an unchanged rerun that decodes has built a result for nothing."
+  ]
+}

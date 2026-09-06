@@ -1,6 +1,5 @@
 // ignore_for_file: avoid_print
 @ffi.DefaultAsset('package:resqlite/src/native/resqlite_bindings.dart')
-
 /// [EXP-283] Prices the two SQLite passes a *changed* stream rerun makes.
 ///
 /// `executeQueryIfChanged` hashes the bound statement to completion, and when
