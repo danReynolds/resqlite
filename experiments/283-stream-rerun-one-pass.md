@@ -310,7 +310,8 @@ contribution and they hold regardless of the verdict.
 - **The lane cannot resolve anything under 200 ms.** `high_cardinality_fanout`'s
   headline wall is one or two settle windows plus ~46 ms of actual work, and
   which one it is depends on a race. It has been the release suite's largest
-  resqlite number for months and most of it is a sleep. Filed separately; any
+  resqlite number for months and most of it is a sleep. Filed as
+  [#318](https://github.com/danReynolds/resqlite/issues/318); any
   future stream candidate should be measured on
   `benchmark/experiments/stream_rerun_one_pass_ab.dart`'s drain metric instead.
 - The fan-out tax has two very different readings and neither has been
