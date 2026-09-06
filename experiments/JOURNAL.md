@@ -1430,6 +1430,82 @@ control span, do not build a sixth harness variation — put twenty lines of
 shutdown. Four variations failed to resolve this; the in-situ counter took one
 run. Remove it in the same session: it belongs in the receipt, not in `lib/`.*
 
+### If the work you are timing overlaps the work you are waiting on, you are timing the wrong thing
+
+Exp 283. A reactive fan-out A/B issued its write burst one awaited write at a
+time — the shape the release suite itself uses — and read the candidate as
+neutral, ±2%, on the lane its mechanism was worth 39% of a changed rerun on.
+The reason is structural: each write's latency covers the reruns the previous
+write scheduled, so the reruns never appear in the wall. The wall is the write
+burst, and the write burst does not change.
+
+The fix was to stop waiting on the writes and start waiting on the backlog.
+Issue the whole burst concurrently, then issue one sentinel write that must
+change one specific stream, and time until that stream emits. Everything the
+burst scheduled has to clear the queue first, so the sentinel prices it. Same
+code, same collection size: −12.5%, reproduced across an order flip.
+
+*Reapplies whenever the cost you are chasing runs concurrently with something
+you await anyway — background reruns, prefetches, invalidation sweeps, any
+work a queue absorbs. Ask what the wall is actually bounded by before trusting
+a neutral result; if it is bounded by the thing you await rather than the thing
+you changed, no number of samples will help. The general move is to find an
+observable event that can only happen after the invisible work has drained, and
+time to that. It matters most when the invisible work produces no output of its
+own — an unchanged stream rerun emits nothing and can never be waited on
+directly, which is exactly why it needs a sentinel behind it.*
+
+### Before removing a redundant pass, ask what it re-reads
+
+Exp 283. A changed stream rerun walked its SQLite statement twice — hash to
+completion, then decode from the top — and the second walk looked like pure
+overhead: 35–45% of the rerun's work, removable by a decoder that had been
+shipping for months and produced the identical digest. Eight order-flipped A/B
+passes said 12–16% faster, guards neutral, correctness tests green.
+
+The release suite then flagged the target lane at +91%. Unpicking it found the
+thing the A/B could not: `resqlite_query_hash` resets the statement on exit, so
+the decode pass that follows opens a *fresh* read transaction. The two passes
+were reading two different database states, and the second one was quietly
+handing the subscriber a newer snapshot than the digest it stored. Collapsing
+them into one pass made hash and rows consistent — the better contract — and
+cost 12% more emissions during a write burst, because the stream lost its free
+refresh and needed another round to converge.
+
+*Reapplies to any duplicated read on a path where state can change underneath
+it: a re-query, a revalidation, a second scan after a first pass. Two passes
+over a mutable source are not one pass done twice — they sample at two times,
+and the later sample may be load-bearing even when nobody chose it. Before
+deduplicating, ask what the second read sees that the first did not, and check
+whether anything downstream depends on the difference. A digest-equality test
+will not tell you: both arms here produced identical digests for identical
+data, and the divergence was in *which* data each arm read.*
+
+### A sentinel you are draining toward must be unreachable by the drain
+
+Exp 283, discovered in review of its own PR after four order-flipped passes had
+agreed on the wrong number.
+
+The harness measured how long a fan-out backlog takes to clear by issuing a
+write burst, then a sentinel write that must change one specific stream, and
+timing until that stream emits — the unchanged majority emits nothing and can
+never be waited on directly, so the sentinel stands in for the whole queue. But
+the sentinel stream was an ordinary partition the burst also wrote to, and its
+completer was armed before the burst started. Each sample therefore ended at
+whichever of that stream's reruns fired first: a random prefix of the backlog,
+and a prefix whose length depended on how fast each arm finished changed reruns
+— exactly the quantity under test. Reserving a partition for the sentinel and
+arming the completer after the burst moved the primary lane from −12.5%
+(reproduced across an order flip) to −1.7% (drift-suspected), and moved the lane
+that actually wins from −5.7% to −11.3%.
+
+*Reapplies to every "wait for a marker to know the queue drained" metric. Two
+checks before trusting one: can the workload itself trigger the marker, and is
+the marker armed before the workload starts? If either is yes, samples end on a
+race, and a race whose timing depends on the change under test will reproduce
+across order flips exactly like a real effect. Order-flipping catches drift; it
+does not catch a metric that is measuring the wrong interval in both arms.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
