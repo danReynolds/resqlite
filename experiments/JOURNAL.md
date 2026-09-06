@@ -1455,6 +1455,32 @@ time to that. It matters most when the invisible work produces no output of its
 own — an unchanged stream rerun emits nothing and can never be waited on
 directly, which is exactly why it needs a sentinel behind it.*
 
+### Before removing a redundant pass, ask what it re-reads
+
+Exp 283. A changed stream rerun walked its SQLite statement twice — hash to
+completion, then decode from the top — and the second walk looked like pure
+overhead: 35–45% of the rerun's work, removable by a decoder that had been
+shipping for months and produced the identical digest. Eight order-flipped A/B
+passes said 12–16% faster, guards neutral, correctness tests green.
+
+The release suite then flagged the target lane at +91%. Unpicking it found the
+thing the A/B could not: `resqlite_query_hash` resets the statement on exit, so
+the decode pass that follows opens a *fresh* read transaction. The two passes
+were reading two different database states, and the second one was quietly
+handing the subscriber a newer snapshot than the digest it stored. Collapsing
+them into one pass made hash and rows consistent — the better contract — and
+cost 12% more emissions during a write burst, because the stream lost its free
+refresh and needed another round to converge.
+
+*Reapplies to any duplicated read on a path where state can change underneath
+it: a re-query, a revalidation, a second scan after a first pass. Two passes
+over a mutable source are not one pass done twice — they sample at two times,
+and the later sample may be load-bearing even when nobody chose it. Before
+deduplicating, ask what the second read sees that the first did not, and check
+whether anything downstream depends on the difference. A digest-equality test
+will not tell you: both arms here produced identical digests for identical
+data, and the divergence was in *which* data each arm read.*
+
 ### A saving inside a queue is worth more than the saving
 
 Exp 283, unresolved but worth carrying. The per-rerun arithmetic — measured

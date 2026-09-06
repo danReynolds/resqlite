@@ -237,18 +237,12 @@ final class ReaderPool {
   /// Execute a re-query with worker-side hash comparison.
   /// Returns `(rows, newHash, newRowCount)` — `rows` is null when the
   /// result is unchanged (hash AND row count match).
-  ///
-  /// [decodeFirst] asks the worker to build the result during the hash pass
-  /// instead of after it
-  /// ([EXP-283](../../../experiments/283-stream-rerun-one-pass.md)); the
-  /// caller sets it when this stream's previous rerun changed.
   Future<(List<Map<String, Object?>>?, int, int)> selectIfChanged(
     String sql,
     List<Object?> parameters,
     int lastResultHash,
     int? lastRowCount, [
     int? traceCorrelationId,
-    bool decodeFirst = false,
   ]) async {
     final memory = _rowHints[sql];
     final result = await _dispatch(
@@ -257,7 +251,6 @@ final class ReaderPool {
         parameters,
         lastResultHash,
         lastRowCount,
-        decodeFirst: decodeFirst,
         traceCorrelationId: traceCorrelationId,
       ),
       memory,

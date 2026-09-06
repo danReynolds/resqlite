@@ -81,7 +81,6 @@ final class SelectIfChangedRequest extends ReadRequest {
     super.parameters,
     this.lastResultHash,
     this.lastRowCount, {
-    this.decodeFirst = false,
     super.traceCorrelationId,
   });
   final int lastResultHash;
@@ -90,15 +89,6 @@ final class SelectIfChangedRequest extends ReadRequest {
   /// baseline. Compared with the fresh count alongside the result hash; a null
   /// baseline can never match, so the result is always treated as changed.
   final int? lastRowCount;
-
-  /// Whether to build the Dart result during the hash pass rather than after
-  /// it ([EXP-283](../../../experiments/283-stream-rerun-one-pass.md)).
-  ///
-  /// Stamped by the stream engine from the previous rerun of this same stream,
-  /// which is the only place that knows the outcome sequence: a reader worker
-  /// sees a sample of a stream's reruns and is destroyed outright by the
-  /// sacrifice path, the same reason [rowHint] is request-carried.
-  final bool decodeFirst;
 }
 
 /// How large a result's *structure* (rows × columns) can grow before handing
@@ -224,7 +214,6 @@ void readerEntrypoint(List<Object> args) {
           :final parameters,
           :final lastResultHash,
           :final lastRowCount,
-          :final decodeFirst,
         ):
           // Two-pass selectIfChanged
           // ([EXP-075](../../../experiments/075-native-hash-selectifchanged.md)).
@@ -237,7 +226,6 @@ void readerEntrypoint(List<Object> args) {
             parameters,
             lastResultHash,
             lastRowCount,
-            decodeFirst,
             request.rowHint,
             request.initialRowHint,
           );
@@ -464,15 +452,6 @@ RawQueryResult executeQuery(
 /// `resqliteQueryHash` resets the stmt on exit, and bindings survive
 /// reset, so no re-acquire is required. The pass-1 hash is reused as
 /// the new baseline.
-///
-/// [decodeFirst] collapses the two passes into one
-/// ([EXP-283](../../../experiments/283-stream-rerun-one-pass.md)).
-/// `decodeQueryWithInitialHash` folds the same canonical FNV digest while it
-/// fills the result, so a rerun that was going to decode anyway steps SQLite
-/// once instead of twice; a rerun that turns out to be unchanged discards the
-/// result it built. The digest is the one exp 097 already ships for initial
-/// stream registration and is byte-for-byte the hash-only pass's, which is what
-/// keeps the stored baseline canonical (exp 228).
 (int, int, RawQueryResult?) executeQueryIfChanged(
   int handleAddr,
   int readerId,
@@ -480,22 +459,9 @@ RawQueryResult executeQuery(
   List<Object?> parameters,
   int lastResultHash,
   int? lastRowCount, [
-  bool decodeFirst = false,
   int rowHint = 0,
   int initialRowHint = 0,
 ]) => _withAcquiredStmt(handleAddr, readerId, sql, parameters, (_, stmt) {
-  if (decodeFirst) {
-    final (raw, newHash) = decodeQueryWithInitialHash(
-      stmt,
-      sql,
-      rowHint: rowHint,
-      initialRowHint: initialRowHint,
-    );
-    if (newHash == lastResultHash && raw.rowCount == lastRowCount) {
-      return (newHash, raw.rowCount, null);
-    }
-    return (newHash, raw.rowCount, raw);
-  }
   final (newHash, newRowCount) = callQueryHash(stmt);
   if (newHash == lastResultHash && newRowCount == lastRowCount) {
     return (newHash, newRowCount, null);

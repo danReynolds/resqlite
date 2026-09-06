@@ -1,9 +1,15 @@
 # Experiment 283: the second walk over the same rows
 
 **Date:** 2026-09-06
-**Status:** Accepted (in review)
-**Direction:** `stream-rerun-dispatch`, `result-transfer-shape`
-**Benchmark Run:** PLACEHOLDER
+**Status:** Rejected — the mechanism works and the reason it still loses is the finding
+**Direction:** `stream-rerun-dispatch`, `result-transfer-shape`, `measurement-system`
+**Archive:** [`archive/exp-283`](https://github.com/danReynolds/resqlite/tree/archive/exp-283)
+  (runtime prototype), [`archive/exp-283-census`](https://github.com/danReynolds/resqlite/tree/archive/exp-283-census)
+  (rerun census counter and its driver)
+**Benchmark Run:** none — the runtime prototype is reverted and no code ships in
+  `lib/`, `native/` or `hook/`. The decision evidence is the pass-price
+  decomposition, eight order-flipped separate-binary A/B passes, and the release
+  suite run that caught the trade-off (§6).
 
 ## Problem
 
@@ -48,6 +54,9 @@ open questions before this run:
 1. changed reruns have to be a real share of a representative stream workload;
 2. the second walk has to be a real share of a changed rerun;
 3. the previous outcome has to actually predict the next one.
+
+A fourth condition went unstated, which is the one that ended up deciding the
+experiment: the second walk has to be *only* a cost. It is not (§6).
 
 ## Approach
 
@@ -123,6 +132,9 @@ Folding the digest into the decode costs 0.6–1.2 µs; the pass it removes cost
 4.5–36 µs. A changed rerun's SQLite-and-decode work falls by roughly two fifths
 at every width tried. The miss tax — a decode built and thrown away — is
 17–70% of an unchanged rerun, so the predictor is not decoration.
+
+Read this table with §6: the removed pass is not pure overhead. It re-reads the
+database, and re-reading turns out to buy something.
 
 ### 3. Whether the predictor is right
 
@@ -208,44 +220,112 @@ on any single pass. Passes 5 and 6 are the two where the control moved most and
 they are also the two where `fanout` reads weakest; they are reported rather
 than dropped.
 
+## 6. What the release suite caught
+
+The headline release run flagged
+`High-Cardinality Stream Fan-out (v1) / 100 streams × 200 writes / resqlite` at
+**+91.4%** (231.78 → 443.67 ms). The A/B above says that lane's shape is 12–25%
+*faster*, so one of the two had to be wrong.
+
+Neither was. The lane's wall is **quantized**: its settle loop waits a 200 ms
+quiet window and stops at the first one with no new emission, so a run where the
+measured iteration emits nothing costs one window and a run where it emits
+anything costs two. The lane is therefore bimodal at ~246 ms and ~448 ms, and
++91.4% is exactly one settle window — not extra work.
+
+What decides the mode is whether any emission lands in a measured iteration.
+The suite re-seeds its PRNG per iteration, so iterations 2 and 3 rewrite the
+values iteration 1 already wrote: the data does not change and the correct
+emission count is zero. Running the lane 35 times per arm:
+
+| arm | slow mode | rate |
+|---|---:|---:|
+| `origin/main` | 2 / 35 | 5.7% |
+| candidate | 10 / 35 | **28.6%** |
+| candidate with the decode-first arm compiled out | 1 / 14 | 7.1% |
+
+The third row is the attribution: wiring the flag through the engine, the pool
+and the request while the worker ignores it reproduces the baseline rate, so the
+shift is the decoder, not the bookkeeping.
+
+Instrumenting the harness to compare each post-baseline emission against what
+that stream last emitted found **zero** same-content emissions on either arm.
+The extra emissions are real changes — and the same instrumentation shows the
+candidate makes more of them during the write burst itself: iteration 1's
+post-baseline emissions are 91–101 on `origin/main` (six runs) and 102–115 on the
+candidate (eight runs), about **+12%**.
+
+### The second walk was not waste
+
+That is the finding, and it inverts §2. The hash-first path's two passes do not
+read the same database state. `resqlite_query_hash` **resets the statement on
+exit**, so the decode pass that follows opens a *fresh* read transaction — a
+newer WAL snapshot than the one the hash was computed over. During a burst,
+the rows a stream emits are therefore fresher than the digest it stores, and the
+stream converges in fewer emissions because each emission has skipped ahead.
+
+The one-pass decoder takes exactly one snapshot, so hash and rows always agree —
+which is the more defensible contract, and is what exp 228's invariant asks for
+in spirit — but it gives up the free refresh. The stream needs one more rerun to
+catch up, which is where the extra 12% of emissions and the extra settle window
+come from.
+
+So the second SQLite pass is not the pure overhead §2 prices it as. It costs
+35–45% of a changed rerun and it buys emission freshness. Nobody knew it was
+buying anything, which is why this looked like free money.
+
 ## Decision
 
-**Accepted (in review).** Stream fan-out where reruns change is 12–16% faster
-end to end, reproduced across order flips and confirmed by the drift
-classifier; the two lanes whose reruns do not change are neutral because the
-predictor is structurally off in them, not because two effects cancel.
+**Rejected**, and not because the numbers failed. The mechanism is real and
+reproduced: 35–45% off a changed rerun's SQLite-and-decode work, 12–16% off a
+change-dense fan-out end to end, with both change-free guard lanes provably
+inert. What it cannot do is pay for itself in the currency the library
+advertises. resqlite's reactive story is that hash suppression keeps streams
+from re-emitting; trading roughly 12% more emissions during a write burst for
+less wall time is a semantic-shaped trade, and this repo's record on those
+(exps 197, 212, 213) is that a reproduced win does not settle them. That call
+belongs to a maintainer, not to a scheduled run, so the runtime is archived
+rather than shipped.
 
-The mechanism is bounded and the code is small: one bool on `StreamEntry`, one
-field on the request, one branch in `executeQueryIfChanged`, and a decoder that
-has been shipping since exp 097. It adds no native code, no public API, and no
-new semantics — the digest stored as a stream's baseline is the same canonical
-value on both arms, which is the invariant exp 228 was written to protect.
+Three things would change the answer:
 
-What would reopen this: a workload whose streams change on isolated single
-reruns rather than in runs. A change run of length 1 is the predictor's pure
-loss — no hit, one miss — and the exchange rate that makes the arithmetic work
-(≈2:1) is not so large that a workload of length-1 runs would survive it. The
-`keyed-pk` and `feed` guards do not test that case; they test the case where the
-predictor never arms at all. `benchmark/experiments/stream_rerun_one_pass_ab.dart`
-is the durable gate.
+- **A design that keeps one snapshot per rerun and converges as fast.** The
+  freshness the two-pass path buys is accidental, not designed. A one-pass
+  rerun that re-checks cheaply — a row-count or version probe rather than a
+  second full walk — would take the win without the trade.
+- **Evidence that emission count does not matter.** The cost here is more
+  subscriber deliveries of correct intermediate data during a burst. If a
+  downstream trace shows burst-time intermediate emissions are cheap or are
+  coalesced by the UI layer anyway, the trade is one-sided and this ships.
+- **A maintainer's ruling** that wall time on change-dense fan-out is worth
+  ~12% more emissions.
+
+What does not need re-deriving: §1's census (reruns are far fewer and far more
+change-dense than the suites assume), §2's pass price, §3's predictor accuracy,
+§5's queueing amplification, and §6's quantization. Those are the run's lasting
+contribution and they hold regardless of the verdict.
 
 ## Future work
 
+- **The lane cannot resolve anything under 200 ms.** `high_cardinality_fanout`'s
+  headline wall is one or two settle windows plus ~46 ms of actual work, and
+  which one it is depends on a race. It has been the release suite's largest
+  resqlite number for months and most of it is a sleep. Filed separately; any
+  future stream candidate should be measured on
+  `benchmark/experiments/stream_rerun_one_pass_ab.dart`'s drain metric instead.
 - The fan-out tax has two very different readings and neither has been
   decomposed. Sequential awaited writes under JIT (§1) show 102 ms of tax over
   847 reruns — 120 µs of wall per rerun. Concurrent bursts under AOT (§4) show
   4.39 ms over 208 reruns — 21 µs per rerun, against roughly 8 µs of
   reader-side work. Whichever regime a real application is in, most of a
-  rerun's wall is still unattributed, and these are the library's largest
-  benchmark lanes.
+  rerun's wall is still unattributed.
 - §5's four-fold amplification is the first evidence in this direction that
   rerun service time and rerun *wall* are related by more than one-to-one.
   If that is queueing, it is a lever: it would mean any reduction in reader-side
   rerun work pays back multiplied on a saturated fan-out, and the current
   practice of sizing stream candidates against per-rerun cost understates them.
   A burst with the pool size swept would settle it.
-- The same one-pass idea has an unexamined sibling on the *unchanged* side.
-  `resqlite_query_hash` walks every cell of every row to prove nothing moved;
-  a row-count or per-row digest checkpoint that could reject early would be a
-  different mechanism against the same 4.5–36 µs, but exp 228's invariant means
-  any such shortcut must produce a non-cacheable sentinel.
+- The unchanged side of the walk is untouched. `resqlite_query_hash` steps every
+  row to prove nothing moved, which §2 prices at 4.5–36 µs; exp 228's invariant
+  (claim 228.1) constrains any early-reject shortcut to a non-cacheable
+  sentinel. A cheap early-reject is also the shape the first bullet above needs.

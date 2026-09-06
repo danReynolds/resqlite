@@ -355,9 +355,7 @@ final class StreamEngine {
         entry.lastResultHash,
         entry.lastRowCount,
         traceCorrelationId,
-        entry.lastRerunChanged,
       );
-      entry.lastRerunChanged = rows != null;
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
@@ -489,16 +487,6 @@ final class StreamEntry {
   /// result was withheld because a write superseded it. A null baseline
   /// guarantees the next re-query reports a change and emits.
   int? lastRowCount;
-
-  /// Whether this stream's most recent rerun changed its result
-  /// ([EXP-283](../../experiments/283-stream-rerun-one-pass.md)).
-  ///
-  /// The next rerun uses it to choose between decoding during the hash pass
-  /// and decoding only if the hash moved. A stream whose reruns change arrives
-  /// in runs — a partition under active writes changes on rerun after rerun —
-  /// so the previous outcome is the whole predictor, and the first unchanged
-  /// rerun disarms it.
-  bool lastRerunChanged = false;
 
   /// Whether the stream is dirty and needs to be requeried.
   bool dirty = false;
