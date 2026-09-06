@@ -341,13 +341,6 @@ final class StreamEngine {
     return subscriberStream;
   }
 
-  /// TEMPORARY [EXP-283] rerun census. Removed before merge.
-  static int tmpReruns = 0;
-  static int tmpChanged = 0;
-  static int tmpRerunUs = 0;
-  static int tmpChangedUs = 0;
-  static final List<(int, bool)> tmpTrace = <(int, bool)>[];
-
   /// Re-query a single stream on the reader pool.
   Future<void> _requery(StreamEntry entry) async {
     final traceCorrelationId = entry.pendingTraceCorrelationId;
@@ -356,7 +349,6 @@ final class StreamEngine {
       entry.inFlight = true;
       entry.dirty = false;
 
-      final tmpSw = Stopwatch()..start();
       final (rows, newHash, newRowCount) = await _pool.selectIfChanged(
         entry.sql,
         entry.params,
@@ -365,15 +357,7 @@ final class StreamEngine {
         traceCorrelationId,
         entry.lastRerunChanged,
       );
-      tmpSw.stop();
-      tmpReruns++;
-      tmpRerunUs += tmpSw.elapsedMicroseconds;
-      tmpTrace.add((entry.key, rows != null));
       entry.lastRerunChanged = rows != null;
-      if (rows != null) {
-        tmpChanged++;
-        tmpChangedUs += tmpSw.elapsedMicroseconds;
-      }
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
