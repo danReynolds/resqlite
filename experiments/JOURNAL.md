@@ -1481,24 +1481,30 @@ whether anything downstream depends on the difference. A digest-equality test
 will not tell you: both arms here produced identical digests for identical
 data, and the divergence was in *which* data each arm read.*
 
-### A saving inside a queue is worth more than the saving
+### A sentinel you are draining toward must be unreachable by the drain
 
-Exp 283, unresolved but worth carrying. The per-rerun arithmetic — measured
-hit and miss counts against a measured per-shape saving — predicted 188 µs per
-burst. The A/B measured 770 µs, four times as much, in the direction the model
-could not produce by being sloppy: the second pass in the real worker is warmer
-than the isolated loop that priced it, so the model should have over-predicted.
+Exp 283, discovered in review of its own PR after four order-flipped passes had
+agreed on the wrong number.
 
-The leading explanation is queueing. The metric prices a backlog draining
-through four workers, and shortening each item's service time also shortens
-every later item's wait.
+The harness measured how long a fan-out backlog takes to clear by issuing a
+write burst, then a sentinel write that must change one specific stream, and
+timing until that stream emits — the unchanged majority emits nothing and can
+never be waited on directly, so the sentinel stands in for the whole queue. But
+the sentinel stream was an ordinary partition the burst also wrote to, and its
+completer was armed before the burst started. Each sample therefore ended at
+whichever of that stream's reruns fired first: a random prefix of the backlog,
+and a prefix whose length depended on how fast each arm finished changed reruns
+— exactly the quantity under test. Reserving a partition for the sentinel and
+arming the completer after the burst moved the primary lane from −12.5%
+(reproduced across an order flip) to −1.7% (drift-suspected), and moved the lane
+that actually wins from −5.7% to −11.3%.
 
-*Reapplies to any component-level estimate used to reject a candidate in a
-saturated pipeline. This repo has repeatedly sized stream and read candidates
-by per-operation cost and rejected them as "below the round-trip floor"; if the
-amplification here is real, those denominators are too small whenever the pool
-is the constraint. Cheap to check and nobody has: sweep the pool size across
-one burst and see whether the win scales with it.*
+*Reapplies to every "wait for a marker to know the queue drained" metric. Two
+checks before trusting one: can the workload itself trigger the marker, and is
+the marker armed before the workload starts? If either is yes, samples end on a
+race, and a race whose timing depends on the change under test will reproduce
+across order flips exactly like a real effect. Order-flipping catches drift; it
+does not catch a metric that is measuring the wrong interval in both arms.*
 
 ## How to add to this file
 

@@ -165,13 +165,13 @@ toggle), one lane per process, 41 samples after 8 warmup, arm order flipped
 between passes. Δ is candidate against baseline within each pass; **B**/**C**
 marks which arm ran first.
 
-| lane | 1 B | 2 C | 3 B | 4 C | 5 B | 6 C | 7 B | 8 C | median | pooled 3–8 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `fanout` | −23.5 | −8.1 | −23.8 | −4.2 | −1.8 | +8.5 | −25.5 | −23.5 | **−15.8%** | **−12.5%** |
-| `fanout-wide` | −7.4 | −0.1 | +6.8 | +3.9 | −15.0 | −7.1 | −15.4 | −5.1 | **−6.1%** | **−5.7%** |
-| `keyed-pk` (guard) | +0.9 | +8.7 | −2.3 | +0.7 | +1.2 | +3.5 | −4.9 | −2.7 | +0.8% | −1.2% |
-| `feed` (guard) | +0.3 | −1.7 | −2.5 | −0.4 | −9.7 | −2.8 | −7.2 | −0.3 | −1.1% | −4.1% |
-| `writes` (control) | −2.4 | −1.2 | −0.9 | −4.0 | +7.8 | +4.1 | +6.0 | −4.5 | −1.1% | +0.6% |
+| lane | 1 B | 2 C | 3 B | 4 C | median | pooled | drift verdict (3/4) |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `fanout` — 100 streams × 100-row partitions | −2.4 | −3.6 | +5.2 | −5.1 | −3.0% | −1.7% | drift-suspected |
+| `fanout-wide` — 20 streams × 1,000-row partitions | −10.8 | −11.7 | −11.5 | −9.2 | **−11.1%** | **−11.3%** | **reproduced** |
+| `keyed-pk` (guard) | −1.5 | −11.6 | +2.8 | −1.5 | −1.5% | −4.2% | neutral |
+| `feed` (guard) | −2.4 | +0.8 | −3.1 | −2.0 | −2.2% | −2.0% | neutral |
+| `writes` (zero-ceiling control) | +16.5 | −2.7 | +6.0 | +1.4 | +3.7% | +5.6% | neutral |
 
 Each sample issues its write burst concurrently and then times a sentinel write
 through to the one stream it must change. Every rerun the burst scheduled —
@@ -179,46 +179,51 @@ including the unchanged majority, which emits nothing and cannot be waited on
 directly — has to clear the queue before the sentinel's own rerun runs, so the
 sentinel prices the backlog. An awaited write-by-write burst cannot: each rerun
 overlaps the next write's latency and the wall reads as the write burst. That
-was the first metric tried here and it resolved nothing.
+was the first metric tried here: a 25-sample pass of the awaited variant put
+`fanout` at +1.2% while the mechanism was worth 39% of a changed rerun, which is
+why it was replaced rather than sampled harder.
 
-`benchmark/ab_drift_check.dart` on the freshest order-flipped pair (7/8):
+**The sentinel has to watch a partition the burst cannot touch,** and the first
+version of this harness did not. Its sentinel stream was an ordinary partition
+that the burst also wrote to, and its completer was armed before the burst
+started, so whichever of that stream's reruns fired first ended the sample —
+measuring a random prefix of the backlog rather than the whole of it, biased
+toward whichever arm finished changed reruns faster. That version reported
+`fanout` at −12.5% pooled and `fanout-wide` at −5.7%; both figures are
+withdrawn. The table above is from the corrected harness, which reserves
+partition 1 for the sentinel, excludes it from the burst, and arms the completer
+only after the burst has been issued. The defect was found in review of this
+experiment's own PR, not by the collection.
 
-| lane | verdict | pass 1 | pass 2 |
-|---|---|---:|---:|
-| `fanout` | **reproduced** | −25.5% | −23.5% |
-| `fanout-wide` | **reproduced** | −15.4% | −5.1% |
-| `keyed-pk` | neutral | −4.9% | −2.7% |
-| `feed` | neutral | −7.2% | −0.3% |
-| `writes` | drift-suspected | +6.0% | −4.5% |
+The corrected reading is narrower and differently shaped. The lane that
+reproduces is the **wide** one — 1,000-row partitions, where §2 prices the
+removed pass at 34.86 µs — at a consistent −9% to −12% in all four passes.
+The 100-row lane, where the same pass is worth 4.22 µs, does not clear the
+collection's floor: the zero-ceiling control moved +16.5% in its worst pass, and
+`fanout` reverses sign across the order flip. The mechanism scales with the
+result size it re-walks, and at 100 rows there is not enough of it to see.
 
-### 5. The win is larger than the pass price predicts
+**Host caveat.** Load average ran 1.8–14.1 across the session — `mediaanalysisd`
+held a core for much of it, and the corrected collection above was taken in the
+quietest window available (1.8–4.1). The zero-ceiling `writes` control is the
+collection's own floor: it moved +16.5% in its worst pass and +3.7% at the
+median. That is why only `fanout-wide`, consistent at −9% to −12% in every pass
+and classified reproduced, is read as an effect, and why `keyed-pk`'s single
+−11.6% pass is read as the same floor rather than as a guard failure.
 
-Worth stating plainly, because it is the one number here that does not
-reconcile. The `fanout` lane issues 208 reruns per burst; §3's hit and miss
-counts and §2's per-shape figures put the reader-side saving at
-`880 × 4.22 − 654 × 1.95` over 13 bursts, or **188 µs per burst**. The measured
-end-to-end saving is `6.170 − 5.400`, or **770 µs per burst** — four times as
-much.
+### 5. The win is smaller than the pass price predicts
 
-The direction of the discrepancy rules out the obvious explanations: the second
-pass in the real worker follows the first over the same rows, so it is warmer
-than the tight loop §2 measured, and the model should therefore over-predict.
-What it does not model is queueing. The sentinel metric prices a backlog draining
-through four workers, and shortening each rerun's service time shortens every
-later rerun's wait as well, so a fifth off the service time buys more than a
-fifth off the drain. Reader-side work also stops being ~8 µs of a ~21 µs
-per-rerun wall in this shape and starts being the part that sets the queue's
-service rate. That is a hypothesis, not a measurement — the honest statement is
-that the mechanism's size is established by §2 and the win's size by §4, and
-the amplification between them is not yet accounted for.
+With the corrected harness the arithmetic runs the ordinary way. `fanout-wide`
+issues 48 reruns per burst, §3 counts 370 hits and 109 misses over 13 bursts,
+and §2 prices those at 34.86 µs and 17.03 µs — a modelled **849 µs per burst**.
+The measured saving is `3.564 − 3.163`, or **401 µs per burst**: the candidate
+delivers about 47% of its isolated mechanism end to end, which is the usual fate
+of a per-operation saving inside a pipeline that is not bound by that operation.
 
-**Host caveat.** Load average ran 4.3–14.1 across the session — `mediaanalysisd`
-held a core for most of it. The zero-ceiling `writes` control is the collection's
-own floor and it swings ±8% in the worst pass and ±2% typically, which is why
-the verdict rests on eight order-flipped passes and a pooled figure rather than
-on any single pass. Passes 5 and 6 are the two where the control moved most and
-they are also the two where `fanout` reads weakest; they are reported rather
-than dropped.
+(An earlier draft of this section reported the opposite — a four-fold
+*amplification* — and attributed it to queueing. That was the broken sentinel of
+§4 measuring a prefix, not a queue effect. Nothing here supports the idea that
+reader-side rerun savings compound; the honest statement is that they discount.)
 
 ## 6. What the release suite caught
 
@@ -276,13 +281,14 @@ buying anything, which is why this looked like free money.
 
 ## Decision
 
-**Rejected**, and not because the numbers failed. The mechanism is real and
-reproduced: 35–45% off a changed rerun's SQLite-and-decode work, 12–16% off a
-change-dense fan-out end to end, with both change-free guard lanes provably
-inert. What it cannot do is pay for itself in the currency the library
-advertises. resqlite's reactive story is that hash suppression keeps streams
-from re-emitting; trading roughly 12% more emissions during a write burst for
-less wall time is a semantic-shaped trade, and this repo's record on those
+**Rejected**, on two counts that compound. The mechanism is real and reproduced
+— 35–45% off a changed rerun's SQLite-and-decode work, and a consistent −11% on
+the wide fan-out lane where that pass is 35 µs — but it is narrower than the
+first measurement claimed: on 100-row partitions, where the pass is 4 µs, the
+effect does not clear the harness floor (§4). And what it does deliver, it
+cannot pay for in the currency the library advertises. resqlite's reactive story
+is that hash suppression keeps streams from re-emitting; trading roughly 12% more
+emissions during a write burst for less wall time is a semantic-shaped trade, and this repo's record on those
 (exps 197, 212, 213) is that a reproduced win does not settle them. That call
 belongs to a maintainer, not to a scheduled run, so the runtime is archived
 rather than shipped.
@@ -292,7 +298,8 @@ Three things would change the answer:
 - **A design that keeps one snapshot per rerun and converges as fast.** The
   freshness the two-pass path buys is accidental, not designed. A one-pass
   rerun that re-checks cheaply — a row-count or version probe rather than a
-  second full walk — would take the win without the trade.
+  second full walk — would take the win without the trade. It would want to be
+  gated on result size: §4 says the win only shows above a few hundred rows.
 - **Evidence that emission count does not matter.** The cost here is more
   subscriber deliveries of correct intermediate data during a burst. If a
   downstream trace shows burst-time intermediate emissions are cheap or are
@@ -302,8 +309,9 @@ Three things would change the answer:
 
 What does not need re-deriving: §1's census (reruns are far fewer and far more
 change-dense than the suites assume), §2's pass price, §3's predictor accuracy,
-§5's queueing amplification, and §6's quantization. Those are the run's lasting
-contribution and they hold regardless of the verdict.
+§4's harness rule about what a sentinel may watch, and §6's quantization and
+freshness finding. Those are the run's lasting contribution and they hold
+regardless of the verdict.
 
 ## Future work
 
@@ -320,12 +328,11 @@ contribution and they hold regardless of the verdict.
   4.39 ms over 208 reruns — 21 µs per rerun, against roughly 8 µs of
   reader-side work. Whichever regime a real application is in, most of a
   rerun's wall is still unattributed.
-- §5's four-fold amplification is the first evidence in this direction that
-  rerun service time and rerun *wall* are related by more than one-to-one.
-  If that is queueing, it is a lever: it would mean any reduction in reader-side
-  rerun work pays back multiplied on a saturated fan-out, and the current
-  practice of sizing stream candidates against per-rerun cost understates them.
-  A burst with the pool size swept would settle it.
+- Whether the reader pool is the fan-out constraint at all is still open. §5
+  says a per-rerun saving discounts to about 47% end to end on the wide lane and
+  to nothing on the narrow one, which is what a pipeline bound by something else
+  looks like. Sweeping the pool size across one drain burst would say what that
+  something else is.
 - The unchanged side of the walk is untouched. `resqlite_query_hash` steps every
   row to prove nothing moved, which §2 prices at 4.5–36 µs; exp 228's invariant
   (claim 228.1) constrains any early-reject shortcut to a non-cacheable

@@ -15,6 +15,12 @@
 /// backlog. An awaited write-by-write burst cannot: each rerun overlaps the
 /// next write's latency and the wall reads as the write burst.
 ///
+/// The sentinel stream watches a partition the burst is excluded from, so the
+/// only thing that can complete the sample is the sentinel write itself. A
+/// sentinel the burst can also change ends the sample early on whichever of its
+/// reruns happens to fire first, which measures a random prefix of the backlog
+/// instead of the whole of it.
+///
 /// Lanes:
 ///   fanout      — 100 streams over 100-row partitions, 200 random writes.
 ///                 ~56% of its reruns change (see `stream_rerun_census.dart`),
@@ -147,14 +153,16 @@ class _Lane {
       for (var o = 1; o <= owners; o++)
         for (var r = 0; r < perOwner; r++) [o, 0],
     ]);
-    final rows = owners * perOwner;
+    // Owner 1 is the sentinel partition: ids 1..perOwner are excluded from the
+    // burst so nothing but the sentinel write can change stream 0.
+    final burstRows = (owners - 1) * perOwner;
     final lane = _Lane(
       name,
       db,
       writes,
       (d, rng, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
         i,
-        rng.nextInt(rows) + 1,
+        perOwner + rng.nextInt(burstRows) + 1,
       ]),
       subscribe
           ? (d, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
@@ -189,13 +197,14 @@ class _Lane {
         for (var i = 1; i <= rowCount; i++) [i, i, 'row-$i'],
       ],
     );
+    // id 1 is the sentinel row: stream 0 watches it and the burst never does.
     final lane = _Lane(
       'keyed-pk',
       db,
       200,
       (d, rng, i) => d.execute('UPDATE items SET value = ? WHERE id = ?', [
         i,
-        rng.nextInt(rowCount) + 1,
+        rng.nextInt(rowCount - 1) + 2,
       ]),
       (d, i) =>
           d.execute('UPDATE items SET value = ? WHERE id = ?', [-i - 1, 1]),
@@ -279,17 +288,15 @@ class _Lane {
   Future<double> burst() async {
     final rng = math.Random(0xCAFEF0);
     final sentinel = _sentinel;
-    final waiter = sentinel == null
-        ? null
-        : (_sentinelWaiter = Completer<void>());
     final sw = Stopwatch()..start();
     final writes = <Future<void>>[
       for (var w = 0; w < _writeCount; w++) _write(_db, rng, _writeCursor++),
     ];
     await Future.wait(writes);
     if (sentinel != null) {
+      final waiter = _sentinelWaiter = Completer<void>();
       await sentinel(_db, _writeCursor++);
-      await waiter!.future;
+      await waiter.future;
     }
     sw.stop();
     _sentinelWaiter = null;
