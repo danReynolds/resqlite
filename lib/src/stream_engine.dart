@@ -341,6 +341,13 @@ final class StreamEngine {
     return subscriberStream;
   }
 
+  /// TEMPORARY [EXP-283] rerun census. Removed before merge.
+  static int tmpReruns = 0;
+  static int tmpChanged = 0;
+  static int tmpRerunUs = 0;
+  static int tmpChangedUs = 0;
+  static final List<(int, bool)> tmpTrace = <(int, bool)>[];
+
   /// Re-query a single stream on the reader pool.
   Future<void> _requery(StreamEntry entry) async {
     final traceCorrelationId = entry.pendingTraceCorrelationId;
@@ -349,13 +356,24 @@ final class StreamEngine {
       entry.inFlight = true;
       entry.dirty = false;
 
+      final tmpSw = Stopwatch()..start();
       final (rows, newHash, newRowCount) = await _pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
         traceCorrelationId,
+        entry.lastRerunChanged,
       );
+      tmpSw.stop();
+      tmpReruns++;
+      tmpRerunUs += tmpSw.elapsedMicroseconds;
+      tmpTrace.add((entry.key, rows != null));
+      entry.lastRerunChanged = rows != null;
+      if (rows != null) {
+        tmpChanged++;
+        tmpChangedUs += tmpSw.elapsedMicroseconds;
+      }
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
@@ -487,6 +505,16 @@ final class StreamEntry {
   /// result was withheld because a write superseded it. A null baseline
   /// guarantees the next re-query reports a change and emits.
   int? lastRowCount;
+
+  /// Whether this stream's most recent rerun changed its result
+  /// ([EXP-283](../../experiments/283-stream-rerun-one-pass.md)).
+  ///
+  /// The next rerun uses it to choose between decoding during the hash pass
+  /// and decoding only if the hash moved. A stream whose reruns change arrives
+  /// in runs — a partition under active writes changes on rerun after rerun —
+  /// so the previous outcome is the whole predictor, and the first unchanged
+  /// rerun disarms it.
+  bool lastRerunChanged = false;
 
   /// Whether the stream is dirty and needs to be requeried.
   bool dirty = false;

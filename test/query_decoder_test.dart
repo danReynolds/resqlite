@@ -142,6 +142,109 @@ void main() {
       dir.deleteSync(recursive: true);
     }
   });
+
+  test('decode-first selectIfChanged agrees with the hash-first arm', () {
+    final dir = Directory.systemTemp.createTempSync('resqlite_decoder_test_');
+    final pathNative = '${dir.path}/decodefirst.db'.toNativeUtf8();
+    final db = resqliteOpen(pathNative, 1, ffi.nullptr.cast());
+    calloc.free(pathNative);
+
+    expect(db, isNot(ffi.nullptr));
+
+    try {
+      _exec(
+        db,
+        'CREATE TABLE mixed('
+        'id INTEGER PRIMARY KEY, label TEXT, amount REAL, payload BLOB);'
+        "INSERT INTO mixed(label, amount, payload) "
+        "VALUES ('héllo 🚀', 1.25, x'010203FF');"
+        "INSERT INTO mixed(label, amount, payload) VALUES ('', -3.5, x'');",
+      );
+
+      const sql = 'SELECT label, amount, payload FROM mixed ORDER BY id';
+      final (_, _, initialHash, initialCount) = executeQueryWithDeps(
+        db.address,
+        0,
+        sql,
+        const [],
+      );
+
+      // Unchanged, both arms: no result, same canonical baseline.
+      for (final decodeFirst in [false, true]) {
+        final (h, c, raw) = executeQueryIfChanged(
+          db.address,
+          0,
+          sql,
+          const [],
+          initialHash,
+          initialCount,
+          decodeFirst,
+        );
+        expect(raw, isNull, reason: 'decodeFirst=$decodeFirst');
+        expect(h, initialHash, reason: 'decodeFirst=$decodeFirst');
+        expect(c, initialCount, reason: 'decodeFirst=$decodeFirst');
+      }
+
+      _exec(
+        db,
+        "INSERT INTO mixed(label, amount, payload) "
+        "VALUES ('third', 9.0, x'AA')",
+      );
+
+      // Changed, both arms: identical hash, row count and decoded values, so a
+      // baseline minted by one arm is usable by the other.
+      final (
+        hashFirstHash,
+        hashFirstCount,
+        hashFirstRaw,
+      ) = executeQueryIfChanged(
+        db.address,
+        0,
+        sql,
+        const [],
+        initialHash,
+        initialCount,
+        false,
+      );
+      final (
+        decodeFirstHash,
+        decodeFirstCount,
+        decodeFirstRaw,
+      ) = executeQueryIfChanged(
+        db.address,
+        0,
+        sql,
+        const [],
+        initialHash,
+        initialCount,
+        true,
+      );
+
+      expect(hashFirstRaw, isNotNull);
+      expect(decodeFirstRaw, isNotNull);
+      expect(decodeFirstHash, hashFirstHash);
+      expect(decodeFirstCount, hashFirstCount);
+      expect(decodeFirstCount, 3);
+      expect(decodeFirstRaw!.values, hashFirstRaw!.values);
+      expect(decodeFirstRaw.schema.names, hashFirstRaw.schema.names);
+
+      // The decode-first arm's hash is a usable baseline for the hash-first
+      // arm: a mixed sequence must not re-emit an unchanged result.
+      final (_, _, afterRaw) = executeQueryIfChanged(
+        db.address,
+        0,
+        sql,
+        const [],
+        decodeFirstHash,
+        decodeFirstCount,
+        false,
+      );
+      expect(afterRaw, isNull);
+    } finally {
+      resqliteClose(db);
+      dir.deleteSync(recursive: true);
+    }
+  });
 }
 
 void _exec(ffi.Pointer<ffi.Void> db, String sql) {
