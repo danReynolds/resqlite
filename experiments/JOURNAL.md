@@ -1430,6 +1430,50 @@ control span, do not build a sixth harness variation — put twenty lines of
 shutdown. Four variations failed to resolve this; the in-situ counter took one
 run. Remove it in the same session: it belongs in the receipt, not in `lib/`.*
 
+### If the work you are timing overlaps the work you are waiting on, you are timing the wrong thing
+
+Exp 283. A reactive fan-out A/B issued its write burst one awaited write at a
+time — the shape the release suite itself uses — and read the candidate as
+neutral, ±2%, on the lane its mechanism was worth 39% of a changed rerun on.
+The reason is structural: each write's latency covers the reruns the previous
+write scheduled, so the reruns never appear in the wall. The wall is the write
+burst, and the write burst does not change.
+
+The fix was to stop waiting on the writes and start waiting on the backlog.
+Issue the whole burst concurrently, then issue one sentinel write that must
+change one specific stream, and time until that stream emits. Everything the
+burst scheduled has to clear the queue first, so the sentinel prices it. Same
+code, same collection size: −12.5%, reproduced across an order flip.
+
+*Reapplies whenever the cost you are chasing runs concurrently with something
+you await anyway — background reruns, prefetches, invalidation sweeps, any
+work a queue absorbs. Ask what the wall is actually bounded by before trusting
+a neutral result; if it is bounded by the thing you await rather than the thing
+you changed, no number of samples will help. The general move is to find an
+observable event that can only happen after the invisible work has drained, and
+time to that. It matters most when the invisible work produces no output of its
+own — an unchanged stream rerun emits nothing and can never be waited on
+directly, which is exactly why it needs a sentinel behind it.*
+
+### A saving inside a queue is worth more than the saving
+
+Exp 283, unresolved but worth carrying. The per-rerun arithmetic — measured
+hit and miss counts against a measured per-shape saving — predicted 188 µs per
+burst. The A/B measured 770 µs, four times as much, in the direction the model
+could not produce by being sloppy: the second pass in the real worker is warmer
+than the isolated loop that priced it, so the model should have over-predicted.
+
+The leading explanation is queueing. The metric prices a backlog draining
+through four workers, and shortening each item's service time also shortens
+every later item's wait.
+
+*Reapplies to any component-level estimate used to reject a candidate in a
+saturated pipeline. This repo has repeatedly sized stream and read candidates
+by per-operation cost and rejected them as "below the round-trip floor"; if the
+amplification here is real, those denominators are too small whenever the pool
+is the constraint. Cheap to check and nobody has: sweep the pool size across
+one burst and see whether the win scales with it.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
