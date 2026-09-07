@@ -1506,6 +1506,34 @@ race, and a race whose timing depends on the change under test will reproduce
 across order flips exactly like a real effect. Order-flipping catches drift; it
 does not catch a metric that is measuring the wrong interval in both arms.*
 
+### Build the floor before you attribute a gap to your own code
+
+Exp 284, after nine experiments over eight months had each proposed a mechanism
+for the same 6.4 µs.
+
+The release suite has exactly one row where resqlite loses to a peer: a hundred
+sequential single inserts, 15.8 µs per write against raw `sqlite3`'s 9.3 µs.
+Everyone read the difference as resqlite overhead and went looking for it —
+mutex, microtask hops, dependency tracking, result decoding, completion
+polling, group commit. Nine rejections.
+
+The missing lane was forty lines: the same insert through a *hand-rolled*
+isolate writer with none of the library's machinery — no coalescing pump, no
+mutex, no blob wrapping, no dependency harvest, no response object, no completer
+queue. It costs 12.9 µs against resqlite's 13.9 µs and the inline reference's
+7.6 µs. Subtracting inline from resqlite charges resqlite for the isolate hop it
+exists to provide, and reads 6.3 µs of collectible overhead. Subtracting inline
+from the floor prices that hop on its own and leaves 1.0 µs. Every one of the
+nine was chasing a share of that microsecond with a harness that could not tell
+it from drift.
+
+*Reapplies whenever a gap is measured against a peer with a different
+architecture — sync vs async, in-process vs isolate, direct vs pooled. The
+comparison you want is not "us vs them", it is "us vs the cheapest possible
+version of what we are". Build that version badly and quickly; it does not have
+to be correct, only representative of the cost. If it lands near you, the gap is
+architectural and there is nothing to collect.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

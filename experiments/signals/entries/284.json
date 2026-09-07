@@ -1,0 +1,70 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "measurement-system"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "premise_refuted",
+  "experimentClass": "exploit",
+  "changedBeliefs": [
+    "We believed a standalone `db.execute()` carried a resqlite-side residual worth chasing, because the release suite's `Single Inserts (100 sequential)` row has resqlite at 15.8 us against raw `sqlite3`'s 9.3 us and nine experiments (151, 170, 171, 182, 197, 214, 215, 257, 271) each proposed a mechanism for that 6.4 us. Claim 284.1 measures it: 5.30 us of the 6.28 us hop is the isolate boundary and 0.98 us is everything resqlite does, corroborated independently at 1.21 us by the in-situ decomposition in claim 284.2. Read the nine rejections as one result rather than nine: each was chasing a share of about a microsecond on a fourteen-microsecond operation, below the resolution of the harness it used. Do not open a tenth candidate against writer-side bookkeeping. The writer-residual passages in the stream-rerun-dispatch synthesis now have a ceiling attached to them.",
+    "We believed the cost of crossing an isolate boundary was the object-graph copy, which is what claims 279.4 and 280.1 measured for bulk payloads and what exp 281 is currently collecting on the read reply. For a small message it is not. Claim 284.3 splits the same write-shaped message three ways -- 0.272 us to a port in the sending isolate, 0.445 us to an isolate already draining a backlog, 0.737 us to a parked one -- and then shows the wake keeps costing after `send` returns: the identical `executeWrite` call is 7.612 us inline and 9.380 us on a just-woken worker. A proposal that shrinks a small message is shrinking the cheapest third of the send.",
+    "We believed claim 279.1's 1.46 us awaited isolate round trip was the price of the boundary. Claim 284.3 refines it: that figure comes from an echo isolate that does nothing between messages and never goes cold, and in a sequential awaited write -- where both sides park for ten microseconds and the woken side then touches a page cache and a statement cache -- the same boundary costs 5.30 us. Read 1.46 us as the floor for a tight ping-pong. Anything that sizes a candidate by multiplying round trips by 1.46 us, including the arithmetic behind claim 279.3's residual, is under-counting by roughly 3.5x for a workload whose isolates actually sleep.",
+    "New, and the reason this run could answer a question nine others could not: claim 284.5 records the floor lane as an instrument. Subtracting an inline reference from a library measures the library's architecture, not its overhead; subtracting it from a hand-rolled version of that same architecture measures the overhead. Any future write-path candidate should be sized against `write_hop_decomposition.dart --part=floor` before it is built."
+  ],
+  "claims": [
+    {
+      "id": "284.1",
+      "text": "84% of the gap between a standalone `db.execute()` and the same insert run inline is the isolate boundary, not resqlite. `await db.execute()` costs 13.895 us per write, the identical `executeWrite` on the calling isolate 7.612 us (hop 6.283 us), and a hand-rolled isolate writer with none of resqlite's machinery -- no coalescing pump, no writer mutex, no blob wrapping, no dirty-dependency harvest, no response object, no completer queue, not even the SQL on the wire -- costs 12.915 us. So the boundary is 5.303 us and everything resqlite does on a write is 0.980 us, about 7% of it. Medians of five passes; the four non-warm-up passes agree inside 0.6 us on every lane.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lane-alternating inside one process, 5 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL. Host not idle (`mediaanalysisd` on ~1 core, load 5.6-6.4); every comparison is between lanes in one process on one build, so drift is shared. 2026-09",
+      "edges": []
+    },
+    {
+      "id": "284.2",
+      "text": "The in-situ decomposition of the shipping path agrees with the floor lane from the other direction and shows there is no large item to take. Eleven Stopwatch marks on both sides of the writer boundary, medians of three passes over 5,200 main-side and 11,200 writer-side writes: `executeWrite` 8.455 us, `ExecuteResponse` build plus reply send 1.640 us, `SendPort.send` of the request 1.481 us, transport and scheduling residual 0.945 us, `_onReply` through `Database.execute`'s return 0.348 us, `Writer.execute` entry through the writer mutex 0.307 us, `getDirtyTableDependencies` 0.288 us, `blobTransfer.unwrapParams` 0.192 us, request build including `wrapParams` 0.074 us. The five items resqlite owns sum to 1.209 us against the floor lane's independent 0.980 us, and the largest single one is 0.348 us -- 2.5% of a write. Probe tax is ~0.2 us per write at 18.2 ns per clock read, visible as the probed build's 14.2 us against the clean build's 13.9 us.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lane-alternating inside one process, 5 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL. Host not idle (`mediaanalysisd` on ~1 core, load 5.6-6.4); every comparison is between lanes in one process on one build, so drift is shared. 2026-09. Probes preserved at `archive/exp-284`; not retained on main",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "284.1"
+        }
+      ]
+    },
+    {
+      "id": "284.3",
+      "text": "What a small `SendPort.send` costs is mostly waking the receiver, and the wake keeps costing after `send` returns. The same write-shaped message costs 0.272 us sent to a port in the sending isolate, 0.445 us to an isolate already draining a backlog, and 0.737 us to one parked waiting for it. Separately, the identical `executeWrite` call -- same C entry point, same statement, same parameters -- costs 7.612 us inline on a running isolate and 9.380 us on a worker that was parked until the message arrived, so about 1.8 us of the 5.303 us boundary is the woken side running cold. This refines claim 279.1: its 1.46 us awaited round trip was measured against an echo isolate that never goes cold, and is a floor for a tight ping-pong rather than the price a workload whose isolates sleep between messages actually pays.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lane-alternating inside one process, 5 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL. Host not idle (`mediaanalysisd` on ~1 core, load 5.6-6.4); every comparison is between lanes in one process on one build, so drift is shared. 2026-09. `--part=wake` and the floor worker's self-timing",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "279.1"
+        }
+      ]
+    },
+    {
+      "id": "284.4",
+      "text": "Removing the per-request reply `SendPort` from writer messages is worth nothing. The main isolate has had one persistent reply port since exp 159, so every request was asking the VM to carry a port handle the worker could have kept; the prototype drops the field from all eight request types and hands the port over once in the spawn arguments, with no public API change. The in-situ `send` slice the change targets reads 1.471 / 1.483 / 1.484 us against 1.469 / 1.485 / 1.521 us for the same builds carrying the port, and end-to-end wall is inside the pass spread. Claim 284.3 says why it cannot pay: `send`'s cost is the thread wake, and a port field is not measurable beside one. Prototype at `archive/exp-284`; do not retry without a mechanism that changes the wake.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lane-alternating inside one process, 5 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL. Host not idle (`mediaanalysisd` on ~1 core, load 5.6-6.4); every comparison is between lanes in one process on one build, so drift is shared. 2026-09. Two probed AOT builds from the same worktree; reported as a mechanism slice rather than a wall-time A/B",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "284.3"
+        }
+      ]
+    },
+    {
+      "id": "284.5",
+      "text": "A floor lane -- the same operation through a hand-rolled version of the library's own architecture, stripped of everything the library adds -- is the instrument that separates a library's overhead from the architecture it provides. Subtracting an inline reference from resqlite charges resqlite for the isolate hop it exists to provide, which is how a 6.28 us hop reads as 6.28 us of collectible overhead; subtracting inline from the floor prices the hop on its own and leaves 0.98 us. It cost about forty lines and it settled in one run what nine experiments over eight months could not. Build the floor before proposing a mechanism for a gap against a peer with a different architecture.",
+      "conditions": "Methodological; instantiated by `benchmark/experiments/write_hop_decomposition.dart --part=floor`. 2026-09",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "The writer-residual family is closed at about 1.2 us. Exps 151, 170, 171, 182, 197, 214, 215, 257 and 271 were each chasing a share of claim 284.2's five items, and the largest of those is 0.348 us. Do not open a tenth candidate against writer-side bookkeeping -- request shape, mutex, harvest, response object, completer plumbing -- without something that changes the boundary itself.",
+    "Exp 182's rejection is now explained rather than merely recorded. Its measured 3.8-5.3% for removing all dependency tracking is consistent with claim 284.2's 0.288 us harvest plus the C-side preupdate hook. The mechanism is real and its whole ceiling is below the noise of any workload that would justify the `tracksDirty` threading it needed.",
+    "Before sizing anything that crosses an isolate boundary, price the boundary in the shape it will run in. `write_hop_decomposition.dart --part=wake` does it in seconds, and claim 284.3 shows the parked case is 2.7x the same-isolate copy. Multiplying round trips by claim 279.1's 1.46 us under-counts a sleeping workload by roughly 3.5x.",
+    "`write_hop_decomposition.dart --part=floor` is the gate for any future write-path candidate: build the floor, subtract it, and only then decide whether the remainder is worth an experiment. `--part=e2e` reproduces the release suite's one peer-losing row inside a single process in about a minute.",
+    "The actionable result is documentation, not code. The release row directly beneath the losing one is the same hundred inserts issued concurrently -- resqlite 0.819 ms against `sqlite3`'s 0.858 ms -- because exp 180's coalescing pump amortises the boundary across the group. An application that awaits each write in turn pays two isolate wakes per row by choice, and nothing in the docs says so."
+  ],
+  "outcomeNote": "Measurement plus the implementation it named. The decomposition is the deliverable and the reply-port candidate is the implementation the measurement rule requires; both are reported here. Runtime reverted, probes and prototype at `archive/exp-284`, harness retained."
+}
