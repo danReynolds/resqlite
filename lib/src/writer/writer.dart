@@ -8,6 +8,7 @@ import 'package:resqlite/src/mutex.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart';
 import 'package:resqlite/src/profile_counters.dart';
 import 'package:resqlite/src/blob_transfer.dart' show blobTransfer;
+import 'package:resqlite/src/write_probe.dart';
 import 'package:resqlite/src/writer/write_worker.dart';
 
 final class Writer {
@@ -72,7 +73,13 @@ final class Writer {
       }
     });
 
-    Isolate.spawn(writerEntrypoint, [receivePort.sendPort, handle.address]);
+    // [EXP-284] The reply port is handed over once, in the spawn arguments,
+    // instead of riding on every request message.
+    Isolate.spawn(writerEntrypoint, [
+      receivePort.sendPort,
+      handle.address,
+      writer._replyPort.sendPort,
+    ]);
 
     writer._sendPort = await handshake.future;
 
@@ -80,6 +87,7 @@ final class Writer {
   }
 
   void _onReply(Object? response) {
+    WriteProbe.tReply(); // [EXP-284] temporary
     // Defensive: a reply with no pending completer (e.g. a stray message
     // after close) is dropped rather than crashing the port handler.
     if (_pending.isEmpty) return;
@@ -99,7 +107,7 @@ final class Writer {
   /// awaiting caller (response bookkeeping + stream invalidation) directly
   /// inside the port event, the same pattern the reader pool uses for its
   /// per-worker completers.
-  Future<T> _request<T>(WriterRequest Function(SendPort replyPort) build) {
+  Future<T> _request<T>(WriterRequest Function() build) {
     final sendPort = _sendPort;
     if (sendPort == null) {
       throw ResqliteConnectionException.databaseClosed();
@@ -108,10 +116,12 @@ final class Writer {
     // constructors can now throw (`blobTransfer.wrapParams` allocates native
     // for large blob params), and a throw after `_pending.addLast` would
     // strand the completer at the queue head and desync every later reply.
-    final request = build(_replyPort.sendPort);
+    final request = build();
+    WriteProbe.tBuilt(); // [EXP-284] temporary
     final completer = Completer<T>.sync();
     _pending.addLast(completer);
     sendPort.send(request);
+    WriteProbe.tSent(); // [EXP-284] temporary
     return completer.future;
   }
 
@@ -137,6 +147,7 @@ final class Writer {
     List<Object?> parameters = const [],
     int? traceCorrelationId,
   ]) {
+    WriteProbe.t0(); // [EXP-284] temporary
     if (_closed) {
       return Future.error(ResqliteConnectionException.databaseClosed());
     }
@@ -166,23 +177,23 @@ final class Writer {
           Future<ExecuteResponse>? singleReply;
           Future<MultiExecuteResponse>? groupReply;
           await _mutex.lock();
+          WriteProbe.tLocked(); // [EXP-284] temporary
           try {
             _ensureOpen();
             if (group.length == 1) {
               final p = group.first;
               singleReply = _request<ExecuteResponse>(
-                (replyPort) => ExecuteRequest(
+                () => ExecuteRequest(
                   p.sql,
                   p.parameters,
-                  replyPort,
                   traceCorrelationId: p.traceCorrelationId,
                 ),
               );
             } else {
               groupReply = _request<MultiExecuteResponse>(
-                (replyPort) => MultiExecuteRequest([
+                () => MultiExecuteRequest([
                   for (final p in group) (sql: p.sql, params: p.parameters),
-                ], replyPort),
+                ]),
               );
             }
           } finally {
@@ -261,10 +272,9 @@ final class Writer {
       'executeLocked requires the writer lock to be held',
     );
     return _request<ExecuteResponse>(
-      (replyPort) => ExecuteRequest(
+      () => ExecuteRequest(
         sql,
         parameters,
-        replyPort,
         traceCorrelationId: traceCorrelationId,
       ),
     );
@@ -292,10 +302,9 @@ final class Writer {
     assertUniformParamSets(sql, paramSets);
 
     return _request<BatchResponse>(
-      (replyPort) => BatchRequest(
+      () => BatchRequest(
         sql,
         paramSets,
-        replyPort,
         traceCorrelationId: traceCorrelationId,
       ),
     );
@@ -311,10 +320,9 @@ final class Writer {
   ]) async {
     assert(_mutex.isLocked, 'selectLocked requires the writer lock to be held');
     final response = await _request<QueryResponse>(
-      (replyPort) => QueryRequest(
+      () => QueryRequest(
         sql,
         parameters,
-        replyPort,
         traceCorrelationId: traceCorrelationId,
       ),
     );
@@ -339,8 +347,7 @@ final class Writer {
     int? traceCorrelationId,
   }) async {
     await _request<bool>(
-      (replyPort) =>
-          BeginRequest(replyPort, traceCorrelationId: traceCorrelationId),
+      () => BeginRequest(traceCorrelationId: traceCorrelationId),
     );
 
     final tx = Transaction(this, traceCorrelationId: traceCorrelationId);
@@ -357,10 +364,7 @@ final class Writer {
     } catch (_) {
       try {
         await _request<bool>(
-          (replyPort) => RollbackRequest(
-            replyPort,
-            traceCorrelationId: traceCorrelationId,
-          ),
+          () => RollbackRequest(traceCorrelationId: traceCorrelationId),
         );
       } catch (_) {
         // Swallow rollback errors — propagating them would mask the
@@ -376,8 +380,7 @@ final class Writer {
     // writer isolate has already rolled back and reset `txDepth`, so we
     // must not issue a second rollback. The error propagates directly.
     final response = await _request<BatchResponse>(
-      (replyPort) =>
-          CommitRequest(replyPort, traceCorrelationId: traceCorrelationId),
+      () => CommitRequest(traceCorrelationId: traceCorrelationId),
     );
     ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
 
@@ -399,7 +402,7 @@ final class Writer {
       if (sendPort == null) return;
       final done = Completer<Object?>.sync();
       _pending.addLast(done);
-      sendPort.send(CloseRequest(_replyPort.sendPort));
+      sendPort.send(CloseRequest());
       _sendPort = null;
       await done.future;
     });

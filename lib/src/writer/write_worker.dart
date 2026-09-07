@@ -21,14 +21,16 @@ import '../profile_mode.dart';
 import '../query_decoder.dart';
 import '../tracelite_profile.dart';
 import '../blob_transfer.dart';
+import '../write_probe.dart';
 
 // ---------------------------------------------------------------------------
 // Request / Response types
 // ---------------------------------------------------------------------------
 
 sealed class WriterRequest {
-  WriterRequest(this.replyPort, {this.traceCorrelationId});
-  final SendPort replyPort;
+  WriterRequest({this.traceCorrelationId});
+
+  /// Correlation id for Tracelite spans; `null` outside profile builds.
   final int? traceCorrelationId;
 }
 
@@ -36,8 +38,7 @@ sealed class WriterRequest {
 final class ExecuteRequest extends WriterRequest {
   ExecuteRequest(
     this.sql,
-    List<Object?> params,
-    super.replyPort, {
+    List<Object?> params, {
     super.traceCorrelationId,
     // Wraps on the main isolate, before send; see blob_transfer.dart.
   }) : params = blobTransfer.wrapParams(params);
@@ -48,10 +49,7 @@ final class ExecuteRequest extends WriterRequest {
 /// A coalesced group of standalone writes (exp 180), each run as its own
 /// autocommit; answered by one [MultiExecuteResponse].
 final class MultiExecuteRequest extends WriterRequest {
-  MultiExecuteRequest(
-    List<({String sql, List<Object?> params})> writes,
-    super.replyPort,
-  )
+  MultiExecuteRequest(List<({String sql, List<Object?> params})> writes)
     // Wraps on the main isolate like ExecuteRequest/QueryRequest — the
     // group form shares one wrapper per unique buffer across the envelope.
     : writes = blobTransfer.wrapParamsGroup(writes);
@@ -63,8 +61,7 @@ final class MultiExecuteRequest extends WriterRequest {
 final class QueryRequest extends WriterRequest {
   QueryRequest(
     this.sql,
-    List<Object?> params,
-    super.replyPort, {
+    List<Object?> params, {
     super.traceCorrelationId,
   }) : params = blobTransfer.wrapParams(params);
   final String sql;
@@ -73,34 +70,29 @@ final class QueryRequest extends WriterRequest {
 
 /// Batch write — one SQL statement, many parameter sets, single transaction.
 final class BatchRequest extends WriterRequest {
-  BatchRequest(
-    this.sql,
-    this.paramSets,
-    super.replyPort, {
-    super.traceCorrelationId,
-  });
+  BatchRequest(this.sql, this.paramSets, {super.traceCorrelationId});
   final String sql;
   final List<List<Object?>> paramSets;
 }
 
 /// Begin an interactive transaction (BEGIN IMMEDIATE).
 final class BeginRequest extends WriterRequest {
-  BeginRequest(super.replyPort, {super.traceCorrelationId});
+  BeginRequest({super.traceCorrelationId});
 }
 
 /// Commit the current transaction. Returns dirty tables for stream invalidation.
 final class CommitRequest extends WriterRequest {
-  CommitRequest(super.replyPort, {super.traceCorrelationId});
+  CommitRequest({super.traceCorrelationId});
 }
 
 /// Roll back the current transaction. Clears dirty tables without notifying.
 final class RollbackRequest extends WriterRequest {
-  RollbackRequest(super.replyPort, {super.traceCorrelationId});
+  RollbackRequest({super.traceCorrelationId});
 }
 
 /// Shut down the writer isolate.
 final class CloseRequest extends WriterRequest {
-  CloseRequest(super.replyPort);
+  CloseRequest();
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +162,14 @@ external ffi.Pointer<ffi.Void> _resqliteStmtAcquireWriter(
 /// Passed to per-request handlers so each handler is a small, self-contained
 /// function that can be reasoned about in isolation.
 final class _WriterState {
-  _WriterState({required this.dbHandle});
+  _WriterState({required this.dbHandle, required this.replyPort});
+
+  /// The one port every reply goes to.
+  ///
+  /// [EXP-284] The main isolate has had a single persistent reply port since
+  /// exp 159, so carrying it on every request only paid the VM to duplicate a
+  /// port handle per message. It is handed over once, in the spawn arguments.
+  final SendPort replyPort;
 
   /// Native SQLite connection handle. Shared with the main isolate via
   /// `dbHandle.address` — the writer isolate owns all access.
@@ -191,17 +190,21 @@ final class _WriterState {
 }
 
 void writerEntrypoint(List<Object> args) {
+  WriterSideProbe.enabled = true; // [EXP-284] temporary
   final mainPort = args[0] as SendPort;
   final dbHandleAddr = args[1] as int;
+  final replyPort = args[2] as SendPort;
 
   final state = _WriterState(
     dbHandle: ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
+    replyPort: replyPort,
   );
   final receivePort = RawReceivePort();
 
   mainPort.send(receivePort.sendPort);
 
   receivePort.handler = (Object? message) {
+    WriterSideProbe.entry(); // [EXP-284] temporary
     if (message is! WriterRequest) return;
 
     // Timeline markers scope the writer-isolate's per-message work so
@@ -240,8 +243,18 @@ void writerEntrypoint(List<Object> args) {
         case RollbackRequest():
           _handleRollback(state, message);
         case CloseRequest():
+          // [EXP-284] temporary: the writer-side half of the decomposition.
+          // ignore: avoid_print
+          print(
+            'writerprobe n=${WriterSideProbe.count} '
+            'unwrap=${WriterSideProbe.unwrapTicks} '
+            'sqlite=${WriterSideProbe.sqliteTicks} '
+            'harvest=${WriterSideProbe.harvestTicks} '
+            'reply=${WriterSideProbe.replyTicks} '
+            'freq=${WriterSideProbe.clock.frequency}',
+          );
           receivePort.close();
-          message.replyPort.send(true);
+          replyPort.send(true);
       }
     } on ResqliteException catch (e) {
       // Same-group isolates (Isolate.spawn) deep-copy objects across
@@ -249,14 +262,14 @@ void writerEntrypoint(List<Object> args) {
       // isolate receives the exact subtype (ResqliteQueryException,
       // ResqliteTransactionException) with all structured fields intact.
       try {
-        message.replyPort.send(e);
+        replyPort.send(e);
       } catch (sendError) {
         // [EXP-234] An exception payload can itself be unsendable — e.g. a
         // `parameters` list holding an already-materialized (spent)
         // TransferableTypedData. A throw here would escape the handler and
         // kill the writer isolate, leaving the caller hanging forever, so
         // fall back to a stripped copy that still delivers the failure.
-        message.replyPort.send(
+        replyPort.send(
           ResqliteException(
             '${e.runtimeType}: $e (reply payload was not '
             'sendable across isolates: $sendError)',
@@ -269,7 +282,7 @@ void writerEntrypoint(List<Object> args) {
       // We cannot rethrow from an isolate event handler without crashing
       // the isolate and leaving the main side hanging on a reply, so we
       // wrap as a ResqliteException and continue.
-      message.replyPort.send(
+      replyPort.send(
         ResqliteException('Internal error in writer isolate: $e\n$st'),
       );
     } finally {
@@ -293,7 +306,9 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   // [EXP-234] Materialize any TransferableTypedData blob params back to
   // Uint8List before binding. No-op (no allocation) when nothing was wrapped.
   final params = blobTransfer.unwrapParams(msg.params);
+  WriterSideProbe.unwrapped(); // [EXP-284] temporary
   final result = executeWrite(state.dbHandle, msg.sql, params);
+  WriterSideProbe.executed(); // [EXP-284] temporary
   final writerSqliteUs = _stopSqliteTimer(sqliteSw);
   // Dirty tables and columns are only collected outside transactions.
   // Inside a transaction they accumulate in the C-level dirty sets until
@@ -301,9 +316,11 @@ void _handleExecute(_WriterState state, ExecuteRequest msg) {
   final modifications = state.txDepth > 0
       ? TableDependencies.none
       : getDirtyTableDependencies(state.dbHandle);
-  msg.replyPort.send(
+  WriterSideProbe.harvested(); // [EXP-284] temporary
+  state.replyPort.send(
     ExecuteResponse(result, modifications, writerSqliteUs: writerSqliteUs),
   );
+  WriterSideProbe.replied(); // [EXP-284] temporary
 }
 
 void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
@@ -333,7 +350,7 @@ void _handleMultiExecute(_WriterState state, MultiExecuteRequest msg) {
       outcomes.add(e);
     }
   }
-  msg.replyPort.send(MultiExecuteResponse(outcomes));
+  state.replyPort.send(MultiExecuteResponse(outcomes));
 }
 
 void _handleBatch(_WriterState state, BatchRequest msg) {
@@ -342,7 +359,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     // let the dirty set accumulate until the outermost commit.
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeNestedBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
-    msg.replyPort.send(
+    state.replyPort.send(
       BatchResponse(
         TableDependencies.none,
         writerSqliteUs: _stopSqliteTimer(sqliteSw),
@@ -352,7 +369,7 @@ void _handleBatch(_WriterState state, BatchRequest msg) {
     final sqliteSw = kProfileMode ? (Stopwatch()..start()) : null;
     executeBatchWrite(state.dbHandle, msg.sql, msg.paramSets);
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
-    msg.replyPort.send(
+    state.replyPort.send(
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
         writerSqliteUs: writerSqliteUs,
@@ -388,7 +405,7 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
       );
     }
     final raw = decodeQuery(stmt, msg.sql);
-    msg.replyPort.send(
+    state.replyPort.send(
       QueryResponse(
         raw.toResultSet(),
         writerSqliteUs: _stopSqliteTimer(sqliteSw),
@@ -433,7 +450,7 @@ void _handleBegin(_WriterState state, BeginRequest msg) {
     }
   }
   state.txDepth++;
-  msg.replyPort.send(true);
+  state.replyPort.send(true);
 }
 
 void _handleCommit(_WriterState state, CommitRequest msg) {
@@ -464,7 +481,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     }
     final writerSqliteUs = _stopSqliteTimer(sqliteSw);
     state.txDepth = newDepth;
-    msg.replyPort.send(
+    state.replyPort.send(
       BatchResponse(
         getDirtyTableDependencies(state.dbHandle),
         writerSqliteUs: writerSqliteUs,
@@ -509,7 +526,7 @@ void _handleCommit(_WriterState state, CommitRequest msg) {
     state.txDepth = newDepth;
     // Dirty tables stay accumulated — only the outermost commit harvests
     // them for stream invalidation.
-    msg.replyPort.send(
+    state.replyPort.send(
       BatchResponse(TableDependencies.none, writerSqliteUs: writerSqliteUs),
     );
   }
@@ -559,7 +576,7 @@ void _handleRollback(_WriterState state, RollbackRequest msg) {
       );
     }
   }
-  msg.replyPort.send(true);
+  state.replyPort.send(true);
 }
 
 int _stopSqliteTimer(Stopwatch? sw) {

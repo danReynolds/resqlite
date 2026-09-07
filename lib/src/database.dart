@@ -18,6 +18,7 @@ import 'profile_mode.dart';
 import 'reader/reader_pool.dart';
 import 'stream_engine.dart';
 import 'tracelite_profile.dart';
+import 'write_probe.dart';
 
 part 'extensions/registration.dart';
 part 'native/open_database.dart';
@@ -431,6 +432,7 @@ final class Database {
       response.modifications,
       traceCorrelationId: correlationId,
     );
+    WriteProbe.tDone(); // [EXP-284] temporary
 
     return response.result;
   }
