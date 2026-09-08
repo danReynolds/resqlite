@@ -10,8 +10,8 @@
     "measurement-system"
   ],
   "coverage": {
-    "entriesWithClaims": 74,
-    "totalEntries": 153
+    "entriesWithClaims": 75,
+    "totalEntries": 154
   },
   "experiments": [
     {
@@ -2309,6 +2309,18 @@
         "measurement-system"
       ],
       "outcomeClass": "rejected"
+    },
+    {
+      "id": "285",
+      "title": "The worker that never sleeps",
+      "file": "285-worker-keep-warm.md",
+      "date": "2026-09-08",
+      "status": "rejected",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "outcomeClass": "rejected"
     }
   ],
   "claims": [
@@ -4462,6 +4474,94 @@
       ],
       "text": "A floor lane -- the same operation through a hand-rolled version of the library's own architecture, stripped of everything the library adds -- is the instrument that separates a library's overhead from the architecture it provides. Subtracting an inline reference from resqlite charges resqlite for the isolate hop it exists to provide, which is how a 6.28 us hop reads as 6.28 us of collectible overhead; subtracting inline from the floor prices the hop on its own and leaves 0.98 us. It cost about forty lines and it settled in one run what nine experiments over eight months could not. Build the floor before proposing a mechanism for a gap against a peer with a different architecture.",
       "conditions": "Methodological; instantiated by `benchmark/experiments/write_hop_decomposition.dart --part=floor`. 2026-09",
+      "edges": [],
+      "state": "live"
+    },
+    {
+      "id": "285.1",
+      "source": "285",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "The cold tax on a woken worker is thread residency and it is recoverable, but it is smaller than exp 284 measured. A worker circulating a token through its own receive port so the VM never parks its thread executes the identical `executeWrite` -- same C entry point, same statement, same parameters, same handle -- at 8.974 us against a parked worker's 9.606 us (-6.6%), and at 8.724 us (-9.2%) when the calling isolate is kept runnable too. Medians of three passes over 6,400 writes per worker per pass, each worker timing its own call so the tax is read inside SQLite rather than inferred from a round trip.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.3"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "285.2",
+      "source": "285",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "A sixth of the isolate boundary is scheduling, not transport. Against the same inline reference, exp 284's floor writer costs 5.117 us of boundary with both sides parking between requests and 4.225 us (-17.4%) with a keep-warm token loop on the worker and on the calling isolate. End to end the both-warm lane is 12.078 us per write against a cold 12.970 us (-6.9%), reproduced at -12.0% in a fourth pass on the reverted tree, and it is the only lane of four that beats cold at any window from 5 to 200 us.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "285.3",
+      "source": "285",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "No library-side form of keeping a worker warm pays for itself, because the cheapest keep-alive Dart exposes costs more per turn than the residency it buys back. Warming the worker alone is +5.7% on the floor lane (13.710 vs 12.970 us, CPU +13%) and +6.2% to +9.6% in the shipping path with CPU +13-17%, at every window tested and across nine passes; a zero-duration `Timer` loop is +25.0% (16.218 us, CPU +58%). A 5 us window, where the round trip outlasts the window so the loop exits on its first turn and never engages, reads flat at 14.567 vs 14.523 us -- the control confirming both the tax and the cost come from the loop running. The one lane that wins requires a keep-warm loop on the *calling* isolate, which in a Flutter application is the UI isolate, so it is barred by the same main-isolate blocking constraint claim 280.2 records. Reopens only on a VM-side spin-before-park window or isolate thread affinity, not on an adaptive window, a cheaper token, or a smarter loop.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3); shipping-path figures under arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, two `Database` handles alternating inside one process on one build, differing only in the keep-warm window handed to their writer isolate at spawn. 3 passes x 15 samples x 400 sequential `await db.execute(...)` per window, windows 15 and 40 us, plus a third collection at 40 us. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "285.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "285.2"
+        }
+      ],
+      "state": "live",
+      "restsOn": [
+        "285.1",
+        "285.2"
+      ]
+    },
+    {
+      "id": "285.4",
+      "source": "285",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "The release suite's `Single Inserts (100 sequential)` row charges resqlite for a caller-side wake that a real application does not pay. The lane awaits each write and does nothing in between, so the calling isolate parks and is woken once per write; claim 285.2 measures that half of the boundary at about a sixth of its total. An application issuing the same hundred writes from an isolate that has other events pending is closer to the both-warm lane than to the cold one. The row remains a fair worst case for a caller that idles; it is not the typical shape, and the 15.8 vs 9.3 us gap should be cited as such.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.1"
+        }
+      ],
+      "state": "live"
+    },
+    {
+      "id": "285.5",
+      "source": "285",
+      "directions": [
+        "stream-rerun-dispatch",
+        "result-transfer-shape"
+      ],
+      "text": "The price of keeping a Dart isolate's event loop occupied, which is what any anti-parking proposal must pay. A token the isolate sends to its own receive port costs 1.85 us per turn on a worker doing SQLite work between turns and 0.65 us on an otherwise idle caller; a zero-duration `Timer.run` costs 6.50 us per turn, roughly ten times as much, which is why the timer lane loses by 25.0% and the token lane by 5.7%. A microtask loop is disqualified before measurement: microtasks run to exhaustion before the event loop delivers a port message, so the isolate would never receive the request it is staying awake for. Measured from each loop's own spin accounting (spun_us / spins).",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
       "edges": [],
       "state": "live"
     }
