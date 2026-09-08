@@ -1,0 +1,79 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "tradeoff",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "We believed the 1.8 us of claim 284.3 -- the identical `executeWrite` costing 7.612 us inline and 9.380 us on a just-woken worker -- was simply what a wake costs, with no statement about whether it is recoverable. Claim 285.1 makes it recoverable and smaller: a worker that never stops being runnable executes the same C call at 8.974 us against a parked worker's 9.606 us, so 0.63-0.88 us of it is thread residency the VM releases when an isolate goes idle. Read 284.3's 1.8 us as an upper bound measured on a single alternating pair, not as the residency cost of a continuously running lane.",
+    "We believed the isolate boundary claim 284.1 prices at 5.30 us was a transport cost. Claim 285.2 shows a sixth of it is scheduling: with neither side of the round trip parked, the same floor writer's boundary falls from 5.117 us to 4.225 us. This does not reopen the write path -- claim 285.3 closes every library-side form of collecting it -- but it does redirect where the remaining headroom is. A proposal that makes messages smaller or handlers leaner is working on the part that was already measured small; the part that is large is two thread wakes, and a package cannot address those.",
+    "New, and the finding a reader of the release suite most needs: claim 285.4 says the `Single Inserts (100 sequential)` row -- the one public lane where resqlite loses to a peer -- awaits each write and does nothing in between, so its caller parks and is woken 100 times. About a sixth of the boundary that row charges resqlite is the caller's own wake, which an application issuing the same writes from an isolate that has frames and futures pending does not pay. Anyone citing that row as the size of resqlite's write overhead, in `benchmark/SCOPE.md` or in a future experiment's Problem section, should cite it as a worst case rather than a typical one. The row is still fair; it is not representative.",
+    "We had no price for keeping a Dart event loop occupied, and exps 271 and 284 both reasoned about worker scheduling without one. Claim 285.5 supplies it: a self-sent port message turn costs 1.85 us on a busy isolate and 0.65 us on an idle one, a zero-duration `Timer.run` turn costs 6.50 us, and a microtask loop is disqualified outright because it starves the receive port the work arrives on. Any future proposal that would keep an isolate runnable is paying one of those three, and the first two are both larger than the residency they buy back."
+  ],
+  "claims": [
+    {
+      "id": "285.1",
+      "text": "The cold tax on a woken worker is thread residency and it is recoverable, but it is smaller than exp 284 measured. A worker circulating a token through its own receive port so the VM never parks its thread executes the identical `executeWrite` -- same C entry point, same statement, same parameters, same handle -- at 8.974 us against a parked worker's 9.606 us (-6.6%), and at 8.724 us (-9.2%) when the calling isolate is kept runnable too. Medians of three passes over 6,400 writes per worker per pass, each worker timing its own call so the tax is read inside SQLite rather than inferred from a round trip.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.3"
+        }
+      ]
+    },
+    {
+      "id": "285.2",
+      "text": "A sixth of the isolate boundary is scheduling, not transport. Against the same inline reference, exp 284's floor writer costs 5.117 us of boundary with both sides parking between requests and 4.225 us (-17.4%) with a keep-warm token loop on the worker and on the calling isolate. End to end the both-warm lane is 12.078 us per write against a cold 12.970 us (-6.9%), reproduced at -12.0% in a fourth pass on the reverted tree, and it is the only lane of four that beats cold at any window from 5 to 200 us.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.1"
+        }
+      ]
+    },
+    {
+      "id": "285.3",
+      "text": "No library-side form of keeping a worker warm pays for itself, because the cheapest keep-alive Dart exposes costs more per turn than the residency it buys back. Warming the worker alone is +5.7% on the floor lane (13.710 vs 12.970 us, CPU +13%) and +6.2% to +9.6% in the shipping path with CPU +13-17%, at every window tested and across nine passes; a zero-duration `Timer` loop is +25.0% (16.218 us, CPU +58%). A 5 us window, where the round trip outlasts the window so the loop exits on its first turn and never engages, reads flat at 14.567 vs 14.523 us -- the control confirming both the tax and the cost come from the loop running. The one lane that wins requires a keep-warm loop on the *calling* isolate, which in a Flutter application is the UI isolate, so it is barred by the same main-isolate blocking constraint claim 280.2 records. Reopens only on a VM-side spin-before-park window or isolate thread affinity, not on an adaptive window, a cheaper token, or a smarter loop.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3); shipping-path figures under arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, two `Database` handles alternating inside one process on one build, differing only in the keep-warm window handed to their writer isolate at spawn. 3 passes x 15 samples x 400 sequential `await db.execute(...)` per window, windows 15 and 40 us, plus a third collection at 40 us. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "285.1"
+        },
+        {
+          "type": "dependsOn",
+          "target": "285.2"
+        }
+      ]
+    },
+    {
+      "id": "285.4",
+      "text": "The release suite's `Single Inserts (100 sequential)` row charges resqlite for a caller-side wake that a real application does not pay. The lane awaits each write and does nothing in between, so the calling isolate parks and is woken once per write; claim 285.2 measures that half of the boundary at about a sixth of its total. An application issuing the same hundred writes from an isolate that has other events pending is closer to the both-warm lane than to the cold one. The row remains a fair worst case for a caller that idles; it is not the typical shape, and the 15.8 vs 9.3 us gap should be cited as such.",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "284.1"
+        }
+      ]
+    },
+    {
+      "id": "285.5",
+      "text": "The price of keeping a Dart isolate's event loop occupied, which is what any anti-parking proposal must pay. A token the isolate sends to its own receive port costs 1.85 us per turn on a worker doing SQLite work between turns and 0.65 us on an otherwise idle caller; a zero-duration `Timer.run` costs 6.50 us per turn, roughly ten times as much, which is why the timer lane loses by 25.0% and the token lane by 5.7%. A microtask loop is disqualified before measurement: microtasks run to exhaustion before the event loop delivers a port message, so the isolate would never receive the request it is staying awake for. Measured from each loop's own spin accounting (spun_us / spins).",
+      "conditions": "arm64 macOS 26.2 (Apple M1 Pro), Dart 3.12.2, AOT via `dart build cli`, lanes alternating inside one process, 3 passes x 15 samples x 400 sequential awaited writes of `INSERT INTO t(name, value) VALUES (?, ?)`, WAL + synchronous=NORMAL, against exp 284's hand-rolled floor writer. Host not idle (load average 3.8-4.3)",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "`benchmark/experiments/worker_keep_warm.dart --part=both` is the durable instrument this run leaves. It separates the two thread wakes in an isolate round trip, so any future proposal about the boundary can tell how much of a benchmark's hop is the benchmark's own idle caller before it proposes a mechanism. Run it alongside `write_hop_decomposition.dart --part=floor`, which sizes the same operation against the architecture rather than against the library.",
+    "The write-path boundary is closed to package-level work. Claims 284.1, 284.4 and 285.3 together say the bookkeeping is 1.0 us and un-collectible and the boundary is 5.3 us and not resqlite's. Do not open an eleventh candidate in this family without either a VM-side scheduling knob, a change to how many round trips a workload makes (exp 180's coalescing pump is the one accepted example), or evidence from a shape other than sequential awaited writes.",
+    "Claim 285.4 is a documentation change waiting to happen. `benchmark/SCOPE.md` presents the `Single Inserts (100 sequential)` comparison without noting that its caller idles between writes; a future run in this direction, or a maintainer pass, should add that caveat where the row is described rather than leaving it in an experiment writeup.",
+    "The reader pool was not measured. This run priced the writer because exp 284 had already decomposed it, but every reader worker parks between requests the same way, and claim 285.1's residency figure should hold there too. It would not change the verdict -- claim 285.3's cost applies to any worker -- so this is context for a future reader-side proposal, not an open candidate.",
+    "Methodology worth reusing: a worker configured at spawn time can be A/B'd inside one process by handing the setting through `Isolate.spawn`'s arguments and opening two handles, which removes the two-worktree drift that exp 282's rejection turned on. The trap is that resqlite's writer isolate spawns on a database's first write rather than in `Database.open`, so both handles capture whatever the setting was at first use; the two lanes came out inverted until a print inside the entrypoint showed the spawn order."
+  ],
+  "outcomeNote": "Moonshot. The mechanism was confirmed and the direction still closed: keeping a worker isolate runnable does recover part of the wake cost claim 284.3 records, and every form a library can ship costs more than it recovers. The frontier evidence -- that a sixth of the isolate boundary is scheduling, and that the release suite's losing row includes a caller-side wake an application does not pay -- outlives the rejection."
+}
