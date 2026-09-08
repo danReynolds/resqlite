@@ -190,19 +190,9 @@ final class _WriterState {
   int txDepth = 0;
 }
 
-/// [EXP-285] Token the writer sends to its own port to keep the isolate
-/// runnable between the requests of a burst. Requests are [WriterRequest]s,
-/// so this type is unreachable from the request protocol and the handler can
-/// never mistake one for the other.
-final class _KeepWarmTick {
-  const _KeepWarmTick();
-}
-
 void writerEntrypoint(List<Object> args) {
   final mainPort = args[0] as SendPort;
   final dbHandleAddr = args[1] as int;
-  // [EXP-285] Keep-warm window in microseconds; 0 disables the loop entirely.
-  final keepWarmMicros = args.length > 2 ? args[2] as int : 0;
 
   final state = _WriterState(
     dbHandle: ffi.Pointer<ffi.Void>.fromAddress(dbHandleAddr),
@@ -211,38 +201,7 @@ void writerEntrypoint(List<Object> args) {
 
   mainPort.send(receivePort.sendPort);
 
-  // [EXP-285] After each request, keep a token circulating through this
-  // isolate's own port for a bounded window so the VM never parks the
-  // worker's thread between the requests of a burst. Exp 284 measured the
-  // identical `executeWrite` at 7.6 us on a running isolate and 9.4 us on one
-  // parked until the message arrived; this is the attempt to collect that.
-  final warmClock = Stopwatch()..start();
-  final warmWindowTicks =
-      keepWarmMicros * warmClock.frequency ~/ Duration.microsecondsPerSecond;
-  final selfPort = receivePort.sendPort;
-  var warmRunning = false;
-  var warmDeadline = 0;
-  var warmSpins = 0;
-  // ignore: avoid_print
-  print('[exp285] writer spawned keepWarmMicros=$keepWarmMicros');
-
   receivePort.handler = (Object? message) {
-    if (warmWindowTicks > 0) {
-      if (message is _KeepWarmTick) {
-        if (warmClock.elapsedTicks >= warmDeadline) {
-          warmRunning = false;
-        } else {
-          warmSpins++;
-          selfPort.send(const _KeepWarmTick());
-        }
-        return;
-      }
-      warmDeadline = warmClock.elapsedTicks + warmWindowTicks;
-      if (!warmRunning) {
-        warmRunning = true;
-        selfPort.send(const _KeepWarmTick());
-      }
-    }
     if (message is! WriterRequest) return;
 
     // Timeline markers scope the writer-isolate's per-message work so
@@ -281,9 +240,6 @@ void writerEntrypoint(List<Object> args) {
         case RollbackRequest():
           _handleRollback(state, message);
         case CloseRequest():
-          // ignore: avoid_print
-          print('[exp285] writer closing spins=$warmSpins');
-          warmDeadline = 0;
           receivePort.close();
           message.replyPort.send(true);
       }

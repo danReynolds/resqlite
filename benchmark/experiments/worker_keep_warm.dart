@@ -41,11 +41,11 @@
 //   inline  the identical `executeWrite` on the calling isolate, the reference
 //           both worker lanes are cold against.
 //
-//   e2e     the shippable half, in the shipping path: two real `Database`s in
-//           one process, one whose writer isolate runs the `self` token loop
-//           and one whose writer parks as it does on `main`, alternating
-//           blocks of `await db.execute(...)`. The floor lanes above answer
-//           what the mechanism does; this lane answers what resqlite gets.
+// The run also drove the same token loop inside resqlite's real writer isolate
+// and A/B'd `await db.execute(...)` against a writer that parks. That lane
+// needed a temporary window field on `Writer`, so it is preserved at
+// `archive/exp-285` rather than retained here; its result (+6.2% to +9.6% of a
+// write, +13-16% CPU) is in the writeup.
 //
 // Each worker times its own `executeWrite` calls, so the cold tax is measured
 // where it lands rather than inferred from the round trip. Process CPU time is
@@ -64,10 +64,8 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
-import 'package:resqlite/resqlite.dart';
 import 'package:resqlite/src/native/resqlite_bindings.dart'
     show executeWrite, resqliteClose, resqliteExec, resqliteOpen;
-import 'package:resqlite/src/writer/writer.dart' show Writer;
 
 const _createSql =
     'CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT NOT NULL, '
@@ -326,58 +324,6 @@ double _inlineBlock(ffi.Pointer<ffi.Void> handle, int writes) {
   return sw.elapsedMicroseconds / writes;
 }
 
-/// Microseconds per write for one block of sequential `db.execute`s.
-Future<double> _dbBlock(Database db, int writes) async {
-  final sw = Stopwatch()..start();
-  for (var i = 0; i < writes; i++) {
-    final r = await db.execute(_insertSql, <Object?>['row', 1.5]);
-    _sink += r.affectedRows;
-  }
-  sw.stop();
-  return sw.elapsedMicroseconds / writes;
-}
-
-/// The shipping path: `db.execute` with the writer isolate parked between
-/// requests, against the same call with the writer's token loop running.
-Future<void> _partE2e(String dir, int writes, int samples, int warmMicros)
-    async {
-  // The writer isolate spawns lazily on the database's first write, not in
-  // `Database.open`, so each handle has to be driven through one write while
-  // the window it should capture is still set. Reading the two lanes' spawn
-  // order the other way round is what inverted this lane's first result.
-  Writer.debugKeepWarmMicros = 0;
-  final plain = await Database.open('$dir/e2e-plain.db');
-  await plain.execute(_createSql);
-  Writer.debugKeepWarmMicros = warmMicros;
-  final kept = await Database.open('$dir/e2e-warm.db');
-  await kept.execute(_createSql);
-  Writer.debugKeepWarmMicros = 0;
-
-  await _dbBlock(plain, writes);
-  await _dbBlock(kept, writes);
-
-  final plainWall = <double>[], keptWall = <double>[];
-  final plainCpu = <double>[], keptCpu = <double>[];
-  for (var s = 0; s < samples; s++) {
-    for (final first in <bool>[s.isEven, !s.isEven]) {
-      final db = first ? plain : kept;
-      final wall = first ? plainWall : keptWall;
-      final cpu = first ? plainCpu : keptCpu;
-      final c0 = _cpuMicros();
-      wall.add(await _dbBlock(db, writes));
-      cpu.add((_cpuMicros() - c0) / writes);
-    }
-  }
-
-  print('lane=e2e-plain us_per_write=${_median(plainWall).toStringAsFixed(3)} '
-      'cpu_us_per_write=${_median(plainCpu).toStringAsFixed(3)}');
-  print('lane=e2e-warm us_per_write=${_median(keptWall).toStringAsFixed(3)} '
-      'cpu_us_per_write=${_median(keptCpu).toStringAsFixed(3)}');
-
-  await plain.close();
-  await kept.close();
-}
-
 Future<void> main(List<String> args) async {
   var part = 'all';
   var samples = 15;
@@ -395,7 +341,6 @@ Future<void> main(List<String> args) async {
       if (part == 'all' || part == m) m,
   ];
   final wantInline = part == 'all' || part == 'inline';
-  final wantE2e = part == 'all' || part == 'e2e';
 
   final tmp = await Directory.systemTemp.createTemp('resqlite-exp285-');
   for (final m in modes) {
@@ -457,8 +402,6 @@ Future<void> main(List<String> args) async {
   if (wantInline) {
     print('lane=inline us_per_write=${_median(inlineWall).toStringAsFixed(3)}');
   }
-
-  if (wantE2e) await _partE2e(tmp.path, writes, samples, warmMicros);
 
   print('main-warm spins=${mainWarm.spins} '
       'spun_us=${(mainWarm.ticksSpun * 1e6 / mainClock.frequency).round()}');

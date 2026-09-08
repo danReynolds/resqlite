@@ -1534,6 +1534,45 @@ version of what we are". Build that version badly and quickly; it does not have
 to be correct, only representative of the cost. If it lands near you, the gap is
 architectural and there is nothing to collect.*
 
+### The benchmark's idle caller is part of what the benchmark measures
+
+Exp 285, extending exp 284's floor writer.
+
+A cross-isolate round trip has two thread wakes in it, not one. The worker is
+woken by the request, and the caller is woken by the reply — and a benchmark
+that awaits each call and does nothing in between guarantees the caller is
+parked every time, because the harness gave it nothing else to do. Warming both
+sides of exp 284's floor writer with a keep-alive loop drops the isolate
+boundary from 5.12 µs to 4.23 µs; warming only the worker makes it *worse*. A
+sixth of the boundary that the release suite's one losing row charges resqlite
+is the caller's own wake, which an application issuing the same writes from an
+isolate that has frames and futures pending never pays.
+
+*Reapplies to any benchmark whose subject is a boundary — isolate, thread,
+process, socket. Before sizing the boundary, ask what the caller is doing while
+it waits, because "nothing" is a measurement choice and usually not the
+deployed one. The cheap check is a lane where the caller is artificially kept
+busy: if the boundary shrinks, part of what you were about to attribute to the
+subject belongs to the harness.*
+
+### A lazily-spawned worker captures the setting at first use, not at open
+
+Exp 285, which read its first end-to-end result exactly backwards.
+
+The clean way to A/B a worker-side setting is to hand it through
+`Isolate.spawn`'s arguments and open two handles in one process — no second
+worktree, no second AOT bundle, no cross-build drift of the kind that decided
+exp 282. It works, and it has one trap: resqlite's writer isolate spawns on a
+database's *first write*, not inside `Database.open`. Setting the global,
+opening, and setting it back therefore configured the wrong handle, and the two
+lanes came out swapped. The A/B looked like a 5% win. It was a 5% loss.
+
+*Reapplies to any per-isolate configuration captured at spawn. The tell is
+cheap and there is no substitute for it: print the value from inside the
+entrypoint and read the spawn order. Nothing else in the result distinguishes
+"lane A won" from "the labels are inverted", and an inverted A/B reproduces
+across order flips as confidently as a real one.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
