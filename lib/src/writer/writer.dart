@@ -57,6 +57,11 @@ final class Writer {
 
   Writer._(this._streamEngine);
 
+  /// [EXP-285] Keep-warm window in microseconds handed to the next writer
+  /// isolate spawned. Experiment scaffolding: 0 (the default) is the shipping
+  /// behaviour, and the field is removed with the prototype.
+  static int debugKeepWarmMicros = 0;
+
   static Future<Writer> spawn(
     StreamEngine streamEngine,
     Pointer<void> handle,
@@ -72,7 +77,11 @@ final class Writer {
       }
     });
 
-    Isolate.spawn(writerEntrypoint, [receivePort.sendPort, handle.address]);
+    Isolate.spawn(writerEntrypoint, [
+      receivePort.sendPort,
+      handle.address,
+      debugKeepWarmMicros,
+    ]);
 
     writer._sendPort = await handshake.future;
 
