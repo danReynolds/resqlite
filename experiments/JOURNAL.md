@@ -1573,6 +1573,57 @@ entrypoint and read the spawn order. Nothing else in the result distinguishes
 "lane A won" from "the labels are inverted", and an inverted A/B reproduces
 across order flips as confidently as a real one.*
 
+### To price a cost, delete it and watch nothing happen
+
+Exp 287, closing the batching family exps 148, 239 and 249 opened.
+
+Three experiments had argued about how much of a reactive fan-out's wall is
+per-rerun isolate messaging, and every one of them argued from a counter — a
+completion-handler microsecond figure, a callback count, a residual left over
+from a subtraction. Exp 287 built the version with almost no messaging instead:
+one request per worker carrying the whole dirtied set, a reply only for the
+members that changed. Ten thousand four hundred request sends became four
+hundred and thirty-two and three quarters of the replies stopped existing, and
+the backlog drain moved +2.0% with the sign flipping across the order flip,
+inside a ±5% control floor.
+
+That bounds the cost harder than any counter could, because there is no reading
+in which removing 96% of something leaves it undetectable *and* material. It
+also cost less: one prototype and four passes, against the several
+instrumentation runs the question had already absorbed.
+
+*Reapplies whenever the question is "is X the constraint" rather than "how big
+is X". Instrumenting X measures X; deleting X measures what X was holding up,
+which is the thing you actually wanted to know. Build the version without it
+badly and quickly — it does not have to be shippable, only to have the cost
+gone — and if the wall does not move, stop looking there. The corollary is the
+useful discipline: size the intervention before you run it, because the
+argument only works when the deletion is large enough that a null result is
+unambiguous.*
+
+### A rejection's stated cause is worth testing, not just believing
+
+Also exp 287.
+
+Exp 249 batched stream reruns, measured emission latency 22–66% worse, and
+named the cause exactly: a batched reply is indivisible, so the one stream a
+subscriber waits on is delivered only when its two dozen batch-mates finish. It
+then dismissed the obvious fix — stream each member back as it finishes — in a
+single clause, on the grounds that this "removes most of the
+message-amortization the idea rests on". Holding exp 249's batching policy
+byte-identical and changing only the reply reversed the metric it died on, from
++66% to −52% on the heterogeneous scenario. The stated cause was right; the
+dismissal was wrong, and later experiments had already made it checkable —
+exps 284 and 285 had priced the wake, and exp 283's census had shown three
+quarters of the replies carried no information.
+
+*Reapplies to any rejection whose decision names a mechanism and an untested
+alternative in the same breath. The named mechanism is a hypothesis the author
+did not get to run, and the dismissal beside it is usually an estimate made
+before the numbers that would settle it existed. Check the dismissal against
+what has been measured since; if the priors have moved, the one clause is a
+whole experiment.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

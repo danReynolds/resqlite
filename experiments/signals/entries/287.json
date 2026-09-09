@@ -1,0 +1,60 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "result-transfer-shape"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "below_signal",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "We believed, on exp 249's evidence, that batching stream reruns was rejected because batching stream reruns hurts latency. Claim 287.2 splits that: exp 249's regression was the indivisible reply specifically, not batching. Holding its batching policy byte-identical and making only the reply divisible reverses the heterogeneous p50 it was rejected on from +66% to -9%..-52% in 4/4 passes. A rejection's stated mechanism is not often testable; this one was, and it held.",
+    "We believed per-rerun isolate messaging was a plausible share of fan-out cost -- exp 136 measured the main-isolate reader port handler at 28.57% of A11c-overlap wall and ~18 us per completion, and exp 283 left 13 of every 21 us of rerun wall unattributed. Claim 287.1 removes messaging as an explanation for the drain: cutting request messages 24:1 and replies 4:1 moves backlog drain +2.0% pooled with the sign flipping across the order flip, inside a +/-5% control floor. Exp 136's per-completion figure remains a real main-isolate cost; what changes is that it does not gate the fan-out's wall.",
+    "We believed exp 283's open question -- 'whether the reader pool is the fan-out constraint at all' -- needed a pool-size sweep to answer. It still does for the pool half, but the messaging half is now closed by claim 287.1, and the zero-ceiling control adds the other bound worth carrying: the write burst alone is 1.75 ms of the 6.03 ms drain, so a fan-out candidate that leaves both the writes and the readers' SQLite work untouched has about 4 ms to play for and, on this evidence, no share of it in dispatch.",
+    "New, and load-bearing for any future worker protocol rather than for this direction: claim 287.4 records that splitting one logical completion across several isolate turns re-opens invariants the scalar path holds by construction, because its whole completion runs in one synchronous turn inside the port handler. Two distinct hazards, one of which leaves a stream permanently stale rather than merely slow. Neither is specific to batching; both apply to any streaming, chunked, or partial-reply reader protocol."
+  ],
+  "claims": [
+    {
+      "id": "287.1",
+      "text": "Per-rerun isolate messaging is not what fan-out backlog drain is made of. A candidate that packs a dirtied stream set into one message per reader worker and replies once per *changed* member turned 10,400 rerun request sends into 432 (24:1) and eliminated 7,905 of 10,400 replies (76% of members were unchanged and sent nothing), and moved the drain from 6.033 ms to 6.155 ms pooled -- +2.0%, with per-pass deltas of +11.1%, -3.0%, +3.7%, -2.5% flipping sign with arm order. The zero-ceiling control, the identical write burst with nothing subscribed, reads -5.2% and +0.7%, so every fan-out delta is inside the collection's own floor. The bound is tight because the intervention was large: there is no plausible reading in which removing 96% of a cost leaves it undetectable and the cost is material.",
+      "conditions": "arm64 macOS 26.2 (Darwin 25.2.0, Apple silicon), Dart 3.12.2, AOT via `dart build cli`, baseline and candidate built from separate worktrees and run as separate processes with the arm order flipped between passes (exp 249: never A/B stream dispatch with an in-process toggle). Fan-out lane: 100 streams over 100-row partitions of one table, 200 concurrent writes per burst, 5 warmup + 21 sampled bursts per pass, timed by exp 283's sentinel stream on a partition the burst never touches. Host load average 1.7-2.1",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "136.1"
+        }
+      ]
+    },
+    {
+      "id": "287.2",
+      "text": "Exp 249 was rejected by its reply protocol, not by its batching. Holding exp 249's flush policy byte-identical -- individual dispatch below pool size, one group per free worker, 64-member cap, 256-row cost gate -- and changing only the reply, so each changed member is sent the instant it is decoded and unchanged members send nothing, reverses the gate that killed it: heterogeneous single-write emission p50 goes from exp 249's +66% to -52.2%, -52.0%, -13.2%, -9.3% across four order-flipped passes, and homogeneous p50 from +22% to -45.9%, -45.2% and +9.4% in the three non-warmup passes. The metric exp 249 died on now favours the candidate; it is the throughput premise underneath (claim 287.1) that fails instead.",
+      "conditions": "arm64 macOS 26.2 (Darwin 25.2.0, Apple silicon), Dart 3.12.2, AOT via `dart build cli`, separate worktrees and separate processes, arm order flipped between passes. `benchmark/experiments/stream_rerun_latency.dart --trials=60`, 4 passes per collection, both scenarios: homogeneous 100 x ~100-row partitions, heterogeneous 10 x ~2000-row + 90 x ~100-row. One write dirties all 100 streams and changes exactly one; timed from write issue to that stream's emission. Host load average 1.7-2.1",
+      "edges": []
+    },
+    {
+      "id": "287.3",
+      "text": "Un-batchable entries must not be allowed to take the whole worker budget ahead of the batchable majority. Exp 249's flush dispatches entries above its row-count cost gate individually and *first*, decrementing the free-worker count as it goes; because the dirty set is enumerated in stream-registration order, ten large partitions registered before ninety small ones consumed every worker and left the small majority queued behind their re-hashes. Measured at +74% to +90% on heterogeneous p50, reproduced 4/4, and reversed to a 4/4 win by splitting the free workers between the two classes. The unbatched path cannot exhibit this because it pulls from a single FIFO. Anyone reusing exp 249's `_flushQueue` inherits the defect.",
+      "conditions": "arm64 macOS 26.2 (Darwin 25.2.0, Apple silicon), Dart 3.12.2, AOT via `dart build cli`, separate worktrees and separate processes, arm order flipped between passes. `benchmark/experiments/stream_rerun_latency.dart --trials=60`, 4 passes per collection, both scenarios: homogeneous 100 x ~100-row partitions, heterogeneous 10 x ~2000-row + 90 x ~100-row. One write dirties all 100 streams and changes exactly one; timed from write issue to that stream's emission. Host load average 1.7-2.1",
+      "edges": []
+    },
+    {
+      "id": "287.4",
+      "text": "A worker protocol that splits one logical completion across several isolate turns must re-establish, explicitly, every invariant the scalar path was holding by running its completion in one synchronous turn. Two hazards found in the streaming-batch prototype, both properties of the protocol rather than of the code: (a) a member whose result is unchanged sends no reply at all, and `StreamEngine.onDependencyChanges` skips queueing anything already `inFlight`, so a member re-dirtied mid-batch is invisible to both and the stream stays stale until an unrelated later write happens to dirty it again -- reproduced as a non-converging stream by a test issuing overlapping write waves; (b) re-queueing a re-dirtied member from inside the partial handler makes it simultaneously queued and in-flight, so a concurrent write's `_flushQueue` can dispatch a second rerun over the same hash baseline while the worker still holds the first. The fix for both is to defer requeueing to the terminator, where in-flight is released in the same turn.",
+      "conditions": "Found by construction and by a convergence test (20 streams, three overlapping write waves, each wave dirtying every stream) against the exp 287 prototype at `archive/exp-287`; both hazards are reasoned from the protocol shape and (a) is reproduced as a test failure",
+      "edges": []
+    },
+    {
+      "id": "287.5",
+      "text": "Tail emission latency under batched reruns is unresolved and this run does not decide it. p95 moved positive in 11 of 16 pass-deltas, which matches what static chunk assignment would predict -- a member at the end of a long chunk cannot be taken by a worker that has gone idle, which a FIFO always permits -- but the two collections disagree on the homogeneous scenario (+29.6/+52.2/+24.4, then +89.1/+196.2/-54.4/-50.6) and a 120-trial read of the whole distribution does not separate the arms at p90 or p95 in either scenario. One candidate sample reached 14.1 ms against a baseline maximum of 4.2 ms. Do not cite this as a measured regression; the rejection rests on claim 287.1.",
+      "conditions": "arm64 macOS 26.2 (Darwin 25.2.0, Apple silicon), Dart 3.12.2, AOT via `dart build cli`, separate worktrees and separate processes, arm order flipped between passes. `benchmark/experiments/stream_rerun_latency.dart --trials=60`, 4 passes per collection, both scenarios: homogeneous 100 x ~100-row partitions, heterogeneous 10 x ~2000-row + 90 x ~100-row. One write dirties all 100 streams and changes exactly one; timed from write issue to that stream's emission. Host load average 1.7-2.1; plus two 120-trial single-shot runs per arm per scenario read at p50/p75/p90/p95/p99/max",
+      "edges": []
+    }
+  ],
+  "nextSignals": [
+    "Do not open a fourth batching candidate in this direction. Claim 287.1 measures the entire ceiling that adaptive sizing, work stealing, cheaper terminators or per-member priorities would compete for, and it is zero on the representative fan-out lane. The one shape that would reopen it is a fan-out of very cheap streams -- one-row partitions, where exp 283's 4.54 us hash pass shrinks toward the dispatch cost instead of dwarfing it.",
+    "Exp 283's suggested probe is now the obvious next one and this run narrows it: sweep the reader pool size across one drain burst. Claim 287.1 removes messaging as the explanation for the fan-out wall and the control puts the write burst at 1.75 ms of 6.03 ms, so the sweep is asking whether the remaining ~4 ms is reader-side parallelism or something serial on the main isolate. It needs no new runtime code.",
+    "Method worth reusing, and the run's most transferable output: to test whether X is a system's constraint, building the version with almost none of X and watching the wall not move bounds X more tightly than instrumenting X does. A 24:1 message reduction that changes nothing is a stronger statement about dispatch overhead than any per-call counter, and it cost one build.",
+    "Claim 287.4 is a standing constraint on any future streaming, chunked, or partial-reply reader protocol -- not only on batching. The specific trap is the entry that is both queued and in-flight, a state the scalar path cannot reach.",
+    "`benchmark/experiments/stream_rerun_latency.dart` has now caught two distinct defects in two experiments (exp 249's verdict, and this run's flush-policy starvation in its first collection). Keep running it on any stream-dispatch change, and keep both of its scenarios: the heterogeneous one is what caught the defect."
+  ],
+  "outcomeNote": "Moonshot. The mechanism worked and the prize was not there. Streaming the batch's replies reverses the emission-latency regression exp 249 was rejected for, confirming that rejection's own account of itself; with the reply fixed, cutting fan-out rerun messages 24:1 and replies 4:1 moves backlog drain by nothing, which closes the batching family from the throughput side that exp 249 never measured. Runtime reverted, prototype at `archive/exp-287`."
+}
