@@ -91,6 +91,62 @@ final class SelectIfChangedRequest extends ReadRequest {
   final int? lastRowCount;
 }
 
+/// One member of a [SelectIfChangedStreamingBatchRequest]: a single stream's
+/// rerun with its cached hash/row-count baseline and its own result-size
+/// hints, mirroring the scalar [SelectIfChangedRequest] fields.
+///
+/// The hints are per-member rather than per-request because a batch mixes
+/// unrelated SQL; [ReadRequest.rowHint] can only describe one of them.
+typedef BatchRerunItem = ({
+  String sql,
+  List<Object?> params,
+  int lastResultHash,
+  int? lastRowCount,
+  int rowHint,
+  int initialRowHint,
+});
+
+/// A single changed member's result, sent back the instant the worker finishes
+/// decoding it rather than waiting for the rest of the batch.
+///
+/// Unchanged members produce no partial at all: their whole outcome is "the
+/// hash still matches", which the main isolate can infer from their absence.
+final class BatchRerunPartial {
+  BatchRerunPartial(this.index, this.rows, this.hash, this.rowCount);
+
+  /// Position of this member in the request's `items`.
+  final int index;
+  final List<Map<String, Object?>> rows;
+  final int hash;
+  final int rowCount;
+}
+
+/// [EXP-287] Batched stream re-query with per-member streaming replies.
+///
+/// Carries N independent [SelectIfChangedRequest]-equivalent members in one
+/// isolate message, so a single write that dirties many streams (the reactive
+/// fan-out case) pays one request send and one worker wake for the whole
+/// group instead of N. Each reader worker owns one SQLite connection and can
+/// only step one query at a time, so the members run serially on the worker
+/// either way — batching removes isolate-scheduling cost, not parallelism.
+///
+/// Unlike [EXP-249](../../../experiments/249-invalidation-batched-rerun.md)'s
+/// batch, the reply is *not* indivisible. A changed member is sent as its own
+/// [BatchRerunPartial] as soon as it is decoded, so it is never delayed behind
+/// its batch-mates' re-hashes — the term that made exp 249's emission latency
+/// 22–66% worse. The terminator reply carries only per-member errors and
+/// releases the worker.
+///
+/// Batched replies never use the sacrifice (Isolate.exit) path: a worker that
+/// exits cannot finish the rest of its batch. The stream engine's row-count
+/// cost gate keeps large results off this path instead.
+final class SelectIfChangedStreamingBatchRequest extends ReadRequest {
+  SelectIfChangedStreamingBatchRequest(this.items, {super.traceCorrelationId})
+    : super('', const []);
+
+  final List<BatchRerunItem> items;
+}
+
 /// How large a result's *structure* (rows × columns) can grow before handing
 /// it to main via `Isolate.exit` — sacrificing this worker — beats sending it.
 ///
@@ -231,6 +287,50 @@ void readerEntrypoint(List<Object> args) {
           );
           sacrifice = raw != null && _shouldSacrifice(raw);
           result = (raw == null ? null : _toRows(raw), newHash, newRowCount);
+
+        case SelectIfChangedStreamingBatchRequest(:final items):
+          // [EXP-287] Run each member serially on this worker's connection —
+          // the only option, since one statement steps at a time — and send
+          // each changed member back the moment it is decoded. An unchanged
+          // member sends nothing: the main isolate reads "no partial arrived
+          // before the terminator" as "hash still matches", which is the whole
+          // of what the scalar path's `(null, hash, rowCount)` reply says.
+          //
+          // Errors are isolated per member so one dropped or renamed table
+          // fails only its own stream; they ride the terminator rather than a
+          // partial because an error member has no rows to deliver early.
+          List<ResqliteException?>? errors;
+          for (var bi = 0; bi < items.length; bi++) {
+            final item = items[bi];
+            try {
+              final (newHash, newRowCount, raw) = executeQueryIfChanged(
+                dbHandleAddr,
+                readerId,
+                item.sql,
+                item.params,
+                item.lastResultHash,
+                item.lastRowCount,
+                item.rowHint,
+                item.initialRowHint,
+              );
+              if (raw != null) {
+                eventPort.send(
+                  BatchRerunPartial(bi, _toRows(raw), newHash, newRowCount),
+                );
+              }
+            } catch (e) {
+              (errors ??= List<ResqliteException?>.filled(items.length, null))[bi] =
+                  e is ResqliteException
+                  ? e
+                  : ResqliteQueryException(
+                      e.toString(),
+                      sql: item.sql,
+                      parameters: item.params,
+                    );
+            }
+          }
+          result = errors;
+          sacrifice = false;
       }
 
       if (sacrifice) {

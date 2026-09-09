@@ -262,6 +262,54 @@ final class ReaderPool {
     return typed;
   }
 
+  /// [EXP-287] Dispatch a group of stream reruns as one message to a single
+  /// worker, which runs them serially and replies with one message per
+  /// *changed* member as it finishes — [onChanged] is called with each, in the
+  /// order the worker produced them. Unchanged members are reported only by
+  /// their absence.
+  ///
+  /// Amortizes the per-rerun request send and worker wake across the group
+  /// without changing parallelism (a worker's connection steps one query at a
+  /// time regardless) and without delaying any member's delivery behind its
+  /// batch-mates. Used by [StreamEngine] under fan-out, when a single write
+  /// dirties more streams than there are workers.
+  ///
+  /// Returns the per-member errors, or null when every member succeeded.
+  Future<List<ResqliteException?>?> selectStreamingBatchIfChanged(
+    List<BatchRerunItem> items,
+    void Function(int index, List<Map<String, Object?>> rows, int hash, int rowCount)
+    onChanged, [
+    int? traceCorrelationId,
+  ]) async {
+    final result = await _dispatch(
+      SelectIfChangedStreamingBatchRequest(
+        items,
+        traceCorrelationId: traceCorrelationId,
+      ),
+      null,
+      // Rotates rather than sticks: consecutive batches are unrelated groups
+      // of SQL, so there is no statement cache locality to keep.
+      false,
+      (partial) {
+        final sql = items[partial.index].sql;
+        _record(sql, _rowHints[sql], partial.rowCount);
+        blobTransfer.materializeCells(partial.rows);
+        onChanged(partial.index, partial.rows, partial.hash, partial.rowCount);
+      },
+    );
+    return result as List<ResqliteException?>?;
+  }
+
+  /// Row-size hints for a batch's members, read on the main isolate because the
+  /// per-request [ReadRequest.rowHint] can only describe one statement.
+  ({int rowHint, int initialRowHint}) rerunHints(String sql) {
+    final memory = _rowHints[sql];
+    return (
+      rowHint: memory?.hint ?? 0,
+      initialRowHint: memory?.initialRows ?? 0,
+    );
+  }
+
   /// [memory] is this SQL's result-size entry, read by the caller so the small
   /// query that will never consult a hint pays one map lookup rather than two.
   /// `selectBytes` passes none: it serializes in C and never builds a Dart
@@ -270,6 +318,7 @@ final class ReaderPool {
     ReadRequest request, [
     RowSizeMemory? memory,
     bool sticky = true,
+    void Function(BatchRerunPartial)? onPartial,
   ]) async {
     // Fail fast on a closed pool so a caller who slipped past the
     // Database-level open check (e.g. a subscription whose reQuery
@@ -297,14 +346,14 @@ final class ReaderPool {
             );
             return TraceliteProfile.traceAsync(
               TraceliteResqliteSpans.readerPoolDispatch,
-              () => slot.request(request),
+              () => slot.request(request, onPartial),
               correlationId:
                   request.traceCorrelationId ??
                   TraceliteProfile.nextCorrelationId(),
               beginArgs: [typeId],
             );
           }
-          return slot.request(request);
+          return slot.request(request, onPartial);
         }
       }
 
@@ -419,6 +468,12 @@ class _WorkerSlot {
   /// not send another request to this worker.
   Completer<Object?>? _pendingCompleter;
 
+  /// [EXP-287] Sink for the in-flight request's per-member partial replies, or
+  /// null for the ordinary one-request-one-reply protocol. A partial neither
+  /// resolves the completer nor frees the slot: the worker is still stepping
+  /// the rest of its batch.
+  void Function(BatchRerunPartial)? _pendingPartial;
+
   /// A worker is available if it has a command port and no in-flight request.
   bool get isAvailable => _sendPort != null && _pendingCompleter == null;
 
@@ -461,6 +516,7 @@ class _WorkerSlot {
         // An exit with a pending completer indicates a crash during query execution.
         if (_pendingCompleter case Completer completer) {
           _pendingCompleter = null;
+          _pendingPartial = null;
           _sendPort = null;
           completer.completeError(
             StateError('Worker isolate crashed during query execution'),
@@ -471,8 +527,17 @@ class _WorkerSlot {
         return;
       }
 
+      if (msg is BatchRerunPartial) {
+        // [EXP-287] One changed member of a streaming batch, delivered as soon
+        // as the worker decoded it. The slot stays busy — more members, and
+        // the terminator, are still coming.
+        _pendingPartial?.call(msg);
+        return;
+      }
+
       final pending = _pendingCompleter;
       _pendingCompleter = null;
+      _pendingPartial = null;
       if (pending == null) {
         // Late event for a worker lifecycle we've already resolved.
         return;
@@ -536,7 +601,10 @@ class _WorkerSlot {
     _notifyPool();
   }
 
-  Future<Object?> request(ReadRequest request) {
+  Future<Object?> request(
+    ReadRequest request, [
+    void Function(BatchRerunPartial)? onPartial,
+  ]) {
     final port = _sendPort;
     if (port == null) throw StateError('Worker not alive');
     if (_pendingCompleter != null) {
@@ -544,6 +612,7 @@ class _WorkerSlot {
     }
 
     final completer = _pendingCompleter = Completer<Object?>.sync();
+    _pendingPartial = onPartial;
     port.send(request);
     return completer.future;
   }

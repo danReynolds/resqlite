@@ -10,6 +10,8 @@ import 'dependency_tracking.dart'
         UnknownTableDependencies;
 import 'profile_counters.dart';
 import 'profile_mode.dart';
+import 'exceptions.dart' show ResqliteException;
+import 'reader/read_worker.dart' show BatchRerunItem;
 import 'reader/reader_pool.dart';
 import 'tracelite_profile.dart';
 import 'extensions/set.dart';
@@ -224,16 +226,200 @@ final class StreamEngine {
     }
   }
 
+  /// [EXP-287] Most stream reruns packed into one batched reader message.
+  /// Bounds the reply size and preserves re-dirty responsiveness under a very
+  /// large fan-out: an entry re-dirtied mid-wave is picked up on the next
+  /// flush rather than waiting behind an unbounded batch.
+  static const int _maxRerunBatchSize = 64;
+
+  /// [EXP-287] Row-count ceiling for a rerun to be eligible for batching.
+  ///
+  /// Members of a batch run serially on one worker's connection, so a member
+  /// expensive to re-hash would delay the *execution* of the cheap members
+  /// behind it — which the unbatched path would have spread across the pool.
+  /// Delivery is no longer at risk (each changed member replies on its own),
+  /// but ordering still is. `lastRowCount` is a cheap per-entry cost proxy the
+  /// engine already tracks: streams above this ceiling, or without a baseline
+  /// yet, are dispatched individually.
+  static const int _batchRowCountCap = 256;
+
+  // TEMPORARY [EXP-287] instrumentation — removed before merge. Answers
+  // "did the batched path actually run, and how wide were the batches" for a
+  // harness that can only see the public API. Dumped by [close].
+  static const bool _exp287Stats = bool.fromEnvironment('RESQLITE_EXP287_STATS');
+  int _statBatches = 0;
+  int _statBatchedMembers = 0;
+  int _statChangedMembers = 0;
+  int _statScalarReruns = 0;
+
   void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
     }
 
-    final dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();
+    var free = _pool.availableWorkerCount;
+    if (free <= 0) {
+      return;
+    }
 
-    for (final entry in dequeued) {
-      _requery(entry);
-      _requeryQueue.remove(entry);
+    final queued = _requeryQueue.length;
+
+    // [EXP-287] With a worker free for every dirty stream there is nothing to
+    // amortize, so dispatch each rerun on its own — byte-identical to the
+    // pre-287 path, which keeps the common one-or-few-stream case untouched.
+    // Batch only when a write dirtied more streams than there are workers (the
+    // reactive fan-out case), where reruns would otherwise drain in waves and
+    // pay one request send and one worker wake each.
+    if (queued <= free) {
+      final dequeued = _requeryQueue.take(free).toList();
+      for (final entry in dequeued) {
+        _requeryQueue.remove(entry);
+        if (_exp287Stats) _statScalarReruns++;
+        _requery(entry);
+      }
+      return;
+    }
+
+    final take = queued < free * _maxRerunBatchSize
+        ? queued
+        : free * _maxRerunBatchSize;
+    final taken = _requeryQueue.take(take).toList();
+
+    final cheap = <StreamEntry>[];
+    final expensive = <StreamEntry>[];
+    for (final entry in taken) {
+      final rowCount = entry.lastRowCount;
+      if (rowCount != null && rowCount <= _batchRowCountCap) {
+        cheap.add(entry);
+      } else {
+        expensive.add(entry);
+      }
+    }
+
+    // Split the free workers between the two classes rather than letting
+    // whichever class sits at the head of the queue take them all. The dirty
+    // set is enumerated in stream-registration order, so a handful of large
+    // partitions registered first would otherwise consume every worker and
+    // leave the whole cheap majority queued behind their re-hashes — which the
+    // unbatched path never does, because it pulls from one FIFO.
+    var expensiveWorkers = expensive.length < free ? expensive.length : free;
+    if (cheap.isNotEmpty && expensiveWorkers >= free) {
+      expensiveWorkers = free - 1;
+    }
+    for (var i = 0; i < expensiveWorkers; i++) {
+      _requeryQueue.remove(expensive[i]);
+      if (_exp287Stats) _statScalarReruns++;
+      _requery(expensive[i]);
+    }
+    free -= expensiveWorkers;
+    // Expensive entries beyond that budget stay queued for the next flush.
+
+    if (free <= 0 || cheap.isEmpty) {
+      return;
+    }
+
+    // One batched message per remaining worker, bounded by the batch cap.
+    // Parallelism across the pool is preserved; only the message count drops.
+    final groups = free < cheap.length ? free : cheap.length;
+    final maxBatch = groups * _maxRerunBatchSize;
+    final batchCount = cheap.length < maxBatch ? cheap.length : maxBatch;
+    for (var i = 0; i < batchCount; i++) {
+      _requeryQueue.remove(cheap[i]);
+    }
+
+    final groupSize = (batchCount + groups - 1) ~/ groups;
+    for (var start = 0; start < batchCount; start += groupSize) {
+      final end = start + groupSize < batchCount
+          ? start + groupSize
+          : batchCount;
+      if (_exp287Stats) {
+        _statBatches++;
+        _statBatchedMembers += end - start;
+      }
+      _requeryStreamingBatch(cheap.sublist(start, end));
+    }
+  }
+
+  /// [EXP-287] Re-query a group of dirtied streams in one batched reader
+  /// round-trip whose changed members reply individually.
+  ///
+  /// Mirrors [_requery]'s per-entry bookkeeping — in-flight guard, mid-flight
+  /// re-dirty re-queue, hash/row-count baseline update, emit — but applies it
+  /// as each member's partial arrives, so a changed stream emits at the moment
+  /// its own rerun finishes rather than when the batch does.
+  Future<void> _requeryStreamingBatch(List<StreamEntry> entries) async {
+    int? batchTraceCorrelationId;
+    final items = <BatchRerunItem>[];
+    for (final entry in entries) {
+      entry.inFlight = true;
+      entry.dirty = false;
+      batchTraceCorrelationId ??= entry.pendingTraceCorrelationId;
+      entry.pendingTraceCorrelationId = null;
+      final hints = _pool.rerunHints(entry.sql);
+      items.add((
+        sql: entry.sql,
+        params: entry.params,
+        lastResultHash: entry.lastResultHash,
+        lastRowCount: entry.lastRowCount,
+        rowHint: hints.rowHint,
+        initialRowHint: hints.initialRowHint,
+      ));
+    }
+
+    try {
+      final errors = await _pool.selectStreamingBatchIfChanged(items, (
+        index,
+        rows,
+        hash,
+        rowCount,
+      ) {
+        final entry = entries[index];
+
+        // Re-dirtied while the batch was in flight: discard this member's
+        // result. Requeueing is deferred to the `finally` below — a partial
+        // lands while the worker still holds the batch, and an entry that is
+        // both queued and `inFlight` can be dispatched a second time by a
+        // concurrent write's `_flushQueue`, racing two reruns over one
+        // baseline. The scalar path never opens that window because its
+        // requeue and its `inFlight` release are in the same synchronous turn.
+        if (entry.dirty) {
+          return;
+        }
+
+        if (_exp287Stats) _statChangedMembers++;
+        entry.lastResultHash = hash;
+        entry.lastRowCount = rowCount;
+        entry.lastResult = rows;
+        entry.emit(rows);
+      }, batchTraceCorrelationId);
+
+      if (errors != null) {
+        for (var i = 0; i < entries.length; i++) {
+          if (errors[i] case final ResqliteException error) {
+            entries[i].emitError(error, StackTrace.current);
+          }
+        }
+      }
+    } catch (e, st) {
+      // Whole-batch dispatch failure (pool closed, worker crash): surface it to
+      // every member's subscribers so none is left silently stale.
+      for (final entry in entries) {
+        entry.emitError(e, st);
+      }
+    } finally {
+      for (final entry in entries) {
+        entry.inFlight = false;
+        // A member re-dirtied mid-batch is invisible to `onDependencyChanges`,
+        // which skips queueing anything already `inFlight`. Requeue it here or
+        // the stream stays stale until some later write happens to dirty it
+        // again — and for an unchanged member, which sends no partial at all,
+        // this is the only place that can notice.
+        if (entry.dirty) {
+          entry.pendingTraceCorrelationId ??= batchTraceCorrelationId;
+          _requeryQueue.add(entry);
+        }
+      }
+      _flushQueue();
     }
   }
 
@@ -242,6 +428,13 @@ final class StreamEngine {
   /// Called by [Database.close]. After this, existing subscriber streams
   /// receive a done event and no new streams can be created.
   void close() {
+    if (_exp287Stats) {
+      // ignore: avoid_print
+      print(
+        'exp287 batches=$_statBatches batched_members=$_statBatchedMembers '
+        'changed_members=$_statChangedMembers scalar_reruns=$_statScalarReruns',
+      );
+    }
     for (final entry in _entries.values) {
       for (final sub in entry.subscribers) {
         if (!sub.isClosed) sub.close();
