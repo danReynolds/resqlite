@@ -5,7 +5,14 @@
 **Category:** Correctness
 **Direction:** `stream-rerun-dispatch`
 **Benchmark Run:** Release headline suite captured at HEAD on 2026-09-10
-  (5-sample medians, linked below once captured).
+  (5-sample medians,
+  [`benchmark/results/2026-09-10T18-51-57-exp288-stream-key-collision.md`](../benchmark/results/2026-09-10T18-51-57-exp288-stream-key-collision.md)),
+  gated against the previous release anchor
+  (`2026-08-09T20-36-47-exp266-headline-refresh.md`, passed explicitly because
+  auto-compare picks the newest markdown in `benchmark/results/`, which was a
+  focused-harness result without a sidecar): exit 0, 0 wins / 0 regressions /
+  169 neutral. The decision evidence is the regression tests; the release run
+  is the no-collateral-damage sweep.
 
 ## Problem
 
@@ -119,7 +126,22 @@ streams, 2M lookups per lane, no database):
 `StreamController` and seed it; a miss goes on to a reader-pool round trip
 that [exp 282](282-read-request-residual.md) prices at 3.27 µs (claim 282.2) before any
 SQLite work. Neither is visible from any public lane, and the headline suite
-below is the no-collateral-damage sweep rather than the decision evidence.
+is the no-collateral-damage sweep rather than the decision evidence.
+
+The headline release run from the committed tree (`--repeat=5
+--fail-on-regression --fail-on-memory-regression`, compared explicitly
+against the last release anchor, exp 266's 2026-08-09 refresh) exited 0 with
+**0 wins, 0 regressions, 169 neutral** resqlite lanes. Every streaming lane
+— the ones this change could touch — reads flat: high-cardinality fan-out,
+keyed-PK, feed paging, many-streams writer throughput, and both column-
+granularity rows (resqlite re-emits 0 disjoint / 10 overlapping, identical to
+the anchor). The comparison's two flagged re-emit rows (−134 / +673) are the
+`sqlite_async` peer's counts, not resqlite's. `check_peer_drift.dart
+--since=2026-08-09` puts the apparatus movement across the month at a −2.6%
+median with 71% lane agreement — within tolerance, so the resqlite deltas
+are comparable despite the anchor's host being recorded under a different
+hostname. The anchor carried no memory section, so the memory gate had no
+baseline; this run's values are recorded for the next one.
 
 ## Decision
 
