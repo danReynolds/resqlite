@@ -1624,6 +1624,29 @@ before the numbers that would settle it existed. Check the dismissal against
 what has been measured since; if the priors have moved, the one clause is a
 whole experiment.*
 
+### A collision has to be constructed, never sampled
+
+[Exp 288](288-stream-key-collision.md) found that `db.stream()` deduplicated
+queries through a map keyed on a 29-bit `Object.hash` with no equality check
+behind it, so two distinct keyed streams whose hashes collided shared one
+entry and the second received the first query's rows. It had survived 287
+experiments and every stream suite in the repo because a test that opens a
+handful of streams has roughly a one-in-ten-million chance of tripping it —
+and a benchmark with a hundred streams, one in twenty-seven thousand. No
+amount of running the existing tests would have found it; reading the lookup
+found it in a minute, and the regression test that guards it searches for a
+colliding pair on purpose rather than hoping to draw one. [Exp 033](033-fnv1a-hash.md)
+had even written down the hash width five months earlier, for a different
+use of the same function, and the registry key was never re-read in that
+light.
+
+*Reapplies to any lookup keyed on a hash, a truncated digest, or a
+"stable id" derived from content: the question is not whether the tests
+pass but what stands behind the key when two inputs share it. If nothing
+does, construct the collision and watch what the second caller receives.
+The same goes for reading an old finding about a primitive — when a
+function's limits are recorded once, check every other use of it.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a
