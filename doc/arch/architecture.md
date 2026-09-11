@@ -241,6 +241,8 @@ When a write returns table dependencies, `database.dart` calls `streamEngine.onD
 
 If rapid writes dispatch multiple re-queries for the same stream, duplicate queue entries collapse before they reach the reader pool. A result hash suppresses no-op emissions when a table was dirtied but the query result did not actually change.
 
+Re-queries normally run on the reader pool, but a reader connection that has just watched the writer commit begins its next statement by discarding its page cache (SQLite's WAL `pager_reset`), so every re-query on a reader runs cold. The writer connection's cache survives its own commits. When no write is in progress — none entered through the public API and nothing queued on the writer — the engine hands one small re-query (≤ 256 rows) per round to the writer isolate instead, where it runs warm; the rest go to the pool as before. See [Experiment 289](../../experiments/289-warm-connection-reruns.md).
+
 Initial stream emission and invalidation benchmark:
 
 | Metric | resqlite | sqlite_async |

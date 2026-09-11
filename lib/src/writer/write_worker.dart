@@ -71,6 +71,30 @@ final class QueryRequest extends WriterRequest {
   final List<Object?> params;
 }
 
+/// A stream rerun on the writer connection
+/// ([EXP-289](../../../experiments/289-warm-connection-reruns.md)).
+///
+/// The reader connections discard their page cache at the first statement
+/// after every commit; the writer's cache is the only one a commit leaves
+/// warm. Semantics match the reader pool's `SelectIfChangedRequest`: hash the
+/// result, decode only when the hash or row count moved. Only sent while no
+/// transaction is open on the writer (the main isolate holds that lock), and
+/// declined by the worker if one is, so a rerun never reads uncommitted rows.
+final class RerunRequest extends WriterRequest {
+  RerunRequest(
+    this.sql,
+    List<Object?> params,
+    this.lastResultHash,
+    this.lastRowCount,
+    super.replyPort, {
+    super.traceCorrelationId,
+  }) : params = blobTransfer.wrapParams(params);
+  final String sql;
+  final List<Object?> params;
+  final int lastResultHash;
+  final int? lastRowCount;
+}
+
 /// Batch write — one SQL statement, many parameter sets, single transaction.
 final class BatchRequest extends WriterRequest {
   BatchRequest(
@@ -133,6 +157,28 @@ final class QueryResponse {
   const QueryResponse(this.rows, {this.writerSqliteUs = 0});
   final List<Map<String, Object?>> rows;
   final int writerSqliteUs;
+}
+
+/// Response to [RerunRequest]. `rows` is null when the result is unchanged;
+/// `declined` is set when the writer was inside a transaction and the rerun
+/// must run on the reader pool instead. `elapsedUs` is the writer's own wall
+/// for the hash and decode after statement acquisition, measured in every
+/// build: the stream engine uses it to stop offering the writer a rerun that
+/// would hold it too long.
+final class RerunResponse {
+  const RerunResponse(
+    this.rows,
+    this.hash,
+    this.rowCount, {
+    this.declined = false,
+    this.elapsedUs = 0,
+  });
+
+  final List<Map<String, Object?>>? rows;
+  final int hash;
+  final int rowCount;
+  final bool declined;
+  final int elapsedUs;
 }
 
 /// Response to [BatchRequest] and [CommitRequest].
@@ -231,6 +277,8 @@ void writerEntrypoint(List<Object> args) {
           _handleMultiExecute(state, message);
         case QueryRequest():
           _handleTxQuery(state, message);
+        case RerunRequest():
+          _handleRerun(state, message);
         case BatchRequest():
           _handleBatch(state, message);
         case BeginRequest():
@@ -398,6 +446,62 @@ void _handleTxQuery(_WriterState state, QueryRequest msg) {
     // Both resources are freed in one finally regardless of which line
     // threw — an earlier version of this function had a paired try/finally
     // that leaked `paramsNative` when stmt acquisition failed.
+    freeParams(paramsNative, params);
+  }
+}
+
+/// Stream rerun on the writer connection; see [RerunRequest].
+void _handleRerun(_WriterState state, RerunRequest msg) {
+  if (state.txDepth > 0) {
+    msg.replyPort.send(
+      RerunResponse(null, msg.lastResultHash, 0, declined: true),
+    );
+    return;
+  }
+  final sqlNative = cachedSqlUtf8(msg.sql);
+  final params = blobTransfer.unwrapParams(msg.params);
+  final paramsNative = allocateParams(params);
+  try {
+    final stmt = _resqliteStmtAcquireWriter(
+      state.dbHandle,
+      sqlNative.cast(),
+      paramsNative,
+      params.length,
+    );
+    if (stmt == ffi.nullptr) {
+      throw ResqliteQueryException(
+        resqliteErrmsg(state.dbHandle).toDartString(),
+        sql: msg.sql,
+        parameters: params,
+      );
+    }
+    // Timed from here: the acquire above is a one-off prepare the first time
+    // a stream's SQL reaches this connection, and the engine gates on what a
+    // rerun costs every time.
+    final sw = Stopwatch()..start();
+    final (newHash, newRowCount) = callQueryHash(stmt);
+    if (newHash == msg.lastResultHash && newRowCount == msg.lastRowCount) {
+      msg.replyPort.send(
+        RerunResponse(
+          null,
+          newHash,
+          newRowCount,
+          elapsedUs: sw.elapsedMicroseconds,
+        ),
+      );
+      return;
+    }
+    // The stream's own last row count is the exact hint for this decode.
+    final raw = decodeQuery(stmt, msg.sql, rowHint: msg.lastRowCount ?? 0);
+    msg.replyPort.send(
+      RerunResponse(
+        raw.toResultSet(),
+        newHash,
+        newRowCount,
+        elapsedUs: sw.elapsedMicroseconds,
+      ),
+    );
+  } finally {
     freeParams(paramsNative, params);
   }
 }

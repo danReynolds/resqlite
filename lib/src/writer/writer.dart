@@ -79,6 +79,39 @@ final class Writer {
     return writer;
   }
 
+  /// Nothing in flight or buffered and no transaction or batch holding the
+  /// lock, so a rerun sent now runs at once and delays no write.
+  bool get isIdle =>
+      _sendPort != null &&
+      _pending.isEmpty &&
+      _pendingWrites.isEmpty &&
+      !_mutex.isLocked;
+
+  /// A stream rerun on the writer connection; see `RerunRequest`. Returns
+  /// null when the writer declined (a transaction was open).
+  Future<(List<Map<String, Object?>>?, int, int, int)?> rerun(
+    String sql,
+    List<Object?> parameters,
+    int lastResultHash,
+    int? lastRowCount,
+    int? traceCorrelationId,
+  ) async {
+    final response = await _request<RerunResponse>(
+      (replyPort) => RerunRequest(
+        sql,
+        parameters,
+        lastResultHash,
+        lastRowCount,
+        replyPort,
+        traceCorrelationId: traceCorrelationId,
+      ),
+    );
+    if (response.declined) return null;
+    final rows = response.rows;
+    if (rows != null) blobTransfer.materializeCells(rows);
+    return (rows, response.hash, response.rowCount, response.elapsedUs);
+  }
+
   void _onReply(Object? response) {
     // Defensive: a reply with no pending completer (e.g. a stray message
     // after close) is dropped rather than crashing the port handler.

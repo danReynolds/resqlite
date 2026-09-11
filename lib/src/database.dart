@@ -71,6 +71,7 @@ final class Database {
 
       // Spawn the single writer isolate.
       final writer = await Writer.spawn(streamEngine, _handle);
+      attachWarmRerunner(streamEngine, _WarmWriter(this, writer));
 
       return (
         readerPool: readerPool,
@@ -83,6 +84,13 @@ final class Database {
   final ffi.Pointer<ffi.Void> _handle;
 
   late final Future<_DatabaseRuntime> _runtime;
+
+  /// Writes between their public entry and their completion, counted before
+  /// the first `await` so the count is exact from the caller's own turn. The
+  /// stream engine offers a rerun to the writer connection only while this is
+  /// zero and the writer itself is idle
+  /// ([EXP-289](../../experiments/289-warm-connection-reruns.md)).
+  int _writesEntered = 0;
 
   /// The filesystem path the database was opened with. Retained so
   /// [diagnostics] can read the `-wal` sidecar size. `:memory:` or
@@ -404,35 +412,40 @@ final class Database {
 
     _ensureOpen();
 
-    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
-    final int? correlationId = kProfileMode && kTraceliteProfileMode
-        ? TraceliteProfile.nextCorrelationId()
-        : null;
+    _writesEntered++;
+    try {
+      final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+      final int? correlationId = kProfileMode && kTraceliteProfileMode
+          ? TraceliteProfile.nextCorrelationId()
+          : null;
 
-    Future<ExecuteResponse> write() =>
-        writer.execute(sql, parameters, correlationId);
+      Future<ExecuteResponse> write() =>
+          writer.execute(sql, parameters, correlationId);
 
-    final ExecuteResponse response;
-    if (correlationId == null) {
-      response = await write();
-    } else {
-      final sqlId = TraceliteProfile.internString(sql);
-      response = await TraceliteProfile.traceAsync(
-        TraceliteResqliteSpans.databaseExecute,
-        write,
-        correlationId: correlationId,
-        beginArgs: [sqlId, parameters.length],
-        endArgs: (response) => [response.result.affectedRows],
+      final ExecuteResponse response;
+      if (correlationId == null) {
+        response = await write();
+      } else {
+        final sqlId = TraceliteProfile.internString(sql);
+        response = await TraceliteProfile.traceAsync(
+          TraceliteResqliteSpans.databaseExecute,
+          write,
+          correlationId: correlationId,
+          beginArgs: [sqlId, parameters.length],
+          endArgs: (response) => [response.result.affectedRows],
+        );
+      }
+
+      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+      streamEngine.onDependencyChanges(
+        response.modifications,
+        traceCorrelationId: correlationId,
       );
+
+      return response.result;
+    } finally {
+      _writesEntered--;
     }
-
-    ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
-    streamEngine.onDependencyChanges(
-      response.modifications,
-      traceCorrelationId: correlationId,
-    );
-
-    return response.result;
   }
 
   /// Executes one SQL statement across many parameter sets in a single
@@ -462,35 +475,43 @@ final class Database {
 
     _ensureOpen();
 
-    final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
+    _writesEntered++;
+    try {
+      final _DatabaseRuntime(:streamEngine, :writer) = await _runtime;
 
-    final int? correlationId = kProfileMode && kTraceliteProfileMode
-        ? TraceliteProfile.nextCorrelationId()
-        : null;
+      final int? correlationId = kProfileMode && kTraceliteProfileMode
+          ? TraceliteProfile.nextCorrelationId()
+          : null;
 
-    Future<BatchResponse?> write() =>
-        writer.executeBatch(sql, paramSets, traceCorrelationId: correlationId);
-
-    final BatchResponse? response;
-    if (correlationId == null) {
-      response = await write();
-    } else {
-      final sqlId = TraceliteProfile.internString(sql);
-      final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
-      response = await TraceliteProfile.traceAsync(
-        TraceliteResqliteSpans.databaseExecuteBatch,
-        write,
-        correlationId: correlationId,
-        beginArgs: [sqlId, paramCount, paramSets.length],
-      );
-    }
-
-    if (response != null) {
-      ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
-      streamEngine.onDependencyChanges(
-        response.modifications,
+      Future<BatchResponse?> write() => writer.executeBatch(
+        sql,
+        paramSets,
         traceCorrelationId: correlationId,
       );
+
+      final BatchResponse? response;
+      if (correlationId == null) {
+        response = await write();
+      } else {
+        final sqlId = TraceliteProfile.internString(sql);
+        final paramCount = paramSets.isEmpty ? 0 : paramSets.first.length;
+        response = await TraceliteProfile.traceAsync(
+          TraceliteResqliteSpans.databaseExecuteBatch,
+          write,
+          correlationId: correlationId,
+          beginArgs: [sqlId, paramCount, paramSets.length],
+        );
+      }
+
+      if (response != null) {
+        ProfileCounters.recordWriterSqlite(response.writerSqliteUs);
+        streamEngine.onDependencyChanges(
+          response.modifications,
+          traceCorrelationId: correlationId,
+        );
+      }
+    } finally {
+      _writesEntered--;
     }
   }
 
@@ -524,22 +545,27 @@ final class Database {
 
     _ensureOpen();
 
-    final runtime = await _runtime;
-    final writer = runtime.writer;
-    final int? correlationId = kProfileMode && kTraceliteProfileMode
-        ? TraceliteProfile.nextCorrelationId()
-        : null;
-    Future<T> run() => writer.locked(
-      () => writer.transaction(body, traceCorrelationId: correlationId),
-    );
-    if (correlationId == null) {
-      return run();
+    _writesEntered++;
+    try {
+      final runtime = await _runtime;
+      final writer = runtime.writer;
+      final int? correlationId = kProfileMode && kTraceliteProfileMode
+          ? TraceliteProfile.nextCorrelationId()
+          : null;
+      Future<T> run() => writer.locked(
+        () => writer.transaction(body, traceCorrelationId: correlationId),
+      );
+      if (correlationId == null) {
+        return await run();
+      }
+      return await TraceliteProfile.traceAsync(
+        TraceliteResqliteSpans.databaseTransaction,
+        run,
+        correlationId: correlationId,
+      );
+    } finally {
+      _writesEntered--;
     }
-    return TraceliteProfile.traceAsync(
-      TraceliteResqliteSpans.databaseTransaction,
-      run,
-      correlationId: correlationId,
-    );
   }
 
   // -------------------------------------------------------------------------
@@ -623,3 +649,30 @@ typedef _DatabaseRuntime = ({
   StreamEngine streamEngine,
   Writer writer,
 });
+
+/// The writer connection as a rerun vehicle, gated on no write being in
+/// progress from the caller's side as well as the writer's own queue.
+final class _WarmWriter implements WarmRerunner {
+  _WarmWriter(this._db, this._writer);
+
+  final Database _db;
+  final Writer _writer;
+
+  @override
+  bool get isIdle => _db._writesEntered == 0 && _writer.isIdle;
+
+  @override
+  Future<(List<Map<String, Object?>>?, int, int, int)?> rerun(
+    String sql,
+    List<Object?> parameters,
+    int lastResultHash,
+    int? lastRowCount,
+    int? traceCorrelationId,
+  ) => _writer.rerun(
+    sql,
+    parameters,
+    lastResultHash,
+    lastRowCount,
+    traceCorrelationId,
+  );
+}
