@@ -1624,49 +1624,6 @@ before the numbers that would settle it existed. Check the dismissal against
 what has been measured since; if the priors have moved, the one clause is a
 whole experiment.*
 
-### Measure the operation after the event that makes it happen
-
-Exp 289, which found a 3x tax on stream reruns that 288 experiments had priced
-around and never through.
-
-A stream rerun exists because a commit preceded it. Every harness that timed
-one — the hash-pass price, the one-pass decoder, the batching gates — ran it on
-a connection that had not just watched another connection commit, and in WAL
-mode that is the one condition under which the connection's page cache
-survives. Run after a commit, the same hash pass on a reader costs 3.2x on a
-50-row index page and 2.6–4.2x on a point read; exp 026 had read 100% cache
-hit rates and closed the direction, on four workloads none of which
-interleaved a write with a read.
-
-*Reapplies to anything validated against a version counter: a page cache, a
-statement cache after a schema change, an OS page cache under a remap, a
-memoized plan. Before pricing an operation, ask what event makes it happen in
-production and put that event immediately before it in the harness. A
-"warm" measurement of something that only ever runs cold is not an upper bound
-on the wrong thing; it is a measurement of nothing.*
-
-### An idle check inside a completion chain reads the wrong turn
-
-Also exp 289, which serialised a 3.3 ms burst into 8.7 ms before it worked.
-
-Deciding "the writer is idle, give it this rerun" from inside a write's reply
-handler is wrong on every sequential caller, even one microtask later. The
-caller's `await db.execute()` continuation does run synchronously inside the
-reply chain — replies resolve `sync` completers — but its next write re-enters
-the writer only after `Database.execute`'s own `await _runtime` hop, so the
-queues the idle check reads are empty for exactly one turn longer than the
-caller's intent is. A timer waits long enough and costs 2.5 µs a shot; a
-microtask waits the right amount and reads the wrong state. The fix is to
-count intent where it is declared: a counter incremented at the public entry
-before the first `await`, decremented on completion, and the idle check reads
-that alongside the queues.
-
-*Reapplies to any scheduling decision taken inside a reply handler or
-completion callback: "is the other side busy" has to be asked of the side that
-knows, at the point where it learns, not inferred from queues that are one
-await behind. The tell is a policy that measures beautifully on a latency lane
-and collapses on the sequential burst — run the burst first.*
-
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

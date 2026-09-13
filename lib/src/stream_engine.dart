@@ -1,6 +1,5 @@
 import 'dart:collection';
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'dependency_tracking.dart'
     show
@@ -42,36 +41,6 @@ import 'extensions/set.dart';
 // `TableDependency(table)`, which only forces re-query for streams that already
 // share that table.
 
-/// A connection that a commit leaves warm, offered a stream rerun when it is
-/// idle ([EXP-289](../../experiments/289-warm-connection-reruns.md)).
-///
-/// Every reader connection begins its first statement after a commit by
-/// discarding its page cache, so a rerun on a reader re-reads every page it
-/// touches. The writer connection's cache survives its own commits. Not
-/// exported from `package:resqlite/resqlite.dart`.
-abstract interface class WarmRerunner {
-  /// True when nothing is in flight or buffered and no transaction holds the
-  /// writer, so a rerun sent now runs at once and delays no write.
-  bool get isIdle;
-
-  /// Same contract as `ReaderPool.selectIfChanged` plus the vehicle's own wall
-  /// for the run in microseconds; `null` rows means unchanged. Returns `null`
-  /// outright when the vehicle declined (a transaction opened between the idle
-  /// check and the run), in which case the caller reruns on the pool.
-  Future<(List<Map<String, Object?>>?, int, int, int)?> rerun(
-    String sql,
-    List<Object?> parameters,
-    int lastResultHash,
-    int? lastRowCount,
-    int? traceCorrelationId,
-  );
-}
-
-/// Package-internal wiring for [WarmRerunner]; not exported.
-void attachWarmRerunner(StreamEngine engine, WarmRerunner rerunner) {
-  engine._warm = rerunner;
-}
-
 /// Stream engine — reactive query lifecycle.
 ///
 /// Manages the full lifecycle of reactive streams: registration,
@@ -82,20 +51,6 @@ final class StreamEngine {
   StreamEngine(this._pool);
 
   final ReaderPool _pool;
-
-  WarmRerunner? _warm;
-
-  /// The one entry held back from the pool for the warm vehicle until the
-  /// microtask that decides where it runs; see [_flushQueue].
-  StreamEntry? _heldForWarm;
-
-  /// A rerun on the writer runs ahead of the next write, so the time it holds
-  /// the writer is what that write may wait. Rows bound the first offer; after
-  /// that the entry's own measured writer-side time does, since rows say
-  /// nothing about bytes (256 rows of 4 KB TEXT hash for hundreds of
-  /// microseconds). A changed 50-row page hashes and decodes in ~43 us warm.
-  static const int _warmRowCap = 256;
-  static const int _warmRerunCapUs = 64;
 
   /// The index of streamed queries by their hash key.
   final Map<int, StreamEntry> _entries = {};
@@ -232,7 +187,7 @@ final class StreamEngine {
         }
       }
 
-      _flushQueue(deferWarm: true);
+      _flushQueue();
     } finally {
       if (kProfileMode) {
         invalidateSw!.stop();
@@ -269,33 +224,9 @@ final class StreamEngine {
     }
   }
 
-  /// [deferWarm] is set from a write's reply chain. Replies resolve `sync`
-  /// completers, so a caller awaiting the write runs its continuation inside
-  /// that chain and a write it issues next is already buffered or locked by the
-  /// time a microtask scheduled here runs: the warm dispatch waits for that
-  /// microtask so the idle check sees it. A flush from a rerun completion has
-  /// no such caller and dispatches warm at once.
-  void _flushQueue({bool deferWarm = false}) {
+  void _flushQueue() {
     if (_requeryQueue.isEmpty) {
       return;
-    }
-
-    final warm = _warm;
-    if (warm != null && _heldForWarm == null && (deferWarm || warm.isIdle)) {
-      for (final entry in _requeryQueue) {
-        if (entry.lastRowCount case final rows?
-            when rows <= _warmRowCap && entry.warmRerunUs <= _warmRerunCapUs) {
-          _requeryQueue.remove(entry);
-          if (deferWarm) {
-            entry.inFlight = true;
-            _heldForWarm = entry;
-            scheduleMicrotask(_dispatchHeld);
-          } else {
-            _requery(entry, warm: warm);
-          }
-          break;
-        }
-      }
     }
 
     final dequeued = _requeryQueue.take(_pool.availableWorkerCount).toList();
@@ -304,18 +235,6 @@ final class StreamEngine {
       _requery(entry);
       _requeryQueue.remove(entry);
     }
-  }
-
-  /// The deferred half of [_flushQueue]: the held entry goes to the writer if
-  /// it is still idle, otherwise to the pool as it always did.
-  void _dispatchHeld() {
-    final entry = _heldForWarm;
-    if (entry == null) return;
-    _heldForWarm = null;
-    entry.inFlight = false;
-    if (_entries[entry.key] != entry) return;
-    final warm = _warm;
-    _requery(entry, warm: warm != null && warm.isIdle ? warm : null);
   }
 
   /// Closes all active streams and clears internal state.
@@ -334,7 +253,6 @@ final class StreamEngine {
     _tableIndex.clear();
     _unknownDepsEntries.clear();
     _requeryQueue.clear();
-    _heldForWarm = null;
   }
 
   /// Create a new stream entry and return a subscriber stream.
@@ -423,37 +341,21 @@ final class StreamEngine {
     return subscriberStream;
   }
 
-  /// Re-query a single stream on the reader pool, or on [warm] when given.
-  Future<void> _requery(StreamEntry entry, {WarmRerunner? warm}) async {
+  /// Re-query a single stream on the reader pool.
+  Future<void> _requery(StreamEntry entry) async {
     final traceCorrelationId = entry.pendingTraceCorrelationId;
     entry.pendingTraceCorrelationId = null;
     try {
       entry.inFlight = true;
       entry.dirty = false;
 
-      (List<Map<String, Object?>>?, int, int)? result;
-      if (warm != null) {
-        final warmResult = await warm.rerun(
-          entry.sql,
-          entry.params,
-          entry.lastResultHash,
-          entry.lastRowCount,
-          traceCorrelationId,
-        );
-        if (warmResult != null) {
-          final (rows, hash, count, elapsedUs) = warmResult;
-          entry.recordWarmRerun(elapsedUs);
-          result = (rows, hash, count);
-        }
-      }
-      result ??= await _pool.selectIfChanged(
+      final (rows, newHash, newRowCount) = await _pool.selectIfChanged(
         entry.sql,
         entry.params,
         entry.lastResultHash,
         entry.lastRowCount,
         traceCorrelationId,
       );
-      final (rows, newHash, newRowCount) = result;
 
       // If the entry has already been marked dirty again from an invalidation that ocurred
       // while it was requerying, then this intermediate result should be discarded and instead
@@ -518,7 +420,6 @@ final class StreamEngine {
   void _remove(StreamEntry entry) {
     _entries.remove(entry.key);
     _requeryQueue.remove(entry);
-    if (_heldForWarm == entry) _heldForWarm = null;
 
     // Clean up inverted index.
     for (final table in entry.dependencies.keys) {
@@ -589,22 +490,6 @@ final class StreamEntry {
 
   /// Whether the stream is dirty and needs to be requeried.
   bool dirty = false;
-
-  /// Writer-side wall (hash and decode, after statement acquisition) of this
-  /// entry's reruns on the writer connection, as the smaller of the last two;
-  /// gates whether it is offered the writer again. Two consecutive samples
-  /// over the cap retire an entry from the writer, never one: the first run
-  /// on a connection fills its schema cache and sizes its result buffer and
-  /// reads well above the steady state even after the prepare is excluded,
-  /// and a lone slow sample later must not retire a small stream for good.
-  int warmRerunUs = 0;
-  int _previousWarmRerunUs = -1;
-
-  void recordWarmRerun(int elapsedUs) {
-    final previous = _previousWarmRerunUs;
-    _previousWarmRerunUs = elapsedUs;
-    if (previous >= 0) warmRerunUs = math.min(previous, elapsedUs);
-  }
 
   /// Whether the stream is currently being queried (and we are waiting for the result).
   bool inFlight = false;

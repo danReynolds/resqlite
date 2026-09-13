@@ -915,68 +915,6 @@ void main() {
       await probe.cancel();
     });
 
-    // [EXP-289] A rerun the idle writer connection runs sees only committed
-    // rows. The rerun is dispatched from a microtask after the write's reply;
-    // a transaction opened after that microtask is queued behind it on the
-    // writer's port, so an uncommitted value can never reach an emission.
-    test('warm rerun never observes a transaction opened after it', () async {
-      await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-        'row',
-        1,
-      ]);
-      final probe = _StreamProbe(
-        db.stream('SELECT value FROM items WHERE name = ?', ['row']),
-      );
-      expect((await probe.event(1))[0]['value'], 1);
-
-      await db.execute('UPDATE items SET value = 2 WHERE name = ?', ['row']);
-      // One microtask: the rerun is now on the writer's queue, not yet run.
-      await Future<void>.microtask(() {});
-      await db
-          .transaction<void>((tx) async {
-            await tx.execute('UPDATE items SET value = 99 WHERE name = ?', [
-              'row',
-            ]);
-            await Future<void>.delayed(const Duration(milliseconds: 20));
-            throw StateError('rollback');
-          })
-          .then<void>((_) {}, onError: (_) {});
-
-      expect((await probe.event(2))[0]['value'], 2);
-      await probe.expectNoAdditionalEvents(const Duration(milliseconds: 100));
-      expect(probe.events.map((rows) => rows[0]['value']), [1, 2]);
-      await probe.cancel();
-    });
-
-    // [EXP-289] The entry held for the writer between a write's reply and the
-    // microtask that dispatches it can be cancelled or closed in between.
-    test(
-      'cancelling or closing right after a write leaves no held rerun',
-      () async {
-        await db.execute('INSERT INTO items(name, value) VALUES (?, ?)', [
-          'row',
-          1,
-        ]);
-        final probe = _StreamProbe(
-          db.stream('SELECT value FROM items WHERE name = ?', ['row']),
-        );
-        await probe.event(1);
-        await db.execute('UPDATE items SET value = 2 WHERE name = ?', ['row']);
-        // Same turn as the reply: the rerun is held, not yet dispatched.
-        await probe.cancel();
-        expect(await _streamLength(db), 0);
-
-        final probe2 = _StreamProbe(
-          db.stream('SELECT value FROM items WHERE name = ?', ['row']),
-        );
-        expect((await probe2.event(1))[0]['value'], 2);
-        await db.execute('UPDATE items SET value = 3 WHERE name = ?', ['row']);
-        await db.close();
-        await probe2.waitForDone();
-        expect(probe2.lastError, isNull);
-      },
-    );
-
     test('rapid sequential writes converge to latest state', () async {
       // Exercises the re-query generation logic: many writes fire many
       // concurrent re-queries. Only the result from the latest snapshot
