@@ -47,7 +47,8 @@ so the pair moves, the distance does not). Integer primary keys in the tens
 of thousands are ordinary. Two colliding streams have to be *live at the same
 time*, which is what keeps it rare: for `n` concurrent streams over the same
 SQL the chance of a pair sharing a key is about `n² / 2³⁰`, roughly one in
-27,000 for a hundred-row list — per screen, per open, across every install.
+107,000 for 100 concurrent keyed streams — per screen, per open, across every
+install.
 The failure is silent and self-consistent, which is the kind that survives.
 
 `StreamEntry` also carried the same key as its `hashCode`/`==`, so the
