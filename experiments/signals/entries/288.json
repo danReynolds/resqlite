@@ -1,0 +1,40 @@
+{
+  "directions": [
+    "stream-rerun-dispatch"
+  ],
+  "outcomeClass": "accepted",
+  "outcomeReason": "correctness",
+  "changedBeliefs": [
+    "Stream deduplication was believed to share an entry only between calls with the same SQL and parameters. It shared an entry between any two calls whose 29-bit `Object.hash(sql, Object.hashAll(params))` collided, with no equality check behind the map, so the second of a colliding pair received the first query's rows — current rows for the wrong query — for as long as the first stream lived. Exp 033 had already identified `Object.hash` as 29-bit when it retired it from result hashing; the registry key was never revisited. The registry now compares SQL and parameters structurally, `StreamEntry` is identity-equal, and an `int` and a `double` parameter no longer alias. `doc/arch/architecture.md`'s StreamEngine lifecycle paragraph is updated; no other documented passage rested on the old key.",
+    "The class of bug is worth naming: a lookup keyed on a hash with nothing standing behind it is correct until the population is large enough to collide, and the failure — self-consistent rows for a neighbouring key — is invisible to the subscriber. This was the only bare-hash key in the runtime; the C statement cache compares SQL bytes and the Dart schema, row-size and SQL-UTF-8 caches key on the `String` itself.",
+    "`Database.open` is not a cold-start target: on this host an AOT `open` returns in ~0.69 ms and the first read after it completes ~0.16 ms later, so the temporary open isolate, the four-reader pool spawn and the writer spawn together cost under a millisecond per process. No lane measures it and none needs to."
+  ],
+  "claims": [
+    {
+      "id": "288.1",
+      "text": "`StreamEngine._entries` keyed on the bare 29-bit `Object.hash(sql, Object.hashAll(params))` aliased distinct queries: two (sql, params) pairs sharing a hash shared one `StreamEntry`, and the second subscriber was seeded from and re-run against the first query. Over `SELECT ... WHERE id = ?` the first colliding pair of consecutive integer ids appears within a few tens of thousands of values (36,683 in one process; the hash is seeded per process, so the pair moves and the distance does not), and for `n` concurrent streams over one SQL the chance that a live pair collides is about `n² / 2^30`. The registry now hashes the same way and compares SQL and parameters structurally, so a colliding pair reaches the equality check and gets its own entry.",
+      "conditions": "deterministic regression test that finds a colliding pair at run time and holds both streams open · fails on the pre-fix engine (stream for one id receives the other id's row, one entry registered), passes with the fix · 2026-09"
+    },
+    {
+      "id": "288.2",
+      "text": "The structural stream key costs +70 ns on a dedup hit (35 -> 106 ns) and +37 ns on a miss including the fixed-length parameter copy the stored key takes (38 -> 75 ns), measured in AOT over a map of 100 live streams with no database. Against the 3.27 us reader-pool round trip claim 282.2 prices for a miss, and the `StreamController` a hit goes on to allocate, the check is not visible from any public lane.",
+      "conditions": "M1 Pro · AOT · isolated map lookup, 2M iterations per lane, five rounds · 2026-09",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "282.2"
+        }
+      ]
+    },
+    {
+      "id": "288.3",
+      "text": "`Database.open` on an existing file costs ~0.69 ms median (0.61 ms min) in AOT and the first `select()` issued immediately after it completes ~0.16 ms later, so the temporary native-open isolate plus the reader-pool and writer spawns cost under a millisecond per process. Open latency is not a cold-start optimization target at this size.",
+      "conditions": "M1 Pro · AOT probe, 30 open/select/close cycles on a one-row table, non-quiet host · 2026-09"
+    }
+  ],
+  "nextSignals": [
+    "Equal-content `Uint8List` blob parameters still do not deduplicate (identity hash, identity equality) — the pre-existing behaviour, kept deliberately; content-hashing every `stream()` call is the wrong trade without evidence that applications stream on blob parameters.",
+    "Any future hash-keyed registry in the runtime should carry the equality it stands in for, or key on the value itself; the audit for this run found no other bare-hash key.",
+    "Exp 283's one-pass-plus-freshness-recheck reopen remains deferred on incidence: the mechanism's win (claim 283.4) is confined to changed re-runs over thousand-row results, and no representative workload has them."
+  ]
+}

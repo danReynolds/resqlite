@@ -372,6 +372,74 @@ void main() {
       expect(result2[0]['name'], 'alice');
     });
 
+    test(
+      'distinct queries whose dedup keys collide do not share a stream',
+      () async {
+        // Regression: `_entries` was keyed by the bare 29-bit
+        // `Object.hash(sql, Object.hashAll(params))` with no equality check, so
+        // two different (sql, params) pairs landing on the same hash shared one
+        // StreamEntry — the second subscriber received the first query's rows,
+        // forever. On `WHERE id = ?` the first colliding pair of integer ids
+        // appears within a few tens of thousands of consecutive values.
+        //
+        // `Object.hash` is seeded per process, so the pair is found at runtime
+        // rather than hard-coded. The engine's key hashes with the same formula,
+        // which is what makes this pair reach the equality check it now has to
+        // pass.
+        const sql = 'SELECT id, name, value FROM items WHERE id = ?';
+        final seenByKey = <int, int>{};
+        int? first;
+        int? second;
+        for (var id = 1; second == null; id++) {
+          final key = Object.hash(sql, Object.hashAll([id]));
+          final previous = seenByKey[key];
+          if (previous != null) {
+            first = previous;
+            second = id;
+          } else {
+            seenByKey[key] = id;
+          }
+        }
+
+        await db.executeBatch(
+          'INSERT INTO items(id, name, value) VALUES (?, ?, ?)',
+          [
+            [first, 'first', 1],
+            [second, 'second', 2],
+          ],
+        );
+
+        final firstProbe = _StreamProbe(db.stream(sql, [first]));
+        addTearDown(firstProbe.cancel);
+        final firstRows = await firstProbe.event(1);
+        final secondProbe = _StreamProbe(db.stream(sql, [second]));
+        addTearDown(secondProbe.cancel);
+        final secondRows = await secondProbe.event(1);
+
+        expect(firstRows.single['id'], first);
+        expect(secondRows.single['id'], second);
+        expect(secondRows.single['name'], 'second');
+        expect(await _streamLength(db), 2);
+      },
+    );
+
+    test('an int and a double parameter are different streams', () async {
+      // `1 == 1.0` and both hash alike, but they bind as INTEGER and REAL
+      // and SQLite can tell them apart — so must the dedup key.
+      final intProbe = _StreamProbe(db.stream('SELECT typeof(?) AS t', [1]));
+      addTearDown(intProbe.cancel);
+      final intRows = await intProbe.event(1);
+      final doubleProbe = _StreamProbe(
+        db.stream('SELECT typeof(?) AS t', [1.0]),
+      );
+      addTearDown(doubleProbe.cancel);
+      final doubleRows = await doubleProbe.event(1);
+
+      expect(intRows.single['t'], 'integer');
+      expect(doubleRows.single['t'], 'real');
+      expect(await _streamLength(db), 2);
+    });
+
     test('empty result stream', () async {
       final stream = db.stream('SELECT * FROM items');
       final first = await stream.first;

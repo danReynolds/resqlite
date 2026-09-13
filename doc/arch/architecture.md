@@ -226,7 +226,7 @@ For external-content FTS, prefer streamed queries that join the real content tab
 
 `StreamEngine` owns active reactive queries. It keeps:
 
-- `_entries`, keyed by `Object.hash(sql, Object.hashAll(params))`, so identical streams share one SQLite query.
+- `_entries`, keyed by SQL plus parameters (hashed with `Object.hash`, compared structurally — the 29-bit hash alone aliased distinct queries, [exp 288](../../experiments/288-stream-key-collision.md)), so identical streams share one SQLite query.
 - `_unknownDepsEntries`, streams whose table dependencies are not available yet or fell back to unknown.
 - `_tableIndex`, an inverted index from table name to affected stream entries.
 - `_requeryQueue`, a bounded queue of dirty entries waiting for reader-pool capacity.

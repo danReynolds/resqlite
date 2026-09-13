@@ -52,8 +52,8 @@ final class StreamEngine {
 
   final ReaderPool _pool;
 
-  /// The index of streamed queries by their hash key.
-  final Map<int, StreamEntry> _entries = {};
+  /// The index of streamed queries by their SQL and parameters.
+  final Map<_StreamKey, StreamEntry> _entries = {};
 
   /// Entries whose table dependencies are not available yet, or are
   /// permanently unknown because native tracking fell back.
@@ -94,15 +94,20 @@ final class StreamEngine {
     String sql, [
     List<Object?> parameters = const [],
   ]) {
-    final key = _streamKey(sql, parameters);
+    final key = _StreamKey(sql, parameters);
 
     // If there is already a stream entry for this query, then subscribe to it.
     if (_entries[key] case StreamEntry entry) {
       return _subscribe(entry);
     }
 
-    // Otherwise, create the stream and execute its initial query.
-    return _createStream(key, sql, parameters);
+    // Otherwise, create the stream and execute its initial query. The entry
+    // keeps its own copy of the parameters: the key lives in [_entries] for
+    // as long as the stream does, and a caller-owned list could change under
+    // it.
+    return _createStream(
+      _StreamKey(sql, List<Object?>.of(parameters, growable: false)),
+    );
   }
 
   /// Apply table dependency updates from a write.
@@ -261,15 +266,11 @@ final class StreamEngine {
   /// eliminating the race condition where async* generators + broadcast
   /// controllers silently drop events during microtask gaps.
   ///
-  Stream<List<Map<String, Object?>>> _createStream(
-    int key,
-    String sql,
-    List<Object?> params,
-  ) {
+  Stream<List<Map<String, Object?>>> _createStream(_StreamKey key) {
     final entry = _entries[key] = StreamEntry(
       key: key,
-      sql: sql,
-      params: params,
+      sql: key.sql,
+      params: key.params,
     );
     entry.inFlight = true;
 
@@ -282,7 +283,7 @@ final class StreamEngine {
 
     Future.sync(() async {
       try {
-        final result = await _pool.selectWithDeps(sql, params);
+        final result = await _pool.selectWithDeps(entry.sql, entry.params);
 
         // Cancelled before query finished.
         if (entry.subscribers.isEmpty) {
@@ -450,8 +451,8 @@ final class StreamEntry {
     this.dependencies = const {},
   });
 
-  /// Hash key identifying this stream (derived from SQL + params).
-  final int key;
+  /// The SQL and parameters this entry is registered under.
+  final _StreamKey key;
 
   /// The SQL query for this stream.
   final String sql;
@@ -501,16 +502,6 @@ final class StreamEntry {
   /// to a triggering write in tracelite.
   int? pendingTraceCorrelationId;
 
-  @override
-  int get hashCode => key;
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! StreamEntry) return false;
-    return key == other.key;
-  }
-
   void emit(List<Map<String, Object?>> rows) {
     // [EXP-136](../../experiments/136-completion-microtask-counter.md):
     // sub-counter of `completionHandlerUs` covering the subscriber
@@ -536,7 +527,40 @@ final class StreamEntry {
   }
 }
 
-/// Compute a stable hash key for a stream query.
-int _streamKey(String sql, List<Object?> params) {
-  return Object.hash(sql, Object.hashAll(params));
+/// What makes two `stream()` calls the same query: identical SQL and
+/// parameters that bind identically.
+///
+/// `Object.hash` is 29 bits wide, so among tens of thousands of possible
+/// parameter values two distinct queries share a hash; keyed on the bare hash
+/// with no equality check, the second stream was silently handed the first
+/// stream's rows. Equality is what the hash used to stand in for.
+///
+/// Parameters compare by `==`, which is value equality for the bindable
+/// scalars and identity for blobs — the same distinctions the hash draws.
+/// The one exception is `int` against `double`: `1 == 1.0` in Dart, but they
+/// bind as INTEGER and REAL and SQLite can tell them apart, so the key must
+/// too.
+final class _StreamKey {
+  _StreamKey(this.sql, this.params);
+
+  final String sql;
+  final List<Object?> params;
+
+  @override
+  int get hashCode => Object.hash(sql, Object.hashAll(params));
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! _StreamKey) return false;
+    if (sql != other.sql || params.length != other.params.length) {
+      return false;
+    }
+    for (var i = 0; i < params.length; i++) {
+      final a = params[i];
+      final b = other.params[i];
+      if (a != b || (a is double) != (b is double)) return false;
+    }
+    return true;
+  }
 }
