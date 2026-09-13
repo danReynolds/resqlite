@@ -1,0 +1,69 @@
+{
+  "directions": [
+    "stream-rerun-dispatch",
+    "sqlite-version-and-build-config"
+  ],
+  "outcomeClass": "rejected",
+  "outcomeReason": "regression",
+  "experimentClass": "moonshot",
+  "changedBeliefs": [
+    "We believed a stream rerun's SQLite cost was the warm query cost measured by earlier pass-price and batching experiments. Claim 289.1 shows the first read on each reader connection whose cached WAL header is stale begins with SQLite pager_reset. A 50-row index page costs 3.2x warm on a reader and 1.1x on the writer after its own commit. Treat earlier warm pass prices as floors for that transition; later reads under the same header remain warm, so fan-out incidence depends on scheduling.",
+    "Exp 026's near-perfect page-cache hit result remains valid for its no-interleaved-commit workloads. Claim 289.1 refines its scope: it cannot close cache questions on reactive or other read-after-write lanes.",
+    "The 256 MB reader mmap setting was believed to be an unmeasured read accelerator. Claim 289.2 makes its trade explicit on a reader's first read after its cached WAL header becomes stale: mmap costs a 2-3 us remap but saves a pread and copy per page. Disabling it wins point reads and loses representative index pages, so it stays.",
+    "A warm writer rerun was believed safe when a caller-side write counter, queue-idle check, row cap, and prior writer-time cap all passed. Claim 289.4 rejects that belief. The first two samples are unbounded, history cannot bound future opaque SQL, and a new write can arrive after admission. The prototype delayed the next write 51.2-53.6 ms on a one-row query, more than 800x its declared 64 us ceiling. Runtime reverted; reservation cannot interrupt synchronous work already in flight, so no larger writer-rerun budget is eligible without preemption/yield inside SQLite or a non-serializing path."
+  ],
+  "claims": [
+    {
+      "id": "289.1",
+      "text": "In WAL mode, the first read transaction on a connection whose shared wal-index header differs from its cached header begins with pager_reset, discarding the page cache and unmapping the database when mmap is enabled. Later reads under that header remain warm; multiple intervening commits collapse into one reset, and an ordinary read can pay it before a stream rerun. In the one-reader immediate-rerun probe, one resqlite_query_hash pass after a commit costs 31.6 vs 9.7 us warm on a scattered 50-row index page (3.2x), 3.5-5.6 vs 1.3 us on a point read (2.6-4.2x), 8.3 vs 2.7 us on a 14-row partition (3.0x), and 46.5 vs 38.1 us on a sequential 1,000-row scan (1.2x). The writer after its own commit stays near warm because it wrote the header it compares against. The tax follows pages touched more than rows returned; fan-out pays at most one reset per participating reader for that WAL generation.",
+      "conditions": "Apple silicon macOS 26.2, Dart 3.12.2 AOT. benchmark/experiments/rerun_snapshot_tax.dart; one native database with two readers, seeded then checkpointed; preceding commit outside the stopwatch; 15 samples x 300 iterations, arm order rotated",
+      "edges": [
+        {
+          "type": "refines",
+          "target": "026.1"
+        }
+      ]
+    },
+    {
+      "id": "289.2",
+      "text": "The 256 MB mmap_size on reader connections is a net win on the measured first-stale-reader lanes and stays. Turning it off halves the cache-reset tax on one- and two-page shapes but raises it by a third on a scattered fifty-page index shape because each page returns through pread and a copy. End to end, a point select forced to be the first reader use after a commit improves 26% while a 50-row index page regresses 32% and single-stream immediate-rerun latency on that page regresses 13-17%.",
+      "conditions": "Same host and native probe as claim 289.1 plus public-API AOT comparison with reader mmap disabled; two passes",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "289.1"
+        }
+      ]
+    },
+    {
+      "id": "289.3",
+      "text": "The warm-writer mechanism is real but not shippable under predictive admission. The archived prototype improved write-to-emission latency 31-33% on a changed 50-row index-page stream, 11-22% on a one-row stream, and 19-24% on a three-write transaction across four order-flipped AOT passes. Small-query awaited-write, concurrent-write, fifty-stream, write-only, and plain-select guards were flat. These lanes establish the cache mechanism; they do not establish the no-write-delay safety invariant.",
+      "conditions": "Apple silicon macOS 26.2, Dart 3.12.2 AOT; benchmark/experiments/reader_snapshot_tax_ab.dart; one process per arm per pass, four passes across both arm orders; exact prototype at archive/exp-289",
+      "edges": [
+        {
+          "type": "dependsOn",
+          "target": "289.1"
+        }
+      ]
+    },
+    {
+      "id": "289.4",
+      "text": "A point-in-time writer-idle check plus row count and historical execution time cannot bound the delay imposed on a write that arrives after a rerun is admitted. Code inspection found that exp 289 admitted its first two writer reruns without timing evidence, later used the smaller of two prior samples, and timed only after statement acquisition. Each fresh-database sample in writer_rerun_opaque_guard.dart directly tests that unpriced first admission: a one-row stream evaluating length(randomblob(16 MiB)) followed by a next-turn write made the archived candidate delay the write 51,206-53,589 us (median 51,958) in all seven samples, versus current main median 82 us; the minimum candidate delay exceeded the declared 64 us ceiling by more than 800x. A past minimum cannot impose a hard bound on a future opaque execution, and the serial writer path cannot preempt it. Runtime rejected and reverted.",
+      "conditions": "Apple silicon macOS 26.2, Dart 3.12.2; current main 90619dc vs archived prototype 79c0646; seven fresh-database samples per arm; benchmark/results/2026-09-13T10-13-28Z-exp289-writer-rerun-opaque-guard.md",
+      "edges": [
+        {
+          "type": "validates",
+          "target": "269.2"
+        }
+      ]
+    }
+  ],
+  "nextSignals": [
+    "Run benchmark/experiments/rerun_snapshot_tax.dart before changing reader mmap_size, cache size, or checkpoint policy; the checkpoint location and remap/page-read trade are coupled.",
+    "Any future design that lets reads or reruns occupy the writer must run benchmark/experiments/writer_rerun_opaque_guard.dart. It directly guards the unpriced first admission after an idle check; a history-based revival must add a slow-after-fast mode as well.",
+    "Do not retry row thresholds, historical-time caps, opcode counters, queue-idle checks, reservation alone, or a larger writer-side rerun budget. Reopen only if later writes can take priority through hard preemption/cancellation/yield inside opaque SQLite work, or the rerun uses a non-serializing path. A deliberately restricted API is separate and must expose an independently bounded write-delay contract plus clear the near-frozen public-API gate.",
+    "The first plain select assigned to a reader with a stale WAL header pays the same cold-reader tax, but routing it to the writer has the same unbounded-work failure and lacks a cached digest that could reduce the work.",
+    "Claim 026.1 remains valid for read-only and write-only workloads without interleaved commits; it should not be cited against cache work on reactive lanes."
+  ],
+  "outcomeNote": "Moonshot rejected. The first-stale-reader tax and reader-mmap trade are durable findings. Disabling mmap lost the representative index-page lane. A warm writer rerun moved emission latency substantially but violated the predeclared no-write-delay rule by more than 800x on opaque one-row SQLite work, so all runtime changes were reverted and the exact prototype was archived."
+}
