@@ -1624,6 +1624,48 @@ before the numbers that would settle it existed. Check the dismissal against
 what has been measured since; if the priors have moved, the one clause is a
 whole experiment.*
 
+### Measure the operation after the event that makes it happen
+
+Exp 289 found a 3x tax on stream reruns that earlier experiments had priced
+around and never through.
+
+A stream rerun is triggered because a commit preceded it. Every earlier harness
+that priced the rerun had run it on a connection that had not just watched
+another connection commit. Put the commit immediately before a reader's next
+read and the same hash pass costs 3.2x warm on a scattered 50-row index page
+and 2.6-4.2x on a point read. Later reads under the same WAL header stay warm;
+the immediate one-reader rerun reliably reaches the cold transition, while
+fan-out pays at most one reset per participating reader and its incidence
+depends on dispatch. Exp 026's near-perfect cache-hit result was correct for
+its read-only regime and did not cover this reactive transition.
+
+*Reapplies to anything validated against mutable state: a page cache, a
+statement cache after schema change, a mapping after remap, or a memoized plan.
+Ask what event makes the operation happen in production and put that event
+immediately before it in the harness. A warm measurement taken before that
+event is a floor for a different workload; measure the event's incidence
+separately before generalising it across pooled work.*
+
+### An idle check is not a reservation
+
+Also exp 289, after a warm-writer rerun moved its target latency by a third and
+still failed its own no-write-delay rule.
+
+The candidate checked that the writer was idle, then sent it a rerun. A new
+write could arrive one turn later and queue behind whatever synchronous SQLite
+work the rerun performed. Row count and old timings looked like bounds on the
+friendly harness; a one-row `length(randomblob(16 MiB))` query made the next
+write wait 51-54 ms, over 800 times the declared 64 us ceiling. The first two
+runs had no timing history, the later minimum described the past, and none of
+the checks could preempt work after admission.
+
+*Reapplies whenever opportunistic background work shares a serial owner with
+latency-critical work. A point-in-time idle observation grants no priority to
+arrivals after it, and a reservation cannot interrupt synchronous work already
+running. If the contract requires a hard delay bound, use preemption or yield
+inside the operation, a non-serializing path, or an independently bounded
+operation; do not add another predictor for work whose worst case is opaque.*
+
 ## How to add to this file
 
 Add an entry when an experiment surfaces a transferable lesson — something a

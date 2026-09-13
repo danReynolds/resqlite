@@ -1,0 +1,7 @@
+{
+  "file": "289-warm-connection-reruns.md",
+  "title": "Each reader's first post-commit read starts cold",
+  "impact": "Moonshot: rejected. The useful finding survives: the first read on each connection whose cached WAL header is stale discards its page cache, making a 50-row index-page hash pass 3.2x its warm cost while the writer stays warm after its own commit; later same-generation reads remain warm. Disabling reader mmap was rejected because it improved point reads 26% but regressed the representative index page 32%. Running one rerun on an apparently idle writer improved write-to-emission latency 31-33%, but failed its no-write-delay kill condition: a one-row `length(randomblob(16 MiB))` stream made the next write wait 51.2-53.6 ms, over 800x the claimed 64 us ceiling. Runtime reverted; reopen only for preemption/yield inside SQLite or a non-serializing path, not reservation or row/history/queue predictors.",
+  "status": "rejected",
+  "link": "289-warm-connection-reruns.md"
+}
